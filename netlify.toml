@@ -1,0 +1,7 @@
+[build]
+  publish = "public"
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
