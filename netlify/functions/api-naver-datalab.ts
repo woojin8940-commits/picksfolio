@@ -72,6 +72,7 @@ const handler: Handler = async (event) => {
             success: true,
             mainInsight: topKeyword || { keyword: "발레코어", growth: "+124%", status: "Rising" },
             results,
+            source: "naver-api",
             updatedAt: new Date().toISOString(),
           }),
         };

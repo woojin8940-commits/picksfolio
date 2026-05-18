@@ -141,9 +141,35 @@ const App: React.FC = () => {
     }
 
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      let session = null;
 
-      if (error || !session) {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+
+      if (code) {
+        try {
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (!exchangeError && data.session) {
+            session = data.session;
+            window.history.replaceState({}, '', '/auth-callback');
+          }
+        } catch (e) {
+          console.warn('[Auth] PKCE exchange failed, trying getSession:', e);
+        }
+      }
+
+      if (!session) {
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        session = existingSession;
+      }
+
+      if (!session) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const { data: { session: retrySession } } = await supabase.auth.getSession();
+        session = retrySession;
+      }
+
+      if (!session) {
         console.warn('[Auth] No session found in callback, redirecting to login');
         navigate('login');
         return;

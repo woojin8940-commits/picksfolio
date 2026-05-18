@@ -5,10 +5,12 @@ import { supabase } from '../services/supabase';
 
 interface LiveStreamingProps {
   userName: string;
+  broadcastTitle?: string;
+  broadcastCategory?: string;
   onClose: () => void;
 }
 
-const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
+const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, broadcastTitle, broadcastCategory, onClose }) => {
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -54,30 +56,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
-
-          // [WebRTC Optimization Reference] 
-          // Note: If using RTCPeerConnection, apply bitrate and degradation preference.
-          // This ensures high quality even in unstable network conditions.
-          /*
-          const applyWebRTCOptimizations = (pc: RTCPeerConnection) => {
-            const senders = pc.getSenders();
-            const videoSender = senders.find(s => s.track?.kind === 'video');
-            if (videoSender) {
-              const parameters = videoSender.getParameters();
-              if (!parameters.encodings) parameters.encodings = [{}];
-              
-              // Set bitrate to 5,000kbps (5Mbps)
-              parameters.encodings[0].maxBitrate = 5000000;
-              
-              // Maintain resolution even if network is unstable
-              parameters.degradationPreference = 'maintain-resolution';
-              
-              videoSender.setParameters(parameters).catch(err => 
-                console.error("Error applying WebRTC optimizations:", err)
-              );
-            }
-          };
-          */
         })
         .catch(err => console.error("Error accessing camera:", err));
     } else {
@@ -101,39 +79,55 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
     const newState = !isLive;
     setIsLive(newState);
     const normalizedUsername = userName.toLowerCase();
-    
+
     if (newState) {
-      const vCount = 0;
-      setViewerCount(vCount);
-      
-      // Update LocalStorage for immediate local sync
+      setViewerCount(0);
+
       localStorage.setItem(`picks_live_${normalizedUsername}`, JSON.stringify({
         isLive: true,
-        viewerCount: vCount,
+        viewerCount: 0,
         currentProduct: null
       }));
 
-      // Update Supabase
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: broadcastTitle || '', category: broadcastCategory || '' }),
+        });
+      } catch (e) {
+        console.error('Error starting live session:', e);
+      }
+
       if (supabase) {
         await supabase
           .from('live_sessions')
-          .upsert({ 
-            username: userName, 
-            is_live: true, 
-            viewer_count: vCount
+          .upsert({
+            username: userName,
+            is_live: true,
+            viewer_count: 0
           });
       }
     } else {
       setViewerCount(0);
       setIsCameraOn(false);
       setIsMicOn(false);
-      
-      // Update LocalStorage
+
       localStorage.setItem(`picks_live_${normalizedUsername}`, JSON.stringify({
         isLive: false,
         viewerCount: 0,
         currentProduct: null
       }));
+
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+      } catch (e) {
+        console.error('Error stopping live session:', e);
+      }
 
       if (supabase) {
         await supabase
@@ -144,24 +138,34 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
     }
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
     setMessages([...messages, { id: Date.now().toString(), user: '나(스트리머)', text: newMessage }]);
     setNewMessage('');
+
+    if (isLive) {
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_count: 1 }),
+        });
+      } catch (e) { /* ignore */ }
+    }
   };
 
   return (
     <div className="fixed inset-0 z-[200] bg-slate-950 flex">
       {/* Main Stream Area */}
       <div className="flex-1 relative bg-black overflow-hidden flex items-center justify-center">
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          muted 
-          playsInline 
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
           className="w-full h-full object-cover"
         />
-        
+
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-4">
@@ -225,9 +229,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                   </span>
                 )}
               </div>
+              {broadcastTitle && (
+                <div className="bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10">
+                  <span className="text-white text-xs font-bold">{broadcastTitle}</span>
+                </div>
+              )}
             </div>
             <div className="flex gap-3">
-              <button 
+              <button
                 onClick={() => setShowMaterialSettings(!showMaterialSettings)}
                 className={`p-3 backdrop-blur-md rounded-full text-white transition-all ${showMaterialSettings ? 'bg-purple-600' : 'bg-black/40 hover:bg-black/60'}`}
               >
@@ -247,8 +256,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">배너 이미지 URL</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={materialUrls.banner}
                       onChange={(e) => setMaterialUrls({...materialUrls, banner: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-white text-xs"
@@ -256,8 +265,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">상품샷 이미지 URL</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={materialUrls.product}
                       onChange={(e) => setMaterialUrls({...materialUrls, product: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-white text-xs"
@@ -271,19 +280,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
               <div className="flex flex-col gap-4">
                 {/* Broadcast Menu Bar */}
                 <div className="bg-black/40 backdrop-blur-md p-2 rounded-2xl border border-white/10 flex gap-2">
-                  <button 
+                  <button
                     onClick={() => setActiveMaterial(activeMaterial === 'banner' ? 'none' : 'banner')}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${activeMaterial === 'banner' ? 'bg-purple-600 text-white' : 'text-white/60 hover:text-white'}`}
                   >
                     <Layout size={14} /> 배너
                   </button>
-                  <button 
+                  <button
                     onClick={() => setActiveMaterial(activeMaterial === 'product' ? 'none' : 'product')}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${activeMaterial === 'product' ? 'bg-purple-600 text-white' : 'text-white/60 hover:text-white'}`}
                   >
                     <ImageIcon size={14} /> 상품샷
                   </button>
-                  <button 
+                  <button
                     onClick={() => setActiveMaterial(activeMaterial === 'beforeAfter' ? 'none' : 'beforeAfter')}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${activeMaterial === 'beforeAfter' ? 'bg-purple-600 text-white' : 'text-white/60 hover:text-white'}`}
                   >
@@ -292,13 +301,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <button 
+                  <button
                     onClick={() => setIsCameraOn(!isCameraOn)}
                     className={`p-4 rounded-full backdrop-blur-md transition-all ${isCameraOn ? 'bg-white/10 text-white' : 'bg-red-500 text-white'}`}
                   >
                     {isCameraOn ? <Camera size={24} /> : <CameraOff size={24} />}
                   </button>
-                  <button 
+                  <button
                     onClick={() => setIsMicOn(!isMicOn)}
                     className={`p-4 rounded-full backdrop-blur-md transition-all ${isMicOn ? 'bg-white/10 text-white' : 'bg-red-500 text-white'}`}
                   >
@@ -310,7 +319,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                 </div>
               </div>
 
-              <button 
+              <button
                 onClick={toggleLive}
                 className={`px-10 py-5 rounded-full text-lg font-black transition-all shadow-2xl active:scale-95 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
               >
@@ -345,15 +354,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
 
         <div className="p-6 bg-slate-950/50">
           <div className="relative">
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="메시지를 입력하세요..."
               className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-6 text-white text-sm outline-none focus:border-purple-500/50 transition-all"
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
             />
-            <button 
+            <button
               onClick={handleSendMessage}
               className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-purple-500 hover:text-purple-400"
             >

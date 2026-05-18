@@ -39,7 +39,13 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             />
           </div>
           <button
-            onClick={() => onSignup(handle)}
+            onClick={() => {
+              if (!handle.trim()) {
+                onSignup('');
+                return;
+              }
+              onSignup(handle.trim());
+            }}
             className="w-full md:w-auto bg-gradient-to-r from-purple-primary to-purple-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-10 md:py-4 rounded-[1.2rem] md:rounded-full text-base md:text-lg font-bold transition-all active:scale-95 flex items-center justify-center shadow-lg shadow-purple-500/20"
           >
             바로 만들기
