@@ -134,7 +134,6 @@ const DataBoardSection: React.FC = () => {
           </motion.div>
         </div>
 
-        {/* AI Trend Insight Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -185,7 +184,6 @@ const DataBoardSection: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Category Rankings */}
         {categories.length > 1 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-10">
             {categories.map((cat, catIdx) => {
@@ -270,7 +268,6 @@ const DataBoardSection: React.FC = () => {
           </div>
         )}
 
-        {/* Refresh Button */}
         <div className="text-center">
           <button onClick={fetchData} disabled={loading}
             className="inline-flex items-center gap-2 text-slate-500 font-bold hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-6 py-3 rounded-full border border-white/5 disabled:opacity-50">

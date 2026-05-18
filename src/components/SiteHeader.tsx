@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 
 interface HeaderProps {
@@ -30,7 +29,6 @@ const SiteHeader: React.FC<HeaderProps> = ({
           PICKS
         </div>
 
-        {/* Desktop Navigation */}
         <nav className="hidden md:flex items-center space-x-4 text-[13px] font-bold text-slate-400 uppercase tracking-widest">
           {isLoggedIn ? (
             <>
@@ -69,7 +67,6 @@ const SiteHeader: React.FC<HeaderProps> = ({
           )}
         </nav>
 
-        {/* Mobile Navigation */}
         <div className="md:hidden flex items-center gap-2">
           {isLoggedIn ? (
             <>
@@ -112,7 +109,6 @@ const SiteHeader: React.FC<HeaderProps> = ({
         </div>
       </header>
 
-      {/* Mobile Menu Overlay */}
       {mobileMenuOpen && isLoggedIn && (
         <div className="md:hidden fixed inset-0 z-[999] animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)}></div>
