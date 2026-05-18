@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { supabase } from '../services/supabase';
 
 interface SignupPageProps {
   initialId: string;
@@ -83,62 +82,23 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
 
     setIsLoading(true);
     try {
-      if (!supabase) {
-        alert('서버 연결에 실패했습니다.');
-        return;
-      }
-
-      // Virtual email for Supabase authentication
-      const virtualEmail = `${id.trim()}@picks.me`;
-
-      // 1. Supabase Auth Signup
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: virtualEmail,
-        password,
-        options: {
-          data: {
-            username: id,
-            phone: phone,
-          }
-        }
+      const response = await fetch('/.netlify/functions/auth-signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: id.trim(),
+          password,
+          phone: phone.replace(/\D/g, ''),
+          full_name: id.trim(),
+        }),
       });
-
-      if (authError) {
-        if (authError.message.includes('already registered')) {
-          alert('이미 가입된 아이디입니다.');
-        } else {
-          alert('회원가입 실패: ' + authError.message);
-        }
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || '회원가입 실패');
         return;
       }
-
-      if (authData.user) {
-        console.log('Auth signup successful, inserting profile...');
-        // 2. Insert into profiles table
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert([
-            {
-              id: authData.user.id,
-              username: id.toLowerCase(),
-              email: virtualEmail,
-              phone: phone,
-              full_name: id,
-              site_data: {}
-            }
-          ]);
-
-        if (profileError) {
-          console.error('Profile insertion error:', profileError);
-          if (profileError.message.includes('unique constraint')) {
-            alert('이미 사용 중인 아이디입니다.');
-          } else {
-            alert('프로필 생성 실패: ' + profileError.message);
-          }
-          return;
-        }
-
-        console.log('Profile insertion successful');
+      if (data.success) {
+        alert('회원가입이 완료되었습니다. 로그인해주세요.');
         onSignupSuccess();
       }
     } catch (error: any) {

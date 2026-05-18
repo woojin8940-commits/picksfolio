@@ -13,11 +13,16 @@ import AITrendAnalysis from './components/AITrendAnalysis';
 import DMAutomation from './components/DMAutomation';
 import PortfolioManagement from './components/PortfolioManagement';
 import LiveCommerceManagement from './components/LiveCommerceManagement';
+import BusinessSignupPage from './components/BusinessSignupPage';
+import BusinessLoginPage from './components/BusinessLoginPage';
+import BusinessInbox from './components/BusinessInbox';
+import CollabCalendar from './components/CollabCalendar';
+import SettlementManagement from './components/SettlementManagement';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
 
-type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page';
-type SubView = 'dashboard' | 'links' | 'trend' | 'dm' | 'portfolio' | 'live';
+type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'business-signup' | 'business-login';
+type SubView = 'dashboard' | 'links' | 'trend' | 'dm' | 'portfolio' | 'live' | 'business' | 'calendar' | 'settlement';
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('home');
@@ -33,18 +38,16 @@ const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user && supabase) {
-        // Fetch profile to get the username
         const { data: profileData } = await supabase
           .from('profiles')
           .select('username')
           .eq('id', session.user.id)
           .maybeSingle();
-        
+
         const userId = profileData?.username || session.user.email?.split('@')[0] || 'user';
         setUserName(userId);
         setIsLoggedIn(true);
-        
-        // If we are on login or signup page, force navigate to admin
+
         if (view === 'login' || view === 'signup') {
           navigate('admin');
         }
@@ -60,14 +63,14 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [view]); // Add view to dependencies to handle redirection correctly
+  }, [view]);
 
   // Persistent auto-logout after 2 hours of inactivity
   useEffect(() => {
     if (!isLoggedIn) return;
 
-    const INACTIVITY_LIMIT = 2 * 60 * 60 * 1000; // 2 hours
-    
+    const INACTIVITY_LIMIT = 2 * 60 * 60 * 1000;
+
     const checkInactivity = () => {
       const lastActivity = localStorage.getItem('picks_last_activity');
       if (lastActivity) {
@@ -84,15 +87,13 @@ const App: React.FC = () => {
       localStorage.setItem('picks_last_activity', Date.now().toString());
     };
 
-    // Check immediately on mount/login
     checkInactivity();
     updateActivity();
 
     const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     activityEvents.forEach(event => window.addEventListener(event, updateActivity));
 
-    // Check periodically for open tabs
-    const interval = setInterval(checkInactivity, 60000); // Every minute
+    const interval = setInterval(checkInactivity, 60000);
 
     return () => {
       activityEvents.forEach(event => window.removeEventListener(event, updateActivity));
@@ -113,6 +114,8 @@ const App: React.FC = () => {
     const handleLocationChange = () => {
       const path = window.location.pathname.replace('/', '');
       if (!path) setView('home');
+      else if (path === 'business-signup') setView('business-signup');
+      else if (path === 'business-login') setView('business-login');
       else if (['signup', 'login', 'admin'].includes(path)) setView(path as View);
       else {
         setTargetUser(path);
@@ -138,35 +141,53 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    console.log('Logout process started...');
-    
-    // 1. Immediate local cleanup
     setIsLoggedIn(false);
     setUserName('');
     localStorage.clear();
     sessionStorage.clear();
-    console.log('Local storage and state cleared');
 
-    // 2. Background signout (don't await to prevent hanging)
     if (supabase) {
       supabase.auth.signOut()
         .then(() => console.log('Supabase signout successful'))
         .catch(err => console.warn('Supabase signout failed (ignoring):', err));
     }
 
-    // 3. Immediate feedback
     alert('정상적으로 로그아웃되었습니다.');
-    
-    // 4. Force hard redirect using absolute URL
+
     const loginUrl = window.location.origin + '/login';
-    console.log('Redirecting to:', loginUrl);
     window.location.href = loginUrl;
   };
 
   if (view === 'user-page') return <UserPage username={targetUser} />;
+
+  if (view === 'business-signup') {
+    return (
+      <BusinessSignupPage
+        onNavigateHome={() => navigate('home')}
+        onNavigateLogin={() => navigate('business-login')}
+        onNavigateInfluencerSignup={() => navigate('signup')}
+        onSignupSuccess={() => navigate('business-login')}
+      />
+    );
+  }
+
+  if (view === 'business-login') {
+    return (
+      <BusinessLoginPage
+        onNavigateHome={() => navigate('home')}
+        onNavigateBusinessSignup={() => navigate('business-signup')}
+        onLoginSuccess={(id, _companyName) => {
+          setUserName(id);
+          setIsLoggedIn(true);
+          navigate('admin');
+        }}
+      />
+    );
+  }
+
   if (view === 'admin') {
     let subComponent: React.ReactNode = null;
-    
+
     switch (subView) {
       case 'links':
         subComponent = <LinkManagement userName={userName} />;
@@ -183,21 +204,33 @@ const App: React.FC = () => {
       case 'live':
         subComponent = <LiveCommerceManagement userName={userName} />;
         break;
+      case 'business':
+        subComponent = <BusinessInbox userName={userName} />;
+        break;
+      case 'calendar':
+        subComponent = <CollabCalendar userName={userName} />;
+        break;
+      case 'settlement':
+        subComponent = <SettlementManagement userName={userName} />;
+        break;
       default:
-        subComponent = null; // AdminDashboard will show default dashboard if children is null
+        subComponent = null;
     }
 
     return (
-      <AdminDashboard 
-        userName={userName} 
-        onLogout={handleLogout} 
+      <AdminDashboard
+        userName={userName}
+        onLogout={handleLogout}
         currentSubView={subView}
-        onNavigateDashboard={() => setSubView('dashboard')} 
+        onNavigateDashboard={() => setSubView('dashboard')}
         onNavigateLinks={() => setSubView('links')}
         onNavigateTrend={() => setSubView('trend')}
         onNavigateDM={() => setSubView('dm')}
         onNavigatePortfolio={() => setSubView('portfolio')}
         onNavigateLive={() => setSubView('live')}
+        onNavigateBusiness={() => setSubView('business')}
+        onNavigateCalendar={() => setSubView('calendar')}
+        onNavigateSettlement={() => setSubView('settlement')}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>
@@ -210,9 +243,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background selection:bg-purple-primary/30">
-      <SiteHeader 
-        onNavigateHome={() => navigate('home')} 
-        onNavigateSignup={() => navigate('signup')} 
+      <SiteHeader
+        onNavigateHome={() => navigate('home')}
+        onNavigateSignup={() => navigate('signup')}
         onNavigateLogin={() => navigate('login')}
         onNavigateDashboard={() => navigate('admin')}
         onLogout={handleLogout}
@@ -224,7 +257,7 @@ const App: React.FC = () => {
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
             <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
             <DataBoardSection />
-            
+
             {/* Footer */}
             <footer className="py-20 border-t border-white/5 bg-background">
               <div className="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
@@ -241,20 +274,21 @@ const App: React.FC = () => {
             </footer>
           </>
         ) : view === 'signup' ? (
-          <SignupPage 
-            initialId={initialId} 
-            onNavigateHome={() => navigate('home')} 
+          <SignupPage
+            initialId={initialId}
+            onNavigateHome={() => navigate('home')}
             onNavigateLogin={() => navigate('login')}
-            onSignupSuccess={() => navigate('login')} 
+            onSignupSuccess={() => navigate('login')}
           />
         ) : (
-          <LoginPage 
+          <LoginPage
             onNavigateHome={() => navigate('home')}
             onNavigateSignup={() => navigate('signup')}
-            onLoginSuccess={(id) => { 
-              setUserName(id); 
+            onNavigateBusinessLogin={() => navigate('business-login')}
+            onLoginSuccess={(id) => {
+              setUserName(id);
               setIsLoggedIn(true);
-              navigate('admin'); 
+              navigate('admin');
             }}
           />
         )}
