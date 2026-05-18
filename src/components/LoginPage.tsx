@@ -176,77 +176,57 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-20 bg-midnight">
-      <div className="w-full max-w-[440px] bg-white rounded-[2.5rem] p-8 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
-        <div className="text-center mb-8">
-          <div className="text-2xl font-black text-purple-600 tracking-tighter mb-4 cursor-pointer" onClick={onNavigateHome}>PICKS</div>
-          <h1 className="text-2xl md:text-3xl font-black text-slate-900 mb-2">로그인</h1>
+    <div className="min-h-screen flex items-center justify-center px-6 py-20 bg-midnight">
+      <div className="w-full max-w-[440px] bg-white rounded-[40px] p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-black text-slate-900 mb-2">로그인</h1>
           <p className="text-slate-500 text-sm font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
         </div>
 
-        {/* Privacy Agreement */}
-        <div className="flex items-start gap-2 mb-5">
-          <input
-            type="checkbox"
-            id="privacy-agree"
-            checked={privacyAgreed}
-            onChange={(e) => setPrivacyAgreed(e.target.checked)}
-            className="mt-1 w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 accent-purple-600 flex-shrink-0"
-          />
-          <label htmlFor="privacy-agree" className="text-[11px] text-slate-500 font-medium leading-relaxed cursor-pointer">
-            <a href="/privacy" target="_blank" className="text-purple-600 font-bold underline">개인정보처리방침</a>에 따른 개인정보 수집·이용에 동의합니다.
-          </label>
+        {/* Kakao Login Section */}
+        <div className="mb-8">
+          <div className="flex items-start gap-2 mb-4">
+            <input
+              type="checkbox"
+              id="privacy-agree"
+              checked={privacyAgreed}
+              onChange={(e) => setPrivacyAgreed(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 accent-purple-600 flex-shrink-0"
+            />
+            <label htmlFor="privacy-agree" className="text-[11px] text-slate-500 font-medium leading-relaxed cursor-pointer">
+              <a href="/privacy" target="_blank" className="text-purple-600 font-bold underline">개인정보처리방침</a>에 따른 개인정보 수집·이용에 동의합니다.
+            </label>
+          </div>
+
+          <button
+            onClick={handleKakaoLogin}
+            disabled={kakaoLoading || !privacyAgreed}
+            className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-[15px] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#FEE500', color: '#3C1E1E' }}
+          >
+            {kakaoLoading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-[#3C1E1E]/30 border-t-[#3C1E1E] rounded-full animate-spin"></div>
+                로그인 중...
+              </>
+            ) : (
+              <>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3C6.48 3 2 6.48 2 10.5c0 2.58 1.7 4.83 4.24 6.12l-1.08 3.96c-.08.28.24.52.48.36L9.96 18.3c.66.12 1.34.18 2.04.18 5.52 0 10-3.48 10-7.98S17.52 3 12 3z" fill="#3C1E1E"/>
+                </svg>
+                동의하고 카카오로 시작하기
+              </>
+            )}
+          </button>
         </div>
 
-        {/* Kakao Login - Primary CTA */}
-        <button
-          onClick={handleKakaoLogin}
-          disabled={kakaoLoading || !privacyAgreed}
-          className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-[15px] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg mb-4"
-          style={{ backgroundColor: '#FEE500', color: '#3C1E1E' }}
-        >
-          {kakaoLoading ? (
-            <>
-              <div className="w-5 h-5 border-2 border-[#3C1E1E]/30 border-t-[#3C1E1E] rounded-full animate-spin"></div>
-              로그인 중...
-            </>
-          ) : (
-            <>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3C6.48 3 2 6.48 2 10.5c0 2.58 1.7 4.83 4.24 6.12l-1.08 3.96c-.08.28.24.52.48.36L9.96 18.3c.66.12 1.34.18 2.04.18 5.52 0 10-3.48 10-7.98S17.52 3 12 3z" fill="#3C1E1E"/>
-              </svg>
-              동의하고 카카오로 시작하기
-            </>
-          )}
-        </button>
-
-        {/* Business Login Button */}
-        {onNavigateBusinessLogin && (
-          <button
-            onClick={onNavigateBusinessLogin}
-            disabled={isLoading}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black text-[14px] transition-all active:scale-95 bg-slate-900 text-white hover:bg-slate-800 mb-6"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
-              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
-              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
-              <path d="M10 6h4"/>
-              <path d="M10 10h4"/>
-              <path d="M10 14h4"/>
-              <path d="M10 18h4"/>
-            </svg>
-            비즈니스/브랜드 계정으로 로그인
-          </button>
-        )}
-
-        <div className="relative flex items-center gap-4 mb-6">
+        <div className="relative flex items-center gap-4 mb-8">
           <div className="flex-1 h-px bg-slate-200"></div>
           <span className="text-slate-400 text-xs font-bold">또는 아이디로 로그인</span>
           <div className="flex-1 h-px bg-slate-200"></div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">아이디</label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-purple-500 transition-colors">
@@ -282,7 +262,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-4.5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
@@ -295,14 +275,18 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           </button>
         </form>
 
-        <div className="text-center mt-6 space-y-2">
-          <div className="text-slate-400 text-sm font-bold">
-            계정이 없으신가요? <button onClick={onNavigateSignup} className="text-purple-600 font-black hover:underline" disabled={isLoading}>회원가입하기</button>
-          </div>
+        <div className="text-center mt-8 text-slate-400 text-sm font-bold">
+          계정이 없으신가요? <button onClick={onNavigateSignup} className="text-slate-800 hover:underline" disabled={isLoading}>회원가입하기</button>
         </div>
 
+        {onNavigateBusinessLogin && (
+          <div className="text-center mt-3 text-slate-400 text-xs font-bold">
+            브랜드/기업이신가요? <button onClick={onNavigateBusinessLogin} className="text-purple-600 hover:underline font-black" disabled={isLoading}>비즈니스 로그인</button>
+          </div>
+        )}
+
         <div className="text-center mt-4">
-          <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors font-medium">홈으로 돌아가기</button>
+          <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">홈으로 돌아가기</button>
         </div>
       </div>
     </div>

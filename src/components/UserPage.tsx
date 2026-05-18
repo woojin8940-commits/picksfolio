@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Instagram, Youtube, Globe, ExternalLink, Share2, Radio, Users } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
+import DOMPurify from 'dompurify';
 import { Block, DesignSettings, TemplateType } from '../types';
 import { supabase } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
@@ -27,6 +28,11 @@ interface LinkData {
 }
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800';
+
+const sanitizeHtml = (html: string) => DOMPurify.sanitize(html, {
+  ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'br', 'p', 'span', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'img', 'blockquote', 'pre', 'code'],
+  ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style', 'src', 'alt'],
+});
 
 const UserPage: React.FC<UserPageProps> = ({ username }) => {
   const normalizedUsername = useMemo(() => (username || '').toLowerCase(), [username]);
@@ -459,7 +465,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: `linear-gradient(to top, ${themeBg || '#ffffff'}, transparent)` }}></div>
               <div className="absolute bottom-8 left-8 right-8">
                  <h3 className={`text-4xl md:text-5xl font-black tracking-tighter mb-2 ${textColor}`}>{profile?.full_name || username}</h3>
-                 <p className="text-xs font-black uppercase tracking-[0.3em]" style={{ color: design.accentColor }}>{profile?.bio || 'Visual Storyteller'}</p>
+                 <p className="text-xs font-black uppercase tracking-[0.3em]" style={{ color: design.accentColor }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(profile?.bio || 'Visual Storyteller') }} />
               </div>
             </div>
 
@@ -511,13 +517,11 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                               <h4 className="text-[10px] font-black uppercase tracking-[0.3em]" style={{ color: design.accentColor }}>{section.title}</h4>
                             </div>
                           )}
-                          <p className={`font-bold leading-[1.6] whitespace-pre-wrap ${textColor} ${
-                            design.portfolioFontSize === 'small' ? 'text-sm md:text-base' : 
-                            design.portfolioFontSize === 'large' ? 'text-2xl md:text-3xl' : 
+                          <div className={`font-bold leading-[1.6] whitespace-pre-wrap ${textColor} ${
+                            design.portfolioFontSize === 'small' ? 'text-sm md:text-base' :
+                            design.portfolioFontSize === 'large' ? 'text-2xl md:text-3xl' :
                             'text-lg md:text-xl'
-                          }`}>
-                            {section.content}
-                          </p>
+                          }`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(section.content || '') }} />
                         </div>
                       ) : (
                         <div className="relative group">
@@ -673,7 +677,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 <div className="absolute inset-0 bg-black/10"></div>
               </div>
               <h3 className="text-2xl font-black tracking-tight leading-none mb-3">@{profile?.full_name || username}</h3>
-              <p className={`text-[11px] font-bold tracking-[0.2em] uppercase opacity-70 ${textColor}`}>{profile?.bio || 'Curated Collection'}</p>
+              <p className={`text-[11px] font-bold tracking-[0.2em] uppercase opacity-70 ${textColor}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(profile?.bio || 'Curated Collection') }} />
               
               {liveState.isLive && (
                 <div className="mt-6 animate-in zoom-in duration-500">
@@ -735,9 +739,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       {section.type === 'text' ? (
                         <div className="space-y-2">
                           {section.title && <h4 className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: design.accentColor }}>{section.title}</h4>}
-                          <p className={`text-sm font-bold leading-relaxed whitespace-pre-wrap ${textColor}`}>
-                            {section.content}
-                          </p>
+                          <div className={`text-sm font-bold leading-relaxed whitespace-pre-wrap ${textColor}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(section.content || '') }} />
                         </div>
                       ) : (
                         <div className="rounded-3xl overflow-hidden shadow-xl border border-white/10">
