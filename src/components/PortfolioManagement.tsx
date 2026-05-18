@@ -99,6 +99,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName }) =
   const [showToast, setShowToast] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'profile' | 'block' | 'cover'; id?: string } | null>(null);
+  const [, setIsUploading] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -143,51 +144,70 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName }) =
     loadData();
   }, [userName, normalizedUsername]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadTarget) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1200;
-        const MAX_HEIGHT = 1200;
-        let width = img.width;
-        let height = img.height;
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('username', userName);
+      formData.append('purpose', uploadTarget.type === 'profile' ? 'avatar' : uploadTarget.type === 'cover' ? 'cover' : 'block');
 
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
+      const res = await fetch('/.netlify/functions/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        
-        const base64String = canvas.toDataURL('image/jpeg', 0.7);
-        
+      if (res.ok) {
+        const { url } = await res.json();
         if (uploadTarget.type === 'profile') {
-          setProfile({ ...profile, avatar_url: base64String });
+          setProfile({ ...profile, avatar_url: url });
         } else if (uploadTarget.type === 'block' && uploadTarget.id) {
-          updateBlock(uploadTarget.id, base64String);
+          updateBlock(uploadTarget.id, url);
         } else if (uploadTarget.type === 'cover') {
-          setDesign(prev => ({ ...prev, portfolioHeaderImage: base64String }));
+          setDesign(prev => ({ ...prev, portfolioHeaderImage: url }));
         }
-        setUploadTarget(null);
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (err) {
+      console.error('Blob upload failed, falling back to base64:', err);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+          } else {
+            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          const base64String = canvas.toDataURL('image/jpeg', 0.7);
+          if (uploadTarget.type === 'profile') {
+            setProfile({ ...profile, avatar_url: base64String });
+          } else if (uploadTarget.type === 'block' && uploadTarget.id) {
+            updateBlock(uploadTarget.id, base64String);
+          } else if (uploadTarget.type === 'cover') {
+            setDesign(prev => ({ ...prev, portfolioHeaderImage: base64String }));
+          }
+        };
+        img.src = event.target?.result as string;
       };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploading(false);
+      setUploadTarget(null);
+    }
   };
 
   const triggerFileUpload = (target: { type: 'profile' | 'block' | 'cover'; id?: string }) => {
