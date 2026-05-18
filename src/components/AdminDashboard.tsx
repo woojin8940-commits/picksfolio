@@ -11,13 +11,18 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'trend' | 'dm' | 'portfolio' | 'live';
+  currentSubView: 'dashboard' | 'links' | 'trend' | 'dm' | 'portfolio' | 'live' | 'business' | 'calendar' | 'settlement';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
   onNavigateTrend: () => void;
   onNavigateDM: () => void;
   onNavigatePortfolio: () => void;
   onNavigateLive: () => void;
+  onNavigateBusiness?: () => void;
+  onNavigateCalendar?: () => void;
+  onNavigateSettlement?: () => void;
+  onNavigateMembership?: () => void;
+  onNavigateSettings?: () => void;
   children?: React.ReactNode;
 }
 
@@ -31,11 +36,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateDM,
   onNavigatePortfolio,
   onNavigateLive,
-  children 
+  onNavigateBusiness,
+  onNavigateCalendar,
+  onNavigateSettlement,
+  onNavigateMembership,
+  onNavigateSettings,
+  children
 }) => {
   const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [links, setLinks] = useState<any[]>([]);
+  const [topTrend, setTopTrend] = useState('분석 중...');
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -83,10 +94,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   useEffect(() => {
     fetchStats();
-    // Only auto-refresh if the end date is today
+    const fetchTopTrend = async () => {
+      try {
+        const res = await fetch('/.netlify/functions/api-naver-datalab');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.mainInsight?.keyword) setTopTrend(data.mainInsight.keyword);
+        }
+      } catch (err) {
+        console.error('Error fetching top trend:', err);
+      }
+    };
+    fetchTopTrend();
     const today = new Date().toISOString().split('T')[0];
     if (endDate === today) {
-      const interval = setInterval(fetchStats, 3600000); // Update every hour
+      const interval = setInterval(fetchStats, 3600000);
       return () => clearInterval(interval);
     }
   }, [userName, startDate, endDate]);
@@ -179,16 +201,51 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             active={currentSubView === 'dm'} 
             onClick={onNavigateDM}
           />
-          <NavItem 
-            icon="🎥" 
-            label="라이브 커머스" 
-            active={currentSubView === 'live'} 
+          <NavItem
+            icon="🎥"
+            label="라이브 커머스"
+            active={currentSubView === 'live'}
             onClick={onNavigateLive}
+          />
+          <div className="my-3 border-t border-white/5"></div>
+          <NavItem
+            icon="📬"
+            label="비즈니스 수신함"
+            active={currentSubView === 'business'}
+            onClick={onNavigateBusiness}
+          />
+          <NavItem
+            icon="📅"
+            label="협업 캘린더"
+            active={currentSubView === 'calendar'}
+            onClick={onNavigateCalendar}
+          />
+          <NavItem
+            icon="💰"
+            label="정산 현황"
+            active={currentSubView === 'settlement'}
+            onClick={onNavigateSettlement}
           />
         </nav>
         
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          <button 
+          <button
+            type="button"
+            onClick={onNavigateMembership}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+          >
+            <span>💎</span>
+            <span>멤버십</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateSettings}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+          >
+            <span>⚙️</span>
+            <span>설정</span>
+          </button>
+          <button
             type="button"
             onClick={() => {
               console.log('Logout button clicked');
@@ -215,6 +272,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <MobileNavItem icon="💼" label="소개" active={currentSubView === 'portfolio'} onClick={() => { onNavigatePortfolio(); setIsMobileMenuOpen(false); }} />
         <MobileNavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
         <MobileNavItem icon="📈" label="분석" active={currentSubView === 'trend'} onClick={() => { onNavigateTrend(); setIsMobileMenuOpen(false); }} />
+        <MobileNavItem icon="📅" label="협업" active={currentSubView === 'calendar'} onClick={() => { if (onNavigateCalendar) onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
       </nav>
 
       {/* Mobile Sidebar Drawer */}
@@ -238,14 +296,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📈" label="분석" active={currentSubView === 'trend'} onClick={() => { onNavigateTrend(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🤖" label="자동화" active={currentSubView === 'dm'} onClick={() => { onNavigateDM(); setIsMobileMenuOpen(false); }} />
+              <div className="my-3 border-t border-white/5"></div>
+              <NavItem icon="📬" label="수신함" active={currentSubView === 'business'} onClick={() => { if (onNavigateBusiness) onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { if (onNavigateCalendar) onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="💰" label="정산" active={currentSubView === 'settlement'} onClick={() => { if (onNavigateSettlement) onNavigateSettlement(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              <button 
+              <button
+                type="button"
+                onClick={() => { if (onNavigateMembership) onNavigateMembership(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+              >
+                <span>💎</span>
+                <span>멤버십</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (onNavigateSettings) onNavigateSettings(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+              >
+                <span>⚙️</span>
+                <span>설정</span>
+              </button>
+              <button
                 type="button"
                 onClick={() => {
                   console.log('Mobile logout button clicked');
                   onLogout();
-                }} 
+                }}
                 className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
               >
                 <span>👤</span>
@@ -380,7 +458,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[140px] md:min-h-[240px] shadow-xl">
                   <div>
                     <h3 className="text-sm md:text-2xl font-black mb-1">AI 트렌드 요약</h3>
-                    <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">지금 "발레코어" 룩이 다시 부상하고 있어요.</p>
+                    <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">지금 "{topTrend}" 룩이 다시 부상하고 있어요.</p>
                   </div>
                   <button onClick={onNavigateTrend} className="bg-white text-purple-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">분석 리포트 보기</button>
                </div>
@@ -397,6 +475,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">실시간 소통으로 구매 전환율을 높여보세요.</p>
                   </div>
                   <button onClick={onNavigateLive} className="bg-indigo-500 text-white px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">스튜디오 입장</button>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-12">
+               <div className="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[140px] md:min-h-[240px] shadow-xl">
+                  <div>
+                    <h3 className="text-sm md:text-2xl font-black mb-1">비즈니스 수신함</h3>
+                    <p className="opacity-80 font-bold text-[9px] md:text-base">브랜드로부터 받은 협업 제안을 확인하세요.</p>
+                  </div>
+                  <button onClick={onNavigateBusiness} className="bg-white text-emerald-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">수신함 보기</button>
+               </div>
+               <div className="bg-gradient-to-br from-violet-600 to-purple-800 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[140px] md:min-h-[240px] shadow-xl">
+                  <div>
+                    <h3 className="text-sm md:text-2xl font-black mb-1">협업 캘린더</h3>
+                    <p className="opacity-80 font-bold text-[9px] md:text-base">협업 일정과 기록을 한눈에 관리합니다.</p>
+                  </div>
+                  <button onClick={onNavigateCalendar} className="bg-white text-violet-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캘린더 보기</button>
+               </div>
+               <div className="bg-gradient-to-br from-amber-600 to-orange-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[140px] md:min-h-[240px] shadow-xl">
+                  <div>
+                    <h3 className="text-sm md:text-2xl font-black mb-1">정산 현황</h3>
+                    <p className="opacity-80 font-bold text-[9px] md:text-base">인플루언서 정산을 관리합니다.</p>
+                  </div>
+                  <button onClick={onNavigateSettlement} className="bg-white text-amber-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">정산 관리</button>
                </div>
             </div>
 

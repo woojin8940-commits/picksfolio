@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TrendingUp, Sparkles, BarChart3, ArrowUpRight, Search, RefreshCw } from 'lucide-react';
+import NaverCategoryRankings from './NaverCategoryRankings';
 
 interface AITrendAnalysisProps {
   userName: string;
@@ -7,7 +8,8 @@ interface AITrendAnalysisProps {
 
 const AITrendAnalysis: React.FC<AITrendAnalysisProps> = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  
+  const [topInsight, setTopInsight] = useState('분석 중...');
+
   const trends = [
     { id: 1, keyword: '발레코어', growth: '+124%', status: 'Rising', color: 'bg-pink-500' },
     { id: 2, keyword: '올드머니 룩', growth: '+85%', status: 'Stable', color: 'bg-amber-600' },
@@ -15,9 +17,28 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = () => {
     { id: 4, keyword: 'Y2K 패션', growth: '+12%', status: 'Declining', color: 'bg-purple-600' }
   ];
 
+  const fetchTopTrend = async () => {
+    try {
+      const res = await fetch('/.netlify/functions/api-naver-datalab');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.mainInsight?.keyword) {
+          setTopInsight(data.mainInsight.keyword);
+        }
+      } else {
+        setTopInsight('트렌드 데이터를 불러올 수 없습니다');
+      }
+    } catch (err) {
+      console.error('Error fetching top trend:', err);
+      setTopInsight('네트워크 오류가 발생했습니다');
+    }
+  };
+
+  useEffect(() => { fetchTopTrend(); }, []);
+
   const handleAnalyze = () => {
     setIsAnalyzing(true);
-    setTimeout(() => setIsAnalyzing(false), 2000);
+    fetchTopTrend().finally(() => setIsAnalyzing(false));
   };
 
   return (
@@ -46,7 +67,7 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = () => {
             <div className="relative z-10">
               <div className="bg-purple-600 text-[10px] font-black px-3 py-1 rounded-full w-fit mb-6 uppercase tracking-widest">Today's Top Insight</div>
               <h3 className="text-xl md:text-4xl font-black mb-4 leading-tight">
-                지금 <span className="text-purple-400">"발레코어"</span> 룩이<br />다시 부상하고 있어요.
+                지금 <span className="text-purple-400">"{topInsight}"</span> 룩이<br />다시 부상하고 있어요.
               </h3>
               <p className="text-slate-400 font-medium mb-8 max-w-md">
                 지난 24시간 동안 인스타그램과 틱톡에서 관련 해시태그 언급량이 124% 증가했습니다. 리본 디테일과 튤 스커트 아이템을 추천 포스트에 추가해보세요.
@@ -123,6 +144,10 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="mt-10">
+        <NaverCategoryRankings embedded />
       </div>
     </div>
   );
