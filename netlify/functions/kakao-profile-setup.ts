@@ -16,14 +16,22 @@ const handler: Handler = async (event) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const { user_id, user_metadata, identities, email, provider_token, client_kakao_phone, client_kakao_name } = JSON.parse(event.body || "{}");
+    const body = JSON.parse(event.body || "{}");
+    const {
+      user_id, user_metadata, identities, email, provider_token,
+      client_kakao_phone, client_kakao_name,
+      kakao_id: client_kakao_id, kakao_name, kakao_phone,
+      access_token, refresh_token,
+    } = body;
 
-    if (!user_id) {
+    const effectiveUserId = user_id || client_kakao_id || "";
+
+    if (!effectiveUserId) {
       return { statusCode: 400, body: JSON.stringify({ error: "사용자 ID가 필요합니다." }) };
     }
 
-    let phone = client_kakao_phone || "";
-    let full_name = client_kakao_name || "";
+    let phone = client_kakao_phone || kakao_phone || "";
+    let full_name = client_kakao_name || kakao_name || "";
     let kakao_id = "";
 
     if (user_metadata) {
@@ -70,12 +78,12 @@ const handler: Handler = async (event) => {
       }
     }
 
-    const username = (full_name || email?.split("@")[0] || `kakao_${kakao_id || user_id.slice(0, 8)}`).toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const username = (full_name || email?.split("@")[0] || `kakao_${kakao_id || effectiveUserId.slice(0, 8)}`).toLowerCase().replace(/[^a-z0-9_]/g, "");
 
     const { data: existingProfile } = await supabase
       .from("profiles")
       .select("*")
-      .eq("id", user_id)
+      .eq("id", effectiveUserId)
       .maybeSingle();
 
     if (existingProfile) {
@@ -87,7 +95,7 @@ const handler: Handler = async (event) => {
       }
 
       if (Object.keys(updates).length > 0) {
-        await supabase.from("profiles").update(updates).eq("id", user_id);
+        await supabase.from("profiles").update(updates).eq("id", effectiveUserId);
       }
 
       return {
@@ -108,7 +116,7 @@ const handler: Handler = async (event) => {
 
     await supabase.from("profiles").insert([
       {
-        id: user_id,
+        id: effectiveUserId,
         username,
         email: email || "",
         phone,

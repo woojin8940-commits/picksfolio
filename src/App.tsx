@@ -184,7 +184,7 @@ const App: React.FC = () => {
 
           if (res.ok) {
             const profileData = await res.json();
-            const userId = profileData.username || kakaoName || kakaoEmail?.split('@')[0] || 'user';
+            const userId = profileData.profile?.username || profileData.username || kakaoName || kakaoEmail?.split('@')[0] || 'user';
             setUserName(userId);
             setIsLoggedIn(true);
             localStorage.setItem('picks_user_session', userId);
