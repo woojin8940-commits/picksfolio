@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../services/supabase';
 
 interface LoginPageProps {
@@ -8,6 +8,8 @@ interface LoginPageProps {
   onNavigateBusinessLogin?: () => void;
   onLoginSuccess: (id: string, hasSiteData?: boolean, phone?: string) => void;
 }
+
+const KAKAO_SDK_URL = 'https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js';
 
 const isAdminEmail = (id: string) => {
   const adminIds = ['admin', 'picksfolio'];
@@ -24,7 +26,83 @@ const supabaseAdminLogin = async (id: string, password: string) => {
 
 const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup, onNavigateBusinessLogin, onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [kakaoLoading, setKakaoLoading] = useState(false);
   const [formData, setFormData] = useState({ id: '', password: '' });
+  const [privacyAgreed, setPrivacyAgreed] = useState(false);
+  const [loginTransitioning, setLoginTransitioning] = useState(false);
+
+  useEffect(() => {
+    const loadKakaoSDK = () => {
+      if ((window as any).Kakao) {
+        initKakao();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = KAKAO_SDK_URL;
+      script.async = true;
+      script.onload = () => initKakao();
+      script.onerror = () => console.warn('[Kakao] SDK load failed');
+      document.head.appendChild(script);
+    };
+
+    const initKakao = () => {
+      const Kakao = (window as any).Kakao;
+      if (Kakao && !Kakao.isInitialized()) {
+        const kakaoKey = import.meta.env.VITE_KAKAO_JS_KEY || '';
+        if (kakaoKey) {
+          Kakao.init(kakaoKey);
+        }
+      }
+    };
+
+    loadKakaoSDK();
+  }, []);
+
+  useEffect(() => {
+    if (!loginTransitioning) return;
+    const timeout = setTimeout(() => {
+      console.warn('[Auth] Safety timeout: loginTransitioning still true after 8s, force-clearing');
+      setLoginTransitioning(false);
+      setKakaoLoading(false);
+    }, 8000);
+    return () => clearTimeout(timeout);
+  }, [loginTransitioning]);
+
+  const handleKakaoLogin = useCallback(async () => {
+    if (!supabase) {
+      alert('서버 연결이 설정되지 않아 카카오 로그인을 사용할 수 없습니다.');
+      return;
+    }
+    if (!privacyAgreed) {
+      alert('개인정보 수집 및 이용에 동의해 주세요.');
+      return;
+    }
+
+    setKakaoLoading(true);
+    setLoginTransitioning(true);
+
+    try {
+      const redirectUrl = `${window.location.origin}/auth-callback`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'kakao',
+        options: {
+          redirectTo: redirectUrl,
+          scopes: 'profile_nickname account_email phone_number',
+        },
+      });
+      if (error) {
+        console.error('Kakao login error:', error);
+        alert('카카오 로그인 중 오류가 발생했습니다.');
+        setKakaoLoading(false);
+        setLoginTransitioning(false);
+      }
+    } catch (err) {
+      console.error('Kakao login error:', err);
+      alert('카카오 로그인 중 오류가 발생했습니다.');
+      setKakaoLoading(false);
+      setLoginTransitioning(false);
+    }
+  }, [privacyAgreed]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,6 +181,49 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         <div className="text-center mb-10">
           <h1 className="text-3xl font-black text-slate-900 mb-2">로그인</h1>
           <p className="text-slate-500 text-sm font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
+        </div>
+
+        {/* Kakao Login Section */}
+        <div className="mb-8">
+          <div className="flex items-start gap-2 mb-4">
+            <input
+              type="checkbox"
+              id="privacy-agree"
+              checked={privacyAgreed}
+              onChange={(e) => setPrivacyAgreed(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 accent-purple-600 flex-shrink-0"
+            />
+            <label htmlFor="privacy-agree" className="text-[11px] text-slate-500 font-medium leading-relaxed cursor-pointer">
+              <a href="/privacy" target="_blank" className="text-purple-600 font-bold underline">개인정보처리방침</a>에 따른 개인정보 수집·이용에 동의합니다.
+            </label>
+          </div>
+
+          <button
+            onClick={handleKakaoLogin}
+            disabled={kakaoLoading || !privacyAgreed}
+            className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-[15px] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#FEE500', color: '#3C1E1E' }}
+          >
+            {kakaoLoading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-[#3C1E1E]/30 border-t-[#3C1E1E] rounded-full animate-spin"></div>
+                로그인 중...
+              </>
+            ) : (
+              <>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3C6.48 3 2 6.48 2 10.5c0 2.58 1.7 4.83 4.24 6.12l-1.08 3.96c-.08.28.24.52.48.36L9.96 18.3c.66.12 1.34.18 2.04.18 5.52 0 10-3.48 10-7.98S17.52 3 12 3z" fill="#3C1E1E"/>
+                </svg>
+                동의하고 카카오로 시작하기
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="relative flex items-center gap-4 mb-8">
+          <div className="flex-1 h-px bg-slate-200"></div>
+          <span className="text-slate-400 text-xs font-bold">또는 아이디로 로그인</span>
+          <div className="flex-1 h-px bg-slate-200"></div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

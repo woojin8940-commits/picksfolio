@@ -9,6 +9,21 @@
   status = 200
 
 [[redirects]]
+  from = "/auth-callback"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/membership"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/settings"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

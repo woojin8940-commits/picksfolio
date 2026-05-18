@@ -18,10 +18,12 @@ import BusinessLoginPage from './components/BusinessLoginPage';
 import BusinessInbox from './components/BusinessInbox';
 import CollabCalendar from './components/CollabCalendar';
 import SettlementManagement from './components/SettlementManagement';
+import MembershipPage from './components/MembershipPage';
+import SettingsPage from './components/SettingsPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
 
-type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'business-signup' | 'business-login';
+type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'business-signup' | 'business-login' | 'auth-callback' | 'membership' | 'settings';
 type SubView = 'dashboard' | 'links' | 'trend' | 'dm' | 'portfolio' | 'live' | 'business' | 'calendar' | 'settlement';
 
 const App: React.FC = () => {
@@ -48,7 +50,7 @@ const App: React.FC = () => {
         setUserName(userId);
         setIsLoggedIn(true);
 
-        if (view === 'login' || view === 'signup') {
+        if (view === 'login' || view === 'signup' || view === 'auth-callback') {
           navigate('admin');
         }
       } else if (event === 'SIGNED_OUT') {
@@ -114,8 +116,11 @@ const App: React.FC = () => {
     const handleLocationChange = () => {
       const path = window.location.pathname.replace('/', '');
       if (!path) setView('home');
+      else if (path === 'auth-callback') handleAuthCallback();
       else if (path === 'business-signup') setView('business-signup');
       else if (path === 'business-login') setView('business-login');
+      else if (path === 'membership') setView('membership');
+      else if (path === 'settings') setView('settings');
       else if (['signup', 'login', 'admin'].includes(path)) setView(path as View);
       else {
         setTargetUser(path);
@@ -126,6 +131,86 @@ const App: React.FC = () => {
     handleLocationChange();
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
+
+  const handleAuthCallback = async () => {
+    setView('auth-callback');
+
+    if (!supabase) {
+      navigate('login');
+      return;
+    }
+
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+
+      if (error || !session) {
+        console.warn('[Auth] No session found in callback, redirecting to login');
+        navigate('login');
+        return;
+      }
+
+      const user = session.user;
+      const provider = user.app_metadata?.provider;
+
+      if (provider === 'kakao') {
+        const kakaoMeta = user.user_metadata || {};
+        const kakaoId = user.id;
+        const kakaoName = kakaoMeta.full_name || kakaoMeta.name || '';
+        const kakaoPhone = kakaoMeta.phone || '';
+        const kakaoEmail = user.email || '';
+
+        localStorage.setItem('picks_kakao_user', JSON.stringify({
+          id: kakaoId,
+          name: kakaoName,
+          phone: kakaoPhone,
+          email: kakaoEmail,
+        }));
+
+        try {
+          const res = await fetch('/.netlify/functions/kakao-profile-setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              kakao_id: kakaoId,
+              kakao_name: kakaoName,
+              kakao_phone: kakaoPhone,
+              email: kakaoEmail,
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              provider_token: session.provider_token,
+            }),
+          });
+
+          if (res.ok) {
+            const profileData = await res.json();
+            const userId = profileData.username || kakaoName || kakaoEmail?.split('@')[0] || 'user';
+            setUserName(userId);
+            setIsLoggedIn(true);
+            localStorage.setItem('picks_user_session', userId);
+            navigate('admin');
+            return;
+          }
+        } catch (err) {
+          console.error('[UserPage] kakao-profile-setup fallback failed:', err);
+        }
+      }
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const userId = profileData?.username || user.email?.split('@')[0] || 'user';
+      setUserName(userId);
+      setIsLoggedIn(true);
+      localStorage.setItem('picks_user_session', userId);
+      navigate('admin');
+    } catch (err) {
+      console.error('[Auth] Callback error:', err);
+      navigate('login');
+    }
+  };
 
   const navigate = (newView: View, param?: string) => {
     let path = '/';
@@ -158,6 +243,30 @@ const App: React.FC = () => {
     window.location.href = loginUrl;
   };
 
+  // KakaoTalk in-app browser detection
+  useEffect(() => {
+    const ua = navigator.userAgent || '';
+    if (/KAKAOTALK/i.test(ua)) {
+      const currentUrl = window.location.href;
+      if ((window as any).location?.href && !sessionStorage.getItem('picks_kakao_redirect_done')) {
+        sessionStorage.setItem('picks_kakao_redirect_done', 'true');
+        window.location.href = `kakaotalk://web/openExternal?url=${encodeURIComponent(currentUrl)}`;
+      }
+    }
+  }, []);
+
+  if (view === 'auth-callback') {
+    return (
+      <div className="min-h-screen bg-midnight flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mx-auto mb-6"></div>
+          <p className="text-white font-bold text-lg">로그인 처리 중...</p>
+          <p className="text-slate-400 text-sm mt-2">잠시만 기다려 주세요.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (view === 'user-page') return <UserPage username={targetUser} />;
 
   if (view === 'business-signup') {
@@ -181,6 +290,29 @@ const App: React.FC = () => {
           setIsLoggedIn(true);
           navigate('admin');
         }}
+      />
+    );
+  }
+
+  if (view === 'membership') {
+    return (
+      <MembershipPage
+        userName={userName}
+        isLoggedIn={isLoggedIn}
+        onNavigateHome={() => navigate('home')}
+        onNavigateLogin={() => navigate('login')}
+        onNavigateBack={() => navigate('admin')}
+      />
+    );
+  }
+
+  if (view === 'settings') {
+    return (
+      <SettingsPage
+        userName={userName}
+        onNavigateBack={() => navigate('admin')}
+        onNavigateMembership={() => navigate('membership')}
+        onLogout={handleLogout}
       />
     );
   }
@@ -231,6 +363,8 @@ const App: React.FC = () => {
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
         onNavigateSettlement={() => setSubView('settlement')}
+        onNavigateMembership={() => navigate('membership')}
+        onNavigateSettings={() => navigate('settings')}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>
@@ -260,15 +394,49 @@ const App: React.FC = () => {
 
             {/* Footer */}
             <footer className="py-20 border-t border-white/5 bg-background">
-              <div className="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
-                <div className="text-2xl font-black text-white font-display">PICKS</div>
-                <div className="text-slate-500 text-sm font-medium">
-                  © 2026 PICKS. All rights reserved.
+              <div className="container mx-auto px-6">
+                <div className="flex flex-col md:flex-row justify-between items-start gap-12 mb-12">
+                  <div>
+                    <div className="text-2xl font-black text-white font-display mb-3">PICKS</div>
+                    <p className="text-slate-500 text-xs font-medium leading-relaxed max-w-xs">
+                      픽스폴리오(Picksfolio)<br />
+                      일상을 큐레이션하고 스타일을 연결하는 소셜 커머스 링크 플랫폼.
+                    </p>
+                    <p className="text-slate-600 text-[10px] font-medium mt-3">admin@picks.me</p>
+                  </div>
+                  <div className="flex gap-12 text-sm">
+                    <div>
+                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Legal</h4>
+                      <ul className="space-y-3">
+                        <li><a href="/privacy" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">개인정보처리방침</a></li>
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">이용약관</a></li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Platform</h4>
+                      <ul className="space-y-3">
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Templates</a></li>
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">AI Scout</a></li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Company</h4>
+                      <ul className="space-y-3">
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">About Us</a></li>
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Press Kit</a></li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex gap-8 text-slate-400 text-sm font-bold uppercase tracking-widest">
-                  <a href="#" className="hover:text-white transition-colors">Privacy</a>
-                  <a href="#" className="hover:text-white transition-colors">Terms</a>
-                  <a href="#" className="hover:text-white transition-colors">Contact</a>
+                <div className="border-t border-white/5 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+                  <div className="text-slate-600 text-[11px] font-medium">
+                    © 2026 Picksfolio. All rights reserved.
+                  </div>
+                  <div className="flex gap-6 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+                    <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
+                    <a href="#" className="hover:text-white transition-colors">Terms</a>
+                    <a href="#" className="hover:text-white transition-colors">Contact</a>
+                  </div>
                 </div>
               </div>
             </footer>

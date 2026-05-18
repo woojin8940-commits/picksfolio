@@ -21,6 +21,8 @@ interface AdminDashboardProps {
   onNavigateBusiness?: () => void;
   onNavigateCalendar?: () => void;
   onNavigateSettlement?: () => void;
+  onNavigateMembership?: () => void;
+  onNavigateSettings?: () => void;
   children?: React.ReactNode;
 }
 
@@ -37,6 +39,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateBusiness,
   onNavigateCalendar,
   onNavigateSettlement,
+  onNavigateMembership,
+  onNavigateSettings,
   children
 }) => {
   const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
@@ -225,7 +229,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </nav>
         
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          <button 
+          <button
+            type="button"
+            onClick={onNavigateMembership}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+          >
+            <span>💎</span>
+            <span>멤버십</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateSettings}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+          >
+            <span>⚙️</span>
+            <span>설정</span>
+          </button>
+          <button
             type="button"
             onClick={() => {
               console.log('Logout button clicked');
@@ -282,12 +302,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="💰" label="정산" active={currentSubView === 'settlement'} onClick={() => { if (onNavigateSettlement) onNavigateSettlement(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              <button 
+              <button
+                type="button"
+                onClick={() => { if (onNavigateMembership) onNavigateMembership(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+              >
+                <span>💎</span>
+                <span>멤버십</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (onNavigateSettings) onNavigateSettings(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
+              >
+                <span>⚙️</span>
+                <span>설정</span>
+              </button>
+              <button
                 type="button"
                 onClick={() => {
                   console.log('Mobile logout button clicked');
                   onLogout();
-                }} 
+                }}
                 className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
               >
                 <span>👤</span>
