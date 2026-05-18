@@ -1,0 +1,9 @@
+{
+  "name": "picksfolio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "일상을 큐레이션하는 하이엔드 링크인바이오(Link-in-bio) 플랫폼입니다.",
+  "dependencies": {
+    "solapi": "^6.0.1"
+  }
+}
