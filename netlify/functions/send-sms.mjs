@@ -1,3 +1,5 @@
+import { createHmac, randomUUID } from "node:crypto";
+
 export default async (req) => {
   if (req.method !== "POST") {
     return Response.json({ message: "Method not allowed" }, { status: 405 });
@@ -44,23 +46,10 @@ export default async (req) => {
 
   try {
     const date = new Date().toISOString();
-    const salt = crypto.randomUUID();
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(apiSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-    const signatureBuffer = await crypto.subtle.sign(
-      "HMAC",
-      key,
-      encoder.encode(date + salt)
-    );
-    const signature = Array.from(new Uint8Array(signatureBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    const salt = randomUUID();
+    const signature = createHmac("sha256", apiSecret)
+      .update(date + salt)
+      .digest("hex");
 
     const res = await fetch("https://api.solapi.com/messages/v4/send", {
       method: "POST",
@@ -96,3 +85,4 @@ export default async (req) => {
     );
   }
 };
+
