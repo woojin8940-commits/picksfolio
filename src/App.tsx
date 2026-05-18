@@ -409,7 +409,7 @@ const App: React.FC = () => {
                       <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Legal</h4>
                       <ul className="space-y-3">
                         <li><a href="/privacy" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">개인정보처리방침</a></li>
-                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">이용약관</a></li>
+                        <li><a href="/terms" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">이용약관</a></li>
                       </ul>
                     </div>
                     <div>
@@ -434,7 +434,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex gap-6 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
                     <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
-                    <a href="#" className="hover:text-white transition-colors">Terms</a>
+                    <a href="/terms" className="hover:text-white transition-colors">Terms</a>
                     <a href="#" className="hover:text-white transition-colors">Contact</a>
                   </div>
                 </div>

@@ -9,6 +9,16 @@
   status = 200
 
 [[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/profile"
+  to = "/profile.html"
+  status = 200
+
+[[redirects]]
   from = "/auth-callback"
   to = "/index.html"
   status = 200
