@@ -20,6 +20,7 @@ import CollabCalendar from './components/CollabCalendar';
 import SettlementManagement from './components/SettlementManagement';
 import MembershipPage from './components/MembershipPage';
 import SettingsPage from './components/SettingsPage';
+import FeatureShowcase from './components/FeatureShowcase';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
 
@@ -390,21 +391,23 @@ const App: React.FC = () => {
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
             <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
+            <FeatureShowcase onSignup={() => navigate('signup')} />
             <DataBoardSection />
 
             {/* Footer */}
-            <footer className="py-20 border-t border-white/5 bg-background">
+            <footer className="py-16 md:py-20 border-t border-white/5 bg-background">
               <div className="container mx-auto px-6">
-                <div className="flex flex-col md:flex-row justify-between items-start gap-12 mb-12">
-                  <div>
+                <div className="flex flex-col md:flex-row justify-between items-start gap-10 md:gap-12 mb-12">
+                  <div className="max-w-xs">
                     <div className="text-2xl font-black text-white font-display mb-3">PICKS</div>
-                    <p className="text-slate-500 text-xs font-medium leading-relaxed max-w-xs">
+                    <p className="text-slate-500 text-xs font-medium leading-relaxed">
                       픽스폴리오(Picksfolio)<br />
-                      일상을 큐레이션하고 스타일을 연결하는 소셜 커머스 링크 플랫폼.
+                      일상을 큐레이션하고 스타일을 연결하는<br />
+                      소셜 커머스 링크 플랫폼.
                     </p>
                     <p className="text-slate-600 text-[10px] font-medium mt-3">admin@picks.me</p>
                   </div>
-                  <div className="flex gap-12 text-sm">
+                  <div className="flex flex-wrap gap-10 md:gap-16 text-sm">
                     <div>
                       <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Legal</h4>
                       <ul className="space-y-3">
@@ -417,6 +420,7 @@ const App: React.FC = () => {
                       <ul className="space-y-3">
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Templates</a></li>
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">AI Scout</a></li>
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">라이브 커머스</a></li>
                       </ul>
                     </div>
                     <div>
@@ -424,6 +428,14 @@ const App: React.FC = () => {
                       <ul className="space-y-3">
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">About Us</a></li>
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Press Kit</a></li>
+                        <li><a href="/business-signup" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">비즈니스 파트너</a></li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Support</h4>
+                      <ul className="space-y-3">
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">고객센터</a></li>
+                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">FAQ</a></li>
                       </ul>
                     </div>
                   </div>
@@ -432,7 +444,7 @@ const App: React.FC = () => {
                   <div className="text-slate-600 text-[11px] font-medium">
                     © 2026 Picksfolio. All rights reserved.
                   </div>
-                  <div className="flex gap-6 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex flex-wrap justify-center gap-4 md:gap-6 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
                     <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
                     <a href="/terms" className="hover:text-white transition-colors">Terms</a>
                     <a href="#" className="hover:text-white transition-colors">Contact</a>
