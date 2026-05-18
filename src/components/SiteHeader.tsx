@@ -50,20 +50,12 @@ const SiteHeader: React.FC<HeaderProps> = ({
               </button>
             </>
           ) : (
-            <>
-              <button
-                onClick={onNavigateLogin}
-                className="text-slate-400 hover:text-white px-4 py-2.5 rounded-full transition-all font-bold"
-              >
-                로그인
-              </button>
-              <button
-                onClick={onNavigateSignup}
-                className="bg-gradient-to-r from-purple-primary to-purple-secondary hover:opacity-90 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-purple-500/20"
-              >
-                무료로 시작하기
-              </button>
-            </>
+            <button
+              onClick={onNavigateLogin}
+              className="bg-gradient-to-r from-purple-primary to-purple-secondary hover:opacity-90 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-purple-500/20"
+            >
+              로그인
+            </button>
           )}
         </nav>
 
@@ -91,20 +83,12 @@ const SiteHeader: React.FC<HeaderProps> = ({
               </button>
             </>
           ) : (
-            <>
-              <button
-                onClick={onNavigateLogin}
-                className="text-slate-400 px-3 py-2 rounded-full text-[11px] font-bold"
-              >
-                로그인
-              </button>
-              <button
-                onClick={onNavigateSignup}
-                className="bg-purple-primary text-white px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest"
-              >
-                시작하기
-              </button>
-            </>
+            <button
+              onClick={onNavigateLogin}
+              className="bg-purple-primary text-white px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest"
+            >
+              로그인
+            </button>
           )}
         </div>
       </header>

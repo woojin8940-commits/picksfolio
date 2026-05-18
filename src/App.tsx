@@ -20,7 +20,6 @@ import CollabCalendar from './components/CollabCalendar';
 import SettlementManagement from './components/SettlementManagement';
 import MembershipPage from './components/MembershipPage';
 import SettingsPage from './components/SettingsPage';
-import FeatureShowcase from './components/FeatureShowcase';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
 
@@ -391,7 +390,6 @@ const App: React.FC = () => {
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
             <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
-            <FeatureShowcase onSignup={() => navigate('signup')} />
             <DataBoardSection />
 
             {/* Footer */}
@@ -401,26 +399,16 @@ const App: React.FC = () => {
                   <div className="max-w-xs">
                     <div className="text-2xl font-black text-white font-display mb-3">PICKS</div>
                     <p className="text-slate-500 text-xs font-medium leading-relaxed">
-                      픽스폴리오(Picksfolio)<br />
                       일상을 큐레이션하고 스타일을 연결하는<br />
                       소셜 커머스 링크 플랫폼.
                     </p>
-                    <p className="text-slate-600 text-[10px] font-medium mt-3">admin@picks.me</p>
                   </div>
                   <div className="flex flex-wrap gap-10 md:gap-16 text-sm">
-                    <div>
-                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Legal</h4>
-                      <ul className="space-y-3">
-                        <li><a href="/privacy" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">개인정보처리방침</a></li>
-                        <li><a href="/terms" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">이용약관</a></li>
-                      </ul>
-                    </div>
                     <div>
                       <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Platform</h4>
                       <ul className="space-y-3">
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Templates</a></li>
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">AI Scout</a></li>
-                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">라이브 커머스</a></li>
                       </ul>
                     </div>
                     <div>
@@ -428,26 +416,25 @@ const App: React.FC = () => {
                       <ul className="space-y-3">
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">About Us</a></li>
                         <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">Press Kit</a></li>
-                        <li><a href="/business-signup" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">비즈니스 파트너</a></li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h4 className="text-white text-[10px] font-black uppercase tracking-widest mb-4">Support</h4>
-                      <ul className="space-y-3">
-                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">고객센터</a></li>
-                        <li><a href="#" className="text-slate-500 hover:text-white text-[11px] font-bold transition-colors">FAQ</a></li>
                       </ul>
                     </div>
                   </div>
                 </div>
-                <div className="border-t border-white/5 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-                  <div className="text-slate-600 text-[11px] font-medium">
-                    © 2026 Picksfolio. All rights reserved.
+                <div className="border-t border-white/5 pt-8 space-y-2">
+                  <div className="text-slate-500 text-[10px] font-medium leading-relaxed">
+                    <p><span className="font-bold">상호명</span> 픽스폴리오(Picksfolio) | <span className="font-bold">대표자</span> 신우진</p>
+                    <p><span className="font-bold">사업자등록번호</span> 220-26-01895</p>
+                    <p><span className="font-bold">통신판매업신고번호</span> 제 2026-우정청마-0846 호</p>
+                    <p><span className="font-bold">사업장 주소</span> 경기도 부천시 원미구 부일로198번길 26, 7층 2호(상동, 시범라이)</p>
+                    <p><span className="font-bold">고객센터</span> 010-3563-8540 | woojn8940@inplace-ad.com</p>
                   </div>
-                  <div className="flex flex-wrap justify-center gap-4 md:gap-6 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-                    <a href="/privacy" className="hover:text-white transition-colors">Privacy</a>
-                    <a href="/terms" className="hover:text-white transition-colors">Terms</a>
-                    <a href="#" className="hover:text-white transition-colors">Contact</a>
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <a href="/terms" className="text-slate-500 hover:text-white text-[10px] font-bold transition-colors underline">이용약관</a>
+                    <span className="text-slate-600 text-[10px]">|</span>
+                    <a href="/privacy" className="text-slate-500 hover:text-white text-[10px] font-bold transition-colors underline">개인정보처리방침</a>
+                  </div>
+                  <div className="text-slate-600 text-[10px] font-medium pt-2">
+                    © 2026 Picksfolio. All rights reserved.
                   </div>
                 </div>
               </div>
