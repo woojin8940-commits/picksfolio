@@ -1,48 +1,53 @@
 import { createHmac, randomUUID } from "node:crypto";
 
-export default async (req) => {
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed", message: "Method not allowed" }), {
-      status: 405,
+export const handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
       headers: { "Content-Type": "application/json" },
-    });
+      body: JSON.stringify({ error: "Method not allowed", message: "Method not allowed" }),
+    };
   }
 
-  const apiKey = Netlify.env.get("SOLAPI_API_KEY");
-  const apiSecret = Netlify.env.get("SOLAPI_API_SECRET");
-  const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER");
+  const apiKey = process.env.SOLAPI_API_KEY;
+  const apiSecret = process.env.SOLAPI_API_SECRET;
+  const fromNumber = process.env.SOLAPI_FROM_NUMBER;
 
   if (!apiKey || !apiSecret || !fromNumber) {
-    return new Response(
-      JSON.stringify({ error: "SMS 서비스가 설정되지 않았습니다.", message: "SMS 서비스가 설정되지 않았습니다." }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "SMS 서비스가 설정되지 않았습니다.", message: "SMS 서비스가 설정되지 않았습니다." }),
+    };
   }
 
   let body;
   try {
-    body = await req.json();
+    body = JSON.parse(event.body || "{}");
   } catch {
-    return new Response(JSON.stringify({ error: "잘못된 요청입니다.", message: "잘못된 요청입니다." }), {
-      status: 400,
+    return {
+      statusCode: 400,
       headers: { "Content-Type": "application/json" },
-    });
+      body: JSON.stringify({ error: "잘못된 요청입니다.", message: "잘못된 요청입니다." }),
+    };
   }
 
   const receiver = body.receiver;
   if (!receiver) {
-    return new Response(
-      JSON.stringify({ error: "수신자 번호가 필요합니다.", message: "수신자 번호가 필요합니다." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "수신자 번호가 필요합니다.", message: "수신자 번호가 필요합니다." }),
+    };
   }
 
   const phone = receiver.replace(/[^0-9]/g, "");
   if (!/^01[016789]\d{7,8}$/.test(phone)) {
-    return new Response(
-      JSON.stringify({ error: "올바른 휴대폰 번호를 입력해 주세요.", message: "올바른 휴대폰 번호를 입력해 주세요." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "올바른 휴대폰 번호를 입력해 주세요.", message: "올바른 휴대폰 번호를 입력해 주세요." }),
+    };
   }
 
   const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -74,26 +79,29 @@ export default async (req) => {
 
     if (!res.ok) {
       console.error("Solapi API error:", res.status, JSON.stringify(result));
-      return new Response(
-        JSON.stringify({ error: "인증번호 발송에 실패했습니다.", message: "인증번호 발송에 실패했습니다." }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "인증번호 발송에 실패했습니다.", message: "인증번호 발송에 실패했습니다." }),
+      };
     }
 
-    return new Response(
-      JSON.stringify({
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         success: true,
         message: "인증번호가 발송되었습니다.",
         code,
         result,
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+    };
   } catch (err) {
     console.error("SMS send error:", err);
-    return new Response(
-      JSON.stringify({ error: "인증번호 발송에 실패했습니다.", message: "인증번호 발송에 실패했습니다." }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "인증번호 발송에 실패했습니다.", message: "인증번호 발송에 실패했습니다." }),
+    };
   }
 };
