@@ -1,0 +1,92 @@
+
+import React from 'react';
+
+interface HeaderProps {
+  onNavigateHome: () => void;
+  onNavigateSignup: () => void;
+  onNavigateLogin: () => void;
+  onNavigateDashboard: () => void;
+  onLogout: () => void;
+  isLoggedIn?: boolean;
+}
+
+const SiteHeader: React.FC<HeaderProps> = ({ 
+  onNavigateHome, 
+  onNavigateLogin,
+  onNavigateDashboard,
+  onLogout,
+  isLoggedIn 
+}) => {
+  return (
+    <header className="fixed top-0 left-0 w-full h-20 z-[1000] bg-background/80 backdrop-blur-2xl border-b border-white/5 flex items-center justify-between px-6 md:px-12 transition-all">
+      <div 
+        className="text-2xl font-black text-purple-primary tracking-tighter cursor-pointer flex items-center font-display"
+        onClick={onNavigateHome}
+      >
+        PICKS
+      </div>
+      
+      <nav className="hidden md:flex items-center space-x-6 text-[13px] font-bold text-slate-400 uppercase tracking-widest">
+        {isLoggedIn ? (
+          <>
+            <button 
+              onClick={onNavigateDashboard}
+              className="bg-white/5 hover:bg-white/10 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold border border-white/10"
+            >
+              대시보드
+            </button>
+            <button 
+              type="button"
+              onClick={() => {
+                console.log('Header logout button clicked');
+                onLogout();
+              }}
+              className="bg-gradient-to-r from-purple-primary to-purple-secondary hover:opacity-90 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-purple-500/20 cursor-pointer"
+            >
+              로그아웃
+            </button>
+          </>
+        ) : (
+          <button 
+            onClick={onNavigateLogin}
+            className="bg-gradient-to-r from-purple-primary to-purple-secondary hover:opacity-90 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-purple-500/20"
+          >
+            로그인
+          </button>
+        )}
+      </nav>
+
+      <div className="md:hidden flex items-center gap-2">
+        {isLoggedIn ? (
+          <>
+            <button 
+              onClick={onNavigateDashboard}
+              className="text-white px-3 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest bg-white/5 border border-white/10"
+            >
+              대시보드
+            </button>
+            <button 
+              type="button"
+              onClick={() => {
+                console.log('Mobile header logout button clicked');
+                onLogout();
+              }}
+              className="bg-purple-primary text-white px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest cursor-pointer"
+            >
+              로그아웃
+            </button>
+          </>
+        ) : (
+          <button 
+            onClick={onNavigateLogin}
+            className="bg-purple-primary text-white px-5 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest"
+          >
+            로그인
+          </button>
+        )}
+      </div>
+    </header>
+  );
+};
+
+export default SiteHeader;
