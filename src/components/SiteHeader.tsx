@@ -11,7 +11,6 @@ interface HeaderProps {
 
 const SiteHeader: React.FC<HeaderProps> = ({
   onNavigateHome,
-  onNavigateSignup,
   onNavigateLogin,
   onNavigateDashboard,
   onLogout,
