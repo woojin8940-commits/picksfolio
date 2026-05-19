@@ -1,6 +1,6 @@
 import { getUser } from '@netlify/identity'
 
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com']
+const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me']
 
 function decodeJwtClaims(token: string): any {
   try {

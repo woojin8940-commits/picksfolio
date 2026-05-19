@@ -64,20 +64,27 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
   const getToken = useCallback(async () => {
     const user = await getUser();
-    return (user as any)?.token?.access_token || '';
+    const identityToken = (user as any)?.token?.access_token || '';
+    if (identityToken) return identityToken;
+    return localStorage.getItem('picks_admin_token') || '';
   }, []);
 
   const fetchData = async () => {
     setLoading(true);
     setError('');
     try {
+      let token = '';
       const user = await getUser();
-      if (!user) {
-        setError('인증이 만료되었습니다. 다시 로그인해주세요.');
-        setLoading(false);
-        return;
+      if (user) {
+        token = (user as any).token?.access_token || '';
+      } else {
+        token = localStorage.getItem('picks_admin_token') || '';
+        if (!token) {
+          setError('인증이 만료되었습니다. 다시 로그인해주세요.');
+          setLoading(false);
+          return;
+        }
       }
-      const token = (user as any).token?.access_token || '';
       const headers: Record<string, string> = {};
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -121,6 +128,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
+    localStorage.removeItem('picks_admin_token');
     onLogout();
   };
 

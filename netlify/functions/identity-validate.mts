@@ -8,7 +8,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
   // Grant admin role if:
   // 1. The user was invited (has invited_at) but doesn't have admin role yet
   // 2. The user's email is explicitly listed as an admin
-  const adminEmails = ['woojin8940@inplace-ad.com']
+  const adminEmails = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me']
   const shouldBeAdmin = (user.invited_at && !existingRoles.includes('admin')) ||
     (adminEmails.includes(user.email) && !existingRoles.includes('admin'))
 

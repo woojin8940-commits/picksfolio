@@ -2,7 +2,7 @@ import { getDatabase } from "@netlify/database";
 import { getUser } from "@netlify/identity";
 import type { Config, Context } from "@netlify/functions";
 
-const ADMIN_EMAILS = ["woojin8940@inplace-ad.com"];
+const ADMIN_EMAILS = ["woojin8940@inplace-ad.com", "picksfolio@picks.me"];
 
 function decodeJwtClaims(token: string): any {
   try {
