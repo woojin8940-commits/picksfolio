@@ -2,17 +2,9 @@ import { getDatabase } from "@netlify/database";
 import { getStore } from "@netlify/blobs";
 import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";
+import { createUniqueProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
-
-function generateProfileCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
 
 function getSupabaseAdmin() {
   const serviceKey = Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -37,32 +29,27 @@ export default async (req: Request, context: Context) => {
       `;
 
       if (result.length > 0 && result[0].data && Object.keys(result[0].data).length > 0) {
-        return Response.json(result[0].data);
+        const dbData = result[0].data as Record<string, any>;
+        if (hasConnectedSiteContent(dbData)) {
+          return Response.json(dbData);
+        }
+
+        try {
+          const restored = await recoverSiteDataFromBlob(db, username);
+          if (restored && hasConnectedSiteContent(restored)) {
+            return Response.json(restored);
+          }
+        } catch (blobErr) {
+          console.warn("[api-site] Blob content recovery failed:", blobErr);
+        }
+
+        return Response.json(dbData);
       }
 
       // Check blob store as fallback (data may exist there from earlier saves)
       try {
-        const blobStore = getStore({ name: "site-data", consistency: "strong" });
-        const blobData = await blobStore.get(username, { type: "json" }) as Record<string, any> | null;
-        if (blobData && Object.keys(blobData).length > 0) {
-          // Restore to database from blob backup
-          let profileCode = generateProfileCode();
-          let attempts = 0;
-          while (attempts < 5) {
-            const dup = await db.sql`
-              SELECT 1 FROM site_data WHERE profile_code = ${profileCode}
-            `;
-            if (dup.length === 0) break;
-            profileCode = generateProfileCode();
-            attempts++;
-          }
-
-          await db.sql`
-            INSERT INTO site_data (username, data, profile_code)
-            VALUES (${username}, ${JSON.stringify(blobData)}, ${profileCode})
-            ON CONFLICT (username) DO UPDATE SET data = ${JSON.stringify(blobData)}::jsonb, updated_at = NOW()
-          `;
-
+        const blobData = await recoverSiteDataFromBlob(db, username);
+        if (blobData) {
           return Response.json(blobData);
         }
       } catch (blobErr) {
@@ -89,16 +76,7 @@ export default async (req: Request, context: Context) => {
             blocks: [],
           };
 
-          let profileCode = generateProfileCode();
-          let attempts = 0;
-          while (attempts < 5) {
-            const dup = await db.sql`
-              SELECT 1 FROM site_data WHERE profile_code = ${profileCode}
-            `;
-            if (dup.length === 0) break;
-            profileCode = generateProfileCode();
-            attempts++;
-          }
+          const profileCode = await createUniqueProfileCode(db);
 
           await db.sql`
             INSERT INTO site_data (username, data, profile_code)
@@ -129,16 +107,7 @@ export default async (req: Request, context: Context) => {
           WHERE username = ${username}
         `;
       } else {
-        let profileCode = generateProfileCode();
-        let attempts = 0;
-        while (attempts < 5) {
-          const dup = await db.sql`
-            SELECT 1 FROM site_data WHERE profile_code = ${profileCode}
-          `;
-          if (dup.length === 0) break;
-          profileCode = generateProfileCode();
-          attempts++;
-        }
+        const profileCode = await createUniqueProfileCode(db);
 
         await db.sql`
           INSERT INTO site_data (username, data, profile_code)

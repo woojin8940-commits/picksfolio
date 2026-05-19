@@ -95,7 +95,7 @@ const RevenueSettlement: React.FC = () => {
                     contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontWeight: 800}}
                   />
                   <Bar dataKey="amount" radius={[8, 8, 0, 0]}>
-                    {monthlyData.map((entry, index) => (
+                    {monthlyData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={index === monthlyData.length - 1 ? '#9333ea' : '#e2e8f0'} />
                     ))}
                   </Bar>

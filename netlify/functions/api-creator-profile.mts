@@ -1,5 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import type { Config, Context } from "@netlify/functions";
+import { recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
 
 export default async (req: Request, context: Context) => {
   if (req.method !== "GET") {
@@ -22,6 +23,17 @@ export default async (req: Request, context: Context) => {
 
     if (byUsername.length > 0) {
       return Response.json({ creator: formatCreator(byUsername[0]) });
+    }
+
+    const recovered = await recoverSiteDataFromBlob(db, identifier);
+    if (recovered) {
+      return Response.json({ creator: formatCreator({
+        username: identifier,
+        data: recovered,
+        profile_code: "",
+        is_public: true,
+        updated_at: new Date().toISOString(),
+      }) });
     }
 
     const byCode = await db.sql`
