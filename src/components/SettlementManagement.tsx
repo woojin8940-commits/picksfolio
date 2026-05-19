@@ -37,7 +37,7 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
   const fetchSettlements = useCallback(async () => {
     if (!userName) return;
     try {
-      const res = await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`);
+      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}`);
       if (res.ok) {
         const data = await res.json();
         setSettlements(data);
@@ -73,7 +73,7 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
     setNewSettlement({ influencer_username: '', title: '', amount: '', scheduled_date: '', memo: '' });
 
     try {
-      await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`, {
+      await fetch(`/api/settlements/${encodeURIComponent(userName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settlement),
@@ -93,7 +93,7 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
     ));
 
     try {
-      await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`, {
+      await fetch(`/api/settlements/${encodeURIComponent(userName)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: newStatus }),
@@ -107,7 +107,7 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
     if (confirm('이 정산 기록을 삭제하시겠습니까?')) {
       setSettlements(prev => prev.filter(s => s.id !== id));
       try {
-        await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}&id=${encodeURIComponent(id)}`, {
+        await fetch(`/api/settlements/${encodeURIComponent(userName)}?id=${encodeURIComponent(id)}`, {
           method: 'DELETE',
         });
       } catch (e) {

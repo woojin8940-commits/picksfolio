@@ -17,7 +17,8 @@ export default async (req: Request, context: Context) => {
 
   try {
     const url = new URL(req.url);
-    const username = url.searchParams.get("username");
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const username = (pathParts[0] === "api" && pathParts[2]) ? decodeURIComponent(pathParts[2]) : url.searchParams.get("username");
     const action = url.searchParams.get("action");
 
     if (!username) {
@@ -145,3 +146,5 @@ export default async (req: Request, context: Context) => {
     );
   }
 };
+
+export const config = { path: ["/api/live-sessions", "/api/live-sessions/:username"] };

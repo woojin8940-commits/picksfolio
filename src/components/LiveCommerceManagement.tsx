@@ -36,7 +36,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}`);
+      const res = await fetch(`/api/live-sessions/${encodeURIComponent(userName)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.session) {
@@ -58,7 +58,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   const handleSaveSettings = async () => {
     setIsSaving(true);
     try {
-      await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=save-settings`, {
+      await fetch(`/api/live-sessions/${encodeURIComponent(userName)}?action=save-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: broadcastTitle, category: broadcastCategory }),

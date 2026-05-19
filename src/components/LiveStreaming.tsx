@@ -89,7 +89,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, broadcastTitle,
       }));
 
       try {
-        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=start`, {
+        await fetch(`/api/live-sessions/${encodeURIComponent(userName)}?action=start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: broadcastTitle || '', category: broadcastCategory || '' }),
@@ -119,7 +119,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, broadcastTitle,
       }));
 
       try {
-        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=stop`, {
+        await fetch(`/api/live-sessions/${encodeURIComponent(userName)}?action=stop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
@@ -144,7 +144,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, broadcastTitle,
 
     if (isLive) {
       try {
-        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=update`, {
+        await fetch(`/api/live-sessions/${encodeURIComponent(userName)}?action=update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_count: 1 }),

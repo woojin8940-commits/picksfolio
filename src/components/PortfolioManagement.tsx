@@ -155,7 +155,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName }) =
       formData.append('username', userName);
       formData.append('purpose', uploadTarget.type === 'profile' ? 'avatar' : uploadTarget.type === 'cover' ? 'cover' : 'block');
 
-      const res = await fetch('/.netlify/functions/upload-image', {
+      const res = await fetch('/api/upload-image', {
         method: 'POST',
         body: formData,
       });

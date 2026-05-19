@@ -17,7 +17,9 @@ export default async (req: Request, context: Context) => {
 
   try {
     const url = new URL(req.url);
-    const username = url.searchParams.get("username");
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const username = (pathParts[0] === "api" && pathParts[2]) ? decodeURIComponent(pathParts[2]) : url.searchParams.get("username");
+    const role = url.searchParams.get("role");
 
     if (!username) {
       return new Response(JSON.stringify({ error: "username is required" }), {
@@ -29,12 +31,22 @@ export default async (req: Request, context: Context) => {
     const normalizedUsername = username.toLowerCase();
 
     if (req.method === "GET") {
-      const result = await db.sql`
-        SELECT id, influencer_username, title, amount, scheduled_date, status, memo, created_at
-        FROM settlements
-        WHERE username = ${normalizedUsername}
-        ORDER BY created_at DESC
-      `;
+      let result;
+      if (role === "influencer") {
+        result = await db.sql`
+          SELECT id, influencer_username, title, amount, scheduled_date, status, memo, created_at
+          FROM settlements
+          WHERE influencer_username = ${normalizedUsername}
+          ORDER BY created_at DESC
+        `;
+      } else {
+        result = await db.sql`
+          SELECT id, influencer_username, title, amount, scheduled_date, status, memo, created_at
+          FROM settlements
+          WHERE username = ${normalizedUsername}
+          ORDER BY created_at DESC
+        `;
+      }
       return new Response(JSON.stringify(result.rows), { headers });
     }
 
@@ -97,3 +109,5 @@ export default async (req: Request, context: Context) => {
     );
   }
 };
+
+export const config = { path: ["/api/settlements", "/api/settlements/:username"] };

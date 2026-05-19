@@ -38,6 +38,28 @@
   to = "/index.html"
   status = 200
 
+# Existing .mts functions with query-param routing (backwards compatibility)
+[[redirects]]
+  from = "/.netlify/functions/api-collabs"
+  to = "/.netlify/functions/api-collabs"
+  status = 200
+
+[[redirects]]
+  from = "/.netlify/functions/api-proposals"
+  to = "/.netlify/functions/api-proposals"
+  status = 200
+
+[[redirects]]
+  from = "/.netlify/functions/api-settlements"
+  to = "/.netlify/functions/api-settlements"
+  status = 200
+
+[[redirects]]
+  from = "/.netlify/functions/api-live-sessions"
+  to = "/.netlify/functions/api-live-sessions"
+  status = 200
+
+# SPA catch-all (must be last)
 [[redirects]]
   from = "/*"
   to = "/index.html"

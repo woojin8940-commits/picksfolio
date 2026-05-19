@@ -13,31 +13,45 @@ export interface SiteSettings {
 
 export const getSiteSettings = async (userName: string): Promise<SiteSettings | null> => {
   const normalizedUsername = userName.toLowerCase();
-  
+
   let cloudData: any = null;
 
+  // Try Netlify Database API first
   try {
-    // Try Supabase first for real data
-    if (supabase) {
-      const { data: profileData, error } = await supabase
-        .from('profiles')
-        .select('site_data, nickname, bio, avatar_url')
-        .eq('username', normalizedUsername)
-        .maybeSingle();
-      
-      if (!error && profileData) {
-        cloudData = profileData.site_data || {};
-        // Merge top-level profile fields into site_data.profile if they exist
-        cloudData.profile = {
-          ...(cloudData.profile || {}),
-          name: profileData.nickname || cloudData.profile?.name,
-          bio: profileData.bio || cloudData.profile?.bio,
-          avatar_url: profileData.avatar_url || cloudData.profile?.avatar_url
-        };
+    const res = await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`);
+    if (res.ok) {
+      const siteData = await res.json();
+      if (siteData && siteData.data) {
+        cloudData = typeof siteData.data === 'string' ? JSON.parse(siteData.data) : siteData.data;
       }
     }
   } catch (e) {
-    console.error('Error loading site settings from Supabase:', e);
+    console.error('Error loading from site API:', e);
+  }
+
+  // Fallback to Supabase
+  if (!cloudData) {
+    try {
+      if (supabase) {
+        const { data: profileData, error } = await supabase
+          .from('profiles')
+          .select('site_data, nickname, bio, avatar_url')
+          .eq('username', normalizedUsername)
+          .maybeSingle();
+
+        if (!error && profileData) {
+          cloudData = profileData.site_data || {};
+          cloudData.profile = {
+            ...(cloudData.profile || {}),
+            name: profileData.nickname || cloudData.profile?.name,
+            bio: profileData.bio || cloudData.profile?.bio,
+            avatar_url: profileData.avatar_url || cloudData.profile?.avatar_url
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Error loading site settings from Supabase:', e);
+    }
   }
 
   // Fallback to LocalStorage
@@ -202,7 +216,35 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
     localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(settings.socials));
   }
   
-  // 2. Update Supabase (Cloud Sync)
+  // 2. Sync to Netlify Database site API
+  try {
+    const existingRes = await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`);
+    let existingData: any = {};
+    if (existingRes.ok) {
+      const existing = await existingRes.json();
+      if (existing && existing.data) {
+        existingData = typeof existing.data === 'string' ? JSON.parse(existing.data) : existing.data;
+      }
+    }
+
+    const mergedData = {
+      ...existingData,
+      ...settings,
+      design: settings.design ? { ...(existingData.design || {}), ...settings.design } : existingData.design,
+      profile: settings.profile ? { ...(existingData.profile || {}), ...settings.profile } : existingData.profile,
+    };
+    delete mergedData.userName;
+
+    await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: mergedData }),
+    });
+  } catch (e) {
+    console.error('Error syncing to site API:', e);
+  }
+
+  // 3. Update Supabase (Cloud Sync)
   if (supabase) {
     try {
       const { data: { user } } = await supabase.auth.getUser();

@@ -26,7 +26,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ userName }) => {
   const fetchProposals = useCallback(async () => {
     if (!userName) return;
     try {
-      const res = await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`);
+      const res = await fetch(`/api/proposals/${encodeURIComponent(userName)}`);
       if (res.ok) {
         const data = await res.json();
         setProposals(data);
@@ -51,7 +51,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ userName }) => {
       setSelectedProposal({ ...selectedProposal, status });
     }
     try {
-      await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`, {
+      await fetch(`/api/proposals/${encodeURIComponent(userName)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status }),
@@ -66,7 +66,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ userName }) => {
       setProposals(prev => prev.filter(p => p.id !== id));
       if (selectedProposal?.id === id) setSelectedProposal(null);
       try {
-        await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}&id=${encodeURIComponent(id)}`, {
+        await fetch(`/api/proposals/${encodeURIComponent(userName)}?id=${encodeURIComponent(id)}`, {
           method: 'DELETE',
         });
       } catch (e) {

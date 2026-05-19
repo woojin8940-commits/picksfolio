@@ -47,8 +47,8 @@ const CollabCalendar: React.FC<CollabCalendarProps> = ({ userName }) => {
 
     try {
       const [collabsRes, proposalsRes] = await Promise.all([
-        fetch(`/.netlify/functions/api-collabs?username=${encodeURIComponent(userName)}`),
-        fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`),
+        fetch(`/api/collabs/${encodeURIComponent(userName)}`),
+        fetch(`/api/proposals/${encodeURIComponent(userName)}`),
       ]);
 
       if (collabsRes.ok) {
@@ -97,7 +97,7 @@ const CollabCalendar: React.FC<CollabCalendarProps> = ({ userName }) => {
     setNewCollab({ title: '', company_name: '', type: '광고', fee: 0, date: new Date().toISOString().split('T')[0], end_date: '', status: 'scheduled', memo: '' });
 
     try {
-      await fetch(`/.netlify/functions/api-collabs?username=${encodeURIComponent(userName)}`, {
+      await fetch(`/api/collabs/${encodeURIComponent(userName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(record),
