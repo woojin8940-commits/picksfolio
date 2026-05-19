@@ -45,7 +45,10 @@ export const getTopClickedItemsForDate = async (username: string, dateString: st
     const res = await fetch(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=top-items`);
     if (!res.ok) return [];
     const data = await res.json();
-    return data.topItems || [];
+    return (data.topItems || []).map((item: any) => ({
+      id: item.blockId || item.id,
+      count: item.clicks || item.count || 0
+    }));
   } catch (e) {
     console.error('Failed to get top items:', e);
     return [];
@@ -68,7 +71,10 @@ export const getTopClickedItemsForRange = async (username: string, startDate: st
     const res = await fetch(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=top-items`);
     if (!res.ok) return [];
     const data = await res.json();
-    return data.topItems || [];
+    return (data.topItems || []).map((item: any) => ({
+      id: item.blockId || item.id,
+      count: item.clicks || item.count || 0
+    }));
   } catch (e) {
     console.error('Failed to get top items for range:', e);
     return [];

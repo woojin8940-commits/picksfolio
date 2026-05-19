@@ -43,6 +43,27 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
         .maybeSingle();
 
       if (!error && profileData) {
+        const legacy = profileData.site_data;
+        const hasLegacy = legacy && typeof legacy === 'object' &&
+          ((Array.isArray(legacy.blocks) && legacy.blocks.length > 0) ||
+           (Array.isArray(legacy.portfolio) && legacy.portfolio.length > 0));
+
+        if (hasLegacy) {
+          return {
+            userName,
+            templateType: (legacy.design as any)?.templateType || TemplateType.SHOPPABLE_GRID,
+            blocks: legacy.blocks || [],
+            portfolio: legacy.portfolio,
+            design: legacy.design,
+            socials: legacy.socials,
+            profile: legacy.profile || {
+              name: profileData.nickname || profileData.full_name || '',
+              bio: profileData.bio || '',
+              avatar_url: profileData.avatar_url || ''
+            }
+          };
+        }
+
         return {
           userName,
           templateType: TemplateType.SHOPPABLE_GRID,
