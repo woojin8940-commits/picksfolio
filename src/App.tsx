@@ -1025,7 +1025,16 @@ const App: React.FC = () => {
     );
   }
 
-  if (view === 'operator-login') return <OperatorLogin onLoginSuccess={() => navigate('operator')} />;
+  if (view === 'operator-login') return <OperatorLogin onLoginSuccess={(info) => {
+    if (info?.username && info?.token) {
+      localStorage.setItem('picks_user_session', info.username);
+      localStorage.setItem('picks_admin_token', info.token);
+      setUserName(info.username);
+      setIsLoggedIn(true);
+      setProfileChecked(true);
+    }
+    navigate('operator');
+  }} />;
   if (view === 'operator') {
     if (!isLoggedIn) {
       setTimeout(() => navigate('operator-login'), 0);
@@ -1250,7 +1259,14 @@ const App: React.FC = () => {
                 navigate('admin');
               }
             }}
-            onAdminLoginSuccess={() => {
+            onAdminLoginSuccess={(info) => {
+              if (info?.username && info?.token) {
+                localStorage.setItem('picks_user_session', info.username);
+                localStorage.setItem('picks_admin_token', info.token);
+                setUserName(info.username);
+                setIsLoggedIn(true);
+                setProfileChecked(true);
+              }
               navigate('operator');
             }}
           />

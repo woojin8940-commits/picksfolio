@@ -4,13 +4,14 @@ import { supabase } from '../services/supabase';
 import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com'];
+const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
+const ADMIN_USERNAMES = ['picksfolio'];
 
 interface LoginPageProps {
   onNavigateHome: () => void;
   onNavigateSignup: () => void;
   onLoginSuccess: (id: string, hasSiteData: boolean, phone: string) => void;
-  onAdminLoginSuccess?: () => void;
+  onAdminLoginSuccess?: (info?: { username: string; token: string }) => void;
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup, onLoginSuccess, onAdminLoginSuccess }) => {
@@ -108,6 +109,19 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         const username = result.username || formData.id.trim().toLowerCase();
         const hasSiteData = !!result.has_site_data;
         const phone = result.phone || '';
+
+        if (ADMIN_USERNAMES.includes(username) && onAdminLoginSuccess) {
+          localStorage.setItem('picks_user_session', username);
+          localStorage.setItem('picks_admin_token', result.access_token || '');
+          if (supabase && result.access_token && result.refresh_token) {
+            supabase.auth.setSession({
+              access_token: result.access_token,
+              refresh_token: result.refresh_token,
+            }).catch(err => console.warn('[Login] setSession warning:', err));
+          }
+          onAdminLoginSuccess({ username, token: result.access_token || '' });
+          return;
+        }
 
         // Set localStorage BEFORE setSession so that the auth state listener
         // can find the username and won't redirect to setup-link

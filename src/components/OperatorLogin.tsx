@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { login, acceptInvite, handleAuthCallback, AuthError, MissingIdentityError } from '@netlify/identity';
 
-const ADMIN_EMAILS = ['woojin8940@inplace-ad.com'];
+const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
+const ADMIN_USERNAMES = ['picksfolio'];
 
 interface OperatorLoginProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (info?: { username: string; token: string }) => void;
 }
 
 const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -55,7 +56,6 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
       await acceptInvite(inviteToken!, password);
       setInviteToken(null);
       window.history.replaceState(null, '', window.location.pathname);
-      // acceptInvite establishes a session, proceed directly to dashboard
       onLoginSuccess();
       return;
     } catch (err) {
@@ -69,28 +69,69 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  const isEmailInput = (input: string) => input.includes('@');
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
+    const input = identifier.trim();
+
+    if (isEmailInput(input)) {
+      try {
+        const user = await login(input, password);
+        const roles: string[] = (user as any).app_metadata?.roles || [];
+        if (!roles.includes('admin') && !ADMIN_EMAILS.includes(input.toLowerCase())) {
+          setError('관리자 권한이 없는 계정입니다.');
+          setLoading(false);
+          return;
+        }
+        onLoginSuccess();
+      } catch (err) {
+        if (err instanceof MissingIdentityError) {
+          setError('Identity 서비스가 설정되지 않았습니다.');
+        } else if (err instanceof AuthError) {
+          setError(err.status === 401 ? '이메일 또는 비밀번호가 올바르지 않습니다.' : err.message);
+        } else {
+          setError('로그인 중 오류가 발생했습니다.');
+        }
+        setLoading(false);
+      }
+      return;
+    }
+
+    const usernameClean = input.toLowerCase();
     try {
-      const user = await login(email, password);
-      const roles: string[] = (user as any).app_metadata?.roles || [];
-      if (!roles.includes('admin') && !ADMIN_EMAILS.includes(email.trim().toLowerCase())) {
+      await fetch('/.netlify/functions/admin-seed', { method: 'POST' }).catch(() => {});
+
+      const response = await fetch('/.netlify/functions/auth-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: usernameClean, password }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setError(result.error || '아이디 또는 비밀번호가 올바르지 않습니다.');
+        setLoading(false);
+        return;
+      }
+
+      const resolvedEmail = `${usernameClean}@picks.me`;
+      if (!ADMIN_USERNAMES.includes(usernameClean) && !ADMIN_EMAILS.includes(resolvedEmail)) {
         setError('관리자 권한이 없는 계정입니다.');
         setLoading(false);
         return;
       }
-      onLoginSuccess();
-    } catch (err) {
-      if (err instanceof MissingIdentityError) {
-        setError('Identity 서비스가 설정되지 않았습니다.');
-      } else if (err instanceof AuthError) {
-        setError(err.status === 401 ? '이메일 또는 비밀번호가 올바르지 않습니다.' : err.message);
-      } else {
-        setError('로그인 중 오류가 발생했습니다.');
-      }
+
+      onLoginSuccess({
+        username: result.username || usernameClean,
+        token: result.access_token || '',
+      });
+    } catch {
+      setError('로그인 중 오류가 발생했습니다.');
       setLoading(false);
     }
   };
@@ -165,14 +206,17 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">이메일</label>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">아이디 또는 이메일</label>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
+                  type="text"
+                  value={identifier}
+                  onChange={e => setIdentifier(e.target.value)}
                   required
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
-                  placeholder="admin@picks.me"
+                  placeholder="아이디 또는 관리자 이메일"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <div>

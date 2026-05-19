@@ -9,7 +9,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
   // 1. User was invited (invite flow is admin-only, so all invited users are admins)
   // 2. User email is explicitly listed as admin
   // 3. User already has admin role
-  const adminEmails = ['woojin8940@inplace-ad.com']
+  const adminEmails = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me']
   const isInvitedUser = user.invited || false
   let roles: string[]
   if (isInvitedUser || existingRoles.includes('admin') || adminEmails.includes(user.email)) {
