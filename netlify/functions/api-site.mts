@@ -65,16 +65,36 @@ export default async (req: Request, context: Context) => {
           .maybeSingle();
 
         if (profile) {
-          const initialData: Record<string, any> = {
-            profile: {
-              name: profile.nickname || profile.full_name || username,
-              bio: profile.bio || "",
-              avatar_url: profile.avatar_url || "",
-            },
-            design: {},
-            socials: {},
-            blocks: [],
-          };
+          // Check if the profile has site_data from the legacy system (April 22 version)
+          const legacySiteData = profile.site_data;
+          const hasLegacyContent =
+            legacySiteData &&
+            typeof legacySiteData === "object" &&
+            (
+              (Array.isArray(legacySiteData.blocks) && legacySiteData.blocks.length > 0) ||
+              (Array.isArray(legacySiteData.portfolio) && legacySiteData.portfolio.length > 0) ||
+              (Array.isArray(legacySiteData.productFolders) && legacySiteData.productFolders.length > 0)
+            );
+
+          const initialData: Record<string, any> = hasLegacyContent
+            ? {
+                ...legacySiteData,
+                profile: legacySiteData.profile || {
+                  name: profile.nickname || profile.full_name || username,
+                  bio: profile.bio || "",
+                  avatar_url: profile.avatar_url || "",
+                },
+              }
+            : {
+                profile: {
+                  name: profile.nickname || profile.full_name || username,
+                  bio: profile.bio || "",
+                  avatar_url: profile.avatar_url || "",
+                },
+                design: {},
+                socials: {},
+                blocks: [],
+              };
 
           const profileCode = await createUniqueProfileCode(db);
 
@@ -83,6 +103,14 @@ export default async (req: Request, context: Context) => {
             VALUES (${username}, ${JSON.stringify(initialData)}, ${profileCode})
             ON CONFLICT (username) DO NOTHING
           `;
+
+          // Also sync to blob store so future reads are faster
+          try {
+            const blobStore = getStore({ name: "site-data", consistency: "strong" });
+            await blobStore.setJSON(username, initialData);
+          } catch (syncErr) {
+            console.warn("[api-site] Blob sync after Supabase fallback failed:", syncErr);
+          }
 
           return Response.json(initialData);
         }
