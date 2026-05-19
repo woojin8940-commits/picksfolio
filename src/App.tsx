@@ -787,6 +787,65 @@ const App: React.FC = () => {
     };
   }, [isLoggedIn]);
 
+  // Business account inactivity timer (separate from regular user timer)
+  useEffect(() => {
+    if (!isBusinessLoggedIn) return;
+
+    const INACTIVITY_LIMIT = 2 * 60 * 60 * 1000;
+    let loggedOut = false;
+
+    const updateActivity = () => {
+      localStorage.setItem('picks_business_last_activity', Date.now().toString());
+    };
+
+    const checkInactivity = () => {
+      if (loggedOut) return;
+      const lastActivity = localStorage.getItem('picks_business_last_activity');
+      if (!lastActivity) return;
+      const elapsed = Date.now() - parseInt(lastActivity, 10);
+      if (elapsed > INACTIVITY_LIMIT) {
+        loggedOut = true;
+        try {
+          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+        } catch {}
+        handleBusinessLogout();
+      }
+    };
+
+    const stored = localStorage.getItem('picks_business_last_activity');
+    if (stored) {
+      const elapsed = Date.now() - parseInt(stored, 10);
+      if (elapsed > INACTIVITY_LIMIT) {
+        loggedOut = true;
+        try {
+          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+        } catch {}
+        handleBusinessLogout();
+        return;
+      }
+    } else {
+      updateActivity();
+    }
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(event => window.addEventListener(event, updateActivity));
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkInactivity();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const interval = setInterval(checkInactivity, 30000);
+
+    return () => {
+      activityEvents.forEach(event => window.removeEventListener(event, updateActivity));
+      document.removeEventListener('visibilitychange', onVisibility);
+      clearInterval(interval);
+    };
+  }, [isBusinessLoggedIn]);
+
   // Clear login transition after a brief delay to allow state to settle
   useEffect(() => {
     if (loginTransitioning && (view === 'admin' || view === 'operator') && userName && isLoggedIn) {
@@ -922,17 +981,18 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     console.log('Logout process started...');
 
-    // 1. Immediate local cleanup — clear ALL user-specific picks_ keys
-    //    to prevent data from leaking to the next user session on this device
+    // 1. Immediate local cleanup — clear user-specific picks_ keys
+    //    but PRESERVE business session keys so business login survives
+    const businessKeys = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
     loginNavigationHandledRef.current = false;
     setProfileChecked(false);
     setIsLoggedIn(false);
     setUserName('');
-    const keysToRemove = Object.keys(localStorage).filter(key => key.startsWith('picks_'));
+    const keysToRemove = Object.keys(localStorage).filter(key => key.startsWith('picks_') && !businessKeys.includes(key));
     keysToRemove.forEach(key => localStorage.removeItem(key));
     sessionStorage.clear();
     clearAllLinkCache();
-    console.log('All picks_ localStorage keys and session cleared');
+    console.log('User picks_ localStorage keys cleared (business keys preserved)');
 
     // 2. Await Supabase signout so its session tokens (sb-*-auth-token) are fully
     //    cleared from storage BEFORE the hard redirect. If we don't wait, the stored
@@ -970,6 +1030,9 @@ const App: React.FC = () => {
   const handleBusinessLogout = () => {
     localStorage.removeItem('picks_business_session');
     localStorage.removeItem('picks_business_company');
+    localStorage.removeItem('picks_business_access_token');
+    localStorage.removeItem('picks_business_refresh_token');
+    localStorage.removeItem('picks_business_last_activity');
     setBusinessUsername('');
     setBusinessCompanyName('');
     setIsBusinessLoggedIn(false);
@@ -1243,8 +1306,9 @@ const App: React.FC = () => {
               // Clear any previous user's cached data before setting new user
               const prevUser = localStorage.getItem('picks_user_session');
               if (prevUser && prevUser !== id) {
+                const businessKeysToKeep = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
                 const staleKeys = Object.keys(localStorage).filter(key =>
-                  key.startsWith('picks_') && key !== 'picks_user_session'
+                  key.startsWith('picks_') && key !== 'picks_user_session' && !businessKeysToKeep.includes(key)
                 );
                 staleKeys.forEach(key => localStorage.removeItem(key));
                 console.log('[Auth] Cleared previous user localStorage data, switching from', prevUser, 'to', id);
