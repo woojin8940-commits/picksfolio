@@ -44,7 +44,7 @@ const App: React.FC = () => {
   const [targetUser, setTargetUser] = useState('');
   const [initialId, setInitialId] = useState('');
   const [userName, setUserName] = useState(() => localStorage.getItem('picks_user_session') || '');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('picks_user_session'));
   const [authUserId, setAuthUserId] = useState<string>('');
 
   // Business account state
@@ -623,7 +623,13 @@ const App: React.FC = () => {
             setProfileChecked(true);
           }
         } else {
-          // No session after OAuth callback — code exchange may have failed silently
+          // No session — clear stale local login state if present
+          if (localStorage.getItem('picks_user_session')) {
+            localStorage.removeItem('picks_user_session');
+            localStorage.removeItem('picks_last_activity');
+            setIsLoggedIn(false);
+            setUserName('');
+          }
           setOauthProcessing(false);
           setProfileChecked(true);
         }

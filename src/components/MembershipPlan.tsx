@@ -9,11 +9,9 @@ interface MembershipPlanProps {
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET)
 // and is used by /api/portone-complete to verify payments.
-// Each channel is bound to a single PG in the PortOne console, so CARD and
-// TOSSPAY are routed through distinct channel keys.
+// CARD channel is routed through KG Inicis V2 in the PortOne console.
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 const PORTONE_CARD_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
-const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 
 type MembershipTier = 'standard' | 'commerce';
@@ -81,7 +79,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [acctEditing, setAcctEditing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [payMethod, setPayMethod] = useState<'CARD' | 'TOSSPAY' | 'KAKAOPAY'>('CARD');
+  const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
 
   const [biz, setBiz] = useState({
@@ -206,11 +204,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       const tierAmount = TIER_PRICE[selectedTier];
       const issueId = `billing-${normalizedUserName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const channelKey =
-        payMethod === 'TOSSPAY'
-          ? PORTONE_TOSSPAY_CHANNEL_KEY
-          : payMethod === 'KAKAOPAY'
-            ? PORTONE_KAKAOPAY_CHANNEL_KEY
-            : PORTONE_CARD_CHANNEL_KEY;
+        payMethod === 'KAKAOPAY'
+          ? PORTONE_KAKAOPAY_CHANNEL_KEY
+          : PORTONE_CARD_CHANNEL_KEY;
 
       const billingKeyMethod = payMethod === 'CARD' ? 'CARD' : 'EASY_PAY';
 
@@ -223,9 +219,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         issueName: `픽스폴리오 ${tierLabel} 정기결제`,
         displayAmount: tierAmount,
         currency: 'KRW',
-        ...(payMethod === 'TOSSPAY' && {
-          easyPay: { easyPayProvider: 'TOSSPAY' },
-        }),
         ...(payMethod === 'KAKAOPAY' && {
           easyPay: { easyPayProvider: 'KAKAOPAY' },
         }),
@@ -613,7 +606,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
               <div>
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setPayMethod('CARD')}
@@ -628,18 +621,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPayMethod('TOSSPAY')}
-                    className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      payMethod === 'TOSSPAY'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="font-black text-blue-600">toss</span>
-                    <span>토스페이</span>
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setPayMethod('KAKAOPAY')}
                     className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                       payMethod === 'KAKAOPAY'
@@ -651,9 +632,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     <span>카카오페이</span>
                   </button>
                 </div>
-                {payMethod === 'TOSSPAY' && (
+                {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    토스 앱으로 간편하게 결제됩니다. 토스 앱이 설치되어 있어야 합니다.
+                    KG이니시스 결제창을 통해 신용·체크카드로 결제됩니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (
@@ -699,20 +680,16 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 onClick={confirmSubscribe}
                 disabled={saving}
                 className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 ${
-                  payMethod === 'TOSSPAY'
-                    ? 'bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600'
-                    : payMethod === 'KAKAOPAY'
-                      ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
-                      : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
+                  payMethod === 'KAKAOPAY'
+                    ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
+                    : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
                 }`}
               >
                 {saving
                   ? '처리 중...'
-                  : payMethod === 'TOSSPAY'
-                    ? `토스페이 정기결제 등록`
-                    : payMethod === 'KAKAOPAY'
-                      ? `카카오페이 정기결제 등록`
-                      : `카드 등록 및 ${TIER_PRICE[selectedTier].toLocaleString()}원 결제`}
+                  : payMethod === 'KAKAOPAY'
+                    ? `카카오페이 정기결제 등록`
+                    : `카드 등록 및 ${TIER_PRICE[selectedTier].toLocaleString()}원 결제`}
               </button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -12,8 +13,9 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const data = await store.get(key, { type: "json" });
-    if (!data) return Response.json(null, { status: 404 });
-    return Response.json(data);
+    const enriched = applyComplimentaryMembership(username, data as any);
+    if (!enriched) return Response.json(null, { status: 404 });
+    return Response.json(enriched);
   }
 
   if (req.method === "POST") {
