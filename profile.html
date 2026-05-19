@@ -250,8 +250,97 @@
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
+                renderBlocks(tab.dataset.tab);
             });
         });
+
+        let allBlocks = [];
+        let profileData = null;
+
+        async function loadProfile() {
+            const session = localStorage.getItem('picks_user_session');
+            if (!session) return;
+
+            try {
+                const res = await fetch('/api/site/' + encodeURIComponent(session.toLowerCase()));
+                if (res.ok) {
+                    const data = await res.json();
+                    profileData = data;
+                    allBlocks = data.blocks || [];
+
+                    if (data.profile) {
+                        const nameEl = document.querySelector('.user-name');
+                        const handleEl = document.querySelector('.user-handle');
+                        const bioEl = document.querySelector('.user-bio');
+                        const avatarEl = document.querySelector('.avatar');
+
+                        if (nameEl) nameEl.textContent = data.profile.name || session;
+                        if (handleEl) handleEl.textContent = '@' + session;
+                        if (bioEl) bioEl.textContent = data.profile.bio || '';
+
+                        if (data.profile.avatar_url && avatarEl) {
+                            avatarEl.innerHTML = '';
+                            const img = document.createElement('img');
+                            img.src = data.profile.avatar_url;
+                            img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%';
+                            img.referrerPolicy = 'no-referrer';
+                            avatarEl.appendChild(img);
+                        } else if (avatarEl) {
+                            avatarEl.textContent = (data.profile.name || session).charAt(0).toUpperCase();
+                        }
+                    }
+
+                    if (data.design && data.design.portfolioHeaderImage) {
+                        const cover = document.querySelector('.cover-section');
+                        if (cover) {
+                            cover.innerHTML = '';
+                            const img = document.createElement('img');
+                            img.src = data.design.portfolioHeaderImage;
+                            img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+                            img.referrerPolicy = 'no-referrer';
+                            cover.appendChild(img);
+                        }
+                    }
+
+                    renderBlocks('all');
+                }
+            } catch (err) {
+                console.error('Failed to load profile:', err);
+            }
+        }
+
+        function renderBlocks(tab) {
+            const container = document.getElementById('tab-content');
+            let filtered = allBlocks;
+            if (tab !== 'all') {
+                filtered = allBlocks.filter(b => {
+                    const cat = (b.category || b.type || '').toLowerCase();
+                    return cat === tab || cat.includes(tab);
+                });
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state">등록된 콘텐츠가 없습니다.</div>';
+                return;
+            }
+
+            let html = '<div class="grid-items">';
+            filtered.forEach(block => {
+                const img = block.coverMedia || block.image_url || block.thumbnail || '';
+                const title = block.title || '';
+                if (img) {
+                    html += '<div class="grid-item" title="' + title.replace(/"/g, '&quot;') + '">'
+                        + '<img src="' + img + '" style="width:100%;height:100%;object-fit:cover" referrerpolicy="no-referrer" loading="lazy">'
+                        + '</div>';
+                } else {
+                    html += '<div class="grid-item"><div class="grid-item-placeholder">' + (title.charAt(0) || '+') + '</div></div>';
+                }
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        loadProfile();
     </script>
 </body>
 </html>

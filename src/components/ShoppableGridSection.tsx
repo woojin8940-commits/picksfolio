@@ -4,9 +4,9 @@ import { Instagram, ShoppingBag, Layers } from 'lucide-react';
 
 const ShoppableGridSection: React.FC = () => {
   return (
-    <section className="py-32 bg-background overflow-hidden">
-      <div className="container mx-auto px-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+    <section className="py-16 md:py-32 bg-background overflow-hidden">
+      <div className="container mx-auto px-4 sm:px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 md:gap-20 items-center">
           {/* Left: Mobile Mockup */}
           <motion.div 
             initial={{ opacity: 0, x: -50 }}
@@ -14,7 +14,7 @@ const ShoppableGridSection: React.FC = () => {
             viewport={{ once: true }}
             className="relative"
           >
-            <div className="relative w-[300px] md:w-[380px] aspect-[9/19] bg-surface rounded-[3rem] border-[8px] border-surface-light shadow-2xl mx-auto overflow-hidden">
+            <div className="relative w-[240px] md:w-[300px] aspect-[9/19] bg-surface rounded-[3rem] border-[8px] border-surface-light shadow-2xl mx-auto overflow-hidden">
               {/* Insta Feed Style Content */}
               <div className="p-4 border-b border-white/5 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-purple-primary"></div>
@@ -55,26 +55,26 @@ const ShoppableGridSection: React.FC = () => {
             className="space-y-10"
           >
             <div>
-              <h2 className="text-3xl md:text-5xl font-black text-white mb-6 leading-tight font-display">
+              <h2 className="text-2xl md:text-7xl font-black text-white mb-4 md:mb-8 leading-tight font-display">
                 인스타 피드 동기화,<br />
                 <span className="text-purple-primary">쇼퍼블 그리드</span>
               </h2>
-              <p className="text-slate-400 text-lg leading-relaxed font-medium">
+              <p className="text-slate-400 text-sm md:text-2xl leading-relaxed font-medium">
                 인스타그램 피드를 실시간으로 불러오고,<br />
                 각 포스트에 상품 정보를 오버레이하여 나만의 샵을 완성하세요.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="p-6 bg-surface rounded-2xl border border-white/5">
-                <Instagram className="w-8 h-8 text-purple-primary mb-4" />
-                <h3 className="text-white font-bold mb-2">실시간 동기화</h3>
-                <p className="text-slate-500 text-sm">인스타그램 포스팅이 즉시 페이지에 반영됩니다.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
+              <div className="p-5 md:p-8 bg-surface rounded-2xl border border-white/5">
+                <Instagram className="w-8 h-8 md:w-10 md:h-10 text-purple-primary mb-4 md:mb-5" />
+                <h3 className="text-white font-bold text-base md:text-xl mb-2 md:mb-3">실시간 동기화</h3>
+                <p className="text-slate-500 text-sm md:text-lg">인스타그램 포스팅이 즉시 페이지에 반영됩니다.</p>
               </div>
-              <div className="p-6 bg-surface rounded-2xl border border-white/5">
-                <Layers className="w-8 h-8 text-purple-primary mb-4" />
-                <h3 className="text-white font-bold mb-2">상품 오버레이</h3>
-                <p className="text-slate-500 text-sm">이미지 위로 상품 가격과 링크를 감각적으로 노출합니다.</p>
+              <div className="p-5 md:p-8 bg-surface rounded-2xl border border-white/5">
+                <Layers className="w-8 h-8 md:w-10 md:h-10 text-purple-primary mb-4 md:mb-5" />
+                <h3 className="text-white font-bold text-base md:text-xl mb-2 md:mb-3">상품 오버레이</h3>
+                <p className="text-slate-500 text-sm md:text-lg">이미지 위로 상품 가격과 링크를 감각적으로 노출합니다.</p>
               </div>
             </div>
           </motion.div>
