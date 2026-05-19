@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
 interface CollabRecord {
   id: string;
@@ -35,25 +35,49 @@ const CollabCalendar: React.FC<CollabCalendarProps> = ({ userName }) => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'proposals' | 'collabs'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [newCollab, setNewCollab] = useState<Partial<CollabRecord>>({
     title: '', company_name: '', type: '광고', fee: 0, date: new Date().toISOString().split('T')[0],
     end_date: '', status: 'scheduled', memo: '',
   });
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!userName) return;
-    const savedCollabs = localStorage.getItem(`picks_collabs_${userName.toLowerCase()}`);
+    const normalizedUsername = userName.toLowerCase();
+
+    try {
+      const [collabsRes, proposalsRes] = await Promise.all([
+        fetch(`/.netlify/functions/api-collabs?username=${encodeURIComponent(userName)}`),
+        fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`),
+      ]);
+
+      if (collabsRes.ok) {
+        const data = await collabsRes.json();
+        setCollabs(data);
+        localStorage.setItem(`picks_collabs_${normalizedUsername}`, JSON.stringify(data));
+      }
+      if (proposalsRes.ok) {
+        const data = await proposalsRes.json();
+        setProposals(data);
+        localStorage.setItem(`picks_proposals_${normalizedUsername}`, JSON.stringify(data));
+      }
+      return;
+    } catch (e) {
+      console.error('Error fetching calendar data:', e);
+    }
+
+    const savedCollabs = localStorage.getItem(`picks_collabs_${normalizedUsername}`);
     if (savedCollabs) setCollabs(JSON.parse(savedCollabs));
-    const savedProposals = localStorage.getItem(`picks_proposals_${userName.toLowerCase()}`);
+    const savedProposals = localStorage.getItem(`picks_proposals_${normalizedUsername}`);
     if (savedProposals) setProposals(JSON.parse(savedProposals));
   }, [userName]);
 
-  const saveCollabs = (records: CollabRecord[]) => {
-    setCollabs(records);
-    localStorage.setItem(`picks_collabs_${userName.toLowerCase()}`, JSON.stringify(records));
-  };
+  useEffect(() => {
+    setIsLoading(true);
+    fetchData().finally(() => setIsLoading(false));
+  }, [fetchData]);
 
-  const handleAddCollab = (e: React.FormEvent) => {
+  const handleAddCollab = async (e: React.FormEvent) => {
     e.preventDefault();
     const record: CollabRecord = {
       id: Date.now().toString(),
@@ -67,9 +91,20 @@ const CollabCalendar: React.FC<CollabCalendarProps> = ({ userName }) => {
       status: (newCollab.status as CollabRecord['status']) || 'scheduled',
       memo: newCollab.memo,
     };
-    saveCollabs([...collabs, record]);
+
+    setCollabs(prev => [...prev, record]);
     setShowAddModal(false);
     setNewCollab({ title: '', company_name: '', type: '광고', fee: 0, date: new Date().toISOString().split('T')[0], end_date: '', status: 'scheduled', memo: '' });
+
+    try {
+      await fetch(`/.netlify/functions/api-collabs?username=${encodeURIComponent(userName)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+      });
+    } catch (e) {
+      console.error('Error saving collab:', e);
+    }
   };
 
   const year = currentMonth.getFullYear();
@@ -164,6 +199,21 @@ const CollabCalendar: React.FC<CollabCalendarProps> = ({ userName }) => {
 
   const selectedDateProposals = selectedDate ? (proposalsByDate[selectedDate] || []) : [];
   const selectedDateCollabs = selectedDate ? (collabsByDate[selectedDate] || []) : [];
+
+  if (isLoading) {
+    return (
+      <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+        <div className="mb-8 md:mb-12">
+          <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 캘린더</h2>
+          <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">협업 일정과 기록을 한눈에 관리합니다</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
+          <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-slate-400 font-bold text-sm">불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">

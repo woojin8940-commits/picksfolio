@@ -1,14 +1,15 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Split, Layout } from 'lucide-react';
 import { supabase } from '../services/supabase';
 
 interface LiveStreamingProps {
   userName: string;
+  broadcastTitle?: string;
+  broadcastCategory?: string;
   onClose: () => void;
 }
 
-const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
+const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, broadcastTitle, broadcastCategory, onClose }) => {
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -87,6 +88,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
         currentProduct: null
       }));
 
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: broadcastTitle || '', category: broadcastCategory || '' }),
+        });
+      } catch (e) {
+        console.error('Error starting live session:', e);
+      }
+
       if (supabase) {
         await supabase
           .from('live_sessions')
@@ -107,6 +118,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
         currentProduct: null
       }));
 
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+      } catch (e) {
+        console.error('Error stopping live session:', e);
+      }
+
       if (supabase) {
         await supabase
           .from('live_sessions')
@@ -120,6 +141,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
     if (!newMessage.trim()) return;
     setMessages([...messages, { id: Date.now().toString(), user: '나(스트리머)', text: newMessage }]);
     setNewMessage('');
+
+    if (isLive) {
+      try {
+        await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_count: 1 }),
+        });
+      } catch (e) { /* ignore */ }
+    }
   };
 
   return (
@@ -197,6 +228,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose }) => {
                   </span>
                 )}
               </div>
+              {broadcastTitle && (
+                <div className="bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10">
+                  <span className="text-white text-xs font-bold">{broadcastTitle}</span>
+                </div>
+              )}
             </div>
             <div className="flex gap-3">
               <button

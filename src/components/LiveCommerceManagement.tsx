@@ -1,14 +1,95 @@
-
-import React, { useState } from 'react';
-import { Users, MessageSquare, DollarSign, Settings, Calendar, Info, Camera } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Users, MessageSquare, DollarSign, Settings, Info, Camera, Clock } from 'lucide-react';
 import LiveStreaming from './LiveStreaming';
 
 interface LiveCommerceManagementProps {
   userName: string;
 }
 
+interface BroadcastHistory {
+  id: string;
+  title: string;
+  category: string;
+  viewer_count: number;
+  total_sales: number;
+  chat_count: number;
+  duration_seconds: number;
+  started_at: string;
+  ended_at: string;
+}
+
+interface LiveSession {
+  title: string;
+  category: string;
+  total_viewers: number;
+  total_sales: number;
+  chat_count: number;
+}
+
 const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userName }) => {
   const [showLiveStream, setShowLiveStream] = useState(false);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastCategory, setBroadcastCategory] = useState('패션/스타일');
+  const [history, setHistory] = useState<BroadcastHistory[]>([]);
+  const [session, setSession] = useState<LiveSession | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          setSession(data.session);
+          setBroadcastTitle(data.session.title || '');
+          setBroadcastCategory(data.session.category || '패션/스타일');
+        }
+        setHistory(data.history || []);
+      }
+    } catch (e) {
+      console.error('Error fetching live session data:', e);
+    }
+  }, [userName]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleSaveSettings = async () => {
+    setIsSaving(true);
+    try {
+      await fetch(`/.netlify/functions/api-live-sessions?username=${encodeURIComponent(userName)}&action=save-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: broadcastTitle, category: broadcastCategory }),
+      });
+    } catch (e) {
+      console.error('Error saving broadcast settings:', e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCloseLiveStream = () => {
+    setShowLiveStream(false);
+    fetchData();
+  };
+
+  const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}시간 ${m}분`;
+    return `${m}분`;
+  };
+
+  const formatDate = (d: string) => {
+    const date = new Date(d);
+    return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const totalViewers = session?.total_viewers || history.reduce((sum, h) => sum + h.viewer_count, 0);
+  const totalChats = session?.chat_count || history.reduce((sum, h) => sum + h.chat_count, 0);
+  const totalSales = session?.total_sales || history.reduce((sum, h) => sum + h.total_sales, 0);
 
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
@@ -27,7 +108,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 mb-6 md:mb-10">
-        {/* Camera Preview Card - Now Static until started */}
+        {/* Camera Preview Card */}
         <div className="lg:col-span-2 bg-slate-900 rounded-2xl md:rounded-[2.5rem] overflow-hidden relative group aspect-video lg:aspect-auto flex items-center justify-center">
           <div className="absolute inset-0">
             <img
@@ -60,21 +141,21 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               <Users size={24} />
             </div>
             <p className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">누적 시청자</p>
-            <h3 className="text-3xl font-black text-slate-900">0명</h3>
+            <h3 className="text-3xl font-black text-slate-900">{totalViewers.toLocaleString()}명</h3>
           </div>
           <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
             <div className="w-12 h-12 bg-purple-50 rounded-2xl flex items-center justify-center text-purple-600 mb-4">
               <MessageSquare size={24} />
             </div>
             <p className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">평균 채팅 수</p>
-            <h3 className="text-3xl font-black text-slate-900">0개</h3>
+            <h3 className="text-3xl font-black text-slate-900">{totalChats.toLocaleString()}개</h3>
           </div>
           <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
             <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center text-green-600 mb-4">
               <DollarSign size={24} />
             </div>
             <p className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">총 판매액</p>
-            <h3 className="text-3xl font-black text-slate-900">₩0</h3>
+            <h3 className="text-3xl font-black text-slate-900">{totalSales > 0 ? `₩${totalSales.toLocaleString()}` : '₩0'}</h3>
           </div>
         </div>
       </div>
@@ -85,6 +166,13 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             <h4 className="text-base md:text-xl font-black flex items-center gap-2 md:gap-3">
               <Settings className="w-4 h-4 md:w-5 md:h-5 text-slate-400" /> 방송 설정
             </h4>
+            <button
+              onClick={handleSaveSettings}
+              disabled={isSaving}
+              className="text-xs font-black text-purple-600 hover:text-purple-700 disabled:opacity-50"
+            >
+              {isSaving ? '저장 중...' : '설정 저장'}
+            </button>
           </div>
 
           <div className="space-y-4 md:space-y-6">
@@ -93,12 +181,18 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               <input
                 type="text"
                 placeholder="제목을 입력하세요"
+                value={broadcastTitle}
+                onChange={e => setBroadcastTitle(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-purple-500/50 transition-all"
               />
             </div>
             <div>
               <label className="block text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5 md:mb-2">방송 카테고리</label>
-              <select className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-purple-500/50 transition-all appearance-none">
+              <select
+                value={broadcastCategory}
+                onChange={e => setBroadcastCategory(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-purple-500/50 transition-all appearance-none"
+              >
                 <option>패션/스타일</option>
                 <option>뷰티/메이크업</option>
                 <option>라이프스타일</option>
@@ -111,17 +205,32 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
         <section className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-4 md:mb-8">
             <h4 className="text-base md:text-xl font-black flex items-center gap-2 md:gap-3">
-              <Calendar className="w-4 h-4 md:w-5 md:h-5 text-slate-400" /> 방송 예약
+              <Clock className="w-4 h-4 md:w-5 md:h-5 text-slate-400" /> 방송 기록
             </h4>
           </div>
 
-          <div className="flex flex-col items-center justify-center py-6 md:py-10 text-center">
-            <div className="w-12 h-12 md:w-20 md:h-20 bg-slate-50 rounded-full flex items-center justify-center text-xl md:text-3xl mb-3 md:mb-4">
-              📅
+          {history.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 md:py-10 text-center">
+              <div className="w-12 h-12 md:w-20 md:h-20 bg-slate-50 rounded-full flex items-center justify-center text-xl md:text-3xl mb-3 md:mb-4">
+                📺
+              </div>
+              <p className="text-slate-500 font-bold text-xs md:text-base">아직 방송 기록이 없습니다.</p>
             </div>
-            <p className="text-slate-500 font-bold text-xs md:text-base mb-4 md:mb-6">예약된 방송이 없습니다.</p>
-            <button className="text-purple-600 font-black text-[10px] md:text-sm hover:underline">새로운 방송 예약하기</button>
-          </div>
+          ) : (
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              {history.map(h => (
+                <div key={h.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                  <div className="w-2 h-10 rounded-full bg-purple-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-slate-900 text-sm truncate">{h.title || '제목 없음'}</p>
+                    <p className="text-xs font-bold text-slate-400">
+                      {formatDate(h.started_at)} · {formatDuration(h.duration_seconds)} · 시청자 {h.viewer_count}명
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
 
@@ -141,7 +250,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
       {showLiveStream && (
         <LiveStreaming
           userName={userName}
-          onClose={() => setShowLiveStream(false)}
+          broadcastTitle={broadcastTitle}
+          broadcastCategory={broadcastCategory}
+          onClose={handleCloseLiveStream}
         />
       )}
     </div>

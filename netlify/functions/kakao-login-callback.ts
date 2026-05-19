@@ -39,9 +39,7 @@ const handler: Handler = async (event) => {
     };
   }
 
-  const redirectUri = process.env.KAKAO_REDIRECT_URI || `${siteUrl}/api/kakao/callback`;
-  console.log("[kakao-login-callback] Using redirect_uri:", redirectUri);
-  console.log("[kakao-login-callback] process.env.URL:", process.env.URL);
+  const redirectUri = `${siteUrl}/api/kakao/callback`;
 
   try {
     // 1. Exchange authorization code for Kakao tokens
