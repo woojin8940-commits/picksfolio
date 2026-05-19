@@ -38,7 +38,7 @@ export default async (req: Request) => {
     if (error) {
       return Response.json({
         success: false,
-        error: "아이디 또는 비밀번호가 올바르지 않습니다.",
+        error: "존재하지 않는 정보입니다. 아이디 또는 비밀번호를 확인해 주세요.",
       });
     }
 

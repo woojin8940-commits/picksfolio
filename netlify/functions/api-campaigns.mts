@@ -82,7 +82,7 @@ export default async (req: Request) => {
 
       await db.sql`
         INSERT INTO campaigns (id, business_username, type, title, description, brand_name, thumbnail_url, category, reward_type, reward_amount, requirements, max_applicants, start_date, end_date, status)
-        VALUES (${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""}, ${body.brand_name || ""}, ${body.thumbnail_url || ""}, ${body.category || ""}, ${body.reward_type || ""}, ${body.reward_amount || ""}, ${body.requirements || ""}, ${body.max_applicants || 0}, ${body.start_date || null}, ${body.end_date || null}, ${body.status || "active"})
+        VALUES (${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""}, ${body.brand_name || ""}, ${body.thumbnail_url || ""}, ${body.category || ""}, ${body.reward_type || ""}, ${body.reward_amount || ""}, ${body.requirements || ""}, ${body.max_applicants || 0}, ${body.start_date || null}, ${body.end_date || null}, 'pending_approval')
       `;
 
       return Response.json({ success: true, id });
@@ -105,6 +105,12 @@ export default async (req: Request) => {
       }
 
       const c = existing[0] as Record<string, any>;
+
+      let newStatus = updates.status ?? c.status;
+      if (c.status === 'pending_approval' || c.status === 'admin_rejected') {
+        newStatus = c.status;
+      }
+
       await db.sql`
         UPDATE campaigns
         SET title = ${updates.title ?? c.title},
@@ -119,7 +125,7 @@ export default async (req: Request) => {
             max_applicants = ${updates.max_applicants ?? c.max_applicants},
             start_date = ${updates.start_date ?? c.start_date},
             end_date = ${updates.end_date ?? c.end_date},
-            status = ${updates.status ?? c.status},
+            status = ${newStatus},
             updated_at = NOW()
         WHERE id = ${id}
       `;

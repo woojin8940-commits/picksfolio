@@ -7,8 +7,9 @@ import AdminSettlementConsole from './admin/AdminSettlementConsole';
 import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
+import AdminCampaignApproval from './admin/AdminCampaignApproval';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -373,6 +374,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         <div className="flex gap-2 mb-6 flex-wrap">
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
+            { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
             { key: 'live' as OperatorTab, label: '라이브 운영' },
@@ -686,6 +688,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           adminToken
             ? <AdminWorkflowConsole token={adminToken} proposals={proposals} />
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 워크플로 분석이 표시됩니다." />
+        )}
+
+        {/* Campaign Approval Tab */}
+        {activeTab === 'campaigns' && (
+          adminToken
+            ? <AdminCampaignApproval token={adminToken} />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
         )}
 
         {/* Influencer Tab */}

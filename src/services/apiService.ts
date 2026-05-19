@@ -1048,4 +1048,40 @@ export const apiService = {
       return null;
     }
   },
+
+  // ───────────────────── Admin: Campaign approval ─────────────────────
+  async getAdminCampaigns(token: string, status?: string): Promise<{ campaigns: any[]; pendingCount: number }> {
+    try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const qs = status ? `?status=${status}` : '';
+      const res = await fetch(`/api/admin/campaigns${qs}`, { credentials: 'same-origin', headers });
+      if (!res.ok) return { campaigns: [], pendingCount: 0 };
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to get admin campaigns:', e);
+      return { campaigns: [], pendingCount: 0 };
+    }
+  },
+
+  async adminCampaignAction(token: string, id: string, action: 'approve' | 'reject', reason?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/campaigns', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({ id, action, reason }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        return { success: false, error: json?.error };
+      }
+      return { success: true };
+    } catch (e) {
+      console.error('[API] Failed to perform admin campaign action:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
 };
