@@ -1,11 +1,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { getStatsForRange, getTopClickedItemsForRange } from '../services/analyticsService';
-import { getSiteSettings, getLinkGridItems } from '../services/settingsService';
+import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
 import { Block, DesignSettings, TemplateType } from '../types';
-import { supabase } from '../services/supabase';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import AITrendAnalysis from './AITrendAnalysis';
@@ -51,7 +50,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
-  const [links, setLinks] = useState<any[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -164,57 +162,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.log('Fetching stats for:', userName, startDate, endDate);
       const data = await getStatsForRange(userName, startDate, endDate);
       setStats(data || { views: 0, clicks: 0, ctr: 0 });
-      
-      // Fetch real blocks to show in "Top Items"
+
+      // Fetch blocks from site settings (API -> Supabase -> localStorage cascade)
       const settings = await getSiteSettings(userName);
       if (settings && settings.blocks && settings.blocks.length > 0) {
-        console.log('Fetched blocks:', settings.blocks.length);
         setBlocks(Array.isArray(settings.blocks) ? settings.blocks : []);
       } else {
-        // Fallback: try link_grid_items
-        const gridItems = await getLinkGridItems(userName);
-        if (gridItems && gridItems.length > 0) {
-          console.log('Fetched link_grid_items as fallback:', gridItems.length);
-          setBlocks(gridItems);
-        } else {
-          setBlocks([]);
-        }
-      }
-
-      // Fetch link_grid_items to map IDs to titles (for top items display)
-      if (supabase) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('username', userName.toLowerCase())
-          .maybeSingle();
-
-        if (profileData) {
-          try {
-            const { data: linksData, error: linksError } = await supabase
-              .from('link_grid_items')
-              .select('id, title, price, image_url, link, display_order')
-              .eq('user_id', profileData.id)
-              .order('display_order', { ascending: true });
-            if (!linksError) {
-              setLinks((linksData || []).map((item: any) => ({
-                id: item.id,
-                title: item.title,
-                image: item.image_url,
-                url: item.link,
-              })));
-            } else {
-              setLinks([]);
-            }
-          } catch {
-            setLinks([]);
-          }
-        }
+        setBlocks([]);
       }
 
       // Fetch real top clicked items for the selected range
       const topItems = await getTopClickedItemsForRange(userName, startDate, endDate);
-      console.log('Fetched top items data:', topItems);
       setTopItemsData(Array.isArray(topItems) ? topItems : []);
     } catch (e) {
       console.error('Error fetching stats:', e);
@@ -231,11 +189,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   }, [userName, startDate, endDate]);
 
-  // Map real click counts to blocks or links for the TOP 3 section
+  // Map real click counts to blocks for the TOP 3 section
   const topItems = (Array.isArray(topItemsData) ? topItemsData.map((item, idx) => {
     if (!item || !item.id) return null;
-    
-    // Check blocks first
+
     const block = Array.isArray(blocks) ? blocks.find(b => b && String(b.id) === String(item.id)) : null;
     if (block) {
       return {
@@ -244,18 +201,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         clicks: item.count || 0,
         image: block.coverMedia,
         products: block.products || []
-      };
-    }
-
-    // Check links if not found in blocks
-    const link = Array.isArray(links) ? links.find(l => l && String(l.id) === String(item.id)) : null;
-    if (link) {
-      return {
-        rank: idx + 1,
-        name: link.title || 'Link',
-        clicks: item.count || 0,
-        image: link.image,
-        products: []
       };
     }
 
@@ -273,16 +218,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             image: block.coverMedia,
             products: block.products || []
           }))
-        : (Array.isArray(links) && links.length > 0
-            ? links.filter(Boolean).slice(0, 3).map((link, idx) => ({
-                rank: idx + 1,
-                name: link.title || 'Link',
-                clicks: 0,
-                image: link.image,
-                products: []
-              }))
-            : []
-          )
+        : []
       );
 
   return (
