@@ -146,7 +146,6 @@ const App: React.FC = () => {
       let session = null;
 
       const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
       const errorParam = params.get('error');
       const errorDescription = params.get('error_description');
 
@@ -157,17 +156,38 @@ const App: React.FC = () => {
         return;
       }
 
-      if (code) {
-        try {
-          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (!exchangeError && data.session) {
+      const hashStr = window.location.hash.substring(1);
+      if (hashStr) {
+        const hashParams = new URLSearchParams(hashStr);
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!error && data.session) {
             session = data.session;
-            window.history.replaceState({}, '', '/auth-callback');
-          } else if (exchangeError) {
-            console.warn('[Auth] PKCE exchange error:', exchangeError.message);
+          } else if (error) {
+            console.warn('[Auth] setSession from hash failed:', error.message);
           }
-        } catch (e) {
-          console.warn('[Auth] PKCE exchange failed, trying getSession:', e);
+          window.history.replaceState({}, '', '/auth-callback');
+        }
+      }
+
+      if (!session) {
+        const code = params.get('code');
+        if (code) {
+          try {
+            const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (!exchangeError && data.session) {
+              session = data.session;
+              window.history.replaceState({}, '', '/auth-callback');
+            }
+          } catch (e) {
+            console.warn('[Auth] PKCE exchange failed:', e);
+          }
         }
       }
 
@@ -183,12 +203,6 @@ const App: React.FC = () => {
       }
 
       if (!session) {
-        await new Promise(resolve => setTimeout(resolve, 2500));
-        const { data: { session: finalRetry } } = await supabase.auth.getSession();
-        session = finalRetry;
-      }
-
-      if (!session) {
         console.warn('[Auth] No session found in callback after retries');
         alert('로그인 세션을 확인할 수 없습니다. 다시 시도해 주세요.');
         navigate('login');
@@ -200,13 +214,14 @@ const App: React.FC = () => {
 
       if (provider === 'kakao') {
         const kakaoMeta = user.user_metadata || {};
-        const kakaoId = user.id;
+        const kakaoId = kakaoMeta.kakao_id || '';
         const kakaoName = kakaoMeta.full_name || kakaoMeta.name || '';
         const kakaoPhone = kakaoMeta.phone || '';
         const kakaoEmail = user.email || '';
 
         localStorage.setItem('picks_kakao_user', JSON.stringify({
-          id: kakaoId,
+          id: user.id,
+          kakao_id: kakaoId,
           name: kakaoName,
           phone: kakaoPhone,
           email: kakaoEmail,
@@ -217,27 +232,24 @@ const App: React.FC = () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              user_id: user.id,
               kakao_id: kakaoId,
               kakao_name: kakaoName,
               kakao_phone: kakaoPhone,
               email: kakaoEmail,
-              access_token: session.access_token,
-              refresh_token: session.refresh_token,
+              user_metadata: kakaoMeta,
               provider_token: session.provider_token,
             }),
           });
 
           if (res.ok) {
             const profileData = await res.json();
-            const userId = profileData.profile?.username || profileData.username || kakaoName || kakaoEmail?.split('@')[0] || 'user';
+            const userId = profileData.profile?.username || kakaoName || kakaoEmail?.split('@')[0] || 'user';
             setUserName(userId);
             setIsLoggedIn(true);
             localStorage.setItem('picks_user_session', userId);
             navigate('admin');
             return;
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            console.warn('[Auth] kakao-profile-setup returned error:', res.status, errData);
           }
         } catch (err) {
           console.error('[Auth] kakao-profile-setup request failed:', err);
