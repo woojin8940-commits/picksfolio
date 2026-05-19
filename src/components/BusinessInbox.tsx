@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface Proposal {
   id: string;
@@ -21,57 +21,29 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ userName }) => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
-  const [isLoading, setIsLoading] = useState(true);
 
-  const fetchProposals = useCallback(async () => {
+  useEffect(() => {
     if (!userName) return;
-    try {
-      const res = await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProposals(data);
-        localStorage.setItem(`picks_proposals_${userName.toLowerCase()}`, JSON.stringify(data));
-        return;
-      }
-    } catch (e) {
-      console.error('Error fetching proposals:', e);
-    }
     const saved = localStorage.getItem(`picks_proposals_${userName.toLowerCase()}`);
     if (saved) setProposals(JSON.parse(saved));
   }, [userName]);
 
-  useEffect(() => {
-    setIsLoading(true);
-    fetchProposals().finally(() => setIsLoading(false));
-  }, [fetchProposals]);
+  const saveProposals = (records: Proposal[]) => {
+    setProposals(records);
+    localStorage.setItem(`picks_proposals_${userName.toLowerCase()}`, JSON.stringify(records));
+  };
 
-  const updateStatus = async (id: string, status: 'accepted' | 'rejected') => {
-    setProposals(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+  const updateStatus = (id: string, status: 'accepted' | 'rejected') => {
+    saveProposals(proposals.map(p => p.id === id ? { ...p, status } : p));
     if (selectedProposal?.id === id) {
       setSelectedProposal({ ...selectedProposal, status });
     }
-    try {
-      await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status }),
-      });
-    } catch (e) {
-      console.error('Error updating proposal status:', e);
-    }
   };
 
-  const deleteProposal = async (id: string) => {
+  const deleteProposal = (id: string) => {
     if (confirm('이 제안을 삭제하시겠습니까?')) {
-      setProposals(prev => prev.filter(p => p.id !== id));
+      saveProposals(proposals.filter(p => p.id !== id));
       if (selectedProposal?.id === id) setSelectedProposal(null);
-      try {
-        await fetch(`/.netlify/functions/api-proposals?username=${encodeURIComponent(userName)}&id=${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-        });
-      } catch (e) {
-        console.error('Error deleting proposal:', e);
-      }
     }
   };
 
@@ -130,12 +102,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ userName }) => {
 
       {/* Proposals List */}
       <div className="space-y-3">
-        {isLoading ? (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
-            <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-slate-400 font-bold text-sm">불러오는 중...</p>
-          </div>
-        ) : filteredProposals.length === 0 ? (
+        {filteredProposals.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
             <p className="text-slate-400 font-bold text-sm">
               {filter === 'all' ? '아직 받은 제안이 없습니다.' : `${filter === 'pending' ? '검토중인' : filter === 'accepted' ? '수락한' : '거절한'} 제안이 없습니다.`}
