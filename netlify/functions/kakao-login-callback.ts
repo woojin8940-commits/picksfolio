@@ -114,6 +114,7 @@ const handler: Handler = async (event) => {
         userId = linkData.user.id;
         await supabase.auth.admin.updateUserById(userId, {
           password: pwd,
+          email_confirm: true,
           user_metadata: {
             ...(linkData.user.user_metadata || {}),
             full_name: name || linkData.user.user_metadata?.full_name,
