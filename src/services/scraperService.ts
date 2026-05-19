@@ -20,7 +20,6 @@ const PROXIES = [
   (url: string) => `https://cors.bridged.cc/${url}`,
   (url: string) => `https://cors-anywhere.herokuapp.com/${url}`,
   (url: string) => `https://proxy.cors.sh/${url}`,
-  (url: string) => `https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all`, // Not a direct proxy but for context
 ];
 
 const USER_AGENTS = [
@@ -110,7 +109,7 @@ async function fetchHtml(url: string): Promise<string> {
 /**
  * Extracts metadata from HTML string.
  */
-function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
+function parseMetadata(html: string, sourceUrl: string): Partial<ScrapedProduct> {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
 
@@ -153,7 +152,7 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
 
   // 3순위: 커스텀 셀렉터 (Platform-specific)
   if (!name || !price || !image) {
-    if (url.includes('coupang.com')) {
+    if (sourceUrl.includes('coupang.com')) {
       if (!name) name = doc.querySelector('.prod-buy-header__title')?.textContent || 
                          doc.querySelector('h2.prod-buy-header__title')?.textContent || '';
       if (!price) price = doc.querySelector('.total-price .value')?.textContent || 
@@ -162,7 +161,7 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
                           doc.querySelector('.discount-price .price-value')?.textContent || '';
       if (!image) image = doc.querySelector('.prod-image__detail')?.getAttribute('src') || 
                           doc.querySelector('.prod-main-image img')?.getAttribute('src') || '';
-    } else if (url.includes('oliveyoung.co.kr')) {
+    } else if (sourceUrl.includes('oliveyoung.co.kr')) {
       if (!name) name = doc.querySelector('.prd_name')?.textContent || 
                          doc.querySelector('#GoodsName')?.textContent || '';
       if (!price) price = doc.querySelector('span.price-2')?.textContent ||
@@ -172,7 +171,7 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
                           doc.querySelector('.price .val')?.textContent || '';
       if (!image) image = doc.querySelector('#mainImg')?.getAttribute('src') || 
                           doc.querySelector('.prd_detail_box .thumb img')?.getAttribute('src') || '';
-    } else if (url.includes('musinsa.com')) {
+    } else if (sourceUrl.includes('musinsa.com')) {
       if (!name) name = doc.querySelector('.product-detail__item-name')?.textContent || 
                          doc.querySelector('.product_title')?.textContent || '';
       if (!price) price = doc.querySelector('.product-detail__price-value')?.textContent || 
@@ -183,7 +182,7 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
   }
 
   // Extra check for Musinsa (New Layout / Script Data)
-  if (url.includes('musinsa.com') && (!name || !price || !image)) {
+  if (sourceUrl.includes('musinsa.com') && (!name || !price || !image)) {
     try {
       const scripts = Array.from(doc.querySelectorAll('script'));
       
@@ -219,8 +218,8 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
 
   // 2. Fallback to Smart Parsing: Open Graph
   name = name.trim() || getMeta('og:title') || doc.title;
-  image = image.trim() || getMeta('og:image');
-  price = price.trim() || getMeta('product:price:amount') || getMeta('og:price');
+  image = image.trim() || getMeta('og:image') || '';
+  price = price.trim() || getMeta('product:price:amount') || getMeta('og:price') || '';
 
   // 3. Clean Name (Remove site names often appended to titles)
   if (name) {
@@ -277,7 +276,7 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
     finalImage = 'https:' + finalImage;
   } else if (finalImage && !finalImage.startsWith('http')) {
     try {
-      const baseUrl = new URL(url);
+      const baseUrl = new URL(sourceUrl);
       finalImage = new URL(finalImage, baseUrl.origin).toString();
     } catch (e) {
       console.error("Failed to resolve image URL", e);
@@ -285,8 +284,8 @@ function parseMetadata(html: string, url: string): Partial<ScrapedProduct> {
   }
 
   return {
-    name: name?.trim(),
-    price: price?.replace(/[^0-9]/g, ''),
+    name: (name || '').trim(),
+    price: (price || '').replace(/[^0-9]/g, ''),
     image: finalImage,
   };
 }

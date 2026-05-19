@@ -1,14 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
-
-function generateProfileCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
+import { createUniqueProfileCode, generateProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -28,11 +20,44 @@ export default async (req: Request) => {
       `;
 
       if (result.length === 0) {
+        const recovered = await recoverSiteDataFromBlob(db, username);
+        if (recovered) {
+          const restored = await db.sql`
+            SELECT username, data, profile_code, is_public, created_at, updated_at
+            FROM site_data
+            WHERE username = ${username}
+          `;
+          if (restored.length > 0) {
+            const row = restored[0];
+            const d = row.data || {};
+            return Response.json({
+              profile: {
+                username: row.username,
+                display_name: d.profile?.name || d.profileName || row.username,
+                bio: d.profile?.bio || "",
+                avatar_url: d.profile?.avatar_url || "",
+                cover_url: d.design?.portfolioHeaderImage || "",
+                category: d.category || "",
+                tags: Array.isArray(d.tags) ? d.tags.join(",") : (d.tags || ""),
+                profile_code: row.profile_code,
+                is_public: row.is_public,
+                page_url: `/${row.username}`,
+                block_count: Array.isArray(d.blocks) ? d.blocks.length : 0,
+                sns_links: d.socials || {},
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+              },
+            });
+          }
+        }
         return Response.json({ profile: null });
       }
 
       const row = result[0];
-      const d = row.data || {};
+      let d = row.data || {};
+      if (!hasConnectedSiteContent(d)) {
+        d = await recoverSiteDataFromBlob(db, username) || d;
+      }
       return Response.json({
         profile: {
           username: row.username,
@@ -106,16 +131,7 @@ export default async (req: Request) => {
         `;
 
         if (existing.length === 0) {
-          let profileCode = generateProfileCode();
-          let attempts = 0;
-          while (attempts < 5) {
-            const dup = await db.sql`
-              SELECT 1 FROM site_data WHERE profile_code = ${profileCode}
-            `;
-            if (dup.length === 0) break;
-            profileCode = generateProfileCode();
-            attempts++;
-          }
+          const profileCode = await createUniqueProfileCode(db);
 
           const newData = {
             profile: { name: display_name || clean, bio: bio || "", avatar_url: "" },

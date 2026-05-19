@@ -235,7 +235,7 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
             {k === 'live' ? '진행 중' : k === 'history' ? '사후 리포트' : k === 'usage' ? '송출 시간 (월별)' : `채팅 모더레이션 ${flaggedPending.length > 0 ? `(${flaggedPending.length})` : ''}`}
           </button>
         ))}
-        <button onClick={load} className="ml-auto px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200">새로고침</button>
+        <button onClick={() => load()} className="ml-auto px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200">새로고침</button>
       </div>
 
       {section === 'live' && (

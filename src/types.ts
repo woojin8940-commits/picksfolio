@@ -32,6 +32,22 @@ export interface Product {
   options?: ProductOption[];
 }
 
+export interface ProductItem {
+  name: string;
+  price: string;
+  image: string;
+  description?: string;
+}
+
+export interface TrendAnalysis {
+  keyword: string;
+  trendScore: number;
+  description: string;
+  stylingTips: string[];
+  recommendedItems: string[];
+  colorPalette: string[];
+}
+
 export interface Block {
   id: string;
   title: string;

@@ -56,10 +56,10 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
       .then(res => res.json())
       .then(data => {
         if (data.success && data.profile) {
-          if (data.profile.company_name) setCompanyName(prev => prev || data.profile.company_name);
-          if (data.profile.contact_person) setContactPerson(prev => prev || data.profile.contact_person);
-          if (data.profile.contact_email) setContactEmail(prev => prev || data.profile.contact_email);
-          if (data.profile.contact_phone) setContactPhone(prev => prev || data.profile.contact_phone);
+          if (data.profile.company_name) setCompanyName((prev: string) => prev || data.profile.company_name);
+          if (data.profile.contact_person) setContactPerson((prev: string) => prev || data.profile.contact_person);
+          if (data.profile.contact_email) setContactEmail((prev: string) => prev || data.profile.contact_email);
+          if (data.profile.contact_phone) setContactPhone((prev: string) => prev || data.profile.contact_phone);
           try {
             localStorage.setItem(
               `picks_business_profile_${initialSession.toLowerCase()}`,

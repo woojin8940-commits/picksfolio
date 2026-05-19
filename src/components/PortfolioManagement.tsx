@@ -2239,7 +2239,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       const tabs = [ALL_CATEGORY_LABEL, ...categoryDescriptors.map(c => c.name)];
                       if (categoryDescriptors.length === 0) return null;
                       const activeName = tabs.includes(previewCategory) ? previewCategory : ALL_CATEGORY_LABEL;
-                      const activeDescriptor = categoryDescriptors.find(c => c.name === activeName);
                       return (
                         <div className="space-y-3">
                           <div className="overflow-x-auto scrollbar-hide flex gap-1.5">
