@@ -40,6 +40,8 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           localStorage.setItem('picks_business_refresh_token', result.refresh_token);
         }
         onLoginSuccess(result.username, result.company_name);
+      } else {
+        alert(result.error || '로그인에 실패했습니다.');
       }
     } catch (error: any) {
       alert('서버 오류가 발생했습니다: ' + error.message);

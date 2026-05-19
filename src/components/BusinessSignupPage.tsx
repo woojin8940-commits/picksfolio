@@ -111,6 +111,8 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
       if (result.success) {
         alert('비즈니스 회원가입이 완료되었습니다. 로그인해주세요.');
         onSignupSuccess();
+      } else {
+        alert(result.error || '회원가입에 실패했습니다.');
       }
     } catch (error: any) {
       alert('서버 오류가 발생했습니다: ' + error.message);
