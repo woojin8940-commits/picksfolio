@@ -17,6 +17,7 @@ import BusinessProposalForm from './components/BusinessProposalForm';
 import BusinessDashboard from './components/BusinessDashboard';
 import BusinessCalendar from './components/BusinessCalendar';
 import OpenScheduleManagement from './components/OpenScheduleManagement';
+import UserCampaignBrowse from './components/UserCampaignBrowse';
 import MembershipPlan from './components/MembershipPlan';
 import OperatorLogin from './components/OperatorLogin';
 import OperatorDashboard from './components/OperatorDashboard';
@@ -36,7 +37,7 @@ import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
-type SubView = 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline';
+type SubView = 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('home');
@@ -1229,6 +1230,9 @@ const App: React.FC = () => {
       case 'membership':
         subComponent = <MembershipPlan userName={userName} />;
         break;
+      case 'campaigns':
+        subComponent = <UserCampaignBrowse userName={userName} />;
+        break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
     }
@@ -1250,6 +1254,7 @@ const App: React.FC = () => {
         onNavigateSettlement={() => setSubView('settlement')}
         onNavigateTimeline={() => setSubView('timeline')}
         onNavigateMembership={() => setSubView('membership')}
+        onNavigateCampaigns={() => setSubView('campaigns')}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>
