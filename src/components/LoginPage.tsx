@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
 import { login as netlifyLogin } from '@netlify/identity';
+import FindAccount from './FindAccount';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com'];
 
@@ -14,6 +15,7 @@ interface LoginPageProps {
 
 const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup, onLoginSuccess, onAdminLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showFindAccount, setShowFindAccount] = useState(false);
   const [formData, setFormData] = useState({
     id: '',
     password: ''
@@ -149,6 +151,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     });
   };
 
+  if (showFindAccount) {
+    return <FindAccount accountType="user" onBack={() => setShowFindAccount(false)} />;
+  }
+
   return (
     <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
       <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
@@ -193,6 +199,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
                 disabled={isLoading}
                 autoComplete="current-password"
               />
+            </div>
+            <div className="text-right">
+              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-purple-600 font-bold transition-colors">
+                아이디/비밀번호 찾기
+              </button>
             </div>
           </div>
 

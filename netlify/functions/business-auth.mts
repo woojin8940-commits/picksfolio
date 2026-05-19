@@ -34,7 +34,7 @@ export default async (req: Request) => {
         await supabase.auth.signInWithPassword({ email, password });
 
       if (authError) {
-        return Response.json({ success: false, error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+        return Response.json({ success: false, error: "존재하지 않는 정보입니다. 아이디 또는 비밀번호를 확인해 주세요." });
       }
 
       const { data: profile } = await supabase

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import FindAccount from './FindAccount';
 
 interface BusinessLoginPageProps {
   onNavigateHome: () => void;
@@ -8,6 +9,7 @@ interface BusinessLoginPageProps {
 
 const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, onNavigateBusinessSignup, onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showFindAccount, setShowFindAccount] = useState(false);
   const [formData, setFormData] = useState({ username: '', password: '' });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,6 +56,10 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  if (showFindAccount) {
+    return <FindAccount accountType="business" onBack={() => setShowFindAccount(false)} />;
+  }
+
   return (
     <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
       <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
@@ -87,6 +93,11 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
                 className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
                 disabled={isLoading}
               />
+            </div>
+            <div className="text-right">
+              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
+                아이디/비밀번호 찾기
+              </button>
             </div>
           </div>
 
