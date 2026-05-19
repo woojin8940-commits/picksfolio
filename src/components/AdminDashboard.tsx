@@ -16,7 +16,7 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline';
+  currentSubView: 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
   onNavigatePortfolio: () => void;
@@ -28,6 +28,7 @@ interface AdminDashboardProps {
   onNavigateOpenSchedule: () => void;
   onNavigateSettlement: () => void;
   onNavigateTimeline: () => void;
+  onNavigateCampaigns: () => void;
   children?: React.ReactNode;
 }
 
@@ -46,6 +47,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateOpenSchedule,
   onNavigateSettlement,
   onNavigateTimeline,
+  onNavigateCampaigns,
   children
 }) => {
   const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
@@ -266,6 +268,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           />
           <div className="my-3 border-t border-white/10" />
           <NavItem
+            icon="📢"
+            label="캠페인 협업"
+            active={currentSubView === 'campaigns'}
+            onClick={onNavigateCampaigns}
+          />
+          <NavItem
             icon="📨"
             label="비즈니스 수신함"
             active={currentSubView === 'business'}
@@ -334,7 +342,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <MobileNavItem
             icon="⋯"
             label="더보기"
-            active={['portfolio','broadcast-settings','timeline','calendar','open-schedule','settlement','membership'].includes(currentSubView)}
+            active={['portfolio','broadcast-settings','timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
           />
         </div>
@@ -371,6 +379,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { onNavigateBroadcastSettings(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
+              <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
