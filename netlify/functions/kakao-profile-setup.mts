@@ -193,8 +193,12 @@ export default async (req: Request) => {
             await supabase
               .from("profiles")
               .update({
+                username: rp.username,
                 kakao_id: recoveryKakaoId,
                 role: rp.role || "user",
+                full_name: rp.full_name || existing.full_name || fullName || "",
+                phone: rp.phone || existing.phone || phone || "",
+                avatar_url: rp.avatar_url || existing.avatar_url || avatarUrl || "",
                 updated_at: new Date().toISOString(),
               })
               .eq("id", user_id);
@@ -203,10 +207,13 @@ export default async (req: Request) => {
               .from("profiles")
               .upsert({
                 id: user_id,
-                username: "",
+                username: rp.username,
                 email: email || "",
                 kakao_id: recoveryKakaoId,
                 role: rp.role || "user",
+                full_name: rp.full_name || fullName || "",
+                phone: rp.phone || phone || "",
+                avatar_url: rp.avatar_url || avatarUrl || "",
                 updated_at: new Date().toISOString(),
               }, { onConflict: "id" })
               .then(({ error }) => {
@@ -416,7 +423,7 @@ export default async (req: Request) => {
       if (linkedProfile.id !== user_id) {
         const kakaoUserProfile = {
           id: user_id,
-          username: "",
+          username: merged.username || "",
           email: email || "",
           full_name: merged.full_name || "",
           phone: merged.phone || "",

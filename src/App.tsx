@@ -310,8 +310,6 @@ const App: React.FC = () => {
           const setupResult = await setupResponse.json();
 
           if (setupResult.success && setupResult.profile) {
-            // Use server response directly — it already contains the complete profile data.
-            // Previously this re-fetched from Supabase which caused unnecessary 5s timeouts.
             profileData = {
               username: setupResult.profile.username || '',
               role: setupResult.profile.role || 'user',
@@ -321,9 +319,19 @@ const App: React.FC = () => {
               email: setupResult.profile.email || '',
               avatar_url: setupResult.profile.avatar_url || '',
             };
+            // Persist username to localStorage immediately so it survives page reloads
+            if (setupResult.profile.username) {
+              localStorage.setItem('picks_user_session', setupResult.profile.username);
+              console.log('[Auth] Kakao profile username persisted to localStorage:', setupResult.profile.username);
+            }
           } else {
             console.error('[Debug] Server-side profile setup failed:', setupResult.error);
-            // 서버 함수 실패 응답 시에도 5초 후 세션 강제 갱신
+            // Use localStorage username as fallback when server call fails
+            const savedUsername = localStorage.getItem('picks_user_session') || '';
+            if (savedUsername) {
+              profileData = { username: savedUsername, role: 'user' };
+              console.log('[Auth] Using saved username from localStorage as fallback:', savedUsername);
+            }
             console.log('[Auth] 서버 함수 실패 응답 — 5초 후 세션 강제 갱신 예약됨');
             setTimeout(async () => {
               try {
@@ -345,7 +353,12 @@ const App: React.FC = () => {
           }
         } catch (serverErr) {
           console.error('[Debug] Server-side profile setup call failed:', serverErr);
-          // 5초 후 세션 강제 갱신 예약 (서버 함수 에러 시에도 로그인 마무리)
+          // Use localStorage username as fallback when server call throws
+          const savedUsernameOnErr = localStorage.getItem('picks_user_session') || '';
+          if (savedUsernameOnErr && !profileData) {
+            profileData = { username: savedUsernameOnErr, role: 'user' };
+            console.log('[Auth] Using saved username from localStorage after server error:', savedUsernameOnErr);
+          }
           console.log('[Auth] 서버 함수 에러 — 5초 후 세션 강제 갱신 예약됨');
           setTimeout(async () => {
             try {

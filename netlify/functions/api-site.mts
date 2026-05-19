@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { getStore } from "@netlify/blobs";
 import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";
 
@@ -37,6 +38,35 @@ export default async (req: Request, context: Context) => {
 
       if (result.length > 0 && result[0].data && Object.keys(result[0].data).length > 0) {
         return Response.json(result[0].data);
+      }
+
+      // Check blob store as fallback (data may exist there from earlier saves)
+      try {
+        const blobStore = getStore({ name: "site-data", consistency: "strong" });
+        const blobData = await blobStore.get(username, { type: "json" }) as Record<string, any> | null;
+        if (blobData && Object.keys(blobData).length > 0) {
+          // Restore to database from blob backup
+          let profileCode = generateProfileCode();
+          let attempts = 0;
+          while (attempts < 5) {
+            const dup = await db.sql`
+              SELECT 1 FROM site_data WHERE profile_code = ${profileCode}
+            `;
+            if (dup.length === 0) break;
+            profileCode = generateProfileCode();
+            attempts++;
+          }
+
+          await db.sql`
+            INSERT INTO site_data (username, data, profile_code)
+            VALUES (${username}, ${JSON.stringify(blobData)}, ${profileCode})
+            ON CONFLICT (username) DO UPDATE SET data = ${JSON.stringify(blobData)}::jsonb, updated_at = NOW()
+          `;
+
+          return Response.json(blobData);
+        }
+      } catch (blobErr) {
+        console.warn("[api-site] Blob fallback failed:", blobErr);
       }
 
       const supabase = getSupabaseAdmin();
@@ -114,6 +144,19 @@ export default async (req: Request, context: Context) => {
           INSERT INTO site_data (username, data, profile_code)
           VALUES (${username}, ${bodyJson}::jsonb, ${profileCode})
         `;
+      }
+
+      // Sync full merged data to blob store for backup and OG image proxy
+      try {
+        const mergedResult = await db.sql`
+          SELECT data FROM site_data WHERE username = ${username}
+        `;
+        if (mergedResult.length > 0 && mergedResult[0].data) {
+          const blobStore = getStore({ name: "site-data", consistency: "strong" });
+          await blobStore.setJSON(username, mergedResult[0].data);
+        }
+      } catch (syncErr) {
+        console.warn("[api-site] Blob sync failed:", syncErr);
       }
 
       return Response.json({ success: true });
