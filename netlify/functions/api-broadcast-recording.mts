@@ -1,45 +1,32 @@
 import { getStore } from "@netlify/blobs";
-import type { Context } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 
 export default async (req: Request, context: Context) => {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+  const username = context.params.username?.toLowerCase();
+  if (!username) {
+    return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  try {
-    const url = new URL(req.url);
-    const pathParts = url.pathname.split("/").filter(Boolean);
-    const username = pathParts[2] ? decodeURIComponent(pathParts[2]) : null;
-    const recordingId = pathParts[3] ? decodeURIComponent(pathParts[3]) : null;
+  const store = getStore("broadcast-recordings");
+  const key = `recording_${username}`;
 
-    if (!username || !recordingId) {
-      return new Response(JSON.stringify({ error: "username and recording id are required" }), { status: 400, headers });
-    }
-
-    const store = getStore("broadcast-recordings");
-    const key = `${username.toLowerCase()}/${recordingId}`;
-    const metadata = await store.getMetadata(key);
-
-    if (!metadata) {
-      return new Response(JSON.stringify({ error: "Recording not found" }), { status: 404, headers });
-    }
-
-    const siteUrl = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-    return new Response(JSON.stringify({
-      url: `${siteUrl}/.netlify/blobs/${key}`,
-      metadata: metadata.metadata,
-    }), { headers });
-  } catch (error: any) {
-    console.error("Broadcast recording API error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), { status: 500, headers });
+  if (req.method === "GET") {
+    const data = await store.get(key, { type: "json" });
+    return Response.json(data || { recordings: [] });
   }
+
+  if (req.method === "POST") {
+    const body = await req.json();
+    const existing = (await store.get(key, { type: "json" })) as any || { recordings: [] };
+    existing.recordings = existing.recordings || [];
+    existing.recordings.unshift({ ...body, createdAt: new Date().toISOString() });
+    await store.setJSON(key, existing);
+    return Response.json({ success: true });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
 };
 
-export const config = { path: "/api/broadcast-recording/*" };
+export const config: Config = {
+  path: "/api/broadcast-recording/:username",
+};

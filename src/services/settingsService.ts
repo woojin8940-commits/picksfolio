@@ -1,5 +1,6 @@
 import { Block, TemplateType, DesignSettings } from '../types';
 import { supabase } from './supabase';
+import { apiService } from './apiService';
 
 export interface SiteSettings {
   userName: string;
@@ -14,66 +15,59 @@ export interface SiteSettings {
 export const getSiteSettings = async (userName: string): Promise<SiteSettings | null> => {
   const normalizedUsername = userName.toLowerCase();
 
-  let cloudData: any = null;
-
-  // Try Netlify Database API first
+  // 1. Try Netlify Blobs API first (primary cloud source of truth)
   try {
-    const res = await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`);
-    if (res.ok) {
-      const siteData = await res.json();
-      if (siteData && siteData.data) {
-        cloudData = typeof siteData.data === 'string' ? JSON.parse(siteData.data) : siteData.data;
+    const apiData = await apiService.getSiteData(normalizedUsername);
+    if (apiData && (apiData.blocks || apiData.design || apiData.profile || apiData.portfolio)) {
+      return {
+        userName,
+        templateType: (apiData.design as any)?.templateType || TemplateType.SHOPPABLE_GRID,
+        blocks: apiData.blocks || [],
+        portfolio: apiData.portfolio,
+        design: apiData.design,
+        socials: apiData.socials,
+        profile: apiData.profile
+      };
+    }
+  } catch (e) {
+    console.warn('Error loading site settings from API:', e);
+  }
+
+  // 2. Try Supabase as fallback (if available)
+  try {
+    if (supabase) {
+      const { data: profileData, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', normalizedUsername)
+        .maybeSingle();
+
+      if (!error && profileData) {
+        return {
+          userName,
+          templateType: TemplateType.SHOPPABLE_GRID,
+          blocks: [],
+          profile: {
+            name: profileData.nickname || profileData.full_name || '',
+            bio: profileData.bio || '',
+            avatar_url: profileData.avatar_url || ''
+          }
+        };
       }
     }
   } catch (e) {
-    console.error('Error loading from site API:', e);
+    console.warn('Error loading site settings from Supabase:', e);
   }
 
-  // Fallback to Supabase
-  if (!cloudData) {
-    try {
-      if (supabase) {
-        const { data: profileData, error } = await supabase
-          .from('profiles')
-          .select('site_data, nickname, bio, avatar_url')
-          .eq('username', normalizedUsername)
-          .maybeSingle();
-
-        if (!error && profileData) {
-          cloudData = profileData.site_data || {};
-          cloudData.profile = {
-            ...(cloudData.profile || {}),
-            name: profileData.nickname || cloudData.profile?.name,
-            bio: profileData.bio || cloudData.profile?.bio,
-            avatar_url: profileData.avatar_url || cloudData.profile?.avatar_url
-          };
-        }
-      }
-    } catch (e) {
-      console.error('Error loading site settings from Supabase:', e);
-    }
-  }
-
-  // Fallback to LocalStorage
+  // 3. Fallback to LocalStorage
   try {
     const savedBlocks = localStorage.getItem(`picks_blocks_${normalizedUsername}`);
     const savedDesign = localStorage.getItem(`picks_design_${normalizedUsername}`);
     const savedPortfolio = localStorage.getItem(`picks_portfolio_${normalizedUsername}`);
-    
+
     const localBlocks = savedBlocks ? JSON.parse(savedBlocks) : null;
     const localPortfolio = savedPortfolio ? JSON.parse(savedPortfolio) : null;
     const localDesign = savedDesign ? JSON.parse(savedDesign) : null;
-
-    if (cloudData) {
-      return {
-        userName,
-        templateType: cloudData?.design?.templateType || TemplateType.SHOPPABLE_GRID,
-        blocks: cloudData?.blocks || [],
-        portfolio: cloudData?.portfolio,
-        design: cloudData?.design,
-        socials: cloudData?.socials
-      };
-    }
 
     if (localBlocks || localPortfolio) {
       return {
@@ -198,16 +192,16 @@ export const updateLinkGridItems = async (blocks: Block[]) => {
 
 export const updateSiteSettings = async (userName: string, settings: Partial<SiteSettings>) => {
   const normalizedUsername = userName.toLowerCase();
-  
+
   // 1. Update LocalStorage (Immediate)
   if (settings.blocks) {
     localStorage.setItem(`picks_blocks_${normalizedUsername}`, JSON.stringify(settings.blocks));
   }
-  
+
   if (settings.portfolio) {
     localStorage.setItem(`picks_portfolio_${normalizedUsername}`, JSON.stringify(settings.portfolio));
   }
-  
+
   if (settings.design) {
     localStorage.setItem(`picks_design_${normalizedUsername}`, JSON.stringify(settings.design));
   }
@@ -215,50 +209,31 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
   if (settings.socials) {
     localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(settings.socials));
   }
-  
-  // 2. Sync to Netlify Database site API
+
+  // 2. Sync to Netlify Blobs API (Primary Cloud Storage)
   try {
-    const existingRes = await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`);
-    let existingData: any = {};
-    if (existingRes.ok) {
-      const existing = await existingRes.json();
-      if (existing && existing.data) {
-        existingData = typeof existing.data === 'string' ? JSON.parse(existing.data) : existing.data;
-      }
+    const apiPayload: Record<string, any> = {};
+    if (settings.blocks !== undefined) apiPayload.blocks = settings.blocks;
+    if (settings.design !== undefined) apiPayload.design = settings.design;
+    if (settings.portfolio !== undefined) apiPayload.portfolio = settings.portfolio;
+    if (settings.socials !== undefined) apiPayload.socials = settings.socials;
+    if (settings.profile !== undefined) apiPayload.profile = settings.profile;
+
+    if (Object.keys(apiPayload).length > 0) {
+      await apiService.saveSiteData(normalizedUsername, apiPayload);
     }
-
-    const mergedData = {
-      ...existingData,
-      ...settings,
-      design: settings.design ? { ...(existingData.design || {}), ...settings.design } : existingData.design,
-      profile: settings.profile ? { ...(existingData.profile || {}), ...settings.profile } : existingData.profile,
-    };
-    delete mergedData.userName;
-
-    await fetch(`/api/site/${encodeURIComponent(normalizedUsername)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: mergedData }),
-    });
   } catch (e) {
-    console.error('Error syncing to site API:', e);
+    console.warn('Error syncing to Netlify Blobs API:', e);
   }
 
-  // 3. Update Supabase (Cloud Sync)
+  // 3. Also sync to Supabase if available (secondary backup)
   if (supabase) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
+      if (!user) return true; // Skip Supabase sync if not authenticated
 
-      // Get current site_data to merge
-      const { data: currentProfile } = await supabase
-        .from('profiles')
-        .select('site_data, nickname, bio, avatar_url')
-        .eq('id', user.id)
-        .maybeSingle();
-      
-      const currentSiteData = currentProfile?.site_data || {};
-      
+      const currentSiteData: any = {};
+
       // Deep merge design and profile
       const newSiteData = {
         ...currentSiteData,
@@ -275,16 +250,16 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
 
       delete newSiteData.userName;
 
-      const updateData: any = { 
-        site_data: newSiteData,
-        username: normalizedUsername // Ensure username is synced
+      const updateData: any = {
+        username: normalizedUsername
       };
-      
+
       // Sync top-level fields
       if (settings.profile) {
         if (settings.profile.name) updateData.nickname = settings.profile.name;
         if (settings.profile.bio) updateData.bio = settings.profile.bio;
         if (settings.profile.avatar_url) updateData.avatar_url = settings.profile.avatar_url;
+        if (settings.profile.links?.phone) updateData.phone = settings.profile.links.phone;
       }
 
       await supabase
@@ -295,9 +270,9 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
           updated_at: new Date().toISOString()
         }, { onConflict: 'id' });
     } catch (e) {
-      console.error('Error syncing to Supabase:', e);
+      console.warn('Error syncing to Supabase:', e);
     }
   }
-  
+
   return true;
 };

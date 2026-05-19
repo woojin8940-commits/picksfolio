@@ -57,3 +57,7 @@ export const clearLinkCache = (userName: string) => {
   const normalizedUsername = userName.toLowerCase();
   delete cache[normalizedUsername];
 };
+
+export const clearAllLinkCache = () => {
+  Object.keys(cache).forEach(key => delete cache[key]);
+};

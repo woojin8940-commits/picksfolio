@@ -1,108 +1,118 @@
-import { createDatabase } from "@netlify/database";
-import type { Context } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
+import type { Config, Context } from "@netlify/functions";
 
-const db = createDatabase();
+interface DayData {
+  views: number;
+  visitors: string[];
+  clicks: number;
+  blockClicks: Record<string, number>;
+  referrers: Record<string, number>;
+}
+
+function emptyDay(): DayData {
+  return { views: 0, visitors: [], clicks: 0, blockClicks: {}, referrers: {} };
+}
+
+function dayKey(username: string, date: string): string {
+  return `analytics_${username}_${date}`;
+}
+
+function dateRange(start: string, end: string): string[] {
+  const dates: string[] = [];
+  const cur = new Date(start + "T00:00:00Z");
+  const last = new Date(end + "T00:00:00Z");
+  while (cur <= last) {
+    dates.push(cur.toISOString().split("T")[0]);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return dates;
+}
 
 export default async (req: Request, context: Context) => {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+  const username = context.params.username?.toLowerCase();
+  if (!username) {
+    return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  try {
+  const store = getStore("analytics");
+
+  if (req.method === "GET") {
     const url = new URL(req.url);
-    const pathParts = url.pathname.split("/").filter(Boolean);
-    const username = pathParts[2] ? decodeURIComponent(pathParts[2]) : url.searchParams.get("username");
+    const type = url.searchParams.get("type");
+    const start = url.searchParams.get("start");
+    const end = url.searchParams.get("end");
 
-    if (!username) {
-      return new Response(JSON.stringify({ error: "username is required" }), { status: 400, headers });
+    if (type === "stats" && start && end) {
+      const dates = dateRange(start, end);
+      let totalViews = 0;
+      let totalClicks = 0;
+
+      for (const date of dates) {
+        const data = (await store.get(dayKey(username, date), { type: "json" })) as DayData | null;
+        if (data) {
+          totalViews += data.views || 0;
+          totalClicks += data.clicks || 0;
+        }
+      }
+
+      const ctr = totalViews > 0 ? Math.round((totalClicks / totalViews) * 100) : 0;
+      return Response.json({ views: totalViews, clicks: totalClicks, ctr });
     }
 
-    const normalizedUsername = username.toLowerCase();
+    if (type === "top-items" && start && end) {
+      const dates = dateRange(start, end);
+      const merged: Record<string, number> = {};
 
-    if (req.method === "POST") {
-      const body = await req.json();
-      const action = body.action;
-      const id = Date.now().toString() + Math.random().toString(36).slice(2, 8);
-
-      if (action === "track-view") {
-        const date = body.date || new Date().toISOString().slice(0, 10);
-        await db.sql`
-          INSERT INTO analytics_events (id, username, action, date, metadata)
-          VALUES (${id}, ${normalizedUsername}, 'view', ${date}, ${JSON.stringify(body.metadata || {})})
-        `;
-        return new Response(JSON.stringify({ success: true }), { headers });
+      for (const date of dates) {
+        const data = (await store.get(dayKey(username, date), { type: "json" })) as DayData | null;
+        if (data?.blockClicks) {
+          for (const [blockId, count] of Object.entries(data.blockClicks)) {
+            merged[blockId] = (merged[blockId] || 0) + (count as number);
+          }
+        }
       }
 
-      if (action === "track-click") {
-        const date = body.date || new Date().toISOString().slice(0, 10);
-        await db.sql`
-          INSERT INTO analytics_events (id, username, action, block_id, date, metadata)
-          VALUES (${id}, ${normalizedUsername}, 'click', ${body.blockId || null}, ${date}, ${JSON.stringify(body.metadata || {})})
-        `;
-        return new Response(JSON.stringify({ success: true }), { headers });
-      }
+      const topItems = Object.entries(merged)
+        .map(([blockId, clicks]) => ({ blockId, clicks }))
+        .sort((a, b) => b.clicks - a.clicks)
+        .slice(0, 10);
 
-      return new Response(JSON.stringify({ error: "Invalid action" }), { status: 400, headers });
+      return Response.json({ topItems });
     }
 
-    if (req.method === "GET") {
-      const start = url.searchParams.get("start");
-      const end = url.searchParams.get("end");
-      const type = url.searchParams.get("type");
-
-      if (type === "stats") {
-        const views = await db.sql`
-          SELECT date, COUNT(*) as count FROM analytics_events
-          WHERE username = ${normalizedUsername} AND action = 'view'
-          AND date >= ${start || '2000-01-01'} AND date <= ${end || '2099-12-31'}
-          GROUP BY date ORDER BY date
-        `;
-        const clicks = await db.sql`
-          SELECT date, COUNT(*) as count FROM analytics_events
-          WHERE username = ${normalizedUsername} AND action = 'click'
-          AND date >= ${start || '2000-01-01'} AND date <= ${end || '2099-12-31'}
-          GROUP BY date ORDER BY date
-        `;
-        return new Response(JSON.stringify({ views: views.rows, clicks: clicks.rows }), { headers });
-      }
-
-      if (type === "top-items") {
-        const items = await db.sql`
-          SELECT block_id, COUNT(*) as click_count FROM analytics_events
-          WHERE username = ${normalizedUsername} AND action = 'click' AND block_id IS NOT NULL
-          AND date >= ${start || '2000-01-01'} AND date <= ${end || '2099-12-31'}
-          GROUP BY block_id ORDER BY click_count DESC LIMIT 10
-        `;
-        return new Response(JSON.stringify(items.rows), { headers });
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-      const viewCount = await db.sql`
-        SELECT COUNT(*) as count FROM analytics_events
-        WHERE username = ${normalizedUsername} AND action = 'view' AND date = ${today}
-      `;
-      const clickCount = await db.sql`
-        SELECT COUNT(*) as count FROM analytics_events
-        WHERE username = ${normalizedUsername} AND action = 'click' AND date = ${today}
-      `;
-      return new Response(JSON.stringify({
-        views: Number(viewCount.rows[0]?.count || 0),
-        clicks: Number(clickCount.rows[0]?.count || 0),
-      }), { headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
-  } catch (error: any) {
-    console.error("Analytics API error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), { status: 500, headers });
+    const key = dayKey(username, new Date().toISOString().split("T")[0]);
+    const data = await store.get(key, { type: "json" });
+    return Response.json(data || emptyDay());
   }
+
+  if (req.method === "POST") {
+    const body = await req.json();
+    const date = body.date || new Date().toISOString().split("T")[0];
+    const key = dayKey(username, date);
+
+    const existing = ((await store.get(key, { type: "json" })) as DayData | null) || emptyDay();
+
+    if (body.action === "track-click" && body.blockId) {
+      existing.clicks = (existing.clicks || 0) + 1;
+      existing.blockClicks = existing.blockClicks || {};
+      existing.blockClicks[body.blockId] = (existing.blockClicks[body.blockId] || 0) + 1;
+    } else {
+      existing.views = (existing.views || 0) + 1;
+      if (body.visitorId) {
+        existing.visitors = existing.visitors || [];
+        if (!existing.visitors.includes(body.visitorId)) {
+          existing.visitors.push(body.visitorId);
+        }
+      }
+    }
+
+    await store.setJSON(key, existing);
+    return Response.json({ success: true });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
 };
 
-export const config = { path: "/api/analytics/*" };
+export const config: Config = {
+  path: "/api/analytics/:username",
+};

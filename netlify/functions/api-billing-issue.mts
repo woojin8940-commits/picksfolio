@@ -1,37 +1,21 @@
-import type { Context } from "@netlify/functions";
+import type { Config } from "@netlify/functions";
 
-export default async (req: Request, context: Context) => {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+export default async (req: Request) => {
+  if (req.method !== "POST") {
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
   try {
-    if (req.method === "POST") {
-      const body = await req.json();
-      const username = body.username?.toLowerCase();
-
-      if (!username) {
-        return new Response(JSON.stringify({ error: "username is required" }), { status: 400, headers });
-      }
-
-      return new Response(JSON.stringify({
-        success: true,
-        message: "Billing issue reported",
-      }), { headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
-  } catch (error: any) {
-    console.error("Billing issue API error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), { status: 500, headers });
+    const body = await req.json();
+    return Response.json({
+      success: true,
+      data: { status: "issued" },
+    });
+  } catch (err: any) {
+    return Response.json({ success: false, error: err?.message || "빌링 발급 실패" });
   }
 };
 
-export const config = { path: "/api/billing-issue" };
+export const config: Config = {
+  path: "/api/billing-issue",
+};

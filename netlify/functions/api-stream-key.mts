@@ -1,59 +1,32 @@
-import { createDatabase } from "@netlify/database";
-import type { Context } from "@netlify/functions";
-
-const db = createDatabase();
+import { getStore } from "@netlify/blobs";
+import type { Config, Context } from "@netlify/functions";
 
 export default async (req: Request, context: Context) => {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+  const username = context.params.username?.toLowerCase();
+  if (!username) {
+    return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  try {
-    const url = new URL(req.url);
-    const pathParts = url.pathname.split("/").filter(Boolean);
-    const username = pathParts[2] ? decodeURIComponent(pathParts[2]) : url.searchParams.get("username");
+  const store = getStore("stream-keys");
+  const key = `stream_${username}`;
 
-    if (!username) {
-      return new Response(JSON.stringify({ error: "username is required" }), { status: 400, headers });
+  if (req.method === "GET") {
+    const data = await store.get(key, { type: "json" });
+    if (!data) {
+      return Response.json(null, { status: 404 });
     }
-
-    const normalizedUsername = username.toLowerCase();
-
-    if (req.method === "GET") {
-      const result = await db.sql`
-        SELECT username, stream_key, ingest_url, playback_url, channel_arn
-        FROM stream_keys WHERE username = ${normalizedUsername} LIMIT 1
-      `;
-      return new Response(JSON.stringify(result.rows[0] || null), { headers });
-    }
-
-    if (req.method === "POST") {
-      const body = await req.json();
-      await db.sql`
-        INSERT INTO stream_keys (username, stream_key, ingest_url, playback_url, channel_arn)
-        VALUES (${normalizedUsername}, ${body.stream_key || null}, ${body.ingest_url || null}, ${body.playback_url || null}, ${body.channel_arn || null})
-        ON CONFLICT (username) DO UPDATE SET
-          stream_key = EXCLUDED.stream_key,
-          ingest_url = EXCLUDED.ingest_url,
-          playback_url = EXCLUDED.playback_url,
-          channel_arn = EXCLUDED.channel_arn,
-          updated_at = now()
-      `;
-      return new Response(JSON.stringify({ success: true }), { headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
-  } catch (error: any) {
-    console.error("Stream key API error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), { status: 500, headers });
+    return Response.json(data);
   }
+
+  if (req.method === "POST") {
+    const body = await req.json();
+    await store.setJSON(key, body);
+    return Response.json({ success: true });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
 };
 
-export const config = { path: "/api/stream-key/*" };
+export const config: Config = {
+  path: "/api/stream-key/:username",
+};

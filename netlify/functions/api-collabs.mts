@@ -1,90 +1,36 @@
-import { createDatabase } from "@netlify/database";
-import type { Context } from "@netlify/functions";
-
-const db = createDatabase();
+import { getStore } from "@netlify/blobs";
+import type { Config, Context } from "@netlify/functions";
 
 export default async (req: Request, context: Context) => {
-  const headers = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+  const username = context.params.username?.toLowerCase();
+  if (!username) {
+    return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  try {
-    const url = new URL(req.url);
-    const pathParts = url.pathname.split("/").filter(Boolean);
-    const username = (pathParts[0] === "api" && pathParts[2]) ? decodeURIComponent(pathParts[2]) : url.searchParams.get("username");
+  const store = getStore("collabs");
+  const key = `collabs_${username}`;
 
-    if (!username) {
-      return new Response(JSON.stringify({ error: "username is required" }), {
-        status: 400,
-        headers,
-      });
-    }
-
-    const normalizedUsername = username.toLowerCase();
-
-    if (req.method === "GET") {
-      const result = await db.sql`
-        SELECT id, title, company_name, type, fee, date, end_date, start_date, status, memo, created_at
-        FROM collabs
-        WHERE username = ${normalizedUsername}
-        ORDER BY created_at DESC
-      `;
-      return new Response(JSON.stringify(result.rows), { headers });
-    }
-
-    if (req.method === "POST") {
-      const body = await req.json();
-      const id = body.id || Date.now().toString();
-      await db.sql`
-        INSERT INTO collabs (id, username, title, company_name, type, fee, date, end_date, start_date, status, memo)
-        VALUES (${id}, ${normalizedUsername}, ${body.title}, ${body.company_name}, ${body.type || "광고"}, ${body.fee || 0}, ${body.date}, ${body.end_date || body.date}, ${body.start_date || body.date}, ${body.status || "scheduled"}, ${body.memo || null})
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          company_name = EXCLUDED.company_name,
-          type = EXCLUDED.type,
-          fee = EXCLUDED.fee,
-          date = EXCLUDED.date,
-          end_date = EXCLUDED.end_date,
-          start_date = EXCLUDED.start_date,
-          status = EXCLUDED.status,
-          memo = EXCLUDED.memo,
-          updated_at = now()
-      `;
-      return new Response(JSON.stringify({ success: true, id }), { headers });
-    }
-
-    if (req.method === "DELETE") {
-      const id = url.searchParams.get("id");
-      if (!id) {
-        return new Response(JSON.stringify({ error: "id is required" }), {
-          status: 400,
-          headers,
-        });
-      }
-      await db.sql`
-        DELETE FROM collabs WHERE id = ${id} AND username = ${normalizedUsername}
-      `;
-      return new Response(JSON.stringify({ success: true }), { headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers,
-    });
-  } catch (error: any) {
-    console.error("Collabs API error:", error);
-    return new Response(
-      JSON.stringify({ error: error.message || "Internal server error" }),
-      { status: 500, headers }
-    );
+  if (req.method === "GET") {
+    const data = await store.get(key, { type: "json" });
+    return Response.json({ records: data || [] });
   }
+
+  if (req.method === "POST") {
+    const body = await req.json();
+    const existing = (await store.get(key, { type: "json" })) as any[] || [];
+    const record = {
+      id: `collab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      ...body,
+      createdAt: new Date().toISOString(),
+    };
+    existing.push(record);
+    await store.setJSON(key, existing);
+    return Response.json({ success: true, record });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
 };
 
-export const config = { path: ["/api/collabs", "/api/collabs/:username", "/api/collabs/:username/:id"] };
+export const config: Config = {
+  path: "/api/collabs/:username",
+};

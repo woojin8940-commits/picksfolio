@@ -5,6 +5,7 @@
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
   --font-display: "Pretendard Variable", "Pretendard", sans-serif;
   --color-background: #050507;
+  --color-midnight: #050507;
   --color-purple-primary: #7c3aed;
   --color-purple-secondary: #a855f7;
   --color-surface: #0f1117;
@@ -17,6 +18,36 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.02em;
+  /* Prevent horizontal page scroll caused by w-screen / 100vw children on iOS */
+  overflow-x: hidden;
+  /* Disable iOS text size auto-adjust on orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html {
+  /* Prevent overscroll chaining on the document */
+  overscroll-behavior-y: none;
+}
+
+/* Remove the 300ms tap delay and the gray flash on iOS / Android */
+button,
+a,
+[role="button"],
+[onclick] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Force inputs to >= 16px font-size to prevent iOS Safari auto-zoom on focus.
+   Many fields in this app rely on Tailwind utilities and some use small classes
+   like text-sm or text-[14px] — those would otherwise trigger zoom. */
+@media (max-width: 768px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -37,4 +68,158 @@ h1, h2, h3, h4, h5, h6 {
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-primary to-purple-secondary;
   }
+}
+
+/* Video.js HLS Player - Full HD Mobile Optimization */
+.video-js.vjs-fluid {
+  width: 100%;
+  height: 100%;
+}
+
+.video-js .vjs-tech {
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+}
+
+/* Hide default Video.js controls for custom UI */
+.video-js .vjs-control-bar,
+.video-js .vjs-big-play-button,
+.video-js .vjs-loading-spinner,
+.video-js .vjs-poster {
+  display: none !important;
+}
+
+/* Live Stream Container - Mobile Layout Fix */
+.live-stream-container {
+  width: 100%;
+  height: 100vh;
+  height: -webkit-fill-available;
+  overflow: hidden;
+}
+
+/* Ensure video fills container on mobile */
+@media (max-width: 768px) {
+  .video-js {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+  }
+  .video-js .vjs-tech {
+    object-fit: contain;
+    width: 100% !important;
+    height: 100% !important;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+  /* Prevent iOS rubber-band scrolling on live stream views */
+  .fixed {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Safe area padding for notched devices - apply only to UI overlays, not video containers */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-area-pad {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Modal/drawer scroll containers: prevent scroll chaining to the underlying page,
+   keep iOS momentum scrolling. Apply with className="overscroll-contain". */
+.overscroll-contain {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Live stream video must show the full broadcaster frame without cropping,
+   so mobile broadcaster view and PC viewer view share the same aspect ratio. */
+.live-stream-container video,
+.live-stream-container .video-js {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  background-color: #000;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+/* ===== Desktop UserPage Layout ===== */
+
+.phone-frame-notch {
+  display: none;
+}
+
+.phone-frame-side-info {
+  display: none;
+}
+
+/* Mobile readability floor: enforce a minimum 12px on tiny tailwind utilities
+   to keep text legible on phones. Keeps existing desktop scaling behaviour. */
+@media (max-width: 767px) {
+  [class*="text-[8px]"] { font-size: 12px !important; line-height: 1.3 !important; }
+  [class*="text-[9px]"] { font-size: 12px !important; line-height: 1.3 !important; }
+  [class*="text-[10px]"] { font-size: 12px !important; line-height: 1.35 !important; }
+  [class*="text-[11px]"] { font-size: 13px !important; line-height: 1.4 !important; }
+}
+
+/* Desktop: scale up tiny text sizes for readability */
+@media (min-width: 768px) {
+  .userpage-root {
+    font-size: 1.1rem;
+  }
+
+  /* Scale up the very small text elements */
+  .userpage-root [class*="text-[8px]"] { font-size: 11px !important; }
+  .userpage-root [class*="text-[9px]"] { font-size: 12px !important; }
+  .userpage-root [class*="text-[10px]"] { font-size: 13px !important; }
+  .userpage-root [class*="text-[11px]"] { font-size: 14px !important; }
+  .userpage-root [class*="text-xs"] { font-size: 14px !important; }
+
+  /* Make social buttons and icons larger */
+  .userpage-root button svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .userpage-root button {
+    padding: 0.625rem 1rem;
+  }
+}
+
+/* Bottom-fixed navigation bars: respect iOS home-indicator safe area. */
+.fixed-bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Use this on main content when a fixed bottom nav is present (~64px tall). */
+.has-bottom-nav-pad {
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Sticky/top-fixed UI: respect notch/dynamic island. */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Rich-text editor placeholder */
+.portfolio-rt-editor:empty::before,
+.portfolio-rt-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: #cbd5e1;
+  pointer-events: none;
+}
+.portfolio-rt-editor:focus {
+  outline: none;
 }

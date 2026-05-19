@@ -1,35 +1,43 @@
-import { createDatabase } from "@netlify/database";
-import type { Context } from "@netlify/functions";
+import { getStore } from '@netlify/blobs'
+import { requireAdmin } from './_shared/admin-auth.mts'
+import type { Config, Context } from '@netlify/functions'
 
-const db = createDatabase();
+// Wipes every entry in the `live-notify-subscribers` blob store, removing
+// all live-notification subscribers across every influencer in one shot.
+// Admin-only.
+export default async (req: Request, _context: Context) => {
+  const auth = await requireAdmin(req)
+  if (!auth.ok) return auth.response
 
-export default async (req: Request, context: Context) => {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  };
-
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers });
+  if (req.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 })
   }
+
+  const store = getStore({ name: 'live-notify-subscribers', consistency: 'strong' })
+
+  let removedKeys = 0
+  let removedSubscribers = 0
 
   try {
-    if (req.method === "POST") {
-      const deleted = await db.sql`DELETE FROM live_notify_subscriptions RETURNING id`;
-      return new Response(JSON.stringify({
-        ok: true,
-        removedKeys: deleted.rows.length,
-        removedSubscribers: deleted.rows.length,
-      }), { headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
-  } catch (error: any) {
-    console.error("Admin live notify reset API error:", error);
-    return new Response(JSON.stringify({ ok: false, error: error.message || "Internal server error" }), { status: 500, headers });
+    const { blobs } = await store.list()
+    await Promise.all(
+      (blobs || []).map(async ({ key }) => {
+        const data = (await store.get(key, { type: 'json' })) as
+          | { subscribers?: Array<{ phone: string }> }
+          | null
+        removedSubscribers += data?.subscribers?.length || 0
+        await store.delete(key)
+        removedKeys += 1
+      }),
+    )
+  } catch (e: any) {
+    return Response.json({ error: e?.message || 'Reset failed' }, { status: 500 })
   }
-};
 
-export const config = { path: "/api/admin/live-notify/reset" };
+  return Response.json({ success: true, removedKeys, removedSubscribers })
+}
+
+export const config: Config = {
+  path: '/api/admin/live-notify/reset',
+  method: ['POST'],
+}
