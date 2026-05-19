@@ -27,21 +27,92 @@ export default async (req: Request) => {
       }
 
       const supabase = getSupabaseAdmin();
+      const cleanUsername = username.trim().toLowerCase();
+      const email = `biz_${cleanUsername}@picks.me`;
+
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({ email, password });
+
+      if (authError) {
+        return Response.json({ success: false, error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+      }
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
-        .eq("username", username.trim().toLowerCase())
+        .eq("id", authData.user.id)
         .maybeSingle();
 
       if (!profile || !["admin", "operator"].includes(profile.role || "")) {
         return Response.json({ success: false, error: "비즈니스 계정을 찾을 수 없습니다." });
       }
 
-      return Response.json({ success: true, profile });
+      return Response.json({
+        success: true,
+        username: profile.username,
+        company_name: profile.full_name || "",
+        access_token: authData.session?.access_token || "",
+        refresh_token: authData.session?.refresh_token || "",
+      });
     }
 
     if (action === "signup") {
-      return Response.json({ success: false, error: "비즈니스 계정은 관리자를 통해 생성됩니다." });
+      const { company_name, business_number, contact_person, contact_email, contact_phone, username, password } = body;
+
+      if (!company_name || !business_number || !contact_person || !contact_email || !username || !password) {
+        return Response.json({ success: false, error: "모든 필수 항목을 입력해 주세요." });
+      }
+
+      const supabase = getSupabaseAdmin();
+      const cleanUsername = username.trim().toLowerCase();
+      const email = `biz_${cleanUsername}@picks.me`;
+
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", cleanUsername)
+        .maybeSingle();
+
+      if (existingProfile) {
+        return Response.json({ success: false, error: "이미 사용 중인 아이디입니다." });
+      }
+
+      const { data: authData, error: authError } =
+        await supabase.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            company_name,
+            business_number,
+            contact_person,
+            contact_email,
+            contact_phone: (contact_phone || "").replace(/\D/g, ""),
+          },
+        });
+
+      if (authError) {
+        if (authError.message.includes("already been registered")) {
+          return Response.json({ success: false, error: "이미 사용 중인 아이디입니다." });
+        }
+        return Response.json({ success: false, error: authError.message });
+      }
+
+      if (authData.user) {
+        await supabase.from("profiles").upsert(
+          {
+            id: authData.user.id,
+            username: cleanUsername,
+            email: contact_email,
+            full_name: company_name,
+            phone: (contact_phone || "").replace(/\D/g, ""),
+            role: "operator",
+          },
+          { onConflict: "id" }
+        );
+      }
+
+      return Response.json({ success: true, username: cleanUsername });
     }
 
     if (action === "profile") {
