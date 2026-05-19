@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface Settlement {
   id: string;
@@ -25,7 +25,6 @@ const parseNumber = (value: string) => value.replace(/,/g, '');
 const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [newSettlement, setNewSettlement] = useState({
     influencer_username: '',
     title: '',
@@ -34,29 +33,18 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
     memo: '',
   });
 
-  const fetchSettlements = useCallback(async () => {
+  useEffect(() => {
     if (!userName) return;
-    try {
-      const res = await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSettlements(data);
-        localStorage.setItem(`picks_settlements_${userName.toLowerCase()}`, JSON.stringify(data));
-        return;
-      }
-    } catch (e) {
-      console.error('Error fetching settlements:', e);
-    }
     const saved = localStorage.getItem(`picks_settlements_${userName.toLowerCase()}`);
     if (saved) setSettlements(JSON.parse(saved));
   }, [userName]);
 
-  useEffect(() => {
-    setIsLoading(true);
-    fetchSettlements().finally(() => setIsLoading(false));
-  }, [fetchSettlements]);
+  const saveSettlements = (records: Settlement[]) => {
+    setSettlements(records);
+    localStorage.setItem(`picks_settlements_${userName.toLowerCase()}`, JSON.stringify(records));
+  };
 
-  const handleAdd = async (e: React.FormEvent) => {
+  const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const settlement: Settlement = {
       id: Date.now().toString(),
@@ -68,51 +56,20 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
       memo: newSettlement.memo,
       created_at: new Date().toISOString(),
     };
-    setSettlements(prev => [...prev, settlement]);
+    saveSettlements([...settlements, settlement]);
     setShowAddModal(false);
     setNewSettlement({ influencer_username: '', title: '', amount: '', scheduled_date: '', memo: '' });
-
-    try {
-      await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settlement),
-      });
-    } catch (e) {
-      console.error('Error saving settlement:', e);
-    }
   };
 
-  const toggleStatus = async (id: string) => {
-    const target = settlements.find(s => s.id === id);
-    if (!target) return;
-    const newStatus = target.status === 'pending' ? 'completed' : 'pending';
-
-    setSettlements(prev => prev.map(s =>
-      s.id === id ? { ...s, status: newStatus } : s
+  const toggleStatus = (id: string) => {
+    saveSettlements(settlements.map(s =>
+      s.id === id ? { ...s, status: s.status === 'pending' ? 'completed' : 'pending' } : s
     ));
-
-    try {
-      await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: newStatus }),
-      });
-    } catch (e) {
-      console.error('Error updating settlement status:', e);
-    }
   };
 
-  const deleteSettlement = async (id: string) => {
+  const deleteSettlement = (id: string) => {
     if (confirm('이 정산 기록을 삭제하시겠습니까?')) {
-      setSettlements(prev => prev.filter(s => s.id !== id));
-      try {
-        await fetch(`/.netlify/functions/api-settlements?username=${encodeURIComponent(userName)}&id=${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-        });
-      } catch (e) {
-        console.error('Error deleting settlement:', e);
-      }
+      saveSettlements(settlements.filter(s => s.id !== id));
     }
   };
 
@@ -154,12 +111,7 @@ const SettlementManagement: React.FC<SettlementManagementProps> = ({ userName })
         <div className="p-4 md:p-6 border-b border-slate-100">
           <h3 className="font-black text-slate-900">정산 목록</h3>
         </div>
-        {isLoading ? (
-          <div className="p-8 text-center">
-            <div className="w-6 h-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-slate-400 font-bold text-sm">불러오는 중...</p>
-          </div>
-        ) : settlements.length === 0 ? (
+        {settlements.length === 0 ? (
           <div className="p-8 text-center">
             <p className="text-slate-400 font-bold text-sm">등록된 정산 내역이 없습니다.</p>
           </div>

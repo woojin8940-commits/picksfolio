@@ -13,7 +13,9 @@ const handler: Handler = async (event) => {
     };
   }
 
-  const redirectUri = `${siteUrl}/api/kakao/callback`;
+  const redirectUri = process.env.KAKAO_REDIRECT_URI || `${siteUrl}/api/kakao/callback`;
+  console.log("[kakao-login-start] Using redirect_uri:", redirectUri);
+  console.log("[kakao-login-start] process.env.URL:", process.env.URL);
 
   const params = new URLSearchParams({
     client_id: KAKAO_REST_API_KEY,
