@@ -25,7 +25,7 @@ export default async (req: Request) => {
     const clientSecret = Netlify.env.get("NAVER_CLIENT_SECRET");
 
     if (!clientId || !clientSecret) {
-      return Response.json({ categories: [], updatedAt: null });
+      return Response.json({ categories: [], updatedAt: null, source: "no_credentials" });
     }
 
     const db = getDatabase();
@@ -113,7 +113,7 @@ export default async (req: Request) => {
       return Response.json(formatDbRows(cached));
     }
 
-    return Response.json({ categories: [], updatedAt: null });
+    return Response.json({ categories: [], updatedAt: null, source: "empty" });
   } catch (err) {
     console.error("Naver category rankings error:", err);
 
@@ -125,7 +125,7 @@ export default async (req: Request) => {
       }
     } catch {}
 
-    return Response.json({ categories: [], updatedAt: null });
+    return Response.json({ categories: [], updatedAt: null, source: "error" });
   }
 };
 
@@ -146,19 +146,21 @@ function toDateStr(d: Date): string {
 function formatDbRows(rows: Record<string, unknown>[]) {
   const map = new Map<
     number,
-    { cid: number; label: string; items: { title: string; keyword: string; changeRate: number }[] }
+    { cid: string; label: string; rankings: { rank: number; keyword: string; ratio: number; delta: number; trend: string }[] }
   >();
   let latest: Date | null = null;
 
   for (const row of rows) {
     const cid = row.cid as number;
     if (!map.has(cid)) {
-      map.set(cid, { cid, label: row.category_label as string, items: [] });
+      map.set(cid, { cid: String(cid), label: row.category_label as string, rankings: [] });
     }
-    map.get(cid)!.items.push({
-      title: row.keyword as string,
+    map.get(cid)!.rankings.push({
+      rank: (row.rank as number) || 0,
       keyword: row.keyword as string,
-      changeRate: row.change_rate as number,
+      ratio: 0,
+      delta: row.change_rate as number,
+      trend: (row.trend as string) || "flat",
     });
     const ts = new Date(row.updated_at as string);
     if (!latest || ts > latest) latest = ts;
@@ -167,28 +169,32 @@ function formatDbRows(rows: Record<string, unknown>[]) {
   return {
     categories: Array.from(map.values()),
     updatedAt: latest?.toISOString() || null,
+    source: "naver_shopping_api",
   };
 }
 
 function formatItems(items: TrendItem[]) {
   const map = new Map<
     number,
-    { cid: number; label: string; items: { title: string; keyword: string; changeRate: number }[] }
+    { cid: string; label: string; rankings: { rank: number; keyword: string; ratio: number; delta: number; trend: string }[] }
   >();
 
   for (const item of items) {
     if (!map.has(item.cid)) {
-      map.set(item.cid, { cid: item.cid, label: item.categoryLabel, items: [] });
+      map.set(item.cid, { cid: String(item.cid), label: item.categoryLabel, rankings: [] });
     }
-    map.get(item.cid)!.items.push({
-      title: item.keyword,
+    map.get(item.cid)!.rankings.push({
+      rank: item.rank,
       keyword: item.keyword,
-      changeRate: item.changeRate,
+      ratio: item.ratio,
+      delta: item.changeRate,
+      trend: item.trend,
     });
   }
 
   return {
     categories: Array.from(map.values()),
     updatedAt: new Date().toISOString(),
+    source: "naver_shopping_api",
   };
 }
