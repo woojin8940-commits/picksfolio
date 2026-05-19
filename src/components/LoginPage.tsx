@@ -58,6 +58,15 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    if (error) {
+      alert(`카카오 로그인 오류: ${decodeURIComponent(error)}`);
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
+
+  useEffect(() => {
     if (!loginTransitioning) return;
     const timeout = setTimeout(() => {
       console.warn('[Auth] Safety timeout: loginTransitioning still true after 8s, force-clearing');
@@ -67,36 +76,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     return () => clearTimeout(timeout);
   }, [loginTransitioning]);
 
-  const handleKakaoLogin = useCallback(async () => {
-    if (!supabase) {
-      alert('서버 연결이 설정되지 않아 카카오 로그인을 사용할 수 없습니다.');
-      return;
-    }
-
+  const handleKakaoLogin = useCallback(() => {
     setKakaoLoading(true);
     setLoginTransitioning(true);
-
-    try {
-      const redirectUrl = `${window.location.origin}/auth-callback`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-          redirectTo: redirectUrl,
-          scopes: 'profile_nickname account_email phone_number',
-        },
-      });
-      if (error) {
-        console.error('Kakao login error:', error);
-        alert('카카오 로그인 중 오류가 발생했습니다.');
-        setKakaoLoading(false);
-        setLoginTransitioning(false);
-      }
-    } catch (err) {
-      console.error('Kakao login error:', err);
-      alert('카카오 로그인 중 오류가 발생했습니다.');
-      setKakaoLoading(false);
-      setLoginTransitioning(false);
-    }
+    window.location.href = '/.netlify/functions/kakao-login-start';
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

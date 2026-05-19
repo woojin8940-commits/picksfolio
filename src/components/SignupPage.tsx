@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { supabase } from '../services/supabase';
 
 interface SignupPageProps {
   initialId: string;
@@ -40,36 +39,13 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
     document.head.appendChild(script);
   }, []);
 
-  const handleKakaoSignup = useCallback(async () => {
-    if (!supabase) {
-      alert('서버 연결이 설정되지 않아 카카오 회원가입을 사용할 수 없습니다.');
-      return;
-    }
+  const handleKakaoSignup = useCallback(() => {
     if (!privacyAgreed) {
       alert('개인정보 수집 및 이용에 동의해 주세요.');
       return;
     }
-
     setKakaoLoading(true);
-    try {
-      const redirectUrl = `${window.location.origin}/auth-callback`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-          redirectTo: redirectUrl,
-          scopes: 'profile_nickname account_email phone_number',
-        },
-      });
-      if (error) {
-        console.error('Kakao signup error:', error);
-        alert('카카오 회원가입 중 오류가 발생했습니다.');
-        setKakaoLoading(false);
-      }
-    } catch (err) {
-      console.error('Kakao signup error:', err);
-      alert('카카오 회원가입 중 오류가 발생했습니다.');
-      setKakaoLoading(false);
-    }
+    window.location.href = '/.netlify/functions/kakao-login-start';
   }, [privacyAgreed]);
 
   const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {

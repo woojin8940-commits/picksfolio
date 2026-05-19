@@ -1,2 +1,2 @@
-# Specific redirects are handled in netlify.toml
-# This file is intentionally empty to avoid catch-all overriding specific rules
+# SPA catch-all is handled in netlify.toml with proper ordering
+# (specific routes like /privacy -> /privacy.html come first, then catch-all)

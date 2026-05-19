@@ -7,9 +7,10 @@ const handler: Handler = async (event) => {
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseServiceKey) {
+    console.error("[auth-signup] Missing env vars:", { url: !!supabaseUrl, key: !!supabaseServiceKey });
     return { statusCode: 500, body: JSON.stringify({ error: "서버 설정 오류" }) };
   }
 

@@ -136,6 +136,8 @@ const App: React.FC = () => {
     setView('auth-callback');
 
     if (!supabase) {
+      console.error('[Auth] Supabase client not initialized');
+      alert('서버 연결이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.');
       navigate('login');
       return;
     }
@@ -145,6 +147,15 @@ const App: React.FC = () => {
 
       const params = new URLSearchParams(window.location.search);
       const code = params.get('code');
+      const errorParam = params.get('error');
+      const errorDescription = params.get('error_description');
+
+      if (errorParam) {
+        console.error('[Auth] OAuth error:', errorParam, errorDescription);
+        alert(`카카오 로그인 오류: ${errorDescription || errorParam}`);
+        navigate('login');
+        return;
+      }
 
       if (code) {
         try {
@@ -152,6 +163,8 @@ const App: React.FC = () => {
           if (!exchangeError && data.session) {
             session = data.session;
             window.history.replaceState({}, '', '/auth-callback');
+          } else if (exchangeError) {
+            console.warn('[Auth] PKCE exchange error:', exchangeError.message);
           }
         } catch (e) {
           console.warn('[Auth] PKCE exchange failed, trying getSession:', e);
@@ -164,13 +177,20 @@ const App: React.FC = () => {
       }
 
       if (!session) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         const { data: { session: retrySession } } = await supabase.auth.getSession();
         session = retrySession;
       }
 
       if (!session) {
-        console.warn('[Auth] No session found in callback, redirecting to login');
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        const { data: { session: finalRetry } } = await supabase.auth.getSession();
+        session = finalRetry;
+      }
+
+      if (!session) {
+        console.warn('[Auth] No session found in callback after retries');
+        alert('로그인 세션을 확인할 수 없습니다. 다시 시도해 주세요.');
         navigate('login');
         return;
       }
@@ -215,9 +235,12 @@ const App: React.FC = () => {
             localStorage.setItem('picks_user_session', userId);
             navigate('admin');
             return;
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            console.warn('[Auth] kakao-profile-setup returned error:', res.status, errData);
           }
         } catch (err) {
-          console.error('[UserPage] kakao-profile-setup fallback failed:', err);
+          console.error('[Auth] kakao-profile-setup request failed:', err);
         }
       }
 
