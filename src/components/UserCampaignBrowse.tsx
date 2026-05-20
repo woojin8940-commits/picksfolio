@@ -57,6 +57,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [applying, setApplying] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [acceptedCampaigns, setAcceptedCampaigns] = useState<Map<string, string>>(new Map());
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
 
@@ -86,8 +87,16 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       try {
         const res = await fetch(`/api/campaign-applications?username=${userName}`);
         const data = await res.json();
-        const ids = new Set<string>((data.applications || []).map((a: any) => a.campaign_id));
+        const apps = data.applications || [];
+        const ids = new Set<string>(apps.map((a: any) => a.campaign_id));
         setAppliedIds(ids);
+        const accepted = new Map<string, string>();
+        apps.forEach((a: any) => {
+          if (a.status === 'accepted') {
+            accepted.set(a.campaign_id, a.applicant_username);
+          }
+        });
+        setAcceptedCampaigns(accepted);
       } catch {}
     };
     if (userName) fetchApplied();
@@ -252,9 +261,30 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
             {/* Apply Section */}
             {isApplied ? (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                <p className="text-sm font-black text-emerald-600">이미 지원한 캠페인입니다</p>
-                <p className="text-xs text-emerald-500 font-medium mt-1">결과를 기다려 주세요</p>
+              <div className="space-y-3">
+                {acceptedCampaigns.has(selectedCampaign.id) ? (
+                  <>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                      <p className="text-sm font-black text-emerald-600">협업이 승인되었습니다!</p>
+                      <p className="text-xs text-emerald-500 font-medium mt-1">채팅으로 브랜드와 소통을 시작해보세요</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const proposalId = `campaign_${selectedCampaign.id}_${userName}`;
+                        window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
+                      }}
+                      className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3.5 rounded-xl font-black text-sm transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                      채팅하기
+                    </button>
+                  </>
+                ) : (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                    <p className="text-sm font-black text-emerald-600">이미 지원한 캠페인입니다</p>
+                    <p className="text-xs text-emerald-500 font-medium mt-1">결과를 기다려 주세요</p>
+                  </div>
+                )}
               </div>
             ) : showApplyForm ? (
               <div className="border border-purple-200 rounded-xl p-5 bg-purple-50/30 space-y-4">
@@ -423,8 +453,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   </div>
                   {isApplied && (
                     <div className="absolute top-2.5 right-2.5">
-                      <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                        지원완료
+                      <span className={`${acceptedCampaigns.has(campaign.id) ? 'bg-purple-500' : 'bg-emerald-500'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
+                        {acceptedCampaigns.has(campaign.id) ? '수락됨' : '지원완료'}
                       </span>
                     </div>
                   )}
