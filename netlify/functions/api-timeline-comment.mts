@@ -68,6 +68,48 @@ export default async (req: Request, context: Context) => {
       await ensureIndex("business", existing.businessUsername);
     }
 
+    // Queue alimtalk notification for the other party
+    try {
+      const authorUsername = (body.authorUsername || "").toLowerCase();
+      const influencerUser = (existing.influencerUsername || "").toLowerCase();
+      const businessUser = (existing.businessUsername || "").toLowerCase();
+      const recipientUsername = authorUsername === influencerUser ? businessUser : influencerUser;
+
+      if (recipientUsername && recipientUsername !== authorUsername) {
+        const notifQueue = getStore({ name: "notification-queue", consistency: "strong" });
+        const queueKey = `pending:${proposalId}_${recipientUsername}`;
+
+        const existingNotif = await notifQueue.get(queueKey, { type: "json" }) as any;
+        const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
+        const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
+        const messagePreview = (body.content || "").slice(0, 50);
+
+        if (existingNotif) {
+          existingNotif.messageCount = (existingNotif.messageCount || 1) + 1;
+          existingNotif.lastMessagePreview = messagePreview;
+          existingNotif.sendAfter = new Date(Date.now() + 60_000).toISOString();
+          await notifQueue.setJSON(queueKey, existingNotif);
+        } else {
+          await notifQueue.setJSON(queueKey, {
+            recipientUsername,
+            recipientType: recipientUsername === businessUser ? "business" : "influencer",
+            proposalId,
+            companyName: existing.companyName || "",
+            proposalTitle: existing.proposalTitle || "협업 프로젝트",
+            senderName: body.authorName || "",
+            messageCount: 1,
+            firstMessagePreview: messagePreview,
+            lastMessagePreview: messagePreview,
+            magicLink,
+            siteOrigin,
+            sendAfter: new Date(Date.now() + 60_000).toISOString(),
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.error("[timeline-comment] Failed to queue notification:", notifErr);
+    }
+
     return Response.json({ success: true, comment });
   }
 
