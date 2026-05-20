@@ -53,17 +53,20 @@ export default async (req: Request) => {
       `;
 
       if (status === "accepted" && appRow) {
+        const rawBizUser = appRow.business_username || "";
+        const businessUsername = rawBizUser.toLowerCase().replace(/^biz\//, "");
+        const creatorUsername = (appRow.applicant_username || "").toLowerCase();
+        const companyName = appRow.brand_name || "";
+        const campaignTitle = appRow.campaign_title || "";
+        const proposalId = `campaign_${appRow.campaign_id}_${creatorUsername}`;
+        const nowISO = new Date().toISOString();
+
+        // 1) Create timeline entry
         const store = getStore("timelines");
-        const proposalId = `campaign_${appRow.campaign_id}_${appRow.applicant_username}`;
         const detailKey = `detail_${proposalId}`;
-        const existing = await store.get(detailKey, { type: "json" });
+        const existingTimeline = await store.get(detailKey, { type: "json" });
 
-        if (!existing) {
-          const businessUsername = appRow.business_username || "";
-          const creatorUsername = appRow.applicant_username || "";
-          const companyName = appRow.brand_name || "";
-          const campaignTitle = appRow.campaign_title || "";
-
+        if (!existingTimeline) {
           const timelineData = {
             proposalId,
             influencerUsername: creatorUsername,
@@ -76,13 +79,13 @@ export default async (req: Request) => {
                 proposalId,
                 authorType: "business",
                 authorName: companyName || businessUsername,
-                authorUsername: businessUsername.toLowerCase(),
+                authorUsername: businessUsername,
                 content: `캠페인 "${campaignTitle}" 협업이 시작되었습니다. 메시지를 보내 소통을 시작해보세요!`,
-                createdAt: new Date().toISOString(),
-                readBy: [businessUsername.toLowerCase()],
+                createdAt: nowISO,
+                readBy: [businessUsername],
               },
             ],
-            createdAt: new Date().toISOString(),
+            createdAt: nowISO,
           };
 
           await store.setJSON(detailKey, timelineData);
@@ -98,7 +101,7 @@ export default async (req: Request) => {
                 businessUsername,
                 companyName,
                 proposalTitle: campaignTitle,
-                createdAt: timelineData.createdAt,
+                createdAt: nowISO,
               });
               await store.setJSON(indexKey, indexData);
             }
@@ -106,6 +109,83 @@ export default async (req: Request) => {
 
           if (creatorUsername) await ensureIndex("influencer", creatorUsername);
           if (businessUsername) await ensureIndex("business", businessUsername);
+        }
+
+        // 2) Create proposal entries so business inbox and influencer proposals show this collaboration
+        const campaignRows = await db.sql`SELECT * FROM campaigns WHERE id = ${appRow.campaign_id}`;
+        const campaign = (campaignRows as any[])?.[0];
+
+        const proposalEntry = {
+          id: proposalId,
+          influencer_username: creatorUsername,
+          category: campaign?.type === "group_buy" ? "커머스" : "광고",
+          company_name: companyName,
+          contact_person: "",
+          contact_email: "",
+          contact_phone: "",
+          title: campaignTitle,
+          content: campaign?.description || "",
+          start_date: campaign?.start_date || "",
+          end_date: campaign?.end_date || "",
+          fee: parseInt(campaign?.reward_amount) || 0,
+          revenue_share: 0,
+          reference_links: [],
+          attachments: [],
+          business_username: businessUsername,
+          status: "accepted",
+          created_at: nowISO,
+          updated_at: nowISO,
+          createdAt: nowISO,
+          updatedAt: nowISO,
+        };
+
+        try {
+          const proposalStore = getStore("proposals");
+          const infKey = `proposals_${creatorUsername}`;
+          const infExisting = ((await proposalStore.get(infKey, { type: "json" })) as any[]) || [];
+          if (!infExisting.some((p: any) => p.id === proposalId)) {
+            infExisting.push(proposalEntry);
+            await proposalStore.setJSON(infKey, infExisting);
+          }
+        } catch (e) {
+          console.error("[campaign-applicants] Failed to create influencer proposal entry:", e);
+        }
+
+        try {
+          const bizStore = getStore("business-proposals");
+          const bizKey = `biz_proposals_${businessUsername}`;
+          const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
+          if (!bizExisting.some((p: any) => p.id === proposalId)) {
+            bizExisting.push(proposalEntry);
+            await bizStore.setJSON(bizKey, bizExisting);
+          }
+        } catch (e) {
+          console.error("[campaign-applicants] Failed to create business proposal entry:", e);
+        }
+
+        // 3) Send alimtalk notification to the accepted creator
+        try {
+          const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
+          const templateId = Netlify.env.get("SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID") || "";
+          const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
+
+          await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: creatorUsername,
+              message: `[픽스폴리오] 캠페인 지원 수락\n\n${companyName}의 "${campaignTitle}" 캠페인 지원이 수락되었습니다!\n\n아래 링크에서 타임라인을 확인하세요.\n${magicLink}`,
+              templateId,
+              variables: {
+                "#{고객명}": creatorUsername,
+                "#{업체명}": companyName,
+                "#{프로젝트명}": campaignTitle,
+                "#{링크연결}": magicLink,
+              },
+            }),
+          });
+        } catch (notifErr) {
+          console.error("[campaign-applicants] Failed to send acceptance alimtalk:", notifErr);
         }
       }
 
