@@ -34,10 +34,10 @@ const REWARD_FILTERS = [
 ];
 
 const CATEGORIES: Record<string, string> = {
-  ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
-  fashion: '패션', beauty: '뷰티', food: '맛집/음식', travel: '여행',
-  lifestyle: '라이프스타일', tech: '테크/IT', fitness: '운동/건강',
-  baby: '유아/키즈', pet: '반려동물',
+  beauty: '뷰티', fashion: '패션', food: '식품', lifestyle: '라이프스타일',
+  travel: '여행', health: '건강', tech: 'IT/테크', parenting: '육아',
+  pet: '반려동물', interior: '인테리어', sports: '스포츠',
+  entertainment: '엔터테인먼트', education: '교육', other: '기타',
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -161,7 +161,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
           {selectedCampaign.thumbnail_url && (
-            <div className="w-full h-52 md:h-72 bg-slate-100 overflow-hidden">
+            <div className="w-full aspect-square max-w-[400px] mx-auto bg-slate-100 overflow-hidden">
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             </div>
           )}
@@ -396,7 +396,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
               >
                 {/* Thumbnail */}
-                <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
+                <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img
                       src={campaign.thumbnail_url}

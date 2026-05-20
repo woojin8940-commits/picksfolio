@@ -50,8 +50,19 @@ const CAMPAIGN_TYPES = [
 
 const CATEGORIES = [
   { value: '', label: '카테고리 선택' },
-  { value: 'ad_collab', label: '광고 협업' },
-  { value: 'group_buy', label: '공동구매' },
+  { value: 'beauty', label: '뷰티' },
+  { value: 'fashion', label: '패션' },
+  { value: 'food', label: '식품' },
+  { value: 'lifestyle', label: '라이프스타일' },
+  { value: 'travel', label: '여행' },
+  { value: 'health', label: '건강' },
+  { value: 'tech', label: 'IT/테크' },
+  { value: 'parenting', label: '육아' },
+  { value: 'pet', label: '반려동물' },
+  { value: 'interior', label: '인테리어' },
+  { value: 'sports', label: '스포츠' },
+  { value: 'entertainment', label: '엔터테인먼트' },
+  { value: 'education', label: '교육' },
   { value: 'other', label: '기타' },
 ];
 
@@ -121,6 +132,31 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     fetchApplicants(campaign.id);
   };
 
+  const resizeImage = (file: File, size: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        const min = Math.min(img.width, img.height);
+        const sx = (img.width - min) / 2;
+        const sy = (img.height - min) / 2;
+        ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
+        canvas.toBlob(
+          blob => blob ? resolve(blob) : reject(new Error('Failed to create blob')),
+          'image/jpeg',
+          0.9
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Failed to load image')); };
+      img.src = objectUrl;
+    });
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -129,12 +165,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       return;
     }
     setUploadingImage(true);
-    const previewUrl = URL.createObjectURL(file);
-    setThumbnailPreview(previewUrl);
 
     try {
+      const resized = await resizeImage(file, 400);
+      const previewUrl = URL.createObjectURL(resized);
+      setThumbnailPreview(previewUrl);
+
       const fd = new FormData();
-      fd.append('image', file);
+      fd.append('image', new File([resized], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
       fd.append('username', businessUsername);
       const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
       const data = await res.json();
@@ -231,8 +269,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const handleDelete = async (id: string) => {
     if (!confirm('정말 삭제하시겠습니까?')) return;
     try {
-      await fetch(`/api/campaigns?id=${id}`, { method: 'DELETE' });
-      fetchCampaigns();
+      const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || '삭제에 실패했습니다.');
+        return;
+      }
+      await fetchCampaigns();
       if (selectedCampaign?.id === id) setSelectedCampaign(null);
     } catch {
       alert('삭제에 실패했습니다.');
@@ -305,7 +348,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   const filteredCampaigns = activeTypeFilter
-    ? campaigns.filter(c => c.category === activeTypeFilter)
+    ? campaigns.filter(c => c.type === activeTypeFilter)
     : campaigns;
 
   // --- Campaign Detail View ---
@@ -319,7 +362,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm mb-6">
           {selectedCampaign.thumbnail_url && (
-            <div className="w-full h-48 md:h-64 bg-slate-100 overflow-hidden">
+            <div className="w-full aspect-square max-w-[400px] mx-auto bg-slate-100 overflow-hidden">
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             </div>
           )}
@@ -477,7 +520,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <label className="block text-xs font-black text-slate-700 mb-2">캠페인 대표 이미지</label>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
               {(thumbnailPreview || formData.thumbnail_url) ? (
-                <div className="relative w-full h-48 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
+                <div className="relative w-full aspect-square max-w-[400px] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
                   <img
                     src={thumbnailPreview || formData.thumbnail_url}
                     alt="캠페인 썸네일"
@@ -512,7 +555,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full h-40 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-50/50 transition-all group"
+                  className="w-full aspect-square max-w-[400px] border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-50/50 transition-all group"
                 >
                   <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
                     <svg className="w-6 h-6 text-slate-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -520,7 +563,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     </svg>
                   </div>
                   <p className="text-xs font-bold text-slate-400 group-hover:text-blue-500">클릭하여 이미지 업로드</p>
-                  <p className="text-[10px] text-slate-300 mt-1">JPG, PNG (최대 5MB)</p>
+                  <p className="text-[10px] text-slate-300 mt-1">JPG, PNG (최대 5MB · 400×400 자동 리사이즈)</p>
                 </button>
               )}
             </div>
@@ -749,7 +792,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 onClick={() => handleSelectCampaign(campaign)}
               >
                 {/* Thumbnail */}
-                <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
+                <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   ) : (
