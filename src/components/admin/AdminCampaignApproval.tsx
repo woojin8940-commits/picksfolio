@@ -87,7 +87,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
   };
 
   const categoryLabel = (c: string) => {
-    const map: Record<string, string> = { fashion: '패션', beauty: '뷰티', food: '맛집/음식', travel: '여행', lifestyle: '라이프스타일', tech: '테크/IT', fitness: '운동/건강', pet: '반려동물', other: '기타' };
+    const map: Record<string, string> = { beauty: '뷰티', fashion: '패션', food: '식품', travel: '여행', lifestyle: '라이프스타일', health: '건강', tech: 'IT/테크', parenting: '육아', pet: '반려동물', interior: '인테리어', sports: '스포츠', entertainment: '엔터테인먼트', education: '교육', other: '기타' };
     return map[c] || c;
   };
 

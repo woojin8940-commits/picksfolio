@@ -50,8 +50,19 @@ const CAMPAIGN_TYPES = [
 
 const CATEGORIES = [
   { value: '', label: '카테고리 선택' },
-  { value: 'ad_collab', label: '광고 협업' },
-  { value: 'group_buy', label: '공동구매' },
+  { value: 'beauty', label: '뷰티' },
+  { value: 'fashion', label: '패션' },
+  { value: 'food', label: '식품' },
+  { value: 'lifestyle', label: '라이프스타일' },
+  { value: 'travel', label: '여행' },
+  { value: 'health', label: '건강' },
+  { value: 'tech', label: 'IT/테크' },
+  { value: 'parenting', label: '육아' },
+  { value: 'pet', label: '반려동물' },
+  { value: 'interior', label: '인테리어' },
+  { value: 'sports', label: '스포츠' },
+  { value: 'entertainment', label: '엔터테인먼트' },
+  { value: 'education', label: '교육' },
   { value: 'other', label: '기타' },
 ];
 
