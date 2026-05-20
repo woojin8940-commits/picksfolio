@@ -17,6 +17,7 @@ export default async (req: Request, context: Context) => {
       const proposalStore = getStore("proposals");
       const { blobs } = await proposalStore.list();
       const rebuilt: any[] = [];
+      const seenIds = new Set<string>();
 
       for (const blob of blobs) {
         if (!blob.key.startsWith("proposals_")) continue;
@@ -24,10 +25,42 @@ export default async (req: Request, context: Context) => {
         if (!Array.isArray(items)) continue;
         for (const item of items) {
           const itemBiz = (item.business_username || "").toLowerCase().replace(/^biz\//, "");
-          if (itemBiz === username) {
+          if (itemBiz === username && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
             rebuilt.push(item);
           }
         }
+      }
+
+      // Also check timeline detail blobs for campaign-based collaborations
+      try {
+        const timelineStore = getStore("timelines");
+        const { blobs: timelineBlobs } = await timelineStore.list({ prefix: "detail_campaign_" });
+        for (const tBlob of timelineBlobs) {
+          const detail = (await timelineStore.get(tBlob.key, { type: "json" })) as any;
+          if (!detail || !detail.proposalId) continue;
+          const bizUser = (detail.businessUsername || "").toLowerCase().replace(/^biz\//, "");
+          if (bizUser !== username) continue;
+          if (seenIds.has(detail.proposalId)) continue;
+          seenIds.add(detail.proposalId);
+          rebuilt.push({
+            id: detail.proposalId,
+            influencer_username: detail.influencerUsername || "",
+            category: "광고",
+            company_name: detail.companyName || "",
+            title: detail.proposalTitle || "",
+            content: "",
+            start_date: "",
+            end_date: "",
+            fee: 0,
+            business_username: bizUser,
+            status: "accepted",
+            created_at: detail.createdAt || new Date().toISOString(),
+            createdAt: detail.createdAt || new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.error("[business-proposals] Failed to scan timeline blobs:", e);
       }
 
       if (rebuilt.length > 0) {

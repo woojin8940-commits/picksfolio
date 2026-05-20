@@ -20,6 +20,7 @@ export default async (req: Request, context: Context) => {
       const proposalStore = getStore("proposals");
       const { blobs } = await proposalStore.list();
       const rebuilt: any[] = [];
+      const seenProposalIds = new Set<string>();
 
       for (const blob of blobs) {
         if (!blob.key.startsWith("proposals_")) continue;
@@ -38,6 +39,9 @@ export default async (req: Request, context: Context) => {
           if (!isMatch) continue;
 
           const proposalId = item.id;
+          if (seenProposalIds.has(proposalId)) continue;
+          seenProposalIds.add(proposalId);
+
           const detailKey = `detail_${proposalId}`;
           let detail = await store.get(detailKey, { type: "json" });
 
@@ -95,6 +99,36 @@ export default async (req: Request, context: Context) => {
             createdAt: (detail as any)?.createdAt || item.createdAt,
           });
         }
+      }
+
+      // Also scan timeline detail blobs for campaign-based timelines that may not have proposal entries
+      try {
+        const { blobs: timelineBlobs } = await store.list({ prefix: "detail_" });
+        for (const tBlob of timelineBlobs) {
+          const detail = (await store.get(tBlob.key, { type: "json" })) as any;
+          if (!detail || !detail.proposalId) continue;
+          if (seenProposalIds.has(detail.proposalId)) continue;
+
+          const bizUser = (detail.businessUsername || "").toLowerCase().replace(/^biz\//, "");
+          const infUser = (detail.influencerUsername || "").toLowerCase();
+
+          const isMatch =
+            (userType === "business" && bizUser === username) ||
+            (userType === "influencer" && infUser === username);
+          if (!isMatch) continue;
+
+          seenProposalIds.add(detail.proposalId);
+          rebuilt.push({
+            proposalId: detail.proposalId,
+            influencerUsername: infUser,
+            businessUsername: bizUser,
+            companyName: detail.companyName || "",
+            proposalTitle: detail.proposalTitle || "",
+            createdAt: detail.createdAt || new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.error("[timeline-list] Failed to scan timeline detail blobs:", e);
       }
 
       if (rebuilt.length > 0) {
