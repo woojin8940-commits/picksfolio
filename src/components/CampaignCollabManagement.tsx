@@ -298,8 +298,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     if (!endDate) return null;
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (diff < 0) return null;
-    if (diff === 0) return '오늘 마감';
-    return `${diff}일 남음`;
+    if (diff === 0) return 'D-Day';
+    return `D-${diff}`;
   };
 
   const filteredCampaigns = activeTypeFilter
@@ -369,7 +369,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               )}
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-[9px] text-slate-400 font-black uppercase">보상</p>
-                <p className="text-sm font-black text-slate-900">{rewardLabel(selectedCampaign.reward_type)} {selectedCampaign.reward_amount && `/ ${selectedCampaign.reward_amount}`}</p>
+                <p className="text-sm font-black text-slate-900">{rewardLabel(selectedCampaign.reward_type)} {selectedCampaign.reward_amount && `/ ${formatNumberWithCommas(selectedCampaign.reward_amount)}`}</p>
               </div>
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-[9px] text-slate-400 font-black uppercase">지원자</p>
@@ -727,67 +727,76 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           </button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredCampaigns.map(campaign => (
-            <div
-              key={campaign.id}
-              className="bg-white rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all cursor-pointer group overflow-hidden"
-              onClick={() => handleSelectCampaign(campaign)}
-            >
-              <div className="flex">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          {filteredCampaigns.map(campaign => {
+            const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
+            return (
+              <div
+                key={campaign.id}
+                className="bg-white rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
+                onClick={() => handleSelectCampaign(campaign)}
+              >
                 {/* Thumbnail */}
-                <div className="w-24 h-24 md:w-36 md:h-36 flex-shrink-0 bg-slate-100 overflow-hidden">
+                <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-                      <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-slate-50">
+                      <svg className="w-10 h-10 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                     </div>
                   )}
+                  {/* Badges overlay */}
+                  <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                    {statusBadge(campaign.status)}
+                    {days && (
+                      <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
+                        {days}
+                      </span>
+                    )}
+                  </div>
+                  {/* Edit/Delete overlay */}
+                  <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => handleEdit(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-white rounded-lg transition-colors shadow-sm" title="수정">
+                      <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                    <button onClick={() => handleDelete(campaign.id)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-red-50 rounded-lg transition-colors shadow-sm" title="삭제">
+                      <svg className="w-3.5 h-3.5 text-slate-500 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 min-w-0 p-4 md:p-5 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      {statusBadge(campaign.status)}
-                      <span className="text-[10px] text-slate-400 font-bold">{typeLabel(campaign.type)}</span>
-                      {campaign.category && <span className="text-[10px] text-slate-300 font-bold">{categoryLabel(campaign.category)}</span>}
-                    </div>
-                    <h3 className="font-black text-sm md:text-base text-slate-900 mb-0.5 line-clamp-1 group-hover:text-blue-600 transition-colors">{campaign.title}</h3>
-                    {campaign.brand_name && <p className="text-xs text-slate-400 font-bold">{campaign.brand_name}</p>}
+                <div className="p-3.5 md:p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    {campaign.brand_name && (
+                      <span className="text-[11px] text-slate-400 font-bold">{campaign.brand_name}</span>
+                    )}
+                    {campaign.category && (
+                      <>
+                        <span className="text-slate-200">·</span>
+                        <span className="text-[11px] text-slate-400 font-medium">{categoryLabel(campaign.category)}</span>
+                      </>
+                    )}
                   </div>
-
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center gap-3">
-                      {campaign.reward_amount && (
-                        <span className="text-sm font-black text-blue-600">{campaign.reward_amount}</span>
-                      )}
-                      <span className="text-[11px] text-slate-400 font-bold">
-                        {campaign.max_applicants > 0 ? `${campaign.max_applicants}명 모집` : '인원 무제한'}
-                        {campaign.application_count > 0 && ` · ${campaign.application_count}명 신청중`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {campaign.end_date && daysRemaining(campaign.end_date) && (
-                        <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">{daysRemaining(campaign.end_date)}</span>
-                      )}
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleEdit(campaign)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors" title="수정">
-                          <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </button>
-                        <button onClick={() => handleDelete(campaign.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="삭제">
-                          <svg className="w-3.5 h-3.5 text-slate-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      </div>
-                    </div>
+                  <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1.5">
+                    {campaign.title}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    {campaign.reward_amount ? (
+                      <span className="text-sm font-black text-blue-600">{formatNumberWithCommas(campaign.reward_amount)}</span>
+                    ) : <span />}
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {campaign.max_applicants > 0
+                        ? `${campaign.application_count}/${campaign.max_applicants}명`
+                        : `${campaign.application_count}명 신청중`}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </main>
