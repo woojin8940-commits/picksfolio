@@ -499,6 +499,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <AITrendAnalysis userName={userName} embedded />
             </section>
 
+            {/* Campaign Collaboration CTA */}
+            <button
+              onClick={onNavigateCampaigns}
+              className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3"
+            >
+              <span className="text-xl">🤝</span>
+              캠페인 협업하기
+              <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+            </button>
+
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
               <QuickCard icon="💼" label="포트폴리오" onClick={onNavigatePortfolio} />

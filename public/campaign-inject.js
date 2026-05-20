@@ -509,69 +509,12 @@
   }
 
   function findDashboardGrid() {
-    var grids = document.querySelectorAll("div");
-    for (var i = 0; i < grids.length; i++) {
-      var cls = grids[i].className || "";
-      if (cls.indexOf("grid") >= 0 && cls.indexOf("grid-cols-1") >= 0 && cls.indexOf("md:grid-cols-2") >= 0 && cls.indexOf("gap-4") >= 0) {
-        return grids[i];
-      }
-    }
     return null;
   }
 
-  async function loadDashboardWidget() {
-    var widget = document.getElementById("ciDashWidget");
-    if (!widget) return;
+  async function loadDashboardWidget() {}
 
-    var listEl = widget.querySelector(".ci-widget-list");
-    if (!listEl) return;
-
-    try {
-      var camps = await fetchCampaigns("", "");
-      var top = camps.slice(0, 3);
-
-      if (top.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:13px">현재 진행 중인 캠페인이 없습니다.</div>';
-        return;
-      }
-
-      listEl.innerHTML = top.map(function (c) { return renderCampaignCard(c, true); }).join("");
-
-      listEl.querySelectorAll(".ci-card").forEach(function (card) {
-        card.onclick = function () {
-          campaignData = camps;
-          openCampaignDetail(card.getAttribute("data-id"));
-        };
-      });
-    } catch (e) {
-      listEl.innerHTML = '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:13px">캠페인 정보를 불러오지 못했습니다.</div>';
-    }
-  }
-
-  function injectDashboardWidget() {
-    if (document.getElementById("ciDashWidget")) return;
-    if (!getSession()) return;
-
-    var dashGrid = findDashboardGrid();
-    if (!dashGrid) return;
-
-    var widget = document.createElement("div");
-    widget.id = "ciDashWidget";
-    widget.className = "ci-dash-widget";
-    widget.innerHTML = '<div class="ci-widget-header">'
-      + '<div style="display:flex;align-items:center;gap:8px">'
-      + '<span style="font-size:18px">🤝</span>'
-      + '<span style="font-size:14px;font-weight:800;color:#1e293b">캠페인 협업</span>'
-      + "</div>"
-      + '<button class="ci-widget-more" id="ciWidgetMore">전체보기 →</button>'
-      + "</div>"
-      + '<div class="ci-widget-list"><div style="text-align:center;padding:16px;color:#94a3b8;font-size:13px">불러오는 중...</div></div>';
-
-    dashGrid.parentNode.insertBefore(widget, dashGrid);
-
-    widget.querySelector("#ciWidgetMore").onclick = function () { openCampaignPanel(); };
-    loadDashboardWidget();
-  }
+  function injectDashboardWidget() {}
 
   function processDOM() {
     var navEls = document.querySelectorAll("nav");
