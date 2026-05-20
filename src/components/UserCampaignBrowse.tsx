@@ -385,7 +385,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <p className="text-sm text-slate-400 font-medium">새로운 캠페인이 등록되면 여기에 표시됩니다</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
             const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
@@ -393,10 +393,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div
                 key={campaign.id}
                 onClick={() => setSelectedCampaign(campaign)}
-                className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
+                className="bg-white rounded-xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
               >
                 {/* Thumbnail */}
-                <div className="w-full h-[200px] bg-slate-50 overflow-hidden relative">
+                <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img
                       src={campaign.thumbnail_url}
@@ -431,26 +431,26 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 </div>
 
                 {/* Content */}
-                <div className="p-3.5 md:p-4">
-                  <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="p-2.5 md:p-3">
+                  <div className="flex items-center gap-1.5 mb-1">
                     {campaign.brand_name && (
-                      <span className="text-[11px] text-slate-400 font-bold">{campaign.brand_name}</span>
+                      <span className="text-[10px] text-slate-400 font-bold truncate">{campaign.brand_name}</span>
                     )}
                     {campaign.category && (
                       <>
                         <span className="text-slate-200">·</span>
-                        <span className="text-[11px] text-slate-400 font-medium">{CATEGORIES[campaign.category] || campaign.category}</span>
+                        <span className="text-[10px] text-slate-400 font-medium truncate">{CATEGORIES[campaign.category] || campaign.category}</span>
                       </>
                     )}
                   </div>
-                  <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-purple-600 transition-colors mb-1.5">
+                  <h3 className="font-black text-xs md:text-sm text-slate-900 line-clamp-1 group-hover:text-purple-600 transition-colors mb-1">
                     {campaign.title}
                   </h3>
                   <div className="flex items-center justify-between">
                     {campaign.reward_amount ? (
-                      <span className="text-sm font-black text-rose-500">{formatKoreanWon(campaign.reward_amount)}</span>
+                      <span className="text-xs font-black text-rose-500">{formatKoreanWon(campaign.reward_amount)}</span>
                     ) : <span />}
-                    <span className="text-[11px] text-slate-400 font-bold">
+                    <span className="text-[10px] text-slate-400 font-bold">
                       {campaign.max_applicants > 0
                         ? `${campaign.application_count}/${campaign.max_applicants}명`
                         : `${campaign.application_count}명 지원중`}
