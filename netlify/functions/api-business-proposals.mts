@@ -12,7 +12,7 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const data = await store.get(key, { type: "json" });
-    return Response.json(data || []);
+    return Response.json({ proposals: data || [] });
   }
 
   if (req.method === "POST") {

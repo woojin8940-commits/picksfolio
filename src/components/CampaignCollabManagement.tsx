@@ -472,6 +472,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         </button>
                       </div>
                     )}
+                    {app.status === 'accepted' && selectedCampaign && (
+                      <button
+                        onClick={() => {
+                          const proposalId = `campaign_${selectedCampaign.id}_${app.applicant_username}`;
+                          window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
+                        }}
+                        className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-black hover:bg-purple-500 transition-colors ml-3 flex-shrink-0 flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        채팅하기
+                      </button>
+                    )}
                   </div>
                   {app.message && <p className="text-xs text-slate-600 font-medium mb-3 whitespace-pre-wrap">{app.message}</p>}
 
