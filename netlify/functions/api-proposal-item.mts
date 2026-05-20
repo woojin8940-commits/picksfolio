@@ -36,6 +36,20 @@ export default async (req: Request, context: Context) => {
       await bizStore.setJSON(bizKey, bizExisting);
     }
 
+    // Update SQL database
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+      await db.sql`
+        UPDATE proposals SET
+          status = ${body.status || updatedProposal.status || 'pending'},
+          updated_at = NOW()
+        WHERE id = ${proposalId}
+      `;
+    } catch (dbErr) {
+      console.error("[api-proposal-item] Failed to update SQL:", dbErr);
+    }
+
     if (body.status === "accepted") {
       try {
         const timelineStore = getStore("timelines");
@@ -46,6 +60,18 @@ export default async (req: Request, context: Context) => {
           const influencerUsername = username;
           const companyName = updatedProposal.company_name || "";
           const proposalTitle = updatedProposal.title || "";
+          const nowISO = new Date().toISOString();
+
+          const systemComment = {
+            id: `tc_${Date.now()}_system`,
+            proposalId,
+            authorType: "business",
+            authorName: companyName || bizUsername,
+            authorUsername: bizUsername,
+            content: `"${proposalTitle}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
+            createdAt: nowISO,
+            readBy: [influencerUsername],
+          };
 
           const timelineData = {
             proposalId,
@@ -53,19 +79,8 @@ export default async (req: Request, context: Context) => {
             businessUsername: bizUsername,
             companyName,
             proposalTitle,
-            comments: [
-              {
-                id: `tc_${Date.now()}_system`,
-                proposalId,
-                authorType: "business",
-                authorName: companyName || bizUsername,
-                authorUsername: bizUsername,
-                content: `"${proposalTitle}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
-                createdAt: new Date().toISOString(),
-                readBy: [influencerUsername],
-              },
-            ],
-            createdAt: new Date().toISOString(),
+            comments: [systemComment],
+            createdAt: nowISO,
           };
 
           await timelineStore.setJSON(detailKey, timelineData);
@@ -88,6 +103,24 @@ export default async (req: Request, context: Context) => {
 
           if (influencerUsername) await ensureIndex("influencer", influencerUsername);
           if (bizUsername) await ensureIndex("business", bizUsername);
+
+          // Persist timeline to SQL
+          try {
+            const { getDatabase } = await import("@netlify/database");
+            const db = getDatabase();
+            await db.sql`
+              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
+              VALUES (${proposalId}, ${influencerUsername}, ${bizUsername}, ${companyName}, ${proposalTitle}, NOW())
+              ON CONFLICT (proposal_id) DO NOTHING
+            `;
+            await db.sql`
+              INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
+              VALUES (${systemComment.id}, ${proposalId}, ${systemComment.authorType}, ${systemComment.authorName}, ${systemComment.authorUsername}, ${systemComment.content}, ${[influencerUsername]}, NOW())
+              ON CONFLICT (id) DO NOTHING
+            `;
+          } catch (dbErr) {
+            console.error("[api-proposal-item] Failed to persist timeline to SQL:", dbErr);
+          }
         }
       } catch (e) {
         console.error("Failed to create timeline on accept:", e);
@@ -144,6 +177,15 @@ export default async (req: Request, context: Context) => {
         const bizFiltered = bizExisting.filter((p: any) => p.id !== proposalId);
         await bizStore.setJSON(bizKey, bizFiltered);
       }
+    }
+
+    // Delete from SQL
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+      await db.sql`DELETE FROM proposals WHERE id = ${proposalId}`;
+    } catch (dbErr) {
+      console.error("[api-proposal-item] Failed to delete from SQL:", dbErr);
     }
 
     return Response.json({ success: true });

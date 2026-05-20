@@ -68,6 +68,28 @@ export default async (req: Request, context: Context) => {
       await ensureIndex("business", existing.businessUsername);
     }
 
+    // Persist to SQL database
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+
+      // Ensure timelines row exists
+      await db.sql`
+        INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
+        VALUES (${proposalId}, ${(existing.influencerUsername || "").toLowerCase()}, ${(existing.businessUsername || "").toLowerCase()}, ${existing.companyName || ""}, ${existing.proposalTitle || ""}, ${existing.createdAt || new Date().toISOString()})
+        ON CONFLICT (proposal_id) DO NOTHING
+      `;
+
+      // Insert message
+      await db.sql`
+        INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, attachments, read_by, created_at)
+        VALUES (${comment.id}, ${proposalId}, ${comment.authorType}, ${comment.authorName}, ${comment.authorUsername}, ${comment.content}, ${body.attachments ? JSON.stringify(body.attachments) : null}, ${comment.readBy}, ${comment.createdAt})
+        ON CONFLICT (id) DO NOTHING
+      `;
+    } catch (dbErr) {
+      console.error("[timeline-comment] Failed to persist to SQL:", dbErr);
+    }
+
     // Queue alimtalk notification for the other party
     try {
       const authorUsername = (body.authorUsername || "").toLowerCase();

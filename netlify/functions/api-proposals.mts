@@ -36,6 +36,38 @@ export default async (req: Request, context: Context) => {
       await bizStore.setJSON(bizKey, bizExisting);
     }
 
+    // Persist to SQL database
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+      await db.sql`
+        INSERT INTO proposals (id, username, influencer_username, business_username, title, company_name, description, content, category, fee, start_date, end_date, status, contact_email, contact_person, contact_phone, created_at, updated_at)
+        VALUES (
+          ${proposal.id},
+          ${username},
+          ${username},
+          ${bizUsername},
+          ${body.title || ""},
+          ${body.company_name || ""},
+          ${body.content || ""},
+          ${body.content || ""},
+          ${body.category || "광고"},
+          ${parseInt(body.fee) || 0},
+          ${body.start_date || null},
+          ${body.end_date || null},
+          ${"pending"},
+          ${body.contact_email || ""},
+          ${body.contact_person || ""},
+          ${body.contact_phone || ""},
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (id) DO NOTHING
+      `;
+    } catch (dbErr) {
+      console.error("[api-proposals] Failed to persist proposal to SQL:", dbErr);
+    }
+
     // Send alimtalk notification to the influencer about the new proposal
     try {
       const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";

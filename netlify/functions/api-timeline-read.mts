@@ -32,6 +32,20 @@ export default async (req: Request, context: Context) => {
 
     if (updated) {
       await store.setJSON(key, data);
+
+      // Update SQL read_by as well
+      try {
+        const { getDatabase } = await import("@netlify/database");
+        const db = getDatabase();
+        await db.sql`
+          UPDATE timeline_messages
+          SET read_by = array_append(read_by, ${username})
+          WHERE proposal_id = ${proposalId}
+          AND NOT (${username} = ANY(read_by))
+        `;
+      } catch (dbErr) {
+        console.error("[timeline-read] Failed to update SQL read_by:", dbErr);
+      }
     }
 
     return Response.json({ success: true });
