@@ -28,14 +28,15 @@
   }
 
   function typeLabel(t) {
-    return { ad_collab: "광고 협업", commerce: "커머스", product_provision: "제품제공" }[t] || t;
+    return { collaboration: "협업", advertisement: "광고/협찬", review: "리뷰", event: "이벤트" }[t] || t;
   }
 
   function typeBadgeColor(t) {
     return {
-      ad_collab: "background:rgba(124,58,237,.2);color:#a78bfa",
-      commerce: "background:rgba(59,130,246,.2);color:#60a5fa",
-      product_provision: "background:rgba(16,185,129,.2);color:#34d399"
+      collaboration: "background:rgba(124,58,237,.2);color:#7c3aed",
+      advertisement: "background:rgba(239,68,68,.12);color:#ef4444",
+      review: "background:rgba(59,130,246,.2);color:#3b82f6",
+      event: "background:rgba(16,185,129,.2);color:#10b981"
     }[t] || "background:rgba(100,116,139,.2);color:#94a3b8";
   }
 
@@ -82,38 +83,67 @@
   }
 
   function renderCampaignCard(c, compact) {
-    var reward = c.reward_amount
-      ? '<span style="font-size:13px;color:#a78bfa;font-weight:600">' + rewardIcon(c.reward_type) + " " + esc(c.reward_amount) + "</span>"
+    var rewardText = c.reward_amount
+      ? esc(c.reward_amount) + ' <span style="font-size:12px;color:#94a3b8;font-weight:500">' + ({fixed:"리워드",product:"제품제공",revenue_share:"수익배분",mixed:"복합"}[c.reward_type]||"리워드") + '</span>'
       : "";
-    var applicants = c.max_applicants > 0
-      ? (c.application_count || 0) + "/" + c.max_applicants + "명"
-      : (c.application_count || 0) + "명 지원";
-    var endDate = c.end_date ? " \xB7 ~" + formatDate(c.end_date) : "";
+    var applicantInfo = c.max_applicants > 0
+      ? (c.max_applicants + "명 모집 | " + (c.application_count || 0) + "명 신청함")
+      : ((c.application_count || 0) + "명 신청함");
+    var endDate = c.end_date ? formatDate(c.end_date) + " 마감" : "";
+    var daysLeft = "";
+    if (c.end_date) {
+      var diff = Math.ceil((new Date(c.end_date).getTime() - Date.now()) / (1000*60*60*24));
+      if (diff === 0) daysLeft = "오늘 마감";
+      else if (diff > 0 && diff <= 7) daysLeft = "D-" + diff;
+    }
+
+    var thumbHtml;
+    if (c.thumbnail_url) {
+      thumbHtml = '<div class="ci-card-thumb"><img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover" /></div>';
+    } else {
+      thumbHtml = '<div class="ci-card-thumb ci-card-thumb-empty"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.5"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>';
+    }
 
     if (compact) {
       return '<div class="ci-card ci-card-compact" data-id="' + esc(c.id) + '">'
-        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
-        + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + "</span>"
-        + (c.brand_name ? '<span style="font-size:12px;color:#a78bfa;font-weight:600">' + esc(c.brand_name) + "</span>" : "")
-        + "</div>"
-        + '<div style="font-size:14px;font-weight:700;line-height:1.4;margin-bottom:6px;color:#1e293b">' + esc(c.title) + "</div>"
-        + '<div style="display:flex;align-items:center;justify-content:space-between">'
-        + reward
-        + '<span style="font-size:11px;color:#94a3b8">' + applicants + endDate + "</span>"
-        + "</div></div>";
+        + '<div style="display:flex;gap:12px">'
+        + '<div class="ci-card-thumb-sm">' + (c.thumbnail_url ? '<img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px" />' : '<div style="width:100%;height:100%;background:linear-gradient(135deg,#f3e8ff,#fce7f3);border-radius:10px;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.5"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>') + '</div>'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+        + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + '</span>'
+        + (c.brand_name ? '<span style="font-size:11px;color:#64748b;font-weight:600">' + esc(c.brand_name) + '</span>' : '')
+        + '</div>'
+        + '<div style="font-size:13px;font-weight:700;line-height:1.4;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c.title) + '</div>'
+        + (rewardText ? '<div style="font-size:14px;font-weight:800;color:#ef4444;margin-top:3px">' + rewardText + '</div>' : '')
+        + '</div>'
+        + '</div>'
+        + '</div>';
     }
 
     return '<div class="ci-card" data-id="' + esc(c.id) + '">'
-      + '<div style="font-size:15px;font-weight:600;line-height:1.4;margin-bottom:10px">' + esc(c.title) + "</div>"
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
-      + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + "</span>"
-      + (c.brand_name ? '<span style="font-size:13px;color:#a78bfa;font-weight:600">' + esc(c.brand_name) + "</span>" : "")
-      + (c.category ? '<span style="font-size:12px;color:#64748b">' + categoryLabel(c.category) + "</span>" : "")
-      + "</div>"
+      + '<div style="display:flex;gap:14px;align-items:stretch">'
+      + thumbHtml
+      + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between">'
+      + '<div>'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">'
+      + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + '</span>'
+      + (daysLeft ? '<span class="ci-badge" style="background:rgba(239,68,68,.1);color:#ef4444">' + daysLeft + '</span>' : '')
+      + (c.brand_name ? '<span style="font-size:12px;color:#64748b;font-weight:600">' + esc(c.brand_name) + '</span>' : '')
+      + '</div>'
+      + '<div style="font-size:15px;font-weight:700;line-height:1.4;margin-bottom:4px;color:#1e293b;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(c.title)
+      + (c.description ? ' <span style="font-weight:400;color:#94a3b8">' + esc(c.description).substring(0, 40) + '</span>' : '')
+      + '</div>'
+      + (rewardText ? '<div style="font-size:15px;font-weight:800;color:#ef4444;margin-bottom:4px">' + rewardText + '</div>' : '')
+      + '</div>'
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
-      + "<div>" + reward + "</div>"
-      + '<span style="font-size:12px;color:#64748b">' + applicants + endDate + "</span>"
-      + "</div></div>";
+      + '<span style="font-size:11px;color:#94a3b8;font-weight:500">' + applicantInfo + (endDate ? ' · ' + endDate : '') + '</span>'
+      + '</div>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;flex-shrink:0">'
+      + '<button class="ci-apply-quick-btn" data-id="' + esc(c.id) + '">신청하기</button>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
   }
 
   function createCampaignPanel() {
@@ -135,9 +165,10 @@
       + "</div>"
       + '<div class="ci-filter-row">'
       + '<button class="ci-chip active" data-filter="">전체</button>'
-      + '<button class="ci-chip" data-filter="ad_collab">광고 협업</button>'
-      + '<button class="ci-chip" data-filter="commerce">커머스</button>'
-      + '<button class="ci-chip" data-filter="product_provision">제품제공</button>'
+      + '<button class="ci-chip" data-filter="advertisement">광고/협찬</button>'
+      + '<button class="ci-chip" data-filter="collaboration">협업</button>'
+      + '<button class="ci-chip" data-filter="review">리뷰</button>'
+      + '<button class="ci-chip" data-filter="event">이벤트</button>'
       + "</div>"
       + '<div id="ciCampaignList" class="ci-campaign-list">'
       + '<div class="ci-loading">캠페인을 불러오는 중...</div>'
@@ -219,8 +250,22 @@
 
   function bindCardClicks(container) {
     container.querySelectorAll(".ci-card").forEach(function (card) {
-      card.onclick = function () {
+      card.onclick = function (ev) {
+        if (ev.target.closest && ev.target.closest(".ci-apply-quick-btn")) return;
         openCampaignDetail(card.getAttribute("data-id"));
+      };
+    });
+    container.querySelectorAll(".ci-apply-quick-btn").forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var id = btn.getAttribute("data-id");
+        var session = getSession();
+        if (!session) {
+          alert("로그인 후 지원 가능합니다.");
+          return;
+        }
+        campaignData = campaignData.length ? campaignData : [];
+        openCampaignDetail(id);
       };
     });
   }
@@ -235,9 +280,14 @@
 
     var rewardInfo = "";
     if (c.reward_type || c.reward_amount) {
-      var rtLabel = { cash: "현금", product: "제품", commission: "수수료", mixed: "혼합" }[c.reward_type] || "";
-      rewardInfo = '<div class="ci-detail-info-item"><div class="ci-detail-info-label">보상</div>'
-        + '<div class="ci-detail-info-value">' + rtLabel + (c.reward_amount ? " " + esc(c.reward_amount) : "") + "</div></div>";
+      var rtLabel = { fixed: "고정 금액", product: "제품 제공", revenue_share: "수익 배분", mixed: "복합" }[c.reward_type] || "";
+      rewardInfo = '<div class="ci-detail-info-item" style="background:linear-gradient(135deg,#fef2f2,#fff1f2);border-color:#fecdd3"><div class="ci-detail-info-label" style="color:#ef4444">리워드</div>'
+        + '<div class="ci-detail-info-value" style="color:#ef4444;font-size:17px">' + (c.reward_amount ? esc(c.reward_amount) : "") + (rtLabel ? '<span style="font-size:12px;color:#f87171;margin-left:6px">' + rtLabel + '</span>' : "") + "</div></div>";
+    }
+
+    var thumbnailHtml = "";
+    if (c.thumbnail_url) {
+      thumbnailHtml = '<div style="width:100%;height:200px;border-radius:14px;overflow:hidden;margin-bottom:16px;background:#f1f5f9"><img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover" /></div>';
     }
 
     overlay.innerHTML = '<div class="ci-detail-header-bar">'
@@ -245,6 +295,7 @@
       + '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>'
       + " 뒤로</button></div>"
       + '<div class="ci-detail-body">'
+      + thumbnailHtml
       + '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
       + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + "</span>"
       + '<span class="ci-badge" style="background:rgba(16,185,129,.15);color:#10b981">진행중</span>'
@@ -612,9 +663,14 @@
       + '.ci-chip:hover{background:#e2e8f0}'
       + '.ci-chip.active:hover{background:#6d28d9}'
       + '.ci-campaign-list{display:flex;flex-direction:column;gap:12px;padding-bottom:24px}'
-      + '.ci-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:16px;transition:border-color .2s;cursor:pointer}'
-      + '.ci-card:hover{border-color:#7c3aed}'
-      + '.ci-card-compact{padding:14px}'
+      + '.ci-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px;transition:border-color .2s,box-shadow .2s;cursor:pointer}'
+      + '.ci-card:hover{border-color:#7c3aed;box-shadow:0 2px 12px rgba(124,58,237,.08)}'
+      + '.ci-card-compact{padding:12px}'
+      + '.ci-card-thumb{width:88px;height:88px;border-radius:12px;overflow:hidden;flex-shrink:0;background:#f1f5f9}'
+      + '.ci-card-thumb-empty{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f3e8ff,#fce7f3)}'
+      + '.ci-card-thumb-sm{width:56px;height:56px;flex-shrink:0}'
+      + '.ci-apply-quick-btn{padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}'
+      + '.ci-apply-quick-btn:hover{background:#6d28d9}'
       + '.ci-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap}'
       + '.ci-loading{text-align:center;padding:40px;color:#64748b;font-size:14px}'
       + '.ci-empty{text-align:center;padding:48px 24px;color:#64748b;font-size:14px;line-height:1.6}'
