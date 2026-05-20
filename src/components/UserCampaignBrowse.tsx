@@ -396,7 +396,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
               >
                 {/* Thumbnail */}
-                <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
+                <div className="w-full h-[300px] bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img
                       src={campaign.thumbnail_url}
