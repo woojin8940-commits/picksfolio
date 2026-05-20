@@ -11,7 +11,32 @@ export default async (req: Request, context: Context) => {
   const key = `biz_proposals_${username}`;
 
   if (req.method === "GET") {
-    const data = await store.get(key, { type: "json" });
+    let data = (await store.get(key, { type: "json" })) as any[] | null;
+
+    if (!data || data.length === 0) {
+      const proposalStore = getStore("proposals");
+      const { blobs } = await proposalStore.list();
+      const rebuilt: any[] = [];
+
+      for (const blob of blobs) {
+        if (!blob.key.startsWith("proposals_")) continue;
+        const items = (await proposalStore.get(blob.key, { type: "json" })) as any[];
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const itemBiz = (item.business_username || "").toLowerCase().replace(/^biz\//, "");
+          if (itemBiz === username) {
+            rebuilt.push(item);
+          }
+        }
+      }
+
+      if (rebuilt.length > 0) {
+        rebuilt.sort((a, b) => new Date(b.createdAt || b.created_at || 0).getTime() - new Date(a.createdAt || a.created_at || 0).getTime());
+        await store.setJSON(key, rebuilt);
+        data = rebuilt;
+      }
+    }
+
     return Response.json({ proposals: data || [] });
   }
 

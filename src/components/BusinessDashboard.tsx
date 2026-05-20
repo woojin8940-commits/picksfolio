@@ -38,30 +38,11 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     setUpdatingId(proposalId);
     const success = await apiService.updateProposalStatus(userName, proposalId, status, rejectionReasonText);
     if (success) {
-      const updatedProposal = proposals.find(p => p.id === proposalId);
       setProposals(prev =>
         prev.map(p => p.id === proposalId ? { ...p, status, rejection_reason: rejectionReasonText, updated_at: new Date().toISOString() } : p)
       );
       setRejectingId(null);
       setRejectionReason('');
-
-      // Auto-create timeline when proposal is accepted
-      if (status === 'accepted' && updatedProposal) {
-        try {
-          await fetch(`/api/timeline/create/${proposalId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              influencerUsername: userName.toLowerCase(),
-              businessUsername: updatedProposal.business_username || '',
-              companyName: updatedProposal.company_name,
-              proposalTitle: updatedProposal.title,
-            }),
-          });
-        } catch (e) {
-          console.error('Failed to auto-create timeline:', e);
-        }
-      }
     } else {
       alert('상태 업데이트에 실패했습니다.');
     }

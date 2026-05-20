@@ -50,6 +50,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [previewProfile, setPreviewProfile] = useState<any>({ name: companyName, bio: '', avatar_url: '' });
   const [previewPortfolio, setPreviewPortfolio] = useState<any[]>([]);
   const [topTrend, setTopTrend] = useState<string>('분석 중...');
+  const [proposalStats, setProposalStats] = useState({ total: 0, accepted: 0, inProgress: 0 });
 
   const fetchTopTrend = async () => {
     try {
@@ -62,6 +63,24 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       }
     } catch (e) {
       console.error('Error fetching top trend:', e);
+    }
+  };
+
+  const fetchProposalStats = async () => {
+    try {
+      const cleanUsername = businessUsername.replace(/^biz\//, '');
+      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const proposals = data.proposals || [];
+        setProposalStats({
+          total: proposals.length,
+          accepted: proposals.filter((p: any) => p.status === 'accepted').length,
+          inProgress: proposals.filter((p: any) => p.status === 'accepted' || p.status === 'completed').length,
+        });
+      }
+    } catch (e) {
+      console.error('Error fetching proposal stats:', e);
     }
   };
 
@@ -89,6 +108,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     if (currentSubView === 'dashboard') {
       loadPreviewData();
       fetchTopTrend();
+      fetchProposalStats();
     }
   }, [currentSubView, loadPreviewData]);
 
@@ -235,15 +255,15 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6">
             <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">보낸 제안</p>
-              <p className="text-lg md:text-2xl font-black text-slate-900">0<span className="text-sm font-bold">건</span></p>
+              <p className="text-lg md:text-2xl font-black text-slate-900">{proposalStats.total}<span className="text-sm font-bold">건</span></p>
             </div>
             <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">수락됨</p>
-              <p className="text-lg md:text-2xl font-black text-green-600">0<span className="text-sm font-bold">건</span></p>
+              <p className="text-lg md:text-2xl font-black text-green-600">{proposalStats.accepted}<span className="text-sm font-bold">건</span></p>
             </div>
             <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">진행중 협업</p>
-              <p className="text-lg md:text-2xl font-black text-blue-600">0<span className="text-sm font-bold">건</span></p>
+              <p className="text-lg md:text-2xl font-black text-blue-600">{proposalStats.inProgress}<span className="text-sm font-bold">건</span></p>
             </div>
             <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">이번 달 정산</p>

@@ -62,10 +62,16 @@ const App: React.FC = () => {
     !!new URLSearchParams(window.location.search).get('code') || window.location.hash.includes('access_token')
   );
 
-  // profileChecked: true once we've definitively verified the user's profile from Supabase.
-  // While false, protected views will NOT render — a loading spinner is shown instead.
-  // This prevents premature redirects before role/username data is available.
-  const [profileChecked, setProfileChecked] = useState(false);
+  // profileChecked: true once we've verified the user's profile from Supabase.
+  // While false, protected views show a loading spinner.
+  // For returning users with a cached session (not an OAuth callback), skip the
+  // blocking check — the profile will be verified in the background.
+  const [profileChecked, setProfileChecked] = useState(() => {
+    const hasCache = !!localStorage.getItem('picks_user_session');
+    const params = new URLSearchParams(window.location.search);
+    const isOAuthCallback = !!params.get('code') || window.location.hash.includes('access_token');
+    return hasCache && !isOAuthCallback;
+  });
 
   // Track the user's role from the Supabase profile (e.g. 'user', 'admin')
   const [, setProfileRole] = useState<string>('');
