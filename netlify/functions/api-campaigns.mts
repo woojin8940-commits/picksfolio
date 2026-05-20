@@ -163,10 +163,24 @@ export default async (req: Request) => {
   if (req.method === "DELETE") {
     try {
       const id = url.searchParams.get("id");
+      const business = url.searchParams.get("business");
       if (!id) {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
+
+      const existing = await db.sql`SELECT id, business_username FROM campaigns WHERE id = ${id}`;
+      if (existing.length === 0) {
+        return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
+      }
+
+      if (business && existing[0].business_username !== business) {
+        return Response.json({ error: "삭제 권한이 없습니다." }, { status: 403 });
+      }
+
+      await db.sql`DELETE FROM campaign_collabs WHERE campaign_id = ${id}`;
+      await db.sql`DELETE FROM campaign_applications WHERE campaign_id = ${id}`;
       await db.sql`DELETE FROM campaigns WHERE id = ${id}`;
+
       return Response.json({ success: true });
     } catch (err: any) {
       return Response.json({ error: err?.message || "캠페인 삭제 실패" }, { status: 500 });

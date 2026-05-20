@@ -242,8 +242,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const handleDelete = async (id: string) => {
     if (!confirm('정말 삭제하시겠습니까?')) return;
     try {
-      await fetch(`/api/campaigns?id=${id}`, { method: 'DELETE' });
-      fetchCampaigns();
+      const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || '삭제에 실패했습니다.');
+        return;
+      }
+      await fetchCampaigns();
       if (selectedCampaign?.id === id) setSelectedCampaign(null);
     } catch {
       alert('삭제에 실패했습니다.');
@@ -316,7 +321,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   const filteredCampaigns = activeTypeFilter
-    ? campaigns.filter(c => c.category === activeTypeFilter)
+    ? campaigns.filter(c => c.type === activeTypeFilter)
     : campaigns;
 
   // --- Campaign Detail View ---
