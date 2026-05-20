@@ -109,6 +109,23 @@ export default async (req: Request) => {
 
           if (creatorUsername) await ensureIndex("influencer", creatorUsername);
           if (businessUsername) await ensureIndex("business", businessUsername);
+
+          // Persist timeline to SQL
+          try {
+            const systemComment = timelineData.comments[0];
+            await db.sql`
+              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
+              VALUES (${proposalId}, ${creatorUsername}, ${businessUsername}, ${companyName}, ${campaignTitle}, ${nowISO})
+              ON CONFLICT (proposal_id) DO NOTHING
+            `;
+            await db.sql`
+              INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
+              VALUES (${systemComment.id}, ${proposalId}, ${systemComment.authorType}, ${systemComment.authorName}, ${systemComment.authorUsername}, ${systemComment.content}, ${[businessUsername]}, ${nowISO})
+              ON CONFLICT (id) DO NOTHING
+            `;
+          } catch (sqlErr) {
+            console.error("[campaign-applicants] Failed to persist timeline to SQL:", sqlErr);
+          }
         }
 
         // 2) Create proposal entries so business inbox and influencer proposals show this collaboration
