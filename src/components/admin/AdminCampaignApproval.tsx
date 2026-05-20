@@ -173,7 +173,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                   onClick={() => setExpandedId(expandedId === campaign.id ? null : campaign.id)}
                 >
                   {/* Thumbnail */}
-                  <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
+                  <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                     {campaign.thumbnail_url ? (
                       <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     ) : (
@@ -228,7 +228,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                 {expandedId === campaign.id && (
                 <div className="px-4 md:px-5 pb-4 md:pb-5 border-t border-slate-100 pt-4 space-y-4 animate-in fade-in duration-200">
                   {campaign.thumbnail_url && (
-                    <div className="w-full h-40 md:h-56 rounded-xl overflow-hidden bg-slate-100">
+                    <div className="w-full aspect-square max-w-[400px] mx-auto rounded-xl overflow-hidden bg-slate-100">
                       <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover" />
                     </div>
                   )}

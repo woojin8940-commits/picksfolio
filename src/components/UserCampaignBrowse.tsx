@@ -161,7 +161,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
           {selectedCampaign.thumbnail_url && (
-            <div className="w-full h-52 md:h-72 bg-slate-100 overflow-hidden">
+            <div className="w-full aspect-square max-w-[400px] mx-auto bg-slate-100 overflow-hidden">
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             </div>
           )}
@@ -396,7 +396,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
               >
                 {/* Thumbnail */}
-                <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
+                <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img
                       src={campaign.thumbnail_url}
