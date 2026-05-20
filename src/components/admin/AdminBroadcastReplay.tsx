@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { formatKRW } from '../../utils/formatters';
 
 interface Bucket {
   bucketIndex: number;
@@ -41,7 +42,7 @@ interface Props {
   onClose: () => void;
 }
 
-const won = (n: number) => `${(n || 0).toLocaleString()}원`;
+const won = (n: number) => formatKRW(n);
 
 const fmtClock = (sec: number) => {
   const s = Math.max(0, Math.floor(sec));

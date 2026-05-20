@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { formatKRW } from '../../utils/formatters';
 
 interface Settlement {
   id: string;
@@ -42,7 +43,7 @@ interface Props {
   token: string;
 }
 
-const won = (n: number) => `${(n || 0).toLocaleString()}원`;
+const won = (n: number) => formatKRW(n);
 
 const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);

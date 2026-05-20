@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { formatKRW } from '../../utils/formatters';
 import type { BusinessProposal } from '../../types';
 
 interface CategoryStat {
@@ -33,7 +34,7 @@ interface Props {
 type CategoryFilter = 'all' | '광고' | '커머스';
 type FeeBucketFilter = 'all' | '0-100k' | '100k-500k' | '500k-1M' | '1M-5M' | '5M+';
 
-const won = (n: number) => `${(n || 0).toLocaleString()}원`;
+const won = (n: number) => formatKRW(n);
 
 const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);

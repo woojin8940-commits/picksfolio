@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { formatNumberWithCommas } from '../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -40,23 +41,15 @@ interface CampaignCollabManagementProps {
 
 const CAMPAIGN_TYPES = [
   { value: '', label: '전체' },
-  { value: 'collaboration', label: '협업' },
-  { value: 'advertisement', label: '광고/협찬' },
-  { value: 'review', label: '리뷰' },
-  { value: 'event', label: '이벤트' },
+  { value: 'ad_collab', label: '광고 협업' },
+  { value: 'group_buy', label: '공동구매' },
+  { value: 'other', label: '기타' },
 ];
 
 const CATEGORIES = [
   { value: '', label: '카테고리 선택' },
-  { value: 'fashion', label: '패션' },
-  { value: 'beauty', label: '뷰티' },
-  { value: 'food', label: '맛집/음식' },
-  { value: 'travel', label: '여행' },
-  { value: 'lifestyle', label: '라이프스타일' },
-  { value: 'tech', label: '테크/IT' },
-  { value: 'fitness', label: '운동/건강' },
-  { value: 'baby', label: '유아/키즈' },
-  { value: 'pet', label: '반려동물' },
+  { value: 'ad_collab', label: '광고 협업' },
+  { value: 'group_buy', label: '공동구매' },
   { value: 'other', label: '기타' },
 ];
 
@@ -76,7 +69,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
-    type: 'collaboration',
+    type: 'ad_collab',
     title: '',
     description: '',
     brand_name: companyName,
@@ -262,7 +255,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     setEditingCampaign(null);
     setThumbnailPreview('');
     setFormData({
-      type: 'collaboration',
+      type: 'ad_collab',
       title: '',
       description: '',
       brand_name: companyName,
@@ -292,7 +285,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   const typeLabel = (type: string) => {
-    const m: Record<string, string> = { collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
+    const m: Record<string, string> = { ad_collab: '광고 협업', group_buy: '공동구매', other: '기타', collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
     return m[type] || type;
   };
 
@@ -310,7 +303,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   const filteredCampaigns = activeTypeFilter
-    ? campaigns.filter(c => c.type === activeTypeFilter)
+    ? campaigns.filter(c => c.category === activeTypeFilter)
     : campaigns;
 
   // --- Campaign Detail View ---
@@ -528,10 +521,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
                 >
-                  <option value="collaboration">협업 캠페인</option>
-                  <option value="advertisement">광고/협찬</option>
-                  <option value="review">리뷰 캠페인</option>
-                  <option value="event">이벤트 캠페인</option>
+                  <option value="ad_collab">광고 협업</option>
+                  <option value="group_buy">공동구매</option>
+                  <option value="other">기타</option>
                 </select>
               </div>
               <div>
@@ -608,7 +600,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 <label className="block text-xs font-black text-slate-700 mb-1.5">보상 금액/내용</label>
                 <input
                   type="text" value={formData.reward_amount}
-                  onChange={e => setFormData(p => ({ ...p, reward_amount: e.target.value }))}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    const digitsOnly = raw.replace(/,/g, '');
+                    if (/^\d*$/.test(digitsOnly) && digitsOnly.length > 0) {
+                      setFormData(p => ({ ...p, reward_amount: formatNumberWithCommas(digitsOnly) + (raw.endsWith('원') ? '원' : '') }));
+                    } else {
+                      setFormData(p => ({ ...p, reward_amount: raw }));
+                    }
+                  }}
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   placeholder="예: 500,000원, 제품 1세트"
                 />
@@ -736,7 +736,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             >
               <div className="flex">
                 {/* Thumbnail */}
-                <div className="w-28 h-28 md:w-36 md:h-36 flex-shrink-0 bg-slate-100 overflow-hidden">
+                <div className="w-24 h-24 md:w-36 md:h-36 flex-shrink-0 bg-slate-100 overflow-hidden">
                   {campaign.thumbnail_url ? (
                     <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   ) : (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
+import { formatKRW } from '../utils/formatters';
 
 interface BusinessDashboardProps {
   userName: string;
@@ -151,9 +152,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => {
-    return `${fee.toLocaleString()}원`;
-  };
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

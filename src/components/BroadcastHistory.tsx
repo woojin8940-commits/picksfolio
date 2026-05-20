@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { History, Clock, Users, ShoppingBag, MessageCircle, ChevronDown, ChevronUp, Trash2, Package, TrendingUp, Play, X } from 'lucide-react';
+import { formatKRW } from '../utils/formatters';
 import { apiService } from '../services/apiService';
 import SafeImage from './SafeImage';
 
@@ -223,7 +224,7 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
                     {sales > 0 && (
                       <div className="text-right hidden md:block">
                         <p className="text-[10px] md:text-xs text-slate-400 font-bold">예상 매출</p>
-                        <p className="text-sm md:text-base font-black text-green-600">{sales.toLocaleString('ko-KR')}원</p>
+                        <p className="text-sm md:text-base font-black text-green-600">{formatKRW(sales)}</p>
                       </div>
                     )}
                     {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
@@ -269,7 +270,7 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
                     {sales > 0 && (
                       <div className="bg-green-50 p-4 rounded-xl border border-green-100">
                         <p className="text-xs font-bold text-green-600 mb-1">예상 매출</p>
-                        <p className="text-2xl font-black text-green-700">{sales.toLocaleString('ko-KR')}원</p>
+                        <p className="text-2xl font-black text-green-700">{formatKRW(sales)}</p>
                         <p className="text-[10px] text-green-500 mt-1">* 담은 상품 수량 x 상품 가격 기준 추정치</p>
                       </div>
                     )}
