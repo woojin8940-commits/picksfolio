@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import { formatKoreanWon } from '../../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -216,7 +216,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                     </h3>
                     <div className="flex items-center justify-between">
                       {campaign.reward_amount ? (
-                        <span className="text-sm font-black text-blue-600">{formatNumberWithCommas(campaign.reward_amount)}</span>
+                        <span className="text-sm font-black text-blue-600">{formatKoreanWon(campaign.reward_amount)}</span>
                       ) : <span />}
                       <span className="text-[11px] text-slate-400 font-bold">
                         {campaign.application_count}명 지원
@@ -251,7 +251,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                     <div className="bg-slate-50 rounded-xl p-3">
                       <p className="text-[9px] text-slate-400 font-black uppercase">보상</p>
                       <p className="text-xs font-bold text-slate-900">
-                        {rewardLabel(campaign.reward_type)} {campaign.reward_amount && `/ ${formatNumberWithCommas(campaign.reward_amount)}`}
+                        {rewardLabel(campaign.reward_type)} {campaign.reward_amount && `/ ${formatKoreanWon(campaign.reward_amount)}`}
                       </p>
                     </div>
                     <div className="bg-slate-50 rounded-xl p-3">

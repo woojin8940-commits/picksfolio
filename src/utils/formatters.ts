@@ -15,3 +15,17 @@ export const formatKRW = (value: number | string | null | undefined): string => 
   if (isNaN(num)) return '0원';
   return `${formatNumberWithCommas(num)}원`;
 };
+
+export const formatKoreanWon = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined || value === '') return '';
+  const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : value;
+  if (isNaN(num) || num === 0) return '0원';
+  const eok = Math.floor(num / 100000000);
+  const man = Math.floor((num % 100000000) / 10000);
+  const rest = num % 10000;
+  let result = '';
+  if (eok > 0) result += `${eok}억`;
+  if (man > 0) result += `${man}만`;
+  if (rest > 0) result += `${formatNumberWithCommas(rest)}`;
+  return result + '원';
+};

@@ -43,7 +43,7 @@ export default async (req: Request) => {
   if (req.method === "POST") {
     try {
       const body = await req.json();
-      const { campaign_id, applicant_username, message, contact, portfolio_url } = body;
+      const { campaign_id, applicant_username, message, contact, portfolio_url, instagram_url, youtube_naver_url } = body;
 
       if (!campaign_id || !applicant_username) {
         return Response.json({ error: "필수 항목을 입력해 주세요." }, { status: 400 });
@@ -73,8 +73,8 @@ export default async (req: Request) => {
       const id = `app_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       await db.sql`
-        INSERT INTO campaign_applications (id, campaign_id, applicant_username, message, contact, portfolio_url)
-        VALUES (${id}, ${campaign_id}, ${applicant_username}, ${message || ""}, ${contact || ""}, ${portfolio_url || ""})
+        INSERT INTO campaign_applications (id, campaign_id, applicant_username, message, contact, portfolio_url, instagram_url, youtube_naver_url)
+        VALUES (${id}, ${campaign_id}, ${applicant_username}, ${message || ""}, ${contact || ""}, ${portfolio_url || ""}, ${instagram_url || ""}, ${youtube_naver_url || ""})
       `;
 
       return Response.json({ success: true, id });

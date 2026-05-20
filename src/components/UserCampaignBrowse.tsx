@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { formatNumberWithCommas } from '../utils/formatters';
+import { formatKoreanWon } from '../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -58,15 +58,15 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [applying, setApplying] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [showApplyForm, setShowApplyForm] = useState(false);
-  const [applyForm, setApplyForm] = useState({ message: '', contact: '', portfolio_url: '' });
+  const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
     try {
       let url = '/api/campaigns?status=active';
-      if (activeFilter) url += `&category=${activeFilter}`;
+      if (activeFilter) url += `&type=${activeFilter}`;
       if (searchQuery.trim()) url = `/api/campaigns?status=active&search=${encodeURIComponent(searchQuery.trim())}`;
-      if (activeFilter && searchQuery.trim()) url += `&category=${activeFilter}`;
+      if (activeFilter && searchQuery.trim()) url += `&type=${activeFilter}`;
       const res = await fetch(url);
       const data = await res.json();
       setCampaigns(data.campaigns || []);
@@ -108,20 +108,20 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         body: JSON.stringify({
           campaign_id: selectedCampaign.id,
           applicant_username: userName,
-          message: applyForm.message,
           contact: applyForm.contact,
-          portfolio_url: applyForm.portfolio_url,
+          instagram_url: applyForm.instagram_url,
+          youtube_naver_url: applyForm.youtube_naver_url,
         }),
       });
       if (res.ok) {
         setAppliedIds(prev => new Set(prev).add(selectedCampaign.id));
         setShowApplyForm(false);
-        setApplyForm({ message: '', contact: '', portfolio_url: '' });
-        alert('신청이 완료되었습니다!');
+        setApplyForm({ contact: '', instagram_url: '', youtube_naver_url: '' });
+        alert('지원이 완료되었습니다!');
         fetchCampaigns();
       } else {
         const err = await res.json();
-        alert(err.error || '신청에 실패했습니다.');
+        alert(err.error || '지원에 실패했습니다.');
       }
     } catch {
       alert('서버 오류가 발생했습니다.');
@@ -192,7 +192,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div className="bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-4 mb-5">
                 <p className="text-[9px] text-rose-400 font-black uppercase tracking-widest mb-1">리워드</p>
                 <p className="text-lg font-black text-rose-600">
-                  {formatNumberWithCommas(selectedCampaign.reward_amount)}
+                  {formatKoreanWon(selectedCampaign.reward_amount)}
                   <span className="text-xs font-bold text-rose-400 ml-2">{REWARD_LABELS[selectedCampaign.reward_type] || ''}</span>
                 </p>
               </div>
@@ -215,7 +215,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 <p className="text-sm font-black text-slate-900 mt-0.5">
                   {selectedCampaign.max_applicants > 0
                     ? `${selectedCampaign.application_count} / ${selectedCampaign.max_applicants}명`
-                    : `${selectedCampaign.application_count}명 신청`}
+                    : `${selectedCampaign.application_count}명 지원`}
                 </p>
               </div>
               {selectedCampaign.start_date && (
@@ -253,52 +253,51 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             {/* Apply Section */}
             {isApplied ? (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                <p className="text-sm font-black text-emerald-600">이미 신청한 캠페인입니다</p>
+                <p className="text-sm font-black text-emerald-600">이미 지원한 캠페인입니다</p>
                 <p className="text-xs text-emerald-500 font-medium mt-1">결과를 기다려 주세요</p>
               </div>
             ) : showApplyForm ? (
               <div className="border border-purple-200 rounded-xl p-5 bg-purple-50/30 space-y-4">
-                <h3 className="text-sm font-black text-slate-900">캠페인 신청</h3>
+                <h3 className="text-sm font-black text-slate-900">캠페인 지원</h3>
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">자기소개 / 지원 메시지</label>
-                  <textarea
-                    value={applyForm.message}
-                    onChange={e => setApplyForm(p => ({ ...p, message: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 min-h-[100px] resize-y bg-white"
-                    placeholder="간단한 자기소개와 지원 동기를 적어주세요"
+                  <label className="block text-xs font-bold text-slate-600 mb-1">연락처 <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    value={applyForm.contact}
+                    onChange={e => setApplyForm(p => ({ ...p, contact: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
+                    placeholder="이메일 또는 전화번호"
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">연락처</label>
-                    <input
-                      type="text"
-                      value={applyForm.contact}
-                      onChange={e => setApplyForm(p => ({ ...p, contact: e.target.value }))}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
-                      placeholder="이메일 또는 전화번호"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">포트폴리오 URL</label>
-                    <input
-                      type="url"
-                      value={applyForm.portfolio_url}
-                      onChange={e => setApplyForm(p => ({ ...p, portfolio_url: e.target.value }))}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
-                      placeholder="https://"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">인스타그램 링크 <span className="text-rose-500">*</span></label>
+                  <input
+                    type="url"
+                    value={applyForm.instagram_url}
+                    onChange={e => setApplyForm(p => ({ ...p, instagram_url: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
+                    placeholder="https://instagram.com/username"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">유튜브 / 네이버 링크 <span className="text-slate-400 font-medium">(선택)</span></label>
+                  <input
+                    type="url"
+                    value={applyForm.youtube_naver_url}
+                    onChange={e => setApplyForm(p => ({ ...p, youtube_naver_url: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
+                    placeholder="https://youtube.com/... 또는 https://blog.naver.com/..."
+                  />
                 </div>
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={handleApply}
-                    disabled={applying}
+                    disabled={applying || !applyForm.contact.trim() || !applyForm.instagram_url.trim()}
                     className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl font-black text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {applying ? (
-                      <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> 신청 중...</>
-                    ) : '신청하기'}
+                      <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> 지원 중...</>
+                    ) : '지원하기'}
                   </button>
                   <button
                     onClick={() => setShowApplyForm(false)}
@@ -314,7 +313,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3.5 rounded-xl font-black text-sm transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                캠페인 신청하기
+                캠페인 지원하기
               </button>
             )}
           </div>
@@ -336,7 +335,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">캠페인</h2>
-        <p className="text-sm text-slate-400 font-medium">브랜드 캠페인에 신청하고 협업 기회를 잡아보세요</p>
+        <p className="text-sm text-slate-400 font-medium">브랜드 캠페인에 지원하고 협업 기회를 잡아보세요</p>
       </div>
 
       {/* Search & Filter */}
@@ -425,7 +424,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   {isApplied && (
                     <div className="absolute top-2.5 right-2.5">
                       <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                        신청완료
+                        지원완료
                       </span>
                     </div>
                   )}
@@ -449,12 +448,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   </h3>
                   <div className="flex items-center justify-between">
                     {campaign.reward_amount ? (
-                      <span className="text-sm font-black text-rose-500">{formatNumberWithCommas(campaign.reward_amount)}</span>
+                      <span className="text-sm font-black text-rose-500">{formatKoreanWon(campaign.reward_amount)}</span>
                     ) : <span />}
                     <span className="text-[11px] text-slate-400 font-bold">
                       {campaign.max_applicants > 0
                         ? `${campaign.application_count}/${campaign.max_applicants}명`
-                        : `${campaign.application_count}명 신청중`}
+                        : `${campaign.application_count}명 지원중`}
                     </span>
                   </div>
                 </div>

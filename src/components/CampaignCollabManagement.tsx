@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { formatNumberWithCommas } from '../utils/formatters';
+import { formatNumberWithCommas, formatKoreanWon } from '../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -30,6 +30,8 @@ interface Applicant {
   message: string;
   contact: string;
   portfolio_url: string;
+  instagram_url: string;
+  youtube_naver_url: string;
   status: string;
   created_at: string;
 }
@@ -369,7 +371,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               )}
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-[9px] text-slate-400 font-black uppercase">보상</p>
-                <p className="text-sm font-black text-slate-900">{rewardLabel(selectedCampaign.reward_type)} {selectedCampaign.reward_amount && `/ ${formatNumberWithCommas(selectedCampaign.reward_amount)}`}</p>
+                <p className="text-sm font-black text-slate-900">{rewardLabel(selectedCampaign.reward_type)} {selectedCampaign.reward_amount && `/ ${formatKoreanWon(selectedCampaign.reward_amount)}`}</p>
               </div>
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-[9px] text-slate-400 font-black uppercase">지원자</p>
@@ -420,6 +422,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       {app.message && <p className="text-xs text-slate-600 font-medium mt-1 whitespace-pre-wrap">{app.message}</p>}
                       <div className="flex flex-wrap gap-3 mt-2">
                         {app.contact && <span className="text-[10px] text-slate-400 font-bold">연락처: {app.contact}</span>}
+                        {app.instagram_url && (
+                          <a href={app.instagram_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-pink-500 font-bold hover:underline">
+                            인스타그램
+                          </a>
+                        )}
+                        {app.youtube_naver_url && (
+                          <a href={app.youtube_naver_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-red-500 font-bold hover:underline">
+                            유튜브/네이버
+                          </a>
+                        )}
                         {app.portfolio_url && (
                           <a href={app.portfolio_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 font-bold hover:underline">
                             포트폴리오 보기
@@ -785,7 +797,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </h3>
                   <div className="flex items-center justify-between">
                     {campaign.reward_amount ? (
-                      <span className="text-sm font-black text-blue-600">{formatNumberWithCommas(campaign.reward_amount)}</span>
+                      <span className="text-sm font-black text-blue-600">{formatKoreanWon(campaign.reward_amount)}</span>
                     ) : <span />}
                     <span className="text-[11px] text-slate-400 font-bold">
                       {campaign.max_applicants > 0

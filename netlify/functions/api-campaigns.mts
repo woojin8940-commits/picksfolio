@@ -43,6 +43,14 @@ export default async (req: Request) => {
             ORDER BY c.created_at DESC
           `;
         }
+      } else if (search && type) {
+        const pattern = `%${search}%`;
+        result = await db.sql`
+          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          FROM campaigns c
+          WHERE c.status = ${status} AND c.type = ${type} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
+          ORDER BY c.created_at DESC
+        `;
       } else if (search && category) {
         const pattern = `%${search}%`;
         result = await db.sql`
