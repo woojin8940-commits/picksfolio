@@ -792,7 +792,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 onClick={() => handleSelectCampaign(campaign)}
               >
                 {/* Thumbnail */}
-                <div className="w-full h-[300px] bg-slate-50 overflow-hidden relative">
+                <div className="w-full h-[200px] bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                   ) : (
