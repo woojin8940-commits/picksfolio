@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
+import { formatNumberWithCommas } from '../../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -112,6 +113,14 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
     return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
   };
 
+  const daysRemaining = (endDate: string) => {
+    if (!endDate) return null;
+    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diff < 0) return null;
+    if (diff === 0) return 'D-Day';
+    return `D-${diff}`;
+  };
+
   const pendingCount = campaigns.filter(c => c.status === 'pending_approval').length;
 
   const filters: { key: FilterStatus; label: string }[] = [
@@ -154,56 +163,69 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
           <p className="text-sm text-slate-400 font-bold">해당 상태의 캠페인이 없습니다.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {campaigns.map(campaign => (
-            <div key={campaign.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div
-                className="p-4 md:p-5 cursor-pointer hover:bg-slate-50/50 transition-all"
-                onClick={() => setExpandedId(expandedId === campaign.id ? null : campaign.id)}
-              >
-                <div className="flex items-start gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          {campaigns.map(campaign => {
+            const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
+            return (
+              <div key={campaign.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div
+                  className="cursor-pointer group"
+                  onClick={() => setExpandedId(expandedId === campaign.id ? null : campaign.id)}
+                >
                   {/* Thumbnail */}
-                  <div className="w-16 h-16 md:w-20 md:h-20 flex-shrink-0 rounded-xl overflow-hidden bg-slate-100">
+                  <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
                     {campaign.thumbnail_url ? (
-                      <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover" />
+                      <img src={campaign.thumbnail_url} alt={campaign.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-                        <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-10 h-10 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                       </div>
                     )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    {/* Badges overlay */}
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                       {statusBadge(campaign.status)}
-                      <span className="text-[10px] text-slate-400 font-bold uppercase">
-                        {typeLabel(campaign.type)}
-                      </span>
-                      {campaign.category && (
-                        <span className="text-[10px] text-slate-300 font-bold">
-                          {categoryLabel(campaign.category)}
+                      {days && (
+                        <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
+                          {days}
                         </span>
                       )}
                     </div>
-                    <h3 className="font-black text-slate-900 text-sm md:text-base truncate">{campaign.title}</h3>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-purple-600 font-black">@{campaign.business_username}</span>
-                      {campaign.brand_name && <span className="text-xs text-slate-400 font-bold">{campaign.brand_name}</span>}
-                      <span className="text-[10px] text-slate-300 font-bold">{formatDate(campaign.created_at)}</span>
+                  </div>
+
+                  {/* Content */}
+                  <div className="p-3.5 md:p-4">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <span className="text-[11px] text-purple-600 font-black">@{campaign.business_username}</span>
+                      {campaign.brand_name && (
+                        <>
+                          <span className="text-slate-200">·</span>
+                          <span className="text-[11px] text-slate-400 font-bold">{campaign.brand_name}</span>
+                        </>
+                      )}
+                      {campaign.category && (
+                        <>
+                          <span className="text-slate-200">·</span>
+                          <span className="text-[11px] text-slate-400 font-medium">{categoryLabel(campaign.category)}</span>
+                        </>
+                      )}
+                    </div>
+                    <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1.5">
+                      {campaign.title}
+                    </h3>
+                    <div className="flex items-center justify-between">
+                      {campaign.reward_amount ? (
+                        <span className="text-sm font-black text-blue-600">{formatNumberWithCommas(campaign.reward_amount)}</span>
+                      ) : <span />}
+                      <span className="text-[11px] text-slate-400 font-bold">
+                        {campaign.application_count}명 지원
+                      </span>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs font-black text-blue-600">{campaign.application_count}명 지원</p>
-                    {campaign.reward_amount && (
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">{campaign.reward_amount}</p>
-                    )}
-                  </div>
                 </div>
-              </div>
 
-              {expandedId === campaign.id && (
+                {expandedId === campaign.id && (
                 <div className="px-4 md:px-5 pb-4 md:pb-5 border-t border-slate-100 pt-4 space-y-4 animate-in fade-in duration-200">
                   {campaign.thumbnail_url && (
                     <div className="w-full h-40 md:h-56 rounded-xl overflow-hidden bg-slate-100">
@@ -229,7 +251,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                     <div className="bg-slate-50 rounded-xl p-3">
                       <p className="text-[9px] text-slate-400 font-black uppercase">보상</p>
                       <p className="text-xs font-bold text-slate-900">
-                        {rewardLabel(campaign.reward_type)} {campaign.reward_amount && `/ ${campaign.reward_amount}`}
+                        {rewardLabel(campaign.reward_type)} {campaign.reward_amount && `/ ${formatNumberWithCommas(campaign.reward_amount)}`}
                       </p>
                     </div>
                     <div className="bg-slate-50 rounded-xl p-3">
@@ -324,7 +346,8 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

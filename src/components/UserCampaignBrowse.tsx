@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { formatNumberWithCommas } from '../utils/formatters';
 
 interface Campaign {
   id: string;
@@ -191,7 +192,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div className="bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-4 mb-5">
                 <p className="text-[9px] text-rose-400 font-black uppercase tracking-widest mb-1">리워드</p>
                 <p className="text-lg font-black text-rose-600">
-                  {selectedCampaign.reward_amount}
+                  {formatNumberWithCommas(selectedCampaign.reward_amount)}
                   <span className="text-xs font-bold text-rose-400 ml-2">{REWARD_LABELS[selectedCampaign.reward_type] || ''}</span>
                 </p>
               </div>
@@ -448,7 +449,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   </h3>
                   <div className="flex items-center justify-between">
                     {campaign.reward_amount ? (
-                      <span className="text-sm font-black text-rose-500">{campaign.reward_amount}</span>
+                      <span className="text-sm font-black text-rose-500">{formatNumberWithCommas(campaign.reward_amount)}</span>
                     ) : <span />}
                     <span className="text-[11px] text-slate-400 font-bold">
                       {campaign.max_applicants > 0

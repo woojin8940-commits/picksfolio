@@ -82,65 +82,51 @@
     return res.json();
   }
 
+  function formatAmount(v) {
+    if (!v) return "";
+    var nums = String(v).replace(/[^0-9]/g, "");
+    if (!nums) return String(v);
+    return nums.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
   function renderCampaignCard(c, compact) {
-    var rewardText = c.reward_amount
-      ? esc(c.reward_amount) + ' <span style="font-size:12px;color:#94a3b8;font-weight:500">' + ({fixed:"리워드",product:"제품제공",revenue_share:"수익배분",mixed:"복합"}[c.reward_type]||"리워드") + '</span>'
-      : "";
-    var applicantInfo = c.max_applicants > 0
-      ? (c.max_applicants + "명 모집 | " + (c.application_count || 0) + "명 신청함")
-      : ((c.application_count || 0) + "명 신청함");
-    var endDate = c.end_date ? formatDate(c.end_date) + " 마감" : "";
+    var rewardText = c.reward_amount ? esc(formatAmount(c.reward_amount)) : "";
+    var applicantText = c.max_applicants > 0
+      ? ((c.application_count || 0) + "/" + c.max_applicants + "명")
+      : ((c.application_count || 0) + "명 신청중");
     var daysLeft = "";
     if (c.end_date) {
       var diff = Math.ceil((new Date(c.end_date).getTime() - Date.now()) / (1000*60*60*24));
-      if (diff === 0) daysLeft = "오늘 마감";
-      else if (diff > 0 && diff <= 7) daysLeft = "D-" + diff;
+      if (diff === 0) daysLeft = "D-Day";
+      else if (diff > 0) daysLeft = "D-" + diff;
     }
 
-    var thumbHtml;
+    var thumbImg;
     if (c.thumbnail_url) {
-      thumbHtml = '<div class="ci-card-thumb"><img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover" /></div>';
+      thumbImg = '<img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;transition:transform .3s" />';
     } else {
-      thumbHtml = '<div class="ci-card-thumb ci-card-thumb-empty"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.5"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>';
+      thumbImg = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f3e8ff,#fce7f3)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.5"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>';
     }
 
-    if (compact) {
-      return '<div class="ci-card ci-card-compact" data-id="' + esc(c.id) + '">'
-        + '<div style="display:flex;gap:12px">'
-        + '<div class="ci-card-thumb-sm">' + (c.thumbnail_url ? '<img src="' + esc(c.thumbnail_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px" />' : '<div style="width:100%;height:100%;background:linear-gradient(135deg,#f3e8ff,#fce7f3);border-radius:10px;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.5"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>') + '</div>'
-        + '<div style="flex:1;min-width:0">'
-        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
-        + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + '</span>'
-        + (c.brand_name ? '<span style="font-size:11px;color:#64748b;font-weight:600">' + esc(c.brand_name) + '</span>' : '')
-        + '</div>'
-        + '<div style="font-size:13px;font-weight:700;line-height:1.4;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c.title) + '</div>'
-        + (rewardText ? '<div style="font-size:14px;font-weight:800;color:#ef4444;margin-top:3px">' + rewardText + '</div>' : '')
-        + '</div>'
-        + '</div>'
-        + '</div>';
-    }
+    var thumbHeight = compact ? "120px" : "160px";
 
     return '<div class="ci-card" data-id="' + esc(c.id) + '">'
-      + '<div style="display:flex;gap:14px;align-items:stretch">'
-      + thumbHtml
-      + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between">'
-      + '<div>'
-      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">'
-      + '<span class="ci-badge" style="' + typeBadgeColor(c.type) + '">' + typeLabel(c.type) + '</span>'
-      + (daysLeft ? '<span class="ci-badge" style="background:rgba(239,68,68,.1);color:#ef4444">' + daysLeft + '</span>' : '')
-      + (c.brand_name ? '<span style="font-size:12px;color:#64748b;font-weight:600">' + esc(c.brand_name) + '</span>' : '')
+      + '<div class="ci-card-thumb-top" style="height:' + thumbHeight + '">'
+      + thumbImg
+      + '<div style="position:absolute;top:8px;left:8px;display:flex;align-items:center;gap:5px">'
+      + '<span class="ci-badge" style="background:rgba(255,255,255,.9);backdrop-filter:blur(4px);color:#7c3aed;font-weight:700">' + typeLabel(c.type) + '</span>'
+      + (daysLeft ? '<span class="ci-badge" style="background:#ef4444;color:#fff">' + daysLeft + '</span>' : '')
       + '</div>'
-      + '<div style="font-size:15px;font-weight:700;line-height:1.4;margin-bottom:4px;color:#1e293b;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(c.title)
-      + (c.description ? ' <span style="font-weight:400;color:#94a3b8">' + esc(c.description).substring(0, 40) + '</span>' : '')
       + '</div>'
-      + (rewardText ? '<div style="font-size:15px;font-weight:800;color:#ef4444;margin-bottom:4px">' + rewardText + '</div>' : '')
+      + '<div style="padding:12px 14px">'
+      + '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
+      + (c.brand_name ? '<span style="font-size:11px;color:#94a3b8;font-weight:700">' + esc(c.brand_name) + '</span>' : '')
+      + (c.category ? '<span style="font-size:11px;color:#cbd5e1">·</span><span style="font-size:11px;color:#94a3b8;font-weight:500">' + ({fashion:"패션",beauty:"뷰티",food:"맛집/음식",travel:"여행",lifestyle:"라이프스타일",tech:"테크/IT",fitness:"운동/건강",pet:"반려동물",other:"기타"}[c.category]||c.category) + '</span>' : '')
       + '</div>'
+      + '<div style="font-size:' + (compact ? '13px' : '14px') + ';font-weight:800;line-height:1.4;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px">' + esc(c.title) + '</div>'
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
-      + '<span style="font-size:11px;color:#94a3b8;font-weight:500">' + applicantInfo + (endDate ? ' · ' + endDate : '') + '</span>'
-      + '</div>'
-      + '</div>'
-      + '<div style="display:flex;align-items:center;flex-shrink:0">'
-      + '<button class="ci-apply-quick-btn" data-id="' + esc(c.id) + '">신청하기</button>'
+      + (rewardText ? '<span style="font-size:14px;font-weight:800;color:#ef4444">' + rewardText + '</span>' : '<span></span>')
+      + '<span style="font-size:11px;color:#94a3b8;font-weight:700">' + applicantText + '</span>'
       + '</div>'
       + '</div>'
       + '</div>';
@@ -250,22 +236,8 @@
 
   function bindCardClicks(container) {
     container.querySelectorAll(".ci-card").forEach(function (card) {
-      card.onclick = function (ev) {
-        if (ev.target.closest && ev.target.closest(".ci-apply-quick-btn")) return;
+      card.onclick = function () {
         openCampaignDetail(card.getAttribute("data-id"));
-      };
-    });
-    container.querySelectorAll(".ci-apply-quick-btn").forEach(function (btn) {
-      btn.onclick = function (ev) {
-        ev.stopPropagation();
-        var id = btn.getAttribute("data-id");
-        var session = getSession();
-        if (!session) {
-          alert("로그인 후 지원 가능합니다.");
-          return;
-        }
-        campaignData = campaignData.length ? campaignData : [];
-        openCampaignDetail(id);
       };
     });
   }
@@ -282,7 +254,7 @@
     if (c.reward_type || c.reward_amount) {
       var rtLabel = { fixed: "고정 금액", product: "제품 제공", revenue_share: "수익 배분", mixed: "복합" }[c.reward_type] || "";
       rewardInfo = '<div class="ci-detail-info-item" style="background:linear-gradient(135deg,#fef2f2,#fff1f2);border-color:#fecdd3"><div class="ci-detail-info-label" style="color:#ef4444">리워드</div>'
-        + '<div class="ci-detail-info-value" style="color:#ef4444;font-size:17px">' + (c.reward_amount ? esc(c.reward_amount) : "") + (rtLabel ? '<span style="font-size:12px;color:#f87171;margin-left:6px">' + rtLabel + '</span>' : "") + "</div></div>";
+        + '<div class="ci-detail-info-value" style="color:#ef4444;font-size:17px">' + (c.reward_amount ? esc(formatAmount(c.reward_amount)) : "") + (rtLabel ? '<span style="font-size:12px;color:#f87171;margin-left:6px">' + rtLabel + '</span>' : "") + "</div></div>";
     }
 
     var thumbnailHtml = "";
@@ -606,14 +578,12 @@
     navEls.forEach(function (navEl) {
       var cls = navEl.className || "";
       if (cls.indexOf("flex-1") >= 0 && cls.indexOf("space-y-1") >= 0 && isUserDashboard(navEl)) {
-        injectSidebarItem(navEl);
         attachNavCloseHandlers(navEl);
       }
     });
 
     var bottomGrid = findBottomNav();
     if (bottomGrid) {
-      injectBottomNavItem(bottomGrid);
       attachBottomNavCloseHandlers(bottomGrid);
     }
 
@@ -662,15 +632,12 @@
       + '.ci-chip.active{background:#7c3aed;color:#fff}'
       + '.ci-chip:hover{background:#e2e8f0}'
       + '.ci-chip.active:hover{background:#6d28d9}'
-      + '.ci-campaign-list{display:flex;flex-direction:column;gap:12px;padding-bottom:24px}'
-      + '.ci-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px;transition:border-color .2s,box-shadow .2s;cursor:pointer}'
+      + '.ci-campaign-list{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-bottom:24px}'
+      + '@media(max-width:500px){.ci-campaign-list{grid-template-columns:1fr}}'
+      + '.ci-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;transition:border-color .2s,box-shadow .2s;cursor:pointer}'
       + '.ci-card:hover{border-color:#7c3aed;box-shadow:0 2px 12px rgba(124,58,237,.08)}'
-      + '.ci-card-compact{padding:12px}'
-      + '.ci-card-thumb{width:88px;height:88px;border-radius:12px;overflow:hidden;flex-shrink:0;background:#f1f5f9}'
-      + '.ci-card-thumb-empty{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f3e8ff,#fce7f3)}'
-      + '.ci-card-thumb-sm{width:56px;height:56px;flex-shrink:0}'
-      + '.ci-apply-quick-btn{padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}'
-      + '.ci-apply-quick-btn:hover{background:#6d28d9}'
+      + '.ci-card:hover img{transform:scale(1.05)}'
+      + '.ci-card-thumb-top{width:100%;overflow:hidden;position:relative;background:#f8fafc}'
       + '.ci-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap}'
       + '.ci-loading{text-align:center;padding:40px;color:#64748b;font-size:14px}'
       + '.ci-empty{text-align:center;padding:48px 24px;color:#64748b;font-size:14px;line-height:1.6}'
@@ -719,7 +686,7 @@
       + '.ci-widget-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}'
       + '.ci-widget-more{background:none;border:none;color:#7c3aed;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:8px;transition:all .15s}'
       + '.ci-widget-more:hover{background:rgba(124,58,237,.08)}'
-      + '.ci-widget-list{display:flex;flex-direction:column;gap:8px}'
+      + '.ci-widget-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}'
       + '@media(min-width:768px){.ci-dash-widget{grid-column:1/-1;border-radius:24px;padding:20px 24px}}'
       + 'body.ci-panel-open nav button:not(.ci-sidebar-item):not(.ci-bottom-item){background:transparent!important;color:#94a3b8!important;box-shadow:none!important}'
       + 'body.ci-panel-open nav button:not(.ci-sidebar-item):not(.ci-bottom-item) div.absolute{display:none!important}'
