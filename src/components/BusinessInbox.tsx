@@ -20,7 +20,6 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
   // `/api/business-proposals/:businessUsername` matches a single path segment,
   // so the slash must be stripped before encoding.
   const fetchProposals = async () => {
-    setLoading(true);
     try {
       const cleanUsername = businessUsername.replace(/^biz\//, '');
       const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
@@ -30,12 +29,15 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
       }
     } catch (e) {
       console.error('Failed to fetch business proposals:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
     fetchProposals();
+    const interval = setInterval(fetchProposals, 30_000);
+    return () => clearInterval(interval);
   }, [businessUsername]);
 
   const filteredProposals = useMemo(() => {

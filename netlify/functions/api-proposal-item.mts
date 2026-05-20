@@ -94,6 +94,38 @@ export default async (req: Request, context: Context) => {
       }
     }
 
+    // Send alimtalk notification to business when proposal status changes
+    if (bizUsername && (body.status === "accepted" || body.status === "rejected")) {
+      try {
+        const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
+        const templateId = Netlify.env.get("SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID") || "";
+        const proposalTitle = updatedProposal.title || "협업 제안";
+        const statusText = body.status === "accepted" ? "수락" : "거절";
+        const magicLink = body.status === "accepted"
+          ? `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`
+          : `${siteOrigin}/admin?tab=inbox`;
+
+        await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: bizUsername,
+            message: `[픽스폴리오] 협업 제안 ${statusText}\n\n@${username}님이 "${proposalTitle}" 협업 제안을 ${statusText}했습니다.\n\n아래 링크에서 확인하세요.\n${magicLink}`,
+            templateId,
+            variables: {
+              "#{고객명}": bizUsername,
+              "#{업체명}": updatedProposal.company_name || bizUsername,
+              "#{프로젝트명}": proposalTitle,
+              "#{메시지내용}": `@${username}님이 협업 제안을 ${statusText}했습니다.`,
+              "#{링크연결}": magicLink,
+            },
+          }),
+        });
+      } catch (notifErr) {
+        console.error("[api-proposal-item] Failed to send status alimtalk to business:", notifErr);
+      }
+    }
+
     return Response.json({ success: true });
   }
 
