@@ -10,8 +10,80 @@ export default async (req: Request, context: Context) => {
   const store = getStore("proposals");
 
   if (req.method === "GET") {
-    const data = await store.get(`proposals_${username}`, { type: "json" });
-    return Response.json(data || []);
+    const allProposals: any[] = [];
+    const seenIds = new Set<string>();
+
+    // 1) SQL 데이터베이스에서 조회 (원래 정상 작동하던 5월 초 버전과 동일)
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+      const result = await db.sql`
+        SELECT * FROM proposals
+        WHERE LOWER(username) = ${username}
+           OR LOWER(influencer_username) = ${username}
+        ORDER BY created_at DESC
+      `;
+      if (result && Array.isArray(result.rows)) {
+        for (const row of result.rows) {
+          seenIds.add(row.id);
+          allProposals.push({
+            id: row.id,
+            influencer_username: row.influencer_username || row.username || username,
+            category: row.category || "광고",
+            company_name: row.company_name || "",
+            contact_person: row.contact_person || "",
+            contact_email: row.contact_email || "",
+            contact_phone: row.contact_phone || "",
+            title: row.title || "",
+            content: row.content || row.description || "",
+            description: row.description || row.content || "",
+            start_date: row.start_date || "",
+            end_date: row.end_date || "",
+            fee: parseInt(row.fee) || 0,
+            business_username: row.business_username || "",
+            status: row.status || "pending",
+            rejection_reason: row.rejection_reason || "",
+            created_at: row.created_at || new Date().toISOString(),
+            createdAt: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || "",
+          });
+        }
+      }
+    } catch (dbErr) {
+      console.error("[api-proposals] SQL query failed:", dbErr);
+    }
+
+    // 2) Blob 스토어에서 SQL에 없는 제안 추가
+    try {
+      const blobData = (await store.get(`proposals_${username}`, { type: "json" })) as any[] | null;
+      if (Array.isArray(blobData)) {
+        for (const bp of blobData) {
+          if (bp.id && !seenIds.has(bp.id)) {
+            seenIds.add(bp.id);
+            allProposals.push(bp);
+          }
+        }
+      }
+    } catch (blobErr) {
+      console.error("[api-proposals] Blob read failed:", blobErr);
+    }
+
+    allProposals.sort(
+      (a: any, b: any) =>
+        new Date(b.created_at || b.createdAt || 0).getTime() -
+        new Date(a.created_at || a.createdAt || 0).getTime()
+    );
+
+    // Blob 스토어에 동기화 (PATCH/DELETE 엔드포인트 호환)
+    if (allProposals.length > 0) {
+      try {
+        await store.setJSON(`proposals_${username}`, allProposals);
+      } catch (syncErr) {
+        console.error("[api-proposals] Blob sync failed:", syncErr);
+      }
+    }
+
+    return Response.json({ proposals: allProposals });
   }
 
   if (req.method === "POST") {
@@ -68,10 +140,9 @@ export default async (req: Request, context: Context) => {
       console.error("[api-proposals] Failed to persist proposal to SQL:", dbErr);
     }
 
-    // Send alimtalk notification to the influencer about the new proposal
+    // 비즈니스 수신 알림 - 카카오 알림톡
     try {
       const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-      const proposalTemplateId = Netlify.env.get("SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID") || "";
       const companyName = body.company_name || body.business_username || "기업";
       const proposalTitle = body.title || "협업 제안";
       const magicLink = `${siteOrigin}/admin?tab=proposals`;
@@ -82,7 +153,7 @@ export default async (req: Request, context: Context) => {
         body: JSON.stringify({
           username,
           message: `[픽스폴리오] 새로운 협업 제안\n\n${companyName}에서 "${proposalTitle}" 협업을 제안했습니다.\n\n자세한 내용은 아래 링크에서 확인하세요.\n${magicLink}`,
-          templateId: proposalTemplateId,
+          templateId: "KA01TP260409050013707MDcnfpN4ApK",
           variables: {
             "#{고객명}": username,
             "#{업체명}": companyName,
@@ -98,9 +169,44 @@ export default async (req: Request, context: Context) => {
     return Response.json({ success: true, proposal });
   }
 
+  // PUT - 상태 업데이트 (원래 5월 초 버전과 동일)
+  if (req.method === "PUT") {
+    const body = await req.json();
+    if (!body.id) {
+      return Response.json({ error: "id is required" }, { status: 400 });
+    }
+
+    // Update in SQL
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      const db = getDatabase();
+      await db.sql`
+        UPDATE proposals SET status = ${body.status}, updated_at = now()
+        WHERE id = ${body.id} AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
+      `;
+    } catch (dbErr) {
+      console.error("[api-proposals] SQL update failed:", dbErr);
+    }
+
+    // Update in blob store
+    try {
+      const existing = (await store.get(`proposals_${username}`, { type: "json" })) as any[] || [];
+      const idx = existing.findIndex((p: any) => p.id === body.id);
+      if (idx !== -1) {
+        existing[idx] = { ...existing[idx], status: body.status, updatedAt: new Date().toISOString() };
+        await store.setJSON(`proposals_${username}`, existing);
+      }
+    } catch (blobErr) {
+      console.error("[api-proposals] Blob update failed:", blobErr);
+    }
+
+    return Response.json({ success: true });
+  }
+
   return Response.json({ error: "Method not allowed" }, { status: 405 });
 };
 
 export const config: Config = {
   path: "/api/proposals/:username",
+  method: ["GET", "POST", "PUT", "OPTIONS"],
 };
