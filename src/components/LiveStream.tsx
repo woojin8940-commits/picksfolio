@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useTransition } from '
 import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, Tv, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
+import { formatKRW } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
@@ -35,7 +36,7 @@ const parseKrwPrice = (raw: string | undefined): number => {
 };
 
 // Format a number to a Korean Won string used by cart/order payloads.
-const formatKrwPrice = (amount: number): string => `${Math.max(0, Math.round(amount)).toLocaleString('ko-KR')}원`;
+const formatKrwPrice = (amount: number): string => formatKRW(amount);
 
 // For broadcast products, each option value can carry an override price and/or
 // a discount %. Compute the effective unit price for the chosen variant:
@@ -2785,7 +2786,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               {batchTotal > 0 && (
                 <div className="flex items-center justify-between px-1 mb-2">
                   <span className="text-white/50 text-[10px] font-black uppercase tracking-widest">총 {batchPayableItems.length}개 합계</span>
-                  <span className="text-white text-sm font-black">{batchTotal.toLocaleString('ko-KR')}원</span>
+                  <span className="text-white text-sm font-black">{batchTotal.toLocaleString()}원</span>
                 </div>
               )}
               {batchTotal > 0 && (
@@ -2794,7 +2795,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-black text-sm hover:from-purple-700 hover:to-pink-600 transition-all active:scale-95 mb-2"
                 >
                   <CreditCard size={16} />
-                  {batchTotal.toLocaleString('ko-KR')}원 한 번에 결제하기
+                  {batchTotal.toLocaleString()}원 한 번에 결제하기
                 </button>
               )}
               {batchUnpriceableItems.length > 0 && (
@@ -2838,7 +2839,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                         .map((v: any) => {
                           const selected = pendingOptions[opt.name] === v.value;
                           const meta: string[] = [];
-                          if (typeof v.price === 'number' && v.price > 0) meta.push(`${v.price.toLocaleString('ko-KR')}원`);
+                          if (typeof v.price === 'number' && v.price > 0) meta.push(`${v.price.toLocaleString()}원`);
                           if (typeof v.discount === 'number' && v.discount > 0) meta.push(`-${v.discount}%`);
                           return (
                             <button
@@ -3020,7 +3021,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     ) : (
                       <>
                         <CreditCard size={14} />
-                        {parseKrwPrice(checkoutProduct.price).toLocaleString('ko-KR')}원 {checkoutPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '카드로 결제'}
+                        {parseKrwPrice(checkoutProduct.price).toLocaleString()}원 {checkoutPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '카드로 결제'}
                       </>
                     )}
                   </button>
@@ -3092,7 +3093,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                             <p className="text-slate-400 text-[10px] truncate">{Object.entries(it.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(' · ')}</p>
                           )}
                         </div>
-                        <p className="text-slate-700 text-xs font-black flex-shrink-0">{parseKrwPrice(it.productPrice).toLocaleString('ko-KR')}원</p>
+                        <p className="text-slate-700 text-xs font-black flex-shrink-0">{parseKrwPrice(it.productPrice).toLocaleString()}원</p>
                       </div>
                     ))}
                   </div>
@@ -3155,7 +3156,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     ) : (
                       <>
                         <CreditCard size={14} />
-                        {batchTotal.toLocaleString('ko-KR')}원 {batchPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '카드로 결제'}
+                        {batchTotal.toLocaleString()}원 {batchPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '카드로 결제'}
                       </>
                     )}
                   </button>

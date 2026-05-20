@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
-import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
+import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatters';
 
 interface BusinessSettlementProps {
   businessUsername: string;
@@ -178,7 +178,7 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => `${fee.toLocaleString()}원`;
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const inputClass = "w-full border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500";
 

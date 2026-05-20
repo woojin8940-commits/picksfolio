@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
+import { formatKRW } from '../utils/formatters';
 
 interface UserSettlementProps {
   userName: string;
@@ -46,7 +47,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => `${fee.toLocaleString()}원`;
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const getDaysUntil = (dateStr: string) => {
     const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24));

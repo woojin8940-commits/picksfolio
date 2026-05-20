@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { formatKRW } from '../../utils/formatters';
 import AdminBroadcastReplay from './AdminBroadcastReplay';
 
 interface Ongoing {
@@ -71,7 +72,7 @@ interface UsagePricing {
 
 interface Props { token: string; }
 
-const won = (n: number) => `${(n || 0).toLocaleString()}원`;
+const won = (n: number) => formatKRW(n);
 
 const formatHm = (mins: number) => {
   const m = Math.max(0, Math.floor(mins || 0));

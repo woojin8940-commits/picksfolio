@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
+import { formatKRW } from '../utils/formatters';
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
@@ -123,9 +124,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => {
-    return `${fee.toLocaleString()}원`;
-  };
+  const formatFee = (fee: number) => formatKRW(fee);
 
   // Selected date proposals
   const selectedDateProposals = useMemo(() => {

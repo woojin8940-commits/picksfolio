@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal, CollabRecord } from '../types';
 import { apiService } from '../services/apiService';
-import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
+import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatters';
 
 interface BusinessCalendarProps {
   userName: string;
@@ -243,9 +243,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => {
-    return `${fee.toLocaleString()}원`;
-  };
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const getProposalStatusColor = (status: string) => {
     switch (status) {

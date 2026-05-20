@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
+import { formatKRW } from '../utils/formatters';
 
 interface BusinessInboxProps {
   businessUsername: string;
@@ -53,7 +54,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => `${fee.toLocaleString()}원`;
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -76,7 +77,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-5 gap-2 md:gap-4 mb-6">
+      <div className="flex gap-2 md:grid md:grid-cols-5 md:gap-4 mb-6 overflow-x-auto pb-1 scrollbar-hide">
         {[
           { label: '전체', count: proposals.length, filter: 'all' as StatusFilter, activeColor: 'border-blue-300 bg-blue-50 ring-2 ring-blue-200', textColor: 'text-slate-900' },
           { label: '대기중', count: pendingCount, filter: 'pending' as StatusFilter, activeColor: 'border-amber-300 bg-amber-50 ring-2 ring-amber-200', textColor: 'text-amber-600' },
@@ -87,7 +88,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
           <button
             key={filter}
             onClick={() => setStatusFilter(filter)}
-            className={`p-3 md:p-5 rounded-2xl border transition-all text-left ${
+            className={`min-w-[80px] flex-shrink-0 md:min-w-0 p-3 md:p-5 rounded-2xl border transition-all text-left ${
               statusFilter === filter ? `${activeColor} shadow-md` : 'border-slate-100 bg-white shadow-sm hover:border-slate-200'
             }`}
           >

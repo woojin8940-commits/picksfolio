@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
+import { formatKRW } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
 import AdminLiveConsole from './admin/AdminLiveConsole';
@@ -206,9 +207,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const formatFee = (fee: number) => {
-    return `${fee.toLocaleString()}원`;
-  };
+  const formatFee = (fee: number) => formatKRW(fee);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

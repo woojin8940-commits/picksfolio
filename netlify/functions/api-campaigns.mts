@@ -21,6 +21,7 @@ export default async (req: Request) => {
       }
 
       const type = url.searchParams.get("type");
+      const category = url.searchParams.get("category");
       const status = url.searchParams.get("status") || "active";
       const business = url.searchParams.get("business");
       const search = url.searchParams.get("search");
@@ -42,6 +43,21 @@ export default async (req: Request) => {
             ORDER BY c.created_at DESC
           `;
         }
+      } else if (search && category) {
+        const pattern = `%${search}%`;
+        result = await db.sql`
+          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          FROM campaigns c
+          WHERE c.status = ${status} AND c.category = ${category} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
+          ORDER BY c.created_at DESC
+        `;
+      } else if (category) {
+        result = await db.sql`
+          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          FROM campaigns c
+          WHERE c.status = ${status} AND c.category = ${category}
+          ORDER BY c.created_at DESC
+        `;
       } else if (type) {
         result = await db.sql`
           SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count

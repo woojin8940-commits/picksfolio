@@ -27,19 +27,20 @@ interface UserCampaignBrowseProps {
 
 const REWARD_FILTERS = [
   { value: '', label: '전체' },
-  { value: 'collaboration', label: '협업' },
-  { value: 'advertisement', label: '광고/협찬' },
-  { value: 'review', label: '리뷰' },
-  { value: 'event', label: '이벤트' },
+  { value: 'ad_collab', label: '광고 협업' },
+  { value: 'group_buy', label: '공동구매' },
+  { value: 'other', label: '기타' },
 ];
 
 const CATEGORIES: Record<string, string> = {
+  ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
   fashion: '패션', beauty: '뷰티', food: '맛집/음식', travel: '여행',
   lifestyle: '라이프스타일', tech: '테크/IT', fitness: '운동/건강',
-  baby: '유아/키즈', pet: '반려동물', other: '기타',
+  baby: '유아/키즈', pet: '반려동물',
 };
 
 const TYPE_LABELS: Record<string, string> = {
+  ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
   collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트',
 };
 
@@ -62,8 +63,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     setLoading(true);
     try {
       let url = '/api/campaigns?status=active';
-      if (activeFilter) url += `&type=${activeFilter}`;
+      if (activeFilter) url += `&category=${activeFilter}`;
       if (searchQuery.trim()) url = `/api/campaigns?status=active&search=${encodeURIComponent(searchQuery.trim())}`;
+      if (activeFilter && searchQuery.trim()) url += `&category=${activeFilter}`;
       const res = await fetch(url);
       const data = await res.json();
       setCampaigns(data.campaigns || []);
@@ -322,7 +324,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
   // --- Campaign List View ---
   return (
-    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-3xl mx-auto">
+    <div className="p-4 md:p-8 w-full animate-in fade-in duration-300 max-w-4xl mx-auto">
       {onBack && (
         <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-700 font-bold text-sm mb-4 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
@@ -331,56 +333,41 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       )}
 
       {/* Header */}
-      <div className="mb-5">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg md:text-xl font-black text-slate-900">캠페인 리스트</h2>
-          <span className="text-xs font-bold text-slate-400">{filteredCampaigns.length}개 모집중</span>
-        </div>
-        <p className="text-xs text-slate-400 font-medium">브랜드 캠페인에 신청하고 협업 기회를 잡아보세요</p>
+      <div className="mb-6">
+        <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">캠페인</h2>
+        <p className="text-sm text-slate-400 font-medium">브랜드 캠페인에 신청하고 협업 기회를 잡아보세요</p>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-100 rounded-xl p-3.5 mb-5 flex items-center gap-3">
-        <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
-          <span className="text-lg">📢</span>
+      {/* Search & Filter */}
+      <div className="flex flex-col gap-3 mb-6">
+        <form onSubmit={handleSearch}>
+          <div className="relative">
+            <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
+              placeholder="캠페인 검색..."
+            />
+          </div>
+        </form>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+          {REWARD_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setActiveFilter(f.value)}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all ${
+                activeFilter === f.value
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{filteredCampaigns.length}개</span>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-black text-purple-700">캠페인 모집 소식을 확인하세요</p>
-          <p className="text-[10px] text-purple-400 font-medium mt-0.5">새로운 캠페인이 오면 알려드릴게요</p>
-        </div>
-      </div>
-
-      {/* Search */}
-      <form onSubmit={handleSearch} className="mb-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 bg-white"
-            placeholder="캠페인 검색..."
-          />
-          <button type="submit" className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-xl font-black text-sm transition-all shadow-sm">
-            검색
-          </button>
-        </div>
-      </form>
-
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 mb-5 overflow-x-auto pb-1 scrollbar-hide">
-        {REWARD_FILTERS.map(f => (
-          <button
-            key={f.value}
-            onClick={() => setActiveFilter(f.value)}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all ${
-              activeFilter === f.value
-                ? 'bg-purple-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
       </div>
 
       {/* Campaign Cards */}
@@ -398,93 +385,76 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <p className="text-sm text-slate-400 font-medium">새로운 캠페인이 등록되면 여기에 표시됩니다</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
             const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
             return (
               <div
                 key={campaign.id}
-                className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-md transition-all overflow-hidden group"
+                onClick={() => setSelectedCampaign(campaign)}
+                className="bg-white rounded-2xl border border-slate-100 hover:border-purple-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
               >
-                <div className="flex">
-                  {/* Thumbnail */}
-                  <div
-                    className="w-24 h-24 md:w-32 md:h-32 flex-shrink-0 bg-slate-100 overflow-hidden cursor-pointer"
-                    onClick={() => setSelectedCampaign(campaign)}
-                  >
-                    {campaign.thumbnail_url ? (
-                      <img
-                        src={campaign.thumbnail_url}
-                        alt={campaign.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
-                        <svg className="w-8 h-8 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
+                {/* Thumbnail */}
+                <div className="w-full h-36 md:h-44 bg-slate-50 overflow-hidden relative">
+                  {campaign.thumbnail_url ? (
+                    <img
+                      src={campaign.thumbnail_url}
+                      alt={campaign.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
+                      <svg className="w-10 h-10 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  )}
+                  {/* Badges overlay */}
+                  <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                    <span className="bg-white/90 backdrop-blur-sm text-purple-700 px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
+                      {TYPE_LABELS[campaign.type] || campaign.type}
+                    </span>
+                    {days && (
+                      <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
+                        {days}
+                      </span>
                     )}
                   </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0 p-3 md:p-4 flex flex-col justify-between cursor-pointer" onClick={() => setSelectedCampaign(campaign)}>
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                        <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[9px] font-black">
-                          {TYPE_LABELS[campaign.type] || campaign.type}
-                        </span>
-                        {campaign.brand_name && (
-                          <span className="text-[10px] text-slate-400 font-bold">{campaign.brand_name}</span>
-                        )}
-                        {campaign.category && (
-                          <span className="text-[10px] text-slate-300 font-bold">{CATEGORIES[campaign.category] || campaign.category}</span>
-                        )}
-                      </div>
-                      <h3 className="font-black text-sm text-slate-900 line-clamp-1 group-hover:text-purple-600 transition-colors">
-                        {campaign.title}
-                      </h3>
-                      {campaign.description && (
-                        <p className="text-[11px] text-slate-400 font-medium line-clamp-1 mt-0.5">{campaign.description}</p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {campaign.reward_amount && (
-                          <span className="text-sm font-black text-rose-500">{campaign.reward_amount}</span>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-bold">
-                          {campaign.max_applicants > 0
-                            ? `${campaign.application_count}/${campaign.max_applicants}명`
-                            : `${campaign.application_count}명 신청중`}
-                        </span>
-                        {days && (
-                          <span className="text-[10px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">{days}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Apply Button */}
-                  <div className="flex items-center px-3 md:px-4 flex-shrink-0">
-                    {isApplied ? (
-                      <span className="bg-emerald-50 text-emerald-600 px-3 py-2 rounded-xl text-[10px] font-black whitespace-nowrap">
+                  {isApplied && (
+                    <div className="absolute top-2.5 right-2.5">
+                      <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
                         신청완료
                       </span>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCampaign(campaign);
-                          setShowApplyForm(true);
-                        }}
-                        className="bg-purple-600 hover:bg-purple-500 text-white px-3 md:px-4 py-2 rounded-xl text-[10px] md:text-xs font-black whitespace-nowrap transition-all shadow-sm"
-                      >
-                        신청하기
-                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="p-3.5 md:p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    {campaign.brand_name && (
+                      <span className="text-[11px] text-slate-400 font-bold">{campaign.brand_name}</span>
                     )}
+                    {campaign.category && (
+                      <>
+                        <span className="text-slate-200">·</span>
+                        <span className="text-[11px] text-slate-400 font-medium">{CATEGORIES[campaign.category] || campaign.category}</span>
+                      </>
+                    )}
+                  </div>
+                  <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-purple-600 transition-colors mb-1.5">
+                    {campaign.title}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    {campaign.reward_amount ? (
+                      <span className="text-sm font-black text-rose-500">{campaign.reward_amount}</span>
+                    ) : <span />}
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {campaign.max_applicants > 0
+                        ? `${campaign.application_count}/${campaign.max_applicants}명`
+                        : `${campaign.application_count}명 신청중`}
+                    </span>
                   </div>
                 </div>
               </div>
