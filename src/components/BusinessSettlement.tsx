@@ -10,20 +10,24 @@ interface BusinessSettlementProps {
 type EditingField = { id: string; field: 'amount' | 'date'; value: string } | null;
 
 const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsername, companyName }) => {
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cleanBusinessUsername = businessUsername.replace(/^biz\//, '');
+  const settlementsBaseUrl = `/api/settlements/${encodeURIComponent(cleanBusinessUsername)}`;
+  const cacheKey = `picks_biz_settlements_${cleanBusinessUsername.toLowerCase()}`;
+
+  const cachedSettlements = (() => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  })();
+
+  const [settlements, setSettlements] = useState<Settlement[]>(cachedSettlements);
+  const [loading, setLoading] = useState(cachedSettlements.length === 0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingField>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [selectedInfluencer, setSelectedInfluencer] = useState<string>('all');
-
-  // localStorage stores the session as 'biz/{name}', but the route
-  // `/api/settlements/:username` matches a single path segment — the slash
-  // must be stripped before encoding so it doesn't get interpreted as a
-  // path separator.
-  const cleanBusinessUsername = businessUsername.replace(/^biz\//, '');
-  const settlementsBaseUrl = `/api/settlements/${encodeURIComponent(cleanBusinessUsername)}`;
 
   // Create form state
   const [formData, setFormData] = useState({
@@ -36,12 +40,13 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
   });
 
   const fetchSettlements = async () => {
-    setLoading(true);
     try {
       const res = await fetch(`${settlementsBaseUrl}?role=business`);
       if (res.ok) {
         const data = await res.json();
-        setSettlements(data.settlements || []);
+        const fresh = data.settlements || [];
+        setSettlements(fresh);
+        try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
       }
     } catch (e) {
       console.error('Failed to fetch settlements:', e);

@@ -31,6 +31,21 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
 
+  const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
+  const statsCacheKey = `picks_biz_stats_${cleanUsername}`;
+  const trendCacheKey = `picks_biz_trend`;
+
+  const cachedStats = (() => {
+    try {
+      const raw = localStorage.getItem(statsCacheKey);
+      return raw ? JSON.parse(raw) : { total: 0, accepted: 0, inProgress: 0 };
+    } catch { return { total: 0, accepted: 0, inProgress: 0 }; }
+  })();
+  const cachedTrend = (() => {
+    try { return localStorage.getItem(trendCacheKey) || '분석 중...'; }
+    catch { return '분석 중...'; }
+  })();
+
   // Phone preview state (matching user dashboard)
   const [previewBlocks, setPreviewBlocks] = useState<Block[]>([]);
   const [previewDesign, setPreviewDesign] = useState<DesignSettings>({
@@ -49,8 +64,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   });
   const [previewProfile, setPreviewProfile] = useState<any>({ name: companyName, bio: '', avatar_url: '' });
   const [previewPortfolio, setPreviewPortfolio] = useState<any[]>([]);
-  const [topTrend, setTopTrend] = useState<string>('분석 중...');
-  const [proposalStats, setProposalStats] = useState({ total: 0, accepted: 0, inProgress: 0 });
+  const [topTrend, setTopTrend] = useState<string>(cachedTrend);
+  const [proposalStats, setProposalStats] = useState(cachedStats);
 
   const fetchTopTrend = async () => {
     try {
@@ -59,6 +74,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         const data = await response.json();
         if (data.mainInsight && data.mainInsight.keyword) {
           setTopTrend(data.mainInsight.keyword);
+          try { localStorage.setItem(trendCacheKey, data.mainInsight.keyword); } catch {}
         }
       }
     } catch (e) {
@@ -68,16 +84,17 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
   const fetchProposalStats = async () => {
     try {
-      const cleanUsername = businessUsername.replace(/^biz\//, '');
       const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
       if (res.ok) {
         const data = await res.json();
         const proposals = data.proposals || [];
-        setProposalStats({
+        const stats = {
           total: proposals.length,
           accepted: proposals.filter((p: any) => p.status === 'accepted').length,
           inProgress: proposals.filter((p: any) => p.status === 'accepted' || p.status === 'completed').length,
-        });
+        };
+        setProposalStats(stats);
+        try { localStorage.setItem(statsCacheKey, JSON.stringify(stats)); } catch {}
       }
     } catch (e) {
       console.error('Error fetching proposal stats:', e);

@@ -69,8 +69,17 @@ const CATEGORIES = [
 const categoryLabel = (val: string) => CATEGORIES.find(c => c.value === val)?.label || val || '-';
 
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName }) => {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
+
+  const cachedCampaigns = (() => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  })();
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>(cachedCampaigns);
+  const [loading, setLoading] = useState(cachedCampaigns.length === 0);
   const [showForm, setShowForm] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -98,17 +107,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [submitting, setSubmitting] = useState(false);
 
   const fetchCampaigns = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch(`/api/campaigns?business=${businessUsername}`);
       const data = await res.json();
-      setCampaigns(data.campaigns || []);
+      const fresh = data.campaigns || [];
+      setCampaigns(fresh);
+      try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
     } catch {
       console.error('Failed to fetch campaigns');
     } finally {
       setLoading(false);
     }
-  }, [businessUsername]);
+  }, [businessUsername, cacheKey]);
 
   useEffect(() => {
     fetchCampaigns();
