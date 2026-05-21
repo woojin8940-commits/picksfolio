@@ -539,9 +539,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     setIsSaving(true);
     const sanitizedBlocks = blocks.map(block => ({
       ...block,
-      products: block.products.map(p => ({
+      products: (block.products || []).map(p => ({
         ...p,
-        link: p.link.replace(/#/g, '')
+        link: (p.link || '').replace(/#/g, '')
       }))
     }));
 
@@ -1133,7 +1133,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                             <button onClick={() => handleDeleteOption(product.id, opt.id)} className="w-10 h-10 bg-white border border-red-100 text-red-400 rounded-xl flex items-center justify-center hover:text-red-500 transition-all"><Trash2 size={14} /></button>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {opt.values.map((val, vi) => (
+                            {(opt.values || []).map((val, vi) => (
                               <div key={vi} className="flex items-center gap-1">
                                 <input
                                   type="text"

@@ -81,6 +81,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [showCartPanel, setShowCartPanel] = useState(false);
   const [cartStats, setCartStats] = useState<{ totalViewers: number; totalItems: number; totalRevenue: number; productCounts: { productId: string; name: string; count: number; image?: string; link: string; price?: string; optionCounts: Record<string, Record<string, number>> }[] } | null>(null);
   const [cartCarts, setCartCarts] = useState<any[]>([]);
+  const [cartError, setCartError] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -416,16 +417,36 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Poll cart stats while live
   useEffect(() => {
     if (!isLive) return;
+    let cancelled = false;
     const fetchCartStats = async () => {
-      const data = await apiService.getLiveCartStats(userName);
-      if (data) {
-        setCartStats(data.stats);
-        setCartCarts(data.carts);
+      try {
+        const data = await apiService.getLiveCartStats(userName);
+        if (cancelled) return;
+        if (data) {
+          const stats = data.stats && typeof data.stats === 'object' ? data.stats : null;
+          const carts = Array.isArray(data.carts) ? data.carts : [];
+          if (stats) {
+            setCartStats({
+              totalViewers: stats.totalViewers ?? 0,
+              totalItems: stats.totalItems ?? 0,
+              totalRevenue: stats.totalRevenue ?? 0,
+              productCounts: Array.isArray(stats.productCounts) ? stats.productCounts : [],
+            });
+          } else {
+            setCartStats(null);
+          }
+          setCartCarts(carts);
+          setCartError(false);
+        } else {
+          setCartError(true);
+        }
+      } catch {
+        if (!cancelled) setCartError(true);
       }
     };
     fetchCartStats();
     const interval = setInterval(fetchCartStats, 3000);
-    return () => clearInterval(interval);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [isLive, userName]);
 
   // Push active product + active material to live state so viewers can see them
@@ -932,6 +953,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       // Reset all stats from previous broadcast
       setCartStats(null);
       setCartCarts([]);
+      setCartError(false);
       setMessages([]);
       setActiveProductId(null);
 
@@ -1814,6 +1836,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* Cart Stats Panel */}
         {showCartPanel && (
           <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-4 scrollbar-hide">
+            {/* Error State */}
+            {cartError && !cartStats && (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-3">
+                  <BarChart3 size={22} className="text-red-400" />
+                </div>
+                <p className="text-red-400 font-bold text-sm">데이터를 불러오지 못했습니다</p>
+                <p className="text-white/30 text-xs mt-1">잠시 후 자동으로 재시도합니다</p>
+              </div>
+            )}
+
             {/* Summary Stats */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white/5 rounded-xl p-3 text-center">
@@ -1831,14 +1864,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             </div>
 
             {/* Product Ranking */}
-            {cartStats && cartStats.productCounts.length > 0 && (
+            {cartStats && Array.isArray(cartStats.productCounts) && cartStats.productCounts.length > 0 && (
               <div>
                 <h5 className="text-white/60 text-xs font-black uppercase tracking-widest mb-3 flex items-center gap-2">
                   <TrendingUp size={14} className="text-orange-400" /> 상품별 담기 순위
                 </h5>
                 <div className="space-y-2">
                   {cartStats.productCounts.map((item, i) => (
-                    <div key={item.productId} className="bg-white/5 p-2.5 rounded-xl">
+                    <div key={item.productId || i} className="bg-white/5 p-2.5 rounded-xl">
                       <div className="flex items-center gap-3">
                         <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
                           i === 0 ? 'bg-yellow-500 text-black' : i === 1 ? 'bg-slate-300 text-black' : i === 2 ? 'bg-orange-700 text-white' : 'bg-white/10 text-white/40'
@@ -1865,11 +1898,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                             <div key={optName}>
                               <p className="text-white/30 text-[9px] font-bold uppercase tracking-wider mb-1">{optName}</p>
                               <div className="flex flex-wrap gap-1">
-                                {Object.entries(values).sort((a, b) => b[1] - a[1]).map(([val, cnt]) => (
+                                {values && typeof values === 'object' ? Object.entries(values).sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0)).map(([val, cnt]) => (
                                   <span key={val} className="text-[9px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">
                                     {val} <span className="text-purple-400">{cnt}</span>
                                   </span>
-                                ))}
+                                )) : null}
                               </div>
                             </div>
                           ))}
@@ -1882,26 +1915,26 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             )}
 
             {/* Viewer Carts Detail */}
-            {cartCarts.length > 0 && (
+            {Array.isArray(cartCarts) && cartCarts.length > 0 && (
               <div>
                 <h5 className="text-white/60 text-xs font-black uppercase tracking-widest mb-3 flex items-center gap-2">
                   <Users size={14} className="text-purple-400" /> 시청자별 담은 상품
                 </h5>
                 <div className="space-y-2">
-                  {cartCarts.map(cart => (
-                    <div key={cart.viewerId} className="bg-white/5 p-3 rounded-xl">
+                  {cartCarts.map((cart, cartIdx) => (
+                    <div key={cart.viewerId || cartIdx} className="bg-white/5 p-3 rounded-xl">
                       <div className="flex items-center gap-2 mb-2">
                         {cart.viewerProfileImage && (
                           <img src={cart.viewerProfileImage} alt="" className="w-6 h-6 rounded-full object-cover" />
                         )}
-                        <span className="text-purple-400 text-xs font-bold">{cart.viewerNickname}</span>
-                        <span className="text-white/20 text-[10px]">{cart.items.length}개</span>
+                        <span className="text-purple-400 text-xs font-bold">{cart.viewerNickname || '시청자'}</span>
+                        <span className="text-white/20 text-[10px]">{Array.isArray(cart.items) ? cart.items.length : 0}개</span>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
-                        {cart.items.map((item: any, idx: number) => (
+                        {Array.isArray(cart.items) && cart.items.map((item: any, idx: number) => (
                           <span key={`${item.productId}-${idx}`} className="text-white/60 text-[10px] bg-white/5 px-2 py-0.5 rounded-full">
                             {item.productName}
-                            {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
+                            {item.selectedOptions && typeof item.selectedOptions === 'object' && Object.keys(item.selectedOptions).length > 0 && (
                               <span className="text-purple-300 ml-1">({Object.values(item.selectedOptions).join('/')})</span>
                             )}
                           </span>
@@ -1913,7 +1946,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            {(!cartStats || cartStats.totalItems === 0) && (
+            {(!cartStats || cartStats.totalItems === 0) && !cartError && (
               <div className="flex flex-col items-center justify-center py-10 text-center">
                 <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-3">
                   <BarChart3 size={28} className="text-white/20" />
