@@ -12,6 +12,8 @@ const EXPECTED_CATEGORIES = [
 
 const CID_ORDER = EXPECTED_CATEGORIES.map((c) => c.cid);
 
+const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
+
 interface CategoryData {
   cid: string;
   label: string;
@@ -96,8 +98,52 @@ export default async (req: Request) => {
     const db = getDatabase();
     const rows = await db.sql`SELECT * FROM trend_items ORDER BY cid, rank`;
 
-    const result: { categories: CategoryData[]; updatedAt: string | null } =
+    const dbResult: { categories: CategoryData[]; updatedAt: string | null } =
       rows.length > 0 ? formatDbRows(rows) : { categories: [], updatedAt: null };
+
+    const isStale =
+      !dbResult.updatedAt ||
+      Date.now() - new Date(dbResult.updatedAt).getTime() > STALE_THRESHOLD_MS;
+
+    const dbCids = new Set(dbResult.categories.map((c) => c.cid));
+    const hasAllCategories = EXPECTED_CATEGORIES.every((c) => dbCids.has(c.cid));
+
+    if (!isStale && hasAllCategories) {
+      dbResult.categories.sort(
+        (a, b) => CID_ORDER.indexOf(a.cid) - CID_ORDER.indexOf(b.cid),
+      );
+      return Response.json({ ...dbResult, source: "db" });
+    }
+
+    const categoriesToFetch = isStale
+      ? EXPECTED_CATEGORIES
+      : EXPECTED_CATEGORIES.filter((c) => !dbCids.has(c.cid));
+
+    const liveResults = await Promise.allSettled(
+      categoriesToFetch.map((c) => fetchLiveForCategory(c.cid, c.label)),
+    );
+
+    const liveCategories = liveResults
+      .filter(
+        (r): r is PromiseFulfilledResult<CategoryData> =>
+          r.status === "fulfilled" && r.value !== null,
+      )
+      .map((r) => r.value);
+
+    const result: { categories: CategoryData[]; updatedAt: string | null } = {
+      categories: [],
+      updatedAt: null,
+    };
+
+    if (isStale && liveCategories.length > 0) {
+      const liveCidSet = new Set(liveCategories.map((c) => c.cid));
+      const keptFromDb = dbResult.categories.filter((c) => !liveCidSet.has(c.cid));
+      result.categories = [...keptFromDb, ...liveCategories];
+      result.updatedAt = new Date().toISOString();
+    } else {
+      result.categories = [...dbResult.categories, ...liveCategories];
+      result.updatedAt = dbResult.updatedAt || (liveCategories.length > 0 ? new Date().toISOString() : null);
+    }
 
     let haveCids = new Set(result.categories.map((c) => c.cid));
     let missing = EXPECTED_CATEGORIES.filter((c) => !haveCids.has(c.cid));
@@ -140,36 +186,38 @@ export default async (req: Request) => {
       }
     }
 
-    if (missing.length > 0) {
-      const liveResults = await Promise.allSettled(
+    if (missing.length > 0 && !isStale) {
+      const extraLive = await Promise.allSettled(
         missing.map((c) => fetchLiveForCategory(c.cid, c.label)),
       );
-      const liveCategories = liveResults
+      const extraCategories = extraLive
         .filter(
           (r): r is PromiseFulfilledResult<CategoryData> =>
             r.status === "fulfilled" && r.value !== null,
         )
         .map((r) => r.value);
 
-      if (liveCategories.length > 0) {
-        result.categories = [...result.categories, ...liveCategories];
+      if (extraCategories.length > 0) {
+        result.categories = [...result.categories, ...extraCategories];
         if (!result.updatedAt) result.updatedAt = new Date().toISOString();
-
-        try {
-          const store = getStore("naver-datalab");
-          await store.setJSON("category-rankings-latest", {
-            categories: result.categories,
-            updatedAt: result.updatedAt,
-          });
-        } catch (_) {
-          /* best-effort cache */
-        }
       }
     }
 
     result.categories.sort(
       (a, b) => CID_ORDER.indexOf(a.cid) - CID_ORDER.indexOf(b.cid),
     );
+
+    if (liveCategories.length > 0) {
+      try {
+        const store = getStore("naver-datalab");
+        await store.setJSON("category-rankings-latest", {
+          categories: result.categories,
+          updatedAt: result.updatedAt,
+        });
+      } catch (_) {
+        /* best-effort cache */
+      }
+    }
 
     if (result.categories.length > 0) {
       return Response.json({ ...result, source: "merged" });
