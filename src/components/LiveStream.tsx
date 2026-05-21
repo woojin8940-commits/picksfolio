@@ -19,9 +19,7 @@ declare global {
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET)
 // and is used by /api/live-order-complete to verify payments.
-// CARD channel is routed through KG Inicis V2 in the PortOne console.
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_CARD_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 
@@ -344,7 +342,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [optionPickerMode, setOptionPickerMode] = useState<'cart' | 'checkout'>('cart');
   // Checkout (simple pay) state for the PortOne-backed in-player purchase flow.
   const [showCheckout, setShowCheckout] = useState(false);
-  const [checkoutPayMethod, setCheckoutPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
+  const [checkoutPayMethod, setCheckoutPayMethod] = useState<'KAKAOPAY' | 'TOSSPAY'>('KAKAOPAY');
   const [checkoutProcessing, setCheckoutProcessing] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
@@ -352,7 +350,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [checkoutOptions, setCheckoutOptions] = useState<Record<string, string> | undefined>(undefined);
   // Batch checkout (multiple cart items at once) state
   const [showBatchCheckout, setShowBatchCheckout] = useState(false);
-  const [batchPayMethod, setBatchPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
+  const [batchPayMethod, setBatchPayMethod] = useState<'KAKAOPAY' | 'TOSSPAY'>('KAKAOPAY');
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchSuccess, setBatchSuccess] = useState(false);
@@ -1974,9 +1972,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       const channelKey =
         checkoutPayMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : checkoutPayMethod === 'TOSSPAY'
-            ? PORTONE_TOSSPAY_CHANNEL_KEY
-            : PORTONE_CARD_CHANNEL_KEY;
+          : PORTONE_TOSSPAY_CHANNEL_KEY;
 
       const optionSuffix = checkoutOptions && Object.keys(checkoutOptions).length > 0
         ? ` (${Object.values(checkoutOptions).join('/')})`
@@ -1990,13 +1986,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         orderName,
         totalAmount: amount,
         currency: 'KRW',
-        payMethod: checkoutPayMethod === 'CARD' ? 'CARD' : 'EASY_PAY',
-        ...(checkoutPayMethod === 'KAKAOPAY' && {
-          easyPay: { easyPayProvider: 'KAKAOPAY' },
-        }),
-        ...(checkoutPayMethod === 'TOSSPAY' && {
-          easyPay: { easyPayProvider: 'TOSSPAY' },
-        }),
+        payMethod: 'EASY_PAY',
+        easyPay: { easyPayProvider: checkoutPayMethod },
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
@@ -2109,9 +2100,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       const channelKey =
         batchPayMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : batchPayMethod === 'TOSSPAY'
-            ? PORTONE_TOSSPAY_CHANNEL_KEY
-            : PORTONE_CARD_CHANNEL_KEY;
+          : PORTONE_TOSSPAY_CHANNEL_KEY;
 
       const firstName = batchPayableItems[0]?.productName || '상품';
       const orderName = (batchPayableItems.length === 1
@@ -2126,9 +2115,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         orderName,
         totalAmount: batchTotal,
         currency: 'KRW',
-        payMethod: batchPayMethod === 'CARD' ? 'CARD' : 'EASY_PAY',
-        ...(batchPayMethod === 'KAKAOPAY' && { easyPay: { easyPayProvider: 'KAKAOPAY' } }),
-        ...(batchPayMethod === 'TOSSPAY' && { easyPay: { easyPayProvider: 'TOSSPAY' } }),
+        payMethod: 'EASY_PAY',
+        easyPay: { easyPayProvider: batchPayMethod },
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
@@ -2975,20 +2963,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   )}
 
                   <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutPayMethod('CARD')}
-                      disabled={checkoutProcessing}
-                      className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 ${
-                        checkoutPayMethod === 'CARD'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      } disabled:opacity-50`}
-                    >
-                      <span>💳</span>
-                      <span>카드</span>
-                    </button>
+                  <div className="grid grid-cols-2 gap-2 mb-4">
                     <button
                       type="button"
                       onClick={() => setCheckoutPayMethod('KAKAOPAY')}
@@ -3022,11 +2997,6 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                       카카오톡 앱에서 카카오페이로 간편하게 결제됩니다.
                     </p>
                   )}
-                  {checkoutPayMethod === 'CARD' && (
-                    <p className="text-[11px] text-slate-400 font-medium mb-4">
-                      KG이니시스 결제창을 통해 신용·체크카드로 결제합니다.
-                    </p>
-                  )}
                   {checkoutPayMethod === 'TOSSPAY' && (
                     <p className="text-[11px] text-slate-400 font-medium mb-4">
                       토스 앱에서 토스페이로 간편하게 결제됩니다.
@@ -3040,9 +3010,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     className={`w-full py-3 rounded-xl text-sm font-black text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
                       checkoutPayMethod === 'KAKAOPAY'
                         ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
-                        : checkoutPayMethod === 'TOSSPAY'
-                          ? 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
-                          : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
+                        : 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
                     }`}
                   >
                     {checkoutProcessing ? (
@@ -3050,7 +3018,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     ) : (
                       <>
                         <CreditCard size={14} />
-                        {parseKrwPrice(checkoutProduct.price).toLocaleString()}원 {checkoutPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : checkoutPayMethod === 'TOSSPAY' ? '토스페이로 결제' : '카드로 결제'}
+                        {parseKrwPrice(checkoutProduct.price).toLocaleString()}원 {checkoutPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '토스페이로 결제'}
                       </>
                     )}
                   </button>
@@ -3141,20 +3109,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   )}
 
                   <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <button
-                      type="button"
-                      onClick={() => setBatchPayMethod('CARD')}
-                      disabled={batchProcessing}
-                      className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 ${
-                        batchPayMethod === 'CARD'
-                          ? 'border-purple-500 bg-purple-50 text-purple-700'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      } disabled:opacity-50`}
-                    >
-                      <span>💳</span>
-                      <span>카드</span>
-                    </button>
+                  <div className="grid grid-cols-2 gap-2 mb-4">
                     <button
                       type="button"
                       onClick={() => setBatchPayMethod('KAKAOPAY')}
@@ -3190,9 +3145,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     className={`w-full py-3 rounded-xl text-sm font-black text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
                       batchPayMethod === 'KAKAOPAY'
                         ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
-                        : batchPayMethod === 'TOSSPAY'
-                          ? 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
-                          : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
+                        : 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
                     }`}
                   >
                     {batchProcessing ? (
@@ -3200,7 +3153,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     ) : (
                       <>
                         <CreditCard size={14} />
-                        {batchTotal.toLocaleString()}원 {batchPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : batchPayMethod === 'TOSSPAY' ? '토스페이로 결제' : '카드로 결제'}
+                        {batchTotal.toLocaleString()}원 {batchPayMethod === 'KAKAOPAY' ? '카카오페이로 결제' : '토스페이로 결제'}
                       </>
                     )}
                   </button>
