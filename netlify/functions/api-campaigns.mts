@@ -10,14 +10,16 @@ export default async (req: Request) => {
       const id = url.searchParams.get("id");
 
       if (id) {
-        const result = await db.sql`SELECT * FROM campaigns WHERE id = ${id}`;
+        const result = await db.sql`
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
+          FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
+          WHERE c.id = ${id}
+        `;
         if (result.length === 0) {
           return Response.json({ error: "Campaign not found" }, { status: 404 });
         }
-        const appCount = await db.sql`SELECT COUNT(*)::int as count FROM campaign_applications WHERE campaign_id = ${id}`;
-        return Response.json({
-          campaign: { ...result[0], application_count: appCount[0].count || 0 },
-        });
+        return Response.json({ campaign: result[0] });
       }
 
       const type = url.searchParams.get("type");
@@ -30,15 +32,17 @@ export default async (req: Request) => {
       if (business) {
         if (type) {
           result = await db.sql`
-            SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+            SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
             FROM campaigns c
+            LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
             WHERE c.business_username = ${business} AND c.type = ${type}
             ORDER BY c.created_at DESC
           `;
         } else {
           result = await db.sql`
-            SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+            SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
             FROM campaigns c
+            LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
             WHERE c.business_username = ${business}
             ORDER BY c.created_at DESC
           `;
@@ -46,45 +50,51 @@ export default async (req: Request) => {
       } else if (search && type) {
         const pattern = `%${search}%`;
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status} AND c.type = ${type} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
           ORDER BY c.created_at DESC
         `;
       } else if (search && category) {
         const pattern = `%${search}%`;
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status} AND c.category = ${category} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
           ORDER BY c.created_at DESC
         `;
       } else if (category) {
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status} AND c.category = ${category}
           ORDER BY c.created_at DESC
         `;
       } else if (type) {
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status} AND c.type = ${type}
           ORDER BY c.created_at DESC
         `;
       } else if (search) {
         const pattern = `%${search}%`;
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
           ORDER BY c.created_at DESC
         `;
       } else {
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
           FROM campaigns c
+          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
           WHERE c.status = ${status}
           ORDER BY c.created_at DESC
         `;
