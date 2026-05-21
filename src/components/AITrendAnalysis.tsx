@@ -32,68 +32,7 @@ const CATEGORY_ACCENTS: Record<string, { dot: string; chip: string }> = {
 
 const DEFAULT_ACCENT = { dot: 'bg-slate-500', chip: 'bg-slate-50 text-slate-700' };
 
-const FALLBACK_CATEGORIES: CategoryBlock[] = [
-  {
-    cid: '50000000', label: '패션의류',
-    rankings: [
-      { rank: 1, keyword: '반팔티', ratio: 100, delta: 15, trend: 'up' },
-      { rank: 2, keyword: '린넨셔츠', ratio: 85, delta: 8, trend: 'up' },
-      { rank: 3, keyword: '와이드팬츠', ratio: 72, delta: -3, trend: 'down' },
-      { rank: 4, keyword: '스니커즈', ratio: 65, delta: 5, trend: 'up' },
-      { rank: 5, keyword: '바람막이', ratio: 58, delta: 12, trend: 'up' },
-    ],
-  },
-  {
-    cid: '50000002', label: '화장품/미용',
-    rankings: [
-      { rank: 1, keyword: '선크림', ratio: 100, delta: 22, trend: 'up' },
-      { rank: 2, keyword: '톤업크림', ratio: 78, delta: 10, trend: 'up' },
-      { rank: 3, keyword: '클렌징오일', ratio: 65, delta: -1, trend: 'flat' },
-      { rank: 4, keyword: '쿠션팩트', ratio: 55, delta: 4, trend: 'up' },
-      { rank: 5, keyword: '립틴트', ratio: 48, delta: -5, trend: 'down' },
-    ],
-  },
-  {
-    cid: '50000003', label: '디지털/가전',
-    rankings: [
-      { rank: 1, keyword: '노트북', ratio: 100, delta: 18, trend: 'up' },
-      { rank: 2, keyword: '무선이어폰', ratio: 82, delta: 6, trend: 'up' },
-      { rank: 3, keyword: '태블릿', ratio: 70, delta: 3, trend: 'up' },
-      { rank: 4, keyword: '스마트워치', ratio: 60, delta: -2, trend: 'flat' },
-      { rank: 5, keyword: '로봇청소기', ratio: 45, delta: 9, trend: 'up' },
-    ],
-  },
-  {
-    cid: '50000004', label: '가구/인테리어',
-    rankings: [
-      { rank: 1, keyword: '소파', ratio: 100, delta: 7, trend: 'up' },
-      { rank: 2, keyword: '매트리스', ratio: 88, delta: 11, trend: 'up' },
-      { rank: 3, keyword: '책상', ratio: 72, delta: -4, trend: 'down' },
-      { rank: 4, keyword: '조명', ratio: 60, delta: 2, trend: 'flat' },
-      { rank: 5, keyword: '커튼', ratio: 50, delta: 14, trend: 'up' },
-    ],
-  },
-  {
-    cid: '50000006', label: '식품',
-    rankings: [
-      { rank: 1, keyword: '닭가슴살', ratio: 100, delta: 20, trend: 'up' },
-      { rank: 2, keyword: '프로틴', ratio: 85, delta: 16, trend: 'up' },
-      { rank: 3, keyword: '커피', ratio: 75, delta: 1, trend: 'flat' },
-      { rank: 4, keyword: '과일', ratio: 62, delta: -6, trend: 'down' },
-      { rank: 5, keyword: '견과류', ratio: 50, delta: 3, trend: 'up' },
-    ],
-  },
-  {
-    cid: '50000008', label: '생활/건강',
-    rankings: [
-      { rank: 1, keyword: '비타민', ratio: 100, delta: 13, trend: 'up' },
-      { rank: 2, keyword: '유산균', ratio: 90, delta: 8, trend: 'up' },
-      { rank: 3, keyword: '칫솔', ratio: 68, delta: -2, trend: 'flat' },
-      { rank: 4, keyword: '세제', ratio: 55, delta: 5, trend: 'up' },
-      { rank: 5, keyword: '영양제', ratio: 48, delta: 10, trend: 'up' },
-    ],
-  },
-];
+const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
 const DISPLAY_CIDS = ['50000000', '50000002', '50000003', '50000004', '50000006', '50000008'];
 
@@ -123,12 +62,8 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
           const data = await res.json();
           const apiCategories: CategoryBlock[] = data.categories || [];
           const filtered = apiCategories.filter((c) => DISPLAY_CIDS.includes(c.cid));
-          if (filtered.length >= 4) {
-            const apiMap = new Map(filtered.map((c) => [c.cid, c]));
-            const merged = DISPLAY_CIDS.map(
-              (cid) => apiMap.get(cid) ?? FALLBACK_CATEGORIES.find((f) => f.cid === cid)!
-            );
-            setCategories(merged);
+          if (filtered.length > 0) {
+            setCategories(filtered);
           }
           if (data.updatedAt) setCategoriesUpdatedAt(data.updatedAt);
         }
@@ -163,11 +98,15 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
-        {loading && categories.length === 0 && (
+        {loading ? (
           <div className="md:col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
             카테고리 데이터를 불러오는 중...
           </div>
-        )}
+        ) : categories.length === 0 ? (
+          <div className="md:col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
+            트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.
+          </div>
+        ) : null}
         {categories.map((cat) => {
           const accent = CATEGORY_ACCENTS[cat.cid] ?? DEFAULT_ACCENT;
           return (
