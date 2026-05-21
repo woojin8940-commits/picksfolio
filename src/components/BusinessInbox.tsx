@@ -10,22 +10,29 @@ interface BusinessInboxProps {
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, companyName }) => {
-  const [proposals, setProposals] = useState<(BusinessProposal & { _influencer?: string })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cleanUsername = businessUsername.replace(/^biz\//, '');
+  const cacheKey = `picks_biz_inbox_${cleanUsername.toLowerCase()}`;
+
+  const cachedProposals = (() => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  })();
+
+  const [proposals, setProposals] = useState<(BusinessProposal & { _influencer?: string })[]>(cachedProposals);
+  const [loading, setLoading] = useState(cachedProposals.length === 0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Fetch all proposals sent by this business (across all influencers).
-  // localStorage stores the session as 'biz/{name}', but the route
-  // `/api/business-proposals/:businessUsername` matches a single path segment,
-  // so the slash must be stripped before encoding.
   const fetchProposals = async () => {
     try {
-      const cleanUsername = businessUsername.replace(/^biz\//, '');
       const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
       if (res.ok) {
         const data = await res.json();
-        setProposals(data.proposals || []);
+        const fresh = data.proposals || [];
+        setProposals(fresh);
+        try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
       }
     } catch (e) {
       console.error('Failed to fetch business proposals:', e);

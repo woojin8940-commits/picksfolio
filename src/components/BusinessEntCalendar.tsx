@@ -8,20 +8,30 @@ interface BusinessEntCalendarProps {
 }
 
 const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername }) => {
-  const [proposals, setProposals] = useState<BusinessProposal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cleanUsername = businessUsername.replace(/^biz\//, '');
+  const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
+
+  const cachedProposals = (() => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  })();
+
+  const [proposals, setProposals] = useState<BusinessProposal[]>(cachedProposals);
+  const [loading, setLoading] = useState(cachedProposals.length === 0);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProposals = async () => {
-      setLoading(true);
       try {
-        const cleanUsername = businessUsername.replace(/^biz\//, '');
         const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
         if (res.ok) {
           const data = await res.json();
-          setProposals((data.proposals || []).filter((p: BusinessProposal) => p.status === 'accepted' || p.status === 'completed'));
+          const fresh = (data.proposals || []).filter((p: BusinessProposal) => p.status === 'accepted' || p.status === 'completed');
+          setProposals(fresh);
+          try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
         }
       } catch (e) {
         console.error('Failed to fetch proposals:', e);
