@@ -1,7 +1,91 @@
 import { getDatabase } from "@netlify/database";
 import { getStore } from "@netlify/blobs";
 
-const EXPECTED_CIDS = ["50000000", "50000002", "50000003", "50000004", "50000006", "50000008"];
+const EXPECTED_CATEGORIES = [
+  { cid: "50000000", label: "패션의류" },
+  { cid: "50000002", label: "화장품/미용" },
+  { cid: "50000003", label: "디지털/가전" },
+  { cid: "50000004", label: "가구/인테리어" },
+  { cid: "50000006", label: "식품" },
+  { cid: "50000008", label: "생활/건강" },
+];
+
+const CID_ORDER = EXPECTED_CATEGORIES.map((c) => c.cid);
+
+interface CategoryData {
+  cid: string;
+  label: string;
+  rankings: { rank: number; keyword: string; ratio: number; delta: number; trend: string }[];
+}
+
+async function fetchLiveForCategory(cid: string, label: string): Promise<CategoryData | null> {
+  const now = new Date();
+  const endDate = now.toISOString().split("T")[0];
+  const startDate = new Date(now.getTime() - 14 * 86400000).toISOString().split("T")[0];
+
+  const res = await fetch(
+    "https://datalab.naver.com/shoppingInsight/getKeywordRank.naver",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: "https://datalab.naver.com/shoppingInsight/sCategory.naver",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      body: new URLSearchParams({
+        cid,
+        timeUnit: "date",
+        startDate,
+        endDate,
+        age: "",
+        gender: "",
+        device: "",
+      }),
+    },
+  );
+
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  const days = data
+    .filter(
+      (d: Record<string, unknown>) =>
+        d.statusCode === 200 && Array.isArray(d.ranks),
+    )
+    .map((d: Record<string, unknown>) => ({
+      date: d.date as string,
+      ranks: (d.ranks as { rank: number; keyword: string }[]).map((r) => ({
+        rank: r.rank,
+        keyword: r.keyword,
+      })),
+    }));
+
+  if (days.length === 0) return null;
+
+  const latest = days[days.length - 1];
+  const previous = days.length > 1 ? days[days.length - 2] : null;
+
+  const prevMap = new Map<string, number>();
+  if (previous) {
+    for (const r of previous.ranks) prevMap.set(r.keyword, r.rank);
+  }
+
+  const rankings = latest.ranks.slice(0, 5).map((item) => {
+    const prevRank = prevMap.get(item.keyword);
+    let delta = 0;
+    let trend = "flat";
+    if (prevRank !== undefined) {
+      delta = prevRank - item.rank;
+      trend = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+    }
+    return { rank: item.rank, keyword: item.keyword, ratio: 0, delta, trend };
+  });
+
+  return { cid, label, rankings };
+}
 
 export default async (req: Request) => {
   if (req.method !== "GET") {
@@ -12,45 +96,83 @@ export default async (req: Request) => {
     const db = getDatabase();
     const rows = await db.sql`SELECT * FROM trend_items ORDER BY cid, rank`;
 
-    const dbResult = rows.length > 0 ? formatDbRows(rows) : { categories: [], updatedAt: null };
-    const dbCids = new Set(dbResult.categories.map((c: { cid: string }) => c.cid));
-    const missingCids = EXPECTED_CIDS.filter((cid) => !dbCids.has(cid));
+    const result: { categories: CategoryData[]; updatedAt: string | null } =
+      rows.length > 0 ? formatDbRows(rows) : { categories: [], updatedAt: null };
 
-    if (missingCids.length > 0) {
+    let haveCids = new Set(result.categories.map((c) => c.cid));
+    let missing = EXPECTED_CATEGORIES.filter((c) => !haveCids.has(c.cid));
+
+    if (missing.length > 0) {
       try {
         const store = getStore("naver-datalab");
-        const blob = await store.get("category-rankings-latest", { type: "json" }) as {
-          categories?: { cid: string; label: string; rankings: unknown[] }[];
+        const blob = (await store.get("category-rankings-latest", {
+          type: "json",
+        })) as {
+          categories?: CategoryData[];
           updatedAt?: string;
         } | null;
 
         if (blob?.categories) {
-          const missingSet = new Set(missingCids);
+          const missingSet = new Set(missing.map((c) => c.cid));
           const blobCategories = blob.categories
             .filter((c) => missingSet.has(c.cid))
             .map((c) => ({
               cid: c.cid,
               label: c.label,
-              rankings: c.rankings.map((r: Record<string, unknown>) => ({
-                rank: (r.rank as number) || 0,
-                keyword: r.keyword as string,
-                ratio: (r.ratio as number) || 0,
-                delta: (r.delta as number) || 0,
-                trend: (r.trend as string) || "flat",
+              rankings: c.rankings.map((r) => ({
+                rank: r.rank || 0,
+                keyword: r.keyword,
+                ratio: r.ratio || 0,
+                delta: r.delta || 0,
+                trend: r.trend || "flat",
               })),
             }));
-          dbResult.categories = [...dbResult.categories, ...blobCategories];
-          if (!dbResult.updatedAt && blob.updatedAt) {
-            dbResult.updatedAt = blob.updatedAt;
+          result.categories = [...result.categories, ...blobCategories];
+          if (!result.updatedAt && blob.updatedAt) {
+            result.updatedAt = blob.updatedAt;
           }
+
+          haveCids = new Set(result.categories.map((c) => c.cid));
+          missing = EXPECTED_CATEGORIES.filter((c) => !haveCids.has(c.cid));
         }
       } catch (blobErr) {
         console.error("Blob fallback error:", blobErr);
       }
     }
 
-    if (dbResult.categories.length > 0) {
-      return Response.json({ ...dbResult, source: "merged" });
+    if (missing.length > 0) {
+      const liveResults = await Promise.allSettled(
+        missing.map((c) => fetchLiveForCategory(c.cid, c.label)),
+      );
+      const liveCategories = liveResults
+        .filter(
+          (r): r is PromiseFulfilledResult<CategoryData> =>
+            r.status === "fulfilled" && r.value !== null,
+        )
+        .map((r) => r.value);
+
+      if (liveCategories.length > 0) {
+        result.categories = [...result.categories, ...liveCategories];
+        if (!result.updatedAt) result.updatedAt = new Date().toISOString();
+
+        try {
+          const store = getStore("naver-datalab");
+          await store.setJSON("category-rankings-latest", {
+            categories: result.categories,
+            updatedAt: result.updatedAt,
+          });
+        } catch (_) {
+          /* best-effort cache */
+        }
+      }
+    }
+
+    result.categories.sort(
+      (a, b) => CID_ORDER.indexOf(a.cid) - CID_ORDER.indexOf(b.cid),
+    );
+
+    if (result.categories.length > 0) {
+      return Response.json({ ...result, source: "merged" });
     }
 
     return Response.json({ categories: [], updatedAt: null, source: "empty" });
@@ -63,14 +185,18 @@ export default async (req: Request) => {
 function formatDbRows(rows: Record<string, unknown>[]) {
   const map = new Map<
     number,
-    { cid: string; label: string; rankings: { rank: number; keyword: string; ratio: number; delta: number; trend: string }[] }
+    CategoryData
   >();
   let latest: Date | null = null;
 
   for (const row of rows) {
     const cid = row.cid as number;
     if (!map.has(cid)) {
-      map.set(cid, { cid: String(cid), label: row.category_label as string, rankings: [] });
+      map.set(cid, {
+        cid: String(cid),
+        label: row.category_label as string,
+        rankings: [],
+      });
     }
     map.get(cid)!.rankings.push({
       rank: (row.rank as number) || 0,
