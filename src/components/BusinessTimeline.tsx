@@ -92,12 +92,34 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     }
   }, [normalizedUserName, userType, cacheKey]);
 
-  const fetchTimelineDetail = useCallback(async (proposalId: string) => {
+  const fetchTimelineDetail = useCallback(async (proposalId: string, showCachedImmediately = false) => {
+    if (showCachedImmediately) {
+      const cached = (() => {
+        try {
+          const raw = localStorage.getItem(detailCacheKey(proposalId));
+          return raw ? JSON.parse(raw) as TimelineData : null;
+        } catch { return null; }
+      })();
+      const fromList = timelines.find(t => t.proposalId === proposalId);
+      if (cached) {
+        setSelectedTimeline(cached);
+      } else if (fromList && fromList.comments) {
+        setSelectedTimeline(fromList);
+      }
+    }
     try {
       const res = await fetch(`/api/timeline/detail/${proposalId}`);
       const data = await res.json();
       if (data.timeline) {
-        setSelectedTimeline(data.timeline);
+        setSelectedTimeline(prev => {
+          if (prev && prev.proposalId === proposalId) {
+            const pendingMsgs = (prev.comments || []).filter((c: TimelineComment) => c.id.startsWith('pending_'));
+            const serverIds = new Set((data.timeline.comments || []).map((c: TimelineComment) => c.id));
+            const stillPending = pendingMsgs.filter((c: TimelineComment) => !serverIds.has(c.id.replace('pending_', 'tc_')));
+            return { ...data.timeline, comments: [...(data.timeline.comments || []), ...stillPending] };
+          }
+          return data.timeline;
+        });
         try { localStorage.setItem(detailCacheKey(proposalId), JSON.stringify(data.timeline)); } catch {}
         fetch(`/api/timeline/read/${proposalId}`, {
           method: 'PATCH',
@@ -108,7 +130,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     } catch (e) {
       console.error('Failed to fetch timeline detail:', e);
     }
-  }, [normalizedUserName]);
+  }, [normalizedUserName, timelines]);
 
   useEffect(() => {
     fetchTimelines();
@@ -118,7 +140,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   useEffect(() => {
     if (initialProposalId) {
-      fetchTimelineDetail(initialProposalId);
+      fetchTimelineDetail(initialProposalId, true);
       setShowList(false);
     }
   }, [initialProposalId, fetchTimelineDetail]);
@@ -139,12 +161,36 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const handleSendMessage = async () => {
     if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedTimeline || sending) return;
 
+    const messageContent = newMessage.trim();
+    const filesToUpload = [...pendingFiles];
+
+    const optimisticId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticComment: TimelineComment = {
+      id: optimisticId,
+      proposalId: selectedTimeline.proposalId,
+      authorType: userType,
+      authorName: normalizedUserName,
+      authorUsername: normalizedUserName.toLowerCase(),
+      content: messageContent,
+      createdAt: new Date().toISOString(),
+      readBy: [normalizedUserName.toLowerCase()],
+    };
+
+    setSelectedTimeline(prev => prev ? {
+      ...prev,
+      comments: [...prev.comments, optimisticComment],
+    } : null);
+    setNewMessage('');
+    setPendingFiles([]);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+
     setSending(true);
-    setUploading(pendingFiles.length > 0);
+    setUploading(filesToUpload.length > 0);
     try {
-      // Upload pending files first
       const uploadedAttachments: TimelineAttachment[] = [];
-      for (const file of pendingFiles) {
+      for (const file of filesToUpload) {
         const formData = new FormData();
         formData.append('image', file);
         formData.append('username', normalizedUserName.toLowerCase());
@@ -160,6 +206,18 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         }
       }
 
+      if (uploadedAttachments.length > 0) {
+        setSelectedTimeline(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            comments: prev.comments.map(c =>
+              c.id === optimisticId ? { ...c, attachments: uploadedAttachments } : c
+            ),
+          };
+        });
+      }
+
       const res = await fetch(`/api/timeline/comment/${selectedTimeline.proposalId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,7 +225,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           authorType: userType,
           authorName: normalizedUserName,
           authorUsername: normalizedUserName.toLowerCase(),
-          content: newMessage.trim(),
+          content: messageContent,
           influencerUsername: selectedTimeline.influencerUsername,
           businessUsername: selectedTimeline.businessUsername,
           companyName: selectedTimeline.companyName,
@@ -178,18 +236,27 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
       const data = await res.json();
       if (data.success && data.comment) {
-        setSelectedTimeline(prev => prev ? {
-          ...prev,
-          comments: [...prev.comments, data.comment],
-        } : null);
-        setNewMessage('');
-        setPendingFiles([]);
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-        }
+        setSelectedTimeline(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            comments: prev.comments.map(c =>
+              c.id === optimisticId ? data.comment : c
+            ),
+          };
+        });
       }
     } catch (e) {
       console.error('Failed to send message:', e);
+      setSelectedTimeline(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          comments: prev.comments.map(c =>
+            c.id === optimisticId ? { ...c, id: `failed_${optimisticId}` } : c
+          ),
+        };
+      });
     } finally {
       setSending(false);
       setUploading(false);
@@ -436,7 +503,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <button
                   key={timeline.proposalId}
                   onClick={() => {
-                    fetchTimelineDetail(timeline.proposalId);
+                    setSelectedTimeline(timeline);
+                    fetchTimelineDetail(timeline.proposalId, true);
                     setShowList(false);
                   }}
                   className={`w-full text-left px-3 py-3 rounded-xl transition-all group ${
@@ -791,8 +859,22 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                       </div>
                     )}
 
-                    {/* Read indicator for own messages */}
-                    {isMe && readByOther && (
+                    {/* Status indicators for own messages */}
+                    {isMe && comment.id.startsWith('pending_') && (
+                      <div className="mt-1 inline-flex items-center gap-1">
+                        <div className="w-3 h-3 border-[1.5px] border-gray-400 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[11px] text-gray-400 font-medium">전송 중...</span>
+                      </div>
+                    )}
+                    {isMe && comment.id.startsWith('failed_') && (
+                      <div className="mt-1 inline-flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-[11px] text-red-500 font-medium">전송 실패</span>
+                      </div>
+                    )}
+                    {isMe && readByOther && !comment.id.startsWith('pending_') && !comment.id.startsWith('failed_') && (
                       <div className="mt-1 inline-flex items-center gap-1">
                         <svg className="w-3.5 h-3.5 text-emerald-500" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
