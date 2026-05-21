@@ -125,6 +125,64 @@ export default async (req: Request, context: Context) => {
       } catch (e) {
         console.error("Failed to create timeline on accept:", e);
       }
+
+      // Auto-create settlement record for accepted proposal
+      try {
+        const settlementStore = getStore("settlements");
+        const stlId = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const nowISO = new Date().toISOString();
+        const fee = parseInt(updatedProposal.fee) || 0;
+        const scheduledDate = (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + 30);
+          return d.toISOString().split("T")[0];
+        })();
+
+        const settlement = {
+          id: stlId,
+          proposal_id: proposalId,
+          influencer_username: username,
+          business_username: bizUsername,
+          company_name: updatedProposal.company_name || "",
+          title: updatedProposal.title || "협업 프로젝트",
+          amount: fee,
+          scheduled_date: scheduledDate,
+          status: "scheduled",
+          memo: "제안 수락 시 자동 생성",
+          created_at: nowISO,
+          updated_at: nowISO,
+        };
+
+        const getBizRecords = async () => {
+          const k = `settlements_biz_${bizUsername}`;
+          const data = (await settlementStore.get(k, { type: "json" })) as any;
+          if (Array.isArray(data)) return data;
+          if (data && Array.isArray(data.records)) return data.records;
+          if (data && Array.isArray(data.settlements)) return data.settlements;
+          return [];
+        };
+        const getInfRecords = async () => {
+          const k = `settlements_inf_${username}`;
+          const data = (await settlementStore.get(k, { type: "json" })) as any;
+          if (Array.isArray(data)) return data;
+          if (data && Array.isArray(data.records)) return data.records;
+          if (data && Array.isArray(data.settlements)) return data.settlements;
+          return [];
+        };
+
+        const [bizSettlements, infSettlements] = await Promise.all([getBizRecords(), getInfRecords()]);
+
+        if (!bizSettlements.some((s: any) => s.proposal_id === proposalId)) {
+          bizSettlements.push(settlement);
+          await settlementStore.setJSON(`settlements_biz_${bizUsername}`, bizSettlements);
+        }
+        if (!infSettlements.some((s: any) => s.proposal_id === proposalId)) {
+          infSettlements.push(settlement);
+          await settlementStore.setJSON(`settlements_inf_${username}`, infSettlements);
+        }
+      } catch (stlErr) {
+        console.error("[api-proposal-item] Failed to auto-create settlement:", stlErr);
+      }
     }
 
     // Send alimtalk notification to business when proposal status changes
