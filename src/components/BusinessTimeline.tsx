@@ -66,11 +66,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [selectedTimeline, setSelectedTimeline] = useState<TimelineData | null>(initialDetail);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(initialTimelines.length === 0);
-  const [sending, setSending] = useState(false);
   const [showList, setShowList] = useState(!initialProposalId);
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -158,8 +156,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     return () => clearInterval(interval);
   }, [selectedTimeline?.proposalId, fetchTimelineDetail]);
 
-  const handleSendMessage = async () => {
-    if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedTimeline || sending) return;
+  const handleSendMessage = () => {
+    if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedTimeline) return;
 
     const messageContent = newMessage.trim();
     const filesToUpload = [...pendingFiles];
@@ -186,89 +184,89 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       textareaRef.current.style.height = 'auto';
     }
 
-    setSending(true);
-    setUploading(filesToUpload.length > 0);
-    try {
-      const uploadedAttachments: TimelineAttachment[] = [];
-      for (const file of filesToUpload) {
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('username', normalizedUserName.toLowerCase());
-        const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
-        const uploadData = await uploadRes.json();
-        if (uploadData.url) {
-          uploadedAttachments.push({
-            url: uploadData.url,
-            fileName: file.name,
-            fileType: file.type,
-            fileSize: file.size,
+    const proposalId = selectedTimeline.proposalId;
+    const timelineInfo = {
+      influencerUsername: selectedTimeline.influencerUsername,
+      businessUsername: selectedTimeline.businessUsername,
+      companyName: selectedTimeline.companyName,
+      proposalTitle: selectedTimeline.proposalTitle,
+    };
+
+    (async () => {
+      try {
+        const uploadedAttachments: TimelineAttachment[] = [];
+        for (const file of filesToUpload) {
+          const formData = new FormData();
+          formData.append('image', file);
+          formData.append('username', normalizedUserName.toLowerCase());
+          const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
+          const uploadData = await uploadRes.json();
+          if (uploadData.url) {
+            uploadedAttachments.push({
+              url: uploadData.url,
+              fileName: file.name,
+              fileType: file.type,
+              fileSize: file.size,
+            });
+          }
+        }
+
+        if (uploadedAttachments.length > 0) {
+          setSelectedTimeline(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              comments: prev.comments.map(c =>
+                c.id === optimisticId ? { ...c, attachments: uploadedAttachments } : c
+              ),
+            };
           });
         }
-      }
 
-      if (uploadedAttachments.length > 0) {
+        const res = await fetch(`/api/timeline/comment/${proposalId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            authorType: userType,
+            authorName: normalizedUserName,
+            authorUsername: normalizedUserName.toLowerCase(),
+            content: messageContent,
+            ...timelineInfo,
+            ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.comment) {
+          setSelectedTimeline(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              comments: prev.comments.map(c =>
+                c.id === optimisticId ? data.comment : c
+              ),
+            };
+          });
+        }
+      } catch (e) {
+        console.error('Failed to send message:', e);
         setSelectedTimeline(prev => {
           if (!prev) return null;
           return {
             ...prev,
             comments: prev.comments.map(c =>
-              c.id === optimisticId ? { ...c, attachments: uploadedAttachments } : c
+              c.id === optimisticId ? { ...c, id: `failed_${optimisticId}` } : c
             ),
           };
         });
       }
-
-      const res = await fetch(`/api/timeline/comment/${selectedTimeline.proposalId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          authorType: userType,
-          authorName: normalizedUserName,
-          authorUsername: normalizedUserName.toLowerCase(),
-          content: messageContent,
-          influencerUsername: selectedTimeline.influencerUsername,
-          businessUsername: selectedTimeline.businessUsername,
-          companyName: selectedTimeline.companyName,
-          proposalTitle: selectedTimeline.proposalTitle,
-          ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success && data.comment) {
-        setSelectedTimeline(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            comments: prev.comments.map(c =>
-              c.id === optimisticId ? data.comment : c
-            ),
-          };
-        });
-      }
-    } catch (e) {
-      console.error('Failed to send message:', e);
-      setSelectedTimeline(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          comments: prev.comments.map(c =>
-            c.id === optimisticId ? { ...c, id: `failed_${optimisticId}` } : c
-          ),
-        };
-      });
-    } finally {
-      setSending(false);
-      setUploading(false);
-    }
+    })();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (newMessage.trim() || pendingFiles.length > 0) {
-        handleSendMessage();
-      }
+      handleSendMessage();
     }
   };
 
@@ -296,7 +294,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   };
 
   const handleComposerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    if (sending) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragOverComposer(true);
@@ -308,7 +305,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   };
 
   const handleComposerDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    if (sending) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragOverComposer(false);
@@ -946,7 +942,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={sending}
                 className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-400 hover:text-purple-500 transition-colors"
                 title="파일 첨부"
               >
@@ -966,20 +961,16 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               />
               <button
                 onClick={handleSendMessage}
-                disabled={(!newMessage.trim() && pendingFiles.length === 0) || sending}
+                disabled={!newMessage.trim() && pendingFiles.length === 0}
                 className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
-                  (newMessage.trim() || pendingFiles.length > 0) && !sending
+                  (newMessage.trim() || pendingFiles.length > 0)
                     ? 'bg-purple-600 text-white hover:bg-purple-500 active:scale-95'
                     : 'bg-gray-100 text-gray-400'
                 }`}
               >
-                {sending ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14m-7-7l7 7-7 7" />
-                  </svg>
-                )}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14m-7-7l7 7-7 7" />
+                </svg>
               </button>
             </div>
             <div className="hidden md:flex items-center justify-between px-3 pb-2">
@@ -987,11 +978,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <span className="text-[11px] text-gray-400 font-medium">
                   Shift + Enter로 줄바꿈
                 </span>
-                {uploading && (
-                  <span className="text-[11px] text-purple-500 font-medium animate-pulse">
-                    파일 업로드 중...
-                  </span>
-                )}
               </div>
               {(newMessage.trim() || pendingFiles.length > 0) && (
                 <span className="text-[11px] text-purple-500 font-medium">
@@ -999,13 +985,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 </span>
               )}
             </div>
-            {uploading && (
-              <div className="md:hidden px-3 pb-2">
-                <span className="text-[11px] text-purple-500 font-medium animate-pulse">
-                  파일 업로드 중...
-                </span>
-              </div>
-            )}
           </div>
         </div>
       </div>

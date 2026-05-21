@@ -54,6 +54,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [timelineUnread, setTimelineUnread] = useState(0);
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
@@ -157,6 +158,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadPreviewData]);
+
+  useEffect(() => {
+    if (!userName) return;
+    const normalizedName = userName.toLowerCase();
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer`);
+        const data = await res.json();
+        if (data.timelines) {
+          const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+          setTimelineUnread(total);
+        }
+      } catch {}
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, [userName]);
 
   const fetchStats = async () => {
     if (!userName) return;
@@ -284,6 +303,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             label="협업 타임라인"
             active={currentSubView === 'timeline'}
             onClick={onNavigateTimeline}
+            badge={timelineUnread}
           />
           <NavItem
             icon="📅"
@@ -344,6 +364,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             label="더보기"
             active={['portfolio','broadcast-settings','timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
+            badge={timelineUnread}
           />
         </div>
       </nav>
@@ -381,7 +402,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💰" label="정산 현황" active={currentSubView === 'settlement'} onClick={() => { onNavigateSettlement(); setIsMobileMenuOpen(false); }} />
@@ -633,18 +654,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 };
 
-const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void }> = ({ icon, label, active, onClick, onMouseEnter }) => (
+const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void; badge?: number }> = ({ icon, label, active, onClick, onMouseEnter, badge }) => (
   <button
     onClick={onClick}
     onMouseEnter={onMouseEnter}
-    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] ${active ? 'text-purple-400' : 'text-slate-500'}`}
+    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative ${active ? 'text-purple-400' : 'text-slate-500'}`}
   >
-    <span className="text-lg leading-none mb-0.5">{icon}</span>
+    <span className="text-lg leading-none mb-0.5 relative">
+      {icon}
+      {badge != null && badge > 0 && (
+        <span className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[8px] font-bold min-w-[14px] h-[14px] flex items-center justify-center px-0.5 rounded-full">{badge > 99 ? '99+' : badge}</span>
+      )}
+    </span>
     <span className="text-[11px] font-black tracking-tighter whitespace-nowrap">{label}</span>
   </button>
 );
 
-const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void }> = ({ icon, label, active, onClick, onMouseEnter }) => (
+const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void; badge?: number }> = ({ icon, label, active, onClick, onMouseEnter, badge }) => (
   <button
     onClick={onClick}
     onMouseEnter={onMouseEnter}
@@ -658,7 +684,10 @@ const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick
       <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-white rounded-r-full"></div>
     )}
     <span className="text-base">{icon}</span>
-    <span>{label}</span>
+    <span className="flex-1">{label}</span>
+    {badge != null && badge > 0 && (
+      <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full">{badge > 99 ? '99+' : badge}</span>
+    )}
   </button>
 );
 

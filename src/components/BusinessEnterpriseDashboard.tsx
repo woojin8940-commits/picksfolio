@@ -29,6 +29,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
+  const [timelineUnread, setTimelineUnread] = useState(0);
 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const statsCacheKey = `picks_biz_stats_${cleanUsername}`;
@@ -129,6 +130,22 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   }, [currentSubView, loadPreviewData]);
 
   useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business`);
+        const data = await res.json();
+        if (data.timelines) {
+          const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+          setTimelineUnread(total);
+        }
+      } catch {}
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, [cleanUsername]);
+
+  useEffect(() => {
     const handleStorageChange = () => loadPreviewData();
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') loadPreviewData();
@@ -150,7 +167,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     };
   }, [loadPreviewData]);
 
-  const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void }> = ({ icon, label, active, onClick }) => (
+  const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; badge?: number }> = ({ icon, label, active, onClick, badge }) => (
     <button
       onClick={onClick}
       className={`w-full flex items-center space-x-3 px-5 py-4 rounded-2xl font-black text-sm transition-all text-left relative group ${
@@ -163,18 +180,26 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full"></div>
       )}
       <span className={`text-lg transition-transform duration-300 ${active ? 'scale-110' : 'group-hover:scale-110'}`}>{icon}</span>
-      <span className={`transition-all duration-300 ${active ? 'translate-x-1' : 'group-hover:translate-x-1'}`}>{label}</span>
+      <span className={`flex-1 transition-all duration-300 ${active ? 'translate-x-1' : 'group-hover:translate-x-1'}`}>{label}</span>
+      {badge != null && badge > 0 && (
+        <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full">{badge > 99 ? '99+' : badge}</span>
+      )}
     </button>
   );
 
-  const MobileNavItem = ({ icon, label, active, onClick }: { icon: string; label: string; active: boolean; onClick: () => void }) => (
+  const MobileNavItem = ({ icon, label, active, onClick, badge }: { icon: string; label: string; active: boolean; onClick: () => void; badge?: number }) => (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center justify-center p-1 rounded-xl transition-all min-w-[46px] flex-shrink-0 ${
+      className={`flex flex-col items-center justify-center p-1 rounded-xl transition-all min-w-[46px] flex-shrink-0 relative ${
         active ? 'text-blue-400' : 'text-slate-500'
       }`}
     >
-      <span className="text-base mb-0.5">{icon}</span>
+      <span className="text-base mb-0.5 relative">
+        {icon}
+        {badge != null && badge > 0 && (
+          <span className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[8px] font-bold min-w-[14px] h-[14px] flex items-center justify-center px-0.5 rounded-full">{badge > 99 ? '99+' : badge}</span>
+        )}
+      </span>
       <span className="text-[8px] font-black tracking-tighter whitespace-nowrap">{label}</span>
     </button>
   );
@@ -475,7 +500,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-5 py-1">비즈니스 관리</p>
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
-          <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} />
+          <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <NavItem icon="📅" label="인플루언서 캘린더" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
           <NavItem icon="💰" label="정산 관리" active={currentSubView === 'settlement'} onClick={() => setCurrentSubView('settlement')} />
@@ -503,7 +528,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📋" label="방송설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
-          <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} />
+          <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <MobileNavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
           <MobileNavItem icon="💰" label="정산" active={currentSubView === 'settlement'} onClick={() => setCurrentSubView('settlement')} />
@@ -529,7 +554,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-5 py-1">비즈니스 관리</p>
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="보낸 제안" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { setCurrentSubView('calendar'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💰" label="정산 관리" active={currentSubView === 'settlement'} onClick={() => { setCurrentSubView('settlement'); setIsMobileMenuOpen(false); }} />
