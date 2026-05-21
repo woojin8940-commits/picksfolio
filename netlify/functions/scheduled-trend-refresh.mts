@@ -2,122 +2,226 @@ import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 const CATEGORIES = [
-  {
-    cid: 50000000,
-    label: "패션의류",
-    keywords: ["반팔티", "린넨셔츠", "와이드팬츠", "스니커즈", "바람막이"],
-  },
-  {
-    cid: 50000002,
-    label: "화장품/미용",
-    keywords: ["선크림", "톤업크림", "클렌징오일", "쿠션팩트", "립틴트"],
-  },
-  {
-    cid: 50000003,
-    label: "디지털/가전",
-    keywords: ["노트북", "무선이어폰", "태블릿", "스마트워치", "로봇청소기"],
-  },
-  {
-    cid: 50000004,
-    label: "가구/인테리어",
-    keywords: ["소파", "매트리스", "책상", "조명", "커튼"],
-  },
-  {
-    cid: 50000006,
-    label: "식품",
-    keywords: ["닭가슴살", "프로틴", "커피", "과일", "견과류"],
-  },
-  {
-    cid: 50000008,
-    label: "생활/건강",
-    keywords: ["비타민", "유산균", "칫솔", "세제", "영양제"],
-  },
-  {
-    cid: 50000009,
-    label: "여가/생활편의",
-    keywords: ["캠핑의자", "여행가방", "텀블러", "자전거", "골프용품"],
-  },
+  { cid: "50000000", label: "패션의류" },
+  { cid: "50000002", label: "화장품/미용" },
+  { cid: "50000003", label: "디지털/가전" },
+  { cid: "50000004", label: "가구/인테리어" },
+  { cid: "50000006", label: "식품" },
+  { cid: "50000008", label: "생활/건강" },
 ];
 
-export default async () => {
-  const clientId = Netlify.env.get("NAVER_CLIENT_ID");
-  const clientSecret = Netlify.env.get("NAVER_CLIENT_SECRET");
+interface RankEntry {
+  rank: number;
+  keyword: string;
+}
 
-  if (!clientId || !clientSecret) {
-    console.log("Naver API credentials not configured, skipping refresh");
-    return;
-  }
+interface DayData {
+  date: string;
+  ranks: RankEntry[];
+}
+
+async function fetchLiveRankings(cid: string): Promise<DayData[]> {
+  const now = new Date();
+  const endDate = now.toISOString().split("T")[0];
+  const startDate = new Date(now.getTime() - 14 * 86400000)
+    .toISOString()
+    .split("T")[0];
+
+  const res = await fetch(
+    "https://datalab.naver.com/shoppingInsight/getKeywordRank.naver",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: "https://datalab.naver.com/shoppingInsight/sCategory.naver",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      body: new URLSearchParams({
+        cid,
+        timeUnit: "date",
+        startDate,
+        endDate,
+        age: "",
+        gender: "",
+        device: "",
+      }),
+    },
+  );
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0)
+    throw new Error("Empty response");
+
+  return data
+    .filter(
+      (d: Record<string, unknown>) =>
+        d.statusCode === 200 && Array.isArray(d.ranks),
+    )
+    .map((d: Record<string, unknown>) => ({
+      date: d.date as string,
+      ranks: (d.ranks as Record<string, unknown>[]).map((r) => ({
+        rank: r.rank as number,
+        keyword: r.keyword as string,
+      })),
+    }));
+}
+
+async function fetchChangeRates(
+  cid: string,
+  keywords: string[],
+  clientId: string,
+  clientSecret: string,
+): Promise<Map<string, { changeRate: number; trend: string }>> {
+  const rateMap = new Map<string, { changeRate: number; trend: string }>();
 
   const now = new Date();
   const endDate = now.toISOString().split("T")[0];
-  const startDate = new Date(now.getTime() - 14 * 86400000).toISOString().split("T")[0];
+  const startDate = new Date(now.getTime() - 14 * 86400000)
+    .toISOString()
+    .split("T")[0];
+
+  const res = await fetch(
+    "https://openapi.naver.com/v1/datalab/shopping/category/keywords",
+    {
+      method: "POST",
+      headers: {
+        "X-Naver-Client-Id": clientId,
+        "X-Naver-Client-Secret": clientSecret,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        startDate,
+        endDate,
+        timeUnit: "week",
+        category: cid,
+        keyword: keywords.slice(0, 5).map((k) => ({ name: k, param: [k] })),
+      }),
+    },
+  );
+
+  if (!res.ok) return rateMap;
+
+  const data = await res.json();
+  for (const r of (data.results || []) as {
+    title: string;
+    data?: { ratio: number }[];
+  }[]) {
+    const periods = r.data || [];
+    const cur = periods.length > 0 ? periods[periods.length - 1].ratio : 0;
+    const prev = periods.length > 1 ? periods[periods.length - 2].ratio : 0;
+    const changeRate =
+      prev > 0 ? Math.round(((cur - prev) / prev) * 100) : 0;
+    rateMap.set(r.title, {
+      changeRate,
+      trend: changeRate > 2 ? "up" : changeRate < -2 ? "down" : "flat",
+    });
+  }
+
+  return rateMap;
+}
+
+function rankBasedTrends(
+  days: DayData[],
+): { keyword: string; rank: number; changeRate: number; trend: string }[] {
+  if (days.length === 0) return [];
+
+  const latest = days[days.length - 1];
+  const previous = days.length > 1 ? days[days.length - 2] : null;
+
+  const prevMap = new Map<string, number>();
+  if (previous) {
+    for (const r of previous.ranks) {
+      prevMap.set(r.keyword, r.rank);
+    }
+  }
+
+  return latest.ranks.slice(0, 5).map((item) => {
+    const prevRank = prevMap.get(item.keyword);
+    let changeRate = 0;
+    let trend = "flat";
+
+    if (prevRank !== undefined) {
+      changeRate = prevRank - item.rank;
+      trend = changeRate > 0 ? "up" : changeRate < 0 ? "down" : "flat";
+    } else if (previous) {
+      changeRate = 1;
+      trend = "up";
+    }
+
+    return { keyword: item.keyword, rank: item.rank, changeRate, trend };
+  });
+}
+
+export default async () => {
+  const clientId = Netlify.env.get("NAVER_CLIENT_ID") || "";
+  const clientSecret = Netlify.env.get("NAVER_CLIENT_SECRET") || "";
 
   const allItems: Array<{
-    cid: number;
+    cid: string;
     categoryLabel: string;
     keyword: string;
-    ratio: number;
+    rank: number;
     changeRate: number;
     trend: string;
-    rank: number;
   }> = [];
 
   for (const cat of CATEGORIES) {
     try {
-      const res = await fetch(
-        "https://openapi.naver.com/v1/datalab/shopping/category/keywords",
-        {
-          method: "POST",
-          headers: {
-            "X-Naver-Client-Id": clientId,
-            "X-Naver-Client-Secret": clientSecret,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            startDate,
-            endDate,
-            timeUnit: "week",
-            category: String(cat.cid),
-            keyword: cat.keywords.map((k) => ({ name: k, param: [k] })),
-          }),
-        }
-      );
+      const days = await fetchLiveRankings(cat.cid);
+      const latest = days.length > 0 ? days[days.length - 1] : null;
 
-      if (!res.ok) {
-        console.error(`Naver API error for ${cat.label}: ${res.status}`);
+      if (!latest || latest.ranks.length === 0) {
+        console.error(`No ranking data for ${cat.label}`);
         continue;
       }
 
-      const data = await res.json();
-      const items = (data.results || []).map(
-        (r: { title: string; data?: { ratio: number }[] }) => {
-          const periods = r.data || [];
-          const cur = periods.length > 0 ? periods[periods.length - 1].ratio : 0;
-          const prev = periods.length > 1 ? periods[periods.length - 2].ratio : 0;
-          const changeRate = prev > 0 ? Math.round(((cur - prev) / prev) * 100) : 0;
+      const keywords = latest.ranks.slice(0, 5).map((r) => r.keyword);
 
-          return {
-            cid: cat.cid,
-            categoryLabel: cat.label,
-            keyword: r.title,
-            ratio: cur,
-            changeRate,
-            trend: changeRate >= 0 ? "up" : "down",
-            rank: 0,
-          };
+      let items: {
+        keyword: string;
+        rank: number;
+        changeRate: number;
+        trend: string;
+      }[];
+
+      if (clientId && clientSecret) {
+        const rateMap = await fetchChangeRates(
+          cat.cid,
+          keywords,
+          clientId,
+          clientSecret,
+        );
+        if (rateMap.size > 0) {
+          items = keywords.map((kw, idx) => {
+            const rates = rateMap.get(kw) || { changeRate: 0, trend: "flat" };
+            return {
+              keyword: kw,
+              rank: idx + 1,
+              changeRate: rates.changeRate,
+              trend: rates.trend,
+            };
+          });
+        } else {
+          items = rankBasedTrends(days);
         }
-      );
+      } else {
+        items = rankBasedTrends(days);
+      }
 
-      items.sort(
-        (a: { ratio: number }, b: { ratio: number }) => b.ratio - a.ratio
-      );
-      items.forEach(
-        (item: { rank: number }, i: number) => {
-          item.rank = i + 1;
-        }
-      );
+      for (const item of items) {
+        allItems.push({
+          cid: cat.cid,
+          categoryLabel: cat.label,
+          ...item,
+        });
+      }
 
-      allItems.push(...items);
+      console.log(
+        `Fetched ${items.length} trending keywords for ${cat.label}: ${items.map((t) => t.keyword).join(", ")}`,
+      );
     } catch (err) {
       console.error(`Error fetching category ${cat.label}:`, err);
     }
@@ -134,7 +238,7 @@ export default async () => {
     for (const item of allItems) {
       await db.sql`
         INSERT INTO trend_items (cid, category_label, rank, keyword, title, trend, change_rate, updated_at)
-        VALUES (${item.cid}, ${item.categoryLabel}, ${item.rank}, ${item.keyword}, ${item.keyword}, ${item.trend}, ${item.changeRate}, NOW())
+        VALUES (${Number(item.cid)}, ${item.categoryLabel}, ${item.rank}, ${item.keyword}, ${item.keyword}, ${item.trend}, ${item.changeRate}, NOW())
       `;
     }
     console.log(`Trend cache refreshed: ${allItems.length} items updated`);
