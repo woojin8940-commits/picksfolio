@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 
 const CATEGORIES = [
@@ -249,6 +250,28 @@ export default async () => {
       }
     }
     console.log(`Trend cache refreshed: ${allItems.length} items across ${byCid.size} categories`);
+
+    try {
+      const store = getStore("naver-datalab");
+      const blobData = {
+        categories: Array.from(byCid.entries()).map(([cid, items]) => ({
+          cid,
+          label: items[0].categoryLabel,
+          rankings: items.map((item) => ({
+            rank: item.rank,
+            keyword: item.keyword,
+            ratio: 0,
+            delta: item.changeRate,
+            trend: item.trend,
+          })),
+        })),
+        updatedAt: new Date().toISOString(),
+      };
+      await store.setJSON("category-rankings-latest", blobData);
+      console.log("Blob store backup updated");
+    } catch (blobErr) {
+      console.error("Blob store backup error:", blobErr);
+    }
   } catch (err) {
     console.error("Database update error:", err);
   }
