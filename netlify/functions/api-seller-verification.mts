@@ -19,10 +19,36 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
+    const existing = ((await store.get(key, { type: "json" })) ?? {}) as Record<string, any>;
     const body = await req.json();
-    const record = { ...body, updatedAt: new Date().toISOString() };
-    await store.setJSON(key, record);
-    return Response.json({ success: true, data: record });
+
+    const merged: Record<string, any> = { ...existing };
+
+    if (body.business !== undefined) {
+      merged.business = body.business;
+      const b = body.business;
+      if (b && b.company_name && b.business_number && b.representative_name && b.contact_phone) {
+        merged.business_verified = true;
+      }
+    }
+
+    if (body.settlement !== undefined) {
+      merged.settlement = body.settlement;
+      const s = body.settlement;
+      if (s && s.bank_name && s.account_number && s.account_holder) {
+        merged.settlement_registered = true;
+      }
+    }
+
+    if (body.membership_active !== undefined) {
+      merged.membership_active = body.membership_active;
+    }
+
+    merged.updatedAt = new Date().toISOString();
+
+    await store.setJSON(key, merged);
+    const enriched = applyComplimentaryMembership(username, merged as any);
+    return Response.json({ success: true, data: enriched });
   }
 
   return Response.json({ error: "Method not allowed" }, { status: 405 });
