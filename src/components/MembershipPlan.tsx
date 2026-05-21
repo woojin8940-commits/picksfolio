@@ -82,6 +82,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
+  const [cardCustomer, setCardCustomer] = useState({ fullName: '', phoneNumber: '', email: '' });
 
   const [biz, setBiz] = useState({
     company_name: '',
@@ -121,6 +122,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         account_holder: data.settlement.account_holder || '',
       });
     }
+    setCardCustomer((prev) => ({
+      fullName: prev.fullName || data?.business?.representative_name || data?.business?.company_name || '',
+      phoneNumber: prev.phoneNumber || data?.business?.contact_phone || '',
+      email: prev.email,
+    }));
     setLoading(false);
   }, [normalizedUserName]);
 
@@ -199,6 +205,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       return;
     }
 
+    if (payMethod === 'CARD') {
+      if (!cardCustomer.fullName.trim() || !cardCustomer.phoneNumber.trim() || !cardCustomer.email.trim()) {
+        setError('카드 결제를 위해 이름, 연락처, 이메일을 모두 입력해 주세요.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const tierLabel = TIER_LABEL[selectedTier];
@@ -230,8 +243,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         }),
         customer: {
           customerId: cleanUserName,
-          fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
-          phoneNumber: verification?.business?.contact_phone || undefined,
+          fullName: cardCustomer.fullName || verification?.business?.representative_name || verification?.business?.company_name || undefined,
+          phoneNumber: cardCustomer.phoneNumber || verification?.business?.contact_phone || undefined,
+          email: cardCustomer.email || undefined,
         },
       });
 
@@ -667,6 +681,38 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </p>
                 )}
               </div>
+
+              {payMethod === 'CARD' && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">카드 결제 정보</p>
+                  <input
+                    type="text"
+                    value={cardCustomer.fullName}
+                    onChange={(e) => setCardCustomer({ ...cardCustomer, fullName: e.target.value })}
+                    placeholder="이름 (필수)"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
+                  />
+                  <input
+                    type="tel"
+                    value={cardCustomer.phoneNumber}
+                    onChange={(e) => setCardCustomer({ ...cardCustomer, phoneNumber: formatPhone(e.target.value) })}
+                    placeholder="연락처 (필수) 010-0000-0000"
+                    inputMode="tel"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
+                  />
+                  <input
+                    type="email"
+                    value={cardCustomer.email}
+                    onChange={(e) => setCardCustomer({ ...cardCustomer, email: e.target.value })}
+                    placeholder="이메일 (필수) example@email.com"
+                    inputMode="email"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
+                  />
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    KG이니시스 카드 결제 시 이름·연락처·이메일이 필수입니다.
+                  </p>
+                </div>
+              )}
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
                 {selectedTier === 'commerce' && (
