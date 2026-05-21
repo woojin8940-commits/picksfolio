@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
+import { toAsciiSafeId } from '../utils/formatters';
 import type { SellerVerification } from '../types';
 
 interface MembershipPlanProps {
@@ -7,9 +8,9 @@ interface MembershipPlanProps {
 }
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
-// browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET)
-// and is used by /api/portone-complete to verify payments.
-// CARD channel is routed through KG Inicis V2 in the PortOne console.
+// browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
+// CARD channel must be configured in PortOne console as:
+//   결제대행사: KG이니시스 / 결제모듈: 결제창 일반·정기결제 / PG상점아이디: INIBillTest (테스트)
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 const PORTONE_CARD_CHANNEL_KEY = 'channel-key-aece99dc-fc98-48e9-a3c1-0e471fbf02fc';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
@@ -216,7 +217,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     try {
       const tierLabel = TIER_LABEL[selectedTier];
       const tierAmount = TIER_PRICE[selectedTier];
-      const issueId = `billing-${normalizedUserName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const safeUserName = toAsciiSafeId(normalizedUserName);
+      const issueId = `billing-${safeUserName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const channelKey =
         payMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
@@ -226,7 +228,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       const billingKeyMethod = payMethod === 'CARD' ? 'CARD' : 'EASY_PAY';
 
-      const cleanUserName = normalizedUserName;
+      const customerPhone = (cardCustomer.phoneNumber || verification?.business?.contact_phone || '').replace(/[^0-9]/g, '');
       const response = await window.PortOne.requestIssueBillingKey({
         storeId: PORTONE_STORE_ID,
         channelKey,
@@ -242,16 +244,20 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           easyPay: { easyPayProvider: 'TOSSPAY' },
         }),
         customer: {
-          customerId: cleanUserName,
+          customerId: safeUserName,
           fullName: cardCustomer.fullName || verification?.business?.representative_name || verification?.business?.company_name || undefined,
-          phoneNumber: cardCustomer.phoneNumber || verification?.business?.contact_phone || undefined,
+          phoneNumber: customerPhone || undefined,
           email: cardCustomer.email || undefined,
         },
       });
 
       if (!response || response.code) {
         if (response?.code) {
-          setError(response.message || `빌링키 발급 실패 (${response.code})`);
+          const detail = response.code === 'PORTONE_ERROR'
+            ? '결제 모듈 오류입니다. 채널 설정(결제모듈·PG상점아이디)을 확인해 주세요.'
+            : response.message || `빌링키 발급 실패 (${response.code})`;
+          setError(detail);
+          console.error('[Membership] PortOne billing key error:', response.code, response.message);
         }
         setSaving(false);
         return;
