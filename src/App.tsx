@@ -31,7 +31,6 @@ import BusinessLoginPage from './components/BusinessLoginPage';
 import BusinessEnterpriseDashboard from './components/BusinessEnterpriseDashboard';
 import UserSettlement from './components/UserSettlement';
 import BusinessTimeline from './components/BusinessTimeline';
-import MembershipGate from './components/MembershipGate';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
@@ -1222,15 +1221,7 @@ const App: React.FC = () => {
         break;
       case 'timeline':
         subComponent = (
-          <MembershipGate
-            userName={userName}
-            featureName="협업 타임라인"
-            featureDescription="브랜드와의 협업 메시지를 주고받습니다"
-            icon="💬"
-            onNavigateMembership={() => setSubView('membership')}
-          >
-            <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
-          </MembershipGate>
+          <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
         );
         break;
       case 'membership':

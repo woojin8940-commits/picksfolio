@@ -12,7 +12,6 @@ import OpenScheduleManagement from './OpenScheduleManagement';
 import MembershipPlan from './MembershipPlan';
 import BusinessTimeline from './BusinessTimeline';
 import CampaignCollabManagement from './CampaignCollabManagement';
-import MembershipGate from './MembershipGate';
 import ErrorBoundary from './ErrorBoundary';
 import SafeImage from './SafeImage';
 import PhoneFrame from './PhoneFrame';
@@ -216,15 +215,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       break;
     case 'timeline':
       subComponent = (
-        <MembershipGate
-          userName={businessUsername}
-          featureName="협업 타임라인"
-          featureDescription="인플루언서와의 협업 메시지를 주고받습니다"
-          icon="💬"
-          onNavigateMembership={() => setCurrentSubView('membership')}
-        >
-          <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
-        </MembershipGate>
+        <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
       );
       break;
     case 'campaign-collab':

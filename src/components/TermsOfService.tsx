@@ -69,7 +69,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 4조 (멤버십 구독료 및 결제)</h3>
             <ul className="space-y-4 text-slate-400 text-sm leading-relaxed">
-              <li><span className="text-slate-300 font-bold">정기 구독료:</span> 픽스폴리오 멤버십은 두 가지 플랜으로 운영됩니다. 스탠다드 멤버십(포트폴리오 영상 커버 · 콘텐츠 구성 · 비즈니스 협업)은 월 4,900원(VAT 포함), 커머스 멤버십(스탠다드 혜택 + 라이브 커머스 송출)은 월 13,900원(VAT 포함)이며, 회사의 정책 변경 시 사전 공지 후 조정될 수 있습니다.</li>
+              <li><span className="text-slate-300 font-bold">정기 구독료:</span> 픽스폴리오 멤버십은 두 가지 플랜으로 운영됩니다. 스탠다드 멤버십(포트폴리오 영상 커버 · 콘텐츠 구성)은 월 4,900원(VAT 포함), 커머스 멤버십(스탠다드 혜택 + 라이브 커머스 송출)은 월 13,900원(VAT 포함)이며, 회사의 정책 변경 시 사전 공지 후 조정될 수 있습니다. 비즈니스 수신함과 협업 타임라인은 모든 이용자에게 무료로 제공됩니다.</li>
               <li><span className="text-slate-300 font-bold">결제 및 자동 갱신:</span> 멤버십 회원(셀러)은 등록한 결제 수단(신용/체크카드, 카카오페이 등)을 통해 매월 자동으로 구독료를 지불하며, 해지 전까지 서비스 이용 기간은 자동 갱신됩니다.</li>
               <li><span className="text-slate-300 font-bold">상품 대금 결제(시청자):</span> 시청자는 방송 중 장바구니에 담은 상품을 회사가 제공하는 일괄 결제 시스템을 통해 결제하며, 결제는 등록된 결제대행사(PG)를 통해 처리됩니다.</li>
             </ul>

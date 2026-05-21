@@ -65,7 +65,7 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
               {featureName}은(는) 멤버십 전용 기능입니다
             </h3>
             <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">
-              월 4,900원 스탠다드 멤버십을 구독하면 비즈니스 수신함과 협업 타임라인, 포트폴리오 영상 커버·콘텐츠 구성을 사용할 수 있습니다. 라이브 커머스 송출까지 원하시면 월 13,900원 커머스 멤버십을 선택하세요.
+              월 4,900원 스탠다드 멤버십을 구독하면 포트폴리오 영상 커버·콘텐츠 구성을 사용할 수 있습니다. 라이브 커머스 송출까지 원하시면 월 13,900원 커머스 멤버십을 선택하세요.
             </p>
           </div>
         </div>
@@ -88,10 +88,6 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
         </div>
 
         <ul className="space-y-2 mb-6">
-          <li className="flex items-center gap-2 text-xs md:text-sm text-slate-600 font-medium">
-            <span className="w-5 h-5 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 text-[10px] font-black">✓</span>
-            비즈니스 수신함 · 협업 타임라인 이용
-          </li>
           <li className="flex items-center gap-2 text-xs md:text-sm text-slate-600 font-medium">
             <span className="w-5 h-5 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 text-[10px] font-black">✓</span>
             포트폴리오 영상 커버 · 콘텐츠 구성 편집
