@@ -1674,7 +1674,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     <ul className="space-y-1.5 mt-4 text-xs md:text-sm text-slate-600 font-medium">
                       <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>상단 커버 <strong>영상</strong> 업로드</li>
                       <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>텍스트 · 이미지 블록 무제한 편집</li>
-                      <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>비즈니스 수신함 · 협업 타임라인</li>
                     </ul>
                     <div className="flex flex-col sm:flex-row gap-2 mt-5">
                       <button
