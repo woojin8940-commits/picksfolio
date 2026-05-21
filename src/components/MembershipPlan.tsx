@@ -9,10 +9,9 @@ interface MembershipPlanProps {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
-// CARD channel must be configured in PortOne console as:
-//   결제대행사: KG이니시스 / 결제모듈: 결제창 일반·정기결제 / PG상점아이디: INIBillTest (테스트)
+// CARD channel: 결제대행사 토스페이먼츠 / 결제모듈: 결제창 일반·정기결제
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_CARD_CHANNEL_KEY = 'channel-key-aece99dc-fc98-48e9-a3c1-0e471fbf02fc';
+const PORTONE_CARD_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 
@@ -207,8 +206,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
 
     if (payMethod === 'CARD') {
-      if (!cardCustomer.fullName.trim() || !cardCustomer.phoneNumber.trim() || !cardCustomer.email.trim()) {
-        setError('카드 결제를 위해 이름, 연락처, 이메일을 모두 입력해 주세요.');
+      if (!cardCustomer.fullName.trim()) {
+        setError('카드 결제를 위해 이름을 입력해 주세요.');
         return;
       }
     }
@@ -673,7 +672,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    KG이니시스 결제창을 통해 신용·체크카드로 결제됩니다.
+                    토스페이먼츠 결제창을 통해 신용·체크카드로 결제됩니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (
@@ -702,7 +701,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     type="tel"
                     value={cardCustomer.phoneNumber}
                     onChange={(e) => setCardCustomer({ ...cardCustomer, phoneNumber: formatPhone(e.target.value) })}
-                    placeholder="연락처 (필수) 010-0000-0000"
+                    placeholder="연락처 (선택) 010-0000-0000"
                     inputMode="tel"
                     className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
                   />
@@ -710,13 +709,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     type="email"
                     value={cardCustomer.email}
                     onChange={(e) => setCardCustomer({ ...cardCustomer, email: e.target.value })}
-                    placeholder="이메일 (필수) example@email.com"
+                    placeholder="이메일 (선택) example@email.com"
                     inputMode="email"
                     className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
                   />
-                  <p className="text-[11px] text-slate-400 font-medium">
-                    KG이니시스 카드 결제 시 이름·연락처·이메일이 필수입니다.
-                  </p>
                 </div>
               )}
               <div className="text-xs text-slate-500 space-y-1">

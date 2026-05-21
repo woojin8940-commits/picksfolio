@@ -118,7 +118,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
             </p>
             <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
               <li><span className="text-slate-300 font-bold">솔라피(Solapi):</span> 카카오 알림톡 및 SMS 발송 대행</li>
-              <li><span className="text-slate-300 font-bold">포트원(PortOne):</span> 신용카드·카카오페이 등 결제 대행(KG이니시스 PG), 정기 구독 빌링 및 시청자 상품 결제 처리</li>
+              <li><span className="text-slate-300 font-bold">포트원(PortOne):</span> 신용카드·카카오페이 등 결제 대행(토스페이먼츠 PG), 정기 구독 빌링 및 시청자 상품 결제 처리</li>
               <li><span className="text-slate-300 font-bold">수파베이스(Supabase):</span> 회원 계정 및 서비스 데이터 보관</li>
               <li><span className="text-slate-300 font-bold">아마존웹서비스(AWS):</span> 라이브 방송 송출 인프라 및 클라우드 서버 운영</li>
             </ul>
