@@ -61,7 +61,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
     <div className="p-3 md:p-14 w-full animate-in fade-in duration-500">
       <div className="mb-6 md:mb-10">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 현황</h2>
-        <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">비즈니스 협업에 대한 정산 일정과 금액을 확인합니다</p>
+        <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">협업 제안이 수락되면 정산 일정이 자동으로 추가됩니다</p>
       </div>
 
       {/* Stats Summary */}
@@ -92,7 +92,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
         <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-12 text-center">
           <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">💰</div>
           <h3 className="font-black text-slate-900 text-lg mb-2">정산 내역이 없습니다</h3>
-          <p className="text-slate-400 text-sm font-medium">비즈니스 파트너가 정산을 등록하면 여기서 확인할 수 있습니다.</p>
+          <p className="text-slate-400 text-sm font-medium">비즈니스 제안을 수락하면 정산이 자동으로 등록됩니다.</p>
         </div>
       ) : (
         <>

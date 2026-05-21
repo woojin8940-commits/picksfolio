@@ -43,7 +43,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
 
   useEffect(() => {
     fetchProposals();
-    const interval = setInterval(fetchProposals, 30_000);
+    const interval = setInterval(fetchProposals, 8_000);
     return () => clearInterval(interval);
   }, [businessUsername]);
 

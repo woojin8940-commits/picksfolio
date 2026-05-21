@@ -70,10 +70,23 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
+  const [windowFocused, setWindowFocused] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastMessageCountRef = useRef<number>(0);
+
+  useEffect(() => {
+    const onFocus = () => setWindowFocused(true);
+    const onBlur = () => setWindowFocused(false);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   const fetchTimelines = useCallback(async () => {
     try {
@@ -101,21 +114,29 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       const fromList = timelines.find(t => t.proposalId === proposalId);
       if (cached) {
         setSelectedTimeline(cached);
+        lastMessageCountRef.current = cached.comments?.length || 0;
       } else if (fromList && fromList.comments) {
         setSelectedTimeline(fromList);
+        lastMessageCountRef.current = fromList.comments?.length || 0;
       }
     }
     try {
       const res = await fetch(`/api/timeline/detail/${proposalId}`);
       const data = await res.json();
       if (data.timeline) {
+        const serverCount = (data.timeline.comments || []).length;
         setSelectedTimeline(prev => {
           if (prev && prev.proposalId === proposalId) {
             const pendingMsgs = (prev.comments || []).filter((c: TimelineComment) => c.id.startsWith('pending_'));
             const serverIds = new Set((data.timeline.comments || []).map((c: TimelineComment) => c.id));
             const stillPending = pendingMsgs.filter((c: TimelineComment) => !serverIds.has(c.id.replace('pending_', 'tc_')));
+            if (serverCount === lastMessageCountRef.current && stillPending.length === 0) {
+              return prev;
+            }
+            lastMessageCountRef.current = serverCount;
             return { ...data.timeline, comments: [...(data.timeline.comments || []), ...stillPending] };
           }
+          lastMessageCountRef.current = serverCount;
           return data.timeline;
         });
         try { localStorage.setItem(detailCacheKey(proposalId), JSON.stringify(data.timeline)); } catch {}
@@ -132,9 +153,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   useEffect(() => {
     fetchTimelines();
-    const interval = setInterval(fetchTimelines, 30000);
+    const ms = windowFocused ? 5000 : 30000;
+    const interval = setInterval(fetchTimelines, ms);
     return () => clearInterval(interval);
-  }, [fetchTimelines]);
+  }, [fetchTimelines, windowFocused]);
 
   useEffect(() => {
     if (initialProposalId) {
@@ -150,11 +172,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   useEffect(() => {
     if (!selectedTimeline) return;
+    const ms = windowFocused ? 3000 : 15000;
     const interval = setInterval(() => {
       fetchTimelineDetail(selectedTimeline.proposalId);
-    }, 10000);
+    }, ms);
     return () => clearInterval(interval);
-  }, [selectedTimeline?.proposalId, fetchTimelineDetail]);
+  }, [selectedTimeline?.proposalId, fetchTimelineDetail, windowFocused]);
 
   const handleSendMessage = () => {
     if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedTimeline) return;
