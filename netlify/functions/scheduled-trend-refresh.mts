@@ -234,14 +234,21 @@ export default async () => {
 
   try {
     const db = getDatabase();
-    await db.sql`DELETE FROM trend_items`;
+    const byCid = new Map<string, typeof allItems>();
     for (const item of allItems) {
-      await db.sql`
-        INSERT INTO trend_items (cid, category_label, rank, keyword, title, trend, change_rate, updated_at)
-        VALUES (${Number(item.cid)}, ${item.categoryLabel}, ${item.rank}, ${item.keyword}, ${item.keyword}, ${item.trend}, ${item.changeRate}, NOW())
-      `;
+      if (!byCid.has(item.cid)) byCid.set(item.cid, []);
+      byCid.get(item.cid)!.push(item);
     }
-    console.log(`Trend cache refreshed: ${allItems.length} items updated`);
+    for (const [cid, items] of byCid) {
+      await db.sql`DELETE FROM trend_items WHERE cid = ${Number(cid)}`;
+      for (const item of items) {
+        await db.sql`
+          INSERT INTO trend_items (cid, category_label, rank, keyword, title, trend, change_rate, updated_at)
+          VALUES (${Number(item.cid)}, ${item.categoryLabel}, ${item.rank}, ${item.keyword}, ${item.keyword}, ${item.trend}, ${item.changeRate}, NOW())
+        `;
+      }
+    }
+    console.log(`Trend cache refreshed: ${allItems.length} items across ${byCid.size} categories`);
   } catch (err) {
     console.error("Database update error:", err);
   }
