@@ -13,59 +13,59 @@ export default async (req: Request, context: Context) => {
     const allProposals: any[] = [];
     const seenIds = new Set<string>();
 
-    // 1) SQL 데이터베이스에서 조회 (원래 정상 작동하던 5월 초 버전과 동일)
-    try {
-      const { getDatabase } = await import("@netlify/database");
-      const db = getDatabase();
-      const result = await db.sql`
-        SELECT * FROM proposals
-        WHERE LOWER(username) = ${username}
-           OR LOWER(influencer_username) = ${username}
-        ORDER BY created_at DESC
-      `;
-      if (result && Array.isArray(result.rows)) {
-        for (const row of result.rows) {
-          seenIds.add(row.id);
-          allProposals.push({
-            id: row.id,
-            influencer_username: row.influencer_username || row.username || username,
-            category: row.category || "광고",
-            company_name: row.company_name || "",
-            contact_person: row.contact_person || "",
-            contact_email: row.contact_email || "",
-            contact_phone: row.contact_phone || "",
-            title: row.title || "",
-            content: row.content || row.description || "",
-            description: row.description || row.content || "",
-            start_date: row.start_date || "",
-            end_date: row.end_date || "",
-            fee: parseInt(row.fee) || 0,
-            business_username: row.business_username || "",
-            status: row.status || "pending",
-            rejection_reason: row.rejection_reason || "",
-            created_at: row.created_at || new Date().toISOString(),
-            createdAt: row.created_at || new Date().toISOString(),
-            updated_at: row.updated_at || "",
-          });
+    const [sqlResult, blobData] = await Promise.all([
+      (async () => {
+        try {
+          const { getDatabase } = await import("@netlify/database");
+          const db = getDatabase();
+          return await db.sql`
+            SELECT * FROM proposals
+            WHERE LOWER(username) = ${username}
+               OR LOWER(influencer_username) = ${username}
+            ORDER BY created_at DESC
+          `;
+        } catch (dbErr) {
+          console.error("[api-proposals] SQL query failed:", dbErr);
+          return null;
         }
+      })(),
+      store.get(`proposals_${username}`, { type: "json" }).catch(() => null),
+    ]);
+
+    if (sqlResult && Array.isArray(sqlResult.rows)) {
+      for (const row of sqlResult.rows) {
+        seenIds.add(row.id);
+        allProposals.push({
+          id: row.id,
+          influencer_username: row.influencer_username || row.username || username,
+          category: row.category || "광고",
+          company_name: row.company_name || "",
+          contact_person: row.contact_person || "",
+          contact_email: row.contact_email || "",
+          contact_phone: row.contact_phone || "",
+          title: row.title || "",
+          content: row.content || row.description || "",
+          description: row.description || row.content || "",
+          start_date: row.start_date || "",
+          end_date: row.end_date || "",
+          fee: parseInt(row.fee) || 0,
+          business_username: row.business_username || "",
+          status: row.status || "pending",
+          rejection_reason: row.rejection_reason || "",
+          created_at: row.created_at || new Date().toISOString(),
+          createdAt: row.created_at || new Date().toISOString(),
+          updated_at: row.updated_at || "",
+        });
       }
-    } catch (dbErr) {
-      console.error("[api-proposals] SQL query failed:", dbErr);
     }
 
-    // 2) Blob 스토어에서 SQL에 없는 제안 추가
-    try {
-      const blobData = (await store.get(`proposals_${username}`, { type: "json" })) as any[] | null;
-      if (Array.isArray(blobData)) {
-        for (const bp of blobData) {
-          if (bp.id && !seenIds.has(bp.id)) {
-            seenIds.add(bp.id);
-            allProposals.push(bp);
-          }
+    if (Array.isArray(blobData)) {
+      for (const bp of blobData as any[]) {
+        if (bp.id && !seenIds.has(bp.id)) {
+          seenIds.add(bp.id);
+          allProposals.push(bp);
         }
       }
-    } catch (blobErr) {
-      console.error("[api-proposals] Blob read failed:", blobErr);
     }
 
     allProposals.sort(
@@ -74,13 +74,11 @@ export default async (req: Request, context: Context) => {
         new Date(a.created_at || a.createdAt || 0).getTime()
     );
 
-    // Blob 스토어에 동기화 (PATCH/DELETE 엔드포인트 호환)
+    // Blob 스토어에 동기화 (PATCH/DELETE 엔드포인트 호환) — deferred
     if (allProposals.length > 0) {
-      try {
-        await store.setJSON(`proposals_${username}`, allProposals);
-      } catch (syncErr) {
-        console.error("[api-proposals] Blob sync failed:", syncErr);
-      }
+      context.waitUntil(
+        store.setJSON(`proposals_${username}`, allProposals).catch(() => {})
+      );
     }
 
     return Response.json({ proposals: allProposals });

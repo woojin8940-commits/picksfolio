@@ -141,7 +141,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       } catch {}
     };
     fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
+    const interval = setInterval(fetchUnread, 60000);
     return () => clearInterval(interval);
   }, [cleanUsername]);
 

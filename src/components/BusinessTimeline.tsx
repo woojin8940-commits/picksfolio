@@ -153,7 +153,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   useEffect(() => {
     fetchTimelines();
-    const ms = windowFocused ? 5000 : 30000;
+    const ms = windowFocused ? 15000 : 60000;
     const interval = setInterval(fetchTimelines, ms);
     return () => clearInterval(interval);
   }, [fetchTimelines, windowFocused]);
@@ -172,7 +172,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   useEffect(() => {
     if (!selectedTimeline) return;
-    const ms = windowFocused ? 3000 : 15000;
+    const ms = windowFocused ? 5000 : 30000;
     const interval = setInterval(() => {
       fetchTimelineDetail(selectedTimeline.proposalId);
     }, ms);
