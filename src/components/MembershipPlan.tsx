@@ -82,7 +82,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
-  const [cardCustomer, setCardCustomer] = useState({ fullName: '', phoneNumber: '', email: '' });
 
   const [biz, setBiz] = useState({
     company_name: '',
@@ -122,11 +121,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         account_holder: data.settlement.account_holder || '',
       });
     }
-    setCardCustomer((prev) => ({
-      fullName: prev.fullName || data?.business?.representative_name || data?.business?.company_name || '',
-      phoneNumber: prev.phoneNumber || data?.business?.contact_phone || '',
-      email: prev.email,
-    }));
     setLoading(false);
   }, [normalizedUserName]);
 
@@ -205,13 +199,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       return;
     }
 
-    if (payMethod === 'CARD') {
-      if (!cardCustomer.fullName.trim()) {
-        setError('카드 결제를 위해 이름을 입력해 주세요.');
-        return;
-      }
-    }
-
     setSaving(true);
     try {
       const tierLabel = TIER_LABEL[selectedTier];
@@ -227,7 +214,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       const billingKeyMethod = payMethod === 'CARD' ? 'CARD' : 'EASY_PAY';
 
-      const customerPhone = (cardCustomer.phoneNumber || verification?.business?.contact_phone || '').replace(/[^0-9]/g, '');
       const response = await window.PortOne.requestIssueBillingKey({
         storeId: PORTONE_STORE_ID,
         channelKey,
@@ -244,9 +230,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         }),
         customer: {
           customerId: safeUserName,
-          fullName: cardCustomer.fullName || verification?.business?.representative_name || verification?.business?.company_name || undefined,
-          phoneNumber: customerPhone || undefined,
-          email: cardCustomer.email || undefined,
+          fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
+          phoneNumber: verification?.business?.contact_phone || undefined,
         },
       });
 
@@ -607,7 +592,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <p className="text-xs font-black text-purple-500 uppercase tracking-widest">{TIER_LABEL[selectedTier]}</p>
-                <h3 className="text-lg font-black text-slate-900">정기결제 등록</h3>
+                <h3 className="text-lg font-black text-slate-900">구독 결제 확인</h3>
               </div>
               <button
                 type="button"
@@ -627,7 +612,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
                 <p className="text-xs font-black text-purple-500 uppercase tracking-widest mb-1">월 구독료</p>
                 <p className="text-3xl font-black text-purple-700">{TIER_PRICE[selectedTier].toLocaleString()}<span className="text-sm font-bold ml-1">원 / 월</span></p>
-                <p className="text-xs font-bold text-purple-500 mt-2">결제 수단 등록 후 매월 자동결제, 언제든 해지 가능</p>
+                <p className="text-xs font-bold text-purple-500 mt-2">매월 자동결제, 언제든 해지 가능</p>
               </div>
 
               <div>
@@ -647,18 +632,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPayMethod('KAKAOPAY')}
-                    className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      payMethod === 'KAKAOPAY'
-                        ? 'border-yellow-400 bg-yellow-50 text-yellow-800'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="font-black text-yellow-700">pay</span>
-                    <span>카카오페이</span>
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setPayMethod('TOSSPAY')}
                     className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                       payMethod === 'TOSSPAY'
@@ -668,6 +641,18 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   >
                     <span className="font-black text-blue-600">toss</span>
                     <span>토스페이</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayMethod('KAKAOPAY')}
+                    className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      payMethod === 'KAKAOPAY'
+                        ? 'border-yellow-400 bg-yellow-50 text-yellow-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="font-black text-yellow-700">pay</span>
+                    <span>카카오페이</span>
                   </button>
                 </div>
                 {payMethod === 'CARD' && (
@@ -686,56 +671,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </p>
                 )}
               </div>
-
-              {payMethod === 'CARD' && (
-                <div className="space-y-2">
-                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">카드 결제 정보</p>
-                  <input
-                    type="text"
-                    value={cardCustomer.fullName}
-                    onChange={(e) => setCardCustomer({ ...cardCustomer, fullName: e.target.value })}
-                    placeholder="이름 (필수)"
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
-                  />
-                  <input
-                    type="tel"
-                    value={cardCustomer.phoneNumber}
-                    onChange={(e) => setCardCustomer({ ...cardCustomer, phoneNumber: formatPhone(e.target.value) })}
-                    placeholder="연락처 (선택) 010-0000-0000"
-                    inputMode="tel"
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
-                  />
-                  <input
-                    type="email"
-                    value={cardCustomer.email}
-                    onChange={(e) => setCardCustomer({ ...cardCustomer, email: e.target.value })}
-                    placeholder="이메일 (선택) example@email.com"
-                    inputMode="email"
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
-                  />
-                </div>
-              )}
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
-                {selectedTier === 'commerce' && (
-                  <>
-                    {businessVerified ? (
-                      <p>✓ 사업자 인증 완료: {verification?.business?.company_name} ({verification?.business?.business_number})</p>
-                    ) : (
-                      <p className="text-slate-400">• 라이브 방송 송출을 원하시면 구독 후 사업자 인증을 진행해 주세요.</p>
-                    )}
-                    {settlementRegistered ? (
-                      <p>✓ 정산 계좌 등록: {verification?.settlement?.bank_name} {maskAccountNumber(verification?.settlement?.account_number || '')}</p>
-                    ) : (
-                      <p className="text-slate-400">• 라이브 방송 송출을 원하시면 구독 후 정산 계좌를 등록해 주세요.</p>
-                    )}
-                  </>
-                )}
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {selectedTier === 'commerce'
-                  ? '결제 수단을 등록하면 첫 결제가 즉시 진행되고 멤버십 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 방송 송출은 사업자 인증과 정산 계좌 등록을 함께 완료한 뒤 이용할 수 있으며, 판매 수익은 등록된 정산 계좌로 입금됩니다.'
-                  : '결제 수단을 등록하면 첫 결제가 즉시 진행되고 스탠다드 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
+                  ? '구독을 시작하면 포트폴리오 영상 커버 · 콘텐츠 구성 등 스탠다드 기능이 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'
+                  : '구독을 시작하면 포트폴리오 영상 커버 · 콘텐츠 구성 등 스탠다드 기능이 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
               </p>
             </div>
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
@@ -761,11 +703,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               >
                 {saving
                   ? '처리 중...'
-                  : payMethod === 'KAKAOPAY'
-                    ? `카카오페이 정기결제 등록`
-                    : payMethod === 'TOSSPAY'
-                      ? `토스페이 정기결제 등록`
-                      : `카드 등록 및 ${TIER_PRICE[selectedTier].toLocaleString()}원 결제`}
+                  : `${TIER_PRICE[selectedTier].toLocaleString()}원으로 구독 시작`}
               </button>
             </div>
           </div>
