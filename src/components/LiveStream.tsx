@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useTransition } from '
 import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, Tv, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, toAsciiSafeId } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
@@ -1968,7 +1968,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     setCheckoutError(null);
     setCheckoutProcessing(true);
     try {
-      const paymentId = `live-${username}-${checkoutProduct.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const paymentId = `live-${toAsciiSafeId(username)}-${checkoutProduct.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const channelKey =
         checkoutPayMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
@@ -2096,7 +2096,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     setBatchError(null);
     setBatchProcessing(true);
     try {
-      const paymentId = `live-batch-${username}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const paymentId = `live-batch-${toAsciiSafeId(username)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const channelKey =
         batchPayMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY

@@ -16,6 +16,11 @@ export const formatKRW = (value: number | string | null | undefined): string => 
   return `${formatNumberWithCommas(num)}원`;
 };
 
+// PortOne V2 requires paymentId / issueId / customerId to contain ASCII characters only.
+// Korean (or any non-ASCII) usernames must be encoded before embedding in those IDs.
+export const toAsciiSafeId = (s: string): string =>
+  s.replace(/[^\x00-\x7F]/g, (ch) => `_${(ch.codePointAt(0) ?? 0).toString(36)}`);
+
 export const formatKoreanWon = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '';
   const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : value;
