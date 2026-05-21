@@ -13,6 +13,7 @@ interface MembershipPlanProps {
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 const PORTONE_CARD_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
+const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 
 type MembershipTier = 'standard' | 'commerce';
 const STANDARD_PRICE = 4900;
@@ -79,7 +80,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [acctEditing, setAcctEditing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY'>('CARD');
+  const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
 
   const [biz, setBiz] = useState({
@@ -206,7 +207,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       const channelKey =
         payMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : PORTONE_CARD_CHANNEL_KEY;
+          : payMethod === 'TOSSPAY'
+            ? PORTONE_TOSSPAY_CHANNEL_KEY
+            : PORTONE_CARD_CHANNEL_KEY;
 
       const billingKeyMethod = payMethod === 'CARD' ? 'CARD' : 'EASY_PAY';
 
@@ -221,6 +224,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         currency: 'KRW',
         ...(payMethod === 'KAKAOPAY' && {
           easyPay: { easyPayProvider: 'KAKAOPAY' },
+        }),
+        ...(payMethod === 'TOSSPAY' && {
+          easyPay: { easyPayProvider: 'TOSSPAY' },
         }),
         customer: {
           customerId: cleanUserName,
@@ -253,7 +259,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       if (verifyRes.data) setVerification(verifyRes.data);
       setConfirmOpen(false);
-      flashSuccess(`카드가 등록되어 ${tierLabel}이(가) 활성화되었습니다. 매월 자동결제됩니다.`);
+      const methodLabel = payMethod === 'KAKAOPAY' ? '카카오페이가' : payMethod === 'TOSSPAY' ? '토스페이가' : '카드가';
+      flashSuccess(`${methodLabel} 등록되어 ${tierLabel}이(가) 활성화되었습니다. 매월 자동결제됩니다.`);
     } catch (e) {
       console.error('[Membership] PortOne billing key error:', e);
       setError('결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
@@ -581,7 +588,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <p className="text-xs font-black text-purple-500 uppercase tracking-widest">{TIER_LABEL[selectedTier]}</p>
-                <h3 className="text-lg font-black text-slate-900">정기결제 카드 등록</h3>
+                <h3 className="text-lg font-black text-slate-900">정기결제 등록</h3>
               </div>
               <button
                 type="button"
@@ -601,12 +608,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
                 <p className="text-xs font-black text-purple-500 uppercase tracking-widest mb-1">월 구독료</p>
                 <p className="text-3xl font-black text-purple-700">{TIER_PRICE[selectedTier].toLocaleString()}<span className="text-sm font-bold ml-1">원 / 월</span></p>
-                <p className="text-xs font-bold text-purple-500 mt-2">카드 등록 후 매월 자동결제, 언제든 해지 가능</p>
+                <p className="text-xs font-bold text-purple-500 mt-2">결제 수단 등록 후 매월 자동결제, 언제든 해지 가능</p>
               </div>
 
               <div>
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setPayMethod('CARD')}
@@ -631,6 +638,18 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     <span className="font-black text-yellow-700">pay</span>
                     <span>카카오페이</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayMethod('TOSSPAY')}
+                    className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      payMethod === 'TOSSPAY'
+                        ? 'border-blue-400 bg-blue-50 text-blue-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="font-black text-blue-600">toss</span>
+                    <span>토스페이</span>
+                  </button>
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
@@ -640,6 +659,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 {payMethod === 'KAKAOPAY' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
                     카카오톡 앱에서 카카오페이로 간편하게 결제됩니다.
+                  </p>
+                )}
+                {payMethod === 'TOSSPAY' && (
+                  <p className="text-[11px] text-slate-400 font-medium mt-2">
+                    토스 앱에서 토스페이로 간편하게 결제됩니다.
                   </p>
                 )}
               </div>
@@ -662,8 +686,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {selectedTier === 'commerce'
-                  ? '카드를 등록하면 첫 결제가 즉시 진행되고 멤버십 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 방송 송출은 사업자 인증과 정산 계좌 등록을 함께 완료한 뒤 이용할 수 있으며, 판매 수익은 등록된 정산 계좌로 입금됩니다.'
-                  : '카드를 등록하면 첫 결제가 즉시 진행되고 스탠다드 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
+                  ? '결제 수단을 등록하면 첫 결제가 즉시 진행되고 멤버십 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 방송 송출은 사업자 인증과 정산 계좌 등록을 함께 완료한 뒤 이용할 수 있으며, 판매 수익은 등록된 정산 계좌로 입금됩니다.'
+                  : '결제 수단을 등록하면 첫 결제가 즉시 진행되고 스탠다드 기능이 활성화됩니다. 이후 매월 같은 날짜에 자동결제됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
               </p>
             </div>
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
@@ -682,14 +706,18 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 ${
                   payMethod === 'KAKAOPAY'
                     ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
-                    : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
+                    : payMethod === 'TOSSPAY'
+                      ? 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
+                      : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
                 }`}
               >
                 {saving
                   ? '처리 중...'
                   : payMethod === 'KAKAOPAY'
                     ? `카카오페이 정기결제 등록`
-                    : `카드 등록 및 ${TIER_PRICE[selectedTier].toLocaleString()}원 결제`}
+                    : payMethod === 'TOSSPAY'
+                      ? `토스페이 정기결제 등록`
+                      : `카드 등록 및 ${TIER_PRICE[selectedTier].toLocaleString()}원 결제`}
               </button>
             </div>
           </div>
