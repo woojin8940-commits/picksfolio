@@ -1294,7 +1294,7 @@ const App: React.FC = () => {
         onLogout={handleLogout}
         isLoggedIn={isLoggedIn}
       />
-      <main className="page-scale-content">
+      <main>
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
