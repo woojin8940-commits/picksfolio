@@ -11,9 +11,9 @@ interface PhoneFrameProps {
 }
 
 const SIZE_CLASS: Record<PhoneFrameSize, string> = {
-  sm: 'w-[200px] xl:w-[220px]',
-  md: 'w-[220px] xl:w-[250px]',
-  lg: 'w-[260px]',
+  sm: 'w-[220px] xl:w-[240px]',
+  md: 'w-[260px] xl:w-[300px]',
+  lg: 'w-[300px] xl:w-[340px]',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({
