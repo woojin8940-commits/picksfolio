@@ -19,50 +19,61 @@ export default async (req: Request, context: Context) => {
     const seenProposalIds = new Set<string>(existing.map((t: any) => t.proposalId));
     let added = 0;
 
-    const [campaignRows, sqlTimelines] = await Promise.all([
-      (async () => {
-        try {
-          const { getDatabase } = await import("@netlify/database");
-          const db = getDatabase();
-          if (userType === "business") {
-            return await db.sql`
-              SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
-              FROM campaign_applications ca
-              JOIN campaigns c ON c.id = ca.campaign_id
-              WHERE ca.status = 'accepted'
-              AND LOWER(REPLACE(c.business_username, 'biz/', '')) = ${username}
-            ` as any[];
-          } else {
-            return await db.sql`
-              SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
-              FROM campaign_applications ca
-              JOIN campaigns c ON c.id = ca.campaign_id
-              WHERE ca.status = 'accepted'
-              AND LOWER(ca.applicant_username) = ${username}
-            ` as any[];
-          }
-        } catch { return []; }
-      })(),
-      (async () => {
-        try {
-          const { getDatabase } = await import("@netlify/database");
-          const db = getDatabase();
-          if (userType === "business") {
-            return await db.sql`
-              SELECT * FROM timelines
-              WHERE LOWER(business_username) = ${username}
-              ORDER BY created_at DESC
-            ` as any[];
-          } else {
-            return await db.sql`
-              SELECT * FROM timelines
-              WHERE LOWER(influencer_username) = ${username}
-              ORDER BY created_at DESC
-            ` as any[];
-          }
-        } catch { return []; }
-      })(),
-    ]);
+    let dbInstance: any = null;
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      dbInstance = getDatabase();
+    } catch {}
+
+    let campaignRows: any[] = [];
+    let sqlTimelines: any[] = [];
+    let unreadMap: Record<string, number> = {};
+    let latestMessageMap: Record<string, any> = {};
+
+    if (dbInstance) {
+      const [cRows, tRows] = await Promise.all([
+        (async () => {
+          try {
+            if (userType === "business") {
+              return await dbInstance.sql`
+                SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
+                FROM campaign_applications ca
+                JOIN campaigns c ON c.id = ca.campaign_id
+                WHERE ca.status = 'accepted'
+                AND LOWER(REPLACE(c.business_username, 'biz/', '')) = ${username}
+              ` as any[];
+            } else {
+              return await dbInstance.sql`
+                SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
+                FROM campaign_applications ca
+                JOIN campaigns c ON c.id = ca.campaign_id
+                WHERE ca.status = 'accepted'
+                AND LOWER(ca.applicant_username) = ${username}
+              ` as any[];
+            }
+          } catch { return []; }
+        })(),
+        (async () => {
+          try {
+            if (userType === "business") {
+              return await dbInstance.sql`
+                SELECT * FROM timelines
+                WHERE LOWER(business_username) = ${username}
+                ORDER BY created_at DESC
+              ` as any[];
+            } else {
+              return await dbInstance.sql`
+                SELECT * FROM timelines
+                WHERE LOWER(influencer_username) = ${username}
+                ORDER BY created_at DESC
+              ` as any[];
+            }
+          } catch { return []; }
+        })(),
+      ]);
+      campaignRows = cRows;
+      sqlTimelines = tRows;
+    }
 
     if (Array.isArray(sqlTimelines)) {
       for (const row of sqlTimelines) {
@@ -138,13 +149,9 @@ export default async (req: Request, context: Context) => {
 
     const proposalIds = existing.map((t: any) => t.proposalId);
 
-    let unreadMap: Record<string, number> = {};
-    let latestMessageMap: Record<string, any> = {};
-    if (proposalIds.length > 0) {
+    if (proposalIds.length > 0 && dbInstance) {
       try {
-        const { getDatabase } = await import("@netlify/database");
-        const db = getDatabase();
-        const unreadRows = await db.sql`
+        const unreadRows = await dbInstance.sql`
           SELECT proposal_id,
                  COUNT(*) FILTER (WHERE NOT (${username} = ANY(read_by))) as unread_count,
                  MAX(created_at) as last_message_at
@@ -159,16 +166,17 @@ export default async (req: Request, context: Context) => {
           }
         }
       } catch {
-        // Fallback: fetch details from blob store in parallel
+        const batchSize = 10;
+        const batched = existing.slice(0, batchSize);
         const details = await Promise.all(
-          existing.map(async (t: any) => {
+          batched.map(async (t: any) => {
             try {
               const detail = (await store.get(`detail_${t.proposalId}`, { type: "json" })) as any;
               const comments = detail?.comments || [];
               const unreadCount = comments.filter((c: any) => !c.readBy?.includes(username)).length;
-              return { proposalId: t.proposalId, unreadCount, comments };
+              return { proposalId: t.proposalId, unreadCount };
             } catch {
-              return { proposalId: t.proposalId, unreadCount: 0, comments: [] };
+              return { proposalId: t.proposalId, unreadCount: 0 };
             }
           })
         );

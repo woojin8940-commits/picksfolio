@@ -26,7 +26,7 @@ interface TimelineData {
   businessUsername: string;
   companyName: string;
   proposalTitle: string;
-  comments: TimelineComment[];
+  comments?: TimelineComment[];
   createdAt: string;
   unreadCount?: number;
 }
@@ -199,7 +199,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
     setSelectedTimeline(prev => prev ? {
       ...prev,
-      comments: [...prev.comments, optimisticComment],
+      comments: [...(prev.comments || []), optimisticComment],
     } : null);
     setNewMessage('');
     setPendingFiles([]);
@@ -239,7 +239,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             if (!prev) return null;
             return {
               ...prev,
-              comments: prev.comments.map(c =>
+              comments: (prev.comments || []).map(c =>
                 c.id === optimisticId ? { ...c, attachments: uploadedAttachments } : c
               ),
             };
@@ -265,7 +265,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             if (!prev) return null;
             return {
               ...prev,
-              comments: prev.comments.map(c =>
+              comments: (prev.comments || []).map(c =>
                 c.id === optimisticId ? data.comment : c
               ),
             };
@@ -277,7 +277,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           if (!prev) return null;
           return {
             ...prev,
-            comments: prev.comments.map(c =>
+            comments: (prev.comments || []).map(c =>
               c.id === optimisticId ? { ...c, id: `failed_${optimisticId}` } : c
             ),
           };
@@ -511,8 +511,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         ) : (
           <div className="space-y-1">
             {filteredTimelines.map(timeline => {
-              const lastComment = timeline.comments.length > 0
-                ? timeline.comments[timeline.comments.length - 1]
+              const comments = timeline.comments || [];
+              const lastComment = comments.length > 0
+                ? comments[comments.length - 1]
                 : null;
               const isUnread = (timeline.unreadCount || 0) > 0;
               const isActive = selectedTimeline?.proposalId === timeline.proposalId;
@@ -699,7 +700,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </div>
           </div>
 
-          {selectedTimeline.comments.length === 0 && (
+          {(selectedTimeline.comments || []).length === 0 && (
             <div className="text-center py-5 md:py-8 px-4">
               <p className="text-xs md:text-sm text-gray-400 font-medium">아직 메시지가 없습니다</p>
               <p className="text-[11px] md:text-xs text-gray-400 mt-1">첫 번째 메시지를 보내 협업을 시작하세요</p>
@@ -707,13 +708,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           )}
 
           {/* Slack-style messages: all left-aligned, avatar + author + content, hover highlight */}
-          {selectedTimeline.comments.map((comment, idx) => {
+          {(selectedTimeline.comments || []).map((comment, idx) => {
             const isMe = comment.authorUsername.toLowerCase() === normalizedUserName.toLowerCase();
             const showDate = idx === 0 || (
               new Date(comment.createdAt).toDateString() !==
-              new Date(selectedTimeline.comments[idx - 1].createdAt).toDateString()
+              new Date((selectedTimeline.comments || [])[idx - 1].createdAt).toDateString()
             );
-            const prevComment = idx > 0 ? selectedTimeline.comments[idx - 1] : null;
+            const prevComment = idx > 0 ? (selectedTimeline.comments || [])[idx - 1] : null;
             const isSameAuthor = prevComment &&
               prevComment.authorUsername === comment.authorUsername &&
               !showDate &&

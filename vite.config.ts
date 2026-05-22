@@ -20,6 +20,11 @@ export default defineConfig(({ mode }) => {
       minify: 'esbuild',
       rollupOptions: {
         external: ['amazon-ivs-web-broadcast'],
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+          },
+        },
       },
     },
     esbuild: {
