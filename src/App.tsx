@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
 import TemplateShowcase from './components/TemplateShowcase';
@@ -7,36 +7,46 @@ import DataBoardSection from './components/DataBoardSection';
 import SignupPage from './components/SignupPage';
 import LoginPage from './components/LoginPage';
 import AdminDashboard from './components/AdminDashboard';
-import UserPage from './components/UserPage';
-import LinkManagement from './components/LinkManagement';
-import PortfolioManagement from './components/PortfolioManagement';
-import LiveCommerceManagement from './components/LiveCommerceManagement';
-import BroadcastSettings from './components/BroadcastSettings';
-import BroadcastHistory from './components/BroadcastHistory';
-import BusinessProposalForm from './components/BusinessProposalForm';
-import BusinessDashboard from './components/BusinessDashboard';
-import BusinessCalendar from './components/BusinessCalendar';
-import OpenScheduleManagement from './components/OpenScheduleManagement';
-import UserCampaignBrowse from './components/UserCampaignBrowse';
-import MembershipPlan from './components/MembershipPlan';
-import OperatorLogin from './components/OperatorLogin';
-import OperatorDashboard from './components/OperatorDashboard';
-import SetupLink from './components/SetupLink';
 import ErrorBoundary from './components/ErrorBoundary';
 import Footer from './components/Footer';
-import TermsOfService from './components/TermsOfService';
-import PrivacyPolicy from './components/PrivacyPolicy';
-import BusinessSignupPage from './components/BusinessSignupPage';
-import BusinessLoginPage from './components/BusinessLoginPage';
-import BusinessEnterpriseDashboard from './components/BusinessEnterpriseDashboard';
-import UserSettlement from './components/UserSettlement';
-import BusinessTimeline from './components/BusinessTimeline';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
+
+const UserPage = lazy(() => import('./components/UserPage'));
+const LinkManagement = lazy(() => import('./components/LinkManagement'));
+const PortfolioManagement = lazy(() => import('./components/PortfolioManagement'));
+const LiveCommerceManagement = lazy(() => import('./components/LiveCommerceManagement'));
+const BroadcastSettings = lazy(() => import('./components/BroadcastSettings'));
+const BroadcastHistory = lazy(() => import('./components/BroadcastHistory'));
+const BusinessProposalForm = lazy(() => import('./components/BusinessProposalForm'));
+const BusinessDashboard = lazy(() => import('./components/BusinessDashboard'));
+const BusinessCalendar = lazy(() => import('./components/BusinessCalendar'));
+const OpenScheduleManagement = lazy(() => import('./components/OpenScheduleManagement'));
+const UserCampaignBrowse = lazy(() => import('./components/UserCampaignBrowse'));
+const MembershipPlan = lazy(() => import('./components/MembershipPlan'));
+const OperatorLogin = lazy(() => import('./components/OperatorLogin'));
+const OperatorDashboard = lazy(() => import('./components/OperatorDashboard'));
+const SetupLink = lazy(() => import('./components/SetupLink'));
+const TermsOfService = lazy(() => import('./components/TermsOfService'));
+const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
+const BusinessSignupPage = lazy(() => import('./components/BusinessSignupPage'));
+const BusinessLoginPage = lazy(() => import('./components/BusinessLoginPage'));
+const BusinessEnterpriseDashboard = lazy(() => import('./components/BusinessEnterpriseDashboard'));
+const UserSettlement = lazy(() => import('./components/UserSettlement'));
+const BusinessTimeline = lazy(() => import('./components/BusinessTimeline'));
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
 type SubView = 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+
+const LazyFallback = () => (
+  <div className="flex items-center justify-center min-h-[40vh]">
+    <div className="text-center animate-in fade-in duration-300">
+      <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+      <p className="text-slate-400 font-semibold text-xs">로딩 중...</p>
+    </div>
+  </div>
+);
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('home');
@@ -875,6 +885,7 @@ const App: React.FC = () => {
     if (isLoggedIn && userName) {
       wasLoggedInRef.current = true;
       localStorage.setItem('picks_user_session', userName);
+      import('./components/BusinessTimeline').catch(() => {});
     } else if (!isLoggedIn && wasLoggedInRef.current) {
       localStorage.removeItem('picks_user_session');
       localStorage.removeItem('picks_last_activity');
@@ -1049,34 +1060,38 @@ const App: React.FC = () => {
   // Business views
   if (view === 'business-signup') {
     return (
-      <BusinessSignupPage
-        onNavigateHome={() => navigate('home')}
-        onNavigateLogin={() => navigate('business-login')}
-        onSignupSuccess={() => navigate('business-login')}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <BusinessSignupPage
+          onNavigateHome={() => navigate('home')}
+          onNavigateLogin={() => navigate('business-login')}
+          onSignupSuccess={() => navigate('business-login')}
+        />
+      </Suspense>
     );
   }
   if (view === 'business-login') {
     return (
-      <BusinessLoginPage
-        onNavigateHome={() => navigate('home')}
-        onNavigateBusinessSignup={() => navigate('business-signup')}
-        onLoginSuccess={(bizUsername, compName) => {
-          setBusinessUsername(bizUsername);
-          setBusinessCompanyName(compName);
-          setIsBusinessLoggedIn(true);
-          localStorage.setItem('picks_business_session', bizUsername);
-          localStorage.setItem('picks_business_company', compName);
-          const redirectPath = sessionStorage.getItem('picks_business_redirect');
-          if (redirectPath) {
-            sessionStorage.removeItem('picks_business_redirect');
-            window.history.pushState(null, '', redirectPath);
-            window.dispatchEvent(new PopStateEvent('popstate'));
-          } else {
-            navigate('business-admin');
-          }
-        }}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <BusinessLoginPage
+          onNavigateHome={() => navigate('home')}
+          onNavigateBusinessSignup={() => navigate('business-signup')}
+          onLoginSuccess={(bizUsername, compName) => {
+            setBusinessUsername(bizUsername);
+            setBusinessCompanyName(compName);
+            setIsBusinessLoggedIn(true);
+            localStorage.setItem('picks_business_session', bizUsername);
+            localStorage.setItem('picks_business_company', compName);
+            const redirectPath = sessionStorage.getItem('picks_business_redirect');
+            if (redirectPath) {
+              sessionStorage.removeItem('picks_business_redirect');
+              window.history.pushState(null, '', redirectPath);
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            } else {
+              navigate('business-admin');
+            }
+          }}
+        />
+      </Suspense>
     );
   }
   if (view === 'business-admin') {
@@ -1086,15 +1101,17 @@ const App: React.FC = () => {
       return null;
     }
     return (
-      <BusinessEnterpriseDashboard
-        businessUsername={businessUsername}
-        companyName={businessCompanyName}
-        onLogout={handleBusinessLogout}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <BusinessEnterpriseDashboard
+          businessUsername={businessUsername}
+          companyName={businessCompanyName}
+          onLogout={handleBusinessLogout}
+        />
+      </Suspense>
     );
   }
 
-  if (view === 'operator-login') return <OperatorLogin onLoginSuccess={(info) => {
+  if (view === 'operator-login') return <Suspense fallback={<LazyFallback />}><OperatorLogin onLoginSuccess={(info) => {
     if (info?.username && info?.token) {
       localStorage.setItem('picks_user_session', info.username);
       localStorage.setItem('picks_admin_token', info.token);
@@ -1103,7 +1120,7 @@ const App: React.FC = () => {
       setProfileChecked(true);
     }
     navigate('operator');
-  }} />;
+  }} /></Suspense>;
   if (view === 'operator') {
     if (!isLoggedIn) {
       setTimeout(() => navigate('operator-login'), 0);
@@ -1119,12 +1136,12 @@ const App: React.FC = () => {
         </div>
       );
     }
-    return <OperatorDashboard onLogout={() => navigate('operator-login')} />;
+    return <Suspense fallback={<LazyFallback />}><OperatorDashboard onLogout={() => navigate('operator-login')} /></Suspense>;
   }
-  if (view === 'terms') return <TermsOfService onNavigateHome={() => navigate('home')} />;
-  if (view === 'privacy') return <PrivacyPolicy onNavigateHome={() => navigate('home')} />;
-  if (view === 'proposal') return <BusinessProposalForm username={targetUser} />;
-  if (view === 'user-page') return <UserPage username={targetUser} />;
+  if (view === 'terms') return <Suspense fallback={<LazyFallback />}><TermsOfService onNavigateHome={() => navigate('home')} /></Suspense>;
+  if (view === 'privacy') return <Suspense fallback={<LazyFallback />}><PrivacyPolicy onNavigateHome={() => navigate('home')} /></Suspense>;
+  if (view === 'proposal') return <Suspense fallback={<LazyFallback />}><BusinessProposalForm username={targetUser} /></Suspense>;
+  if (view === 'user-page') return <Suspense fallback={<LazyFallback />}><UserPage username={targetUser} /></Suspense>;
   if (view === 'setup-link') {
     // If user already has a username (existing user), skip setup and go to admin dashboard
     const savedUser = (userName || localStorage.getItem('picks_user_session') || '').trim();
@@ -1150,16 +1167,18 @@ const App: React.FC = () => {
       );
     }
     return (
-      <SetupLink
-        userId={authUserId}
-        onSetupComplete={(newUsername) => {
-          loginNavigationHandledRef.current = true;
-          setLoginTransitioning(true);
-          setUserName(newUsername);
-          setIsLoggedIn(true);
-          navigate('admin');
-        }}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <SetupLink
+          userId={authUserId}
+          onSetupComplete={(newUsername) => {
+            loginNavigationHandledRef.current = true;
+            setLoginTransitioning(true);
+            setUserName(newUsername);
+            setIsLoggedIn(true);
+            navigate('admin');
+          }}
+        />
+      </Suspense>
     );
   }
   if (view === 'admin') {
@@ -1190,45 +1209,47 @@ const App: React.FC = () => {
     }
 
     let subComponent: React.ReactNode = null;
-    
+
     switch (subView) {
       case 'links':
-        subComponent = <LinkManagement userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} /></Suspense>;
         break;
       case 'portfolio':
-        subComponent = <PortfolioManagement userName={userName} onNavigateMembership={() => setSubView('membership')} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><PortfolioManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
         break;
       case 'live':
-        subComponent = <LiveCommerceManagement userName={userName} onNavigateMembership={() => setSubView('membership')} onNavigateBroadcastSettings={() => setSubView('broadcast-settings')} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><LiveCommerceManagement userName={userName} onNavigateMembership={() => setSubView('membership')} onNavigateBroadcastSettings={() => setSubView('broadcast-settings')} /></Suspense>;
         break;
       case 'broadcast-settings':
-        subComponent = <BroadcastSettings userName={userName} onNavigateLive={() => setSubView('live')} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><BroadcastSettings userName={userName} onNavigateLive={() => setSubView('live')} /></Suspense>;
         break;
       case 'broadcast-history':
-        subComponent = <BroadcastHistory userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><BroadcastHistory userName={userName} /></Suspense>;
         break;
       case 'business':
-        subComponent = <BusinessDashboard userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><BusinessDashboard userName={userName} /></Suspense>;
         break;
       case 'calendar':
-        subComponent = <BusinessCalendar userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><BusinessCalendar userName={userName} /></Suspense>;
         break;
       case 'open-schedule':
-        subComponent = <OpenScheduleManagement userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><OpenScheduleManagement userName={userName} /></Suspense>;
         break;
       case 'settlement':
-        subComponent = <UserSettlement userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><UserSettlement userName={userName} /></Suspense>;
         break;
       case 'timeline':
         subComponent = (
-          <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
+          <Suspense fallback={<LazyFallback />}>
+            <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
+          </Suspense>
         );
         break;
       case 'membership':
-        subComponent = <MembershipPlan userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><MembershipPlan userName={userName} /></Suspense>;
         break;
       case 'campaigns':
-        subComponent = <UserCampaignBrowse userName={userName} />;
+        subComponent = <Suspense fallback={<LazyFallback />}><UserCampaignBrowse userName={userName} /></Suspense>;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null

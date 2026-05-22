@@ -1,21 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import BusinessInbox from './BusinessInbox';
-import BusinessEntCalendar from './BusinessEntCalendar';
-import BusinessSettlement from './BusinessSettlement';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import LinkManagement from './LinkManagement';
-import PortfolioManagement from './PortfolioManagement';
-import AITrendAnalysis from './AITrendAnalysis';
-import LiveCommerceManagement from './LiveCommerceManagement';
-import BroadcastSettings from './BroadcastSettings';
-import OpenScheduleManagement from './OpenScheduleManagement';
-import MembershipPlan from './MembershipPlan';
-import BusinessTimeline from './BusinessTimeline';
-import CampaignCollabManagement from './CampaignCollabManagement';
 import ErrorBoundary from './ErrorBoundary';
 import SafeImage from './SafeImage';
 import PhoneFrame from './PhoneFrame';
 import { Block, DesignSettings, TemplateType } from '../types';
+
+const BusinessInbox = lazy(() => import('./BusinessInbox'));
+const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
+const BusinessSettlement = lazy(() => import('./BusinessSettlement'));
+const LinkManagement = lazy(() => import('./LinkManagement'));
+const PortfolioManagement = lazy(() => import('./PortfolioManagement'));
+const AITrendAnalysis = lazy(() => import('./AITrendAnalysis'));
+const LiveCommerceManagement = lazy(() => import('./LiveCommerceManagement'));
+const BroadcastSettings = lazy(() => import('./BroadcastSettings'));
+const OpenScheduleManagement = lazy(() => import('./OpenScheduleManagement'));
+const MembershipPlan = lazy(() => import('./MembershipPlan'));
+const BusinessTimeline = lazy(() => import('./BusinessTimeline'));
+const CampaignCollabManagement = lazy(() => import('./CampaignCollabManagement'));
 
 interface BusinessEnterpriseDashboardProps {
   businessUsername: string;
@@ -130,6 +131,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   }, [currentSubView, loadPreviewData]);
 
   useEffect(() => {
+    const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
     const fetchUnread = async () => {
       try {
         const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business`);
@@ -137,6 +139,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         if (data.timelines) {
           const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
           setTimelineUnread(total);
+          try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
         }
       } catch {}
     };
@@ -204,48 +207,61 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     </button>
   );
 
+  const BizLazyFallback = () => (
+    <div className="flex items-center justify-center min-h-[40vh]">
+      <div className="text-center animate-in fade-in duration-300">
+        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+        <p className="text-slate-400 font-semibold text-xs">로딩 중...</p>
+      </div>
+    </div>
+  );
+
   let subComponent: React.ReactNode = null;
   switch (currentSubView) {
     case 'links':
-      subComponent = <LinkManagement userName={businessUsername} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><LinkManagement userName={businessUsername} /></Suspense>;
       break;
     case 'portfolio':
-      subComponent = <PortfolioManagement userName={businessUsername} onNavigateMembership={() => setCurrentSubView('membership')} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><PortfolioManagement userName={businessUsername} onNavigateMembership={() => setCurrentSubView('membership')} /></Suspense>;
       break;
     case 'trend':
-      subComponent = <AITrendAnalysis userName={businessUsername} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><AITrendAnalysis userName={businessUsername} /></Suspense>;
       break;
     case 'live':
-      subComponent = <LiveCommerceManagement userName={businessUsername} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><LiveCommerceManagement userName={businessUsername} /></Suspense>;
       break;
     case 'broadcast-settings':
-      subComponent = <BroadcastSettings userName={businessUsername} onNavigateLive={() => setCurrentSubView('live')} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><BroadcastSettings userName={businessUsername} onNavigateLive={() => setCurrentSubView('live')} /></Suspense>;
       break;
     case 'open-schedule':
-      subComponent = <OpenScheduleManagement userName={businessUsername} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><OpenScheduleManagement userName={businessUsername} /></Suspense>;
       break;
     case 'membership':
-      subComponent = <MembershipPlan userName={businessUsername} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><MembershipPlan userName={businessUsername} /></Suspense>;
       break;
     case 'inbox':
       subComponent = (
-        <BusinessInbox businessUsername={businessUsername} companyName={companyName} />
+        <Suspense fallback={<BizLazyFallback />}><BusinessInbox businessUsername={businessUsername} companyName={companyName} /></Suspense>
       );
       break;
     case 'calendar':
-      subComponent = <BusinessEntCalendar businessUsername={businessUsername} companyName={companyName} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><BusinessEntCalendar businessUsername={businessUsername} companyName={companyName} /></Suspense>;
       break;
     case 'settlement':
-      subComponent = <BusinessSettlement businessUsername={businessUsername} companyName={companyName} />;
+      subComponent = <Suspense fallback={<BizLazyFallback />}><BusinessSettlement businessUsername={businessUsername} companyName={companyName} /></Suspense>;
       break;
     case 'timeline':
       subComponent = (
-        <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
+        <Suspense fallback={<BizLazyFallback />}>
+          <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
+        </Suspense>
       );
       break;
     case 'campaign-collab':
       subComponent = (
-        <CampaignCollabManagement businessUsername={businessUsername} companyName={companyName} />
+        <Suspense fallback={<BizLazyFallback />}>
+          <CampaignCollabManagement businessUsername={businessUsername} companyName={companyName} />
+        </Suspense>
       );
       break;
     default:

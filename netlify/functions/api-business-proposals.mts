@@ -14,24 +14,26 @@ export default async (req: Request, context: Context) => {
     const seenIds = new Set<string>();
     const allProposals: any[] = [];
 
+    let dbInstance: any = null;
+    try {
+      const { getDatabase } = await import("@netlify/database");
+      dbInstance = getDatabase();
+    } catch {}
+
     const [cachedData, sqlProposals, campaignRows] = await Promise.all([
       store.get(key, { type: "json" }).catch(() => null),
-      (async () => {
+      dbInstance ? (async () => {
         try {
-          const { getDatabase } = await import("@netlify/database");
-          const db = getDatabase();
-          return await db.sql`
+          return await dbInstance.sql`
             SELECT * FROM proposals
             WHERE LOWER(COALESCE(business_username, '')) = ${username}
             ORDER BY created_at DESC
           ` as any[];
         } catch { return []; }
-      })(),
-      (async () => {
+      })() : Promise.resolve([]),
+      dbInstance ? (async () => {
         try {
-          const { getDatabase } = await import("@netlify/database");
-          const db = getDatabase();
-          return await db.sql`
+          return await dbInstance.sql`
             SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name, c.type as campaign_type,
                    c.description, c.start_date, c.end_date, c.reward_amount
             FROM campaign_applications ca
@@ -40,7 +42,7 @@ export default async (req: Request, context: Context) => {
             AND LOWER(REPLACE(c.business_username, 'biz/', '')) = ${username}
           ` as any[];
         } catch { return []; }
-      })(),
+      })() : Promise.resolve([]),
     ]);
 
     if (Array.isArray(sqlProposals)) {

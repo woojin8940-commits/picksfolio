@@ -162,6 +162,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     if (!userName) return;
     const normalizedName = userName.toLowerCase();
+    const cacheKey = `picks_timelines_influencer_${normalizedName}`;
     const fetchUnread = async () => {
       try {
         const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer`);
@@ -169,6 +170,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (data.timelines) {
           const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
           setTimelineUnread(total);
+          try { localStorage.setItem(cacheKey, JSON.stringify(data.timelines)); } catch {}
         }
       } catch {}
     };

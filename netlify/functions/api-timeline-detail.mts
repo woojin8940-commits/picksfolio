@@ -16,20 +16,21 @@ export default async (req: Request, context: Context) => {
       return Response.json({ timeline: data });
     }
 
-    // Fallback: recover from SQL database
     try {
       const { getDatabase } = await import("@netlify/database");
       const db = getDatabase();
-      const rows = await db.sql`
-        SELECT * FROM timelines WHERE proposal_id = ${proposalId}
-      `;
-      if (Array.isArray(rows) && rows.length > 0) {
-        const row = rows[0] as any;
-        const msgRows = await db.sql`
+
+      const [rows, msgRows] = await Promise.all([
+        db.sql`SELECT * FROM timelines WHERE proposal_id = ${proposalId}`,
+        db.sql`
           SELECT * FROM timeline_messages
           WHERE proposal_id = ${proposalId}
           ORDER BY created_at ASC
-        `;
+        `,
+      ]);
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        const row = rows[0] as any;
         const comments = Array.isArray(msgRows) ? msgRows.map((m: any) => ({
           id: m.id,
           proposalId: m.proposal_id,
@@ -52,8 +53,7 @@ export default async (req: Request, context: Context) => {
           createdAt: row.created_at || new Date().toISOString(),
         };
 
-        // Write back to blob store for future reads
-        await store.setJSON(key, recovered);
+        context.waitUntil(store.setJSON(key, recovered).catch(() => {}));
         return Response.json({ timeline: recovered });
       }
     } catch (dbErr) {
