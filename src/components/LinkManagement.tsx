@@ -173,6 +173,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block', id: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
+  const fullDesignRef = useRef<Record<string, any>>((() => {
+    try {
+      const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  })());
 
   // 이미지를 Base64 데이터 URL로 변환하는 헬퍼
   const blobToDataUrl = (blob: Blob): Promise<string> => {
@@ -435,6 +441,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
     const applySettings = (settings: SiteSettings) => {
       if (settings.design) {
+        fullDesignRef.current = { ...fullDesignRef.current, ...settings.design };
         setHomePriority(settings.design.homePriority === 'portfolio' ? 'portfolio' : 'curation');
         setLayoutTemplate(settings.design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid');
         setColumns(settings.design.gridColumns as 1 | 2 | 3 || 2);
@@ -473,6 +480,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const handleSaveDesign = async () => {
     setIsSaving(true);
     const designUpdate: Partial<DesignSettings> = {
+      ...fullDesignRef.current,
       templateType: layoutTemplate === 'list' ? TemplateType.LINK_LIST : TemplateType.SHOPPABLE_GRID,
       theme: themePreset,
       accentColor: accentColor,
@@ -490,6 +498,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     };
 
     // 즉시 로컬 저장
+    fullDesignRef.current = designUpdate as Record<string, any>;
     localStorage.setItem(`picks_profile_${userName.toLowerCase()}`, JSON.stringify(profile));
     localStorage.setItem(`picks_design_${userName.toLowerCase()}`, JSON.stringify(designUpdate));
 
