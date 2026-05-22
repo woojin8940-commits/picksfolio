@@ -4,11 +4,8 @@ import { getStatsForRange, getTopClickedItemsForRange } from '../services/analyt
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
-import { Block, DesignSettings, TemplateType } from '../types';
-import SafeImage from './SafeImage';
-import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
+import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
-import PhoneFrame from './PhoneFrame';
 
 
 import ErrorBoundary from './ErrorBoundary';
@@ -58,41 +55,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Phone preview state
+  // Dashboard data counts
   const [previewBlocks, setPreviewBlocks] = useState<Block[]>([]);
-  const [previewDesign, setPreviewDesign] = useState<DesignSettings>({
-    templateType: TemplateType.SHOPPABLE_GRID,
-    theme: 'midnight',
-    accentColor: '#7c3aed',
-    borderRadius: 'full',
-    gridGap: 1,
-    gridColumns: 2,
-    gridStyle: 'magazine',
-    fontFamily: 'Sans',
-    buttonStyle: 'solid',
-    backgroundType: 'solid',
-    profileLayout: 'center',
-    homePriority: 'curation'
-  });
-  const [previewProfile, setPreviewProfile] = useState<any>({ name: userName, bio: '', avatar_url: '' });
   const [previewPortfolio, setPreviewPortfolio] = useState<any[]>([]);
   const [previewSchedule, setPreviewSchedule] = useState<any[]>([]);
   const [previewMaterials, setPreviewMaterials] = useState<any[]>([]);
 
-  const loadPreviewData = useCallback(() => {
+  const loadDashboardCounts = useCallback(() => {
     const u = (userName || '').toLowerCase();
     if (!u) return;
 
-    // Load from localStorage for immediate display (optimistic UI)
     try {
       const savedBlocks = localStorage.getItem(`picks_blocks_${u}`);
       if (savedBlocks) setPreviewBlocks(JSON.parse(savedBlocks));
-
-      const savedDesign = localStorage.getItem(`picks_design_${u}`);
-      if (savedDesign) setPreviewDesign(prev => ({ ...prev, ...JSON.parse(savedDesign) }));
-
-      const savedProfile = localStorage.getItem(`picks_profile_${u}`);
-      if (savedProfile) setPreviewProfile(JSON.parse(savedProfile));
 
       const savedPortfolio = localStorage.getItem(`picks_portfolio_${u}`);
       if (savedPortfolio) setPreviewPortfolio(JSON.parse(savedPortfolio));
@@ -103,23 +78,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const savedMaterials = localStorage.getItem(`picks_materials_${u}`);
       if (savedMaterials) setPreviewMaterials(JSON.parse(savedMaterials));
     } catch (e) {
-      console.error('Error loading preview data from localStorage:', e);
+      console.error('Error loading dashboard data from localStorage:', e);
     }
 
-    // Then fetch from API (Netlify Blobs) for authoritative data
     apiService.getSiteData(u).then(apiData => {
       if (!apiData) return;
       if (Array.isArray(apiData.blocks)) {
         setPreviewBlocks(apiData.blocks);
         localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
-      }
-      if (apiData.design) {
-        setPreviewDesign(prev => ({ ...prev, ...(apiData.design as any) }));
-        localStorage.setItem(`picks_design_${u}`, JSON.stringify(apiData.design));
-      }
-      if (apiData.profile) {
-        setPreviewProfile(apiData.profile);
-        localStorage.setItem(`picks_profile_${u}`, JSON.stringify(apiData.profile));
       }
       if (apiData.portfolio) {
         setPreviewPortfolio(apiData.portfolio);
@@ -134,30 +100,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         localStorage.setItem(`picks_materials_${u}`, JSON.stringify(apiData.materials));
       }
     }).catch(e => {
-      console.warn('Error loading preview data from API:', e);
+      console.warn('Error loading dashboard data from API:', e);
     });
   }, [userName]);
 
-  // Load preview data and trend when returning to dashboard
   useEffect(() => {
     if (currentSubView === 'dashboard') {
-      loadPreviewData();
+      loadDashboardCounts();
     }
-  }, [currentSubView, loadPreviewData]);
-
-  // Listen for storage changes and visibility changes for real-time updates
-  useEffect(() => {
-    const handleStorageChange = () => loadPreviewData();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') loadPreviewData();
-    };
-    window.addEventListener('storage', handleStorageChange);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [loadPreviewData]);
+  }, [currentSubView, loadDashboardCounts]);
 
   useEffect(() => {
     if (!userName) return;
@@ -475,8 +426,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </header>
 
-            <div className="flex gap-4 lg:gap-6 xl:gap-10">
-              <div className="flex-1 min-w-0">
+            <div>
 
             {/* Stats Row */}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 mb-6 md:mb-8">
@@ -550,103 +500,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <DataCard icon="🎥" label="방송 자료" count={previewMaterials.length} onClick={onNavigateLive} />
               </div>
             </div>
-              </div>
-
-              {/* Phone Preview - Right Side */}
-              <div className="hidden lg:block shrink-0 sticky top-6 self-start">
-                <PhoneFrame
-                  size="sm"
-                  label="실시간 미리보기"
-                  liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
-                  contentClassName={previewDesign.theme === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
-                >
-                    {/* Profile Header */}
-                    <div className="pt-8 pb-4 flex flex-col items-center">
-                      <div className="w-14 h-14 rounded-full border-2 p-0.5 mb-2" style={{ borderColor: previewDesign.accentColor || '#7c3aed' }}>
-                        <img
-                          src={previewProfile.avatar_url || DEFAULT_AVATAR}
-                          alt=""
-                          className="w-full h-full rounded-full object-cover bg-slate-800"
-                        />
-                      </div>
-                      <h3 className="text-sm font-black">{previewProfile.name || userName}</h3>
-                      {previewProfile.bio && (
-                        <p className="text-[8px] font-medium opacity-60 mt-0.5 px-4 text-center line-clamp-2">{previewProfile.bio}</p>
-                      )}
-                    </div>
-
-                    {/* Content based on priority */}
-                    {previewDesign.homePriority === 'portfolio' ? (
-                      <>
-                        {/* Portfolio First */}
-                        {previewPortfolio.length > 0 && (
-                          <div className="px-4 pb-4 space-y-3">
-                            {previewPortfolio.slice(0, 4).map((section: any, idx: number) => (
-                              <div key={section.id || idx}>
-                                {section.type === 'text' ? (
-                                  <p className="text-[8px] font-medium opacity-70 leading-relaxed whitespace-pre-wrap">{section.content}</p>
-                                ) : section.content ? (
-                                  <div className="rounded-lg overflow-hidden">
-                                    <img src={section.content} alt="" className="w-full object-cover" />
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {/* Then Blocks Grid */}
-                        {previewBlocks.length > 0 && (
-                          <div className={`px-3 pb-4 grid gap-1.5 ${previewDesign.gridColumns === 1 ? 'grid-cols-1' : previewDesign.gridColumns === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                            {previewBlocks.slice(0, 6).map(block => (
-                              <div key={block.id} className={`rounded-lg overflow-hidden border ${previewDesign.theme === 'white' ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}>
-                                <SafeImage src={block.coverMedia} alt="" className="w-full aspect-square object-cover" />
-                                <div className="p-1.5"><p className="text-[7px] font-black truncate">{block.title}</p></div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {/* Blocks Grid First */}
-                        {previewBlocks.length > 0 && (
-                          <div className={`px-3 pb-4 grid gap-1.5 ${previewDesign.gridColumns === 1 ? 'grid-cols-1' : previewDesign.gridColumns === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                            {previewBlocks.slice(0, 6).map(block => (
-                              <div key={block.id} className={`rounded-lg overflow-hidden border ${previewDesign.theme === 'white' ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}>
-                                <SafeImage src={block.coverMedia} alt="" className="w-full aspect-square object-cover" />
-                                <div className="p-1.5"><p className="text-[7px] font-black truncate">{block.title}</p></div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {/* Then Portfolio */}
-                        {previewPortfolio.length > 0 && (
-                          <div className="px-4 pb-4 space-y-3">
-                            {previewPortfolio.slice(0, 4).map((section: any, idx: number) => (
-                              <div key={section.id || idx}>
-                                {section.type === 'text' ? (
-                                  <p className="text-[8px] font-medium opacity-70 leading-relaxed whitespace-pre-wrap">{section.content}</p>
-                                ) : section.content ? (
-                                  <div className="rounded-lg overflow-hidden">
-                                    <img src={section.content} alt="" className="w-full object-cover" />
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {/* Empty State */}
-                    {previewBlocks.length === 0 && previewPortfolio.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-8 opacity-40">
-                        <p className="text-[10px] font-black">아직 콘텐츠가 없습니다</p>
-                        <p className="text-[8px] font-medium mt-1">포스트나 포트폴리오를 추가해보세요</p>
-                      </div>
-                    )}
-                </PhoneFrame>
-              </div>
             </div>
           </main>
         </ErrorBoundary>
