@@ -75,8 +75,8 @@ const getSectionImages = (section: any): string[] => {
   return arr;
 };
 
-const flattenSectionImages = (sections: any[]): { key: string; src: string }[] =>
-  sections.flatMap(s => getSectionImages(s).map((src, i) => ({ key: `${s.id}-${i}`, src })));
+const flattenSectionImages = (sections: any[]): { key: string; src: string; pos?: { x: number; y: number } }[] =>
+  sections.flatMap(s => getSectionImages(s).map((src, i) => ({ key: `${s.id}-${i}`, src, pos: s.imagePositions?.[i] })));
 
 const PORTFOLIO_ALL_LABEL = '전체';
 
@@ -1412,7 +1412,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           {flatImgs.map(img => (
                             <div key={img.key} className="relative">
                               <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={img.src} className="w-full h-auto block" style={{ maxWidth: '100%' }} />
+                                <MediaAuto src={img.src} className="w-full h-auto block" style={{ maxWidth: '100%', ...(img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : {}) }} />
                               </div>
                             </div>
                           ))}
@@ -1428,20 +1428,20 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             ck.length === 3 ? (
                               <div key={`mg-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 aspect-[4/3]">
                                 <div className={`row-span-2 relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" />
+                                  <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" style={ck[0].pos ? { objectPosition: `${ck[0].pos.x}% ${ck[0].pos.y}%` } : undefined} />
                                 </div>
                                 <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" />
+                                  <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" style={ck[1].pos ? { objectPosition: `${ck[1].pos.x}% ${ck[1].pos.y}%` } : undefined} />
                                 </div>
                                 <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" />
+                                  <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" style={ck[2].pos ? { objectPosition: `${ck[2].pos.x}% ${ck[2].pos.y}%` } : undefined} />
                                 </div>
                               </div>
                             ) : (
                               <div key={`mg-${ci}`} className={`grid gap-2 md:gap-3 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                 {ck.map(img => (
                                   <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                                    <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                                    <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                                   </div>
                                 ))}
                               </div>
@@ -1456,7 +1456,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                         <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3 -mx-4 md:-mx-8">
                           {flatImgs.map(img => (
                             <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                              <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                              <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                             </div>
                           ))}
                         </div>
@@ -1471,7 +1471,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       >
                         {flatImgs.map(img => (
                           <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                            <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                            <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                           </div>
                         ))}
                       </div>
@@ -1556,7 +1556,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                           }}
                         >
-                          <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" />
+                          <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
                           <div className="absolute top-3 right-3">
                             <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                           </div>
@@ -1880,7 +1880,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                         }}
                       >
-                        <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" />
+                        <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
                         <div className="absolute top-3 right-3">
                           <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                         </div>
@@ -2020,7 +2020,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                         {flatImgs.map(img => (
                           <div key={img.key} className="relative">
                             <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                              <MediaAuto src={img.src} className="w-full h-auto block" />
+                              <MediaAuto src={img.src} className="w-full h-auto block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                             </div>
                           </div>
                         ))}
@@ -2036,20 +2036,20 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           ck.length === 3 ? (
                             <div key={`mg-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 aspect-[4/3]">
                               <div className={`row-span-2 relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" />
+                                <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" style={ck[0].pos ? { objectPosition: `${ck[0].pos.x}% ${ck[0].pos.y}%` } : undefined} />
                               </div>
                               <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" />
+                                <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" style={ck[1].pos ? { objectPosition: `${ck[1].pos.x}% ${ck[1].pos.y}%` } : undefined} />
                               </div>
                               <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" />
+                                <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" style={ck[2].pos ? { objectPosition: `${ck[2].pos.x}% ${ck[2].pos.y}%` } : undefined} />
                               </div>
                             </div>
                           ) : (
                             <div key={`mg-${ci}`} className={`grid gap-2 md:gap-3 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                               {ck.map(img => (
                                 <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                                  <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                                  <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                                 </div>
                               ))}
                             </div>
@@ -2064,7 +2064,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3">
                         {flatImgs.map(img => (
                           <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                            <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                            <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                           </div>
                         ))}
                       </div>
@@ -2079,7 +2079,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     >
                       {flatImgs.map(img => (
                         <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                          <MediaAuto src={img.src} className="w-full h-full object-cover block" />
+                          <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
                         </div>
                       ))}
                     </div>

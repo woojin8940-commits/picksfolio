@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save } from 'lucide-react';
+import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink } from 'lucide-react';
+import ImagePositionEditor from './ImagePositionEditor';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData } from '../services/prefetchService';
@@ -1000,16 +1001,69 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <h2 className="text-sm font-black">{profile.name}</h2>
             </div>
 
-            <div className={`px-4 pb-10 ${layoutTemplate === 'grid' ? 'grid grid-cols-2 gap-2' : 'space-y-2'}`}>
-              {blocks.map(block => (
-                <div key={block.id} onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }} className="cursor-pointer">
-                  <div className={`rounded-xl overflow-hidden border ${themePreset === 'white' ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}>
-                    <SafeImage src={block.coverMedia} alt="" className="w-full aspect-square object-cover" />
-                    <div className="p-1.5"><p className="text-[8px] font-black truncate">{block.title}</p></div>
-                  </div>
+            {layoutTemplate === 'grid' ? (
+              <div className="px-2 pb-10">
+                <div
+                  className="grid grid-flow-dense"
+                  style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '4px' }}
+                >
+                  {blocks.map((block, idx) => {
+                    const isFeatured = itemStyle === 'magazine' && idx === 0;
+                    const colSpan = isFeatured ? Math.min(columns, 2) : 1;
+                    const rowSpan = isFeatured ? 2 : 1;
+                    const pos = block.coverMediaPosition || { x: 50, y: 50 };
+                    return (
+                      <div
+                        key={block.id}
+                        onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
+                        className="relative overflow-hidden cursor-pointer group shadow-sm aspect-square"
+                        style={{
+                          gridColumn: `span ${colSpan}`,
+                          gridRow: `span ${rowSpan}`,
+                          borderRadius: '0.75rem',
+                        }}
+                      >
+                        <SafeImage
+                          src={block.coverMedia}
+                          alt=""
+                          className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
+                          style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+                        />
+                        <div className="absolute top-1.5 right-1.5">
+                          <span className="bg-black/60 backdrop-blur-md text-[7px] font-black px-1.5 py-0.5 rounded-md text-white border border-white/10">{block.products?.length || 0}</span>
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                          <div className="text-[7px] font-black truncate text-white uppercase tracking-tight">{block.title}</div>
+                          <div className="text-[6px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="px-3 pb-10 space-y-1.5">
+                {blocks.flatMap(block =>
+                  (block.products || []).map(p => (
+                    <div
+                      key={p.id}
+                      className={`flex items-center justify-between p-2 border transition-all ${themePreset === 'white' ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}
+                      style={{ borderRadius: '0.75rem' }}
+                    >
+                      <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                        <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                          <SafeImage src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
+                        </div>
+                        <span className="text-[8px] font-black truncate">{p.name}</span>
+                      </div>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: accentColor, color: '#fff' }}>
+                        <ExternalLink size={8} />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
 
             {showBottomSheet && previewSelectedBlock && (
               <div className="absolute inset-0 z-50 flex flex-col justify-end">
@@ -1071,10 +1125,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 <div className="w-full md:w-1/2 space-y-4">
                   <div
                     className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
-                    onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
+                    onClick={() => !isUploading && !editForm.coverMedia && triggerFileUpload({ type: 'block' })}
                   >
                     {editForm.coverMedia ? (
-                      <SafeImage src={editForm.coverMedia} alt="" className="w-full h-full object-cover" />
+                      <ImagePositionEditor
+                        src={editForm.coverMedia}
+                        position={editForm.coverMediaPosition || { x: 50, y: 50 }}
+                        onChange={(pos) => setEditForm(prev => ({ ...prev, coverMediaPosition: pos }))}
+                        aspectRatio="1/1"
+                        roundedClass="rounded-[2rem]"
+                        className="w-full h-full"
+                      />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2">
                         <ImageIcon size={48} />
