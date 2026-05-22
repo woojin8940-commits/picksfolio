@@ -987,36 +987,93 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       </div>
 
       {/* Mobile Preview Area */}
-      <div className="hidden lg:flex flex-col w-[300px] xl:w-[340px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-start p-6 xl:p-8 sticky top-0 h-screen flex-shrink-0 gap-4 pt-20">
+      <div className="hidden lg:flex flex-col w-[340px] xl:w-[400px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-start p-4 xl:p-6 sticky top-0 h-screen flex-shrink-0 gap-4 pt-12">
         <PhoneFrame
-          size="md"
+          size="lg"
           label="실시간 미리보기"
           liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
           contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
         >
-            <div className="pt-8 pb-4 flex flex-col items-center">
-              <div className="w-14 h-14 rounded-full border-2 p-0.5 mb-2" style={{ borderColor: accentColor }}>
-                <img src={profile.avatar_url || DEFAULT_AVATAR} alt="" className="w-full h-full rounded-full bg-slate-800 object-cover" />
+            {/* Cover Header - like personal page */}
+            <div
+              className="relative h-28 flex-shrink-0"
+              style={{ background: fullDesignRef.current.portfolioHeaderColor || (themePreset === 'white' ? 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)' : 'linear-gradient(135deg, #9333ea 0%, #4f46e5 100%)') }}
+            >
+              {fullDesignRef.current.portfolioHeaderImage && (
+                <SafeImage
+                  src={fullDesignRef.current.portfolioHeaderImage}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: `center ${fullDesignRef.current.portfolioHeaderImagePosition || '50'}%` }}
+                />
+              )}
+              <div
+                className="absolute inset-0"
+                style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'}88 20%, transparent 60%)` }}
+              />
+              <div className="absolute bottom-2 left-3 right-3">
+                <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>
+                <p className="text-[7px] font-black uppercase tracking-[0.2em]" style={{ color: accentColor }}>{profile.bio || 'Visual Storyteller'}</p>
               </div>
-              <h2 className="text-sm font-black">{profile.name}</h2>
             </div>
 
+            {/* Profile Avatar */}
+            <div className="px-3 pt-2 pb-1 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-2 p-0.5 flex-shrink-0" style={{ borderColor: accentColor }}>
+                <img src={profile.avatar_url || DEFAULT_AVATAR} alt="" className="w-full h-full rounded-full bg-slate-800 object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[8px] font-black truncate">{profile.name || userName}</div>
+                <div className={`text-[6px] font-bold truncate ${themePreset === 'white' ? 'text-slate-400' : 'text-white/40'}`}>{profile.bio || ''}</div>
+              </div>
+            </div>
+
+            {/* Curation Section Header */}
+            <div className="px-3 pt-3 pb-1">
+              <div className="flex justify-between items-end mb-2">
+                <div>
+                  <h4 className="text-[6px] font-black uppercase tracking-[0.15em] mb-0.5" style={{ color: accentColor }}>My Curations</h4>
+                  <h3 className="text-[9px] font-black tracking-tighter">Explore My Picks</h3>
+                </div>
+                <div className={`text-[6px] font-black uppercase tracking-widest ${themePreset === 'white' ? 'text-slate-300' : 'text-white/20'}`}>{blocks.length} Items</div>
+              </div>
+            </div>
+
+            {/* Category Tabs */}
+            {(() => {
+              const previewCategories = ['전체', ...Array.from(new Set(blocks.map(b => b.category).filter(Boolean)))];
+              return previewCategories.length > 1 ? (
+                <div className="px-2 pb-2 overflow-x-auto scrollbar-hide flex gap-1">
+                  {previewCategories.map(cat => (
+                    <span
+                      key={cat}
+                      className={`px-2 py-0.5 text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? 'text-white border-transparent' : themePreset === 'white' ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}
+                      style={cat === '전체' ? { backgroundColor: accentColor } : {}}
+                    >
+                      {cat}
+                    </span>
+                  ))}
+                </div>
+              ) : null;
+            })()}
+
+            {/* Grid / List Content */}
             {layoutTemplate === 'grid' ? (
               <div className="px-2 pb-10">
                 <div
                   className="grid grid-flow-dense"
-                  style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '4px' }}
+                  style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '3px' }}
                 >
                   {blocks.map((block, idx) => {
-                    const isFeatured = itemStyle === 'magazine' && idx === 0;
-                    const colSpan = isFeatured ? Math.min(columns, 2) : 1;
+                    const isFeatured = itemStyle === 'magazine' && idx === 0 && columns > 1;
+                    const colSpan = isFeatured ? 2 : 1;
                     const rowSpan = isFeatured ? 2 : 1;
                     const pos = block.coverMediaPosition || { x: 50, y: 50 };
                     return (
                       <div
                         key={block.id}
                         onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                        className="relative overflow-hidden cursor-pointer group shadow-sm aspect-square"
+                        className={`relative overflow-hidden cursor-pointer group shadow-sm ${isFeatured ? 'aspect-[10/9]' : 'aspect-square'}`}
                         style={{
                           gridColumn: `span ${colSpan}`,
                           gridRow: `span ${rowSpan}`,
@@ -1068,19 +1125,19 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
             {showBottomSheet && previewSelectedBlock && (
               <div className="absolute inset-0 z-50 flex flex-col justify-end">
                 <div className="absolute inset-0 bg-black/40" onClick={() => setShowBottomSheet(false)}></div>
-                <div className={`relative rounded-t-[2rem] p-6 animate-in slide-in-from-bottom duration-300 ${themePreset === 'white' ? 'bg-white' : 'bg-[#1E1E2E]'}`}>
-                  <h3 className="text-sm font-black mb-6">연결된 상품</h3>
-                  <div className="space-y-3">
+                <div className={`relative rounded-t-[2rem] p-4 animate-in slide-in-from-bottom duration-300 ${themePreset === 'white' ? 'bg-white' : 'bg-[#1E1E2E]'}`}>
+                  <h3 className="text-[10px] font-black mb-3">연결된 상품</h3>
+                  <div className="space-y-2">
                     {(previewSelectedBlock.products || []).map(product => (
                       <a
                         key={product.id}
                         href={product.link.startsWith('http') ? product.link : `https://${product.link}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100"
+                        className={`flex items-center justify-between p-2.5 rounded-xl border ${themePreset === 'white' ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
                       >
-                        <span className="text-[10px] font-black text-slate-900">{product.name}</span>
-                        <ChevronRight size={14} className="text-purple-600" />
+                        <span className="text-[8px] font-black">{product.name}</span>
+                        <ChevronRight size={10} style={{ color: accentColor }} />
                       </a>
                     ))}
                   </div>
