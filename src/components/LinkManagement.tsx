@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash } from 'lucide-react';
-import ImagePositionEditor from './ImagePositionEditor';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -765,6 +764,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           src={cropperSrc}
           onCrop={handleCropConfirm}
           onCancel={handleCropCancel}
+          aspectRatio={1}
         />
       )}
       
@@ -1224,13 +1224,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     onClick={() => !isUploading && !editForm.coverMedia && triggerFileUpload({ type: 'block' })}
                   >
                     {editForm.coverMedia ? (
-                      <ImagePositionEditor
+                      <img
                         src={editForm.coverMedia}
-                        position={editForm.coverMediaPosition || { x: 50, y: 50 }}
-                        onChange={(pos) => setEditForm(prev => ({ ...prev, coverMediaPosition: pos }))}
-                        aspectRatio="1/1"
-                        roundedClass="rounded-[2rem]"
-                        className="w-full h-full"
+                        alt=""
+                        draggable={false}
+                        className="w-full h-full object-cover rounded-[2rem]"
                       />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2">

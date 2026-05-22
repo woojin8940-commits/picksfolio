@@ -190,7 +190,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
   };
 
   const renderCornerHandle = (pos: HandlePos) => {
-    const borderW = '3px solid #FF6B00';
+    const borderW = '3px solid #8B5CF6';
     const borderStyles: Record<HandlePos, React.CSSProperties> = {
       tl: { borderTop: borderW, borderLeft: borderW, borderRadius: '4px 0 0 0' },
       tr: { borderTop: borderW, borderRight: borderW, borderRadius: '0 4px 0 0' },
@@ -288,7 +288,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
               style={{
                 position: 'absolute',
                 left: crop.x, top: crop.y, width: crop.w, height: crop.h,
-                border: '2px solid #FF6B00',
+                border: '2px solid #8B5CF6',
                 boxSizing: 'border-box',
                 cursor: dragging === 'move' ? 'grabbing' : 'grab',
               }}
@@ -340,7 +340,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             onClick={handleConfirm}
             style={{
               padding: '10px 32px', borderRadius: 8,
-              background: '#FF6B00', color: '#fff',
+              background: '#8B5CF6', color: '#fff',
               border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer',
             }}
           >
