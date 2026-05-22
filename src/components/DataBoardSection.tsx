@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowUpRight, ArrowDownRight, Minus, Clock, BarChart3 } from 'lucide-react';
+import { Clock, BarChart3 } from 'lucide-react';
 
 interface RankingItem {
   rank: number;
@@ -136,32 +136,6 @@ const DataBoardSection: React.FC = () => {
                             <span className="text-xs md:text-sm font-bold text-slate-300 truncate">
                               {item.keyword}
                             </span>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {item.trend === 'up' && (
-                              <>
-                                <ArrowUpRight size={12} className="text-emerald-400" />
-                                <span className="text-[10px] font-black text-emerald-400 tabular-nums">
-                                  +{item.delta}%
-                                </span>
-                              </>
-                            )}
-                            {item.trend === 'down' && (
-                              <>
-                                <ArrowDownRight size={12} className="text-red-400" />
-                                <span className="text-[10px] font-black text-red-400 tabular-nums">
-                                  {item.delta}%
-                                </span>
-                              </>
-                            )}
-                            {item.trend === 'flat' && (
-                              <>
-                                <Minus size={12} className="text-slate-500" />
-                                <span className="text-[10px] font-black text-slate-500 tabular-nums">
-                                  {item.delta >= 0 ? '+' : ''}{item.delta}%
-                                </span>
-                              </>
-                            )}
                           </div>
                         </div>
                       ))}

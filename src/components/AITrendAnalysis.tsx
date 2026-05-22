@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Minus, Clock } from 'lucide-react';
+import { Sparkles, BarChart3, Clock } from 'lucide-react';
 
 interface AITrendAnalysisProps {
   userName: string;
@@ -134,32 +134,6 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
                       <span className="text-xs font-bold text-slate-700 truncate">
                         {item.keyword}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {item.trend === 'up' && (
-                        <>
-                          <ArrowUpRight size={12} className="text-emerald-500" />
-                          <span className="text-[9px] font-black text-emerald-600 tabular-nums">
-                            +{item.delta}%
-                          </span>
-                        </>
-                      )}
-                      {item.trend === 'down' && (
-                        <>
-                          <ArrowDownRight size={12} className="text-red-500" />
-                          <span className="text-[9px] font-black text-red-500 tabular-nums">
-                            {item.delta}%
-                          </span>
-                        </>
-                      )}
-                      {item.trend === 'flat' && (
-                        <>
-                          <Minus size={12} className="text-slate-400" />
-                          <span className="text-[9px] font-black text-slate-400 tabular-nums">
-                            {item.delta >= 0 ? '+' : ''}{item.delta}%
-                          </span>
-                        </>
-                      )}
                     </div>
                   </div>
                 ))}
