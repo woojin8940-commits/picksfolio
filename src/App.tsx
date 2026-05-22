@@ -1294,7 +1294,7 @@ const App: React.FC = () => {
         onLogout={handleLogout}
         isLoggedIn={isLoggedIn}
       />
-      <main className="md:max-w-[67%] md:mx-auto">
+      <main>
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
