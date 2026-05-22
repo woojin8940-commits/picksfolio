@@ -587,6 +587,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
       {/* Main Content */}
       <div className="flex-1 md:ml-64 w-full min-h-screen">
+        <div className="w-full md:max-w-[67%] md:mx-auto">
         {subComponent ? (
           <ErrorBoundary>
             {subComponent}
@@ -594,6 +595,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         ) : (
           <DashboardHome />
         )}
+        </div>
       </div>
     </div>
   );
