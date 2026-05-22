@@ -380,6 +380,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Content Area */}
       <div className="flex-1 md:ml-60 w-full min-h-screen pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <div className="w-full page-scale-content">
         {children || (
           <ErrorBoundary>
             <main className="p-4 md:p-14 w-full animate-in fade-in duration-500">
@@ -504,6 +505,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </main>
         </ErrorBoundary>
         )}
+        </div>
       </div>
     </div>
   );
