@@ -34,6 +34,18 @@ html {
   html {
     zoom: 0.75;
   }
+
+  .min-h-screen {
+    min-height: calc(100vh / 0.75);
+  }
+
+  .min-h-\[100dvh\] {
+    min-height: calc(100dvh / 0.75) !important;
+  }
+
+  .min-h-\[100vh\] {
+    min-height: calc(100vh / 0.75) !important;
+  }
 }
 
 /* Remove the 300ms tap delay and the gray flash on iOS / Android */

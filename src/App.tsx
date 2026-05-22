@@ -1285,7 +1285,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background selection:bg-purple-primary/30">
+    <div className="min-h-screen bg-background selection:bg-purple-primary/30 flex flex-col">
       <SiteHeader
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}
@@ -1294,21 +1294,19 @@ const App: React.FC = () => {
         onLogout={handleLogout}
         isLoggedIn={isLoggedIn}
       />
-      <main>
+      <main className="flex-1">
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
             <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
             <DataBoardSection />
-            
-            <Footer onNavigateTerms={() => navigate('terms')} onNavigatePrivacy={() => navigate('privacy')} />
           </>
         ) : view === 'signup' ? (
-          <SignupPage 
-            initialId={initialId} 
-            onNavigateHome={() => navigate('home')} 
+          <SignupPage
+            initialId={initialId}
+            onNavigateHome={() => navigate('home')}
             onNavigateLogin={() => navigate('login')}
-            onSignupSuccess={() => navigate('login')} 
+            onSignupSuccess={() => navigate('login')}
           />
         ) : (
           (oauthProcessing || loginTransitioning) ? (
@@ -1360,6 +1358,9 @@ const App: React.FC = () => {
           )
         )}
       </main>
+      {view === 'home' && (
+        <Footer onNavigateTerms={() => navigate('terms')} onNavigatePrivacy={() => navigate('privacy')} />
+      )}
     </div>
   );
 };
