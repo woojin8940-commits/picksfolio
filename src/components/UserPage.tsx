@@ -1148,7 +1148,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     <div className={`min-h-screen ${getFontStyle()} ${textColor} userpage-root`} style={backgroundStyle}>
       {/* PC: Full-width vertical layout */}
       <div className="min-h-screen">
-        <div className="max-w-md mx-auto min-h-screen flex flex-col relative px-4" style={backgroundStyle}>
+        <div className="max-w-md md:max-w-2xl mx-auto min-h-screen flex flex-col relative px-4 md:px-8" style={backgroundStyle}>
 
         {design.homePriority === 'portfolio' ? (
           /* PORTFOLIO LAYOUT */
@@ -1160,7 +1160,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 className="relative cursor-pointer overflow-hidden group w-screen left-1/2 -translate-x-1/2"
               >
                 <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 px-4 py-3">
-                  <div className="flex items-center justify-between max-w-md mx-auto">
+                  <div className="flex items-center justify-between max-w-2xl mx-auto">
                     <div className="flex items-center gap-3">
                       <div className="relative">
                         <div className="w-8 h-8 rounded-full border-2 border-white/80 overflow-hidden">
@@ -1194,7 +1194,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             )}
 
             <div
-              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4"
+              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #9333ea, #4f46e5)'
               }}
@@ -1408,7 +1408,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
                     if (group.columns === 1) {
                       return (
-                        <div key={`pgrid-${gi}`} className="space-y-3 md:space-y-4 -mx-4">
+                        <div key={`pgrid-${gi}`} className="space-y-3 md:space-y-4 -mx-4 md:-mx-8">
                           {flatImgs.map(img => (
                             <div key={img.key} className="relative">
                               <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
@@ -1423,7 +1423,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     if (group.columns === 3) {
                       const chunks = chunkSections(flatImgs, 3);
                       return (
-                        <div key={`pgrid-${gi}`} className="space-y-2 md:space-y-3 -mx-4">
+                        <div key={`pgrid-${gi}`} className="space-y-2 md:space-y-3 -mx-4 md:-mx-8">
                           {chunks.map((ck, ci) => (
                             ck.length === 3 ? (
                               <div key={`mg-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 aspect-[4/3]">
@@ -1453,7 +1453,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
                     if (group.columns === 4) {
                       return (
-                        <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3 -mx-4">
+                        <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3 -mx-4 md:-mx-8">
                           {flatImgs.map(img => (
                             <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
                               <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
@@ -1466,7 +1466,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     return (
                       <div
                         key={`pgrid-${gi}`}
-                        className="grid gap-2 md:gap-3 -mx-4"
+                        className="grid gap-2 md:gap-3 -mx-4 md:-mx-8"
                         style={{ gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))` }}
                       >
                         {flatImgs.map(img => (
@@ -1511,7 +1511,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                  </div>
                </div>
 
-               <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-4 -mx-4">
+               <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 -mx-4 md:-mx-8">
                  {categories.map(cat => (
                    <button
                      key={cat}
@@ -1525,7 +1525,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                </div>
 
                {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                 <div className="w-full -mx-4">
+                 <div className="w-full -mx-4 md:-mx-8">
                  <div
                     className="grid grid-flow-dense transition-all duration-500"
                     style={{
@@ -1612,7 +1612,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 className="relative cursor-pointer overflow-hidden group w-screen left-1/2 -translate-x-1/2"
               >
                 <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 px-4 py-3">
-                  <div className="flex items-center justify-between max-w-md mx-auto">
+                  <div className="flex items-center justify-between max-w-2xl mx-auto">
                     <div className="flex items-center gap-3">
                       <div className="relative">
                         <div className="w-8 h-8 rounded-full border-2 border-white/80 overflow-hidden">
@@ -1647,7 +1647,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
-              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4"
+              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #9333ea, #4f46e5)'
               }}
@@ -1670,7 +1670,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               </div>
             </div>
 
-            <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4">
+            <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4 md:-mx-8">
 
               <div className="flex gap-2.5 overflow-x-auto scrollbar-hide justify-center flex-wrap">
                 {socials.phone?.trim() && (
@@ -1773,7 +1773,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             </header>
 
-            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-4 backdrop-blur-md -mx-4">
+            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 backdrop-blur-md -mx-4 md:-mx-8">
               {categories.map(cat => (
                 <button
                   key={cat}
