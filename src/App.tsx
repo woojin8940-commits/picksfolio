@@ -1286,15 +1286,15 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background selection:bg-purple-primary/30">
-      <SiteHeader 
-        onNavigateHome={() => navigate('home')} 
-        onNavigateSignup={() => navigate('signup')} 
+      <SiteHeader
+        onNavigateHome={() => navigate('home')}
+        onNavigateSignup={() => navigate('signup')}
         onNavigateLogin={() => navigate('login')}
         onNavigateDashboard={() => navigate('admin')}
         onLogout={handleLogout}
         isLoggedIn={isLoggedIn}
       />
-      <main>
+      <main className="md:max-w-[67%] md:mx-auto">
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
