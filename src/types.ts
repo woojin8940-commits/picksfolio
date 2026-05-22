@@ -53,6 +53,7 @@ export interface Block {
   title: string;
   category: string;
   coverMedia: string;
+  coverMediaPosition?: { x: number; y: number };
   mediaType: 'image' | 'video';
   products: Product[];
 }

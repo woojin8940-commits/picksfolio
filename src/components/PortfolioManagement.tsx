@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
+import ImagePositionEditor from './ImagePositionEditor';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings } from '../services/settingsService';
 import { apiService } from '../services/apiService';
@@ -18,6 +19,7 @@ interface PortfolioBlock {
   type: 'text' | 'image' | 'category';
   content: string;
   images?: string[];
+  imagePositions?: Record<number, { x: number; y: number }>;
   fontSize?: BlockFontSize;
   fontSizePx?: number;
   bold?: boolean;
@@ -1462,7 +1464,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 </label>
                 <div className="flex items-start gap-3">
                   <div
-                    onClick={() => triggerFileUpload({ type: 'cover' })}
+                    onClick={() => !design?.portfolioHeaderImage && triggerFileUpload({ type: 'cover' })}
                     className="flex-1 aspect-video rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative"
                   >
                     {isUploading && uploadTarget?.type === 'cover' ? (
@@ -1471,7 +1473,17 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       </div>
                     ) : null}
                     {design?.portfolioHeaderImage ? (
-                      <MediaAuto src={design.portfolioHeaderImage} alt="Cover" className="w-full h-full object-cover" style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }} />
+                      <ImagePositionEditor
+                        src={design.portfolioHeaderImage}
+                        position={{
+                          x: 50,
+                          y: parseInt(design.portfolioHeaderImagePosition || '50'),
+                        }}
+                        onChange={(pos) => setDesign(prev => ({ ...prev, portfolioHeaderImagePosition: `${Math.round(pos.y)}` }))}
+                        aspectRatio="16/9"
+                        roundedClass="rounded-2xl"
+                        className="w-full h-full"
+                      />
                     ) : (
                       <>
                         <ImageIcon size={32} className="text-slate-300 mb-2" />
@@ -1490,22 +1502,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 </div>
                 {design?.portfolioHeaderImage && (
                   <>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">이미지 위치 조정</label>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] text-slate-400 font-medium w-6 shrink-0">상</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={parseInt(design.portfolioHeaderImagePosition || '50')}
-                          onChange={(e) => setDesign(prev => ({ ...prev, portfolioHeaderImagePosition: `${e.target.value}` }))}
-                          className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-purple-600"
-                        />
-                        <span className="text-[10px] text-slate-400 font-medium w-6 shrink-0">하</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 font-medium">슬라이더를 움직여 이미지의 노출 영역을 조정하세요.</p>
-                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2130,7 +2126,17 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                         </div>
                                       ) : null}
                                       {imgUrl ? (
-                                        <MediaAuto src={imgUrl} alt="" className="w-full h-full object-cover" />
+                                        <ImagePositionEditor
+                                          src={imgUrl}
+                                          position={block.imagePositions?.[i] || { x: 50, y: 50 }}
+                                          onChange={(pos) => {
+                                            const updatedPositions = { ...(block.imagePositions || {}), [i]: pos };
+                                            setBlocks(prev => prev.map(b => b.id === block.id ? { ...b, imagePositions: updatedPositions } : b));
+                                          }}
+                                          aspectRatio={cols === 1 ? '16/9' : '1/1'}
+                                          roundedClass="rounded-2xl"
+                                          className="w-full h-full"
+                                        />
                                       ) : (
                                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1">
                                           <ImageIcon size={cols === 1 ? 32 : 20} />
@@ -2140,7 +2146,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                       <button
                                         onClick={() => triggerFileUpload({ type: 'block', id: block.id, index: i })}
                                         disabled={isUploading}
-                                        className="absolute bottom-1.5 right-1.5 p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1 shadow-lg disabled:opacity-50"
+                                        className="absolute bottom-1.5 right-1.5 p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1 shadow-lg disabled:opacity-50 z-10"
                                       >
                                         <Camera size={14} />
                                         <span className="text-[9px] font-black whitespace-nowrap">{imgUrl ? '변경' : '업로드'}</span>
@@ -2176,11 +2182,10 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
             <div className="flex flex-col items-center justify-center gap-4">
             <PhoneFrame
               size="md"
-              label="Mobile Preview"
+              label="실시간 미리보기"
               liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
               contentClassName="bg-white text-slate-900"
             >
-              {/* Portfolio Preview Content */}
               {/* Header Image */}
                 <div
                   className="h-40 relative overflow-hidden"
@@ -2195,6 +2200,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
                     />
                   )}
+                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white via-white/40 to-transparent" />
                   <div className="absolute -bottom-10 left-1/2 -translate-x-1/2">
                     <div className="w-20 h-20 rounded-[1.8rem] bg-white p-1 shadow-xl">
                       <img
@@ -2206,31 +2212,30 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   </div>
                 </div>
 
-                <div className="pt-14 px-6 text-center space-y-6">
+                <div className="pt-14 px-4 text-center space-y-4">
                   <div>
-                    <h4 className="text-xl font-black text-slate-900">{profile.name}</h4>
-                    <p className={`font-bold uppercase tracking-widest ${
+                    <h4 className="text-lg font-black text-slate-900 tracking-tighter">{profile.name}</h4>
+                    <p className={`font-black uppercase tracking-[0.3em] ${
                       design.portfolioFontSize === 'small' ? 'text-[8px]' :
                       design.portfolioFontSize === 'large' ? 'text-sm' :
                       'text-[10px]'
                     }`} style={{ color: design.accentColor || '#a855f7' }}>{profile.bio || 'CREATOR & STYLIST'}</p>
                   </div>
 
-                  {/* Top Links Preview */}
-                  <div className="flex justify-center gap-3 flex-wrap">
-                    {profile.links?.phone?.trim() && <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-900 shadow-sm"><Phone size={18} /></div>}
-                    {profile.links?.kakao?.trim() && <div className="w-10 h-10 rounded-2xl bg-yellow-400 flex items-center justify-center text-slate-900 shadow-sm"><MessageCircle size={18} /></div>}
-                    {profile.links?.youtube?.trim() && <div className="w-10 h-10 rounded-2xl bg-red-50 flex items-center justify-center text-red-500 shadow-sm"><Youtube size={18} /></div>}
-                    {profile.links?.instagram?.trim() && <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600 flex items-center justify-center text-white shadow-sm"><Instagram size={18} /></div>}
-                    {profile.links?.naver?.trim() && <div className="w-10 h-10 rounded-2xl bg-[#03C75A] flex items-center justify-center text-white shadow-sm"><span className="text-[10px] font-black">N</span></div>}
-                    {profile.links?.tiktok?.trim() && <div className="w-10 h-10 rounded-2xl bg-black flex items-center justify-center text-white shadow-sm"><Globe size={18} /></div>}
-                    {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 h-10 rounded-2xl text-white shadow-sm cursor-pointer transition-all" style={{ backgroundColor: design.accentColor || '#a855f7' }} title="비즈니스 제안"><Briefcase size={14} /><span className="text-[8px] font-black">비즈니스 제안</span></div>}
-                    {profile.links?.liveNotify && <div className="flex items-center gap-1 px-3 h-10 rounded-2xl bg-purple-primary text-white shadow-sm cursor-pointer transition-all" title="라이브 알림"><Bell size={14} /><span className="text-[8px] font-black">라이브 알림</span></div>}
+                  <div className="flex justify-center gap-2 flex-wrap">
+                    {profile.links?.phone?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#3B82F6] text-white shadow-sm"><Phone size={12} /><span>전화</span></div>}
+                    {profile.links?.kakao?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#FEE500] text-[#3C1E1E] shadow-sm"><MessageCircle size={12} /><span>카카오</span></div>}
+                    {profile.links?.youtube?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#FF0000] text-white shadow-sm"><Youtube size={12} /><span>유튜브</span></div>}
+                    {profile.links?.instagram?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}><Instagram size={12} /><span>인스타</span></div>}
+                    {profile.links?.naver?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#03C75A] text-white shadow-sm"><span className="text-[9px] font-black">N</span><span>네이버</span></div>}
+                    {profile.links?.tiktok?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-black text-white shadow-sm border border-white/10"><Globe size={12} /><span>틱톡</span></div>}
+                    {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: design.accentColor || '#a855f7' }}><Briefcase size={12} /><span>비즈니스 제안</span></div>}
+                    {profile.links?.liveNotify && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold bg-emerald-500 text-white shadow-sm"><Bell size={12} /><span>라이브 알림</span></div>}
                   </div>
 
                   <div className="h-[1px] bg-slate-100 w-full" />
 
-                  {/* Dynamic Blocks Preview - Notion style */}
+                  {/* Dynamic Blocks Preview */}
                   <div className="space-y-3 text-left">
                     {(() => {
                       const visibleBlocks = blocks.filter(Boolean);
@@ -2278,15 +2283,18 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                         return (
                           <div key={group.block.id}>
                             <div
-                              className="rounded-xl border border-slate-200 px-3 py-3"
-                              style={{ backgroundColor: group.block.highlight || '#f1f5f9' }}
+                              className="rounded-2xl border px-3 py-3"
+                              style={{
+                                backgroundColor: (group.block.highlight && group.block.highlight !== 'transparent') ? group.block.highlight : '#f1f5f9',
+                                borderColor: '#e2e8f0',
+                              }}
                             >
                               <p
                                 className={`whitespace-pre-wrap ${group.block.bold ? 'font-bold' : 'font-medium'}`}
                                 style={{
                                   color: group.block.color || '#37352f',
                                   fontSize: `${pxOnPreview}px`,
-                                  lineHeight: 1.7,
+                                  lineHeight: 1.75,
                                   fontStyle: group.block.italic ? 'italic' : undefined,
                                   textDecoration: getTextDecoration(group.block)
                                 }}
@@ -2297,14 +2305,14 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                         );
                       }
 
-                      const ImgTile: React.FC<{ src?: string; rounded?: string }> = ({ src, rounded = 'rounded-xl' }) => (
-                        <div className={`${rounded} overflow-hidden border border-slate-200 bg-slate-50 w-full h-full`}>
-                          {src ? <MediaAuto src={src} alt="" className="w-full h-full object-cover" /> : null}
-                        </div>
+                      const flatImgs: { key: string; src: string; pos?: { x: number; y: number } }[] = group.blocks.flatMap(b =>
+                        getBlockImages(b).map((src, i) => ({ key: `${b.id}-${i}`, src, pos: b.imagePositions?.[i] }))
                       );
 
-                      const flatImgs: { key: string; src: string }[] = group.blocks.flatMap(b =>
-                        getBlockImages(b).map((src, i) => ({ key: `${b.id}-${i}`, src }))
+                      const ImgTile: React.FC<{ src?: string; pos?: { x: number; y: number }; rounded?: string }> = ({ src, pos, rounded = 'rounded-xl' }) => (
+                        <div className={`${rounded} overflow-hidden border border-slate-200 bg-slate-50 w-full h-full`}>
+                          {src ? <MediaAuto src={src} alt="" className="w-full h-full object-cover" style={pos ? { objectPosition: `${pos.x}% ${pos.y}%` } : undefined} /> : null}
+                        </div>
                       );
 
                       if (group.columns === 3) {
@@ -2314,14 +2322,14 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                             {chunks.map((ck, ci) => (
                               ck.length === 3 ? (
                                 <div key={`m-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-1.5 aspect-[4/3]">
-                                  <div className="row-span-2 h-full"><ImgTile src={ck[0].src} /></div>
-                                  <div className="h-full"><ImgTile src={ck[1].src} /></div>
-                                  <div className="h-full"><ImgTile src={ck[2].src} /></div>
+                                  <div className="row-span-2 h-full"><ImgTile src={ck[0].src} pos={ck[0].pos} /></div>
+                                  <div className="h-full"><ImgTile src={ck[1].src} pos={ck[1].pos} /></div>
+                                  <div className="h-full"><ImgTile src={ck[2].src} pos={ck[2].pos} /></div>
                                 </div>
                               ) : (
                                 <div key={`m-${ci}`} className={`grid gap-1.5 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                   {ck.map(b => (
-                                    <div key={b.key} className="aspect-square"><ImgTile src={b.src} /></div>
+                                    <div key={b.key} className="aspect-square"><ImgTile src={b.src} pos={b.pos} /></div>
                                   ))}
                                 </div>
                               )
@@ -2334,7 +2342,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                         return (
                           <div key={`grid-${gi}`} className="grid grid-cols-2 gap-1.5">
                             {flatImgs.map(img => (
-                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} /></div>
+                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} pos={img.pos} /></div>
                             ))}
                           </div>
                         );
@@ -2344,7 +2352,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                         return (
                           <div key={`grid-${gi}`} className="grid grid-cols-2 gap-1.5">
                             {flatImgs.map(img => (
-                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} /></div>
+                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} pos={img.pos} /></div>
                             ))}
                           </div>
                         );
@@ -2354,7 +2362,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                         <div key={`grid-${gi}`} className="space-y-1.5">
                           {flatImgs.map(img => (
                             <div key={img.key} className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                              {img.src ? <MediaAuto src={img.src} alt="" className="w-full h-auto object-cover" /> : <div className="aspect-video" />}
+                              {img.src ? <MediaAuto src={img.src} alt="" className="w-full h-auto object-cover" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} /> : <div className="aspect-video" />}
                             </div>
                           ))}
                         </div>
