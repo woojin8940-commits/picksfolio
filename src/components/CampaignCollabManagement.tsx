@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { formatNumberWithCommas, formatKoreanWon } from '../utils/formatters';
+import ImageCropper from './ImageCropper';
 
 interface Campaign {
   id: string;
@@ -89,6 +90,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [thumbnailPreview, setThumbnailPreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const pendingFileRef = useRef<File | null>(null);
 
   const [formData, setFormData] = useState({
     type: 'ad_collab',
@@ -142,30 +145,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     fetchApplicants(campaign.id);
   };
 
-  const resizeImage = (file: File, size: number): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      const objectUrl = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d')!;
-        const min = Math.min(img.width, img.height);
-        const sx = (img.width - min) / 2;
-        const sy = (img.height - min) / 2;
-        ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
-        canvas.toBlob(
-          blob => blob ? resolve(blob) : reject(new Error('Failed to create blob')),
-          'image/jpeg',
-          0.9
-        );
-      };
-      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Failed to load image')); };
-      img.src = objectUrl;
-    });
-  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -174,15 +153,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       alert('이미지 크기는 5MB 이하만 가능합니다.');
       return;
     }
+    pendingFileRef.current = file;
+    const previewUrl = URL.createObjectURL(file);
+    setCropperSrc(previewUrl);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleCropConfirm = async (croppedBlob: Blob) => {
+    const file = pendingFileRef.current;
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    if (!file) return;
     setUploadingImage(true);
 
     try {
-      const resized = await resizeImage(file, 400);
-      const previewUrl = URL.createObjectURL(resized);
+      const previewUrl = URL.createObjectURL(croppedBlob);
       setThumbnailPreview(previewUrl);
 
       const fd = new FormData();
-      fd.append('image', new File([resized], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+      fd.append('image', new File([croppedBlob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
       fd.append('username', businessUsername);
       const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
       const data = await res.json();
@@ -198,6 +187,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     } finally {
       setUploadingImage(false);
     }
+  };
+
+  const handleCropCancel = () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
+    setCropperSrc(null);
+    pendingFileRef.current = null;
   };
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
@@ -759,6 +754,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // --- Campaign List ---
   return (
     <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
+      {cropperSrc && (
+        <ImageCropper
+          src={cropperSrc}
+          onCrop={handleCropConfirm}
+          onCancel={handleCropCancel}
+          aspectRatio={1}
+        />
+      )}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>

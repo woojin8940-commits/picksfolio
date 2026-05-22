@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShoppingBag, Check, Plus, X, Package, History as HistoryIcon, Trash2, Camera, Edit3, Search } from 'lucide-react';
 import SafeImage from './SafeImage';
+import ImageCropper from './ImageCropper';
 import { apiService } from '../services/apiService';
 import { LiveProductOption, LiveProductOptionValue } from '../types';
 import BroadcastHistory from './BroadcastHistory';
@@ -57,6 +58,8 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const pendingFileRef = useRef<File | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,13 +198,24 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
       alert('파일 크기는 20MB 이하로 업로드해주세요.');
       return;
     }
+    pendingFileRef.current = file;
+    const previewUrl = URL.createObjectURL(file);
+    setCropperSrc(previewUrl);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleCropConfirm = async (croppedBlob: Blob) => {
+    const file = pendingFileRef.current;
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    if (!file) return;
     setIsUploading(true);
-    const objectUrl = URL.createObjectURL(file);
+    const objectUrl = URL.createObjectURL(croppedBlob);
     updateField('image', objectUrl);
     try {
       const ext = file.name?.split('.').pop()?.toLowerCase() || 'jpg';
       const fileName = `${Date.now()}-${file.name.replace(/\.[^/.]+$/, '')}.${ext}`;
-      const apiUrl = await apiService.uploadImage(userName, file, fileName);
+      const apiUrl = await apiService.uploadImage(userName, croppedBlob, fileName);
       if (apiUrl) {
         updateField('image', apiUrl);
       }
@@ -209,8 +223,13 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
       console.error('[BroadcastSettings] image upload failed:', err);
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleCropCancel = () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
+    setCropperSrc(null);
+    pendingFileRef.current = null;
   };
 
   const renderEditor = () => {
@@ -442,6 +461,13 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
 
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+      {cropperSrc && (
+        <ImageCropper
+          src={cropperSrc}
+          onCrop={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
+      )}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 md:mb-8">
         <div>
           <h2 className="text-xl md:text-3xl font-black text-slate-900 mb-1 md:mb-2">방송 설정</h2>

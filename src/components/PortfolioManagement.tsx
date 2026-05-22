@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
 import ImagePositionEditor from './ImagePositionEditor';
+import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings } from '../services/settingsService';
 import { apiService } from '../services/apiService';
@@ -9,7 +10,6 @@ import Toast from './Toast';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import { normalizeContentToHtml, renderPortfolioHtml, sanitizeRichHtml } from './richText';
-import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 type BlockFontSize = 'sm' | 'md' | 'lg' | 'xl';
 type BlockGridColumns = 1 | 2 | 3 | 4;
@@ -387,10 +387,15 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   const [saveSuccess, setSaveSuccess] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'profile' | 'block' | 'cover' | 'category'; id?: string; index?: number } | null>(null);
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const pendingFileRef = useRef<File | null>(null);
   const [previewCategory, setPreviewCategory] = useState<string>(ALL_CATEGORY_LABEL);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null);
   const [openHighlightPicker, setOpenHighlightPicker] = useState<string | null>(null);
+
+  // Link grid blocks for combined preview
+  const [linkGridBlocks, setLinkGridBlocks] = useState<any[]>([]);
 
   const editorRefs = useRef<Map<string, RichTextEditorHandle>>(new Map());
   const lastSelectionByEditorRef = useRef<Map<string, Range>>(new Map());
@@ -570,6 +575,9 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               apiSocials = apiData.socials;
               localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(apiData.socials));
             }
+            if (Array.isArray(apiData.blocks)) {
+              setLinkGridBlocks(apiData.blocks);
+            }
             if (apiData.design) {
               setDesign(prev => ({ ...prev, ...(apiData.design as any) }));
               localStorage.setItem(`picks_design_${normalizedUsername}`, JSON.stringify(apiData.design));
@@ -609,6 +617,9 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               }
               if (settings.profile) {
                 cloudProfile = settings.profile;
+              }
+              if (settings.blocks && Array.isArray(settings.blocks)) {
+                setLinkGridBlocks(settings.blocks);
               }
             }
           } catch (e) {
@@ -739,9 +750,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
 
   const applyImageToState = (url: string, target: typeof uploadTarget) => {
     if (!target) return;
-    if (target.type === 'profile') {
-      setProfile(prev => ({ ...prev, avatar_url: url }));
-    } else if (target.type === 'block' && target.id) {
+    if (target.type === 'block' && target.id) {
       const idx = target.index ?? 0;
       setBlocks(prev => prev.map(b => {
         if (b.id !== target.id) return b;
@@ -765,14 +774,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
     const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|ogg|ogv|mov|m4v|avi|mkv)$/i.test(file.name);
     const allowedImageExts = ['jpeg', 'jpg', 'png', 'webp', 'gif', 'bmp', 'heic', 'heif'];
     const isImage = file.type.startsWith('image/') || allowedImageExts.some(t => file.name.toLowerCase().endsWith(`.${t}`));
-
-    // 아바타(프로필) 업로드는 이미지만 허용
-    if (uploadTarget.type === 'profile' && !isImage) {
-      setSaveMessage('프로필 이미지는 이미지 파일만 업로드할 수 있습니다.');
-      setSaveSuccess(false);
-      setShowToast(true);
-      return;
-    }
 
     // 카테고리 이미지는 이미지 파일만 허용
     if (uploadTarget.type === 'category' && !isImage) {
@@ -805,12 +806,41 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
       return;
     }
 
+    if (isImage) {
+      pendingFileRef.current = file;
+      const previewUrl = URL.createObjectURL(file);
+      setCropperSrc(previewUrl);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    await doUpload(file, null);
+  };
+
+  const handleCropConfirm = async (croppedBlob: Blob) => {
+    const file = pendingFileRef.current;
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    if (!file || !uploadTarget) return;
+    await doUpload(file, croppedBlob);
+  };
+
+  const handleCropCancel = () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    setUploadTarget(null);
+  };
+
+  const doUpload = async (file: File, croppedBlob: Blob | null) => {
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|ogg|ogv|mov|m4v|avi|mkv)$/i.test(file.name);
+
     setIsUploading(true);
     const currentTarget = uploadTarget;
 
     try {
-      // 1. 이미지/영상 처리 (영상은 원본 그대로, 이미지는 최고 화질 유지)
-      const processedBlob: Blob = isVideo ? file : await processImageFile(file);
+      // 1. 이미지/영상 처리 (영상은 원본 그대로, 크롭된 이미지는 그대로 사용)
+      const processedBlob: Blob = isVideo ? file : (croppedBlob || await processImageFile(file));
 
       // 2. 로컬 미리보기 즉시 표시 (영상은 로컬 blob 미리보기 생략하고 업로드 완료 후 표시)
       let blobUrl = '';
@@ -1095,6 +1125,13 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
         className="hidden"
         accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,video/mp4,video/webm,video/quicktime,video/x-m4v,video/*"
       />
+      {cropperSrc && (
+        <ImageCropper
+          src={cropperSrc}
+          onCrop={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
+      )}
 
       <header className="mb-6 md:mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
         <div>
@@ -1134,36 +1171,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
             </div>
 
             <div className="flex flex-col md:flex-row gap-6">
-              {/* Avatar */}
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    onClick={() => triggerFileUpload({ type: 'profile' })}
-                    className="w-24 h-24 rounded-[1.8rem] bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative"
-                  >
-                    {isUploading && uploadTarget?.type === 'profile' ? (
-                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-                        <div className="w-6 h-6 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
-                      </div>
-                    ) : null}
-                    {profile.avatar_url ? (
-                      <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-                    ) : (
-                      <Camera size={24} className="text-slate-300" />
-                    )}
-                  </div>
-                  <button
-                    onClick={() => triggerFileUpload({ type: 'profile' })}
-                    disabled={isUploading}
-                    className="p-2.5 bg-purple-50 text-purple-600 rounded-xl hover:bg-purple-100 transition-all flex flex-col items-center gap-1 shrink-0 disabled:opacity-50"
-                  >
-                    <Camera size={16} />
-                    <span className="text-[9px] font-black">{profile.avatar_url ? '변경' : '업로드'}</span>
-                  </button>
-                </div>
-                <span className="text-[10px] font-black text-slate-400">프로필 사진</span>
-              </div>
-
               {/* Name & Bio */}
               <div className="flex-1 space-y-4">
                 <div className="space-y-2">
@@ -2201,18 +2208,9 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     />
                   )}
                   <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white via-white/40 to-transparent" />
-                  <div className="absolute -bottom-10 left-1/2 -translate-x-1/2">
-                    <div className="w-20 h-20 rounded-[1.8rem] bg-white p-1 shadow-xl">
-                      <img
-                        src={profile.avatar_url || DEFAULT_AVATAR}
-                        alt=""
-                        className="w-full h-full rounded-[1.5rem] object-cover"
-                      />
-                    </div>
-                  </div>
                 </div>
 
-                <div className="pt-14 px-4 text-center space-y-4">
+                <div className="pt-4 px-4 text-center space-y-4">
                   <div>
                     <h4 className="text-lg font-black text-slate-900 tracking-tighter">{profile.name}</h4>
                     <p className={`font-black uppercase tracking-[0.3em] ${
@@ -2235,6 +2233,9 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
 
                   <div className="h-[1px] bg-slate-100 w-full" />
 
+                  {/* Content sections ordered by homePriority */}
+                  <div className="flex flex-col w-full">
+                  <div style={{ order: design.homePriority === 'portfolio' ? 1 : 2 }}>
                   {/* Dynamic Blocks Preview */}
                   <div className="space-y-3 text-left">
                     {(() => {
@@ -2369,6 +2370,36 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       );
                     })}
                   </div>
+                  </div>
+
+                  {linkGridBlocks.length > 0 && (
+                  <div style={{ order: design.homePriority === 'portfolio' ? 2 : 1 }} className="space-y-2 text-left pt-3">
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#a855f7', opacity: 0.3 }}></div>
+                      <h4 className="text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: design.accentColor || '#a855f7' }}>My Curations</h4>
+                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#a855f7', opacity: 0.3 }}></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {linkGridBlocks.map((block: any) => {
+                        const pos = block.coverMediaPosition || { x: 50, y: 50 };
+                        return (
+                          <div key={block.id} className="relative overflow-hidden aspect-square rounded-xl border border-slate-200 bg-slate-50">
+                            {block.coverMedia && <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" style={{ objectPosition: `${pos.x}% ${pos.y}%` }} />}
+                            <div className="absolute top-1 right-1">
+                              <span className="bg-black/60 backdrop-blur-md text-[6px] font-black px-1 py-0.5 rounded text-white">{block.products?.length || 0}</span>
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+                              <div className="text-[6px] font-black truncate text-white uppercase tracking-tight">{block.title}</div>
+                              <div className="text-[5px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  )}
+                  </div>
+
                 </div>
             </PhoneFrame>
             {/* Save Button - next to phone preview */}
