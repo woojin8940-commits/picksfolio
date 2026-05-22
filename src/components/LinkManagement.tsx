@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink } from 'lucide-react';
+import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash } from 'lucide-react';
 import ImagePositionEditor from './ImagePositionEditor';
+import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData } from '../services/prefetchService';
-import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import { apiService } from '../services/apiService';
 import { Block, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
 import SafeImage from './SafeImage';
 import PhoneFrame from './PhoneFrame';
+import { renderPortfolioHtml } from './richText';
 
 interface LinkManagementProps {
   userName: string;
@@ -168,12 +169,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     }
   });
 
+  // Portfolio blocks for combined preview
+  const [portfolioBlocks, setPortfolioBlocks] = useState<any[]>([]);
+
   // Mobile Preview State
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const [previewSelectedBlock, setPreviewSelectedBlock] = useState<Block | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block', id: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const pendingFileRef = useRef<File | null>(null);
   const fullDesignRef = useRef<Record<string, any>>((() => {
     try {
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
@@ -188,54 +194,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsDataURL(blob);
-    });
-  };
-
-  // 이미지 처리 (리사이즈 + WebP 변환)
-  const processImage = (file: File): Promise<Blob> => {
-    // For maximum quality, return the original file if it's already a supported format
-    const directUploadTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
-    if (directUploadTypes.includes(file.type) && file.size <= 20 * 1024 * 1024) {
-      return Promise.resolve(file);
-    }
-
-    return new Promise((resolve, reject) => {
-      const imageUrl = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_SIZE = 8192;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
-        } else {
-          if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob((blob) => {
-          URL.revokeObjectURL(imageUrl);
-          if (blob) {
-            resolve(blob);
-          } else {
-            canvas.toBlob((jpegBlob) => {
-              if (jpegBlob) resolve(jpegBlob);
-              else reject(new Error('Canvas to Blob 변환 실패'));
-            }, 'image/jpeg', 1.0);
-          }
-        }, 'image/png', 1.0);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(imageUrl);
-        reject(new Error('이미지 로드 실패'));
-      };
-      img.src = imageUrl;
     });
   };
 
@@ -274,12 +232,24 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       return;
     }
 
+    pendingFileRef.current = file;
+    const previewUrl = URL.createObjectURL(file);
+    setCropperSrc(previewUrl);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleCropConfirm = async (croppedBlob: Blob) => {
+    const file = pendingFileRef.current;
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    if (!file || !uploadTarget) return;
+
     setIsUploading(true);
     const currentTarget = uploadTarget;
 
     try {
-      // 1. 이미지 처리 (최고 화질 유지 - 원본 직접 업로드)
-      const processedBlob = await processImage(file);
+      // 1. 크롭된 이미지 사용 (이미 크롭 완료됨)
+      const processedBlob = croppedBlob;
 
       // 2. 로컬 미리보기 즉시 표시
       const blobUrl = URL.createObjectURL(processedBlob);
@@ -356,6 +326,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     }
   };
 
+  const handleCropCancel = () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
+    setCropperSrc(null);
+    pendingFileRef.current = null;
+    setUploadTarget(null);
+  };
+
   const triggerFileUpload = (target: { type: 'block' } | { type: 'product', productId: string }) => {
     setUploadTarget(target);
     fileInputRef.current?.click();
@@ -394,6 +371,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           if (apiData.design) {
             applySettings({ userName, templateType: TemplateType.SHOPPABLE_GRID, blocks: apiData.blocks || [], design: apiData.design as any, profile: apiData.profile });
           }
+          if (Array.isArray(apiData.portfolio)) {
+            setPortfolioBlocks(apiData.portfolio);
+          }
           // API에 블록 데이터가 없으면 Supabase 폴백
           if ((!apiData.blocks || apiData.blocks.length === 0)) {
             const [settings, gridItems] = await Promise.all([
@@ -431,6 +411,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
           if (settings) {
             applySettings(settings);
+            if (Array.isArray(settings.portfolio)) {
+              setPortfolioBlocks(settings.portfolio);
+            }
           }
         }
       } catch (error) {
@@ -777,6 +760,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   return (
     <div className="flex h-full bg-[#F8FAFC]">
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif" />
+      {cropperSrc && (
+        <ImageCropper
+          src={cropperSrc}
+          onCrop={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
+      )}
       
       <div className="flex-1 overflow-y-auto p-4 md:p-14">
         <div className="max-w-[1200px] mx-auto w-full">
@@ -1017,17 +1007,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               </div>
             </div>
 
-            {/* Profile Avatar */}
-            <div className="px-3 pt-2 pb-1 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-2 p-0.5 flex-shrink-0" style={{ borderColor: accentColor }}>
-                <img src={profile.avatar_url || DEFAULT_AVATAR} alt="" className="w-full h-full rounded-full bg-slate-800 object-cover" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[8px] font-black truncate">{profile.name || userName}</div>
-                <div className={`text-[6px] font-bold truncate ${themePreset === 'white' ? 'text-slate-400' : 'text-white/40'}`}>{profile.bio || ''}</div>
-              </div>
-            </div>
-
+            {/* Content sections ordered by homePriority */}
+            <div className="flex flex-col">
+            <div style={{ order: homePriority === 'portfolio' ? 2 : 1 }}>
             {/* Curation Section Header */}
             <div className="px-3 pt-3 pb-1">
               <div className="flex justify-between items-end mb-2">
@@ -1121,6 +1103,63 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 )}
               </div>
             )}
+            </div>
+
+            {portfolioBlocks.length > 0 && (
+            <div style={{ order: homePriority === 'portfolio' ? 1 : 2 }} className="px-2 pt-3 pb-2">
+              <div className="flex items-center gap-1 mb-1.5 px-1">
+                <div className="flex-1 h-[0.5px]" style={{ backgroundColor: accentColor, opacity: 0.3 }}></div>
+                <h4 className="text-[5px] font-black uppercase tracking-[0.15em]" style={{ color: accentColor }}>Portfolio</h4>
+                <div className="flex-1 h-[0.5px]" style={{ backgroundColor: accentColor, opacity: 0.3 }}></div>
+              </div>
+              <div className="space-y-1">
+                {portfolioBlocks.filter(Boolean).map((block: any) => {
+                  if (!block) return null;
+                  if (block.type === 'category') {
+                    return (
+                      <div key={block.id} className="pt-0.5 flex items-center gap-1">
+                        <Hash size={6} className="text-purple-500 shrink-0" />
+                        <span className={`text-[6px] font-black truncate ${themePreset === 'white' ? 'text-slate-900' : 'text-white'}`}>{block.content || '카테고리'}</span>
+                      </div>
+                    );
+                  }
+                  if (block.type === 'text') {
+                    return (
+                      <div key={block.id}>
+                        <div
+                          className={`rounded-lg border px-1.5 py-1 ${themePreset === 'white' ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
+                          style={(block.highlight && block.highlight !== 'transparent') ? { backgroundColor: block.highlight, borderColor: 'transparent' } : undefined}
+                        >
+                          <p
+                            className={`text-[6px] leading-relaxed whitespace-pre-wrap ${block.bold ? 'font-bold' : 'font-medium'}`}
+                            style={{ color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)') }}
+                            dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.content || '') }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (block.type === 'image') {
+                    const imgs = Array.isArray(block.images) && block.images.length > 0 ? block.images : [block.content || ''];
+                    const cols = Math.min(4, Math.max(1, Number(block.gridColumns) || 1));
+                    const displayImgs = imgs.slice(0, cols).filter(Boolean);
+                    if (displayImgs.length === 0) return null;
+                    return (
+                      <div key={block.id} className={`grid gap-0.5 ${cols >= 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                        {displayImgs.map((src: string, i: number) => (
+                          <div key={i} className={`overflow-hidden border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'} ${cols === 1 ? 'rounded-lg' : 'rounded-md aspect-square'}`}>
+                            <SafeImage src={src} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            </div>
+            )}
+            </div>
 
             {showBottomSheet && previewSelectedBlock && (
               <div className="absolute inset-0 z-50 flex flex-col justify-end">
