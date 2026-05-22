@@ -171,6 +171,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   // Portfolio blocks for combined preview
   const [portfolioBlocks, setPortfolioBlocks] = useState<any[]>([]);
 
+  // Social links for preview
+  const [socials, setSocials] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem(`picks_socials_${(userName || '').toLowerCase()}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
   // Mobile Preview State
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const [previewSelectedBlock, setPreviewSelectedBlock] = useState<Block | null>(null);
@@ -372,6 +380,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           }
           if (Array.isArray(apiData.portfolio)) {
             setPortfolioBlocks(apiData.portfolio);
+          }
+          if (apiData.socials) {
+            setSocials(apiData.socials);
+            localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(apiData.socials));
           }
           // API에 블록 데이터가 없으면 Supabase 폴백
           if ((!apiData.blocks || apiData.blocks.length === 0)) {
@@ -984,9 +996,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
           contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
         >
-            {/* Cover Header - like personal page */}
+            {/* Cover Header - matching personal page */}
             <div
-              className="relative h-28 flex-shrink-0"
+              className="relative h-40 flex-shrink-0"
               style={{ background: fullDesignRef.current.portfolioHeaderColor || (themePreset === 'white' ? 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)' : 'linear-gradient(135deg, #9333ea 0%, #4f46e5 100%)') }}
             >
               {fullDesignRef.current.portfolioHeaderImage && (
@@ -999,13 +1011,44 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               )}
               <div
                 className="absolute inset-0"
-                style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'}88 20%, transparent 60%)` }}
+                style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'}88 20%, transparent 50%)` }}
               />
               <div className="absolute bottom-2 left-3 right-3">
                 <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>
-                <p className="text-[7px] font-black uppercase tracking-[0.2em]" style={{ color: accentColor }}>{profile.bio || 'Visual Storyteller'}</p>
+                <p className={`font-black uppercase tracking-[0.2em] ${
+                  portfolioFontSize === 'small' ? 'text-[5px]' :
+                  portfolioFontSize === 'large' ? 'text-[8px]' :
+                  'text-[6px]'
+                }`} style={{ color: accentColor }}>{profile.bio || 'Visual Storyteller'}</p>
               </div>
             </div>
+
+            {/* Social Links - matching personal page */}
+            {(socials.phone || socials.kakao || socials.instagram || socials.youtube || socials.naver || socials.tiktok) && (
+              <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
+                {socials.phone?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#3B82F6] text-white whitespace-nowrap">전화</span>
+                )}
+                {socials.kakao?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#FEE500] text-[#3C1E1E] whitespace-nowrap">카카오톡</span>
+                )}
+                {socials.instagram?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}>인스타</span>
+                )}
+                {socials.youtube?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#FF0000] text-white whitespace-nowrap">유튜브</span>
+                )}
+                {socials.naver?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#03C75A] text-white whitespace-nowrap">네이버</span>
+                )}
+                {socials.tiktok?.trim() && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-black text-white whitespace-nowrap border border-white/10">틱톡</span>
+                )}
+                {socials.businessProposal && (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: accentColor }}>비즈니스 제안</span>
+                )}
+              </div>
+            )}
 
             {/* Content sections ordered by homePriority */}
             <div className="flex flex-col">
@@ -1041,7 +1084,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
             {/* Grid / List Content */}
             {layoutTemplate === 'grid' ? (
-              <div className="px-2 pb-10">
+              <div className="px-2 pb-4">
                 <div
                   className="grid grid-flow-dense"
                   style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '3px' }}
@@ -1081,7 +1124,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
               </div>
             ) : (
-              <div className="px-3 pb-10 space-y-1.5">
+              <div className="px-3 pb-4 space-y-1.5">
                 {blocks.flatMap(block =>
                   (block.products || []).map(p => (
                     <div
@@ -1112,14 +1155,29 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 <h4 className="text-[5px] font-black uppercase tracking-[0.15em]" style={{ color: accentColor }}>Portfolio</h4>
                 <div className="flex-1 h-[0.5px]" style={{ backgroundColor: accentColor, opacity: 0.3 }}></div>
               </div>
+              {/* Portfolio category tabs */}
+              {(() => {
+                const catBlocks = portfolioBlocks.filter(b => b && b.type === 'category');
+                if (catBlocks.length === 0) return null;
+                return (
+                  <div className="px-1 pb-1.5 overflow-x-auto scrollbar-hide flex gap-1">
+                    <span className={`px-1.5 py-0.5 text-[5px] font-black whitespace-nowrap rounded-full text-white border-transparent`} style={{ backgroundColor: accentColor }}>전체</span>
+                    {catBlocks.map((c: any) => (
+                      <span key={c.id} className={`px-1.5 py-0.5 text-[5px] font-black whitespace-nowrap rounded-full border ${themePreset === 'white' ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}>
+                        {(c.content || '').trim() || '카테고리'}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className="space-y-1">
                 {portfolioBlocks.filter(Boolean).map((block: any) => {
                   if (!block) return null;
                   if (block.type === 'category') {
                     return (
-                      <div key={block.id} className="pt-0.5 flex items-center gap-1">
-                        <Hash size={6} className="text-purple-500 shrink-0" />
-                        <span className={`text-[6px] font-black truncate ${themePreset === 'white' ? 'text-slate-900' : 'text-white'}`}>{block.content || '카테고리'}</span>
+                      <div key={block.id} className="pt-1 pb-0.5 flex items-center gap-1">
+                        <Hash size={7} className="text-purple-500 shrink-0" />
+                        <span className={`text-[7px] font-black truncate ${themePreset === 'white' ? 'text-slate-900' : 'text-white'}`}>{block.content || '카테고리'}</span>
                       </div>
                     );
                   }
@@ -1132,7 +1190,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         >
                           <p
                             className={`text-[6px] leading-relaxed whitespace-pre-wrap ${block.bold ? 'font-bold' : 'font-medium'}`}
-                            style={{ color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)') }}
+                            style={{
+                              color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)'),
+                              fontStyle: block.italic ? 'italic' : undefined,
+                              textDecoration: block.underline ? 'underline' : block.strikethrough ? 'line-through' : undefined
+                            }}
                             dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.content || '') }}
                           />
                         </div>
@@ -1144,10 +1206,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     const cols = Math.min(4, Math.max(1, Number(block.gridColumns) || 1));
                     const displayImgs = imgs.slice(0, cols).filter(Boolean);
                     if (displayImgs.length === 0) return null;
+                    if (cols === 1) {
+                      return (
+                        <div key={block.id}>
+                          {displayImgs.map((src: string, i: number) => (
+                            <div key={i} className={`overflow-hidden rounded-lg border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                              <SafeImage src={src} alt="" className="w-full h-auto block" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    if (cols === 3 && displayImgs.length === 3) {
+                      return (
+                        <div key={block.id} className="grid grid-cols-2 grid-rows-2 gap-0.5 aspect-[4/3]">
+                          <div className={`row-span-2 overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                            <SafeImage src={displayImgs[0]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[0] ? { objectPosition: `${block.imagePositions[0].x}% ${block.imagePositions[0].y}%` } : undefined} />
+                          </div>
+                          <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                            <SafeImage src={displayImgs[1]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[1] ? { objectPosition: `${block.imagePositions[1].x}% ${block.imagePositions[1].y}%` } : undefined} />
+                          </div>
+                          <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                            <SafeImage src={displayImgs[2]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[2] ? { objectPosition: `${block.imagePositions[2].x}% ${block.imagePositions[2].y}%` } : undefined} />
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <div key={block.id} className={`grid gap-0.5 ${cols >= 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                         {displayImgs.map((src: string, i: number) => (
-                          <div key={i} className={`overflow-hidden border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'} ${cols === 1 ? 'rounded-lg' : 'rounded-md aspect-square'}`}>
+                          <div key={i} className={`overflow-hidden rounded-md aspect-square border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
                             <SafeImage src={src} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
                           </div>
                         ))}

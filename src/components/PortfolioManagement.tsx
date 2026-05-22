@@ -1127,10 +1127,10 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
       {cropperSrc && (() => {
         let cropAspect: number | undefined = 1;
         if (uploadTarget?.type === 'cover') {
-          cropAspect = 16 / 9;
+          cropAspect = 4 / 5;
         } else if (uploadTarget?.type === 'block' && uploadTarget.id) {
           const targetBlock = blocks.find(b => b.id === uploadTarget.id);
-          cropAspect = (targetBlock?.gridColumns === 1) ? 16 / 9 : 1;
+          cropAspect = (targetBlock?.gridColumns === 1) ? undefined : 1;
         }
         return (
           <ImageCropper
@@ -1481,7 +1481,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 <div className="flex items-start gap-3">
                   <div
                     onClick={() => !design?.portfolioHeaderImage && triggerFileUpload({ type: 'cover' })}
-                    className="flex-1 aspect-video rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative"
+                    className="flex-1 aspect-[4/5] rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative"
                   >
                     {isUploading && uploadTarget?.type === 'cover' ? (
                       <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
@@ -2130,7 +2130,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                   (uploadTarget?.index ?? 0) === i;
                                 return (
                                   <div key={i} className="flex flex-col gap-1.5">
-                                    <div className={`${cols === 1 ? 'aspect-video' : 'aspect-square'} rounded-2xl overflow-hidden bg-slate-100 relative border-2 border-dashed border-slate-200`}>
+                                    <div className={`${cols === 1 ? (imgUrl ? '' : 'aspect-[4/5]') : 'aspect-square'} rounded-2xl overflow-hidden bg-slate-100 relative border-2 border-dashed border-slate-200`}>
                                       {isSlotUploading ? (
                                         <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
                                           <div className="w-8 h-8 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
@@ -2141,7 +2141,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                           src={imgUrl}
                                           alt=""
                                           draggable={false}
-                                          className="w-full h-full object-cover rounded-2xl"
+                                          className={cols === 1 ? "w-full h-auto block rounded-2xl" : "w-full h-full object-cover rounded-2xl"}
                                         />
                                       ) : (
                                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1">
