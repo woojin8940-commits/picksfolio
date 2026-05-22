@@ -165,6 +165,15 @@ h1, h2, h3, h4, h5, h6 {
   display: none;
 }
 
+/* Page scale: constrain content width on desktop to 67% */
+@media (min-width: 768px) {
+  .page-scale-content {
+    max-width: 67%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
 /* Mobile readability floor: enforce a minimum 12px on tiny tailwind utilities
    to keep text legible on phones. Keeps existing desktop scaling behaviour. */
 @media (max-width: 767px) {
