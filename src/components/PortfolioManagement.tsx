@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
-import ImagePositionEditor from './ImagePositionEditor';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings } from '../services/settingsService';
@@ -1125,13 +1124,23 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
         className="hidden"
         accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,video/mp4,video/webm,video/quicktime,video/x-m4v,video/*"
       />
-      {cropperSrc && (
-        <ImageCropper
-          src={cropperSrc}
-          onCrop={handleCropConfirm}
-          onCancel={handleCropCancel}
-        />
-      )}
+      {cropperSrc && (() => {
+        let cropAspect: number | undefined = 1;
+        if (uploadTarget?.type === 'cover') {
+          cropAspect = 16 / 9;
+        } else if (uploadTarget?.type === 'block' && uploadTarget.id) {
+          const targetBlock = blocks.find(b => b.id === uploadTarget.id);
+          cropAspect = (targetBlock?.gridColumns === 1) ? 16 / 9 : 1;
+        }
+        return (
+          <ImageCropper
+            src={cropperSrc}
+            onCrop={handleCropConfirm}
+            onCancel={handleCropCancel}
+            aspectRatio={cropAspect}
+          />
+        );
+      })()}
 
       <header className="mb-6 md:mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
         <div>
@@ -1480,16 +1489,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       </div>
                     ) : null}
                     {design?.portfolioHeaderImage ? (
-                      <ImagePositionEditor
+                      <img
                         src={design.portfolioHeaderImage}
-                        position={{
-                          x: 50,
-                          y: parseInt(design.portfolioHeaderImagePosition || '50'),
-                        }}
-                        onChange={(pos) => setDesign(prev => ({ ...prev, portfolioHeaderImagePosition: `${Math.round(pos.y)}` }))}
-                        aspectRatio="16/9"
-                        roundedClass="rounded-2xl"
-                        className="w-full h-full"
+                        alt=""
+                        draggable={false}
+                        className="w-full h-full object-cover rounded-2xl"
                       />
                     ) : (
                       <>
@@ -2133,16 +2137,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                         </div>
                                       ) : null}
                                       {imgUrl ? (
-                                        <ImagePositionEditor
+                                        <img
                                           src={imgUrl}
-                                          position={block.imagePositions?.[i] || { x: 50, y: 50 }}
-                                          onChange={(pos) => {
-                                            const updatedPositions = { ...(block.imagePositions || {}), [i]: pos };
-                                            setBlocks(prev => prev.map(b => b.id === block.id ? { ...b, imagePositions: updatedPositions } : b));
-                                          }}
-                                          aspectRatio={cols === 1 ? '16/9' : '1/1'}
-                                          roundedClass="rounded-2xl"
-                                          className="w-full h-full"
+                                          alt=""
+                                          draggable={false}
+                                          className="w-full h-full object-cover rounded-2xl"
                                         />
                                       ) : (
                                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1">
