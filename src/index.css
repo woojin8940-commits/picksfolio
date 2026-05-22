@@ -30,6 +30,12 @@ html {
   overscroll-behavior-y: none;
 }
 
+@media (min-width: 769px) {
+  html {
+    zoom: 0.75;
+  }
+}
+
 /* Remove the 300ms tap delay and the gray flash on iOS / Android */
 button,
 a,
