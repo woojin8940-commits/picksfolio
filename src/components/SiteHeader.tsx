@@ -18,8 +18,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
   isLoggedIn 
 }) => {
   return (
-    <header className="fixed top-0 left-0 w-full h-16 md:h-24 z-[1000] bg-background/80 backdrop-blur-2xl border-b border-white/5 flex items-center justify-center transition-all">
-      <div className="w-full page-scale-content flex items-center justify-between px-4 md:px-16 h-full">
+    <header className="fixed top-0 left-0 w-full h-16 md:h-24 z-[1000] bg-background/80 backdrop-blur-2xl border-b border-white/5 flex items-center justify-between px-4 md:px-16 transition-all">
       <div
         className="text-2xl md:text-3xl font-black text-purple-primary tracking-tighter cursor-pointer flex items-center font-display"
         onClick={onNavigateHome}
@@ -85,7 +84,6 @@ const SiteHeader: React.FC<HeaderProps> = ({
             로그인
           </button>
         )}
-      </div>
       </div>
     </header>
   );
