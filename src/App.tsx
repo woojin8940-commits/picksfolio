@@ -730,6 +730,21 @@ const App: React.FC = () => {
       localStorage.setItem('picks_last_activity', Date.now().toString());
     };
 
+    const publicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-login'];
+
+    const silentLogout = async () => {
+      const businessKeys = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
+      setIsLoggedIn(false);
+      setUserName('');
+      setProfileChecked(false);
+      loginNavigationHandledRef.current = false;
+      Object.keys(localStorage).filter(key => key.startsWith('picks_') && !businessKeys.includes(key)).forEach(key => localStorage.removeItem(key));
+      Object.keys(localStorage).filter(key => key.startsWith('sb-') || key.includes('supabase.auth')).forEach(key => localStorage.removeItem(key));
+      sessionStorage.clear();
+      clearAllLinkCache();
+      if (supabase) { try { await supabase.auth.signOut(); } catch {} }
+    };
+
     const checkInactivity = () => {
       if (loggedOut) return;
       const lastActivity = localStorage.getItem('picks_last_activity');
@@ -738,10 +753,14 @@ const App: React.FC = () => {
       if (elapsed > INACTIVITY_LIMIT) {
         loggedOut = true;
         console.log(`[Auth] Auto-logout: ${Math.round(elapsed / 60000)}분간 활동 없음 — 세션 종료`);
-        try {
-          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
-        } catch {}
-        handleLogout();
+        if (publicViews.includes(viewRef.current)) {
+          silentLogout();
+        } else {
+          try {
+            window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+          } catch {}
+          handleLogout();
+        }
       }
     };
 
@@ -755,10 +774,14 @@ const App: React.FC = () => {
       if (elapsed > INACTIVITY_LIMIT) {
         loggedOut = true;
         console.log(`[Auth] Auto-logout on mount: ${Math.round(elapsed / 60000)}분간 활동 없음 — 세션 종료`);
-        try {
-          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
-        } catch {}
-        handleLogout();
+        if (publicViews.includes(viewRef.current)) {
+          silentLogout();
+        } else {
+          try {
+            window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+          } catch {}
+          handleLogout();
+        }
         return;
       }
     } else {
@@ -814,6 +837,15 @@ const App: React.FC = () => {
       localStorage.setItem('picks_business_last_activity', Date.now().toString());
     };
 
+    const silentBusinessLogout = () => {
+      setIsBusinessLoggedIn(false);
+      setBusinessUsername('');
+      setBusinessCompanyName('');
+      ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token', 'picks_business_last_activity'].forEach(key => localStorage.removeItem(key));
+    };
+
+    const businessPublicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'login'];
+
     const checkInactivity = () => {
       if (loggedOut) return;
       const lastActivity = localStorage.getItem('picks_business_last_activity');
@@ -821,10 +853,14 @@ const App: React.FC = () => {
       const elapsed = Date.now() - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_LIMIT) {
         loggedOut = true;
-        try {
-          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
-        } catch {}
-        handleBusinessLogout();
+        if (businessPublicViews.includes(viewRef.current)) {
+          silentBusinessLogout();
+        } else {
+          try {
+            window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+          } catch {}
+          handleBusinessLogout();
+        }
       }
     };
 
@@ -833,10 +869,14 @@ const App: React.FC = () => {
       const elapsed = Date.now() - parseInt(stored, 10);
       if (elapsed > INACTIVITY_LIMIT) {
         loggedOut = true;
-        try {
-          window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
-        } catch {}
-        handleBusinessLogout();
+        if (businessPublicViews.includes(viewRef.current)) {
+          silentBusinessLogout();
+        } else {
+          try {
+            window.alert('2시간 동안 활동이 없어 자동 로그아웃됩니다.\n보안을 위해 다시 로그인해 주세요.');
+          } catch {}
+          handleBusinessLogout();
+        }
         return;
       }
     } else {
