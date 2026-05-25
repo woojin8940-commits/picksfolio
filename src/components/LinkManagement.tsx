@@ -203,6 +203,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
   const [categoryEditValue, setCategoryEditValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textEditorRef = useRef<HTMLDivElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
@@ -476,6 +477,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     loadData();
   }, [userName]);
 
+  useEffect(() => {
+    if (textEditorRef.current && isEditing && editForm.displayType === 'text') {
+      textEditorRef.current.innerHTML = editForm.textContent || '';
+    }
+  }, [isEditing]);
+
   const handleThemeChange = (theme: 'midnight' | 'white') => {
     setThemePreset(theme);
     if (theme === 'white') {
@@ -646,7 +653,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   const handleConfirmAddBlock = () => {
     const effectiveColSpan = newBlockDisplayType === 'grid' ? newBlockColSpan : 1;
-    const assignedCategory = selectedFolderId || 'TOP';
+    const assignedCategory = selectedFolderId || '';
     const newBlock: Block = {
       id: generateId(),
       title: newBlockDisplayType === 'text' ? '새로운 텍스트' : '새로운 포스트',
@@ -1259,11 +1266,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         <div
                           key={block.id}
                           onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                          className={`relative overflow-hidden cursor-pointer group shadow-sm flex flex-col justify-center p-2 ${themePreset === 'white' ? 'bg-slate-50 border border-slate-100' : 'bg-white/5 border border-white/10'}`}
+                          className="relative overflow-hidden cursor-pointer group flex flex-col justify-center px-2 py-1"
                           style={{
                             gridColumn: `span ${gridSpan}`,
-                            borderRadius: '0.75rem',
-                            minHeight: '50px',
+                            minHeight: '30px',
                             backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
                           }}
                         >
@@ -1609,6 +1615,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">텍스트 내용</label>
                       <div
+                        ref={textEditorRef}
                         contentEditable
                         suppressContentEditableWarning
                         className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-purple-600 transition-all outline-none whitespace-pre-wrap"
@@ -1620,8 +1627,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           color: editForm.color || '#37352f',
                           backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : undefined,
                         }}
-                        dangerouslySetInnerHTML={{ __html: editForm.textContent || '' }}
-                        onInput={(e) => setEditForm({ ...editForm, textContent: (e.target as HTMLDivElement).innerHTML })}
+                        onInput={(e) => setEditForm(prev => ({ ...prev, textContent: (e.target as HTMLDivElement).innerHTML }))}
                         data-placeholder="내용을 자유롭게 입력하세요. 키보드 이모지를 사용해 꾸밀 수 있어요."
                       />
                     </div>
