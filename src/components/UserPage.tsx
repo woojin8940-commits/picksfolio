@@ -1529,13 +1529,14 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                  <div
                     className="grid grid-flow-dense transition-all duration-500"
                     style={{
-                      gridTemplateColumns: `repeat(${design.gridColumns}, 1fr)`,
+                      gridTemplateColumns: 'repeat(6, 1fr)',
                       gap: `${Math.max(design.gridGap, 4)}px`,
                       paddingBottom: '100px'
                     }}
                   >
                     {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
-                      const blockColSpan = Math.min(block.colSpan || 1, design.gridColumns);
+                      const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                      const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
                       const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                       if (blockDisplay === 'text') {
@@ -1548,12 +1549,27 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             }}
                             className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
                             style={{
-                              gridColumn: `span ${blockColSpan}`,
+                              gridColumn: `span ${gridSpan}`,
                               borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                              minHeight: blockColSpan > 1 ? '120px' : '80px',
+                              minHeight: '80px',
+                              backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
                             }}
                           >
-                            <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                            {block.textContent ? (
+                              <div
+                                className="leading-relaxed whitespace-pre-wrap"
+                                style={{
+                                  fontSize: `${block.fontSizePx || 14}px`,
+                                  fontWeight: block.bold ? 'bold' : undefined,
+                                  fontStyle: block.italic ? 'italic' : undefined,
+                                  textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                                  color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
+                                }}
+                                dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
+                              />
+                            ) : (
+                              <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                            )}
                             <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
                             {(block.products?.length || 0) > 0 && (
                               <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
@@ -1572,7 +1588,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             }}
                             className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
                             style={{
-                              gridColumn: `span ${blockColSpan}`,
+                              gridColumn: `span ${gridSpan}`,
                               borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                             }}
                           >
@@ -1605,10 +1621,9 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             setSelectedBlockId(block.id);
                             trackClick(username, block.id);
                           }}
-                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
+                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
                           style={{
-                            gridColumn: `span ${blockColSpan}`,
-                            gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
+                            gridColumn: `span ${gridSpan}`,
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                           }}
                         >
@@ -1909,13 +1924,14 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 <div
                   className="grid grid-flow-dense"
                   style={{
-                    gridTemplateColumns: `repeat(${design.gridColumns}, 1fr)`,
+                    gridTemplateColumns: 'repeat(6, 1fr)',
                     gap: `${Math.max(design.gridGap, 4)}px`,
                     paddingBottom: '100px'
                   }}
                 >
                   {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
-                    const blockColSpan = Math.min(block.colSpan || 1, design.gridColumns);
+                    const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                    const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
                     const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                     if (blockDisplay === 'text') {
@@ -1928,12 +1944,27 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           }}
                           className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
                           style={{
-                            gridColumn: `span ${blockColSpan}`,
+                            gridColumn: `span ${gridSpan}`,
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                            minHeight: blockColSpan > 1 ? '120px' : '80px',
+                            minHeight: '80px',
+                            backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
                           }}
                         >
-                          <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                          {block.textContent ? (
+                            <div
+                              className="leading-relaxed whitespace-pre-wrap"
+                              style={{
+                                fontSize: `${block.fontSizePx || 14}px`,
+                                fontWeight: block.bold ? 'bold' : undefined,
+                                fontStyle: block.italic ? 'italic' : undefined,
+                                textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                                color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
+                              }}
+                              dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
+                            />
+                          ) : (
+                            <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                          )}
                           <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
                           {(block.products?.length || 0) > 0 && (
                             <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
@@ -1952,7 +1983,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           }}
                           className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
                           style={{
-                            gridColumn: `span ${blockColSpan}`,
+                            gridColumn: `span ${gridSpan}`,
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                           }}
                         >
@@ -1985,10 +2016,9 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           setSelectedBlockId(block.id);
                           trackClick(username, block.id);
                         }}
-                        className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
+                        className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
                         style={{
-                          gridColumn: `span ${blockColSpan}`,
-                          gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
+                          gridColumn: `span ${gridSpan}`,
                           borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                         }}
                       >

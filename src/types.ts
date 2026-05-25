@@ -60,6 +60,14 @@ export interface Block {
   products: Product[];
   colSpan?: 1 | 2 | 3;
   displayType?: BlockDisplayType;
+  textContent?: string;
+  fontSizePx?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  color?: string;
+  highlight?: string;
 }
 
 export interface DesignSettings {

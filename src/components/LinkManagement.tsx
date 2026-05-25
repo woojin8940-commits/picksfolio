@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronRight, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -9,6 +9,18 @@ import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSe
 import SafeImage from './SafeImage';
 import PhoneFrame from './PhoneFrame';
 import { renderPortfolioHtml } from './richText';
+
+const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#7c3aed', '#2563eb', '#dc2626', '#059669', '#d97706'];
+const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
+  { value: 'transparent', label: '없음' },
+  { value: '#FEF3C7', label: '노랑' },
+  { value: '#FEE2E2', label: '빨강' },
+  { value: '#DBEAFE', label: '파랑' },
+  { value: '#D1FAE5', label: '초록' },
+  { value: '#FCE7F3', label: '분홍' },
+  { value: '#E0E7FF', label: '보라' },
+  { value: '#F1F5F9', label: '회색' }
+];
 
 interface LinkManagementProps {
   userName: string;
@@ -174,6 +186,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [showBlockTypeModal, setShowBlockTypeModal] = useState(false);
   const [newBlockColSpan, setNewBlockColSpan] = useState<1 | 2 | 3>(1);
   const [newBlockDisplayType, setNewBlockDisplayType] = useState<BlockDisplayType>('grid');
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [showTextHighlightPicker, setShowTextHighlightPicker] = useState(false);
+  const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
@@ -567,7 +582,53 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     setShowBlockTypeModal(true);
   };
 
+  const handleMoveBlock = (blockId: string, direction: 'up' | 'down') => {
+    const idx = blocks.findIndex(b => b.id === blockId);
+    if (idx < 0) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === blocks.length - 1) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const updated = [...blocks];
+    [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
+    setBlocks(updated);
+    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updated));
+    saveBlocksToCloud(updated).catch(() => {});
+  };
+
+  const handleDragStart = (e: React.DragEvent, blockId: string) => {
+    setDraggedBlockId(blockId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetBlockId: string) => {
+    e.preventDefault();
+    if (!draggedBlockId || draggedBlockId === targetBlockId) {
+      setDraggedBlockId(null);
+      return;
+    }
+    const fromIdx = blocks.findIndex(b => b.id === draggedBlockId);
+    const toIdx = blocks.findIndex(b => b.id === targetBlockId);
+    if (fromIdx < 0 || toIdx < 0) { setDraggedBlockId(null); return; }
+    const updated = [...blocks];
+    const [moved] = updated.splice(fromIdx, 1);
+    updated.splice(toIdx, 0, moved);
+    setBlocks(updated);
+    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updated));
+    saveBlocksToCloud(updated).catch(() => {});
+    setDraggedBlockId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedBlockId(null);
+  };
+
   const handleConfirmAddBlock = () => {
+    const effectiveColSpan = newBlockDisplayType === 'grid' ? newBlockColSpan : 1;
     const newBlock: Block = {
       id: generateId(),
       title: newBlockDisplayType === 'text' ? '새로운 텍스트' : '새로운 포스트',
@@ -575,8 +636,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       coverMedia: '',
       mediaType: 'image',
       products: newBlockDisplayType === 'text' ? [] : [{ id: generateId(), name: '새 상품', price: '0', image: '', link: '' }],
-      colSpan: newBlockColSpan,
+      colSpan: effectiveColSpan,
       displayType: newBlockDisplayType,
+      ...(newBlockDisplayType === 'text' ? { textContent: '', fontSizePx: 14, color: '#37352f' } : {}),
     };
     const updatedBlocks = [newBlock, ...blocks];
     setBlocks(updatedBlocks);
@@ -828,8 +890,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               </div>
 
               <div className="space-y-3 md:space-y-4">
-                {displayedBlocks.map(block => (
-                  <div key={block.id} className="bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-4 md:gap-6 cursor-pointer hover:border-purple-600 transition-all group shadow-sm" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
+                {displayedBlocks.map((block, blockIndex) => (
+                  <div
+                    key={block.id}
+                    className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-purple-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+                    draggable
+                    onDragStart={e => handleDragStart(e, block.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={e => handleDrop(e, block.id)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'up'); }}
+                        disabled={blockIndex === 0}
+                        className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-all">
+                        <GripVertical size={16} />
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'down'); }}
+                        disabled={blockIndex === displayedBlocks.length - 1}
+                        className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                      >
+                        <ArrowDown size={14} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
                     <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
                       {block.displayType === 'text' ? (
                         <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
@@ -850,6 +940,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
                     </div>
                     <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -952,31 +1043,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
               </section>
 
-              <section className="space-y-3">
-                <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">그리드 상세 설정</h3>
-                <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] space-y-5">
-                  <div className="bg-purple-50 rounded-xl p-4">
-                    <p className="text-xs font-bold text-purple-700">
-                      블록별 칸 수와 표시 형식은 포스트 추가 시 개별 설정할 수 있습니다.
-                      아래 설정은 기본 그리드 최대 열 수를 지정합니다.
-                    </p>
-                  </div>
-                  <div className="space-y-2.5">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">기본 그리드 열 수</label>
-                    <div className="flex gap-2">
-                      {[2, 3].map((num) => (
-                        <button
-                          key={num}
-                          onClick={() => setColumns(num as 2 | 3)}
-                          className={`flex-1 py-4 rounded-xl font-black text-base transition-all ${columns === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                        >
-                          {num}칸
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </section>
 
             </div>
           )}
@@ -1083,10 +1149,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <div className="px-2 pb-4">
                 <div
                   className="grid grid-flow-dense"
-                  style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '3px' }}
+                  style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '3px' }}
                 >
                   {blocks.map((block) => {
-                    const blockColSpan = Math.min(block.colSpan || 1, columns);
+                    const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                    const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
                     const blockDisplay = block.displayType || 'grid';
                     const pos = block.coverMediaPosition || { x: 50, y: 50 };
 
@@ -1097,12 +1164,27 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
                           className={`relative overflow-hidden cursor-pointer group shadow-sm flex flex-col justify-center p-2 ${themePreset === 'white' ? 'bg-slate-50 border border-slate-100' : 'bg-white/5 border border-white/10'}`}
                           style={{
-                            gridColumn: `span ${blockColSpan}`,
+                            gridColumn: `span ${gridSpan}`,
                             borderRadius: '0.75rem',
-                            minHeight: blockColSpan > 1 ? '60px' : '50px',
+                            minHeight: '50px',
+                            backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
                           }}
                         >
-                          <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
+                          {block.textContent ? (
+                            <div
+                              className="text-[7px] leading-relaxed whitespace-pre-wrap overflow-hidden"
+                              style={{
+                                fontSize: `${Math.max(5, Math.min(10, (block.fontSizePx || 14) * 0.5))}px`,
+                                fontWeight: block.bold ? 'bold' : undefined,
+                                fontStyle: block.italic ? 'italic' : undefined,
+                                textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                                color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)'),
+                              }}
+                              dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
+                            />
+                          ) : (
+                            <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
+                          )}
                           <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5" style={{ color: accentColor }}>{block.category}</div>
                           {(block.products?.length || 0) > 0 && (
                             <div className="text-[5px] font-bold mt-1 opacity-50">{block.products.length} items</div>
@@ -1118,7 +1200,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
                           className={`relative overflow-hidden cursor-pointer group shadow-sm ${themePreset === 'white' ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}
                           style={{
-                            gridColumn: `span ${blockColSpan}`,
+                            gridColumn: `span ${gridSpan}`,
                             borderRadius: '0.75rem',
                           }}
                         >
@@ -1144,10 +1226,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       <div
                         key={block.id}
                         onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                        className={`relative overflow-hidden cursor-pointer group shadow-sm ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
+                        className={`relative overflow-hidden cursor-pointer group shadow-sm aspect-square`}
                         style={{
-                          gridColumn: `span ${blockColSpan}`,
-                          gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
+                          gridColumn: `span ${gridSpan}`,
                           borderRadius: '0.75rem',
                         }}
                       >
@@ -1395,6 +1476,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
                     <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-purple-600 transition-all" placeholder="카테고리" />
                   </div>
+                  {editForm.displayType === 'grid' && (
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">레이아웃</label>
                     <div className="flex gap-2">
@@ -1404,7 +1486,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         </button>
                       ))}
                     </div>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">1칸: 크게 표시 / 2,3칸: 동일 크기로 나열</p>
                   </div>
+                  )}
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">표시 형식</label>
                     <div className="flex gap-2">
@@ -1417,6 +1501,118 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   </div>
                 </div>
               </div>
+
+              {/* Text Design Settings - only for text display type */}
+              {editForm.displayType === 'text' && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-black text-purple-600">텍스트 디자인</h4>
+                  <div className="bg-[#F8FAFC] p-5 rounded-2xl border border-[#E2E8F0] space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">텍스트 내용</label>
+                      <div
+                        contentEditable
+                        suppressContentEditableWarning
+                        className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-purple-600 transition-all outline-none whitespace-pre-wrap"
+                        style={{
+                          fontSize: `${editForm.fontSizePx || 14}px`,
+                          fontWeight: editForm.bold ? 'bold' : undefined,
+                          fontStyle: editForm.italic ? 'italic' : undefined,
+                          textDecoration: [editForm.underline ? 'underline' : '', editForm.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                          color: editForm.color || '#37352f',
+                          backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : undefined,
+                        }}
+                        dangerouslySetInnerHTML={{ __html: editForm.textContent || '' }}
+                        onInput={(e) => setEditForm({ ...editForm, textContent: (e.target as HTMLDivElement).innerHTML })}
+                        data-placeholder="내용을 자유롭게 입력하세요. 키보드 이모지를 사용해 꾸밀 수 있어요."
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Font Size */}
+                      <div className="flex items-center gap-1 bg-white rounded-xl border border-[#E2E8F0] px-2 py-1">
+                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.max(8, (editForm.fontSizePx || 14) - 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronDown size={14} /></button>
+                        <span className="text-xs font-black w-8 text-center">{editForm.fontSizePx || 14}</span>
+                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.min(96, (editForm.fontSizePx || 14) + 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronUp size={14} /></button>
+                      </div>
+
+                      {/* Bold */}
+                      <button
+                        onClick={() => setEditForm({ ...editForm, bold: !editForm.bold })}
+                        className={`p-2 rounded-xl transition-all ${editForm.bold ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                      ><BoldIcon size={16} /></button>
+
+                      {/* Italic */}
+                      <button
+                        onClick={() => setEditForm({ ...editForm, italic: !editForm.italic })}
+                        className={`p-2 rounded-xl transition-all ${editForm.italic ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                      ><ItalicIcon size={16} /></button>
+
+                      {/* Underline */}
+                      <button
+                        onClick={() => setEditForm({ ...editForm, underline: !editForm.underline })}
+                        className={`p-2 rounded-xl transition-all ${editForm.underline ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                      ><UnderlineIcon size={16} /></button>
+
+                      {/* Strikethrough */}
+                      <button
+                        onClick={() => setEditForm({ ...editForm, strikethrough: !editForm.strikethrough })}
+                        className={`p-2 rounded-xl transition-all ${editForm.strikethrough ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                      ><StrikethroughIcon size={16} /></button>
+
+                      {/* Text Color */}
+                      <div className="relative">
+                        <button
+                          onClick={() => { setShowTextColorPicker(!showTextColorPicker); setShowTextHighlightPicker(false); }}
+                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
+                        >
+                          <span className="text-xs font-black">A</span>
+                          <div className="w-4 h-1 rounded-full" style={{ backgroundColor: editForm.color || '#37352f' }}></div>
+                        </button>
+                        {showTextColorPicker && (
+                          <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
+                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
+                              {TEXT_COLOR_PRESETS.map(c => (
+                                <button key={c} onClick={() => { setEditForm({ ...editForm, color: c }); setShowTextColorPicker(false); }}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
+                                  style={{ backgroundColor: c }}
+                                />
+                              ))}
+                            </div>
+                            <input type="color" value={editForm.color || '#37352f'} onChange={e => setEditForm({ ...editForm, color: e.target.value })}
+                              className="w-full h-8 cursor-pointer rounded"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Highlight Color */}
+                      <div className="relative">
+                        <button
+                          onClick={() => { setShowTextHighlightPicker(!showTextHighlightPicker); setShowTextColorPicker(false); }}
+                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
+                        >
+                          <span className="text-xs font-black px-0.5 rounded" style={{ backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : '#FEF3C7' }}>H</span>
+                        </button>
+                        {showTextHighlightPicker && (
+                          <div className="absolute top-full mt-2 right-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3">
+                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
+                              {HIGHLIGHT_COLOR_PRESETS.map(c => (
+                                <button key={c.value} onClick={() => { setEditForm({ ...editForm, highlight: c.value }); setShowTextHighlightPicker(false); }}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-purple-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
+                                  style={{ backgroundColor: c.value === 'transparent' ? '#fff' : c.value }}
+                                >
+                                  {c.value === 'transparent' ? '✕' : ''}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold">키보드 이모지를 사용해 꾸밀 수 있어요</p>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
@@ -1565,6 +1761,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
               </div>
 
+              {newBlockDisplayType === 'grid' && (
               <div className="space-y-3">
                 <label className="text-xs font-black text-slate-400 uppercase tracking-widest">칸 수 (너비)</label>
                 <div className="grid grid-cols-3 gap-3">
@@ -1578,15 +1775,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     </button>
                   ))}
                 </div>
-                <div className="flex gap-2 items-center justify-center pt-1">
-                  <div className="flex gap-1 bg-slate-50 rounded-lg p-2">
-                    {[1,2,3].map(i => (
-                      <div key={i} className={`h-6 rounded transition-all ${i <= newBlockColSpan ? 'bg-purple-400' : 'bg-slate-200'}`} style={{ width: `${20 * (i <= newBlockColSpan && i === newBlockColSpan ? newBlockColSpan : 1)}px` }}></div>
-                    ))}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-bold">미리보기</span>
-                </div>
+                <p className="text-[10px] text-slate-400 font-bold text-center">1칸: 크게 표시 / 2,3칸: 동일 크기로 나열</p>
               </div>
+              )}
             </div>
 
             <div className="p-6 sm:p-8 bg-[#F8FAFC] border-t border-[#E2E8F0] flex gap-3">
