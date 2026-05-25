@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
-import { Block, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
+import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
 import SafeImage from './SafeImage';
 import PhoneFrame from './PhoneFrame';
 import { renderPortfolioHtml } from './richText';
@@ -98,18 +98,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     }
     return 2;
   });
-  const [itemStyle, setItemStyle] = useState<'equal' | 'magazine'>(() => {
-    try {
-      const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
-      if (saved) {
-        const design = JSON.parse(saved);
-        return design.gridStyle === 'magazine' ? 'magazine' : 'equal';
-      }
-    } catch (e) {
-      console.error('Error parsing design:', e);
-    }
-    return 'equal';
-  });
   const [themePreset, setThemePreset] = useState<'midnight' | 'white'>(() => {
     try {
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
@@ -183,6 +171,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const [previewSelectedBlock, setPreviewSelectedBlock] = useState<Block | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block', id: string } | null>(null);
+  const [showBlockTypeModal, setShowBlockTypeModal] = useState(false);
+  const [newBlockColSpan, setNewBlockColSpan] = useState<1 | 2 | 3>(1);
+  const [newBlockDisplayType, setNewBlockDisplayType] = useState<BlockDisplayType>('grid');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
@@ -440,7 +431,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
         setHomePriority(settings.design.homePriority === 'portfolio' ? 'portfolio' : 'curation');
         setLayoutTemplate(settings.design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid');
         setColumns(settings.design.gridColumns as 1 | 2 | 3 || 2);
-        setItemStyle(settings.design.gridStyle === 'magazine' ? 'magazine' : 'equal');
         setThemePreset(settings.design.theme === 'white' ? 'white' : 'midnight');
         setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#a855f7'));
         setCustomGradient(settings.design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)');
@@ -482,7 +472,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       borderRadius: 'full',
       gridGap: 1,
       gridColumns: columns,
-      gridStyle: itemStyle === 'magazine' ? 'magazine' : 'standard',
+      gridStyle: 'standard',
       fontFamily: 'Sans',
       buttonStyle: 'solid',
       backgroundType: 'solid',
@@ -572,19 +562,27 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   };
 
   const handleAddBlock = () => {
+    setNewBlockColSpan(1);
+    setNewBlockDisplayType('grid');
+    setShowBlockTypeModal(true);
+  };
+
+  const handleConfirmAddBlock = () => {
     const newBlock: Block = {
       id: generateId(),
-      title: '새로운 포스트',
+      title: newBlockDisplayType === 'text' ? '새로운 텍스트' : '새로운 포스트',
       category: 'TOP',
       coverMedia: '',
       mediaType: 'image',
-      products: [{ id: generateId(), name: '새 상품', price: '0', image: '', link: '' }]
+      products: newBlockDisplayType === 'text' ? [] : [{ id: generateId(), name: '새 상품', price: '0', image: '', link: '' }],
+      colSpan: newBlockColSpan,
+      displayType: newBlockDisplayType,
     };
     const updatedBlocks = [newBlock, ...blocks];
     setBlocks(updatedBlocks);
     localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
-    // 클라우드 동기화 (백그라운드)
     saveBlocksToCloud(updatedBlocks).catch(err => console.warn('[AddBlock] 클라우드 동기화 실패:', err));
+    setShowBlockTypeModal(false);
     setIsEditing(newBlock.id);
     setEditForm(newBlock);
   };
@@ -833,11 +831,20 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 {displayedBlocks.map(block => (
                   <div key={block.id} className="bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-4 md:gap-6 cursor-pointer hover:border-purple-600 transition-all group shadow-sm" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
                     <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                      <SafeImage src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                      {block.displayType === 'text' ? (
+                        <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
+                          <span className="text-2xl font-black">T</span>
+                        </div>
+                      ) : (
+                        <SafeImage src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                      )}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="inline-block bg-[#F1F5F9] text-[#64748B] text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">{block.category}</span>
+                        <span className="inline-block bg-purple-50 text-purple-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+                          {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
+                        </span>
                       </div>
                       <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
                       <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
@@ -948,35 +955,24 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <section className="space-y-3">
                 <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">그리드 상세 설정</h3>
                 <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] space-y-5">
+                  <div className="bg-purple-50 rounded-xl p-4">
+                    <p className="text-xs font-bold text-purple-700">
+                      블록별 칸 수와 표시 형식은 포스트 추가 시 개별 설정할 수 있습니다.
+                      아래 설정은 기본 그리드 최대 열 수를 지정합니다.
+                    </p>
+                  </div>
                   <div className="space-y-2.5">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">그리드 칸 수</label>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">기본 그리드 열 수</label>
                     <div className="flex gap-2">
-                      {[1, 2, 3].map((num) => (
+                      {[2, 3].map((num) => (
                         <button
                           key={num}
-                          onClick={() => setColumns(num as 1 | 2 | 3)}
+                          onClick={() => setColumns(num as 2 | 3)}
                           className={`flex-1 py-4 rounded-xl font-black text-base transition-all ${columns === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                         >
                           {num}칸
                         </button>
                       ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2.5">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">아이템 스타일</label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setItemStyle('equal')}
-                        className={`flex-1 py-4 rounded-xl font-black text-base transition-all ${itemStyle === 'equal' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                      >
-                        정사각형
-                      </button>
-                      <button
-                        onClick={() => setItemStyle('magazine')}
-                        className={`flex-1 py-4 rounded-xl font-black text-base transition-all ${itemStyle === 'magazine' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                      >
-                        매거진
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -1089,19 +1085,69 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   className="grid grid-flow-dense"
                   style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '3px' }}
                 >
-                  {blocks.map((block, idx) => {
-                    const isFeatured = itemStyle === 'magazine' && idx === 0 && columns > 1;
-                    const colSpan = isFeatured ? 2 : 1;
-                    const rowSpan = isFeatured ? 2 : 1;
+                  {blocks.map((block) => {
+                    const blockColSpan = Math.min(block.colSpan || 1, columns);
+                    const blockDisplay = block.displayType || 'grid';
                     const pos = block.coverMediaPosition || { x: 50, y: 50 };
+
+                    if (blockDisplay === 'text') {
+                      return (
+                        <div
+                          key={block.id}
+                          onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
+                          className={`relative overflow-hidden cursor-pointer group shadow-sm flex flex-col justify-center p-2 ${themePreset === 'white' ? 'bg-slate-50 border border-slate-100' : 'bg-white/5 border border-white/10'}`}
+                          style={{
+                            gridColumn: `span ${blockColSpan}`,
+                            borderRadius: '0.75rem',
+                            minHeight: blockColSpan > 1 ? '60px' : '50px',
+                          }}
+                        >
+                          <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
+                          <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5" style={{ color: accentColor }}>{block.category}</div>
+                          {(block.products?.length || 0) > 0 && (
+                            <div className="text-[5px] font-bold mt-1 opacity-50">{block.products.length} items</div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (blockDisplay === 'minimal') {
+                      return (
+                        <div
+                          key={block.id}
+                          onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
+                          className={`relative overflow-hidden cursor-pointer group shadow-sm ${themePreset === 'white' ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}
+                          style={{
+                            gridColumn: `span ${blockColSpan}`,
+                            borderRadius: '0.75rem',
+                          }}
+                        >
+                          {block.coverMedia && (
+                            <div className="aspect-[16/10] overflow-hidden">
+                              <SafeImage
+                                src={block.coverMedia}
+                                alt=""
+                                className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
+                                style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
+                              />
+                            </div>
+                          )}
+                          <div className="p-1.5">
+                            <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
+                            <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5" style={{ color: accentColor }}>{block.category}</div>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div
                         key={block.id}
                         onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                        className={`relative overflow-hidden cursor-pointer group shadow-sm ${isFeatured ? 'aspect-[10/9]' : 'aspect-square'}`}
+                        className={`relative overflow-hidden cursor-pointer group shadow-sm ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
                         style={{
-                          gridColumn: `span ${colSpan}`,
-                          gridRow: `span ${rowSpan}`,
+                          gridColumn: `span ${blockColSpan}`,
+                          gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
                           borderRadius: '0.75rem',
                         }}
                       >
@@ -1349,6 +1395,26 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
                     <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-purple-600 transition-all" placeholder="카테고리" />
                   </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">레이아웃</label>
+                    <div className="flex gap-2">
+                      {([1, 2, 3] as const).map(num => (
+                        <button key={num} onClick={() => setEditForm({ ...editForm, colSpan: num })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.colSpan || 1) === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                          {num}칸
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">표시 형식</label>
+                    <div className="flex gap-2">
+                      {([{ key: 'grid' as const, label: '그리드' }, { key: 'minimal' as const, label: '미니멀' }, { key: 'text' as const, label: '텍스트' }]).map(opt => (
+                        <button key={opt.key} onClick={() => setEditForm({ ...editForm, displayType: opt.key })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.displayType || 'grid') === opt.key ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1443,6 +1509,91 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
             <div className="grid grid-cols-2 gap-3">
               <button onClick={() => setConfirmDelete(null)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">취소</button>
               <button onClick={executeDelete} className="py-4 bg-red-500 text-white rounded-2xl font-black">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Block Type Selection Modal */}
+      {showBlockTypeModal && (
+        <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBlockTypeModal(false)}></div>
+          <div className="bg-white w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
+            <div className="p-6 sm:p-8 pb-4 flex justify-between items-center">
+              <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">블록 추가</h3>
+              <button onClick={() => setShowBlockTypeModal(false)} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8 pt-0 space-y-6">
+              <div className="space-y-3">
+                <label className="text-xs font-black text-slate-400 uppercase tracking-widest">표시 형식</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => setNewBlockDisplayType('grid')}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'grid' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 grid grid-cols-2 gap-px p-2">
+                      {[1,2,3,4].map(i => <div key={i} className="bg-slate-300 rounded-sm"></div>)}
+                    </div>
+                    <span className="font-black text-xs">그리드</span>
+                    <span className="text-[10px] text-slate-400 font-bold">이미지 중심</span>
+                  </button>
+                  <button
+                    onClick={() => setNewBlockDisplayType('minimal')}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'minimal' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 flex flex-col gap-1 p-2 justify-center">
+                      <div className="h-1.5 bg-slate-300 rounded-sm w-full"></div>
+                      <div className="h-1 bg-slate-200 rounded-sm w-3/4"></div>
+                      <div className="h-1 bg-slate-200 rounded-sm w-1/2"></div>
+                    </div>
+                    <span className="font-black text-xs">미니멀</span>
+                    <span className="text-[10px] text-slate-400 font-bold">깔끔한 카드</span>
+                  </button>
+                  <button
+                    onClick={() => setNewBlockDisplayType('text')}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'text' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 flex flex-col gap-1 p-2.5 justify-center">
+                      <div className="h-1 bg-slate-400 rounded-sm w-full"></div>
+                      <div className="h-1 bg-slate-300 rounded-sm w-4/5"></div>
+                      <div className="h-1 bg-slate-300 rounded-sm w-3/5"></div>
+                    </div>
+                    <span className="font-black text-xs">텍스트</span>
+                    <span className="text-[10px] text-slate-400 font-bold">텍스트 전용</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-black text-slate-400 uppercase tracking-widest">칸 수 (너비)</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {([1, 2, 3] as const).map(num => (
+                    <button
+                      key={num}
+                      onClick={() => setNewBlockColSpan(num)}
+                      className={`py-4 rounded-xl font-black text-base transition-all ${newBlockColSpan === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                    >
+                      {num}칸
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 items-center justify-center pt-1">
+                  <div className="flex gap-1 bg-slate-50 rounded-lg p-2">
+                    {[1,2,3].map(i => (
+                      <div key={i} className={`h-6 rounded transition-all ${i <= newBlockColSpan ? 'bg-purple-400' : 'bg-slate-200'}`} style={{ width: `${20 * (i <= newBlockColSpan && i === newBlockColSpan ? newBlockColSpan : 1)}px` }}></div>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-bold">미리보기</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 sm:p-8 bg-[#F8FAFC] border-t border-[#E2E8F0] flex gap-3">
+              <button onClick={() => setShowBlockTypeModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">취소</button>
+              <button onClick={handleConfirmAddBlock} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black hover:bg-purple-700 transition-all shadow-lg">
+                추가하기
+              </button>
             </div>
           </div>
         </div>
