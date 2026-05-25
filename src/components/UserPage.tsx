@@ -762,10 +762,13 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   }, [normalizedUsername]);
 
   const categories = useMemo(() => {
-    const catSet = new Set<string>(linkGridCategories);
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const c = blocks[i].category;
+    const catSet = new Set<string>();
+    for (const b of blocks) {
+      const c = b.category;
       if (c) catSet.add(c);
+    }
+    for (const c of linkGridCategories) {
+      catSet.add(c);
     }
     return ['전체', ...Array.from(catSet)];
   }, [blocks, linkGridCategories]);
@@ -1398,7 +1401,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             }`}
                             style={highlight ? { backgroundColor: highlight } : undefined}
                           >
-                            <p
+                            <div
                               className={`whitespace-pre-wrap ${section.bold ? 'font-bold' : 'font-medium'}`}
                               style={{
                                 color: section.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
@@ -1941,11 +1944,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       return (
                         <div
                           key={block.id}
-                          onClick={() => {
-                            setSelectedBlockId(block.id);
-                            trackClick(username, block.id);
-                          }}
-                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                          className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
                           style={{
                             gridColumn: `span ${gridSpan}`,
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
@@ -2136,7 +2135,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           }`}
                           style={highlight ? { backgroundColor: highlight } : undefined}
                         >
-                          <p
+                          <div
                             className={`whitespace-pre-wrap ${section.bold ? 'font-bold' : 'font-medium'}`}
                             style={{
                               color: section.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
