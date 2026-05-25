@@ -60,6 +60,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     }
   });
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [linkGridCategories, setLinkGridCategories] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`picks_categories_${(userName || '').toLowerCase()}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [_showFolderModal, setShowFolderModal] = useState(false);
   const [folderEditName, setFolderEditName] = useState('');
   const [folderEditIcon, setFolderEditIcon] = useState('');
@@ -190,6 +198,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   const [showTextHighlightPicker, setShowTextHighlightPicker] = useState(false);
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
+  const [categoryEditValue, setCategoryEditValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
@@ -391,6 +403,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           if (apiData.socials) {
             setSocials(apiData.socials);
             localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(apiData.socials));
+          }
+          if (Array.isArray(apiData.linkGridCategories)) {
+            setLinkGridCategories(apiData.linkGridCategories);
+            localStorage.setItem(`picks_categories_${userName.toLowerCase()}`, JSON.stringify(apiData.linkGridCategories));
           }
           // API에 블록 데이터가 없으면 Supabase 폴백
           if ((!apiData.blocks || apiData.blocks.length === 0)) {
@@ -630,10 +646,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   const handleConfirmAddBlock = () => {
     const effectiveColSpan = newBlockDisplayType === 'grid' ? newBlockColSpan : 1;
+    const assignedCategory = selectedFolderId || 'TOP';
     const newBlock: Block = {
       id: generateId(),
       title: newBlockDisplayType === 'text' ? '새로운 텍스트' : '새로운 포스트',
-      category: 'TOP',
+      category: assignedCategory,
       coverMedia: '',
       mediaType: 'image',
       products: newBlockDisplayType === 'text' ? [] : [{ id: generateId(), name: '새 상품', price: '0', image: '', link: '' }],
@@ -715,6 +732,69 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   // Folder management functions - reserved for future folder UI
   void _handleAddFolder; void _handleEditFolder; void _handleSaveFolder; void _handleDeleteFolder; void _handleToggleBlockInFolder;
+
+  const managedCategories = (() => {
+    const catSet = new Set<string>(linkGridCategories);
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const c = blocks[i].category;
+      if (c) catSet.add(c);
+    }
+    return Array.from(catSet);
+  })();
+
+  const saveCategoriesToCloud = (cats: string[]) => {
+    localStorage.setItem(`picks_categories_${userName.toLowerCase()}`, JSON.stringify(cats));
+    apiService.saveSiteData(userName, { linkGridCategories: cats }).catch(err => console.warn('[SaveCategories] 클라우드 동기화 실패:', err));
+  };
+
+  const handleAddCategory = () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    if (managedCategories.includes(trimmed)) {
+      showSuccessFeedback('이미 존재하는 카테고리입니다!');
+      return;
+    }
+    const updatedCats = [...linkGridCategories, trimmed];
+    setLinkGridCategories(updatedCats);
+    saveCategoriesToCloud(updatedCats);
+    setNewCategoryName('');
+    setSelectedFolderId(trimmed);
+    showSuccessFeedback(`'${trimmed}' 카테고리가 추가되었습니다!`);
+  };
+
+  const handleRenameCategory = (oldName: string) => {
+    const trimmed = categoryEditValue.trim();
+    if (!trimmed || trimmed === oldName) {
+      setEditingCategoryName(null);
+      return;
+    }
+    if (managedCategories.includes(trimmed)) {
+      showSuccessFeedback('이미 존재하는 카테고리입니다!');
+      return;
+    }
+    const updatedBlocks = blocks.map(b => b.category === oldName ? { ...b, category: trimmed } : b);
+    setBlocks(updatedBlocks);
+    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+    saveBlocksToCloud(updatedBlocks).catch(() => {});
+    const updatedCats = linkGridCategories.map(c => c === oldName ? trimmed : c);
+    setLinkGridCategories(updatedCats);
+    saveCategoriesToCloud(updatedCats);
+    if (selectedFolderId === oldName) setSelectedFolderId(trimmed);
+    setEditingCategoryName(null);
+    showSuccessFeedback(`카테고리가 '${trimmed}'(으)로 변경되었습니다!`);
+  };
+
+  const handleDeleteCategory = (catName: string) => {
+    const updatedBlocks = blocks.filter(b => b.category !== catName);
+    setBlocks(updatedBlocks);
+    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+    saveBlocksToCloud(updatedBlocks).catch(() => {});
+    const updatedCats = linkGridCategories.filter(c => c !== catName);
+    setLinkGridCategories(updatedCats);
+    saveCategoriesToCloud(updatedCats);
+    if (selectedFolderId === catName) setSelectedFolderId(null);
+    showSuccessFeedback(`'${catName}' 카테고리가 삭제되었습니다!`);
+  };
 
   const displayedBlocks = selectedFolderId
     ? blocks.filter(b => b.category === selectedFolderId)
@@ -872,13 +952,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide items-center">
                   {(() => {
-                    const catSet = new Set<string>();
-                    // Iterate oldest → newest so newly added blocks (prepended) contribute their category last
-                    for (let i = blocks.length - 1; i >= 0; i--) {
-                      const c = blocks[i].category;
-                      if (c) catSet.add(c);
-                    }
-                    const cats = ['전체', ...Array.from(catSet)];
+                    const cats = ['전체', ...managedCategories];
                     return cats.map(cat => (
                       <button key={cat} onClick={() => setSelectedFolderId(cat === '전체' ? null : cat)} className={`px-5 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${(cat === '전체' && !selectedFolderId) || selectedFolderId === cat ? 'bg-[#1E1E2E] text-white shadow-lg' : 'bg-white text-[#64748B] border border-[#E2E8F0] hover:border-purple-300'}`}>
                         {cat}
@@ -894,9 +968,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 <h2 className="text-sm md:text-base font-black text-[#64748B]">
                   {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : `전체 리스트 (${blocks.length})`}
                 </h2>
-                <button onClick={handleAddBlock} className="text-purple-600 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all">
-                  <Plus size={14} /> 새 포스트 추가
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-purple-300">
+                    <Plus size={14} /> 카테고리 관리
+                  </button>
+                  <button onClick={handleAddBlock} className="text-purple-600 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all">
+                    <Plus size={14} /> 새 포스트 추가
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3 md:space-y-4">
@@ -946,8 +1025,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
                         </span>
                       </div>
-                      <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
-                      <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
+                      {block.displayType === 'text' ? (
+                        <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
+                          {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
+                        </h3>
+                      ) : (
+                        <>
+                          <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
+                          <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
+                        </>
+                      )}
                     </div>
                     <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
                     </div>
@@ -1138,7 +1225,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
             {/* Category Tabs */}
             {(() => {
-              const previewCategories = ['전체', ...Array.from(new Set(blocks.map(b => b.category).filter(Boolean)))];
+              const previewCategories = ['전체', ...managedCategories];
               return previewCategories.length > 1 ? (
                 <div className="px-2 pb-2 overflow-x-auto scrollbar-hide flex gap-1">
                   {previewCategories.map(cat => (
@@ -1193,11 +1280,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                               dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
                             />
                           ) : (
-                            <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
-                          )}
-                          <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5" style={{ color: accentColor }}>{block.category}</div>
-                          {(block.products?.length || 0) > 0 && (
-                            <div className="text-[5px] font-bold mt-1 opacity-50">{block.products.length} items</div>
+                            <div className={`text-[6px] opacity-50 ${themePreset === 'white' ? 'text-slate-300' : 'text-white/30'}`}>텍스트 입력</div>
                           )}
                         </div>
                       );
@@ -1437,7 +1520,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={handleCancelEdit}></div>
           <div className="bg-white w-full max-w-2xl max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-5 sm:p-10 pb-4 sm:pb-6 flex justify-between items-center">
-              <h3 className="text-xl sm:text-3xl font-black text-[#1E1E2E]">포스트 수정</h3>
+              <h3 className="text-xl sm:text-3xl font-black text-[#1E1E2E]">{editForm.displayType === 'text' ? '텍스트 수정' : '포스트 수정'}</h3>
               <button onClick={handleCancelEdit} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
@@ -1480,6 +1563,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
                 )}
                 <div className={`w-full ${editForm.displayType !== 'text' ? 'md:w-1/2' : ''} space-y-6`}>
+                  {editForm.displayType !== 'text' && (
+                  <>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">포스트 제목</label>
                     <input type="text" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all" placeholder="제목" />
@@ -1488,6 +1573,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
                     <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-purple-600 transition-all" placeholder="카테고리" />
                   </div>
+                  </>
+                  )}
                   {editForm.displayType === 'grid' && (
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">레이아웃</label>
@@ -1626,6 +1713,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                 </div>
               )}
 
+              {editForm.displayType !== 'text' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
                   <h4 className="text-lg font-black text-purple-600">연결 상품</h4>
@@ -1694,6 +1782,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                   </div>
                 ))}
               </div>
+              )}
             </div>
 
             <div className="p-10 bg-[#F8FAFC] border-t border-[#E2E8F0] flex gap-4">
@@ -1797,6 +1886,79 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <button onClick={handleConfirmAddBlock} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black hover:bg-purple-700 transition-all shadow-lg">
                 추가하기
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category Management Modal */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => { setShowCategoryModal(false); setEditingCategoryName(null); }}></div>
+          <div className="bg-white w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
+            <div className="p-6 sm:p-8 pb-4 flex justify-between items-center">
+              <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">카테고리 관리</h3>
+              <button onClick={() => { setShowCategoryModal(false); setEditingCategoryName(null); }} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8 pt-0 space-y-6">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={e => setNewCategoryName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                  className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-5 py-3 font-black text-sm focus:border-purple-600 transition-all"
+                  placeholder="새 카테고리 이름"
+                />
+                <button
+                  onClick={handleAddCategory}
+                  disabled={!newCategoryName.trim()}
+                  className="px-5 py-3 bg-purple-600 text-white rounded-2xl font-black text-sm hover:bg-purple-700 transition-all disabled:opacity-50"
+                >
+                  추가
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {managedCategories.length === 0 ? (
+                  <p className="text-center text-slate-400 font-bold text-sm py-8">카테고리가 없습니다. 위에서 추가해주세요.</p>
+                ) : (
+                  managedCategories.map(cat => (
+                    <div key={cat} className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-4 flex items-center justify-between gap-3">
+                      {editingCategoryName === cat ? (
+                        <div className="flex-1 flex gap-2">
+                          <input
+                            type="text"
+                            value={categoryEditValue}
+                            onChange={e => setCategoryEditValue(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleRenameCategory(cat)}
+                            className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-4 py-2 font-black text-sm focus:border-purple-600 transition-all"
+                            autoFocus
+                          />
+                          <button onClick={() => handleRenameCategory(cat)} className="px-3 py-2 bg-purple-600 text-white rounded-xl font-black text-xs">확인</button>
+                          <button onClick={() => setEditingCategoryName(null)} className="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl font-black text-xs">취소</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <span className="font-black text-sm text-[#1E1E2E] truncate">{cat}</span>
+                            <span className="text-xs text-slate-400 font-bold whitespace-nowrap">{blocks.filter(b => b.category === cat).length}개</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button onClick={() => { setEditingCategoryName(cat); setCategoryEditValue(cat); }} className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-black text-slate-500 hover:border-purple-300 transition-all">수정</button>
+                            <button onClick={() => handleDeleteCategory(cat)} className="p-1.5 bg-white border border-red-100 text-red-400 rounded-xl hover:text-red-500 transition-all"><Trash2 size={14} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 sm:p-8 bg-[#F8FAFC] border-t border-[#E2E8F0]">
+              <button onClick={() => { setShowCategoryModal(false); setEditingCategoryName(null); }} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">닫기</button>
             </div>
           </div>
         </div>

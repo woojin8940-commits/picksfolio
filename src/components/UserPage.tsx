@@ -227,6 +227,14 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     } catch (e) { return []; }
   });
 
+  const [linkGridCategories, setLinkGridCategories] = useState<string[]>(() => {
+    try {
+      if (!normalizedUsername) return [];
+      const saved = localStorage.getItem(`picks_categories_${normalizedUsername}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
+
   const [profile, setProfile] = useState<ProfileData | null>(() => {
     try {
       if (!normalizedUsername) return null;
@@ -361,6 +369,10 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             if (apiData.openSchedule) {
               setOpenSchedule(apiData.openSchedule);
               localStorage.setItem(`picks_schedule_${normalizedUsername}`, JSON.stringify(apiData.openSchedule));
+            }
+            if (Array.isArray(apiData.linkGridCategories)) {
+              setLinkGridCategories(apiData.linkGridCategories);
+              localStorage.setItem(`picks_categories_${normalizedUsername}`, JSON.stringify(apiData.linkGridCategories));
             }
           }
         } catch (apiError) {
@@ -750,14 +762,13 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   }, [normalizedUsername]);
 
   const categories = useMemo(() => {
-    const catSet = new Set<string>();
-    // Iterate oldest → newest so newly added blocks (prepended) contribute their category last
+    const catSet = new Set<string>(linkGridCategories);
     for (let i = blocks.length - 1; i >= 0; i--) {
       const c = blocks[i].category;
       if (c) catSet.add(c);
     }
     return ['전체', ...Array.from(catSet)];
-  }, [blocks]);
+  }, [blocks, linkGridCategories]);
 
   const filteredBlocks = useMemo(() => {
     let result = blocks;
@@ -1568,11 +1579,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                 dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
                               />
                             ) : (
-                              <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
-                            )}
-                            <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
-                            {(block.products?.length || 0) > 0 && (
-                              <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
+                              <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
                             )}
                           </div>
                         );
@@ -1963,11 +1970,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                               dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
                             />
                           ) : (
-                            <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
-                          )}
-                          <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
-                          {(block.products?.length || 0) > 0 && (
-                            <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
+                            <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
                           )}
                         </div>
                       );
