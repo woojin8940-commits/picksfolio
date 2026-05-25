@@ -186,6 +186,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [showBlockTypeModal, setShowBlockTypeModal] = useState(false);
   const [newBlockColSpan, setNewBlockColSpan] = useState<1 | 2 | 3>(1);
   const [newBlockDisplayType, setNewBlockDisplayType] = useState<BlockDisplayType>('grid');
+  const [pendingNewBlockId, setPendingNewBlockId] = useState<string | null>(null);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   const [showTextHighlightPicker, setShowTextHighlightPicker] = useState(false);
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
@@ -640,13 +641,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       displayType: newBlockDisplayType,
       ...(newBlockDisplayType === 'text' ? { textContent: '', fontSizePx: 14, color: '#37352f' } : {}),
     };
-    const updatedBlocks = [newBlock, ...blocks];
-    setBlocks(updatedBlocks);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
-    saveBlocksToCloud(updatedBlocks).catch(err => console.warn('[AddBlock] 클라우드 동기화 실패:', err));
+    setPendingNewBlockId(newBlock.id);
     setShowBlockTypeModal(false);
     setIsEditing(newBlock.id);
     setEditForm(newBlock);
+  };
+
+  const handleCancelEdit = () => {
+    if (pendingNewBlockId && isEditing === pendingNewBlockId) {
+      setPendingNewBlockId(null);
+    }
+    setIsEditing(null);
   };
 
   // Product Folder Management Functions
@@ -727,8 +732,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       }))
     } as Block;
 
-    // 즉시 로컬 저장 및 UI 반영
-    const updatedBlocks = blocks.map(b => b.id === isEditing ? sanitizedEditForm : b);
+    let updatedBlocks: Block[];
+    if (pendingNewBlockId && isEditing === pendingNewBlockId) {
+      updatedBlocks = [sanitizedEditForm, ...blocks];
+      setPendingNewBlockId(null);
+    } else {
+      updatedBlocks = blocks.map(b => b.id === isEditing ? sanitizedEditForm : b);
+    }
     setBlocks(updatedBlocks);
     localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
 
@@ -1424,15 +1434,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       {/* Edit Modal */}
       {isEditing && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsEditing(null)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={handleCancelEdit}></div>
           <div className="bg-white w-full max-w-2xl max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-5 sm:p-10 pb-4 sm:pb-6 flex justify-between items-center">
               <h3 className="text-xl sm:text-3xl font-black text-[#1E1E2E]">포스트 수정</h3>
-              <button onClick={() => setIsEditing(null)} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
+              <button onClick={handleCancelEdit} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
             <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-10 pt-0 space-y-6 sm:space-y-10 custom-scrollbar">
               <div className="flex flex-col md:flex-row gap-8">
+                {editForm.displayType !== 'text' && (
                 <div className="w-full md:w-1/2 space-y-4">
                   <div
                     className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
@@ -1467,7 +1478,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <span>{editForm.coverMedia ? '이미지 변경' : '이미지 업로드'}</span>
                   </button>
                 </div>
-                <div className="w-full md:w-1/2 space-y-6">
+                )}
+                <div className={`w-full ${editForm.displayType !== 'text' ? 'md:w-1/2' : ''} space-y-6`}>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">포스트 제목</label>
                     <input type="text" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all" placeholder="제목" />
