@@ -15,6 +15,7 @@ export interface SiteData {
   openSchedule?: OpenScheduleItem[];
   materials?: any[];
   selectedLiveProductIds?: string[];
+  linkGridCategories?: string[];
 }
 
 export const apiService = {
