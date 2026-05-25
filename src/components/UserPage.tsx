@@ -1554,11 +1554,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                         return (
                           <div
                             key={block.id}
-                            onClick={() => {
-                              setSelectedBlockId(block.id);
-                              trackClick(username, block.id);
-                            }}
-                            className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                            className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
                             style={{
                               gridColumn: `span ${gridSpan}`,
                               borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
