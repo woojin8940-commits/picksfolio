@@ -48,6 +48,8 @@ export interface TrendAnalysis {
   colorPalette: string[];
 }
 
+export type BlockDisplayType = 'grid' | 'minimal' | 'text';
+
 export interface Block {
   id: string;
   title: string;
@@ -56,6 +58,8 @@ export interface Block {
   coverMediaPosition?: { x: number; y: number };
   mediaType: 'image' | 'video';
   products: Product[];
+  colSpan?: 1 | 2 | 3;
+  displayType?: BlockDisplayType;
 }
 
 export interface DesignSettings {

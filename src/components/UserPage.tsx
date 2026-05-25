@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Instagram, ExternalLink, Share2, Radio, Users, Briefcase, Search, Bell, Hash } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
-import { Block, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
+import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
 import { supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
@@ -1534,13 +1534,69 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       paddingBottom: '100px'
                     }}
                   >
-                    {filteredBlocks.length > 0 ? filteredBlocks.map((block, idx) => {
-                      const isMagazineFeatured = design.gridStyle === 'magazine' && idx === 0 && design.gridColumns > 1;
-                      const colSpan = isMagazineFeatured ? 2 : 1;
-                      const rowSpan = isMagazineFeatured ? 2 : 1;
+                    {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
+                      const blockColSpan = Math.min(block.colSpan || 1, design.gridColumns);
+                      const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
-                      let tileSizeClass = 'aspect-square';
-                      if (isMagazineFeatured) tileSizeClass = 'aspect-[10/9]';
+                      if (blockDisplay === 'text') {
+                        return (
+                          <div
+                            key={block.id}
+                            onClick={() => {
+                              setSelectedBlockId(block.id);
+                              trackClick(username, block.id);
+                            }}
+                            className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                            style={{
+                              gridColumn: `span ${blockColSpan}`,
+                              borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
+                              minHeight: blockColSpan > 1 ? '120px' : '80px',
+                            }}
+                          >
+                            <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
+                            {(block.products?.length || 0) > 0 && (
+                              <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      if (blockDisplay === 'minimal') {
+                        return (
+                          <div
+                            key={block.id}
+                            onClick={() => {
+                              setSelectedBlockId(block.id);
+                              trackClick(username, block.id);
+                            }}
+                            className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                            style={{
+                              gridColumn: `span ${blockColSpan}`,
+                              borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                            }}
+                          >
+                            {block.coverMedia && (
+                              <div className="aspect-[16/10] overflow-hidden">
+                                <MediaAuto
+                                  src={block.coverMedia || FALLBACK_IMAGE}
+                                  className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                  style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
+                                />
+                              </div>
+                            )}
+                            <div className="p-3 md:p-4">
+                              <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
+                              <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                            </div>
+                            {(block.products?.length || 0) > 0 && (
+                              <div className="absolute top-3 right-3">
+                                <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
 
                       return (
                         <div
@@ -1549,10 +1605,10 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             setSelectedBlockId(block.id);
                             trackClick(username, block.id);
                           }}
-                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${tileSizeClass}`}
+                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
                           style={{
-                            gridColumn: `span ${colSpan}`,
-                            gridRow: `span ${rowSpan}`,
+                            gridColumn: `span ${blockColSpan}`,
+                            gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
                             borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                           }}
                         >
@@ -1858,13 +1914,69 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     paddingBottom: '100px'
                   }}
                 >
-                  {filteredBlocks.length > 0 ? filteredBlocks.map((block, idx) => {
-                    const isMagazineFeatured = design.gridStyle === 'magazine' && design.gridColumns > 1 && (idx % 5 === 0);
-                    const colSpan = isMagazineFeatured ? 2 : 1;
-                    const rowSpan = isMagazineFeatured ? 2 : 1;
+                  {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
+                    const blockColSpan = Math.min(block.colSpan || 1, design.gridColumns);
+                    const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
-                    let tileSizeClass = 'aspect-square';
-                    if (isMagazineFeatured) tileSizeClass = 'aspect-[10/9]';
+                    if (blockDisplay === 'text') {
+                      return (
+                        <div
+                          key={block.id}
+                          onClick={() => {
+                            setSelectedBlockId(block.id);
+                            trackClick(username, block.id);
+                          }}
+                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                          style={{
+                            gridColumn: `span ${blockColSpan}`,
+                            borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
+                            minHeight: blockColSpan > 1 ? '120px' : '80px',
+                          }}
+                        >
+                          <div className="text-sm font-black truncate uppercase tracking-tight">{block.title}</div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest mt-1" style={{ color: design.accentColor }}>{block.category}</div>
+                          {(block.products?.length || 0) > 0 && (
+                            <div className="text-[9px] font-bold mt-2 opacity-50">{block.products.length} items linked</div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (blockDisplay === 'minimal') {
+                      return (
+                        <div
+                          key={block.id}
+                          onClick={() => {
+                            setSelectedBlockId(block.id);
+                            trackClick(username, block.id);
+                          }}
+                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                          style={{
+                            gridColumn: `span ${blockColSpan}`,
+                            borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                          }}
+                        >
+                          {block.coverMedia && (
+                            <div className="aspect-[16/10] overflow-hidden">
+                              <MediaAuto
+                                src={block.coverMedia || FALLBACK_IMAGE}
+                                className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
+                              />
+                            </div>
+                          )}
+                          <div className="p-3 md:p-4">
+                            <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
+                            <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                          </div>
+                          {(block.products?.length || 0) > 0 && (
+                            <div className="absolute top-3 right-3">
+                              <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
 
                     return (
                       <div
@@ -1873,10 +1985,10 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           setSelectedBlockId(block.id);
                           trackClick(username, block.id);
                         }}
-                        className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} ${tileSizeClass}`}
+                        className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} ${blockColSpan > 1 ? 'aspect-[10/9]' : 'aspect-square'}`}
                         style={{
-                          gridColumn: `span ${colSpan}`,
-                          gridRow: `span ${rowSpan}`,
+                          gridColumn: `span ${blockColSpan}`,
+                          gridRow: blockColSpan > 1 ? `span ${blockColSpan}` : undefined,
                           borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                         }}
                       >
