@@ -741,10 +741,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   void _handleAddFolder; void _handleEditFolder; void _handleSaveFolder; void _handleDeleteFolder; void _handleToggleBlockInFolder;
 
   const managedCategories = (() => {
-    const catSet = new Set<string>(linkGridCategories);
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const c = blocks[i].category;
+    const catSet = new Set<string>();
+    for (const b of blocks) {
+      const c = b.category;
       if (c) catSet.add(c);
+    }
+    for (const c of linkGridCategories) {
+      catSet.add(c);
     }
     return Array.from(catSet);
   })();
@@ -1414,7 +1417,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           className={`rounded-lg border px-1.5 py-1 ${themePreset === 'white' ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
                           style={(block.highlight && block.highlight !== 'transparent') ? { backgroundColor: block.highlight, borderColor: 'transparent' } : undefined}
                         >
-                          <p
+                          <div
                             className={`text-[6px] leading-relaxed whitespace-pre-wrap ${block.bold ? 'font-bold' : 'font-medium'}`}
                             style={{
                               color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)'),

@@ -2289,7 +2289,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                 borderColor: '#e2e8f0',
                               }}
                             >
-                              <p
+                              <div
                                 className={`whitespace-pre-wrap ${group.block.bold ? 'font-bold' : 'font-medium'}`}
                                 style={{
                                   color: group.block.color || '#37352f',
