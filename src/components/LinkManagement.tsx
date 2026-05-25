@@ -821,7 +821,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
     let updatedBlocks: Block[];
     if (pendingNewBlockId && isEditing === pendingNewBlockId) {
-      updatedBlocks = [sanitizedEditForm, ...blocks];
+      updatedBlocks = [...blocks, sanitizedEditForm];
       setPendingNewBlockId(null);
     } else {
       updatedBlocks = blocks.map(b => b.id === isEditing ? sanitizedEditForm : b);
