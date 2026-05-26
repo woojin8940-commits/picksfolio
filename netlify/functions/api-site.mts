@@ -50,11 +50,14 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "GET") {
       const result = await db.sql`
-        SELECT data FROM site_data WHERE username = ${username}
+        SELECT data, cover_updated_at FROM site_data WHERE username = ${username}
       `;
 
       if (result.length > 0 && result[0].data && Object.keys(result[0].data).length > 0) {
         const dbData = result[0].data as Record<string, any>;
+        if (result[0].cover_updated_at) {
+          dbData.coverUpdatedAt = result[0].cover_updated_at;
+        }
         if (hasConnectedSiteContent(dbData)) {
           return Response.json(dbData);
         }
@@ -193,6 +196,16 @@ export default async (req: Request, context: Context) => {
         }
       }
 
+      const oldCoverImage =
+        existingData?.design?.portfolioHeaderImage ||
+        existingData?.blocks?.[0]?.coverMedia ||
+        existingData?.profile?.avatar_url || null;
+      const newCoverImage =
+        body?.design?.portfolioHeaderImage ||
+        body?.blocks?.[0]?.coverMedia ||
+        body?.profile?.avatar_url || null;
+      const coverChanged = newCoverImage !== null && newCoverImage !== oldCoverImage;
+
       const bodyJson = JSON.stringify(body);
 
       if (existing.length > 0) {
@@ -202,12 +215,18 @@ export default async (req: Request, context: Context) => {
               updated_at = NOW()
           WHERE username = ${username}
         `;
+        if (coverChanged) {
+          await db.sql`
+            UPDATE site_data SET cover_updated_at = NOW() WHERE username = ${username}
+          `;
+        }
       } else {
         const profileCode = await createUniqueProfileCode(db);
+        const initialCoverAt = newCoverImage ? new Date().toISOString() : null;
 
         await db.sql`
-          INSERT INTO site_data (username, data, profile_code)
-          VALUES (${username}, ${bodyJson}::jsonb, ${profileCode})
+          INSERT INTO site_data (username, data, profile_code, cover_updated_at)
+          VALUES (${username}, ${bodyJson}::jsonb, ${profileCode}, ${initialCoverAt})
         `;
       }
 

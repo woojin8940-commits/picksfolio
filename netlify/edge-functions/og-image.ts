@@ -70,11 +70,8 @@ export default async (req: Request, context: Context) => {
       blocks?: Array<{ coverMedia?: string }>
     }
 
-    // Use the OG image proxy endpoint so crawlers always get the latest image
-    // via a 302 redirect with no-cache headers. The proxy reads the current
-    // cover photo from Blobs on every request.
-    const cacheBuster = (data as any).updatedAt
-      ? new Date((data as any).updatedAt).getTime()
+    const cacheBuster = (data as any).coverUpdatedAt
+      ? new Date((data as any).coverUpdatedAt).getTime()
       : Date.now()
     const ogImage = `${url.origin}/api/og-image/${encodeURIComponent(username)}?v=${cacheBuster}`
 
