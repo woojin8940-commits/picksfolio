@@ -310,9 +310,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
         </button>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 mb-6 md:mb-10">
+      <div className="grid grid-cols-1 gap-4 md:gap-8 mb-6 md:mb-10">
         {/* Camera Preview Card - Now Static until started */}
-        <div className="lg:col-span-2 bg-slate-900 rounded-2xl md:rounded-[2.5rem] overflow-hidden relative group aspect-video lg:aspect-auto flex items-center justify-center">
+        <div className="bg-slate-900 rounded-2xl md:rounded-[2.5rem] overflow-hidden relative group aspect-video flex items-center justify-center">
           <div className="absolute inset-0">
             <img 
               src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=3840&q=100" 
@@ -337,38 +337,45 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           </div>
         </div>
 
-        {/* Stats Column */}
-        <div className="space-y-3 md:space-y-6">
-          <div className="bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
-            <div className="w-8 h-8 md:w-12 md:h-12 bg-emerald-50 rounded-xl md:rounded-2xl flex items-center justify-center text-emerald-600 mb-2 md:mb-4">
+        {/* Stats Column - 구독자 현황 & 라이브 시간 현황 */}
+        <div className="grid grid-cols-2 gap-3 md:gap-6">
+          <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-50 rounded-xl md:rounded-2xl flex items-center justify-center text-emerald-600 mb-2 md:mb-3">
               <Bell size={16} className="md:hidden" />
-              <Bell size={24} className="hidden md:block" />
+              <Bell size={20} className="hidden md:block" />
             </div>
-            <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">라이브 알림받기 구독자</p>
-            <h3 className="text-xl md:text-3xl font-black text-slate-900">{notifySubscriberCount.toLocaleString()}명</h3>
-            <p className="text-slate-400 text-[10px] md:text-xs font-medium mt-1 md:mt-2">방송 시작 시 알림톡을 받는 시청자 수</p>
+            <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">구독자 현황</p>
+            <h3 className="text-xl md:text-3xl font-black text-slate-900">{notifySubscriberCount.toLocaleString()}<span className="text-sm md:text-base font-bold text-slate-400 ml-0.5">명</span></h3>
+            <p className="text-slate-400 text-[9px] md:text-[11px] font-medium mt-1 md:mt-2">알림톡 수신 시청자</p>
           </div>
 
-          {liveUsage && (
-            <div className="bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
-              <div className="w-8 h-8 md:w-12 md:h-12 bg-purple-50 rounded-xl md:rounded-2xl flex items-center justify-center text-purple-600 mb-2 md:mb-4">
-                <Clock size={16} className="md:hidden" />
-                <Clock size={24} className="hidden md:block" />
-              </div>
-              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">이번 달 방송 잔여시간</p>
-              <h3 className="text-xl md:text-3xl font-black text-slate-900">
-                {Math.floor(liveUsage.includedMinutesRemaining / 60)}시간 {liveUsage.includedMinutesRemaining % 60}분
-              </h3>
-              <p className="text-slate-400 text-[10px] md:text-xs font-medium mt-1 md:mt-2">
-                월 포함 3시간 중 {Math.floor(liveUsage.totalMinutes / 60)}시간 {liveUsage.totalMinutes % 60}분 사용
-              </p>
-              {liveUsage.overageMinutes > 0 && (
-                <p className="text-amber-600 text-[10px] md:text-xs font-bold mt-1">
-                  초과 {Math.floor(liveUsage.overageMinutes / 60)}시간 {liveUsage.overageMinutes % 60}분 · 후불 {liveUsage.overageAmountKrw.toLocaleString()}원
-                </p>
-              )}
+          <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-purple-50 rounded-xl md:rounded-2xl flex items-center justify-center text-purple-600 mb-2 md:mb-3">
+              <Clock size={16} className="md:hidden" />
+              <Clock size={20} className="hidden md:block" />
             </div>
-          )}
+            <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">라이브 시간 현황</p>
+            {liveUsage ? (
+              <>
+                <h3 className="text-xl md:text-3xl font-black text-slate-900">
+                  {Math.floor(liveUsage.includedMinutesRemaining / 60)}<span className="text-sm md:text-base font-bold text-slate-400">시간</span> {liveUsage.includedMinutesRemaining % 60}<span className="text-sm md:text-base font-bold text-slate-400">분</span>
+                </h3>
+                <p className="text-slate-400 text-[9px] md:text-[11px] font-medium mt-1 md:mt-2">
+                  월 3시간 중 {Math.floor(liveUsage.totalMinutes / 60)}시간 {liveUsage.totalMinutes % 60}분 사용
+                </p>
+                {liveUsage.overageMinutes > 0 && (
+                  <p className="text-amber-600 text-[9px] md:text-[11px] font-bold mt-1">
+                    초과 {Math.floor(liveUsage.overageMinutes / 60)}시간 {liveUsage.overageMinutes % 60}분 · {liveUsage.overageAmountKrw.toLocaleString()}원
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <h3 className="text-xl md:text-3xl font-black text-slate-400">—</h3>
+                <p className="text-slate-400 text-[9px] md:text-[11px] font-medium mt-1 md:mt-2">데이터 없음</p>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
