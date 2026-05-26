@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShoppingBag, Check, Plus, X, Package, History as HistoryIcon, Trash2, Camera, Edit3, Search } from 'lucide-react';
-import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 import ImageCropper from './ImageCropper';
 import { apiService } from '../services/apiService';
 import { LiveProductOption, LiveProductOptionValue } from '../types';
@@ -198,10 +198,10 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
       alert('파일 크기는 20MB 이하로 업로드해주세요.');
       return;
     }
+    if (fileInputRef.current) fileInputRef.current.value = '';
     pendingFileRef.current = file;
     const previewUrl = URL.createObjectURL(file);
     setCropperSrc(previewUrl);
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleCropConfirm = async (croppedBlob: Blob) => {
@@ -265,7 +265,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                     </div>
                   )}
                   {editForm.image ? (
-                    <SafeImage src={editForm.image} className="w-full h-full object-cover" />
+                    <MediaAuto src={editForm.image} className="w-full h-full object-cover" />
                   ) : (
                     <Camera size={22} className="text-slate-300" />
                   )}
@@ -574,7 +574,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                     {index + 1}
                   </div>
                   {product.image ? (
-                    <SafeImage src={product.image} className="w-12 h-12 md:w-16 md:h-16 rounded-xl object-cover flex-shrink-0 border border-green-200" />
+                    <MediaAuto src={product.image} className="w-12 h-12 md:w-16 md:h-16 rounded-xl object-cover flex-shrink-0 border border-green-200" />
                   ) : (
                     <div className="w-12 h-12 md:w-16 md:h-16 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
                       <Package size={20} className="text-green-400" />

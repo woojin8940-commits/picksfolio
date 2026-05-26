@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
 import ImageCropper from './ImageCropper';
+import ImagePositionEditor from './ImagePositionEditor';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings } from '../services/settingsService';
 import { apiService } from '../services/apiService';
@@ -2137,12 +2138,23 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                         </div>
                                       ) : null}
                                       {imgUrl ? (
-                                        <img
-                                          src={imgUrl}
-                                          alt=""
-                                          draggable={false}
-                                          className={cols === 1 ? "w-full h-auto block rounded-2xl" : "w-full h-full object-cover rounded-2xl"}
-                                        />
+                                        cols > 1 ? (
+                                          <ImagePositionEditor
+                                            src={imgUrl}
+                                            position={block.imagePositions?.[i] || { x: 50, y: 50 }}
+                                            onChange={(pos) => updateBlockField(block.id, {
+                                              imagePositions: { ...block.imagePositions, [i]: pos }
+                                            })}
+                                            aspectRatio="1/1"
+                                            roundedClass="rounded-2xl"
+                                            className="w-full h-full"
+                                          />
+                                        ) : (
+                                          <MediaAuto
+                                            src={imgUrl}
+                                            className="w-full h-auto block rounded-2xl"
+                                          />
+                                        )
                                       ) : (
                                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1">
                                           <ImageIcon size={cols === 1 ? 32 : 20} />

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -7,6 +7,7 @@ import { getCachedLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
 import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
 import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import { renderPortfolioHtml } from './richText';
 
@@ -243,9 +244,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     const file = e.target.files?.[0];
     if (!file || !uploadTarget) return;
 
-    // 파일 유효성 검사
-    if (!file.type.startsWith('image/')) {
-      setSaveMessage('이미지 파일만 업로드할 수 있습니다.');
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      setSaveMessage('이미지 또는 영상 파일만 업로드할 수 있습니다.');
       setToastType('error');
       setShowToast(true);
       return;
@@ -256,6 +258,62 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       setSaveMessage('파일 크기가 20MB를 초과합니다.');
       setToastType('error');
       setShowToast(true);
+      return;
+    }
+
+    if (isVideo) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setIsUploading(true);
+      const currentTarget = uploadTarget;
+      try {
+        const blobUrl = URL.createObjectURL(file);
+        applyImageToForm(blobUrl, currentTarget);
+
+        let finalUrl = '';
+        const ext = file.name?.split('.').pop()?.toLowerCase() || 'mp4';
+        const fileName = `${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const apiUrl = await apiService.uploadImage(userName, file, fileName);
+            if (apiUrl) { finalUrl = apiUrl; break; }
+          } catch (apiError) {
+            console.warn(`[Upload] API 업로드 시도 ${attempt + 1}/3 실패:`, apiError);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
+
+        if (!finalUrl && supabase) {
+          try {
+            const filePath = `${userName.toLowerCase()}/${fileName}`;
+            const { error: uploadError } = await supabase.storage
+              .from('images')
+              .upload(filePath, file, { contentType: file.type, cacheControl: '3600', upsert: true });
+            if (uploadError) throw uploadError;
+            const { data: publicData } = supabase.storage.from('images').getPublicUrl(filePath);
+            if (publicData?.publicUrl) finalUrl = publicData.publicUrl;
+          } catch (storageError) {
+            console.warn('[Upload] Supabase 업로드 실패, Base64로 전환:', storageError);
+          }
+        }
+
+        if (!finalUrl) {
+          finalUrl = await blobToDataUrl(file);
+        }
+
+        applyImageToForm(finalUrl, currentTarget);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        showSuccessFeedback('영상이 업로드되었습니다!');
+      } catch (error) {
+        console.error('[Upload] 에러:', error);
+        setSaveMessage('영상 업로드 중 오류가 발생했습니다. 다시 시도해주세요.');
+        setToastType('error');
+        setShowToast(true);
+      } finally {
+        setIsUploading(false);
+        setUploadTarget(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
       return;
     }
 
@@ -359,6 +417,46 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     pendingFileRef.current = null;
     setUploadTarget(null);
   };
+
+  const coverPosContainerRef = useRef<HTMLDivElement>(null);
+  const [coverPosDragging, setCoverPosDragging] = useState(false);
+  const coverPosDragStart = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
+
+  const handleCoverPosDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCoverPosDragging(true);
+    const pos = editForm.coverMediaPosition || { x: 50, y: 50 };
+    coverPosDragStart.current = { x: e.clientX, y: e.clientY, posX: pos.x, posY: pos.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [editForm.coverMediaPosition]);
+
+  const handleCoverPosMove = useCallback((e: React.PointerEvent) => {
+    if (!coverPosDragging || !coverPosDragStart.current || !coverPosContainerRef.current) return;
+    const rect = coverPosContainerRef.current.getBoundingClientRect();
+    const dx = ((e.clientX - coverPosDragStart.current.x) / rect.width) * -100;
+    const dy = ((e.clientY - coverPosDragStart.current.y) / rect.height) * -100;
+    const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    setEditForm(prev => ({
+      ...prev,
+      coverMediaPosition: {
+        x: clamp(coverPosDragStart.current!.posX + dx),
+        y: clamp(coverPosDragStart.current!.posY + dy),
+      }
+    }));
+  }, [coverPosDragging]);
+
+  const handleCoverPosUp = useCallback(() => {
+    setCoverPosDragging(false);
+    coverPosDragStart.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!coverPosDragging) return;
+    const up = () => { setCoverPosDragging(false); coverPosDragStart.current = null; };
+    window.addEventListener('pointerup', up);
+    return () => window.removeEventListener('pointerup', up);
+  }, [coverPosDragging]);
 
   const triggerFileUpload = (target: { type: 'block' } | { type: 'product', productId: string }) => {
     setUploadTarget(target);
@@ -975,7 +1073,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
 
   return (
     <div className="flex h-full bg-[#F8FAFC]">
-      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif" />
+      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,video/mp4,video/webm,video/ogg,video/quicktime" />
       {cropperSrc && (
         <ImageCropper
           src={cropperSrc}
@@ -1099,7 +1197,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                                     <span className="text-2xl font-black">T</span>
                                   </div>
                                 ) : (
-                                  <SafeImage src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                                  <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
                                 )}
                               </div>
                               <div className="flex-1">
@@ -1163,7 +1261,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           <span className="text-2xl font-black">T</span>
                         </div>
                       ) : (
-                        <SafeImage src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                        <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
                       )}
                     </div>
                     <div className="flex-1">
@@ -1447,7 +1545,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         >
                           {block.coverMedia && (
                             <div className="aspect-[16/10] overflow-hidden">
-                              <SafeImage
+                              <MediaAuto
                                 src={block.coverMedia}
                                 alt=""
                                 className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
@@ -1473,7 +1571,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           borderRadius: '0.75rem',
                         }}
                       >
-                        <SafeImage
+                        <MediaAuto
                           src={block.coverMedia}
                           alt=""
                           className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
@@ -1502,7 +1600,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     >
                       <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
                         <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                          <SafeImage src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
+                          <MediaAuto src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
                         </div>
                         <span className="text-[8px] font-black truncate">{p.name}</span>
                       </div>
@@ -1579,7 +1677,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                         <div key={block.id}>
                           {displayImgs.map((src: string, i: number) => (
                             <div key={i} className={`overflow-hidden rounded-lg border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                              <SafeImage src={src} alt="" className="w-full h-auto block" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
+                              <MediaAuto src={src} alt="" className="w-full h-auto block" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
                             </div>
                           ))}
                         </div>
@@ -1589,13 +1687,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       return (
                         <div key={block.id} className="grid grid-cols-2 grid-rows-2 gap-0.5 aspect-[4/3]">
                           <div className={`row-span-2 overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                            <SafeImage src={displayImgs[0]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[0] ? { objectPosition: `${block.imagePositions[0].x}% ${block.imagePositions[0].y}%` } : undefined} />
+                            <MediaAuto src={displayImgs[0]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[0] ? { objectPosition: `${block.imagePositions[0].x}% ${block.imagePositions[0].y}%` } : undefined} />
                           </div>
                           <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                            <SafeImage src={displayImgs[1]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[1] ? { objectPosition: `${block.imagePositions[1].x}% ${block.imagePositions[1].y}%` } : undefined} />
+                            <MediaAuto src={displayImgs[1]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[1] ? { objectPosition: `${block.imagePositions[1].x}% ${block.imagePositions[1].y}%` } : undefined} />
                           </div>
                           <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                            <SafeImage src={displayImgs[2]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[2] ? { objectPosition: `${block.imagePositions[2].x}% ${block.imagePositions[2].y}%` } : undefined} />
+                            <MediaAuto src={displayImgs[2]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[2] ? { objectPosition: `${block.imagePositions[2].x}% ${block.imagePositions[2].y}%` } : undefined} />
                           </div>
                         </div>
                       );
@@ -1604,7 +1702,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                       <div key={block.id} className={`grid gap-0.5 ${cols >= 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                         {displayImgs.map((src: string, i: number) => (
                           <div key={i} className={`overflow-hidden rounded-md aspect-square border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                            <SafeImage src={src} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
+                            <MediaAuto src={src} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
                           </div>
                         ))}
                       </div>
@@ -1676,37 +1774,65 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <div className="flex flex-col md:flex-row gap-8">
                 {editForm.displayType !== 'text' && (
                 <div className="w-full md:w-1/2 space-y-4">
-                  <div
-                    className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
-                    onClick={() => !isUploading && !editForm.coverMedia && triggerFileUpload({ type: 'block' })}
-                  >
-                    {editForm.coverMedia ? (
-                      <img
-                        src={editForm.coverMedia}
-                        alt=""
-                        draggable={false}
-                        className="w-full h-full object-cover rounded-[2rem]"
-                      />
-                    ) : (
+                  {editForm.coverMedia ? (
+                    <>
+                      <div
+                        ref={coverPosContainerRef}
+                        className="relative overflow-hidden rounded-[2rem] border-2 border-purple-200 bg-slate-50 select-none"
+                        style={{ aspectRatio: editForm.displayType === 'minimal' ? '16/10' : '1/1' }}
+                      >
+                        <MediaAuto
+                          src={editForm.coverMedia}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={{ objectPosition: `${(editForm.coverMediaPosition?.x ?? 50)}% ${(editForm.coverMediaPosition?.y ?? 50)}%` }}
+                        />
+                        <div
+                          className={`absolute inset-0 flex items-center justify-center transition-colors ${coverPosDragging ? 'bg-black/30 cursor-grabbing' : 'bg-black/10 hover:bg-black/20 cursor-grab'}`}
+                          onPointerDown={handleCoverPosDown}
+                          onPointerMove={handleCoverPosMove}
+                          onPointerUp={handleCoverPosUp}
+                        >
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-[10px] font-bold pointer-events-none">
+                            <Move size={12} />
+                            <span>드래그하여 노출 영역 조정</span>
+                          </div>
+                        </div>
+                        {isUploading && uploadTarget?.type === 'block' && (
+                          <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2 z-10">
+                            <Loader2 size={32} className="animate-spin" />
+                            <span className="text-xs font-black">업로드 중...</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-bold text-center">
+                        개인페이지에 {editForm.displayType === 'minimal' ? '미니멀(16:10)' : '정사각형(1:1)'} 비율로 표시됩니다
+                      </p>
+                    </>
+                  ) : (
+                    <div
+                      className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
+                      onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
+                    >
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2">
                         <ImageIcon size={48} />
-                        <span className="text-xs font-black">이미지 업로드</span>
+                        <span className="text-xs font-black">이미지/영상 업로드</span>
                       </div>
-                    )}
-                    {isUploading && uploadTarget?.type === 'block' ? (
-                      <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2">
-                        <Loader2 size={32} className="animate-spin" />
-                        <span className="text-xs font-black">업로드 중...</span>
-                      </div>
-                    ) : null}
-                  </div>
+                      {isUploading && uploadTarget?.type === 'block' && (
+                        <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2">
+                          <Loader2 size={32} className="animate-spin" />
+                          <span className="text-xs font-black">업로드 중...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
                     disabled={isUploading}
                     className="flex items-center gap-2 px-4 py-2.5 bg-purple-50 text-purple-600 rounded-xl font-black text-xs hover:bg-purple-100 transition-all disabled:opacity-50 w-full justify-center"
                   >
                     <ImageIcon size={14} />
-                    <span>{editForm.coverMedia ? '이미지 변경' : '이미지 업로드'}</span>
+                    <span>{editForm.coverMedia ? '이미지/영상 변경' : '이미지/영상 업로드'}</span>
                   </button>
                 </div>
                 )}

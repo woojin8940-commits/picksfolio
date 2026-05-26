@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Move } from 'lucide-react';
+import MediaAuto from './MediaAuto';
 
 interface ImagePositionEditorProps {
   src: string;
@@ -61,10 +62,8 @@ const ImagePositionEditor: React.FC<ImagePositionEditorProps> = ({
       className={`relative overflow-hidden select-none ${roundedClass} ${className}`}
       style={{ aspectRatio }}
     >
-      <img
+      <MediaAuto
         src={src}
-        alt=""
-        draggable={false}
         className="absolute inset-0 w-full h-full object-cover"
         style={{ objectPosition: `${position.x}% ${position.y}%` }}
       />
