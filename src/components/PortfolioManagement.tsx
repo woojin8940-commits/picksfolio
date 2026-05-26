@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
 import ImageCropper from './ImageCropper';
+import VideoCropper from './VideoCropper';
 import ImagePositionEditor from './ImagePositionEditor';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings } from '../services/settingsService';
 import { apiService } from '../services/apiService';
 import { DesignSettings, TemplateType, SellerVerification } from '../types';
 import Toast from './Toast';
-import MediaAuto from './MediaAuto';
+import MediaAuto, { isVideoSource } from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import { normalizeContentToHtml, renderPortfolioHtml, sanitizeRichHtml } from './richText';
 
@@ -388,6 +389,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'profile' | 'block' | 'cover' | 'category'; id?: string; index?: number } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const [videoCropperSrc, setVideoCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
   const [previewCategory, setPreviewCategory] = useState<string>(ALL_CATEGORY_LABEL);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -814,6 +816,14 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
       return;
     }
 
+    if (isVideo) {
+      pendingFileRef.current = file;
+      const previewUrl = URL.createObjectURL(file);
+      setVideoCropperSrc(previewUrl);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     await doUpload(file, null);
   };
 
@@ -828,6 +838,33 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   const handleCropCancel = () => {
     if (cropperSrc) URL.revokeObjectURL(cropperSrc);
     setCropperSrc(null);
+    pendingFileRef.current = null;
+    setUploadTarget(null);
+  };
+
+  const handleVideoCropConfirm = async (position: { x: number; y: number }) => {
+    const file = pendingFileRef.current;
+    if (videoCropperSrc) URL.revokeObjectURL(videoCropperSrc);
+    setVideoCropperSrc(null);
+    pendingFileRef.current = null;
+    if (!file || !uploadTarget) return;
+    const currentTarget = uploadTarget;
+    await doUpload(file, null);
+    if (currentTarget.type === 'block' && currentTarget.id) {
+      const idx = currentTarget.index ?? 0;
+      setBlocks(prev => prev.map(b =>
+        b.id === currentTarget.id
+          ? { ...b, imagePositions: { ...b.imagePositions, [idx]: position } }
+          : b
+      ));
+    } else if (currentTarget.type === 'cover') {
+      setDesign(prev => ({ ...prev, portfolioHeaderImagePosition: `${position.y}` }));
+    }
+  };
+
+  const handleVideoCropCancel = () => {
+    if (videoCropperSrc) URL.revokeObjectURL(videoCropperSrc);
+    setVideoCropperSrc(null);
     pendingFileRef.current = null;
     setUploadTarget(null);
   };
@@ -1138,6 +1175,23 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
             src={cropperSrc}
             onCrop={handleCropConfirm}
             onCancel={handleCropCancel}
+            aspectRatio={cropAspect}
+          />
+        );
+      })()}
+      {videoCropperSrc && (() => {
+        let cropAspect: number | undefined = 1;
+        if (uploadTarget?.type === 'cover') {
+          cropAspect = 4 / 5;
+        } else if (uploadTarget?.type === 'block' && uploadTarget.id) {
+          const targetBlock = blocks.find(b => b.id === uploadTarget.id);
+          cropAspect = (targetBlock?.gridColumns === 1) ? undefined : 1;
+        }
+        return (
+          <VideoCropper
+            src={videoCropperSrc}
+            onConfirm={handleVideoCropConfirm}
+            onCancel={handleVideoCropCancel}
             aspectRatio={cropAspect}
           />
         );
@@ -1490,11 +1544,10 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       </div>
                     ) : null}
                     {design?.portfolioHeaderImage ? (
-                      <img
+                      <MediaAuto
                         src={design.portfolioHeaderImage}
-                        alt=""
-                        draggable={false}
                         className="w-full h-full object-cover rounded-2xl"
+                        style={design.portfolioHeaderImagePosition ? { objectPosition: `center ${design.portfolioHeaderImagePosition}%` } : undefined}
                       />
                     ) : (
                       <>
@@ -2149,6 +2202,14 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                             roundedClass="rounded-2xl"
                                             className="w-full h-full"
                                           />
+                                        ) : isVideoSource(imgUrl) && block.imagePositions?.[i] ? (
+                                          <div className="aspect-square relative">
+                                            <MediaAuto
+                                              src={imgUrl}
+                                              className="absolute inset-0 w-full h-full object-cover rounded-2xl"
+                                              style={{ objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` }}
+                                            />
+                                          </div>
                                         ) : (
                                           <MediaAuto
                                             src={imgUrl}
