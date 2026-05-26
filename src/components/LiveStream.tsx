@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useTransition } from 'react';
 import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, Tv, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
 import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import { formatKRW, toAsciiSafeId } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
@@ -2662,7 +2663,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-2.5">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border border-white/20">
-                  <SafeImage src={(currentProduct.image && currentProduct.image.trim()) || FALLBACK_IMAGE} className="w-full h-full object-cover" />
+                  <MediaAuto src={(currentProduct.image && currentProduct.image.trim()) || FALLBACK_IMAGE} className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h4 className="text-white text-[11px] font-black truncate">{currentProduct.name}</h4>
@@ -2748,7 +2749,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 {cartItems.map((item, idx) => (
                   <div key={`${item.productId}-${idx}`} className="flex items-center gap-3 bg-white/5 p-2.5 rounded-xl">
                     {item.productImage ? (
-                      <img src={item.productImage} alt={item.productName} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+                      <MediaAuto src={item.productImage} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
                     ) : (
                       <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
                         <Package size={14} className="text-white/30" />
@@ -2819,7 +2820,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               </div>
               <div className="flex items-center gap-3 mb-4 bg-white/5 p-3 rounded-xl">
                 {currentProduct.image && (
-                  <SafeImage src={currentProduct.image} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                  <MediaAuto src={currentProduct.image} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-xs font-bold truncate">{currentProduct.name}</p>
@@ -2936,7 +2937,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 <>
                   <div className="flex items-center gap-3 mb-4 bg-slate-50 border border-slate-100 p-3 rounded-xl">
                     {checkoutProduct.image && (
-                      <SafeImage
+                      <MediaAuto
                         src={checkoutProduct.image}
                         className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
                       />
@@ -3079,7 +3080,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     {batchPayableItems.map((it, idx) => (
                       <div key={`batch-${it.productId}-${idx}`} className="flex items-center gap-2">
                         {it.productImage ? (
-                          <SafeImage src={it.productImage} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+                          <MediaAuto src={it.productImage} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
                         ) : (
                           <div className="w-9 h-9 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
                             <Package size={14} className="text-slate-400" />

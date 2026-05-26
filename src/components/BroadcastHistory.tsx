@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { History, Clock, Users, ShoppingBag, MessageCircle, ChevronDown, ChevronUp, Trash2, Package, TrendingUp, Play, X } from 'lucide-react';
 import { formatKRW } from '../utils/formatters';
 import { apiService } from '../services/apiService';
-import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 
 interface BroadcastRecord {
   id: string;
@@ -291,7 +291,7 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
                                     {idx + 1}
                                   </div>
                                   {pc.image ? (
-                                    <SafeImage src={pc.image} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+                                    <MediaAuto src={pc.image} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
                                   ) : (
                                     <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
                                       <Package size={16} className="text-slate-300" />
@@ -339,7 +339,7 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
                           {record.products.map(product => (
                             <div key={product.id} className="flex-shrink-0 w-28 md:w-32 bg-white p-2 rounded-xl border border-slate-100">
                               {product.image ? (
-                                <SafeImage src={product.image} className="w-full aspect-square rounded-lg object-cover mb-1.5" />
+                                <MediaAuto src={product.image} className="w-full aspect-square rounded-lg object-cover mb-1.5" />
                               ) : (
                                 <div className="w-full aspect-square rounded-lg bg-slate-100 flex items-center justify-center mb-1.5">
                                   <Package size={20} className="text-slate-300" />

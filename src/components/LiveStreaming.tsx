@@ -5,7 +5,7 @@ import { apiService } from '../services/apiService';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
 
-import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 
 interface LiveStreamingProps {
   userName: string;
@@ -1204,7 +1204,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   {activeProduct.image ? (
-                    <SafeImage src={activeProduct.image} alt={activeProduct.name} className="w-10 h-10 rounded-xl object-cover flex-shrink-0 border border-white/20" />
+                    <MediaAuto src={activeProduct.image} className="w-10 h-10 rounded-xl object-cover flex-shrink-0 border border-white/20" />
                   ) : (
                     <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0 border border-white/20">
                       <Package size={16} className="text-white/30" />
@@ -1807,7 +1807,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     }`}
                   >
                     {product.image ? (
-                      <SafeImage src={product.image} alt={product.name} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+                      <MediaAuto src={product.image} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
                     ) : (
                       <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
                         <Package size={18} className="text-white/30" />
@@ -1879,7 +1879,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           {i + 1}
                         </span>
                         {item.image ? (
-                          <SafeImage src={item.image} alt={item.name} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+                          <MediaAuto src={item.image} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
                         ) : (
                           <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
                             <Package size={12} className="text-white/30" />

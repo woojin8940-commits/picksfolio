@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, ShoppingBag, Check, Package, Plus, Clock } from 'lucide-react';
 import LiveStreaming from './LiveStreaming';
-import SafeImage from './SafeImage';
+import MediaAuto from './MediaAuto';
 import { SellerVerification } from '../types';
 import { apiService } from '../services/apiService';
 
@@ -488,7 +488,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                     {isSelected ? <Check size={16} /> : index + 1}
                   </div>
                   {product.image ? (
-                    <SafeImage src={product.image} className="w-12 h-12 md:w-16 md:h-16 rounded-xl object-cover flex-shrink-0 border border-slate-200" />
+                    <MediaAuto src={product.image} className="w-12 h-12 md:w-16 md:h-16 rounded-xl object-cover flex-shrink-0 border border-slate-200" />
                   ) : (
                     <div className="w-12 h-12 md:w-16 md:h-16 rounded-xl bg-white border border-slate-200 flex items-center justify-center flex-shrink-0">
                       <Package size={20} className="text-slate-300" />
