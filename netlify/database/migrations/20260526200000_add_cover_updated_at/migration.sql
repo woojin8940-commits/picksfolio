@@ -1,0 +1,1 @@
+ALTER TABLE site_data ADD COLUMN cover_updated_at TIMESTAMP WITH TIME ZONE;
