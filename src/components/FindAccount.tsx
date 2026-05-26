@@ -9,16 +9,25 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   const [step, setStep] = useState<'choose' | 'find-id' | 'reset-pw'>('choose');
   const [phone, setPhone] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [showVerificationInput, setShowVerificationInput] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [foundAccounts, setFoundAccounts] = useState<Array<{ username: string; display_name: string; created_at: string }>>([]);
   const [selectedUsername, setSelectedUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+
+  const smsPurpose = step === 'find-id' ? 'find-id' : 'reset-password';
+
+  React.useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
   const handleSendSMS = async () => {
     if (!phone) {
@@ -30,15 +39,15 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
       const response = await fetch('/.netlify/functions/send-sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver: phone }),
+        body: JSON.stringify({ receiver: phone, purpose: smsPurpose }),
       });
       const data = await response.json();
-      if (response.ok) {
-        setGeneratedCode(data.code);
+      if (response.ok && data.success) {
         alert('인증번호가 발송되었습니다.');
         setShowVerificationInput(true);
+        setCooldown(60);
       } else {
-        alert(data.message || '인증번호 발송에 실패했습니다.');
+        alert(data.error || data.message || '인증번호 발송에 실패했습니다.');
       }
     } catch {
       alert('서버 오류가 발생했습니다.');
@@ -47,12 +56,33 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
     }
   };
 
-  const handleVerifySMS = () => {
-    if (verificationCode === generatedCode && generatedCode !== '') {
-      alert('인증되었습니다.');
-      setIsVerified(true);
-    } else {
-      alert('인증번호가 일치하지 않습니다.');
+  const handleVerifySMS = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      alert('6자리 인증번호를 입력해 주세요.');
+      return;
+    }
+    setIsVerifying(true);
+    try {
+      const response = await fetch('/.netlify/functions/verify-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: phone.replace(/\D/g, ''),
+          code: verificationCode,
+          purpose: smsPurpose,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert('인증되었습니다.');
+        setIsVerified(true);
+      } else {
+        alert(data.error || '인증번호가 일치하지 않습니다.');
+      }
+    } catch {
+      alert('서버 오류가 발생했습니다.');
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -130,15 +160,16 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   const resetState = () => {
     setPhone('');
     setIsSending(false);
-    setGeneratedCode('');
     setVerificationCode('');
     setShowVerificationInput(false);
     setIsVerified(false);
+    setIsVerifying(false);
     setFoundAccounts([]);
     setSelectedUsername('');
     setNewPassword('');
     setConfirmPassword('');
     setResultMessage('');
+    setCooldown(0);
   };
 
   const accentClasses = {
@@ -165,10 +196,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
           </div>
           <button
             type="button" onClick={handleSendSMS}
-            disabled={isSending || isVerified}
+            disabled={isSending || isVerified || cooldown > 0}
             className={`px-4 py-3 ${accentClasses.btn} text-white rounded-2xl font-black text-xs transition-all disabled:opacity-50 whitespace-nowrap flex-shrink-0`}
           >
-            {isSending ? '발송중...' : isVerified ? '인증완료' : '인증번호 전송'}
+            {isSending ? '발송중...' : isVerified ? '인증완료' : cooldown > 0 ? `${cooldown}초` : '인증번호 전송'}
           </button>
         </div>
       </div>
@@ -189,11 +220,13 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
             </div>
             <button
               type="button" onClick={handleVerifySMS}
-              className={`px-5 py-3 ${accentClasses.btn} text-white rounded-2xl font-black text-xs transition-all whitespace-nowrap flex-shrink-0`}
+              disabled={isVerifying}
+              className={`px-5 py-3 ${accentClasses.btn} text-white rounded-2xl font-black text-xs transition-all whitespace-nowrap flex-shrink-0 disabled:opacity-50`}
             >
-              확인
+              {isVerifying ? '확인중...' : '확인'}
             </button>
           </div>
+          <p className="text-xs text-slate-400 font-medium ml-1">인증번호는 5분 동안 유효합니다.</p>
         </div>
       )}
     </>

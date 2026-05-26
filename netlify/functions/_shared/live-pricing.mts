@@ -1,8 +1,8 @@
 /**
  * Pickfolio live commerce pricing constants and helpers.
  *
- * Commerce membership (월 13,900원) includes 5 hours of live broadcast time
- * per calendar month. Overage is billed postpaid at 4,900원/시간 (≈81.67원/분).
+ * Commerce membership (월 13,900원) includes 3 hours of live broadcast time
+ * per calendar month. Overage is billed postpaid at 8,900원/시간 (≈148.33원/분).
  * Live sales carry a 7.5% commission (PG fee included; Pickfolio nets ≈4.5%).
  *
  * Hard caps (advisory in this module — enforcement is layered separately):
@@ -12,9 +12,9 @@
  * which is already populated by `api-broadcast-history` on every live stop.
  */
 
-export const INCLUDED_MINUTES_PER_MONTH = 300 // 5 hours
-export const OVERAGE_RATE_KRW_PER_HOUR = 4900
-export const OVERAGE_RATE_KRW_PER_MINUTE = OVERAGE_RATE_KRW_PER_HOUR / 60 // ≈81.67
+export const INCLUDED_MINUTES_PER_MONTH = 180 // 3 hours
+export const OVERAGE_RATE_KRW_PER_HOUR = 8900
+export const OVERAGE_RATE_KRW_PER_MINUTE = OVERAGE_RATE_KRW_PER_HOUR / 60 // ≈148.33
 
 export const DAILY_HARD_CAP_MINUTES = 8 * 60 // 480
 export const MONTHLY_HARD_CAP_MINUTES = 50 * 60 // 3000

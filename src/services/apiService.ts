@@ -754,6 +754,32 @@ export const apiService = {
     }
   },
 
+  // ───────────────────── Site Data Snapshots & Restore ─────────────────────
+  async getSiteDataSnapshots(username: string): Promise<{ snapshots: { id: number; snapshot_reason: string; created_at: string; block_count: number; portfolio_count: number }[] }> {
+    try {
+      const res = await fetch(`/api/site-restore/${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) return { snapshots: [] };
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to get site data snapshots:', e);
+      return { snapshots: [] };
+    }
+  },
+
+  async restoreSiteDataSnapshot(username: string, snapshotId: number): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/site-restore/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot_id: snapshotId })
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to restore site data snapshot:', e);
+      return false;
+    }
+  },
+
   // ───────────────────── Admin: Influencer management ─────────────────────
   async getAdminInfluencers(token: string): Promise<{ influencers: any[]; businesses?: any[]; liveCustomers?: any[] }> {
     try {
