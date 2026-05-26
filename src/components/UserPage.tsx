@@ -9,7 +9,7 @@ import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import MediaAuto from './MediaAuto';
+import MediaAuto, { isVideoSource } from './MediaAuto';
 import LiveStream from './LiveStream';
 import { renderPortfolioHtml } from './richText';
 
@@ -1440,7 +1440,13 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                           {flatImgs.map(img => (
                             <div key={img.key} className="relative">
                               <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={img.src} className="w-full h-auto block" style={{ maxWidth: '100%', ...(img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : {}) }} />
+                                {isVideoSource(img.src) && img.pos ? (
+                                  <div className="aspect-square">
+                                    <MediaAuto src={img.src} className="w-full h-full object-cover block" style={{ objectPosition: `${img.pos.x}% ${img.pos.y}%` }} />
+                                  </div>
+                                ) : (
+                                  <MediaAuto src={img.src} className="w-full h-auto block" style={{ maxWidth: '100%', ...(img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : {}) }} />
+                                )}
                               </div>
                             </div>
                           ))}
