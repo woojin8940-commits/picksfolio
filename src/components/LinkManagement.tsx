@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -7,7 +7,7 @@ import { getCachedLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
 import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
 import SafeImage from './SafeImage';
-import MediaAuto, { isVideoSource } from './MediaAuto';
+import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import { renderPortfolioHtml } from './richText';
 
@@ -417,6 +417,46 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     pendingFileRef.current = null;
     setUploadTarget(null);
   };
+
+  const coverPosContainerRef = useRef<HTMLDivElement>(null);
+  const [coverPosDragging, setCoverPosDragging] = useState(false);
+  const coverPosDragStart = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
+
+  const handleCoverPosDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCoverPosDragging(true);
+    const pos = editForm.coverMediaPosition || { x: 50, y: 50 };
+    coverPosDragStart.current = { x: e.clientX, y: e.clientY, posX: pos.x, posY: pos.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [editForm.coverMediaPosition]);
+
+  const handleCoverPosMove = useCallback((e: React.PointerEvent) => {
+    if (!coverPosDragging || !coverPosDragStart.current || !coverPosContainerRef.current) return;
+    const rect = coverPosContainerRef.current.getBoundingClientRect();
+    const dx = ((e.clientX - coverPosDragStart.current.x) / rect.width) * -100;
+    const dy = ((e.clientY - coverPosDragStart.current.y) / rect.height) * -100;
+    const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    setEditForm(prev => ({
+      ...prev,
+      coverMediaPosition: {
+        x: clamp(coverPosDragStart.current!.posX + dx),
+        y: clamp(coverPosDragStart.current!.posY + dy),
+      }
+    }));
+  }, [coverPosDragging]);
+
+  const handleCoverPosUp = useCallback(() => {
+    setCoverPosDragging(false);
+    coverPosDragStart.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!coverPosDragging) return;
+    const up = () => { setCoverPosDragging(false); coverPosDragStart.current = null; };
+    window.addEventListener('pointerup', up);
+    return () => window.removeEventListener('pointerup', up);
+  }, [coverPosDragging]);
 
   const triggerFileUpload = (target: { type: 'block' } | { type: 'product', productId: string }) => {
     setUploadTarget(target);
@@ -1734,29 +1774,58 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               <div className="flex flex-col md:flex-row gap-8">
                 {editForm.displayType !== 'text' && (
                 <div className="w-full md:w-1/2 space-y-4">
-                  <div
-                    className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
-                    onClick={() => !isUploading && !editForm.coverMedia && triggerFileUpload({ type: 'block' })}
-                  >
-                    {editForm.coverMedia ? (
-                      <MediaAuto
-                        src={editForm.coverMedia}
-                        alt=""
-                        className="w-full h-full object-cover rounded-[2rem]"
-                      />
-                    ) : (
+                  {editForm.coverMedia ? (
+                    <>
+                      <div
+                        ref={coverPosContainerRef}
+                        className="relative overflow-hidden rounded-[2rem] border-2 border-purple-200 bg-slate-50 select-none"
+                        style={{ aspectRatio: editForm.displayType === 'minimal' ? '16/10' : '1/1' }}
+                      >
+                        <MediaAuto
+                          src={editForm.coverMedia}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={{ objectPosition: `${(editForm.coverMediaPosition?.x ?? 50)}% ${(editForm.coverMediaPosition?.y ?? 50)}%` }}
+                        />
+                        <div
+                          className={`absolute inset-0 flex items-center justify-center transition-colors ${coverPosDragging ? 'bg-black/30 cursor-grabbing' : 'bg-black/10 hover:bg-black/20 cursor-grab'}`}
+                          onPointerDown={handleCoverPosDown}
+                          onPointerMove={handleCoverPosMove}
+                          onPointerUp={handleCoverPosUp}
+                        >
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-[10px] font-bold pointer-events-none">
+                            <Move size={12} />
+                            <span>드래그하여 노출 영역 조정</span>
+                          </div>
+                        </div>
+                        {isUploading && uploadTarget?.type === 'block' && (
+                          <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2 z-10">
+                            <Loader2 size={32} className="animate-spin" />
+                            <span className="text-xs font-black">업로드 중...</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-bold text-center">
+                        개인페이지에 {editForm.displayType === 'minimal' ? '미니멀(16:10)' : '정사각형(1:1)'} 비율로 표시됩니다
+                      </p>
+                    </>
+                  ) : (
+                    <div
+                      className="aspect-square rounded-[2rem] border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden relative cursor-pointer"
+                      onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
+                    >
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2">
                         <ImageIcon size={48} />
                         <span className="text-xs font-black">이미지/영상 업로드</span>
                       </div>
-                    )}
-                    {isUploading && uploadTarget?.type === 'block' ? (
-                      <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2">
-                        <Loader2 size={32} className="animate-spin" />
-                        <span className="text-xs font-black">업로드 중...</span>
-                      </div>
-                    ) : null}
-                  </div>
+                      {isUploading && uploadTarget?.type === 'block' && (
+                        <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white gap-2">
+                          <Loader2 size={32} className="animate-spin" />
+                          <span className="text-xs font-black">업로드 중...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
                     disabled={isUploading}

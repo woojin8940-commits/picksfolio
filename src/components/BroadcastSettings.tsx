@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShoppingBag, Check, Plus, X, Package, History as HistoryIcon, Trash2, Camera, Edit3, Search } from 'lucide-react';
-import MediaAuto, { isVideoSource } from './MediaAuto';
+import MediaAuto from './MediaAuto';
 import ImageCropper from './ImageCropper';
 import { apiService } from '../services/apiService';
 import { LiveProductOption, LiveProductOptionValue } from '../types';
@@ -190,10 +190,8 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|ogg|ogv|mov|m4v|avi|mkv)$/i.test(file.name);
-    if (!isImage && !isVideo) {
-      alert('이미지 또는 영상 파일만 업로드할 수 있습니다.');
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일만 업로드할 수 있습니다.');
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
@@ -201,22 +199,6 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
       return;
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
-    if (isVideo) {
-      setIsUploading(true);
-      try {
-        const ext = file.name?.split('.').pop()?.toLowerCase() || 'mp4';
-        const fileName = `${Date.now()}-${file.name.replace(/\.[^/.]+$/, '')}.${ext}`;
-        const apiUrl = await apiService.uploadImage(userName, file, fileName);
-        if (apiUrl) {
-          updateField('image', apiUrl);
-        }
-      } catch (err) {
-        console.error('[BroadcastSettings] video upload failed:', err);
-      } finally {
-        setIsUploading(false);
-      }
-      return;
-    }
     pendingFileRef.current = file;
     const previewUrl = URL.createObjectURL(file);
     setCropperSrc(previewUrl);
@@ -271,7 +253,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
           <div className="p-5 md:p-7 space-y-5">
             {/* Image */}
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">상품 이미지/영상</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">상품 이미지</label>
               <div className="flex items-center gap-4">
                 <div
                   onClick={() => fileInputRef.current?.click()}
@@ -295,7 +277,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                     disabled={isUploading}
                     className="px-4 py-2 bg-purple-50 text-purple-600 rounded-xl text-xs font-black hover:bg-purple-100 transition-all disabled:opacity-50"
                   >
-                    {editForm.image ? (isVideoSource(editForm.image) ? '영상 변경' : '이미지 변경') : '이미지/영상 업로드'}
+                    {editForm.image ? '이미지 변경' : '이미지 업로드'}
                   </button>
                   {editForm.image && (
                     <button
@@ -303,14 +285,14 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                       onClick={() => updateField('image', '')}
                       className="px-4 py-2 bg-red-50 text-red-500 rounded-xl text-xs font-black hover:bg-red-100 transition-all"
                     >
-                      {isVideoSource(editForm.image) ? '영상 제거' : '이미지 제거'}
+                      이미지 제거
                     </button>
                   )}
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,video/mp4,video/webm,video/ogg,video/quicktime"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif"
                   onChange={handleImageUpload}
                   className="hidden"
                 />
