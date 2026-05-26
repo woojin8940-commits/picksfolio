@@ -310,9 +310,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
         </button>
       </header>
 
-      <div className="grid grid-cols-1 gap-4 md:gap-8 mb-6 md:mb-10">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 mb-6 md:mb-10">
         {/* Camera Preview Card - Now Static until started */}
-        <div className="bg-slate-900 rounded-2xl md:rounded-[2.5rem] overflow-hidden relative group aspect-video flex items-center justify-center">
+        <div className="lg:col-span-2 bg-slate-900 rounded-2xl md:rounded-[2.5rem] overflow-hidden relative group aspect-video lg:aspect-auto flex items-center justify-center">
           <div className="absolute inset-0">
             <img 
               src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=3840&q=100" 
@@ -338,7 +338,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
         </div>
 
         {/* Stats Column - 구독자 현황 & 라이브 시간 현황 */}
-        <div className="grid grid-cols-2 gap-3 md:gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-1 gap-3 md:gap-6">
           <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
             <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-50 rounded-xl md:rounded-2xl flex items-center justify-center text-emerald-600 mb-2 md:mb-3">
               <Bell size={16} className="md:hidden" />
