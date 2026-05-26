@@ -15,10 +15,6 @@ interface CropRect {
   h: number;
 }
 
-type HandlePos = 'tl' | 'tr' | 'bl' | 'br';
-
-const MIN_CROP = 40;
-
 const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspectRatio }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -26,7 +22,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
   const [displayRect, setDisplayRect] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
-  const [dragging, setDragging] = useState<'move' | HandlePos | null>(null);
+  const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ mx: number; my: number; crop: CropRect } | null>(null);
 
   const calcDisplayRect = useCallback(() => {
@@ -44,28 +40,32 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     return { x: dx, y: dy, w: dw, h: dh };
   }, [naturalSize]);
 
+  const computeFixedCropSize = useCallback((dr: { w: number; h: number }) => {
+    const ratio = aspectRatio || 1;
+    let cw: number, ch: number;
+    if (dr.w / dr.h > ratio) {
+      ch = dr.h;
+      cw = ch * ratio;
+    } else {
+      cw = dr.w;
+      ch = cw / ratio;
+    }
+    return { w: cw, h: ch };
+  }, [aspectRatio]);
+
   useEffect(() => {
     if (!imgLoaded || !naturalSize.w) return;
     const dr = calcDisplayRect();
     if (!dr) return;
     setDisplayRect(dr);
-    const inset = Math.min(dr.w, dr.h) * 0.05;
-    let cw = dr.w - inset * 2;
-    let ch = dr.h - inset * 2;
-    if (aspectRatio) {
-      if (cw / ch > aspectRatio) {
-        cw = ch * aspectRatio;
-      } else {
-        ch = cw / aspectRatio;
-      }
-    }
+    const { w: cw, h: ch } = computeFixedCropSize(dr);
     setCrop({
       x: dr.x + (dr.w - cw) / 2,
       y: dr.y + (dr.h - ch) / 2,
       w: cw,
       h: ch,
     });
-  }, [imgLoaded, naturalSize, calcDisplayRect, aspectRatio]);
+  }, [imgLoaded, naturalSize, calcDisplayRect, computeFixedCropSize]);
 
   useEffect(() => {
     const onResize = () => {
@@ -74,33 +74,30 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
       if (!dr) return;
       const oldDr = displayRect;
       if (oldDr.w === 0) return;
+      setDisplayRect(dr);
+      const { w: cw, h: ch } = computeFixedCropSize(dr);
       const scaleX = dr.w / oldDr.w;
       const scaleY = dr.h / oldDr.h;
-      setDisplayRect(dr);
-      setCrop(prev => ({
-        x: dr.x + (prev.x - oldDr.x) * scaleX,
-        y: dr.y + (prev.y - oldDr.y) * scaleY,
-        w: prev.w * scaleX,
-        h: prev.h * scaleY,
-      }));
+      const newX = dr.x + (crop.x - oldDr.x) * scaleX;
+      const newY = dr.y + (crop.y - oldDr.y) * scaleY;
+      const clampedX = Math.max(dr.x, Math.min(newX, dr.x + dr.w - cw));
+      const clampedY = Math.max(dr.y, Math.min(newY, dr.y + dr.h - ch));
+      setCrop({ x: clampedX, y: clampedY, w: cw, h: ch });
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [imgLoaded, naturalSize, displayRect, calcDisplayRect]);
+  }, [imgLoaded, naturalSize, displayRect, calcDisplayRect, computeFixedCropSize, crop]);
 
-  const clampCrop = useCallback((c: CropRect): CropRect => {
-    let { x, y, w, h } = c;
-    w = Math.max(MIN_CROP, Math.min(w, displayRect.w));
-    h = Math.max(MIN_CROP, Math.min(h, displayRect.h));
-    x = Math.max(displayRect.x, Math.min(x, displayRect.x + displayRect.w - w));
-    y = Math.max(displayRect.y, Math.min(y, displayRect.y + displayRect.h - h));
-    return { x, y, w, h };
+  const clampPosition = useCallback((c: CropRect): CropRect => {
+    const x = Math.max(displayRect.x, Math.min(c.x, displayRect.x + displayRect.w - c.w));
+    const y = Math.max(displayRect.y, Math.min(c.y, displayRect.y + displayRect.h - c.h));
+    return { x, y, w: c.w, h: c.h };
   }, [displayRect]);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent, mode: 'move' | HandlePos) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragging(mode);
+    setDragging(true);
     dragStart.current = { mx: e.clientX, my: e.clientY, crop: { ...crop } };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, [crop]);
@@ -110,42 +107,17 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     const dx = e.clientX - dragStart.current.mx;
     const dy = e.clientY - dragStart.current.my;
     const s = dragStart.current.crop;
-
-    if (dragging === 'move') {
-      setCrop(clampCrop({ x: s.x + dx, y: s.y + dy, w: s.w, h: s.h }));
-      return;
-    }
-
-    let nx = s.x, ny = s.y, nw = s.w, nh = s.h;
-    if (dragging === 'tl') { nx = s.x + dx; ny = s.y + dy; nw = s.w - dx; nh = s.h - dy; }
-    else if (dragging === 'tr') { ny = s.y + dy; nw = s.w + dx; nh = s.h - dy; }
-    else if (dragging === 'bl') { nx = s.x + dx; nw = s.w - dx; nh = s.h + dy; }
-    else if (dragging === 'br') { nw = s.w + dx; nh = s.h + dy; }
-
-    if (aspectRatio) {
-      if (dragging === 'tl' || dragging === 'bl') {
-        nh = nw / aspectRatio;
-        if (dragging === 'tl') ny = s.y + s.h - nh;
-      } else {
-        nh = nw / aspectRatio;
-        if (dragging === 'tr') ny = s.y + s.h - nh;
-      }
-    }
-
-    if (nw < MIN_CROP) { nw = MIN_CROP; nx = dragging === 'tl' || dragging === 'bl' ? s.x + s.w - MIN_CROP : s.x; }
-    if (nh < MIN_CROP) { nh = MIN_CROP; ny = dragging === 'tl' || dragging === 'tr' ? s.y + s.h - MIN_CROP : s.y; }
-
-    setCrop(clampCrop({ x: nx, y: ny, w: nw, h: nh }));
-  }, [dragging, clampCrop, aspectRatio]);
+    setCrop(clampPosition({ x: s.x + dx, y: s.y + dy, w: s.w, h: s.h }));
+  }, [dragging, clampPosition]);
 
   const handlePointerUp = useCallback(() => {
-    setDragging(null);
+    setDragging(false);
     dragStart.current = null;
   }, []);
 
   useEffect(() => {
     if (!dragging) return;
-    const up = () => { setDragging(null); dragStart.current = null; };
+    const up = () => { setDragging(false); dragStart.current = null; };
     window.addEventListener('pointerup', up);
     return () => window.removeEventListener('pointerup', up);
   }, [dragging]);
@@ -175,35 +147,6 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     if (!imgRef.current) return;
     setNaturalSize({ w: imgRef.current.naturalWidth, h: imgRef.current.naturalHeight });
     setImgLoaded(true);
-  };
-
-  const handleCornerStyle = (pos: HandlePos): React.CSSProperties => {
-    const size = 20;
-    const offset = -4;
-    const base: React.CSSProperties = {
-      position: 'absolute', width: size, height: size, zIndex: 20,
-    };
-    if (pos === 'tl') return { ...base, top: offset, left: offset, cursor: 'nwse-resize' };
-    if (pos === 'tr') return { ...base, top: offset, right: offset, cursor: 'nesw-resize' };
-    if (pos === 'bl') return { ...base, bottom: offset, left: offset, cursor: 'nesw-resize' };
-    return { ...base, bottom: offset, right: offset, cursor: 'nwse-resize' };
-  };
-
-  const renderCornerHandle = (pos: HandlePos) => {
-    const borderW = '3px solid #8B5CF6';
-    const borderStyles: Record<HandlePos, React.CSSProperties> = {
-      tl: { borderTop: borderW, borderLeft: borderW, borderRadius: '4px 0 0 0' },
-      tr: { borderTop: borderW, borderRight: borderW, borderRadius: '0 4px 0 0' },
-      bl: { borderBottom: borderW, borderLeft: borderW, borderRadius: '0 0 0 4px' },
-      br: { borderBottom: borderW, borderRight: borderW, borderRadius: '0 0 4px 0' },
-    };
-    return (
-      <div
-        key={pos}
-        style={{ ...handleCornerStyle(pos), ...borderStyles[pos] }}
-        onPointerDown={e => handlePointerDown(e, pos)}
-      />
-    );
   };
 
   return (
@@ -290,12 +233,10 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
                 left: crop.x, top: crop.y, width: crop.w, height: crop.h,
                 border: '2px solid #8B5CF6',
                 boxSizing: 'border-box',
-                cursor: dragging === 'move' ? 'grabbing' : 'grab',
+                cursor: dragging ? 'grabbing' : 'grab',
               }}
-              onPointerDown={e => handlePointerDown(e, 'move')}
-            >
-              {(['tl', 'tr', 'bl', 'br'] as HandlePos[]).map(renderCornerHandle)}
-            </div>
+              onPointerDown={handlePointerDown}
+            />
           </>
         )}
       </div>
@@ -305,7 +246,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
         paddingBottom: 32, paddingTop: 12, gap: 16,
       }}>
         <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, textAlign: 'center', lineHeight: 1.6, margin: 0 }}>
-          크기, 위치를 자유롭게 변경하여<br />표시 영역을 조절할 수 있습니다
+          영역을 드래그하여 이동하면서<br />노출될 부분을 선택하세요
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <button
@@ -326,11 +267,12 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             }}
             onClick={() => {
               if (!displayRect.w) return;
+              const { w: cw, h: ch } = computeFixedCropSize(displayRect);
               setCrop({
-                x: displayRect.x,
-                y: displayRect.y,
-                w: displayRect.w,
-                h: displayRect.h,
+                x: displayRect.x + (displayRect.w - cw) / 2,
+                y: displayRect.y + (displayRect.h - ch) / 2,
+                w: cw,
+                h: ch,
               });
             }}
           >
