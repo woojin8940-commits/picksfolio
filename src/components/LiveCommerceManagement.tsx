@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, ShoppingBag, Check, Package, Plus } from 'lucide-react';
+import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, ShoppingBag, Check, Package, Plus, Clock } from 'lucide-react';
 import LiveStreaming from './LiveStreaming';
 import SafeImage from './SafeImage';
 import { SellerVerification } from '../types';
@@ -50,6 +50,28 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
   // Live notification subscriber count (people who opted in to be alerted when live starts)
   const [notifySubscriberCount, setNotifySubscriberCount] = useState<number>(0);
+
+  // Monthly live broadcast usage (remaining included time, overage)
+  const [liveUsage, setLiveUsage] = useState<{
+    totalMinutes: number;
+    includedMinutesRemaining: number;
+    overageMinutes: number;
+    overageAmountKrw: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getLiveUsage(userName).then((result) => {
+      if (cancelled || !result?.usage) return;
+      setLiveUsage({
+        totalMinutes: result.usage.totalMinutes,
+        includedMinutesRemaining: result.usage.includedMinutesRemaining,
+        overageMinutes: result.usage.overageMinutes,
+        overageAmountKrw: result.usage.overageAmountKrw,
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [userName]);
 
   // Broadcast title (saved per user, used for live-start alimtalk variable 라이브 제목)
   const [broadcastTitle, setBroadcastTitle] = useState<string>('');
@@ -326,6 +348,27 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             <h3 className="text-xl md:text-3xl font-black text-slate-900">{notifySubscriberCount.toLocaleString()}명</h3>
             <p className="text-slate-400 text-[10px] md:text-xs font-medium mt-1 md:mt-2">방송 시작 시 알림톡을 받는 시청자 수</p>
           </div>
+
+          {liveUsage && (
+            <div className="bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="w-8 h-8 md:w-12 md:h-12 bg-purple-50 rounded-xl md:rounded-2xl flex items-center justify-center text-purple-600 mb-2 md:mb-4">
+                <Clock size={16} className="md:hidden" />
+                <Clock size={24} className="hidden md:block" />
+              </div>
+              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">이번 달 방송 잔여시간</p>
+              <h3 className="text-xl md:text-3xl font-black text-slate-900">
+                {Math.floor(liveUsage.includedMinutesRemaining / 60)}시간 {liveUsage.includedMinutesRemaining % 60}분
+              </h3>
+              <p className="text-slate-400 text-[10px] md:text-xs font-medium mt-1 md:mt-2">
+                월 포함 3시간 중 {Math.floor(liveUsage.totalMinutes / 60)}시간 {liveUsage.totalMinutes % 60}분 사용
+              </p>
+              {liveUsage.overageMinutes > 0 && (
+                <p className="text-amber-600 text-[10px] md:text-xs font-bold mt-1">
+                  초과 {Math.floor(liveUsage.overageMinutes / 60)}시간 {liveUsage.overageMinutes % 60}분 · 후불 {liveUsage.overageAmountKrw.toLocaleString()}원
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -371,7 +371,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     fetchStreamConfig();
   }, [userName]);
 
-  // Live time usage (current month: 5h included + 4,900원/h overage). Refresh
+  // Live time usage (current month: 3h included + 8,900원/h overage). Refresh
   // when the broadcast ends so the badge reflects the just-finished session.
   const refreshLiveUsage = useCallback(async () => {
     try {
@@ -1249,7 +1249,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               {liveUsage && (
                 <div
                   className="bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2"
-                  title="이번 달 라이브 송출 시간 · 후불 누적 (시간당 4,900원) · 매출 수수료 7.5%(PG 포함)"
+                  title="이번 달 라이브 송출 시간 · 후불 누적 (시간당 8,900원) · 매출 수수료 7.5%(PG 포함)"
                 >
                   <span className="text-white/40 uppercase tracking-widest text-[9px]">이번 달</span>
                   <span>

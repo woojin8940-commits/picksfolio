@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -9,6 +10,20 @@ function getSupabaseAdmin() {
   return createClient(SUPABASE_URL, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+async function isPhoneVerified(phone: string, purpose: string): Promise<boolean> {
+  const db = getDatabase();
+  const results = await db.sql`
+    SELECT 1 FROM sms_verifications
+    WHERE phone = ${phone}
+      AND purpose = ${purpose}
+      AND verified = TRUE
+      AND expires_at > NOW() - INTERVAL '10 minutes'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return results.length > 0;
 }
 
 export default async (req: Request) => {
@@ -26,6 +41,15 @@ export default async (req: Request) => {
 
     const cleanPhone = phone.replace(/\D/g, "");
     const supabase = getSupabaseAdmin();
+
+    const purpose = action === "find-id" ? "find-id" : "reset-password";
+    const verified = await isPhoneVerified(cleanPhone, purpose);
+    if (!verified) {
+      return Response.json({
+        success: false,
+        error: "휴대폰 인증을 완료해 주세요.",
+      });
+    }
 
     if (action === "find-id") {
       if (account_type === "business") {

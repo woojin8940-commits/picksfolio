@@ -231,7 +231,7 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
     localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(settings.socials));
   }
 
-  // 2. Sync to Netlify Blobs API (Primary Cloud Storage)
+  // 2. Sync to Netlify Database + Blobs API (Primary Cloud Storage)
   try {
     const apiPayload: Record<string, any> = {};
     if (settings.blocks !== undefined) apiPayload.blocks = settings.blocks;
@@ -241,7 +241,14 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
     if (settings.profile !== undefined) apiPayload.profile = settings.profile;
 
     if (Object.keys(apiPayload).length > 0) {
-      await apiService.saveSiteData(normalizedUsername, apiPayload);
+      let saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
+      if (!saved) {
+        await new Promise(r => setTimeout(r, 1000));
+        saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
+        if (!saved) {
+          console.error('[settingsService] Cloud save failed after retry');
+        }
+      }
     }
   } catch (e) {
     console.warn('Error syncing to Netlify Blobs API:', e);

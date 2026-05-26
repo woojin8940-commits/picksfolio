@@ -14,6 +14,31 @@ function getSupabaseAdmin() {
   });
 }
 
+const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_SNAPSHOTS_PER_USER = 20;
+
+function isDestructiveUpdate(existing: Record<string, any>, incoming: Record<string, any>): boolean {
+  if (!hasConnectedSiteContent(existing)) return false;
+
+  const existingBlockCount = Array.isArray(existing.blocks) ? existing.blocks.length : 0;
+  const incomingBlocks = incoming.blocks;
+
+  if (incomingBlocks !== undefined) {
+    if (!Array.isArray(incomingBlocks)) return true;
+    if (existingBlockCount > 3 && incomingBlocks.length === 0) return true;
+  }
+
+  const existingPortfolioCount = Array.isArray(existing.portfolio) ? existing.portfolio.length : 0;
+  const incomingPortfolio = incoming.portfolio;
+
+  if (incomingPortfolio !== undefined) {
+    if (!Array.isArray(incomingPortfolio)) return true;
+    if (existingPortfolioCount > 3 && incomingPortfolio.length === 0) return true;
+  }
+
+  return false;
+}
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -46,7 +71,6 @@ export default async (req: Request, context: Context) => {
         return Response.json(dbData);
       }
 
-      // Check blob store as fallback (data may exist there from earlier saves)
       try {
         const blobData = await recoverSiteDataFromBlob(db, username);
         if (blobData) {
@@ -65,7 +89,6 @@ export default async (req: Request, context: Context) => {
           .maybeSingle();
 
         if (profile) {
-          // Check if the profile has site_data from the legacy system (April 22 version)
           const legacySiteData = profile.site_data;
           const hasLegacyContent =
             legacySiteData &&
@@ -104,7 +127,6 @@ export default async (req: Request, context: Context) => {
             ON CONFLICT (username) DO NOTHING
           `;
 
-          // Also sync to blob store so future reads are faster
           try {
             const blobStore = getStore({ name: "site-data", consistency: "strong" });
             await blobStore.setJSON(username, initialData);
@@ -120,12 +142,58 @@ export default async (req: Request, context: Context) => {
     }
 
     if (req.method === "POST") {
-      const body = await req.json();
-      const bodyJson = JSON.stringify(body);
+      const bodyText = await req.text();
+
+      if (bodyText.length > MAX_PAYLOAD_BYTES) {
+        return Response.json({ error: "Payload too large" }, { status: 413 });
+      }
+
+      let body: Record<string, any>;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return Response.json({ error: "Invalid payload" }, { status: 400 });
+      }
 
       const existing = await db.sql`
-        SELECT profile_code FROM site_data WHERE username = ${username}
+        SELECT data, profile_code FROM site_data WHERE username = ${username}
       `;
+
+      const existingData = existing.length > 0 ? (existing[0].data as Record<string, any> || {}) : {};
+
+      if (existing.length > 0 && hasConnectedSiteContent(existingData) && isDestructiveUpdate(existingData, body)) {
+        return Response.json({
+          error: "이 요청은 기존 콘텐츠를 모두 삭제합니다. force=true 파라미터를 포함하여 다시 시도해 주세요.",
+          code: "DESTRUCTIVE_UPDATE",
+        }, { status: 409 });
+      }
+
+      if (existing.length > 0 && hasConnectedSiteContent(existingData)) {
+        try {
+          await db.sql`
+            INSERT INTO site_data_snapshots (username, data, snapshot_reason)
+            VALUES (${username}, ${JSON.stringify(existingData)}::jsonb, ${'pre-update'})
+          `;
+
+          await db.sql`
+            DELETE FROM site_data_snapshots
+            WHERE id IN (
+              SELECT id FROM site_data_snapshots
+              WHERE username = ${username}
+              ORDER BY created_at DESC
+              OFFSET ${MAX_SNAPSHOTS_PER_USER}
+            )
+          `;
+        } catch (snapshotErr) {
+          console.warn("[api-site] Snapshot creation failed (non-blocking):", snapshotErr);
+        }
+      }
+
+      const bodyJson = JSON.stringify(body);
 
       if (existing.length > 0) {
         await db.sql`
@@ -143,7 +211,6 @@ export default async (req: Request, context: Context) => {
         `;
       }
 
-      // Sync full merged data to blob store for backup and OG image proxy
       try {
         const mergedResult = await db.sql`
           SELECT data FROM site_data WHERE username = ${username}
