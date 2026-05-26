@@ -1042,20 +1042,23 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                           <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || '미분류'}</span>
                           <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}개</span>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5 bg-slate-100 rounded-xl px-1.5 py-1 border border-slate-200">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">순서</span>
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'up')}
                             disabled={groupIndex === 0}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                            className="p-1.5 rounded-lg bg-white hover:bg-purple-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-purple-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                            title="카테고리 위로 이동"
                           >
-                            <ChevronUp size={16} />
+                            <ChevronUp size={16} strokeWidth={2.5} />
                           </button>
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'down')}
                             disabled={groupIndex === orderedCategoryGroups.length - 1}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                            className="p-1.5 rounded-lg bg-white hover:bg-purple-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-purple-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                            title="카테고리 아래로 이동"
                           >
-                            <ChevronDown size={16} />
+                            <ChevronDown size={16} strokeWidth={2.5} />
                           </button>
                         </div>
                       </div>

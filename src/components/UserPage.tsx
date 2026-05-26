@@ -762,20 +762,20 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   }, [normalizedUsername]);
 
   const categories = useMemo(() => {
-    const catSet = new Set<string>();
+    const ordered: string[] = [];
+    const seen = new Set<string>();
     for (const b of blocks) {
       const c = b.category;
-      if (c) catSet.add(c);
+      if (c && !seen.has(c)) { seen.add(c); ordered.push(c); }
     }
     for (const c of linkGridCategories) {
-      catSet.add(c);
+      if (!seen.has(c)) { seen.add(c); ordered.push(c); }
     }
-    return ['전체', ...Array.from(catSet)];
+    return ['전체', ...ordered];
   }, [blocks, linkGridCategories]);
 
   const filteredBlocks = useMemo(() => {
     let result = blocks;
-    // Apply category filter
     if (selectedCategory !== '전체') {
       result = result.filter(b => b.category === selectedCategory);
     }
@@ -788,6 +788,20 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     }
     return result;
   }, [blocks, selectedCategory, searchQuery]);
+
+  const orderedCategoryGroups = useMemo(() => {
+    if (selectedCategory !== '전체') return [];
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const b of filteredBlocks) {
+      const cat = b.category || '';
+      if (!seen.has(cat)) { seen.add(cat); order.push(cat); }
+    }
+    return order.map(cat => ({
+      category: cat,
+      blocks: filteredBlocks.filter(b => (b.category || '') === cat),
+    }));
+  }, [filteredBlocks, selectedCategory]);
 
   const activeScheduleItems = useMemo(() => {
     return openSchedule.filter(item => item.isActive && new Date(item.date) >= new Date(new Date().toDateString()));
@@ -1539,141 +1553,163 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                </div>
 
                {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                 <div className="w-full -mx-4 md:-mx-8">
-                 <div
-                    className="grid grid-flow-dense transition-all duration-500"
-                    style={{
-                      gridTemplateColumns: 'repeat(6, 1fr)',
-                      gap: `${Math.max(design.gridGap, 4)}px`,
-                      paddingBottom: '100px'
-                    }}
-                  >
-                    {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
-                      const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                      const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
-                      const blockDisplay: BlockDisplayType = block.displayType || 'grid';
+                 <div className="w-full -mx-4 md:-mx-8" style={{ paddingBottom: '100px' }}>
+                   {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                     <div key={group.category || '__all'}>
+                       {selectedCategory === '전체' && group.category && (
+                         <div className={`flex items-center gap-3 px-4 md:px-6 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                           <Hash size={14} style={{ color: design.accentColor }} />
+                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
+                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
+                           <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                         </div>
+                       )}
+                       <div
+                         className="grid grid-flow-dense transition-all duration-500"
+                         style={{
+                           gridTemplateColumns: 'repeat(6, 1fr)',
+                           gap: `${Math.max(design.gridGap, 4)}px`,
+                         }}
+                       >
+                         {group.blocks.map((block) => {
+                           const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                           const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
+                           const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
-                      if (blockDisplay === 'text') {
-                        return (
-                          <div
-                            key={block.id}
-                            className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
-                            style={{
-                              gridColumn: `span ${gridSpan}`,
-                              borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                              minHeight: '80px',
-                              backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
-                            }}
-                          >
-                            {block.textContent ? (
-                              <div
-                                className="leading-relaxed whitespace-pre-wrap"
-                                style={{
-                                  fontSize: `${block.fontSizePx || 14}px`,
-                                  fontWeight: block.bold ? 'bold' : undefined,
-                                  fontStyle: block.italic ? 'italic' : undefined,
-                                  textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                                  color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                                }}
-                                dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
-                              />
-                            ) : (
-                              <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
-                            )}
-                          </div>
-                        );
-                      }
+                           if (blockDisplay === 'text') {
+                             return (
+                               <div
+                                 key={block.id}
+                                 className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                                 style={{
+                                   gridColumn: `span ${gridSpan}`,
+                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
+                                   minHeight: '80px',
+                                   backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
+                                 }}
+                               >
+                                 {block.textContent ? (
+                                   <div
+                                     className="leading-relaxed whitespace-pre-wrap"
+                                     style={{
+                                       fontSize: `${block.fontSizePx || 14}px`,
+                                       fontWeight: block.bold ? 'bold' : undefined,
+                                       fontStyle: block.italic ? 'italic' : undefined,
+                                       textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                                       color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
+                                     }}
+                                     dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
+                                   />
+                                 ) : (
+                                   <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
+                                 )}
+                               </div>
+                             );
+                           }
 
-                      if (blockDisplay === 'minimal') {
-                        return (
-                          <div
-                            key={block.id}
-                            onClick={() => {
-                              setSelectedBlockId(block.id);
-                              trackClick(username, block.id);
-                            }}
-                            className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
-                            style={{
-                              gridColumn: `span ${gridSpan}`,
-                              borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                            }}
-                          >
-                            {block.coverMedia && (
-                              <div className="aspect-[16/10] overflow-hidden">
-                                <MediaAuto
-                                  src={block.coverMedia || FALLBACK_IMAGE}
-                                  className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
-                                  style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
-                                />
-                              </div>
-                            )}
-                            <div className="p-3 md:p-4">
-                              <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
-                              <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
-                            </div>
-                            {(block.products?.length || 0) > 0 && (
-                              <div className="absolute top-3 right-3">
-                                <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
+                           if (blockDisplay === 'minimal') {
+                             return (
+                               <div
+                                 key={block.id}
+                                 onClick={() => {
+                                   setSelectedBlockId(block.id);
+                                   trackClick(username, block.id);
+                                 }}
+                                 className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                                 style={{
+                                   gridColumn: `span ${gridSpan}`,
+                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                                 }}
+                               >
+                                 {block.coverMedia && (
+                                   <div className="aspect-[16/10] overflow-hidden">
+                                     <MediaAuto
+                                       src={block.coverMedia || FALLBACK_IMAGE}
+                                       className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                       style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
+                                     />
+                                   </div>
+                                 )}
+                                 <div className="p-3 md:p-4">
+                                   <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
+                                   <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                                 </div>
+                                 {(block.products?.length || 0) > 0 && (
+                                   <div className="absolute top-3 right-3">
+                                     <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
+                                   </div>
+                                 )}
+                               </div>
+                             );
+                           }
 
-                      return (
-                        <div
-                          key={block.id}
-                          onClick={() => {
-                            setSelectedBlockId(block.id);
-                            trackClick(username, block.id);
-                          }}
-                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
-                          style={{
-                            gridColumn: `span ${gridSpan}`,
-                            borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                          }}
-                        >
-                          <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
-                          <div className="absolute top-3 right-3">
-                            <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
-                          </div>
-                          <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                            <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                            <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                          </div>
-                        </div>
-                      );
-                    }) : null}
-                  </div>
+                           return (
+                             <div
+                               key={block.id}
+                               onClick={() => {
+                                 setSelectedBlockId(block.id);
+                                 trackClick(username, block.id);
+                               }}
+                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
+                               style={{
+                                 gridColumn: `span ${gridSpan}`,
+                                 borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                               }}
+                             >
+                               <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
+                               <div className="absolute top-3 right-3">
+                                 <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
+                               </div>
+                               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                                 <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
+                                 <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                               </div>
+                             </div>
+                           );
+                         })}
+                       </div>
+                     </div>
+                   ))}
                   </div>
                ) : (
                 <div className="flex flex-col gap-3 pb-32">
-                   {filteredBlocks.map((block) => (
-                     (block.products || []).map(p => (
-                       <a 
-                         key={p.id}
-                         href={ensureAbsoluteUrl(p.link)}
-                         target="_blank"
-                         rel="noopener noreferrer"
-                         onClick={() => trackClick(username, block.id)}
-                         className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`} 
-                         style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
-                       >
-                         <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                           {/* Small Product Image */}
-                           <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-                             <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
-                           </div>
-                           <div className="flex-1 min-w-0">
-                             <h4 className="text-sm font-black truncate">{p.name}</h4>
-                           </div>
-                         </div>
-                         <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
-                           <ExternalLink size={12} />
-                         </div>
-                       </a>
-                     ))
-                   ))}
+                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                    <div key={group.category || '__all'}>
+                      {selectedCategory === '전체' && group.category && (
+                        <div className={`flex items-center gap-3 px-2 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          <Hash size={14} style={{ color: design.accentColor }} />
+                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
+                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                        </div>
+                      )}
+                      {group.blocks.map((block) => (
+                        (block.products || []).map(p => (
+                          <a
+                            key={p.id}
+                            href={ensureAbsoluteUrl(p.link)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => trackClick(username, block.id)}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`}
+                            style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
+                          >
+                            <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
+                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                                <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-black truncate">{p.name}</h4>
+                              </div>
+                            </div>
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
+                              <ExternalLink size={12} />
+                            </div>
+                          </a>
+                        ))
+                      ))}
+                    </div>
+                  ))}
                  </div>
                )}
             </div>
@@ -1926,144 +1962,166 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               )}
 
               {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                <div className="w-full">
-                <div
-                  className="grid grid-flow-dense"
-                  style={{
-                    gridTemplateColumns: 'repeat(6, 1fr)',
-                    gap: `${Math.max(design.gridGap, 4)}px`,
-                    paddingBottom: '100px'
-                  }}
-                >
-                  {filteredBlocks.length > 0 ? filteredBlocks.map((block) => {
-                    const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                    const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
-                    const blockDisplay: BlockDisplayType = block.displayType || 'grid';
-
-                    if (blockDisplay === 'text') {
-                      return (
-                        <div
-                          key={block.id}
-                          className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
-                          style={{
-                            gridColumn: `span ${gridSpan}`,
-                            borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                            minHeight: '80px',
-                            backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
-                          }}
-                        >
-                          {block.textContent ? (
-                            <div
-                              className="leading-relaxed whitespace-pre-wrap"
-                              style={{
-                                fontSize: `${block.fontSizePx || 14}px`,
-                                fontWeight: block.bold ? 'bold' : undefined,
-                                fontStyle: block.italic ? 'italic' : undefined,
-                                textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                                color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                              }}
-                              dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
-                            />
-                          ) : (
-                            <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
-                          )}
+                <div className="w-full" style={{ paddingBottom: '100px' }}>
+                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                    <div key={group.category || '__all'}>
+                      {selectedCategory === '전체' && group.category && (
+                        <div className={`flex items-center gap-3 px-2 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          <Hash size={14} style={{ color: design.accentColor }} />
+                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
+                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
                         </div>
-                      );
-                    }
-
-                    if (blockDisplay === 'minimal') {
-                      return (
-                        <div
-                          key={block.id}
-                          onClick={() => {
-                            setSelectedBlockId(block.id);
-                            trackClick(username, block.id);
-                          }}
-                          className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
-                          style={{
-                            gridColumn: `span ${gridSpan}`,
-                            borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                          }}
-                        >
-                          {block.coverMedia && (
-                            <div className="aspect-[16/10] overflow-hidden">
-                              <MediaAuto
-                                src={block.coverMedia || FALLBACK_IMAGE}
-                                className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
-                                style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
-                              />
-                            </div>
-                          )}
-                          <div className="p-3 md:p-4">
-                            <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
-                            <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
-                          </div>
-                          {(block.products?.length || 0) > 0 && (
-                            <div className="absolute top-3 right-3">
-                              <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    return (
+                      )}
                       <div
-                        key={block.id}
-                        onClick={() => {
-                          setSelectedBlockId(block.id);
-                          trackClick(username, block.id);
-                        }}
-                        className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
+                        className="grid grid-flow-dense"
                         style={{
-                          gridColumn: `span ${gridSpan}`,
-                          borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                          gridTemplateColumns: 'repeat(6, 1fr)',
+                          gap: `${Math.max(design.gridGap, 4)}px`,
                         }}
                       >
-                        <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
-                        <div className="absolute top-3 right-3">
-                          <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
-                        </div>
-                        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                          <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                          <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                        </div>
+                        {group.blocks.map((block) => {
+                          const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                          const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
+                          const blockDisplay: BlockDisplayType = block.displayType || 'grid';
+
+                          if (blockDisplay === 'text') {
+                            return (
+                              <div
+                                key={block.id}
+                                className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                                style={{
+                                  gridColumn: `span ${gridSpan}`,
+                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
+                                  minHeight: '80px',
+                                  backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
+                                }}
+                              >
+                                {block.textContent ? (
+                                  <div
+                                    className="leading-relaxed whitespace-pre-wrap"
+                                    style={{
+                                      fontSize: `${block.fontSizePx || 14}px`,
+                                      fontWeight: block.bold ? 'bold' : undefined,
+                                      fontStyle: block.italic ? 'italic' : undefined,
+                                      textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
+                                      color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
+                                  />
+                                ) : (
+                                  <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (blockDisplay === 'minimal') {
+                            return (
+                              <div
+                                key={block.id}
+                                onClick={() => {
+                                  setSelectedBlockId(block.id);
+                                  trackClick(username, block.id);
+                                }}
+                                className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                                style={{
+                                  gridColumn: `span ${gridSpan}`,
+                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                                }}
+                              >
+                                {block.coverMedia && (
+                                  <div className="aspect-[16/10] overflow-hidden">
+                                    <MediaAuto
+                                      src={block.coverMedia || FALLBACK_IMAGE}
+                                      className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                      style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
+                                    />
+                                  </div>
+                                )}
+                                <div className="p-3 md:p-4">
+                                  <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
+                                  <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                                </div>
+                                {(block.products?.length || 0) > 0 && (
+                                  <div className="absolute top-3 right-3">
+                                    <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={block.id}
+                              onClick={() => {
+                                setSelectedBlockId(block.id);
+                                trackClick(username, block.id);
+                              }}
+                              className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
+                              style={{
+                                gridColumn: `span ${gridSpan}`,
+                                borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
+                              }}
+                            >
+                              <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
+                              <div className="absolute top-3 right-3">
+                                <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
+                              </div>
+                              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                                <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
+                                <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  }) : null}
-                </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="flex flex-col gap-3 pb-32">
-                  {filteredBlocks.map((block) => (
-                    (block.products || []).map(p => (
-                      <a
-                        key={p.id}
-                        href={ensureAbsoluteUrl(p.link)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          trackClick(username, block.id);
-                          openLink(p.link);
-                        }}
-                        className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`} 
-                        style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
-                      >
-                        <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                          {/* Small Product Image */}
-                          <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-                            <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-sm font-black truncate">{p.name}</h4>
-                          </div>
+                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                    <div key={group.category || '__all'}>
+                      {selectedCategory === '전체' && group.category && (
+                        <div className={`flex items-center gap-3 px-2 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          <Hash size={14} style={{ color: design.accentColor }} />
+                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
+                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
                         </div>
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
-                          <ExternalLink size={12} />
-                        </div>
-                      </a>
-                    ))
+                      )}
+                      {group.blocks.map((block) => (
+                        (block.products || []).map(p => (
+                          <a
+                            key={p.id}
+                            href={ensureAbsoluteUrl(p.link)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              trackClick(username, block.id);
+                              openLink(p.link);
+                            }}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`}
+                            style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
+                          >
+                            <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
+                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                                <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-black truncate">{p.name}</h4>
+                              </div>
+                            </div>
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
+                              <ExternalLink size={12} />
+                            </div>
+                          </a>
+                        ))
+                      ))}
+                    </div>
                   ))}
                 </div>
               )}
