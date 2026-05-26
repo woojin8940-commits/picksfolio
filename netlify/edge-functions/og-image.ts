@@ -70,10 +70,14 @@ export default async (req: Request, context: Context) => {
       blocks?: Array<{ coverMedia?: string }>
     }
 
-    const cacheBuster = (data as any).coverUpdatedAt
-      ? new Date((data as any).coverUpdatedAt).getTime()
-      : Date.now()
-    const ogImage = `${url.origin}/api/og-image/${encodeURIComponent(username)}?v=${cacheBuster}`
+    // Resolve the actual image URL directly instead of using the redirect proxy,
+    // because KakaoTalk's crawler does not follow 302 redirects for og:image.
+    const directImage =
+      data.design?.portfolioHeaderImage ||
+      data.blocks?.[0]?.coverMedia ||
+      data.profile?.avatar_url
+
+    const ogImage = directImage || `${url.origin}/og-image.png`
 
     const profileName = data.profile?.name || username
     const ogTitle = data.design?.title || `${profileName} | PICKSFOLIO`
