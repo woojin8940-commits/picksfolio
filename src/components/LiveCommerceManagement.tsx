@@ -337,7 +337,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           </div>
         </div>
 
-        {/* Stats Column - 구독자 현황 & 라이브 시간 현황 */}
+        {/* Stats Column - 구독자 현황 & 라이브 잔여 시간 */}
         <div className="grid grid-cols-2 lg:grid-cols-1 gap-3 md:gap-6">
           <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
             <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-50 rounded-xl md:rounded-2xl flex items-center justify-center text-emerald-600 mb-2 md:mb-3">
@@ -354,7 +354,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               <Clock size={16} className="md:hidden" />
               <Clock size={20} className="hidden md:block" />
             </div>
-            <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">라이브 시간 현황</p>
+            <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">라이브 잔여 시간</p>
             {liveUsage ? (
               <>
                 <h3 className="text-xl md:text-3xl font-black text-slate-900">
