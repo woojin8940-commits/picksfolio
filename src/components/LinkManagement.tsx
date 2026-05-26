@@ -607,13 +607,19 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   };
 
   const handleMoveBlock = (blockId: string, direction: 'up' | 'down') => {
-    const idx = blocks.findIndex(b => b.id === blockId);
-    if (idx < 0) return;
-    if (direction === 'up' && idx === 0) return;
-    if (direction === 'down' && idx === blocks.length - 1) return;
-    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const block = blocks.find(b => b.id === blockId);
+    if (!block) return;
+    const cat = block.category || '';
+    const sameCategory = blocks.filter(b => (b.category || '') === cat);
+    const idxInCat = sameCategory.findIndex(b => b.id === blockId);
+    if (idxInCat < 0) return;
+    if (direction === 'up' && idxInCat === 0) return;
+    if (direction === 'down' && idxInCat === sameCategory.length - 1) return;
+    const swapTarget = direction === 'up' ? sameCategory[idxInCat - 1] : sameCategory[idxInCat + 1];
+    const idxA = blocks.findIndex(b => b.id === blockId);
+    const idxB = blocks.findIndex(b => b.id === swapTarget.id);
     const updated = [...blocks];
-    [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
+    [updated[idxA], updated[idxB]] = [updated[idxB], updated[idxA]];
     setBlocks(updated);
     localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updated));
     saveBlocksToCloud(updated).catch(() => {});
@@ -810,6 +816,45 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
     ? blocks.filter(b => b.category === selectedFolderId)
     : blocks;
 
+  const orderedCategoryGroups = (() => {
+    if (selectedFolderId) return [];
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const b of blocks) {
+      const cat = b.category || '';
+      if (!seen.has(cat)) {
+        seen.add(cat);
+        order.push(cat);
+      }
+    }
+    return order.map(cat => ({
+      category: cat,
+      blocks: blocks.filter(b => (b.category || '') === cat),
+    }));
+  })();
+
+  const handleMoveCategoryGroup = (category: string, direction: 'up' | 'down') => {
+    const catOrder: string[] = [];
+    const seen = new Set<string>();
+    for (const b of blocks) {
+      const cat = b.category || '';
+      if (!seen.has(cat)) { seen.add(cat); catOrder.push(cat); }
+    }
+    const idx = catOrder.indexOf(category);
+    if (idx < 0) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === catOrder.length - 1) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [catOrder[idx], catOrder[swapIdx]] = [catOrder[swapIdx], catOrder[idx]];
+    const reordered: Block[] = [];
+    for (const cat of catOrder) {
+      reordered.push(...blocks.filter(b => (b.category || '') === cat));
+    }
+    setBlocks(reordered);
+    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(reordered));
+    saveBlocksToCloud(reordered).catch(() => {});
+  };
+
   const handleSaveEdit = async () => {
     if (!isEditing) return;
 
@@ -989,7 +1034,97 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
               </div>
 
               <div className="space-y-3 md:space-y-4">
-                {displayedBlocks.map((block, blockIndex) => (
+                {!selectedFolderId ? (
+                  orderedCategoryGroups.map((group, groupIndex) => (
+                    <div key={group.category || '__uncategorized'} className="rounded-2xl border border-[#E2E8F0] overflow-hidden bg-slate-50/50">
+                      <div className="flex items-center justify-between px-4 md:px-6 py-3 bg-white border-b border-[#E2E8F0]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || '미분류'}</span>
+                          <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}개</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleMoveCategoryGroup(group.category, 'up')}
+                            disabled={groupIndex === 0}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                          >
+                            <ChevronUp size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleMoveCategoryGroup(group.category, 'down')}
+                            disabled={groupIndex === orderedCategoryGroups.length - 1}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                          >
+                            <ChevronDown size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 p-2 md:p-3">
+                        {group.blocks.map((block, blockIndex) => (
+                          <div
+                            key={block.id}
+                            className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-purple-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+                            draggable
+                            onDragStart={e => handleDragStart(e, block.id)}
+                            onDragOver={handleDragOver}
+                            onDrop={e => handleDrop(e, block.id)}
+                            onDragEnd={handleDragEnd}
+                          >
+                            <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'up'); }}
+                                disabled={blockIndex === 0}
+                                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                              >
+                                <ArrowUp size={14} />
+                              </button>
+                              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-all">
+                                <GripVertical size={16} />
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'down'); }}
+                                disabled={blockIndex === group.blocks.length - 1}
+                                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
+                              >
+                                <ArrowDown size={14} />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
+                              <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                                {block.displayType === 'text' ? (
+                                  <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400">
+                                    <span className="text-2xl font-black">T</span>
+                                  </div>
+                                ) : (
+                                  <SafeImage src={block.coverMedia} alt="" className="w-full h-full object-cover" />
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                  <span className="inline-block bg-purple-50 text-purple-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+                                    {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
+                                  </span>
+                                </div>
+                                {block.displayType === 'text' ? (
+                                  <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5 truncate">
+                                    {block.textContent ? block.textContent.replace(/<[^>]*>/g, '').substring(0, 50) || '텍스트' : '텍스트를 입력하세요'}
+                                  </h3>
+                                ) : (
+                                  <>
+                                    <h3 className="text-sm md:text-xl font-black text-[#1E1E2E] mb-0.5">{block.title}</h3>
+                                    <p className="text-[9px] md:text-xs font-black text-[#94A3B8] uppercase tracking-widest">{(block.products || []).length} ITEMS LINKED</p>
+                                  </>
+                                )}
+                              </div>
+                              <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  displayedBlocks.map((block, blockIndex) => (
                   <div
                     key={block.id}
                     className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-purple-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
@@ -1049,7 +1184,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
 
             </>
