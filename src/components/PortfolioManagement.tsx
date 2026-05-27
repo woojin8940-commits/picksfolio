@@ -11,6 +11,7 @@ import Toast from './Toast';
 import MediaAuto, { isVideoSource } from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import { normalizeContentToHtml, renderPortfolioHtml, sanitizeRichHtml } from './richText';
+import ColorPickerModal from './ColorPickerModal';
 
 type BlockFontSize = 'sm' | 'md' | 'lg' | 'xl';
 type BlockGridColumns = 1 | 2 | 3 | 4;
@@ -403,6 +404,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null);
   const [openHighlightPicker, setOpenHighlightPicker] = useState<string | null>(null);
+  const [colorPickerModal, setColorPickerModal] = useState<{ target: string; color: string } | null>(null);
 
   // Link grid blocks for combined preview
   const [linkGridBlocks, setLinkGridBlocks] = useState<any[]>([]);
@@ -1346,21 +1348,17 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold text-slate-400">색상</span>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={btn.color}
-                          onChange={(e) => {
-                            const updated = [...(profile.links.customButtons || [])];
-                            updated[idx] = { ...updated[idx], color: e.target.value };
-                            setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
-                          }}
-                          className="w-7 h-7 rounded-full border border-slate-200 cursor-pointer appearance-none"
+                      <button
+                        type="button"
+                        onClick={() => setColorPickerModal({ target: `btn-${btn.id}`, color: btn.color })}
+                        className="flex items-center gap-2 group"
+                      >
+                        <div
+                          className="w-7 h-7 rounded-full border border-slate-200 cursor-pointer transition-all group-hover:scale-110 group-hover:shadow-md"
                           style={{ backgroundColor: btn.color }}
-                          title="색상 선택"
                         />
-                        <span className="text-[10px] text-slate-400 font-mono uppercase">{btn.color}</span>
-                      </div>
+                        <span className="text-[10px] text-slate-400 font-mono uppercase group-hover:text-slate-600 transition-colors">{btn.color}</span>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1478,26 +1476,26 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">커버 배경색</label>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      '#7c3aed', // Violet
-                      '#0f172a', // Midnight
-                      '#ffffff', // White
-                      'linear-gradient(to br, #9333ea, #4f46e5)', // Purple Gradient
+                      '#7c3aed',
+                      '#0f172a',
+                      '#ffffff',
+                      'linear-gradient(to br, #9333ea, #4f46e5)',
                     ].map(color => (
-                      <button 
+                      <button
                         key={color}
                         onClick={() => setDesign(prev => ({ ...prev, portfolioHeaderColor: color }))}
                         className={`w-10 h-10 rounded-xl border-2 transition-all ${design.portfolioHeaderColor === color ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
                         style={{ background: color, border: color === '#ffffff' ? '1px solid #e2e8f0' : undefined }}
                       />
                     ))}
-                    <div className="relative">
-                      <input 
-                        type="color" 
-                        value={design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#9333ea'} 
-                        onChange={e => setDesign(prev => ({ ...prev, portfolioHeaderColor: e.target.value }))}
-                        className="w-10 h-10 rounded-xl overflow-hidden border-none p-0 cursor-pointer"
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setColorPickerModal({ target: 'headerColor', color: design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#9333ea' })}
+                      className="w-10 h-10 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-purple-400 hover:text-purple-500 transition-all hover:scale-105"
+                      title="더 많은 색상"
+                    >
+                      <Palette size={16} />
+                    </button>
                   </div>
                   <p className="text-[10px] text-slate-400 font-medium">이미지가 없을 때 적용되는 배경색입니다.</p>
                 </div>
@@ -1506,25 +1504,25 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">포인트 컬러 (ACCENT COLOR)</label>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      '#a855f7', // Violet
-                      '#0f172a', // Midnight Slate
-                      '#2563eb', // Blue
+                      '#a855f7',
+                      '#0f172a',
+                      '#2563eb',
                     ].map(color => (
-                      <button 
+                      <button
                         key={color}
                         onClick={() => setDesign(prev => ({ ...prev, accentColor: color }))}
                         className={`w-10 h-10 rounded-full border-4 transition-all ${design.accentColor === color ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
                         style={{ backgroundColor: color }}
                       />
                     ))}
-                    <div className="relative">
-                      <input 
-                        type="color" 
-                        value={design.accentColor || '#a855f7'} 
-                        onChange={e => setDesign(prev => ({ ...prev, accentColor: e.target.value }))}
-                        className="w-10 h-10 rounded-full overflow-hidden border-none p-0 cursor-pointer"
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setColorPickerModal({ target: 'accentColor', color: design.accentColor || '#a855f7' })}
+                      className="w-10 h-10 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-purple-400 hover:text-purple-500 transition-all hover:scale-105"
+                      title="더 많은 색상"
+                    >
+                      <Palette size={16} />
+                    </button>
                   </div>
                 </div>
 
@@ -2394,6 +2392,31 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
         isVisible={showToast}
         onClose={() => setShowToast(false)}
         type={saveSuccess ? 'success' : 'error'}
+      />
+      <ColorPickerModal
+        isOpen={!!colorPickerModal}
+        onClose={() => setColorPickerModal(null)}
+        currentColor={colorPickerModal?.color || '#7c3aed'}
+        onColorChange={(color) => {
+          if (!colorPickerModal) return;
+          const { target } = colorPickerModal;
+          if (target === 'headerColor') {
+            setDesign(prev => ({ ...prev, portfolioHeaderColor: color }));
+          } else if (target === 'accentColor') {
+            setDesign(prev => ({ ...prev, accentColor: color }));
+          } else if (target.startsWith('btn-')) {
+            const btnId = target.replace('btn-', '');
+            const updated = (profile.links.customButtons || []).map(b =>
+              b.id === btnId ? { ...b, color } : b
+            );
+            setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
+          }
+          setColorPickerModal(prev => prev ? { ...prev, color } : null);
+        }}
+        title={
+          colorPickerModal?.target === 'headerColor' ? '커버 배경색' :
+          colorPickerModal?.target === 'accentColor' ? '포인트 컬러' : '버튼 색상'
+        }
       />
     </div>
   );
