@@ -283,6 +283,13 @@ interface AboutSection {
   content: string;
 }
 
+interface CustomButton {
+  id: string;
+  label: string;
+  url: string;
+  color: string;
+}
+
 interface PortfolioProfile {
   name: string;
   bio: string;
@@ -298,6 +305,7 @@ interface PortfolioProfile {
     tiktok: string;
     businessProposal?: boolean;
     liveNotify?: boolean;
+    customButtons?: CustomButton[];
   };
 }
 
@@ -680,7 +688,8 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               naver: socialsSource.naver || prev.links.naver || '',
               tiktok: socialsSource.tiktok || prev.links.tiktok || '',
               businessProposal: typeof socialsSource.businessProposal === 'boolean' ? socialsSource.businessProposal : (prev.links.businessProposal || false),
-              liveNotify: typeof socialsSource.liveNotify === 'boolean' ? socialsSource.liveNotify : (prev.links.liveNotify || false)
+              liveNotify: typeof socialsSource.liveNotify === 'boolean' ? socialsSource.liveNotify : (prev.links.liveNotify || false),
+              customButtons: Array.isArray(socialsSource.customButtons) ? socialsSource.customButtons : (prev.links.customButtons || [])
             }
           }));
         }
@@ -995,7 +1004,8 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
         tiktok: (profile.links.tiktok || '').trim(),
         naver: (profile.links.naver || '').trim(),
         businessProposal: profile.links.businessProposal || false,
-        liveNotify: profile.links.liveNotify || false
+        liveNotify: profile.links.liveNotify || false,
+        customButtons: (profile.links.customButtons || []).filter(b => b.label.trim() && b.url.trim())
       };
 
       const savePayload = {
@@ -1262,124 +1272,10 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
 
             {/* Social Links - Dynamic Add/Remove */}
             <div className="space-y-3">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">소셜 링크 & 연락처</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">버튼 설정</label>
 
-              {/* Active (added) links */}
+              {/* Special toggle buttons: Business Proposal & Live Notify */}
               <div className="space-y-2">
-                {profile.links?.phone !== undefined && profile.links.phone !== '' && (
-                  <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Phone size={16} className="text-slate-400 shrink-0" />
-                    <input
-                      type="text"
-                      value={profile.links.phone}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, phone: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="전화번호 (예: 010-1234-5678)"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, phone: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-                {profile.links?.kakao !== undefined && profile.links.kakao !== '' && (
-                  <div className="flex items-center gap-3 bg-yellow-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <MessageCircle size={16} className="text-yellow-500 shrink-0" />
-                    <input
-                      type="text"
-                      value={profile.links.kakao}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, kakao: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="카카오톡 채널 링크 또는 ID"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, kakao: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-                {profile.links?.youtube !== undefined && profile.links.youtube !== '' && (
-                  <div className="flex items-center gap-3 bg-red-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Youtube size={16} className="text-red-500 shrink-0" />
-                    <input
-                      type="text"
-                      value={profile.links.youtube}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, youtube: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="YouTube 채널 링크"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, youtube: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-                {profile.links?.instagram !== undefined && profile.links.instagram !== '' && (
-                  <div className="flex items-center gap-3 bg-pink-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Instagram size={16} className="text-pink-500 shrink-0" />
-                    <input
-                      type="text"
-                      value={profile.links.instagram}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, instagram: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="Instagram 사용자명 (예: @username)"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, instagram: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-                {profile.links?.naver !== undefined && profile.links.naver !== '' && (
-                  <div className="flex items-center gap-3 bg-green-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <span className="text-[#03C75A] font-black text-sm shrink-0 w-4 text-center">N</span>
-                    <input
-                      type="text"
-                      value={profile.links.naver}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, naver: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="네이버 블로그 링크"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, naver: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-                {profile.links?.tiktok !== undefined && profile.links.tiktok !== '' && (
-                  <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Globe size={16} className="text-slate-900 shrink-0" />
-                    <input
-                      type="text"
-                      value={profile.links.tiktok}
-                      onChange={(e) => setProfile({ ...profile, links: { ...profile.links, tiktok: e.target.value } })}
-                      className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
-                      placeholder="TikTok 사용자명 (예: @username)"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProfile({ ...profile, links: { ...profile.links, tiktok: '' } })}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
                 {profile.links?.businessProposal && (
                   <div className="flex items-center gap-3 bg-purple-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
                     <Briefcase size={16} className="text-purple-600 shrink-0" />
@@ -1406,113 +1302,110 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     </button>
                   </div>
                 )}
+
+                {/* Custom buttons list */}
+                {(profile.links?.customButtons || []).map((btn, idx) => (
+                  <div key={btn.id} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2 animate-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full shrink-0 border border-slate-200" style={{ backgroundColor: btn.color }} />
+                      <input
+                        type="text"
+                        value={btn.label}
+                        onChange={(e) => {
+                          const updated = [...(profile.links.customButtons || [])];
+                          updated[idx] = { ...updated[idx], label: e.target.value };
+                          setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
+                        }}
+                        className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
+                        placeholder="버튼 이름"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = (profile.links.customButtons || []).filter((_, i) => i !== idx);
+                          setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
+                        }}
+                        className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className="text-slate-400 shrink-0" />
+                      <input
+                        type="url"
+                        value={btn.url}
+                        onChange={(e) => {
+                          const updated = [...(profile.links.customButtons || [])];
+                          updated[idx] = { ...updated[idx], url: e.target.value };
+                          setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
+                        }}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="https://example.com"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-slate-400">색상</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={btn.color}
+                          onChange={(e) => {
+                            const updated = [...(profile.links.customButtons || [])];
+                            updated[idx] = { ...updated[idx], color: e.target.value };
+                            setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
+                          }}
+                          className="w-7 h-7 rounded-full border border-slate-200 cursor-pointer appearance-none"
+                          style={{ backgroundColor: btn.color }}
+                          title="색상 선택"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono uppercase">{btn.color}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              {/* Add link buttons */}
-              {(
-                !profile.links?.phone ||
-                !profile.links?.kakao ||
-                !profile.links?.youtube ||
-                !profile.links?.instagram ||
-                !profile.links?.naver ||
-                !profile.links?.tiktok ||
-                !profile.links?.businessProposal ||
-                !profile.links?.liveNotify
-              ) && (
-                <div className="space-y-2">
-                  <label className="text-[9px] font-black text-slate-300 uppercase tracking-widest">추가하기</label>
-                  <div className="flex flex-wrap gap-2">
-                    {!profile.links?.phone && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, phone: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold hover:border-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Phone size={12} />
-                        전화
-                      </button>
-                    )}
-                    {!profile.links?.kakao && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, kakao: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-yellow-300 text-yellow-600 text-[10px] font-bold hover:border-yellow-400 hover:bg-yellow-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <MessageCircle size={12} />
-                        카카오톡
-                      </button>
-                    )}
-                    {!profile.links?.youtube && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, youtube: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-red-300 text-red-500 text-[10px] font-bold hover:border-red-400 hover:bg-red-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Youtube size={12} />
-                        유튜브
-                      </button>
-                    )}
-                    {!profile.links?.instagram && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, instagram: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-pink-300 text-pink-500 text-[10px] font-bold hover:border-pink-400 hover:bg-pink-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Instagram size={12} />
-                        인스타그램
-                      </button>
-                    )}
-                    {!profile.links?.naver && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, naver: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-green-300 text-green-600 text-[10px] font-bold hover:border-green-400 hover:bg-green-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <span className="font-black text-xs">N</span>
-                        네이버
-                      </button>
-                    )}
-                    {!profile.links?.tiktok && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, tiktok: ' ' } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold hover:border-slate-400 hover:bg-slate-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Globe size={12} />
-                        틱톡
-                      </button>
-                    )}
-                    {!profile.links?.businessProposal && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, businessProposal: true } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Briefcase size={12} />
-                        비즈니스 제안
-                      </button>
-                    )}
-                    {!profile.links?.liveNotify && (
-                      <button
-                        type="button"
-                        onClick={() => setProfile({ ...profile, links: { ...profile.links, liveNotify: true } })}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
-                      >
-                        <Plus size={12} />
-                        <Bell size={12} />
-                        라이브 알림
-                      </button>
-                    )}
-                  </div>
+              {/* Add buttons */}
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-300 uppercase tracking-widest">추가하기</label>
+                <div className="flex flex-wrap gap-2">
+                  {!profile.links?.businessProposal && (
+                    <button
+                      type="button"
+                      onClick={() => setProfile({ ...profile, links: { ...profile.links, businessProposal: true } })}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
+                    >
+                      <Plus size={12} />
+                      <Briefcase size={12} />
+                      비즈니스 제안
+                    </button>
+                  )}
+                  {!profile.links?.liveNotify && (
+                    <button
+                      type="button"
+                      onClick={() => setProfile({ ...profile, links: { ...profile.links, liveNotify: true } })}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
+                    >
+                      <Plus size={12} />
+                      <Bell size={12} />
+                      라이브 알림
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newBtn: CustomButton = { id: Date.now().toString(), label: '', url: '', color: '#7c3aed' };
+                      setProfile({ ...profile, links: { ...profile.links, customButtons: [...(profile.links.customButtons || []), newBtn] } });
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold hover:border-purple-400 hover:text-purple-600 hover:bg-purple-50 transition-all"
+                  >
+                    <Plus size={12} />
+                    <Globe size={12} />
+                    버튼 추가하기
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           </section>
 
@@ -2293,14 +2186,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   </div>
 
                   <div className="flex justify-center gap-2 flex-wrap">
-                    {profile.links?.phone?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#3B82F6] text-white shadow-sm"><Phone size={12} /><span>전화</span></div>}
-                    {profile.links?.kakao?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#FEE500] text-[#3C1E1E] shadow-sm"><MessageCircle size={12} /><span>카카오</span></div>}
-                    {profile.links?.youtube?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#FF0000] text-white shadow-sm"><Youtube size={12} /><span>유튜브</span></div>}
-                    {profile.links?.instagram?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}><Instagram size={12} /><span>인스타</span></div>}
-                    {profile.links?.naver?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-[#03C75A] text-white shadow-sm"><span className="text-[9px] font-black">N</span><span>네이버</span></div>}
-                    {profile.links?.tiktok?.trim() && <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-bold bg-black text-white shadow-sm border border-white/10"><Globe size={12} /><span>틱톡</span></div>}
                     {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: design.accentColor || '#a855f7' }}><Briefcase size={12} /><span>비즈니스 제안</span></div>}
                     {profile.links?.liveNotify && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold bg-emerald-500 text-white shadow-sm"><Bell size={12} /><span>라이브 알림</span></div>}
+                    {(profile.links?.customButtons || []).filter(b => b.label.trim()).map(btn => (
+                      <div key={btn.id} className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: btn.color }}><Globe size={12} /><span>{btn.label}</span></div>
+                    ))}
                   </div>
 
                   <div className="h-[1px] bg-slate-100 w-full" />

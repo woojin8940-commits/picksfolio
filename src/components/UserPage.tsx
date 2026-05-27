@@ -1254,42 +1254,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             <div className="px-4 pt-4 pb-8 space-y-12">
               {/* Social & Contact Links */}
               <div className="flex gap-2.5 pt-4 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
-                {socials.phone?.trim() && (
-                  <button onClick={() => openLink(`tel:${socials.phone.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#3B82F6] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                    전화
-                  </button>
-                )}
-                {socials.kakao?.trim() && (
-                  <button onClick={() => openLink(socials.kakao.trim().startsWith('http') ? socials.kakao.trim() : `https://pf.kakao.com/${socials.kakao.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#FEE500] text-[#3C1E1E] hover:brightness-95 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.734 1.811 5.13 4.537 6.478-.147.543-.535 1.965-.612 2.272-.097.387.142.382.298.278.123-.082 1.96-1.311 2.756-1.843.654.097 1.327.148 2.021.148 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
-                    카카오톡
-                  </button>
-                )}
-                {socials.naver?.trim() && (
-                  <button onClick={() => openLink(socials.naver.trim())} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#03C75A] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16.273 12.845L7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727v12.845z"/></svg>
-                    네이버
-                  </button>
-                )}
-                {socials.instagram?.trim() && (
-                  <button onClick={() => openLink(`https://instagram.com/${socials.instagram.trim().replace('@', '')}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 text-white hover:brightness-110 shadow-sm" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}>
-                    <Instagram size={14} strokeWidth={2.5} />
-                    인스타그램
-                  </button>
-                )}
-                {socials.youtube?.trim() && (
-                  <button onClick={() => openLink(socials.youtube.trim().startsWith('http') ? socials.youtube.trim() : `https://youtube.com/${socials.youtube.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#FF0000] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                    유튜브
-                  </button>
-                )}
-                {socials.tiktok?.trim() && (
-                  <button onClick={() => openLink(`https://tiktok.com/@${socials.tiktok.trim().replace('@', '')}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-black text-white hover:brightness-125 shadow-sm border border-white/10">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.72a8.2 8.2 0 0 0 4.76 1.52V6.79a4.83 4.83 0 0 1-1-.1z"/></svg>
-                    틱톡
-                  </button>
-                )}
                 {socials.businessProposal && (
                   <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
@@ -1310,6 +1274,12 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   {notifySubscribed ? '구독중' : '라이브 알림받기'}
                 </button>
                 )}
+                {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
+                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#7c3aed' }}>
+                    <ExternalLink size={14} strokeWidth={2.5} />
+                    {btn.label}
+                  </button>
+                ))}
               </div>
 
               {aboutSectionsBlock}
@@ -1792,42 +1762,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4 md:-mx-8">
 
               <div className="flex gap-2.5 overflow-x-auto scrollbar-hide justify-center flex-wrap">
-                {socials.phone?.trim() && (
-                  <button onClick={() => openLink(`tel:${socials.phone.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#3B82F6] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                    전화
-                  </button>
-                )}
-                {socials.kakao?.trim() && (
-                  <button onClick={() => openLink(socials.kakao.trim().startsWith('http') ? socials.kakao.trim() : `https://pf.kakao.com/${socials.kakao.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#FEE500] text-[#3C1E1E] hover:brightness-95 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.734 1.811 5.13 4.537 6.478-.147.543-.535 1.965-.612 2.272-.097.387.142.382.298.278.123-.082 1.96-1.311 2.756-1.843.654.097 1.327.148 2.021.148 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
-                    카카오톡
-                  </button>
-                )}
-                {socials.naver?.trim() && (
-                  <button onClick={() => openLink(socials.naver.trim())} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#03C75A] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16.273 12.845L7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727v12.845z"/></svg>
-                    네이버
-                  </button>
-                )}
-                {socials.instagram?.trim() && (
-                  <button onClick={() => openLink(`https://instagram.com/${socials.instagram.trim().replace('@', '')}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 text-white hover:brightness-110 shadow-sm" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}>
-                    <Instagram size={14} strokeWidth={2.5} />
-                    인스타그램
-                  </button>
-                )}
-                {socials.youtube?.trim() && (
-                  <button onClick={() => openLink(socials.youtube.trim().startsWith('http') ? socials.youtube.trim() : `https://youtube.com/${socials.youtube.trim()}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-[#FF0000] text-white hover:brightness-110 shadow-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                    유튜브
-                  </button>
-                )}
-                {socials.tiktok?.trim() && (
-                  <button onClick={() => openLink(`https://tiktok.com/@${socials.tiktok.trim().replace('@', '')}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 bg-black text-white hover:brightness-125 shadow-sm border border-white/10">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.15 15a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.72a8.2 8.2 0 0 0 4.76 1.52V6.79a4.83 4.83 0 0 1-1-.1z"/></svg>
-                    틱톡
-                  </button>
-                )}
                 {socials.businessProposal && (
                   <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
@@ -1848,6 +1782,12 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   {notifySubscribed ? '구독중' : '라이브 알림받기'}
                 </button>
                 )}
+                {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
+                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#7c3aed' }}>
+                    <ExternalLink size={14} strokeWidth={2.5} />
+                    {btn.label}
+                  </button>
+                ))}
               </div>
 
               {aboutSectionsBlock}

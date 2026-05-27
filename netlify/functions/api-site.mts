@@ -59,7 +59,12 @@ export default async (req: Request, context: Context) => {
           dbData.coverUpdatedAt = result[0].cover_updated_at;
         }
         if (hasConnectedSiteContent(dbData)) {
-          return Response.json(dbData);
+          return new Response(JSON.stringify(dbData), {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "public, s-maxage=5, stale-while-revalidate=30",
+            },
+          });
         }
 
         try {

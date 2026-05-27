@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 
 const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v|avi|mkv)(\?.*)?$/i;
 
@@ -26,19 +26,47 @@ interface MediaAutoProps {
 }
 
 const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, forceVideo }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoReady, setVideoReady] = useState(false);
+
+  useEffect(() => {
+    setVideoReady(false);
+  }, [src]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const tryPlay = () => {
+      el.play().catch(() => {});
+    };
+    if (el.readyState >= 2) {
+      setVideoReady(true);
+      tryPlay();
+      return;
+    }
+    const onData = () => {
+      setVideoReady(true);
+      tryPlay();
+    };
+    el.addEventListener('loadeddata', onData);
+    el.load();
+    return () => el.removeEventListener('loadeddata', onData);
+  }, [src]);
+
   if (!src) return null;
   const isVideo = forceVideo || isVideoSource(src);
   if (isVideo) {
     return (
       <video
+        ref={videoRef}
         src={src}
         className={className}
-        style={style}
+        style={{ ...style, opacity: videoReady ? 1 : 0, transition: 'opacity 0.3s ease' }}
         autoPlay
         loop
         muted
         playsInline
-        preload="auto"
+        preload="metadata"
         disablePictureInPicture
         controls={false}
       />
