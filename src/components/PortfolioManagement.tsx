@@ -795,8 +795,8 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
     }
 
     // 상단 커버 영상 업로드는 멤버십 전용 (이미지 커버는 무료)
-    if (uploadTarget.type === 'cover' && isVideo && !membershipActive) {
-      setSaveMessage('영상 커버는 스탠다드 멤버십(월 4,900원)부터 이용할 수 있습니다.');
+    if (isVideo && !membershipActive) {
+      setSaveMessage('영상 업로드는 스탠다드 멤버십(월 4,900원)부터 이용할 수 있습니다.');
       setSaveSuccess(false);
       setShowToast(true);
       return;
@@ -1623,10 +1623,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <div className="flex-1">
                     <h4 className="text-base md:text-lg font-black text-slate-900">콘텐츠 구성은 스탠다드 멤버십 전용입니다</h4>
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1.5 leading-relaxed">
-                      포트폴리오 본문(텍스트 · 이미지 블록)과 상단 커버 영상 업로드는 월 4,900원 스탠다드 멤버십에 포함됩니다. 라이브 커머스 송출까지 사용하시려면 월 13,900원 커머스 멤버십을 선택해 주세요.
+                      포트폴리오 본문(텍스트 · 이미지 블록)과 상단 커버 영상 업로드, 상품·포트폴리오 영상 업로드는 월 4,900원 스탠다드 멤버십에 포함됩니다. 라이브 커머스 송출까지 사용하시려면 월 13,900원 커머스 멤버십을 선택해 주세요.
                     </p>
                     <ul className="space-y-1.5 mt-4 text-xs md:text-sm text-slate-600 font-medium">
                       <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>상단 커버 <strong>영상</strong> 업로드</li>
+                      <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>상품·포트폴리오 <strong>영상</strong> 업로드</li>
                       <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>텍스트 · 이미지 블록 무제한 편집</li>
                     </ul>
                     <div className="flex flex-col sm:flex-row gap-2 mt-5">

@@ -1252,7 +1252,7 @@ const App: React.FC = () => {
 
     switch (subView) {
       case 'links':
-        subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} /></Suspense>;
+        subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
         break;
       case 'portfolio':
         subComponent = <Suspense fallback={<LazyFallback />}><PortfolioManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
