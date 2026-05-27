@@ -296,7 +296,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       <header className="mb-8 md:mb-12">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">멤버십 플랜</h2>
         <p className="text-slate-500 mt-2 text-sm md:text-base">
-          스탠다드 멤버십(월 4,900원)으로 영상 커버 · 콘텐츠 구성을 풀고, 커머스 멤버십(월 13,900원)으로 라이브 송출 월 3시간 포함 + 매출 수수료 7.5%(PG 결제 수수료 포함)에 라이브 커머스를 운영할 수 있습니다.
+          스탠다드 멤버십(월 4,900원)으로 영상 커버 · 콘텐츠 구성을 풀고, 커머스 멤버십(월 13,900원)으로 라이브 송출 월 3시간 포함 + 매출 수수료 8.5%(PG 결제 수수료 포함)에 라이브 커머스를 운영할 수 있습니다.
         </p>
       </header>
 
@@ -373,7 +373,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>라이브 송출 월 3시간 포함</strong> · 초과분 시간당 8,900원 후불</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>라이브 매출 수수료 7.5%</strong> (PG 결제 수수료 포함)</li>
+              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>라이브 매출 수수료 8.5%</strong> (PG 결제 수수료 포함)</li>
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>실시간 채팅 &amp; 상품 연동</li>
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>방송 기록 &amp; 분석 리포트 · 라이브 시작 알림톡</li>
             </ul>
@@ -579,7 +579,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <li>• 스탠다드 멤버십은 월 4,900원, 커머스 멤버십은 월 13,900원이며, 언제든 해지할 수 있습니다.</li>
             <li>• 스탠다드 멤버십 구독 시 포트폴리오 상단 커버 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
             <li>• 커머스 멤버십은 스탠다드 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
-            <li>• 라이브 매출 수수료는 결제액의 7.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
+            <li>• 라이브 매출 수수료는 결제액의 8.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
             <li>• 라이브 송출에는 사업자 인증과 정산 계좌 등록이 추가로 필요합니다. 등록된 정산 계좌로 라이브 판매 수익이 입금되며, 계좌 예금주명은 사업자 대표자와 일치해야 합니다.</li>
           </ul>
         </div>
