@@ -32,22 +32,6 @@ export interface Product {
   options?: ProductOption[];
 }
 
-export interface ProductItem {
-  name: string;
-  price: string;
-  image: string;
-  description?: string;
-}
-
-export interface TrendAnalysis {
-  keyword: string;
-  trendScore: number;
-  description: string;
-  stylingTips: string[];
-  recommendedItems: string[];
-  colorPalette: string[];
-}
-
 export type BlockDisplayType = 'grid' | 'minimal' | 'text';
 
 export interface Block {

@@ -5,13 +5,11 @@
 ## 주요 기능
 - **AI 트렌드 스카우트**: 무신사, 올리브영 등 주요 플랫폼의 실시간 트렌드 분석
 - **그리드 템플릿**: 감각적인 디자인의 포트폴리오 및 링크 관리
-- **DM 자동화**: 문의에 대한 자동 응답 시스템
 - **커스텀 도메인**: 개인 도메인 연결 지원
 
 ## 기술 스택
 - **Frontend**: React 19, Vite, Tailwind CSS
 - **Backend**: Supabase (Auth, Database)
-- **AI**: Google Gemini API
 - **Deployment**: Vite Build System
 
 ## 시작하기
