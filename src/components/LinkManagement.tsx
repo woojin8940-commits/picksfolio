@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, ExternalLink, Hash, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
-import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder } from '../types';
+import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification } from '../types';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
@@ -25,6 +25,7 @@ const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
 
 interface LinkManagementProps {
   userName: string;
+  onNavigateMembership?: () => void;
 }
 
 // [시각적 확인] 새 코드가 적용되었음을 알리는 알림창
@@ -32,7 +33,7 @@ if (typeof window !== 'undefined') {
   (window as any)._picks_code_applied = true;
 }
 
-const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
+const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMembership }) => {
   useEffect(() => {
     // window.alert('픽스폴리오 새 코드가 적용되었습니다!');
   }, []);
@@ -50,6 +51,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Block>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  const [verification, setVerification] = useState<SellerVerification | null>(null);
+  const membershipActive = !!verification?.membership_active;
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getSellerVerification(userName.replace(/^biz\//, '')).then((data) => {
+      if (!cancelled) setVerification(data);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [userName]);
 
   // Product Folder (InfoClink-style) state
   const [productFolders, setProductFolders] = useState<ProductFolder[]>(() => {
@@ -258,6 +270,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
       setSaveMessage('파일 크기가 20MB를 초과합니다.');
       setToastType('error');
       setShowToast(true);
+      return;
+    }
+
+    if (isVideo && !membershipActive) {
+      setSaveMessage('영상 업로드는 스탠다드 멤버십(월 4,900원)부터 이용할 수 있습니다.');
+      setToastType('error');
+      setShowToast(true);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
@@ -1834,6 +1854,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName }) => {
                     <ImageIcon size={14} />
                     <span>{editForm.coverMedia ? '이미지/영상 변경' : '이미지/영상 업로드'}</span>
                   </button>
+                  {!membershipActive && (
+                    <button
+                      onClick={() => onNavigateMembership?.()}
+                      className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 text-purple-600 rounded-xl text-[11px] font-bold w-full justify-center hover:bg-purple-100 transition-all"
+                    >
+                      <Lock size={12} />
+                      <span>영상 업로드는 멤버십 전용</span>
+                    </button>
+                  )}
                 </div>
                 )}
                 <div className={`w-full ${editForm.displayType !== 'text' ? 'md:w-1/2' : ''} space-y-6`}>
