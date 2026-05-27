@@ -3,7 +3,7 @@
  *
  * Commerce membership (월 13,900원) includes 3 hours of live broadcast time
  * per calendar month. Overage is billed postpaid at 8,900원/시간 (≈148.33원/분).
- * Live sales carry a 7.5% commission (PG fee included; Pickfolio nets ≈4.5%).
+ * Live sales carry an 8.5% commission (PG fee included; Pickfolio nets ≈5.5%).
  *
  * Hard caps (advisory in this module — enforcement is layered separately):
  *   일 송출 한도 8시간 / 월 송출 한도 50시간.
@@ -20,7 +20,7 @@ export const DAILY_HARD_CAP_MINUTES = 8 * 60 // 480
 export const MONTHLY_HARD_CAP_MINUTES = 50 * 60 // 3000
 export const THRESHOLD_BILLING_AMOUNT_KRW = 30000
 
-export const LIVE_COMMISSION_RATE = 0.075 // 7.5% — PG fee included
+export const LIVE_COMMISSION_RATE = 0.085 // 8.5% — PG fee included
 export const PG_FEE_RATE_ESTIMATE = 0.03 // ≈3% — used for net split estimate only
 
 export interface LiveTimeUsage {
@@ -87,15 +87,15 @@ export const summarizeMonthlyLiveTime = (
 
 export interface LiveCommissionSplit {
   grossAmount: number
-  commissionRate: number // 0.075
-  commissionAmount: number // 7.5% — Pickfolio collects this from the order total
+  commissionRate: number // 0.085
+  commissionAmount: number // 8.5% — Pickfolio collects this from the order total
   sellerNetAmount: number // grossAmount - commissionAmount
   pgFeeEstimate: number // ≈3% of gross — informational only
-  pickfolioNetEstimate: number // commission - PG fee (≈4.5% of gross)
+  pickfolioNetEstimate: number // commission - PG fee (≈5.5% of gross)
 }
 
 /**
- * Compute the 7.5% live-commerce commission split for a single order amount.
+ * Compute the 8.5% live-commerce commission split for a single order amount.
  * `commissionAmount` is what Pickfolio retains from the order; `sellerNetAmount`
  * is what should reach the seller's settlement account. The PG-fee/Pickfolio
  * net values are estimates surfaced for reporting — they don't affect splitting.

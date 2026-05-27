@@ -5,7 +5,7 @@ import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricin
 /**
  * Live-commerce product purchase completion — verifies a PortOne V2 payment
  * server-side against the PortOne REST API, then stores an order record keyed
- * by the seller's username. Each verified order is split into the 7.5% live
+ * by the seller's username. Each verified order is split into the 8.5% live
  * commission and the seller's net amount via `splitLiveCommission` so the
  * settlement layer can later reconcile what to pay out.
  *
