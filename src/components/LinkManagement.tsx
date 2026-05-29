@@ -9,6 +9,7 @@ import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSe
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
+import ColorPicker from './ColorPicker';
 import { renderPortfolioHtml } from './richText';
 
 const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#7c3aed', '#2563eb', '#dc2626', '#059669', '#d97706'];
@@ -1980,9 +1981,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                                 />
                               ))}
                             </div>
-                            <input type="color" value={editForm.color || '#37352f'} onChange={e => setEditForm({ ...editForm, color: e.target.value })}
-                              className="w-full h-8 cursor-pointer rounded"
-                            />
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                              <ColorPicker
+                                value={editForm.color || '#37352f'}
+                                onChange={c => setEditForm({ ...editForm, color: c })}
+                                triggerClassName="w-7 h-7 rounded-lg"
+                                aria-label="텍스트 색상 직접 지정"
+                              />
+                              직접 지정
+                            </label>
                           </div>
                         )}
                       </div>

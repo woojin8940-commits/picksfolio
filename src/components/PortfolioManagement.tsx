@@ -10,6 +10,7 @@ import { DesignSettings, TemplateType, SellerVerification } from '../types';
 import Toast from './Toast';
 import MediaAuto, { isVideoSource } from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
+import ColorPicker from './ColorPicker';
 import { normalizeContentToHtml, renderPortfolioHtml, sanitizeRichHtml } from './richText';
 
 type BlockFontSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -1347,17 +1348,15 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold text-slate-400">색상</span>
                       <div className="flex items-center gap-2">
-                        <input
-                          type="color"
+                        <ColorPicker
                           value={btn.color}
-                          onChange={(e) => {
+                          onChange={(c) => {
                             const updated = [...(profile.links.customButtons || [])];
-                            updated[idx] = { ...updated[idx], color: e.target.value };
+                            updated[idx] = { ...updated[idx], color: c };
                             setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
                           }}
-                          className="w-7 h-7 rounded-full border border-slate-200 cursor-pointer appearance-none"
-                          style={{ backgroundColor: btn.color }}
-                          title="색상 선택"
+                          triggerClassName="w-7 h-7 rounded-full"
+                          aria-label="버튼 색상 선택"
                         />
                         <span className="text-[10px] text-slate-400 font-mono uppercase">{btn.color}</span>
                       </div>
@@ -1491,11 +1490,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       />
                     ))}
                     <div className="relative">
-                      <input 
-                        type="color" 
-                        value={design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#9333ea'} 
-                        onChange={e => setDesign(prev => ({ ...prev, portfolioHeaderColor: e.target.value }))}
-                        className="w-10 h-10 rounded-xl overflow-hidden border-none p-0 cursor-pointer"
+                      <ColorPicker
+                        value={design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#9333ea'}
+                        onChange={c => setDesign(prev => ({ ...prev, portfolioHeaderColor: c }))}
+                        triggerClassName="w-10 h-10 rounded-xl"
+                        aria-label="커버 배경색 직접 지정"
                       />
                     </div>
                   </div>
@@ -1518,11 +1517,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       />
                     ))}
                     <div className="relative">
-                      <input 
-                        type="color" 
-                        value={design.accentColor || '#a855f7'} 
-                        onChange={e => setDesign(prev => ({ ...prev, accentColor: e.target.value }))}
-                        className="w-10 h-10 rounded-full overflow-hidden border-none p-0 cursor-pointer"
+                      <ColorPicker
+                        value={design.accentColor || '#a855f7'}
+                        onChange={c => setDesign(prev => ({ ...prev, accentColor: c }))}
+                        triggerClassName="w-10 h-10 rounded-full"
+                        aria-label="포인트 컬러 직접 지정"
                       />
                     </div>
                   </div>
@@ -1925,16 +1924,16 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                       />
                                     ))}
                                   </div>
-                                  <label className="mt-2 flex items-center gap-2 cursor-pointer text-[10px] font-bold text-slate-500 px-1">
-                                    <input
-                                      type="color"
+                                  <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-slate-500 px-1">
+                                    <ColorPicker
                                       value={block.color || '#37352f'}
-                                      onChange={(e) => applySelectionOrBlock(
+                                      onChange={(c) => applySelectionOrBlock(
                                         block.id,
-                                        (editor) => runExecCommand(editor, 'foreColor', e.target.value),
-                                        () => updateBlockField(block.id, { color: e.target.value })
+                                        (editor) => runExecCommand(editor, 'foreColor', c),
+                                        () => updateBlockField(block.id, { color: c })
                                       )}
-                                      className="w-5 h-5 rounded-md overflow-hidden border border-slate-200 cursor-pointer"
+                                      triggerClassName="w-5 h-5 rounded-md"
+                                      aria-label="텍스트 색상 직접 지정"
                                     />
                                     사용자 지정
                                   </label>
