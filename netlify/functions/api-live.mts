@@ -7,7 +7,12 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  const store = getStore("live-state");
+  // Strong consistency so a viewer's "is this broadcast live?" poll reflects the
+  // broadcaster's go-live/end-broadcast write immediately. With the default
+  // eventual store this read could lag up to 60s, so viewers would keep seeing
+  // isLive=false (never connecting) or stale isLive=true after a broadcast ended.
+  // Matches api-admin-live.mts, which already opens this same store as 'strong'.
+  const store = getStore({ name: "live-state", consistency: "strong" });
   const key = `picks_live_${username}`;
 
   if (req.method === "GET") {
