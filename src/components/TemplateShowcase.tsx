@@ -53,7 +53,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
                 onClick={() => setActiveTab(template.id)}
                 className={`flex items-center gap-2 md:gap-3 px-4 py-2.5 md:px-8 md:py-4 rounded-xl text-sm md:text-lg font-bold transition-all ${
                   activeTab === template.id 
-                    ? 'bg-gradient-to-r from-purple-primary to-purple-secondary text-white shadow-lg' 
+                    ? 'bg-gradient-to-r from-blue-primary to-blue-secondary text-white shadow-lg' 
                     : 'text-slate-500 hover:text-white'
                 }`}
               >
@@ -71,10 +71,10 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
               {/* Mockup Content */}
               <div className="p-4 pt-12 h-full flex flex-col">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-primary to-purple-secondary"></div>
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-primary to-blue-secondary"></div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1">
-                      picks_official <CheckCircle2 className="w-3 h-3 text-purple-400 fill-purple-400" />
+                      picks_official <CheckCircle2 className="w-3 h-3 text-blue-400 fill-blue-400" />
                     </div>
                     <div className="text-[10px] text-slate-500">Daily Curator & Lifestyle ✨</div>
                   </div>
@@ -115,7 +115,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Spring Windbreaker</div>
-                            <div className="text-[8px] text-purple-primary font-bold">picks.me/product/1</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/1</div>
                           </div>
                         </div>
                         <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
@@ -124,7 +124,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Wide Denim Pants</div>
-                            <div className="text-[8px] text-purple-primary font-bold">picks.me/product/2</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/2</div>
                           </div>
                         </div>
                         <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
@@ -133,7 +133,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Salomon XT-6</div>
-                            <div className="text-[8px] text-purple-primary font-bold">picks.me/product/3</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/3</div>
                           </div>
                         </div>
                       </div>
@@ -148,7 +148,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
 
           {/* Template Info */}
           <div className="text-left">
-            <div className="flex items-center gap-3 text-purple-primary font-bold text-base uppercase tracking-widest mb-6">
+            <div className="flex items-center gap-3 text-blue-primary font-bold text-base uppercase tracking-widest mb-6">
               <Grid className="w-5 h-5" />
               TEMPLATE STYLE
             </div>
@@ -171,8 +171,8 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
                 <div className="space-y-3 md:space-y-5 mb-8 md:mb-14">
                   {activeTemplate.features.map((feature, idx) => (
                     <div key={idx} className="flex items-center gap-3 md:gap-4">
-                      <div className="w-5 h-5 md:w-7 md:h-7 rounded-full border border-purple-primary flex items-center justify-center">
-                        <CheckCircle2 className="w-3.5 h-3.5 md:w-5 md:h-5 text-purple-primary" />
+                      <div className="w-5 h-5 md:w-7 md:h-7 rounded-full border border-blue-primary flex items-center justify-center">
+                        <CheckCircle2 className="w-3.5 h-3.5 md:w-5 md:h-5 text-blue-primary" />
                       </div>
                       <span className="text-white font-bold text-sm md:text-lg">{feature}</span>
                     </div>
@@ -181,7 +181,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
 
                 <button
                   onClick={onSignup}
-                  className="bg-gradient-to-r from-purple-primary to-purple-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-14 md:py-6 rounded-full text-base md:text-2xl font-bold transition-all active:scale-95 shadow-lg shadow-purple-primary/20"
+                  className="bg-gradient-to-r from-blue-primary to-blue-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-14 md:py-6 rounded-full text-base md:text-2xl font-bold transition-all active:scale-95 shadow-lg shadow-blue-primary/20"
                 >
                   이 템플릿으로 시작
                 </button>

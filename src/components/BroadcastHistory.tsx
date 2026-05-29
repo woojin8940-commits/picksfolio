@@ -259,7 +259,7 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
                       </div>
                       <div className="bg-white p-3 md:p-4 rounded-xl border border-slate-100">
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Clock size={14} className="text-purple-500" />
+                          <Clock size={14} className="text-blue-500" />
                           <span className="text-[10px] md:text-xs font-bold text-slate-400">방송 시간</span>
                         </div>
                         <p className="text-lg md:text-xl font-black text-slate-900">{formatDuration(record.durationMinutes)}</p>

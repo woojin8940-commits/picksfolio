@@ -1219,7 +1219,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   <div className="flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wide bg-orange-500/50 text-white/70 flex items-center justify-center gap-1">
                     <ShoppingBag size={10} /> 상품 담기
                   </div>
-                  <div className="px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wide bg-purple-600/50 text-white/70 flex items-center justify-center">
+                  <div className="px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wide bg-blue-600/50 text-white/70 flex items-center justify-center">
                     구매
                   </div>
                 </div>
@@ -1309,7 +1309,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </button>
               <button
                 onClick={() => { setShowMaterialPanel(!showMaterialPanel); setShowFilterPanel(false); }}
-                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${showMaterialPanel ? 'bg-purple-600' : 'bg-black/40 hover:bg-black/60'}`}
+                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${showMaterialPanel ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'}`}
               >
                 <Settings size={20} />
               </button>
@@ -1492,7 +1492,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
                           <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Eye size={14} className="text-purple-400" /> 스무딩
+                            <Eye size={14} className="text-blue-400" /> 스무딩
                           </label>
                           <span className="text-white/40 text-[10px] font-mono">{filters.blur}px</span>
                         </div>
@@ -1503,7 +1503,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           step="0.5"
                           value={filters.blur}
                           onChange={(e) => setFilters(f => ({ ...f, blur: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-400"
+                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-blue-400"
                         />
                       </div>
                     </div>
@@ -1536,7 +1536,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       </button>
                       <button
                         onClick={() => setFilters({ brightness: 110, contrast: 95, saturation: 80, warmth: 5, blur: 1 })}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 transition-all"
+                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-all"
                       >
                         소프트
                       </button>
@@ -1574,7 +1574,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   <div className="flex gap-2">
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 border border-purple-500/30 text-purple-400 rounded-xl py-2 px-3 text-xs font-bold hover:bg-purple-600/30 transition-all"
+                      className="flex-1 flex items-center justify-center gap-2 bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-xl py-2 px-3 text-xs font-bold hover:bg-blue-600/30 transition-all"
                     >
                       <Upload size={14} /> 파일 업로드
                     </button>
@@ -1598,7 +1598,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       key={item.id}
                       className={`flex items-center gap-3 p-2 rounded-xl border transition-all cursor-pointer ${
                         activeMaterialId === item.id
-                          ? 'bg-purple-600/20 border-purple-500/40'
+                          ? 'bg-blue-600/20 border-blue-500/40'
                           : 'bg-white/5 border-white/5 hover:bg-white/10'
                       }`}
                     >
@@ -1611,21 +1611,21 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       <div className="flex items-center gap-1">
                         <button
                           onClick={(e) => { e.stopPropagation(); updateMaterialSize(item.id, 30); }}
-                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 30 ? 'bg-purple-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 30 ? 'bg-blue-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
                           title="작은 크기"
                         >
                           S
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); updateMaterialSize(item.id, 50); }}
-                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 50 ? 'bg-purple-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 50 ? 'bg-blue-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
                           title="중간 크기"
                         >
                           M
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); updateMaterialSize(item.id, 90); }}
-                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 90 ? 'bg-purple-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${item.width === 90 ? 'bg-blue-600 text-white' : 'bg-white/10 text-white/40 hover:text-white'}`}
                           title="큰 크기"
                         >
                           L
@@ -1639,7 +1639,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                         }}
                         className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${
                           activeMaterialId === item.id
-                            ? 'bg-purple-600 text-white'
+                            ? 'bg-blue-600 text-white'
                             : 'bg-white/10 text-white/60 hover:bg-white/20'
                         }`}
                       >
@@ -1665,7 +1665,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     key={item.id}
                     onClick={() => setActiveMaterialId(activeMaterialId === item.id ? null : item.id)}
                     className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${
-                      activeMaterialId === item.id ? 'bg-purple-600 text-white' : 'text-white/60 hover:text-white'
+                      activeMaterialId === item.id ? 'bg-blue-600 text-white' : 'text-white/60 hover:text-white'
                     }`}
                   >
                     {item.type === 'banner' ? <Layout size={12} /> : <ImageIcon size={12} />}
@@ -1705,7 +1705,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 onClick={toggleLive}
                 disabled={!isLive && !!capBlock}
                 title={capBlock ? capBlock.message : undefined}
-                className={`px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? 'bg-slate-500 text-white/80 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
+                className={`px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? 'bg-slate-500 text-white/80 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
                 {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : '오늘 한도 도달') : '라이브 시작'}
@@ -1722,7 +1722,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           <button
             onClick={() => { setShowProductPanel(false); setShowCartPanel(false); }}
             className={`flex-1 p-3 md:p-4 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
-              !showProductPanel && !showCartPanel ? 'text-purple-400 border-b-2 border-purple-500' : 'text-white/40 hover:text-white/60'
+              !showProductPanel && !showCartPanel ? 'text-blue-400 border-b-2 border-blue-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
             <MessageCircle size={14} /> 채팅
@@ -1753,7 +1753,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hide overscroll-contain">
               {messages.map(msg => (
                 <div key={msg.id} className="animate-in slide-in-from-bottom-2 duration-200">
-                  <span className="text-purple-400 text-xs font-black uppercase tracking-wide block mb-1">{msg.user}</span>
+                  <span className="text-blue-400 text-xs font-black uppercase tracking-wide block mb-1">{msg.user}</span>
                   <div className="bg-white/5 border border-white/5 p-3 rounded-2xl rounded-tl-none text-white text-[15px] leading-snug">
                     {msg.text}
                   </div>
@@ -1766,14 +1766,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 <input
                   type="text"
                   placeholder="메시지를 입력하세요..."
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5 text-white text-[15px] outline-none focus:border-purple-500/50 transition-all placeholder:text-white/30"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/30"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 />
                 <button
                   onClick={handleSendMessage}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-purple-500 hover:text-purple-400"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-blue-500 hover:text-blue-400"
                 >
                   <Send size={18} />
                 </button>
@@ -1899,8 +1899,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                               <p className="text-white/30 text-[9px] font-bold uppercase tracking-wider mb-1">{optName}</p>
                               <div className="flex flex-wrap gap-1">
                                 {values && typeof values === 'object' ? Object.entries(values).sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0)).map(([val, cnt]) => (
-                                  <span key={val} className="text-[9px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">
-                                    {val} <span className="text-purple-400">{cnt}</span>
+                                  <span key={val} className="text-[9px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                                    {val} <span className="text-blue-400">{cnt}</span>
                                   </span>
                                 )) : null}
                               </div>
@@ -1918,7 +1918,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             {Array.isArray(cartCarts) && cartCarts.length > 0 && (
               <div>
                 <h5 className="text-white/60 text-xs font-black uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <Users size={14} className="text-purple-400" /> 시청자별 담은 상품
+                  <Users size={14} className="text-blue-400" /> 시청자별 담은 상품
                 </h5>
                 <div className="space-y-2">
                   {cartCarts.map((cart, cartIdx) => (
@@ -1927,7 +1927,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                         {cart.viewerProfileImage && (
                           <img src={cart.viewerProfileImage} alt="" className="w-6 h-6 rounded-full object-cover" />
                         )}
-                        <span className="text-purple-400 text-xs font-bold">{cart.viewerNickname || '시청자'}</span>
+                        <span className="text-blue-400 text-xs font-bold">{cart.viewerNickname || '시청자'}</span>
                         <span className="text-white/20 text-[10px]">{Array.isArray(cart.items) ? cart.items.length : 0}개</span>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
@@ -1935,7 +1935,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           <span key={`${item.productId}-${idx}`} className="text-white/60 text-[10px] bg-white/5 px-2 py-0.5 rounded-full">
                             {item.productName}
                             {item.selectedOptions && typeof item.selectedOptions === 'object' && Object.keys(item.selectedOptions).length > 0 && (
-                              <span className="text-purple-300 ml-1">({Object.values(item.selectedOptions).join('/')})</span>
+                              <span className="text-blue-300 ml-1">({Object.values(item.selectedOptions).join('/')})</span>
                             )}
                           </span>
                         ))}

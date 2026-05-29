@@ -253,7 +253,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                 valueClass="text-pink-500"
                 sub={`스탠다드 ${standardMemberCount}명 · 주목 ${featuredCount}명`}
               />
-              <StatCard label="누적 뷰" value={rows.reduce((s, r) => s + r.views, 0)} valueClass="text-purple-600" />
+              <StatCard label="누적 뷰" value={rows.reduce((s, r) => s + r.views, 0)} valueClass="text-blue-600" />
               <StatCard label="누적 클릭" value={rows.reduce((s, r) => s + r.clicks, 0)} valueClass="text-indigo-600" />
             </div>
 
@@ -312,7 +312,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                   return (
                     <div key={r.username} className="md:grid md:grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-slate-50/50 transition-all">
                       <div className="md:col-span-3 flex items-center gap-2 min-w-0">
-                        <div className="w-9 h-9 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                        <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
                           <span className="text-xs font-black text-white">{r.username.slice(0, 2).toUpperCase()}</span>
                         </div>
                         <div className="min-w-0">
@@ -336,7 +336,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         <p className="text-[10px] font-bold text-slate-400">{formatTimeAgo(r.last_login_at)}</p>
                       </div>
                       <div className="md:col-span-1 mt-1 md:mt-0">
-                        <p className="text-[11px] font-bold text-purple-600">{r.views.toLocaleString()}</p>
+                        <p className="text-[11px] font-bold text-blue-600">{r.views.toLocaleString()}</p>
                         <p className="text-[10px] font-bold text-indigo-600">{r.clicks.toLocaleString()}</p>
                       </div>
                       <div className="md:col-span-1 mt-1 md:mt-0">
@@ -350,9 +350,9 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                             <span className="text-[9px] font-bold text-pink-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : activePlan === 'standard' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-100 text-purple-700 text-[10px] font-black">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 text-blue-700 text-[10px] font-black">
                             ★ 스탠다드
-                            <span className="text-[9px] font-bold text-purple-500">{formatDate(r.membership_started_at)}~</span>
+                            <span className="text-[9px] font-bold text-blue-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : (
                           <span className="inline-flex px-2 py-1 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-black">미가입</span>
@@ -375,8 +375,8 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                           disabled={busy === r.username || activePlan === 'standard'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'standard'
-                              ? 'bg-purple-500 text-white'
-                              : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
                           }`}
                         >
                           스탠다드
@@ -386,7 +386,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                           disabled={busy === r.username || activePlan === 'commerce'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'commerce'
-                              ? 'bg-gradient-to-r from-purple-600 to-pink-500 text-white'
+                              ? 'bg-gradient-to-r from-blue-600 to-pink-500 text-white'
                               : 'bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200'
                           }`}
                         >
@@ -592,7 +592,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       <p className="text-[12px] font-bold text-slate-700">{c.phone}</p>
                     </div>
                     <div className="md:col-span-3 mt-1 md:mt-0">
-                      <p className="text-[12px] font-black text-purple-600 truncate">@{c.subscribed_to}</p>
+                      <p className="text-[12px] font-black text-blue-600 truncate">@{c.subscribed_to}</p>
                     </div>
                     <div className="md:col-span-3 mt-1 md:mt-0">
                       <p className="text-[11px] font-bold text-slate-600">{formatDate(c.subscribed_at)}</p>

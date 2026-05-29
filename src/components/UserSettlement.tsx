@@ -66,10 +66,10 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
 
       {/* Stats Summary */}
       <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8">
-        <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-2xl border border-purple-100 p-4 md:p-5">
-          <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-1">총 정산 금액</p>
-          <p className="text-base md:text-2xl font-black text-purple-700">{formatFee(totalAmount)}</p>
-          <p className="text-[10px] font-bold text-purple-400 mt-1">{settlements.length}건</p>
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-100 p-4 md:p-5">
+          <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">총 정산 금액</p>
+          <p className="text-base md:text-2xl font-black text-blue-700">{formatFee(totalAmount)}</p>
+          <p className="text-[10px] font-bold text-blue-400 mt-1">{settlements.length}건</p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">정산 완료</p>
@@ -85,7 +85,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
 
       {loading ? (
         <div className="text-center py-20">
-          <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-400 font-bold text-sm">로딩 중...</p>
         </div>
       ) : settlements.length === 0 ? (
@@ -112,7 +112,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
                   <div key={s.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+                        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
                           <span className="text-lg">💰</span>
                         </div>
                         <div>
@@ -121,7 +121,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-black text-purple-600 text-base">{formatFee(s.amount)}</p>
+                        <p className="font-black text-blue-600 text-base">{formatFee(s.amount)}</p>
                         {getDaysUntil(s.scheduled_date)}
                       </div>
                     </div>

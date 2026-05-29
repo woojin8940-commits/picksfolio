@@ -58,7 +58,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
   if (isLoading) {
     return (
       <div className="p-14 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-purple-600/20 border-t-purple-600 rounded-full animate-spin"></div>
+        <div className="w-8 h-8 border-4 border-blue-600/20 border-t-blue-600 rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -74,7 +74,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
             type="text" 
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-lg text-slate-900 focus:outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-500 transition-all"
+            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-lg text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
             placeholder="페이지 제목을 입력하세요"
           />
         </div>
@@ -84,7 +84,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
           <textarea 
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-lg text-slate-900 focus:outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-500 transition-all min-h-[120px]"
+            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-lg text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all min-h-[120px]"
             placeholder="나를 소개하는 한 줄을 입력하세요"
           />
         </div>
@@ -93,7 +93,7 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
           <button 
             onClick={handleSave}
             disabled={isSaving}
-            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-purple-500/20 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSaving ? (
               <>

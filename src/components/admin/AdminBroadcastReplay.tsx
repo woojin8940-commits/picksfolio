@@ -151,7 +151,7 @@ const AdminBroadcastReplay: React.FC<Props> = ({ token, broadcastId, username, o
               </div>
               <div className="bg-slate-50 rounded-lg p-3">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">피크 시청자</p>
-                <p className="font-black text-purple-600 text-sm">{data.broadcast.peakViewers}</p>
+                <p className="font-black text-blue-600 text-sm">{data.broadcast.peakViewers}</p>
               </div>
               <div className="bg-amber-50 rounded-lg p-3">
                 <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">결제 피크 구간</p>

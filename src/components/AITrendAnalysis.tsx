@@ -21,7 +21,7 @@ interface CategoryBlock {
 }
 
 const CATEGORY_ACCENTS: Record<string, { dot: string; chip: string }> = {
-  '50000000': { dot: 'bg-purple-600', chip: 'bg-purple-50 text-purple-700' },
+  '50000000': { dot: 'bg-blue-600', chip: 'bg-blue-50 text-blue-700' },
   '50000002': { dot: 'bg-pink-500', chip: 'bg-pink-50 text-pink-700' },
   '50000003': { dot: 'bg-blue-500', chip: 'bg-blue-50 text-blue-700' },
   '50000004': { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700' },
@@ -81,11 +81,11 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
         <div>
           <h2 className="text-lg md:text-3xl font-black text-slate-900 mb-1 md:mb-2 flex items-center gap-2 md:gap-3">
-            AI 트렌드 분석 <Sparkles className="text-purple-600 w-5 h-5 md:w-6 md:h-6" />
+            AI 트렌드 분석 <Sparkles className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
           </h2>
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-slate-500 font-medium text-[10px] md:text-base">카테고리별 인기 키워드 트렌드를 분석합니다.</p>
-            <span className="flex items-center gap-1 bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+            <span className="flex items-center gap-1 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
               <Clock size={10} /> 매일 오후 2시 업데이트
             </span>
             {categoriesUpdatedAt && (
@@ -113,7 +113,7 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
             <div key={cat.cid} className="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-3 md:mb-4">
                 <h4 className="font-black text-slate-900 flex items-center gap-2 text-xs md:text-sm">
-                  <BarChart3 size={16} className="text-purple-600" />
+                  <BarChart3 size={16} className="text-blue-600" />
                   <span className={`w-1.5 h-1.5 rounded-full ${accent.dot}`}></span>
                   {cat.label}
                 </h4>

@@ -122,7 +122,7 @@ const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
                   <p className="font-black text-slate-900 text-sm truncate">@{r.username}</p>
                   <p className="text-[10px] font-bold text-slate-400">정산 {r.settlementCount || 0}건 · 완료 {won(r.paidAmount)}</p>
                 </div>
-                <p className="font-black text-purple-600 text-sm shrink-0">{won(r.totalAmount)}</p>
+                <p className="font-black text-blue-600 text-sm shrink-0">{won(r.totalAmount)}</p>
               </div>
             ))}
           </div>
@@ -189,7 +189,7 @@ const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
                 <p className="font-black text-slate-900 text-sm truncate">{s.company_name || s.business_username}</p>
                 <p className="text-[10px] font-bold text-slate-400 truncate">{s.title}</p>
               </div>
-              <div className="md:col-span-2"><p className="font-bold text-purple-600 text-xs">@{s.influencer_username}</p></div>
+              <div className="md:col-span-2"><p className="font-bold text-blue-600 text-xs">@{s.influencer_username}</p></div>
               <div className="md:col-span-2"><p className="font-black text-slate-900 text-sm">{won(s.amount)}</p></div>
               <div className="md:col-span-2"><p className="text-xs font-bold text-slate-500">{s.scheduled_date}</p></div>
               <div className="md:col-span-1">

@@ -261,7 +261,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                 >
                   {isUploading && (
                     <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-                      <div className="w-5 h-5 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+                      <div className="w-5 h-5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
                     </div>
                   )}
                   {editForm.image ? (
@@ -275,7 +275,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploading}
-                    className="px-4 py-2 bg-purple-50 text-purple-600 rounded-xl text-xs font-black hover:bg-purple-100 transition-all disabled:opacity-50"
+                    className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-black hover:bg-blue-100 transition-all disabled:opacity-50"
                   >
                     {editForm.image ? '이미지 변경' : '이미지 업로드'}
                   </button>
@@ -307,7 +307,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                 value={editForm.name}
                 onChange={(e) => updateField('name', e.target.value)}
                 placeholder="예: 시그니처 후드티"
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-purple-500"
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500"
               />
             </div>
 
@@ -324,7 +324,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                   updateField('price', digits ? formatNumberWithCommas(digits) : '');
                 }}
                 placeholder="예: 29,000"
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-purple-500"
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500"
               />
               <p className="text-[10px] text-slate-400 mt-1">옵션별 가격을 따로 설정하지 않으면 이 가격으로 결제됩니다.</p>
             </div>
@@ -336,7 +336,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                 <button
                   type="button"
                   onClick={addOption}
-                  className="text-purple-500 text-[10px] font-black hover:text-purple-700 transition-all"
+                  className="text-blue-500 text-[10px] font-black hover:text-blue-700 transition-all"
                 >
                   + 옵션 추가
                 </button>
@@ -351,7 +351,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                         placeholder="옵션명 (예: 사이즈, 컬러)"
                         value={opt.name}
                         onChange={(e) => updateOptionName(opt.id, e.target.value)}
-                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-purple-500"
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-blue-500"
                       />
                       <button
                         type="button"
@@ -372,7 +372,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                               const next = opt.values.map((v, i) => i === vi ? { ...v, value: e.target.value } : v);
                               updateOptionValues(opt.id, next);
                             }}
-                            className="flex-1 min-w-[100px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-purple-500"
+                            className="flex-1 min-w-[100px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-blue-500"
                           />
                           <div className="flex items-center gap-1">
                             <input
@@ -386,7 +386,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                                 const next = opt.values.map((v, i) => i === vi ? { ...v, price: num } : v);
                                 updateOptionValues(opt.id, next);
                               }}
-                              className="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold focus:outline-none focus:border-purple-500"
+                              className="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold focus:outline-none focus:border-blue-500"
                             />
                             <span className="text-[10px] font-bold text-slate-400">원</span>
                           </div>
@@ -402,7 +402,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                                 const next = opt.values.map((v, i) => i === vi ? { ...v, discount: num } : v);
                                 updateOptionValues(opt.id, next);
                               }}
-                              className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold focus:outline-none focus:border-purple-500"
+                              className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold focus:outline-none focus:border-blue-500"
                             />
                             <span className="text-[10px] font-bold text-slate-400">%</span>
                           </div>
@@ -424,7 +424,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                       <button
                         type="button"
                         onClick={() => updateOptionValues(opt.id, [...opt.values, { value: '' }])}
-                        className="text-purple-400 text-[10px] font-black bg-purple-50 px-3 py-2 rounded-lg hover:bg-purple-100 transition-all"
+                        className="text-blue-400 text-[10px] font-black bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition-all"
                       >
                         + 값 추가
                       </button>
@@ -449,7 +449,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
             <button
               type="button"
               onClick={saveEdit}
-              className="flex-[2] py-3 rounded-xl bg-purple-600 text-white font-black text-sm hover:bg-purple-700 transition-all"
+              className="flex-[2] py-3 rounded-xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 transition-all"
             >
               저장
             </button>
@@ -477,7 +477,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
           <button
             type="button"
             onClick={onNavigateLive}
-            className="text-xs md:text-sm font-bold text-purple-600 hover:text-purple-800 flex items-center gap-1"
+            className="text-xs md:text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
           >
             라이브 커머스로 이동 →
           </button>
@@ -536,7 +536,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="상품명으로 검색"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-9 py-2.5 text-sm font-bold focus:outline-none focus:border-purple-500 focus:bg-white transition-all"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-9 py-2.5 text-sm font-bold focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
               />
               {searchQuery && (
                 <button
@@ -591,7 +591,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                   </div>
                   <button
                     onClick={() => startEdit(product)}
-                    className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-xl transition-all"
+                    className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all"
                     aria-label="수정"
                   >
                     <Edit3 size={18} />

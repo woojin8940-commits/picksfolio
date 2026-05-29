@@ -12,7 +12,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
   return (
     <section className="relative pt-20 pb-12 md:pt-48 md:pb-32 container mx-auto px-4 sm:px-6 text-center overflow-hidden">
       {/* Background Glows */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[300px] md:w-[600px] h-[300px] md:h-[600px] bg-purple-primary/10 blur-[80px] md:blur-[120px] rounded-full -z-10 animate-pulse"></div>
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[300px] md:w-[600px] h-[300px] md:h-[600px] bg-blue-primary/10 blur-[80px] md:blur-[120px] rounded-full -z-10 animate-pulse"></div>
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -42,14 +42,14 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
           </div>
           <button
             onClick={() => onSignup(handle)}
-            className="w-full md:w-auto bg-gradient-to-r from-purple-primary to-purple-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-14 md:py-6 rounded-[1.2rem] md:rounded-full text-base md:text-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
+            className="w-full md:w-auto bg-gradient-to-r from-blue-primary to-blue-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-14 md:py-6 rounded-[1.2rem] md:rounded-full text-base md:text-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
           >
             바로 만들기
           </button>
         </div>
 
         <div className="text-sm md:text-lg font-medium text-slate-500">
-          이미 <span className="text-purple-primary font-bold">4,281개</span>의 링크가 개설되었습니다
+          이미 <span className="text-blue-primary font-bold">4,281개</span>의 링크가 개설되었습니다
         </div>
       </motion.div>
     </section>

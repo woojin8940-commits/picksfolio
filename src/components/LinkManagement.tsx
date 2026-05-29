@@ -12,7 +12,7 @@ import PhoneFrame from './PhoneFrame';
 import ColorPicker from './ColorPicker';
 import { renderPortfolioHtml } from './richText';
 
-const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#7c3aed', '#2563eb', '#dc2626', '#059669', '#d97706'];
+const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
 const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
   { value: 'transparent', label: '없음' },
   { value: '#FEF3C7', label: '노랑' },
@@ -149,12 +149,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
       if (saved) {
         const design = JSON.parse(saved);
-        return design.accentColor || (design.theme === 'white' ? '#0f172a' : '#a855f7');
+        return design.accentColor || (design.theme === 'white' ? '#0f172a' : '#3B82F6');
       }
     } catch (e) {
       console.error('Error parsing design:', e);
     }
-    return '#a855f7';
+    return '#3B82F6';
   });
   const [customGradient, setCustomGradient] = useState(() => {
     try {
@@ -584,7 +584,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         setLayoutTemplate(settings.design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid');
         setColumns(settings.design.gridColumns as 1 | 2 | 3 || 2);
         setThemePreset(settings.design.theme === 'white' ? 'white' : 'midnight');
-        setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#a855f7'));
+        setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#3B82F6'));
         setCustomGradient(settings.design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)');
         setPortfolioFontSize(settings.design.portfolioFontSize || 'medium');
       }
@@ -607,7 +607,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     if (theme === 'white') {
       setAccentColor('#0f172a');
     } else {
-      setAccentColor('#a855f7');
+      setAccentColor('#3B82F6');
     }
   };
 
@@ -1080,7 +1080,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       className={`px-10 py-5 rounded-2xl font-black text-base transition-all flex items-center justify-center gap-2 shadow-2xl ${
         isSaved
           ? 'bg-emerald-500 text-white scale-105'
-          : 'bg-purple-600 text-white hover:bg-purple-700 active:scale-95 disabled:opacity-50'
+          : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95 disabled:opacity-50'
       }`}
     >
       {isSaving ? (
@@ -1128,7 +1128,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   {(() => {
                     const cats = ['전체', ...managedCategories];
                     return cats.map(cat => (
-                      <button key={cat} onClick={() => setSelectedFolderId(cat === '전체' ? null : cat)} className={`px-5 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${(cat === '전체' && !selectedFolderId) || selectedFolderId === cat ? 'bg-[#1E1E2E] text-white shadow-lg' : 'bg-white text-[#64748B] border border-[#E2E8F0] hover:border-purple-300'}`}>
+                      <button key={cat} onClick={() => setSelectedFolderId(cat === '전체' ? null : cat)} className={`px-5 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${(cat === '전체' && !selectedFolderId) || selectedFolderId === cat ? 'bg-[#1E1E2E] text-white shadow-lg' : 'bg-white text-[#64748B] border border-[#E2E8F0] hover:border-blue-300'}`}>
                         {cat}
                       </button>
                     ));
@@ -1143,10 +1143,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : `전체 리스트 (${blocks.length})`}
                 </h2>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-purple-300">
+                  <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-blue-300">
                     <Plus size={14} /> 카테고리 관리
                   </button>
-                  <button onClick={handleAddBlock} className="text-purple-600 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all">
+                  <button onClick={handleAddBlock} className="text-blue-600 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all">
                     <Plus size={14} /> 새 포스트 추가
                   </button>
                 </div>
@@ -1166,7 +1166,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'up')}
                             disabled={groupIndex === 0}
-                            className="p-1.5 rounded-lg bg-white hover:bg-purple-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-purple-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                            className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
                             title="카테고리 위로 이동"
                           >
                             <ChevronUp size={16} strokeWidth={2.5} />
@@ -1174,7 +1174,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'down')}
                             disabled={groupIndex === orderedCategoryGroups.length - 1}
-                            className="p-1.5 rounded-lg bg-white hover:bg-purple-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-purple-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+                            className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
                             title="카테고리 아래로 이동"
                           >
                             <ChevronDown size={16} strokeWidth={2.5} />
@@ -1185,7 +1185,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         {group.blocks.map((block, blockIndex) => (
                           <div
                             key={block.id}
-                            className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-purple-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+                            className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
                             draggable
                             onDragStart={e => handleDragStart(e, block.id)}
                             onDragOver={handleDragOver}
@@ -1223,7 +1223,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                               </div>
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                  <span className="inline-block bg-purple-50 text-purple-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+                                  <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
                                     {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
                                   </span>
                                 </div>
@@ -1238,7 +1238,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                                   </>
                                 )}
                               </div>
-                              <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
+                              <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
                             </div>
                           </div>
                         ))}
@@ -1249,7 +1249,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   displayedBlocks.map((block, blockIndex) => (
                   <div
                     key={block.id}
-                    className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-purple-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
+                    className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
                     draggable
                     onDragStart={e => handleDragStart(e, block.id)}
                     onDragOver={handleDragOver}
@@ -1288,7 +1288,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="inline-block bg-[#F1F5F9] text-[#64748B] text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">{block.category}</span>
-                        <span className="inline-block bg-purple-50 text-purple-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
+                        <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
                           {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
                         </span>
                       </div>
@@ -1303,7 +1303,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         </>
                       )}
                     </div>
-                    <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-purple-600 transition-all" />
+                    <ChevronRight size={18} className="text-[#CBD5E1] group-hover:text-blue-600 transition-all" />
                     </div>
                   </div>
                   ))
@@ -1322,9 +1322,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setHomePriority('curation')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'curation' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'curation' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
-                    <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-lg flex-shrink-0">🛍️</div>
+                    <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-lg flex-shrink-0">🛍️</div>
                     <div className="text-left">
                       <span className="font-black text-sm block">큐레이션 우선</span>
                       <span className="text-xs text-slate-500 font-bold">상품 그리드 먼저</span>
@@ -1332,7 +1332,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                   <button
                     onClick={() => setHomePriority('portfolio')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'portfolio' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'portfolio' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-lg flex-shrink-0">💼</div>
                     <div className="text-left">
@@ -1348,7 +1348,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setLayoutTemplate('grid')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'grid' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'grid' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-10 h-10 rounded-xl bg-slate-100 grid grid-cols-3 gap-px p-1.5 flex-shrink-0">
                       {[1,2,3,4,5,6].map(i => <div key={i} className="bg-slate-300 rounded-[1px]"></div>)}
@@ -1360,7 +1360,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                   <button
                     onClick={() => setLayoutTemplate('list')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'list' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'list' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-10 h-10 rounded-xl bg-slate-100 flex flex-col gap-1 p-2 justify-center flex-shrink-0">
                       {[1,2,3].map(i => (
@@ -1383,7 +1383,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleThemeChange('midnight')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${themePreset === 'midnight' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${themePreset === 'midnight' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-10 h-10 rounded-xl bg-[#1E1E2E] border-2 border-slate-700 shadow-inner flex items-center justify-center flex-shrink-0">
                       <span className="text-white text-xs font-black">Aa</span>
@@ -1395,7 +1395,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                   <button
                     onClick={() => handleThemeChange('white')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${themePreset === 'white' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${themePreset === 'white' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-10 h-10 rounded-xl bg-white border-2 border-slate-200 shadow-inner flex items-center justify-center flex-shrink-0">
                       <span className="text-slate-800 text-xs font-black">Aa</span>
@@ -1426,7 +1426,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
             {/* Cover Header - matching personal page */}
             <div
               className="relative h-40 flex-shrink-0"
-              style={{ background: fullDesignRef.current.portfolioHeaderColor || (themePreset === 'white' ? 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)' : 'linear-gradient(135deg, #9333ea 0%, #4f46e5 100%)') }}
+              style={{ background: fullDesignRef.current.portfolioHeaderColor || (themePreset === 'white' ? 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)' : 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)') }}
             >
               {fullDesignRef.current.portfolioHeaderImage && (
                 <SafeImage
@@ -1663,7 +1663,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   if (block.type === 'category') {
                     return (
                       <div key={block.id} className="pt-1 pb-0.5 flex items-center gap-1">
-                        <Hash size={7} className="text-purple-500 shrink-0" />
+                        <Hash size={7} className="text-blue-500 shrink-0" />
                         <span className={`text-[7px] font-black truncate ${themePreset === 'white' ? 'text-slate-900' : 'text-white'}`}>{block.content || '카테고리'}</span>
                       </div>
                     );
@@ -1764,7 +1764,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           <button
             onClick={activeTab === 'posts' ? handleSaveBlocks : handleSaveDesign}
             disabled={isSaving}
-            className="bg-purple-600 text-white px-5 py-4 rounded-2xl font-black flex flex-col items-center justify-center gap-2 hover:bg-purple-700 transition-all shadow-2xl shadow-purple-200 disabled:opacity-50"
+            className="bg-blue-600 text-white px-5 py-4 rounded-2xl font-black flex flex-col items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 disabled:opacity-50"
           >
             {isSaving ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1799,7 +1799,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <>
                       <div
                         ref={coverPosContainerRef}
-                        className="relative overflow-hidden rounded-[2rem] border-2 border-purple-200 bg-slate-50 select-none"
+                        className="relative overflow-hidden rounded-[2rem] border-2 border-blue-200 bg-slate-50 select-none"
                         style={{ aspectRatio: editForm.displayType === 'minimal' ? '16/10' : '1/1' }}
                       >
                         <MediaAuto
@@ -1850,7 +1850,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   <button
                     onClick={() => !isUploading && triggerFileUpload({ type: 'block' })}
                     disabled={isUploading}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-purple-50 text-purple-600 rounded-xl font-black text-xs hover:bg-purple-100 transition-all disabled:opacity-50 w-full justify-center"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-600 rounded-xl font-black text-xs hover:bg-blue-100 transition-all disabled:opacity-50 w-full justify-center"
                   >
                     <ImageIcon size={14} />
                     <span>{editForm.coverMedia ? '이미지/영상 변경' : '이미지/영상 업로드'}</span>
@@ -1858,7 +1858,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   {!membershipActive && (
                     <button
                       onClick={() => onNavigateMembership?.()}
-                      className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 text-purple-600 rounded-xl text-[11px] font-bold w-full justify-center hover:bg-purple-100 transition-all"
+                      className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 text-blue-600 rounded-xl text-[11px] font-bold w-full justify-center hover:bg-blue-100 transition-all"
                     >
                       <Lock size={12} />
                       <span>영상 업로드는 멤버십 전용</span>
@@ -1871,11 +1871,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   <>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">포스트 제목</label>
-                    <input type="text" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all" placeholder="제목" />
+                    <input type="text" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all" placeholder="제목" />
                   </div>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
-                    <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-purple-600 transition-all" placeholder="카테고리" />
+                    <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-blue-600 transition-all" placeholder="카테고리" />
                   </div>
                   </>
                   )}
@@ -1884,7 +1884,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">레이아웃</label>
                     <div className="flex gap-2">
                       {([1, 2, 3] as const).map(num => (
-                        <button key={num} onClick={() => setEditForm({ ...editForm, colSpan: num })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.colSpan || 1) === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                        <button key={num} onClick={() => setEditForm({ ...editForm, colSpan: num })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.colSpan || 1) === num ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
                           {num}칸
                         </button>
                       ))}
@@ -1896,7 +1896,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">표시 형식</label>
                     <div className="flex gap-2">
                       {([{ key: 'grid' as const, label: '그리드' }, { key: 'minimal' as const, label: '미니멀' }, { key: 'text' as const, label: '텍스트' }]).map(opt => (
-                        <button key={opt.key} onClick={() => setEditForm({ ...editForm, displayType: opt.key })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.displayType || 'grid') === opt.key ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                        <button key={opt.key} onClick={() => setEditForm({ ...editForm, displayType: opt.key })} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${(editForm.displayType || 'grid') === opt.key ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
                           {opt.label}
                         </button>
                       ))}
@@ -1908,7 +1908,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               {/* Text Design Settings - only for text display type */}
               {editForm.displayType === 'text' && (
                 <div className="space-y-4">
-                  <h4 className="text-lg font-black text-purple-600">텍스트 디자인</h4>
+                  <h4 className="text-lg font-black text-blue-600">텍스트 디자인</h4>
                   <div className="bg-[#F8FAFC] p-5 rounded-2xl border border-[#E2E8F0] space-y-4">
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">텍스트 내용</label>
@@ -1916,7 +1916,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         ref={textEditorRef}
                         contentEditable
                         suppressContentEditableWarning
-                        className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-purple-600 transition-all outline-none whitespace-pre-wrap"
+                        className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-medium min-h-[100px] focus:border-blue-600 transition-all outline-none whitespace-pre-wrap"
                         style={{
                           fontSize: `${editForm.fontSizePx || 14}px`,
                           fontWeight: editForm.bold ? 'bold' : undefined,
@@ -1976,7 +1976,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             <div className="flex gap-1.5 flex-wrap max-w-[200px]">
                               {TEXT_COLOR_PRESETS.map(c => (
                                 <button key={c} onClick={() => { setEditForm({ ...editForm, color: c }); setShowTextColorPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-blue-600 scale-110' : 'border-transparent hover:scale-105'}`}
                                   style={{ backgroundColor: c }}
                                 />
                               ))}
@@ -2007,7 +2007,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             <div className="flex gap-1.5 flex-wrap max-w-[200px]">
                               {HIGHLIGHT_COLOR_PRESETS.map(c => (
                                 <button key={c.value} onClick={() => { setEditForm({ ...editForm, highlight: c.value }); setShowTextHighlightPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-purple-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
                                   style={{ backgroundColor: c.value === 'transparent' ? '#fff' : c.value }}
                                 >
                                   {c.value === 'transparent' ? '✕' : ''}
@@ -2026,8 +2026,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               {editForm.displayType !== 'text' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center">
-                  <h4 className="text-lg font-black text-purple-600">연결 상품</h4>
-                  <button onClick={handleAddProduct} className="bg-purple-50 text-purple-600 px-4 py-2 rounded-full font-black text-xs hover:bg-purple-100 transition-all">+ 추가</button>
+                  <h4 className="text-lg font-black text-blue-600">연결 상품</h4>
+                  <button onClick={handleAddProduct} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-full font-black text-xs hover:bg-blue-100 transition-all">+ 추가</button>
                 </div>
                 {editForm.products?.map(product => (
                   <div key={product.id} className="bg-[#F8FAFC] p-6 rounded-[2.5rem] border border-[#E2E8F0] space-y-4">
@@ -2042,7 +2042,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">상품 옵션 (선택사항)</span>
-                        <button onClick={() => handleAddOption(product.id)} className="text-purple-500 text-[10px] font-black hover:text-purple-700 transition-all">+ 옵션 추가</button>
+                        <button onClick={() => handleAddOption(product.id)} className="text-blue-500 text-[10px] font-black hover:text-blue-700 transition-all">+ 옵션 추가</button>
                       </div>
                       {(product.options || []).map(opt => (
                         <div key={opt.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3">
@@ -2083,7 +2083,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             ))}
                             <button
                               onClick={() => handleUpdateOption(product.id, opt.id, 'values', [...opt.values, ''])}
-                              className="text-purple-400 text-[10px] font-black bg-purple-50 px-3 py-2 rounded-lg hover:bg-purple-100 transition-all"
+                              className="text-blue-400 text-[10px] font-black bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition-all"
                             >+ 값</button>
                           </div>
                         </div>
@@ -2137,7 +2137,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="grid grid-cols-3 gap-3">
                   <button
                     onClick={() => setNewBlockDisplayType('grid')}
-                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'grid' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'grid' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-12 h-12 rounded-xl bg-slate-100 grid grid-cols-2 gap-px p-2">
                       {[1,2,3,4].map(i => <div key={i} className="bg-slate-300 rounded-sm"></div>)}
@@ -2147,7 +2147,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                   <button
                     onClick={() => setNewBlockDisplayType('minimal')}
-                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'minimal' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'minimal' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-12 h-12 rounded-xl bg-slate-100 flex flex-col gap-1 p-2 justify-center">
                       <div className="h-1.5 bg-slate-300 rounded-sm w-full"></div>
@@ -2159,7 +2159,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                   <button
                     onClick={() => setNewBlockDisplayType('text')}
-                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'text' ? 'border-purple-600 bg-purple-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-purple-300'}`}
+                    className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${newBlockDisplayType === 'text' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
                   >
                     <div className="w-12 h-12 rounded-xl bg-slate-100 flex flex-col gap-1 p-2.5 justify-center">
                       <div className="h-1 bg-slate-400 rounded-sm w-full"></div>
@@ -2180,7 +2180,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <button
                       key={num}
                       onClick={() => setNewBlockColSpan(num)}
-                      className={`py-4 rounded-xl font-black text-base transition-all ${newBlockColSpan === num ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                      className={`py-4 rounded-xl font-black text-base transition-all ${newBlockColSpan === num ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                     >
                       {num}칸
                     </button>
@@ -2193,7 +2193,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
             <div className="p-6 sm:p-8 bg-[#F8FAFC] border-t border-[#E2E8F0] flex gap-3">
               <button onClick={() => setShowBlockTypeModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">취소</button>
-              <button onClick={handleConfirmAddBlock} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black hover:bg-purple-700 transition-all shadow-lg">
+              <button onClick={handleConfirmAddBlock} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-lg">
                 추가하기
               </button>
             </div>
@@ -2218,13 +2218,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
-                  className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-5 py-3 font-black text-sm focus:border-purple-600 transition-all"
+                  className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-5 py-3 font-black text-sm focus:border-blue-600 transition-all"
                   placeholder="새 카테고리 이름"
                 />
                 <button
                   onClick={handleAddCategory}
                   disabled={!newCategoryName.trim()}
-                  className="px-5 py-3 bg-purple-600 text-white rounded-2xl font-black text-sm hover:bg-purple-700 transition-all disabled:opacity-50"
+                  className="px-5 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all disabled:opacity-50"
                 >
                   추가
                 </button>
@@ -2243,10 +2243,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             value={categoryEditValue}
                             onChange={e => setCategoryEditValue(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && handleRenameCategory(cat)}
-                            className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-4 py-2 font-black text-sm focus:border-purple-600 transition-all"
+                            className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-4 py-2 font-black text-sm focus:border-blue-600 transition-all"
                             autoFocus
                           />
-                          <button onClick={() => handleRenameCategory(cat)} className="px-3 py-2 bg-purple-600 text-white rounded-xl font-black text-xs">확인</button>
+                          <button onClick={() => handleRenameCategory(cat)} className="px-3 py-2 bg-blue-600 text-white rounded-xl font-black text-xs">확인</button>
                           <button onClick={() => setEditingCategoryName(null)} className="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl font-black text-xs">취소</button>
                         </div>
                       ) : (
@@ -2256,7 +2256,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             <span className="text-xs text-slate-400 font-bold whitespace-nowrap">{blocks.filter(b => b.category === cat).length}개</span>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <button onClick={() => { setEditingCategoryName(cat); setCategoryEditValue(cat); }} className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-black text-slate-500 hover:border-purple-300 transition-all">수정</button>
+                            <button onClick={() => { setEditingCategoryName(cat); setCategoryEditValue(cat); }} className="px-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-black text-slate-500 hover:border-blue-300 transition-all">수정</button>
                             <button onClick={() => handleDeleteCategory(cat)} className="p-1.5 bg-white border border-red-100 text-red-400 rounded-xl hover:text-red-500 transition-all"><Trash2 size={14} /></button>
                           </div>
                         </>

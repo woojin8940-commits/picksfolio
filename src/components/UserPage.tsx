@@ -165,7 +165,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     const defaultDesign: DesignSettings = {
       templateType: TemplateType.SHOPPABLE_GRID,
       theme: 'midnight',
-      accentColor: '#7c3aed',
+      accentColor: '#2563EB',
       borderRadius: 'full',
       gridGap: 1,
       gridColumns: 2,
@@ -1224,7 +1224,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             <div
               className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
-                background: design.portfolioHeaderColor || 'linear-gradient(to br, #9333ea, #4f46e5)'
+                background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
             >
               {design.portfolioHeaderImage && (
@@ -1238,6 +1238,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 <SafeImage
                   src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=3840&q=100"
                   className="w-full h-full object-cover"
+                  loading="eager"
                 />
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: `linear-gradient(to top, ${themeBg || '#ffffff'} 0%, ${themeBg || '#ffffff'}88 15%, transparent 50%)` }}></div>
@@ -1267,7 +1268,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm whitespace-nowrap shrink-0 ${
                     notifySubscribed
                       ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                      : 'bg-purple-primary text-white hover:bg-purple-secondary'
+                      : 'bg-blue-primary text-white hover:bg-blue-secondary'
                   }`}
                 >
                   <Bell size={14} strokeWidth={2.5} />
@@ -1275,7 +1276,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 </button>
                 )}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#7c3aed' }}>
+                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
                   </button>
@@ -1363,7 +1364,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                         return (
                           <div key={section.id} className="pt-4 pb-1 space-y-2">
                             <div className="flex items-center gap-2">
-                              <Hash size={16} className={isDark ? 'text-purple-300 shrink-0' : 'text-purple-500 shrink-0'} />
+                              <Hash size={16} className={isDark ? 'text-blue-300 shrink-0' : 'text-blue-500 shrink-0'} />
                               <h4 className={`text-base md:text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                                 {section.content || '카테고리'}
                               </h4>
@@ -1498,7 +1499,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
                {/* Product Search Bar */}
                <div className="px-4 mb-6">
-                 <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-purple-300'}`}>
+                 <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                    <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                    <input
                      type="text"
@@ -1667,7 +1668,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => trackClick(username, block.id)}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
                           >
                             <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
@@ -1738,7 +1739,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             <div
               className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
-                background: design.portfolioHeaderColor || 'linear-gradient(to br, #9333ea, #4f46e5)'
+                background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
             >
               {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
@@ -1775,7 +1776,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm whitespace-nowrap shrink-0 ${
                     notifySubscribed
                       ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                      : 'bg-purple-primary text-white hover:bg-purple-secondary'
+                      : 'bg-blue-primary text-white hover:bg-blue-secondary'
                   }`}
                 >
                   <Bell size={14} strokeWidth={2.5} />
@@ -1783,7 +1784,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 </button>
                 )}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#7c3aed' }}>
+                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
                   </button>
@@ -1847,7 +1848,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             {/* Product Search Bar */}
             <div className="px-6 mb-2">
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-purple-300'}`}>
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                 <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                 <input
                   type="text"
@@ -2050,7 +2051,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                               trackClick(username, block.id);
                               openLink(p.link);
                             }}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-purple-200'}`}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
                           >
                             <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
@@ -2117,7 +2118,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       return (
                         <div key={section.id} className="pt-4 pb-1 space-y-2">
                           <div className="flex items-center gap-2">
-                            <Hash size={16} className={isDark ? 'text-purple-300 shrink-0' : 'text-purple-500 shrink-0'} />
+                            <Hash size={16} className={isDark ? 'text-blue-300 shrink-0' : 'text-blue-500 shrink-0'} />
                             <h4 className={`text-base md:text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                               {section.content || '카테고리'}
                             </h4>
@@ -2256,7 +2257,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
           
           <div className="flex items-center gap-2 opacity-30 grayscale hover:grayscale-0 transition-all cursor-pointer">
             <span className="text-[10px] font-black tracking-tighter">POWERED BY</span>
-            <span className="text-sm font-black text-purple-600 tracking-tighter">PICKSFOLIO</span>
+            <span className="text-sm font-black text-blue-600 tracking-tighter">PICKSFOLIO</span>
           </div>
         </footer>
 
@@ -2265,7 +2266,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
           <div className={`w-12 h-1 rounded-full mx-auto mb-8 cursor-pointer ${isDark ? 'bg-white/20' : 'bg-slate-200'}`} onClick={() => setSelectedBlockId(null)}></div>
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-purple-600 mb-1">Shop the Selection</h4>
+              <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-600 mb-1">Shop the Selection</h4>
               <h3 className="text-lg font-black tracking-tight">{selectedBlock?.title}</h3>
             </div>
             <button onClick={() => setSelectedBlockId(null)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isDark ? 'bg-white/10 text-white/40 hover:text-white' : 'bg-slate-100 text-slate-400 hover:text-slate-900'}`}>✕</button>
@@ -2274,7 +2275,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             {selectedBlock?.products.map((p) => (
               <div 
                 key={p.id} 
-                className={`flex items-center justify-between p-5 rounded-2xl border group shadow-sm transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:border-purple-200'}`}
+                className={`flex items-center justify-between p-5 rounded-2xl border group shadow-sm transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:border-blue-200'}`}
               >
                 <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
                   {/* Product Thumbnail */}
@@ -2395,7 +2396,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     placeholder="010-1234-5678"
                     value={notifyPhoneInput}
                     onChange={(e) => setNotifyPhoneInput(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-purple-primary focus:ring-2 focus:ring-purple-primary/20 outline-none text-center text-base font-bold text-slate-900 mb-3"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-primary focus:ring-2 focus:ring-blue-primary/20 outline-none text-center text-base font-bold text-slate-900 mb-3"
                   />
 
                   {notifyError && (
@@ -2418,7 +2419,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                       }
                     }}
                     disabled={notifyLoading || notifyPhoneInput.replace(/[^0-9]/g, '').length < 10}
-                    className="w-full py-4 rounded-2xl font-black text-base bg-purple-primary text-white hover:bg-purple-secondary transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full py-4 rounded-2xl font-black text-base bg-blue-primary text-white hover:bg-blue-secondary transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {notifyLoading ? '등록 중...' : '알림 받기'}
                   </button>

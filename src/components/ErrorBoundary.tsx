@@ -35,7 +35,7 @@ class ErrorBoundary extends Component<Props, State> {
               localStorage.clear();
               window.location.reload();
             }}
-            className="bg-purple-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-purple-700 transition-all"
+            className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-blue-700 transition-all"
           >
             데이터 초기화 후 새로고침
           </button>

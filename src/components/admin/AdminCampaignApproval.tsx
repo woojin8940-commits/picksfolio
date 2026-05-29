@@ -197,7 +197,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                   {/* Content */}
                   <div className="p-3.5 md:p-4">
                     <div className="flex items-center gap-1.5 mb-1.5">
-                      <span className="text-[11px] text-purple-600 font-black">@{campaign.business_username}</span>
+                      <span className="text-[11px] text-blue-600 font-black">@{campaign.business_username}</span>
                       {campaign.brand_name && (
                         <>
                           <span className="text-slate-200">·</span>
@@ -274,7 +274,7 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                     )}
                     <div className="bg-slate-50 rounded-xl p-3">
                       <p className="text-[9px] text-slate-400 font-black uppercase">비즈니스 계정</p>
-                      <p className="text-xs font-bold text-purple-600">@{campaign.business_username}</p>
+                      <p className="text-xs font-bold text-blue-600">@{campaign.business_username}</p>
                     </div>
                   </div>
 

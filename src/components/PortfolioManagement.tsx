@@ -97,7 +97,7 @@ const resizeImages = (current: string[] | undefined, fallback: string, size: num
   return arr;
 };
 
-const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#7c3aed', '#2563eb', '#dc2626', '#059669', '#d97706'];
+const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
 const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
   { value: 'transparent', label: '없음' },
   { value: '#FEF3C7', label: '노랑' },
@@ -1223,7 +1223,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="bg-purple-600 text-white px-6 py-3 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-purple-700 transition-all shadow-xl shadow-purple-200 disabled:opacity-50 text-sm"
+            className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 disabled:opacity-50 text-sm"
           >
             {isSaving ? (
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1242,7 +1242,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
           <section className="bg-white rounded-2xl md:rounded-[3rem] border border-slate-100 p-6 md:p-10 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-lg md:text-xl font-black text-slate-900">프로필 정보 설정</h3>
-              <User size={20} className="text-purple-600" />
+              <User size={20} className="text-blue-600" />
             </div>
 
             <div className="flex flex-col md:flex-row gap-6">
@@ -1254,7 +1254,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     type="text"
                     value={profile.name}
                     onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-black text-lg focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-black text-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
                     placeholder="이름"
                   />
                 </div>
@@ -1263,7 +1263,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <textarea
                     value={profile.bio}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-sm focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
                     placeholder="소개를 입력하세요"
                     rows={2}
                   />
@@ -1278,26 +1278,26 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               {/* Special toggle buttons: Business Proposal & Live Notify */}
               <div className="space-y-2">
                 {profile.links?.businessProposal && (
-                  <div className="flex items-center gap-3 bg-purple-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Briefcase size={16} className="text-purple-600 shrink-0" />
-                    <span className="flex-1 font-bold text-sm text-purple-700">비즈니스 제안 버튼 활성화됨</span>
+                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
+                    <Briefcase size={16} className="text-blue-600 shrink-0" />
+                    <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼 활성화됨</span>
                     <button
                       type="button"
                       onClick={() => setProfile({ ...profile, links: { ...profile.links, businessProposal: false } })}
-                      className="p-1 text-purple-300 hover:text-red-500 transition-colors"
+                      className="p-1 text-blue-300 hover:text-red-500 transition-colors"
                     >
                       <X size={14} />
                     </button>
                   </div>
                 )}
                 {profile.links?.liveNotify && (
-                  <div className="flex items-center gap-3 bg-purple-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
-                    <Bell size={16} className="text-purple-primary shrink-0" />
-                    <span className="flex-1 font-bold text-sm text-purple-700">라이브 알림 버튼 활성화됨</span>
+                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3 animate-in slide-in-from-top-2 duration-300">
+                    <Bell size={16} className="text-blue-primary shrink-0" />
+                    <span className="flex-1 font-bold text-sm text-blue-700">라이브 알림 버튼 활성화됨</span>
                     <button
                       type="button"
                       onClick={() => setProfile({ ...profile, links: { ...profile.links, liveNotify: false } })}
-                      className="p-1 text-purple-300 hover:text-red-500 transition-colors"
+                      className="p-1 text-blue-300 hover:text-red-500 transition-colors"
                     >
                       <X size={14} />
                     </button>
@@ -1341,7 +1341,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                           updated[idx] = { ...updated[idx], url: e.target.value };
                           setProfile({ ...profile, links: { ...profile.links, customButtons: updated } });
                         }}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                         placeholder="https://example.com"
                       />
                     </div>
@@ -1373,7 +1373,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     <button
                       type="button"
                       onClick={() => setProfile({ ...profile, links: { ...profile.links, businessProposal: true } })}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[10px] font-bold hover:border-blue-400 hover:bg-blue-50 transition-all"
                     >
                       <Plus size={12} />
                       <Briefcase size={12} />
@@ -1384,7 +1384,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     <button
                       type="button"
                       onClick={() => setProfile({ ...profile, links: { ...profile.links, liveNotify: true } })}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-purple-300 text-purple-600 text-[10px] font-bold hover:border-purple-400 hover:bg-purple-50 transition-all"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[10px] font-bold hover:border-blue-400 hover:bg-blue-50 transition-all"
                     >
                       <Plus size={12} />
                       <Bell size={12} />
@@ -1394,10 +1394,10 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <button
                     type="button"
                     onClick={() => {
-                      const newBtn: CustomButton = { id: Date.now().toString(), label: '', url: '', color: '#7c3aed' };
+                      const newBtn: CustomButton = { id: Date.now().toString(), label: '', url: '', color: '#2563EB' };
                       setProfile({ ...profile, links: { ...profile.links, customButtons: [...(profile.links.customButtons || []), newBtn] } });
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold hover:border-purple-400 hover:text-purple-600 hover:bg-purple-50 transition-all"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
                   >
                     <Plus size={12} />
                     <Globe size={12} />
@@ -1412,7 +1412,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
           <section className="bg-white rounded-2xl md:rounded-[3rem] border border-slate-100 p-6 md:p-10 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-lg md:text-xl font-black text-slate-900">상단 커버 디자인</h3>
-              <Palette size={20} className="text-purple-600" />
+              <Palette size={20} className="text-blue-600" />
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1420,7 +1420,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                   커버 미디어 (이미지 / 영상)
                   {!membershipActive && (
-                    <span className="inline-flex items-center gap-0.5 text-[8px] font-black text-purple-700 bg-purple-100 border border-purple-200 px-1.5 py-0.5 rounded-full normal-case tracking-normal">
+                    <span className="inline-flex items-center gap-0.5 text-[8px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded-full normal-case tracking-normal">
                       <Lock size={8} /> 영상은 멤버십
                     </span>
                   )}
@@ -1432,7 +1432,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   >
                     {isUploading && uploadTarget?.type === 'cover' ? (
                       <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-                        <div className="w-8 h-8 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+                        <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
                       </div>
                     ) : null}
                     {design?.portfolioHeaderImage ? (
@@ -1451,7 +1451,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <button
                     onClick={() => triggerFileUpload({ type: 'cover' })}
                     disabled={isUploading}
-                    className="p-3 bg-purple-50 text-purple-600 rounded-xl hover:bg-purple-100 transition-all flex flex-col items-center gap-1.5 shrink-0 disabled:opacity-50"
+                    className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-all flex flex-col items-center gap-1.5 shrink-0 disabled:opacity-50"
                   >
                     <Camera size={18} />
                     <span className="text-[9px] font-black whitespace-nowrap">{design?.portfolioHeaderImage ? '변경' : '업로드'}</span>
@@ -1476,55 +1476,31 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">커버 배경색</label>
                   <div className="flex flex-wrap gap-2">
-                    {[
-                      '#7c3aed', // Violet
-                      '#0f172a', // Midnight
-                      '#ffffff', // White
-                      'linear-gradient(to br, #9333ea, #4f46e5)', // Purple Gradient
-                    ].map(color => (
-                      <button 
-                        key={color}
-                        onClick={() => setDesign(prev => ({ ...prev, portfolioHeaderColor: color }))}
-                        className={`w-10 h-10 rounded-xl border-2 transition-all ${design.portfolioHeaderColor === color ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
-                        style={{ background: color, border: color === '#ffffff' ? '1px solid #e2e8f0' : undefined }}
-                      />
-                    ))}
                     <div className="relative">
                       <ColorPicker
-                        value={design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#9333ea'}
+                        value={design.portfolioHeaderColor?.startsWith('#') ? design.portfolioHeaderColor : '#2563eb'}
                         onChange={c => setDesign(prev => ({ ...prev, portfolioHeaderColor: c }))}
                         triggerClassName="w-10 h-10 rounded-xl"
                         aria-label="커버 배경색 직접 지정"
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] text-slate-400 font-medium">이미지가 없을 때 적용되는 배경색입니다.</p>
+                  <p className="text-[10px] text-slate-400 font-medium">이미지가 없을 때 적용되는 배경색입니다. 원하는 색을 직접 지정하세요.</p>
                 </div>
 
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">포인트 컬러 (ACCENT COLOR)</label>
                   <div className="flex flex-wrap gap-2">
-                    {[
-                      '#a855f7', // Violet
-                      '#0f172a', // Midnight Slate
-                      '#2563eb', // Blue
-                    ].map(color => (
-                      <button 
-                        key={color}
-                        onClick={() => setDesign(prev => ({ ...prev, accentColor: color }))}
-                        className={`w-10 h-10 rounded-full border-4 transition-all ${design.accentColor === color ? 'border-purple-600 scale-110' : 'border-transparent hover:scale-105'}`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
                     <div className="relative">
                       <ColorPicker
-                        value={design.accentColor || '#a855f7'}
+                        value={design.accentColor || '#2563eb'}
                         onChange={c => setDesign(prev => ({ ...prev, accentColor: c }))}
                         triggerClassName="w-10 h-10 rounded-full"
                         aria-label="포인트 컬러 직접 지정"
                       />
                     </div>
                   </div>
+                  <p className="text-[10px] text-slate-400 font-medium">원하는 색을 직접 지정하세요.</p>
                 </div>
 
                 <div className="space-y-3">
@@ -1538,7 +1514,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       <button 
                         key={size.id}
                         onClick={() => setDesign(prev => ({ ...prev, portfolioFontSize: size.id as any }))}
-                        className={`flex-1 py-2 rounded-xl font-black text-[10px] transition-all border-2 ${design.portfolioFontSize === size.id || (!design.portfolioFontSize && size.id === 'medium') ? 'bg-purple-50 border-purple-600 text-purple-600' : 'bg-slate-50 border-transparent text-slate-400 hover:bg-slate-100'}`}
+                        className={`flex-1 py-2 rounded-xl font-black text-[10px] transition-all border-2 ${design.portfolioFontSize === size.id || (!design.portfolioFontSize && size.id === 'medium') ? 'bg-blue-50 border-blue-600 text-blue-600' : 'bg-slate-50 border-transparent text-slate-400 hover:bg-slate-100'}`}
                       >
                         {size.label}
                       </button>
@@ -1555,7 +1531,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               <h3 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-2">
                 콘텐츠 구성
                 {!membershipActive && (
-                  <span className="inline-flex items-center gap-1 text-[9px] md:text-[10px] font-black text-purple-700 bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[9px] md:text-[10px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">
                     <Lock size={10} /> 멤버십 전용
                   </span>
                 )}
@@ -1616,31 +1592,31 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
             </div>
 
             {!membershipActive ? (
-              <div className="bg-white border border-purple-100 rounded-2xl p-6 md:p-10 shadow-sm">
+              <div className="bg-white border border-blue-100 rounded-2xl p-6 md:p-10 shadow-sm">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-2xl shrink-0">🔒</div>
+                  <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-2xl shrink-0">🔒</div>
                   <div className="flex-1">
                     <h4 className="text-base md:text-lg font-black text-slate-900">콘텐츠 구성은 스탠다드 멤버십 전용입니다</h4>
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1.5 leading-relaxed">
                       포트폴리오 본문(텍스트 · 이미지 블록)과 상단 커버 영상 업로드, 상품·포트폴리오 영상 업로드는 월 4,900원 스탠다드 멤버십에 포함됩니다. 라이브 커머스 송출까지 사용하시려면 월 13,900원 커머스 멤버십을 선택해 주세요.
                     </p>
                     <ul className="space-y-1.5 mt-4 text-xs md:text-sm text-slate-600 font-medium">
-                      <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>상단 커버 <strong>영상</strong> 업로드</li>
-                      <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>상품·포트폴리오 <strong>영상</strong> 업로드</li>
-                      <li className="flex items-center gap-2"><span className="text-purple-500 font-black">✓</span>텍스트 · 이미지 블록 무제한 편집</li>
+                      <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>상단 커버 <strong>영상</strong> 업로드</li>
+                      <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>상품·포트폴리오 <strong>영상</strong> 업로드</li>
+                      <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>텍스트 · 이미지 블록 무제한 편집</li>
                     </ul>
                     <div className="flex flex-col sm:flex-row gap-2 mt-5">
                       <button
                         type="button"
                         onClick={() => onNavigateMembership?.()}
-                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-purple-500 to-fuchsia-500 hover:from-purple-600 hover:to-fuchsia-600 transition-all shadow-md text-sm"
+                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md text-sm"
                       >
                         스탠다드 멤버십 4,900원으로 풀기
                       </button>
                       <button
                         type="button"
                         onClick={() => onNavigateMembership?.()}
-                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 transition-all shadow-md text-sm"
+                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md text-sm"
                       >
                         커머스 멤버십 13,900원
                       </button>
@@ -1677,7 +1653,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                             onClick={() => setEditingCategoryId(c.id)}
                             className={`px-3 py-1.5 rounded-full text-[10px] md:text-xs font-black whitespace-nowrap border transition-all flex items-center gap-1 ${
                               isActive
-                                ? 'bg-purple-600 text-white border-transparent'
+                                ? 'bg-blue-600 text-white border-transparent'
                                 : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
                             }`}
                           >
@@ -1722,7 +1698,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     {block.type === 'category' ? (
                       <div className="space-y-3 py-1">
                         <div className="flex items-center gap-3">
-                          <Hash size={18} className="text-purple-500 shrink-0" />
+                          <Hash size={18} className="text-blue-500 shrink-0" />
                           <input
                             type="text"
                             value={block.content}
@@ -1743,7 +1719,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                           <button
                             type="button"
                             onClick={() => addBlock('image', block.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-600 text-white hover:bg-purple-700 text-[11px] font-black transition-all"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 text-[11px] font-black transition-all"
                           >
                             <ImageIcon size={12} />
                             이미지 추가
@@ -1917,7 +1893,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                           setOpenColorPicker(null);
                                         }}
                                         className={`w-5 h-5 rounded-md transition-all ${
-                                          (block.color || '#37352f') === c ? 'ring-2 ring-offset-1 ring-purple-400 scale-110' : 'hover:scale-110'
+                                          (block.color || '#37352f') === c ? 'ring-2 ring-offset-1 ring-blue-400 scale-110' : 'hover:scale-110'
                                         }`}
                                         style={{ backgroundColor: c }}
                                         aria-label={`color ${c}`}
@@ -1990,7 +1966,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                           setOpenHighlightPicker(null);
                                         }}
                                         className={`h-7 rounded-md text-[10px] font-bold flex items-center justify-center transition-all ${
-                                          (block.highlight || 'transparent') === h.value ? 'ring-2 ring-offset-1 ring-purple-400' : 'hover:scale-105'
+                                          (block.highlight || 'transparent') === h.value ? 'ring-2 ring-offset-1 ring-blue-400' : 'hover:scale-105'
                                         }`}
                                         style={{
                                           backgroundColor: h.value === 'transparent' ? '#fff' : h.value,
@@ -2011,7 +1987,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                             value={block.content}
                             onChange={(html) => updateBlock(block.id, html)}
                             placeholder="내용을 자유롭게 입력하세요. 키보드 이모지를 사용해 꾸밀 수 있어요."
-                            className={`portfolio-rt-editor w-full bg-white rounded-xl px-5 py-5 md:px-6 md:py-6 min-h-[96px] border border-transparent focus:border-purple-200 focus:ring-2 focus:ring-purple-100 outline-none transition-all whitespace-pre-wrap break-words ${block.bold ? 'font-bold' : 'font-medium'}`}
+                            className={`portfolio-rt-editor w-full bg-white rounded-xl px-5 py-5 md:px-6 md:py-6 min-h-[96px] border border-transparent focus:border-blue-200 focus:ring-2 focus:ring-blue-100 outline-none transition-all whitespace-pre-wrap break-words ${block.bold ? 'font-bold' : 'font-medium'}`}
                             style={{
                               color: block.color || '#37352f',
                               backgroundColor: block.highlight || '#fff',
@@ -2047,7 +2023,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                 }}
                                 className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-all ${
                                   (block.gridColumns || 1) === opt.n
-                                    ? 'bg-purple-600 text-white'
+                                    ? 'bg-blue-600 text-white'
                                     : 'text-slate-500 hover:bg-slate-50'
                                 }`}
                                 aria-pressed={(block.gridColumns || 1) === opt.n}
@@ -2080,7 +2056,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                     <div className={`${cols === 1 ? (imgUrl ? '' : 'aspect-[4/5]') : 'aspect-square'} rounded-2xl overflow-hidden bg-slate-100 relative border-2 border-dashed border-slate-200`}>
                                       {isSlotUploading ? (
                                         <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-                                          <div className="w-8 h-8 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+                                          <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
                                         </div>
                                       ) : null}
                                       {imgUrl ? (
@@ -2118,7 +2094,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                       <button
                                         onClick={() => triggerFileUpload({ type: 'block', id: block.id, index: i })}
                                         disabled={isUploading}
-                                        className="absolute bottom-1.5 right-1.5 p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1 shadow-lg disabled:opacity-50 z-10"
+                                        className="absolute bottom-1.5 right-1.5 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex items-center gap-1 shadow-lg disabled:opacity-50 z-10"
                                       >
                                         <Camera size={14} />
                                         <span className="text-[9px] font-black whitespace-nowrap">{imgUrl ? '변경' : '업로드'}</span>
@@ -2162,7 +2138,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                 <div
                   className="h-40 relative overflow-hidden"
                   style={{
-                    background: design.portfolioHeaderColor || 'linear-gradient(to br, #9333ea, #4f46e5)'
+                    background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
                   }}
                 >
                   {design.portfolioHeaderImage && (
@@ -2182,11 +2158,11 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                       design.portfolioFontSize === 'small' ? 'text-[8px]' :
                       design.portfolioFontSize === 'large' ? 'text-sm' :
                       'text-[10px]'
-                    }`} style={{ color: design.accentColor || '#a855f7' }}>{profile.bio || 'CREATOR & STYLIST'}</p>
+                    }`} style={{ color: design.accentColor || '#3B82F6' }}>{profile.bio || 'CREATOR & STYLIST'}</p>
                   </div>
 
                   <div className="flex justify-center gap-2 flex-wrap">
-                    {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: design.accentColor || '#a855f7' }}><Briefcase size={12} /><span>비즈니스 제안</span></div>}
+                    {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: design.accentColor || '#3B82F6' }}><Briefcase size={12} /><span>비즈니스 제안</span></div>}
                     {profile.links?.liveNotify && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold bg-emerald-500 text-white shadow-sm"><Bell size={12} /><span>라이브 알림</span></div>}
                     {(profile.links?.customButtons || []).filter(b => b.label.trim()).map(btn => (
                       <div key={btn.id} className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: btn.color }}><Globe size={12} /><span>{btn.label}</span></div>
@@ -2219,7 +2195,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                                     ? 'text-white border-transparent'
                                     : 'bg-white border-slate-200 text-slate-500'
                                 }`}
-                                style={activeName === t ? { backgroundColor: design.accentColor || '#a855f7' } : undefined}
+                                style={activeName === t ? { backgroundColor: design.accentColor || '#3B82F6' } : undefined}
                               >
                                 {t}
                               </button>
@@ -2234,7 +2210,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                           return (
                             <div key={group.block.id} className="pt-2 pb-1 space-y-2">
                               <div className="flex items-center gap-2">
-                                <Hash size={14} className="text-purple-500 shrink-0" />
+                                <Hash size={14} className="text-blue-500 shrink-0" />
                                 <h5 className="text-sm font-black text-slate-900 truncate">
                                   {group.block.content || '카테고리'}
                                 </h5>
@@ -2337,9 +2313,9 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   {linkGridBlocks.length > 0 && (
                   <div style={{ order: design.homePriority === 'portfolio' ? 2 : 1 }} className="space-y-2 text-left pt-3">
                     <div className="flex items-center gap-1.5">
-                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#a855f7', opacity: 0.3 }}></div>
-                      <h4 className="text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: design.accentColor || '#a855f7' }}>My Curations</h4>
-                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#a855f7', opacity: 0.3 }}></div>
+                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#3B82F6', opacity: 0.3 }}></div>
+                      <h4 className="text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: design.accentColor || '#3B82F6' }}>My Curations</h4>
+                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#3B82F6', opacity: 0.3 }}></div>
                     </div>
                     <div className="grid grid-cols-2 gap-1.5">
                       {linkGridBlocks.map((block: any) => {
@@ -2369,7 +2345,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="bg-purple-600 text-white px-6 py-3 rounded-2xl font-black flex flex-row items-center justify-center gap-2 hover:bg-purple-700 transition-all shadow-2xl shadow-purple-200 disabled:opacity-50 whitespace-nowrap"
+                className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black flex flex-row items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 disabled:opacity-50 whitespace-nowrap"
               >
                 {isSaving ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

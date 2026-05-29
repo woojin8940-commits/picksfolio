@@ -151,7 +151,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           </div>
           <h2 className="text-2xl font-black text-slate-900 mb-3">제안이 전송되었습니다!</h2>
           <p className="text-slate-500 font-medium text-sm leading-relaxed">
-            <span className="font-black text-purple-600">@{username}</span>님에게 비즈니스 제안이 성공적으로 전달되었습니다.
+            <span className="font-black text-blue-600">@{username}</span>님에게 비즈니스 제안이 성공적으로 전달되었습니다.
             <br />인플루언서가 확인 후 수락/거절 여부를 결정합니다.
           </p>
         </div>
@@ -171,7 +171,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           </div>
           <h2 className="text-2xl font-black text-slate-900 mb-3">비즈니스 로그인이 필요합니다</h2>
           <p className="text-slate-500 font-medium text-sm leading-relaxed mb-8">
-            <span className="font-black text-purple-600">@{username}</span>님에게 비즈니스 제안을 보내려면
+            <span className="font-black text-blue-600">@{username}</span>님에게 비즈니스 제안을 보내려면
             <br />비즈니스 계정으로 로그인해 주세요.
           </p>
           <div className="space-y-3">
@@ -207,7 +207,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
   return (
     <div className="min-h-screen bg-[#f8fafc]">
       {/* Header */}
-      <div className="bg-gradient-to-r from-purple-700 to-indigo-700 text-white">
+      <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white">
         <div className="max-w-3xl mx-auto px-4 py-8 md:py-12">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">📨</div>
@@ -229,7 +229,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               onClick={() => setCategory('광고')}
               className={`p-4 rounded-xl border-2 font-black text-sm transition-all ${
                 category === '광고'
-                  ? 'border-purple-600 bg-purple-50 text-purple-700'
+                  ? 'border-blue-600 bg-blue-50 text-blue-700'
                   : 'border-slate-200 text-slate-400 hover:border-slate-300'
               }`}
             >
@@ -241,7 +241,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               onClick={() => setCategory('커머스')}
               className={`p-4 rounded-xl border-2 font-black text-sm transition-all ${
                 category === '커머스'
-                  ? 'border-purple-600 bg-purple-50 text-purple-700'
+                  ? 'border-blue-600 bg-blue-50 text-blue-700'
                   : 'border-slate-200 text-slate-400 hover:border-slate-300'
               }`}
             >
@@ -262,7 +262,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               onChange={e => setCompanyName(e.target.value)}
               required
               placeholder="회사명을 입력하세요"
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
             />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -274,7 +274,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 onChange={e => setContactPerson(e.target.value)}
                 required
                 placeholder="홍길동"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
             <div>
@@ -285,7 +285,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 onChange={e => setContactEmail(e.target.value)}
                 required
                 placeholder="email@company.com"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
             <div>
@@ -295,7 +295,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 value={contactPhone}
                 onChange={e => setContactPhone(e.target.value)}
                 placeholder="010-0000-0000"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
           </div>
@@ -312,7 +312,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               onChange={e => setTitle(e.target.value)}
               required
               placeholder={category === '광고' ? '예: 신제품 런칭 인스타그램 협찬 제안' : '예: 봄 시즌 공구 진행 제안'}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
             />
           </div>
           <div>
@@ -327,7 +327,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                   ? '제안 배경, 콘텐츠 형식(피드/릴스/스토리), 필수 포함 사항, 가이드라인 등을 상세히 작성해주세요.'
                   : '공구 상품 소개, 진행 방식, 수수료 구조, 예상 판매량 등을 상세히 작성해주세요.'
               }
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all resize-none"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all resize-none"
             />
           </div>
 
@@ -336,7 +336,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
             <label className="block text-xs font-bold text-slate-600 mb-1.5">첨부 파일</label>
             <p className="text-xs text-slate-400 font-medium mb-3">제안과 관련된 파일을 첨부할 수 있습니다. (최대 20MB)</p>
 
-            <label className={`block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${uploadingFiles ? 'border-purple-300 bg-purple-50' : 'border-slate-200 hover:border-purple-400 hover:bg-purple-50/50'}`}>
+            <label className={`block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${uploadingFiles ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'}`}>
               <input
                 type="file"
                 accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
@@ -347,8 +347,8 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               />
               {uploadingFiles ? (
                 <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm font-bold text-purple-600">업로드 중...</p>
+                  <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm font-bold text-blue-600">업로드 중...</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2">
@@ -412,7 +412,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
             <div>
@@ -422,7 +422,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 value={endDate}
                 onChange={e => setEndDate(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
           </div>
@@ -439,7 +439,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 onChange={handleFeeChange}
                 required
                 placeholder="0"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
             {category === '커머스' && (
@@ -452,7 +452,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                   min="0"
                   max="100"
                   placeholder="예: 15"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-100 transition-all"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
                 />
               </div>
             )}
@@ -463,7 +463,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-purple-600/30 hover:shadow-purple-600/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]"
+          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]"
         >
           {isSubmitting ? '전송 중...' : '제안서 보내기'}
         </button>

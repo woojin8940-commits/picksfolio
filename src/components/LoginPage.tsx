@@ -180,7 +180,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">아이디 또는 이메일</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-purple-500 transition-colors">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
               <input
                 type="text"
                 name="id"
@@ -201,7 +201,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
 
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">비밀번호</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-purple-500 transition-colors">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
               <input
                 type="password"
                 name="password"
@@ -215,7 +215,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
               />
             </div>
             <div className="text-right">
-              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-purple-600 font-bold transition-colors">
+              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
                 아이디/비밀번호 찾기
               </button>
             </div>
@@ -224,7 +224,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           <button 
             type="submit" 
             disabled={isLoading}
-            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>

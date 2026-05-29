@@ -231,7 +231,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
               style={{
                 position: 'absolute',
                 left: crop.x, top: crop.y, width: crop.w, height: crop.h,
-                border: '2px solid #8B5CF6',
+                border: '2px solid #3B82F6',
                 boxSizing: 'border-box',
                 cursor: dragging ? 'grabbing' : 'grab',
               }}
@@ -282,7 +282,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             onClick={handleConfirm}
             style={{
               padding: '10px 32px', borderRadius: 8,
-              background: '#8B5CF6', color: '#fff',
+              background: '#3B82F6', color: '#fff',
               border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer',
             }}
           >

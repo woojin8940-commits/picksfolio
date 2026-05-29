@@ -200,7 +200,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-60 bg-[#0b1221] text-white fixed h-full flex-col p-6 z-50">
         <div
-          className="text-xl font-black text-purple-500 tracking-tighter mb-8 cursor-pointer hover:scale-105 transition-transform"
+          className="text-xl font-black text-blue-500 tracking-tighter mb-8 cursor-pointer hover:scale-105 transition-transform"
           onClick={onNavigateDashboard}
         >
           PICKSFOLIO
@@ -328,7 +328,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>
           <aside className="absolute left-0 top-0 w-72 max-w-[85vw] h-full bg-[#0b1221] text-white p-6 pt-[calc(env(safe-area-inset-top,0px)+1.5rem)] flex flex-col animate-in slide-in-from-left duration-300 overflow-y-auto overscroll-contain">
             <div className="flex items-center justify-between mb-8">
-              <div className="text-2xl font-black text-purple-500 tracking-tighter" onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }}>
+              <div className="text-2xl font-black text-blue-500 tracking-tighter" onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }}>
                 PICKSFOLIO
               </div>
               <button
@@ -386,7 +386,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-6 md:mb-10">
               <div className="flex items-center justify-between w-full md:w-auto">
                 <h2 className="text-base md:text-3xl font-black text-slate-900 whitespace-nowrap">
-                  반가워요, <span className="text-purple-600">{userName}</span>님!
+                  반가워요, <span className="text-blue-600">{userName}</span>님!
                 </h2>
                 <button
                   onClick={() => setIsMobileMenuOpen(true)}
@@ -449,7 +449,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="space-y-2.5">
                     {displayTopItems.map((item) => (
                       <div key={item.rank} className="flex items-center gap-2.5">
-                        <span className={`text-xs font-black w-4 ${item.rank === 1 ? 'text-purple-600' : 'text-slate-300'}`}>{item.rank}</span>
+                        <span className={`text-xs font-black w-4 ${item.rank === 1 ? 'text-blue-600' : 'text-slate-300'}`}>{item.rank}</span>
                         <p className="text-xs font-bold text-slate-900 truncate flex-1">{item.name}</p>
                         <span className="text-[10px] font-bold text-slate-400">{item.clicks}</span>
                       </div>
@@ -462,7 +462,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* CTA */}
             <button
               onClick={onNavigateLinks}
-              className="w-full bg-purple-600 text-white py-3 md:py-5 rounded-2xl font-black text-xs md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:bg-purple-500 transition-all active:scale-[0.99]"
+              className="w-full bg-blue-600 text-white py-3 md:py-5 rounded-2xl font-black text-xs md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:bg-blue-500 transition-all active:scale-[0.99]"
             >
               + 새로운 포스트 & 링크 등록
             </button>
@@ -475,7 +475,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* Campaign Collaboration CTA */}
             <button
               onClick={onNavigateCampaigns}
-              className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3"
+              className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3"
             >
               <span className="text-xl">🤝</span>
               캠페인 협업하기
@@ -513,7 +513,7 @@ const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; o
   <button
     onClick={onClick}
     onMouseEnter={onMouseEnter}
-    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative ${active ? 'text-purple-400' : 'text-slate-500'}`}
+    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative ${active ? 'text-blue-400' : 'text-slate-500'}`}
   >
     <span className="text-lg leading-none mb-0.5 relative">
       {icon}
@@ -531,7 +531,7 @@ const NavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick
     onMouseEnter={onMouseEnter}
     className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-black text-sm transition-all text-left relative group ${
       active
-      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-900/40'
+      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/40'
       : 'text-slate-400 hover:bg-white/5 hover:text-white'
     }`}
   >
@@ -551,7 +551,7 @@ const StatCard: React.FC<{ id?: string; label: string; value: string; trend?: st
     <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">{label}</p>
     <div className="flex items-end gap-2">
       <span className="text-xl md:text-3xl font-black text-slate-900">{value}</span>
-      {trend && <span className="text-[10px] md:text-sm font-black text-purple-600 mb-0.5">{trend}</span>}
+      {trend && <span className="text-[10px] md:text-sm font-black text-blue-600 mb-0.5">{trend}</span>}
     </div>
   </div>
 );
@@ -559,7 +559,7 @@ const StatCard: React.FC<{ id?: string; label: string; value: string; trend?: st
 const QuickCard: React.FC<{ icon: string; label: string; onClick?: () => void }> = ({ icon, label, onClick }) => (
   <button
     onClick={onClick}
-    className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-purple-300 hover:shadow-md transition-all text-left group"
+    className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left group"
   >
     <span className="text-xl md:text-2xl block mb-2 group-hover:scale-110 transition-transform">{icon}</span>
     <p className="text-xs md:text-sm font-black text-slate-900">{label}</p>
@@ -567,7 +567,7 @@ const QuickCard: React.FC<{ icon: string; label: string; onClick?: () => void }>
 );
 
 const DataCard: React.FC<{ icon: string; label: string; count: number; onClick?: () => void }> = ({ icon, label, count, onClick }) => (
-  <div onClick={onClick} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:border-purple-300 transition-all">
+  <div onClick={onClick} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:border-blue-300 transition-all">
     <span className="text-base md:text-xl block mb-1">{icon}</span>
     <p className="text-slate-400 text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-0.5">{label}</p>
     <p className="text-lg md:text-xl font-black text-slate-900">{count}<span className="text-xs text-slate-400 ml-1">개</span></p>
