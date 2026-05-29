@@ -32,7 +32,30 @@ const isMobileViewer = isMobileSender;
 function buildIceConfig(forceRelay: boolean): RTCConfiguration {
   const base = getActiveIceConfig();
   if (!forceRelay) return base;
+  // Relay-only is only viable when there is an actual TURN server to relay
+  // through. The bundled default ICE list ships with ZERO TURN entries
+  // (VITE_TURN_* is not injected at build time); TURN servers arrive only
+  // after the async /api/ice-servers fetch resolves. Forcing
+  // iceTransportPolicy:'relay' while the TURN list is still empty gathers no
+  // relay candidates at all, so the peer connection is GUARANTEED to fail and
+  // every viewer (PC included) is left on a black screen. When that happens,
+  // degrade to 'all' so STUN / direct-P2P still gets a chance instead of
+  // certain failure — the stall watchdog will re-escalate to relay once TURN
+  // has loaded if direct P2P doesn't connect.
+  const turnUrls = collectTurnUrls(base);
+  if (turnUrls.length === 0) {
+    console.warn(
+      '[ICE] Relay-only requested but no TURN server is loaded yet — falling back ' +
+      'to iceTransportPolicy="all" so the connection can still try STUN/P2P.',
+    );
+    return { ...base, iceTransportPolicy: 'all' };
+  }
   return { ...base, iceTransportPolicy: 'relay' };
+}
+
+/** True when the active ICE config contains at least one TURN/TURNS server. */
+function hasTurnServers(): boolean {
+  return collectTurnUrls(getActiveIceConfig()).length > 0;
 }
 
 /**
@@ -782,6 +805,18 @@ export class BroadcasterSignaling {
     // the broadcaster side guarantees every viewer — PC included — gets a TURN
     // path that actually works, instead of hanging on direct P2P until the ICE
     // timeout.
+    //
+    // But relay-only with no TURN server loaded yet is a guaranteed failure for
+    // EVERY viewer (PC and mobile). TURN credentials arrive asynchronously from
+    // /api/ice-servers; if the first viewer joins before that fetch resolves we
+    // would offer a relay-only connection with zero relay candidates. Wait for
+    // the (idempotent, usually already-resolved) refresh so the broadcaster
+    // offers a real TURN path. This is the most common "broadcast invisible on
+    // both PC and mobile" cause when the seller broadcasts from a phone.
+    if (isMobileSender() && !hasTurnServers()) {
+      console.log('[Broadcaster] Mobile sender with no TURN loaded yet — awaiting ICE server refresh before building peer connection');
+      await refreshIceServers();
+    }
     const pc = new RTCPeerConnection(buildIceConfig(isMobileSender()));
     if (isMobileSender()) {
       console.log('[Broadcaster] Mobile sender detected — using iceTransportPolicy="relay" so viewers reach us through TURN');
@@ -1428,6 +1463,14 @@ export class ViewerSignaling {
 
     // Build ICE config — force TURN relay if a prior attempt failed on mobile
     // (carrier-grade NAT routinely blocks direct P2P on cellular networks).
+    // If relay-only is desired but TURN servers haven't loaded from
+    // /api/ice-servers yet, wait for that (idempotent, usually already-resolved)
+    // fetch first — a relay-only peer connection with zero TURN servers gathers
+    // no relay candidates and fails instantly with a black screen.
+    if (this.forceRelay && !hasTurnServers()) {
+      console.log('[Viewer] Relay-only desired but no TURN loaded yet — awaiting ICE server refresh before building peer connection');
+      await refreshIceServers();
+    }
     const pc = new RTCPeerConnection(buildIceConfig(this.forceRelay));
     if (this.forceRelay) {
       console.log('[Viewer] Using iceTransportPolicy="relay" — all media will flow through TURN');
