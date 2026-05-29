@@ -457,14 +457,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       <div className="shrink-0 px-4 pt-5 pb-3">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
             <h2 className="text-base font-extrabold text-gray-900 tracking-tight">협업 메시지</h2>
             {totalUnread > 0 && (
-              <span className="bg-purple-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full">
+              <span className="bg-blue-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full">
                 {totalUnread}
               </span>
             )}
@@ -481,7 +481,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             placeholder="대화 검색..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-300/30 transition-all"
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/30 transition-all"
           />
         </div>
       </div>
@@ -490,7 +490,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : filteredTimelines.length === 0 ? (
           <div className="text-center py-10 px-4">
@@ -529,7 +529,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   }}
                   className={`w-full text-left px-3 py-3 rounded-xl transition-all group ${
                     isActive
-                      ? 'bg-purple-50 border border-purple-200'
+                      ? 'bg-blue-50 border border-blue-200'
                       : isUnread
                         ? 'bg-gray-50 hover:bg-gray-100 border border-transparent'
                         : 'hover:bg-gray-50 border border-transparent'
@@ -539,7 +539,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     {/* Avatar */}
                     <div className={`shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-xs md:text-sm font-bold ${
                       isActive
-                        ? 'bg-purple-500 text-white'
+                        ? 'bg-blue-500 text-white'
                         : userType === 'influencer'
                           ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
                           : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
@@ -558,7 +558,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                           {lastComment ? formatTime(lastComment.createdAt) : formatTime(timeline.createdAt)}
                         </span>
                       </div>
-                      <p className="text-[11px] md:text-xs text-purple-600 font-semibold truncate mb-0.5 md:mb-1">
+                      <p className="text-[11px] md:text-xs text-blue-600 font-semibold truncate mb-0.5 md:mb-1">
                         # {timeline.proposalTitle}
                       </p>
                       <div className="flex items-center justify-between gap-2">
@@ -577,7 +577,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                           }
                         </p>
                         {isUnread && (
-                          <span className="shrink-0 bg-purple-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1.5 rounded-full">
+                          <span className="shrink-0 bg-blue-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1.5 rounded-full">
                             {timeline.unreadCount}
                           </span>
                         )}
@@ -600,7 +600,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         <div className="flex-1 flex items-center justify-center bg-white">
           <div className="text-center px-6">
             <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
@@ -681,7 +681,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto py-3 md:py-4 pb-[68px] md:pb-4 scrollbar-hide">
           {/* Channel intro (Slack-style) */}
           <div className="px-3 md:px-5 pb-2 md:pb-4 mb-1 md:mb-2">
-            <div className="w-9 h-9 md:w-12 md:h-12 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center mb-2 md:mb-3">
+            <div className="w-9 h-9 md:w-12 md:h-12 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-2 md:mb-3">
               <span className="text-lg md:text-2xl font-bold text-white leading-none">#</span>
             </div>
             <h3 className="text-base md:text-xl font-extrabold text-gray-900 mb-0.5 md:mb-1">
@@ -781,7 +781,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                           {roleLabel}
                         </span>
                         {isMe && (
-                          <span className="text-[10px] md:text-[11px] font-semibold px-1 md:px-1.5 py-0.5 rounded bg-purple-100 text-purple-600">
+                          <span className="text-[10px] md:text-[11px] font-semibold px-1 md:px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">
                             나
                           </span>
                         )}
@@ -793,7 +793,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
                     {/* Message content */}
                     {comment.content && (
-                      <div className={`inline-block max-w-full ${isMe ? 'bg-purple-50 border border-purple-100 rounded-2xl rounded-tr-sm px-2.5 py-1.5 md:px-3.5 md:py-2' : 'md:bg-transparent md:border-0 md:rounded-none md:px-0 md:py-0 bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-2.5 py-1.5 md:px-3.5 md:py-2'}`}>
+                      <div className={`inline-block max-w-full ${isMe ? 'bg-blue-50 border border-blue-100 rounded-2xl rounded-tr-sm px-2.5 py-1.5 md:px-3.5 md:py-2' : 'md:bg-transparent md:border-0 md:rounded-none md:px-0 md:py-0 bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-2.5 py-1.5 md:px-3.5 md:py-2'}`}>
                         <p className="text-[13px] leading-[1.5] md:text-[15px] md:leading-[1.6] text-gray-900 whitespace-pre-wrap break-words font-normal">
                           {comment.content}
                         </p>
@@ -918,12 +918,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             onDragLeave={handleComposerDragLeave}
             onDrop={handleComposerDrop}
             className={`relative bg-white border-2 rounded-lg overflow-hidden focus-within:border-gray-400 transition-all ${
-              isDragOverComposer ? 'border-purple-400 ring-2 ring-purple-400/35' : 'border-gray-300'
+              isDragOverComposer ? 'border-blue-400 ring-2 ring-blue-400/35' : 'border-gray-300'
             }`}
           >
             {isDragOverComposer && (
-              <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center bg-purple-50/80 backdrop-blur-[1px]">
-                <div className="px-3 py-2 rounded-lg border border-purple-300 bg-white/90 text-[12px] font-semibold text-purple-600">
+              <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center bg-blue-50/80 backdrop-blur-[1px]">
+                <div className="px-3 py-2 rounded-lg border border-blue-300 bg-white/90 text-[12px] font-semibold text-blue-600">
                   파일을 놓으면 첨부됩니다
                 </div>
               </div>
@@ -966,7 +966,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-400 hover:text-purple-500 transition-colors"
+                className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
                 title="파일 첨부"
               >
                 <svg className="w-4 h-4 md:w-[18px] md:h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -988,7 +988,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 disabled={!newMessage.trim() && pendingFiles.length === 0}
                 className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
                   (newMessage.trim() || pendingFiles.length > 0)
-                    ? 'bg-purple-600 text-white hover:bg-purple-500 active:scale-95'
+                    ? 'bg-blue-600 text-white hover:bg-blue-500 active:scale-95'
                     : 'bg-gray-100 text-gray-400'
                 }`}
               >
@@ -1004,7 +1004,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 </span>
               </div>
               {(newMessage.trim() || pendingFiles.length > 0) && (
-                <span className="text-[11px] text-purple-500 font-medium">
+                <span className="text-[11px] text-blue-500 font-medium">
                   Enter로 전송
                 </span>
               )}

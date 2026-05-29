@@ -6,8 +6,8 @@
   --font-display: "Pretendard Variable", "Pretendard", sans-serif;
   --color-background: #050507;
   --color-midnight: #050507;
-  --color-purple-primary: #7c3aed;
-  --color-purple-secondary: #a855f7;
+  --color-blue-primary: #2563EB;
+  --color-blue-secondary: #3B82F6;
   --color-surface: #0f1117;
   --color-surface-light: #1e1e2e;
 }
@@ -103,7 +103,7 @@ h1, h2, h3, h4, h5, h6 {
 
 @layer utilities {
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-primary to-purple-secondary;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-primary to-blue-secondary;
   }
 }
 

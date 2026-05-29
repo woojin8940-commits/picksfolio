@@ -25,7 +25,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제1장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 1장 총칙</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 1장 총칙</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 1조 (목적)</h3>
@@ -55,7 +55,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제2장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 2장 서비스 이용 및 요금 정책</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 2장 서비스 이용 및 요금 정책</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 3조 (서비스의 구분 및 이용)</h3>
@@ -78,7 +78,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제3장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 3장 라이브 커머스 운영 및 책임</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 3장 라이브 커머스 운영 및 책임</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 5조 (장바구니 및 일괄 결제 시스템)</h3>
@@ -100,7 +100,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제4장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 4장 계약 해지 및 환불 정책</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 4장 계약 해지 및 환불 정책</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 7조 (멤버십 구독 해지 및 환불)</h3>
@@ -134,7 +134,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제5장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 5장 회원 및 이용계약 관리</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 5장 회원 및 이용계약 관리</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 10조 (약관의 명시 및 개정)</h3>
@@ -192,7 +192,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제6장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 6장 상품 거래의 이행</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 6장 상품 거래의 이행</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 15조 (매매계약의 체결 및 대금 결제)</h3>
@@ -240,7 +240,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제7장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 7장 회원의 의무 및 금지행위</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 7장 회원의 의무 및 금지행위</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 19조 (금지행위)</h3>
@@ -274,7 +274,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제8장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 8장 게시물·콘텐츠 및 지식재산권</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 8장 게시물·콘텐츠 및 지식재산권</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 22조 (게시물 및 방송 콘텐츠의 권리)</h3>
@@ -299,7 +299,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
 
         {/* 제9장 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">제 9장 고객지원, 면책 및 준거법</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">제 9장 고객지원, 면책 및 준거법</h2>
 
           <div className="mb-8">
             <h3 className="text-lg font-bold text-white mb-3">제 24조 (고객센터 운영 및 분쟁 조정)</h3>

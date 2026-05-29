@@ -163,7 +163,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     <div
       key={proposal.id}
       className={`bg-white rounded-2xl border transition-all ${
-        expandedId === proposal.id ? 'border-purple-200 shadow-lg shadow-purple-100/50' : 'border-slate-100 shadow-sm hover:border-slate-200'
+        expandedId === proposal.id ? 'border-blue-200 shadow-lg shadow-blue-100/50' : 'border-slate-100 shadow-sm hover:border-slate-200'
       }`}
     >
       {/* Row Summary */}
@@ -182,7 +182,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="font-black text-purple-600 text-sm md:text-base">{formatFee(proposal.fee)}</p>
+          <p className="font-black text-blue-600 text-sm md:text-base">{formatFee(proposal.fee)}</p>
           {proposal.revenue_share != null && proposal.revenue_share > 0 && (
             <p className="text-[10px] font-bold text-slate-400">+{proposal.revenue_share}% 배분</p>
           )}
@@ -202,21 +202,21 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
       {expandedId === proposal.id && (
         <div className="px-4 md:px-5 pb-5 border-t border-slate-100 pt-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
           {/* Fee Detail Card */}
-          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 border border-purple-100">
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest">제안 금액</p>
-                <p className="text-xl font-black text-purple-700 mt-0.5">{formatFee(proposal.fee)}</p>
+                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">제안 금액</p>
+                <p className="text-xl font-black text-blue-700 mt-0.5">{formatFee(proposal.fee)}</p>
               </div>
               {proposal.revenue_share != null && proposal.revenue_share > 0 && (
                 <div className="text-right">
-                  <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest">수익 배분</p>
-                  <p className="text-xl font-black text-purple-700 mt-0.5">{proposal.revenue_share}%</p>
+                  <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">수익 배분</p>
+                  <p className="text-xl font-black text-blue-700 mt-0.5">{proposal.revenue_share}%</p>
                 </div>
               )}
               <div className="text-right">
-                <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest">일정</p>
-                <p className="text-xs font-bold text-purple-600 mt-0.5">{formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}</p>
+                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">일정</p>
+                <p className="text-xs font-bold text-blue-600 mt-0.5">{formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}</p>
               </div>
             </div>
           </div>
@@ -255,7 +255,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
                     href={link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-xs text-purple-600 font-bold hover:underline truncate"
+                    className="block text-xs text-blue-600 font-bold hover:underline truncate"
                   >
                     {link}
                   </a>
@@ -279,7 +279,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
                   const fileName = url.split('/').pop() || `첨부파일 ${idx + 1}`;
                   return (
                     <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="block">
-                      <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-purple-400 hover:bg-purple-50/50 transition-all flex flex-col items-center justify-center gap-1">
+                      <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50 transition-all flex flex-col items-center justify-center gap-1">
                         <span className="text-lg">
                           {isImage ? '🖼️' : ext === 'pdf' ? '📄' : ['doc', 'docx'].includes(ext) ? '📝' : ['xls', 'xlsx'].includes(ext) ? '📊' : ['ppt', 'pptx'].includes(ext) ? '📑' : ext === 'zip' ? '📦' : '📎'}
                         </span>
@@ -326,7 +326,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
                 // Navigate to the timeline view — timeline was already created on acceptance
                 window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId: proposal.id } }));
               }}
-              className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 text-white py-3 rounded-xl font-black text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-xl font-black text-sm shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
             >
               <span>💬</span> 타임라인에서 대화하기
             </button>
@@ -369,7 +369,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
             브랜드로부터 받은 협업 제안을 관리합니다
             {pendingCount > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-black">
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-black">
                 새 제안 {pendingCount}건
               </span>
             )}
@@ -396,7 +396,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           onClick={() => setStatusFilter('all')}
           className={`p-3 md:p-5 rounded-2xl border transition-all text-left ${
             statusFilter === 'all'
-              ? 'border-purple-300 bg-purple-50 shadow-md shadow-purple-100/50 ring-2 ring-purple-200'
+              ? 'border-blue-300 bg-blue-50 shadow-md shadow-blue-100/50 ring-2 ring-blue-200'
               : 'border-slate-100 bg-white shadow-sm hover:border-slate-200'
           }`}
         >
@@ -440,21 +440,21 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
 
       {/* Fee Summary Banner (visible when filtered) */}
       {statusFilter !== 'all' && feeSummary.count > 0 && (
-        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 rounded-2xl p-4 mb-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-4 mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-purple-100 rounded-xl flex items-center justify-center">
-              <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div>
-              <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest">
+              <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">
                 {statusFilter === 'pending' ? '대기중' : statusFilter === 'accepted' ? '수락됨' : statusFilter === 'rejected' ? '거절됨' : '완료'} 총 금액
               </p>
-              <p className="text-lg md:text-xl font-black text-purple-700">{formatFee(feeSummary.total)}</p>
+              <p className="text-lg md:text-xl font-black text-blue-700">{formatFee(feeSummary.total)}</p>
             </div>
           </div>
-          <p className="text-sm font-bold text-purple-400">{feeSummary.count}건</p>
+          <p className="text-sm font-bold text-blue-400">{feeSummary.count}건</p>
         </div>
       )}
 
@@ -464,7 +464,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           onClick={() => setActiveTab('광고')}
           className={`px-3 md:px-4 py-2 md:py-2.5 rounded-xl font-black text-xs md:text-sm transition-all ${
             activeTab === '광고'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
               : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
           }`}
         >
@@ -474,7 +474,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           onClick={() => setActiveTab('커머스')}
           className={`px-3 md:px-4 py-2 md:py-2.5 rounded-xl font-black text-xs md:text-sm transition-all ${
             activeTab === '커머스'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
               : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
           }`}
         >
@@ -486,7 +486,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           <select
             value={sortMode}
             onChange={e => setSortMode(e.target.value as SortMode)}
-            className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-purple-600"
+            className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-600"
           >
             <option value="latest">최신순</option>
             <option value="deadline">일정순 (마감 임박)</option>
@@ -498,7 +498,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
       {/* Proposal List */}
       {loading ? (
         <div className="text-center py-20">
-          <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-400 font-bold text-sm">로딩 중...</p>
         </div>
       ) : filteredProposals.length === 0 ? (
@@ -551,7 +551,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
               value={rejectionReason}
               onChange={e => setRejectionReason(e.target.value)}
               placeholder="거절 사유를 입력해주세요 (선택사항)"
-              className="w-full border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700 focus:outline-none focus:border-purple-500 resize-none h-28 mb-4"
+              className="w-full border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500 resize-none h-28 mb-4"
             />
             <div className="flex gap-3">
               <button

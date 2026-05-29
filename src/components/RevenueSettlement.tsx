@@ -39,7 +39,7 @@ const RevenueSettlement: React.FC = () => {
         {/* Earnings Overview */}
         <div className="lg:col-span-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-gradient-to-br from-purple-600 to-indigo-700 p-8 rounded-[1.5rem] md:rounded-[2.5rem] text-white shadow-xl">
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[1.5rem] md:rounded-[2.5rem] text-white shadow-xl">
               <div className="flex justify-between items-start mb-8">
                 <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
                   <Wallet className="w-6 h-6" />
@@ -48,7 +48,7 @@ const RevenueSettlement: React.FC = () => {
               </div>
               <p className="text-xs opacity-60 font-black uppercase tracking-widest mb-1">정산 가능 금액</p>
               <h3 className="text-3xl md:text-4xl font-black mb-8">₩ 1,240,000</h3>
-              <button className="w-full bg-white text-purple-700 py-4 rounded-2xl font-black text-sm hover:bg-slate-50 transition-all">
+              <button className="w-full bg-white text-blue-700 py-4 rounded-2xl font-black text-sm hover:bg-slate-50 transition-all">
                 정산 신청하기
               </button>
             </div>
@@ -96,7 +96,7 @@ const RevenueSettlement: React.FC = () => {
                   />
                   <Bar dataKey="amount" radius={[8, 8, 0, 0]}>
                     {monthlyData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={index === monthlyData.length - 1 ? '#9333ea' : '#e2e8f0'} />
+                      <Cell key={`cell-${index}`} fill={index === monthlyData.length - 1 ? '#2563EB' : '#e2e8f0'} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -128,7 +128,7 @@ const RevenueSettlement: React.FC = () => {
                 </div>
               ))}
             </div>
-            <button className="w-full mt-8 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-purple-600 transition-colors">
+            <button className="w-full mt-8 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-blue-600 transition-colors">
               전체 내역 보기
             </button>
           </div>

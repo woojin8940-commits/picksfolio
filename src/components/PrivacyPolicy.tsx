@@ -25,7 +25,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 1. 개인정보처리방침이란? */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">1. 개인정보처리방침이란?</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">1. 개인정보처리방침이란?</h2>
           <div className="space-y-4 text-slate-400 text-sm leading-relaxed">
             <p>
               픽스폴리오(이하 "회사")는 회원의 개인정보보호를 매우 중요시하며, 이용자가 회사의 서비스(이하 "서비스")를 이용함과 동시에 온라인상에서 회사에 제공한 개인정보가 보호 받을 수 있도록 최선을 다하고 있습니다. 이에 회사는 개인정보보호법 등 관련 법규를 준수하고 있습니다.
@@ -38,7 +38,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 2. 개인정보의 수집 및 이용목적 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">2. 개인정보의 수집 및 이용목적</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">2. 개인정보의 수집 및 이용목적</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-4">
             회사는 더욱 향상된 사용자 경험과 원활한 커머스 환경을 제공하기 위해 최소한의 개인정보를 수집하며, 다음의 목적 이외의 용도로는 이용하지 않습니다.
           </p>
@@ -54,7 +54,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 3. 수집하는 개인정보 항목과 수집방법 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">3. 수집하는 개인정보 항목과 수집방법</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">3. 수집하는 개인정보 항목과 수집방법</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-6">
             회사는 서비스 제공을 위해 아래와 같은 개인정보를 수집합니다.
           </p>
@@ -93,7 +93,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 4. 개인정보의 제3자 제공 및 취급위탁 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">4. 개인정보의 제3자 제공 및 취급위탁</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">4. 개인정보의 제3자 제공 및 취급위탁</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-6">
             회사는 회원의 동의 없이 개인정보를 외부에 제공하지 않으나, 거래 이행 및 서비스 운영을 위해 아래와 같이 위탁 및 제공하고 있습니다.
           </p>
@@ -127,7 +127,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 5. 개인정보의 처리 및 보유기간 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">5. 개인정보의 처리 및 보유기간</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">5. 개인정보의 처리 및 보유기간</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-4">
             회사는 수집 시 동의 받은 보유 기간 또는 법령에 따른 기간 내에서 개인정보를 처리합니다.
           </p>
@@ -140,7 +140,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 6. 이용자의 권리와 행사 방법 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">6. 이용자의 권리와 행사 방법</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">6. 이용자의 권리와 행사 방법</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-4">
             이용자는 언제든지 자신의 개인정보를 열람, 정정하거나 삭제 요청(회원 탈퇴)을 할 수 있습니다.
           </p>
@@ -152,7 +152,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 7. 쿠키 안내 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">7. 개인정보 자동 수집 장치(쿠키) 안내</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">7. 개인정보 자동 수집 장치(쿠키) 안내</h2>
           <p className="text-slate-400 text-sm leading-relaxed">
             회사는 개인화된 맞춤 서비스를 제공하기 위해 쿠키(Cookie)를 사용합니다. 이용자는 브라우저 설정을 통해 쿠키 저장을 거부할 수 있으나, 이 경우 라이브 커머스 일부 기능(장바구니 등) 이용에 어려움이 있을 수 있습니다.
           </p>
@@ -160,7 +160,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 8. 개인정보 보호책임자 안내 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">8. 개인정보 보호책임자 안내</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">8. 개인정보 보호책임자 안내</h2>
           <p className="text-slate-400 text-sm leading-relaxed mb-4">
             회사는 이용자의 개인정보를 보호하고 관련 불만을 처리하기 위해 책임자를 지정하고 있습니다.
           </p>
@@ -173,7 +173,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
 
         {/* 부칙 */}
         <section className="mb-12">
-          <h2 className="text-xl font-black text-purple-400 mb-6">부칙</h2>
+          <h2 className="text-xl font-black text-blue-400 mb-6">부칙</h2>
           <p className="text-slate-400 text-sm leading-relaxed">
             본 개인정보처리방침은 2026년 4월 1일부터 적용됩니다.
           </p>

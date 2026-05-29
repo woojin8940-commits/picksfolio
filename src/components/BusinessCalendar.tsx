@@ -249,7 +249,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     switch (status) {
       case 'accepted': return 'bg-green-500';
       case 'completed': return 'bg-blue-500';
-      default: return 'bg-purple-500';
+      default: return 'bg-blue-500';
     }
   };
 
@@ -259,7 +259,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       case 'in_progress': return 'bg-orange-500';
       case 'completed': return 'bg-teal-500';
       case 'cancelled': return 'bg-slate-400';
-      default: return 'bg-purple-500';
+      default: return 'bg-blue-500';
     }
   };
 
@@ -327,7 +327,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         </div>
         <button
           onClick={openAddForm}
-          className="px-5 py-2.5 bg-purple-600 text-white text-sm font-black rounded-xl hover:bg-purple-700 transition-all shrink-0 flex items-center gap-2"
+          className="px-5 py-2.5 bg-blue-600 text-white text-sm font-black rounded-xl hover:bg-blue-700 transition-all shrink-0 flex items-center gap-2"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
@@ -367,7 +367,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               <div className="flex items-center gap-2 justify-center flex-wrap">
                 <button
                   onClick={goToToday}
-                  className="px-3 py-1.5 text-xs font-bold bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-all"
+                  className="px-3 py-1.5 text-xs font-bold bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all"
                 >
                   오늘
                 </button>
@@ -377,7 +377,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     placeholder="년도"
                     value={jumpYear}
                     onChange={e => setJumpYear(e.target.value)}
-                    className="w-20 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-center focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                    className="w-20 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-center focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                     min={2020}
                     max={2099}
                   />
@@ -386,7 +386,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     placeholder="월"
                     value={jumpMonth}
                     onChange={e => setJumpMonth(e.target.value)}
-                    className="w-14 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-center focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                    className="w-14 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-center focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                     min={1}
                     max={12}
                   />
@@ -428,13 +428,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   <div
                     key={day}
                     onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                    className={`p-2 md:p-3 min-h-[115px] md:min-h-[155px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-purple-50/50 ${
-                      isSelected ? 'bg-purple-50 ring-2 ring-inset ring-purple-300' : ''
+                    className={`p-2 md:p-3 min-h-[115px] md:min-h-[155px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                      isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
                     }`}
                   >
                     <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black ${
                       isToday
-                        ? 'bg-purple-600 text-white'
+                        ? 'bg-blue-600 text-white'
                         : dayOfWeek === 0
                         ? 'text-red-400'
                         : dayOfWeek === 6
@@ -504,7 +504,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     setFormData(prev => ({ ...prev, date: selectedDate }));
                     openAddForm();
                   }}
-                  className="text-xs font-bold text-purple-600 hover:text-purple-700 flex items-center gap-1"
+                  className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
@@ -520,7 +520,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                      activeTab === tab ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      activeTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                     }`}
                   >
                     {tab === 'all' ? '전체' : tab === 'proposals' ? '제안' : '협업 기록'}
@@ -698,15 +698,15 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 <p className="text-xl md:text-2xl font-black text-teal-600">{completedCollabs + acceptedProposals.filter(p => p.status === 'completed').length}</p>
                 <p className="text-[10px] md:text-xs font-bold text-teal-500">완료됨</p>
               </div>
-              <div className="bg-purple-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-purple-600">{totalCollabs}</p>
-                <p className="text-[10px] md:text-xs font-bold text-purple-500">총 협업</p>
+              <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center">
+                <p className="text-xl md:text-2xl font-black text-blue-600">{totalCollabs}</p>
+                <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
               </div>
             </div>
             {totalRevenue > 0 && (
-              <div className="mt-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-lg md:text-xl font-black text-purple-700">{formatFee(totalRevenue)}</p>
-                <p className="text-[10px] md:text-xs font-bold text-purple-500">완료 협업 총 수익</p>
+              <div className="mt-3 bg-gradient-to-r from-blue-50 to-pink-50 rounded-xl p-3 md:p-4 text-center">
+                <p className="text-lg md:text-xl font-black text-blue-700">{formatFee(totalRevenue)}</p>
+                <p className="text-[10px] md:text-xs font-bold text-blue-500">완료 협업 총 수익</p>
               </div>
             )}
           </div>
@@ -803,7 +803,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   value={formData.title}
                   onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))}
                   placeholder="예: 브랜드A 인스타 콘텐츠 협업"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                 />
               </div>
               <div>
@@ -813,7 +813,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   value={formData.company_name}
                   onChange={e => setFormData(prev => ({ ...prev, company_name: e.target.value }))}
                   placeholder="협업 업체명"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -822,7 +822,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   <select
                     value={formData.category}
                     onChange={e => setFormData(prev => ({ ...prev, category: e.target.value as CollabRecord['category'] }))}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none bg-white"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none bg-white"
                   >
                     {COLLAB_CATEGORIES.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -834,7 +834,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   <select
                     value={formData.status}
                     onChange={e => setFormData(prev => ({ ...prev, status: e.target.value as CollabRecord['status'] }))}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none bg-white"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none bg-white"
                   >
                     {COLLAB_STATUSES.map(s => (
                       <option key={s.value} value={s.value}>{s.label}</option>
@@ -849,7 +849,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     type="date"
                     value={formData.date}
                     onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                   />
                 </div>
                 <div>
@@ -858,7 +858,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     type="date"
                     value={formData.end_date}
                     onChange={e => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                   />
                 </div>
               </div>
@@ -870,7 +870,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   value={formData.fee ? formatNumberWithCommas(formData.fee) : ''}
                   onChange={e => setFormData(prev => ({ ...prev, fee: parseInt(stripCommas(e.target.value)) || 0 }))}
                   placeholder="0"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                 />
               </div>
               <div>
@@ -880,7 +880,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   onChange={e => setFormData(prev => ({ ...prev, memo: e.target.value }))}
                   placeholder="협업 관련 메모 (선택사항)"
                   rows={3}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none resize-none"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none resize-none"
                 />
               </div>
             </div>
@@ -894,7 +894,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               <button
                 onClick={handleSaveCollab}
                 disabled={saving || !formData.title || !formData.date}
-                className="px-5 py-2.5 text-sm font-black text-white bg-purple-600 rounded-xl hover:bg-purple-700 transition-all disabled:opacity-50"
+                className="px-5 py-2.5 text-sm font-black text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
               >
                 {saving ? '저장 중...' : editingCollab ? '수정' : '추가'}
               </button>

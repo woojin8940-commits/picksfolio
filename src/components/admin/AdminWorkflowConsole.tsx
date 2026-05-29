@@ -138,9 +138,9 @@ const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
                 <div key={b.bucket} className="flex items-center gap-3 text-xs">
                   <span className="font-black text-slate-900 w-20">{b.bucket}</span>
                   <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
-                    <div className="bg-purple-500 h-full" style={{ width: `${b.acceptanceRate}%` }} />
+                    <div className="bg-blue-500 h-full" style={{ width: `${b.acceptanceRate}%` }} />
                   </div>
-                  <span className="font-black text-purple-600 w-10 text-right">{b.acceptanceRate}%</span>
+                  <span className="font-black text-blue-600 w-10 text-right">{b.acceptanceRate}%</span>
                   <span className="font-bold text-slate-400 w-12 text-right">{b.total}건</span>
                 </div>
               ))}
@@ -235,13 +235,13 @@ const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
                     'bg-blue-100 text-blue-700'
                   }`}>{p.status}</span>
                   <span className="text-[10px] font-bold text-slate-400">{p.category}</span>
-                  <span className="text-[10px] font-bold text-purple-600">@{p._username}</span>
+                  <span className="text-[10px] font-bold text-blue-600">@{p._username}</span>
                 </div>
                 <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
                 <p className="text-[10px] font-bold text-slate-400 truncate">{p.company_name}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-black text-purple-600 text-sm">{won(p.fee)}</p>
+                <p className="font-black text-blue-600 text-sm">{won(p.fee)}</p>
                 <p className="text-[10px] font-bold text-slate-300">타임라인 보기 →</p>
               </div>
             </div>
@@ -272,13 +272,13 @@ const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
                   {timelineEvents.map((e, i) => (
                     <div key={i} className="relative mb-4 last:mb-0">
                       <div className={`absolute -left-[18px] top-1 w-3 h-3 rounded-full border-2 border-white ${
-                        e.kind === 'proposal' ? 'bg-purple-500' :
+                        e.kind === 'proposal' ? 'bg-blue-500' :
                         e.kind === 'collab' ? 'bg-amber-500' :
                         'bg-blue-500'
                       }`} />
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className={`px-1.5 py-0.5 text-[9px] font-black rounded uppercase ${
-                          e.kind === 'proposal' ? 'bg-purple-100 text-purple-700' :
+                          e.kind === 'proposal' ? 'bg-blue-100 text-blue-700' :
                           e.kind === 'collab' ? 'bg-amber-100 text-amber-700' :
                           'bg-blue-100 text-blue-700'
                         }`}>{e.kind}</span>

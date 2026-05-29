@@ -132,7 +132,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
             </div>
             <button
               onClick={handleAdd}
-              className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-2xl font-black text-sm hover:bg-purple-700 transition-all shadow-lg self-start md:self-auto"
+              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all shadow-lg self-start md:self-auto"
             >
               <Plus size={16} />
               새 일정 추가
@@ -153,18 +153,18 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
               <div className="text-4xl mb-4">📅</div>
               <h3 className="text-lg font-black text-[#1E1E2E] mb-2">등록된 오픈 일정이 없습니다</h3>
               <p className="text-sm text-[#64748B] font-medium mb-6">새 일정을 추가하여 팔로워들에게 오픈 소식을 알려보세요.</p>
-              <button onClick={handleAdd} className="px-6 py-3 bg-purple-600 text-white rounded-2xl font-black text-sm hover:bg-purple-700 transition-all">
+              <button onClick={handleAdd} className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all">
                 <Plus size={14} className="inline mr-1" /> 첫 일정 등록하기
               </button>
             </div>
           ) : (
             schedules.map(item => (
-              <div key={item.id} className={`bg-white rounded-2xl border ${item.isActive && isUpcoming(item.date) ? 'border-purple-200 bg-purple-50/30' : 'border-[#E2E8F0]'} p-5 md:p-6 shadow-sm transition-all`}>
+              <div key={item.id} className={`bg-white rounded-2xl border ${item.isActive && isUpcoming(item.date) ? 'border-blue-200 bg-blue-50/30' : 'border-[#E2E8F0]'} p-5 md:p-6 shadow-sm transition-all`}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       {item.isActive && isUpcoming(item.date) ? (
-                        <span className="bg-purple-600 text-white text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">예정</span>
+                        <span className="bg-blue-600 text-white text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">예정</span>
                       ) : !isUpcoming(item.date) ? (
                         <span className="bg-slate-200 text-slate-500 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">종료</span>
                       ) : (
@@ -176,7 +176,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     <h3 className="text-base md:text-lg font-black text-[#1E1E2E] mb-1">{item.title}</h3>
                     {item.description && <p className="text-sm text-[#64748B] font-medium mb-2">{item.description}</p>}
                     {item.link && (
-                      <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-xs text-purple-600 font-bold hover:underline break-all">
+                      <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline break-all">
                         {item.link}
                       </a>
                     )}
@@ -184,11 +184,11 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={() => handleToggleActive(item.id)}
-                      className={`relative w-11 h-6 rounded-full transition-all ${item.isActive ? 'bg-purple-600' : 'bg-slate-200'}`}
+                      className={`relative w-11 h-6 rounded-full transition-all ${item.isActive ? 'bg-blue-600' : 'bg-slate-200'}`}
                     >
                       <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${item.isActive ? 'left-[22px]' : 'left-0.5'}`} />
                     </button>
-                    <button onClick={() => handleEdit(item)} className="p-2 rounded-xl hover:bg-slate-100 text-[#94A3B8] hover:text-purple-600 transition-all">
+                    <button onClick={() => handleEdit(item)} className="p-2 rounded-xl hover:bg-slate-100 text-[#94A3B8] hover:text-blue-600 transition-all">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                     </button>
                     <button onClick={() => handleDelete(item.id)} className="p-2 rounded-xl hover:bg-red-50 text-[#94A3B8] hover:text-red-500 transition-all">
@@ -214,7 +214,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     value={form.title}
                     onChange={e => setForm({ ...form, title: e.target.value })}
                     placeholder="예: 봄 신상 오픈, 한정판 발매"
-                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all"
+                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -224,7 +224,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                       type="date"
                       value={form.date}
                       onChange={e => setForm({ ...form, date: e.target.value })}
-                      className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all"
+                      className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all"
                     />
                   </div>
                   <div>
@@ -233,7 +233,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                       type="time"
                       value={form.time}
                       onChange={e => setForm({ ...form, time: e.target.value })}
-                      className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-purple-600 transition-all"
+                      className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all"
                     />
                   </div>
                 </div>
@@ -244,7 +244,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     onChange={e => setForm({ ...form, description: e.target.value })}
                     placeholder="일정에 대한 간단한 설명"
                     rows={3}
-                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-bold focus:border-purple-600 transition-all resize-none"
+                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-bold focus:border-blue-600 transition-all resize-none"
                   />
                 </div>
                 <div>
@@ -254,7 +254,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     value={form.link}
                     onChange={e => setForm({ ...form, link: e.target.value })}
                     placeholder="https://..."
-                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-bold focus:border-purple-600 transition-all"
+                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-bold focus:border-blue-600 transition-all"
                   />
                 </div>
               </div>
@@ -265,7 +265,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                 <button
                   onClick={handleSave}
                   disabled={!form.title.trim() || !form.date || isSaving}
-                  className="flex-1 py-4 rounded-2xl bg-purple-600 text-white font-black text-sm hover:bg-purple-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 py-4 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : null}
                   {editingId ? '수정' : '등록'}

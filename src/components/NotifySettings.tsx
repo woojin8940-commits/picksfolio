@@ -163,7 +163,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
       <section className="bg-white rounded-2xl md:rounded-[2.5rem] border border-slate-100 shadow-sm p-6 md:p-10">
         <div className="flex items-center justify-between mb-4 md:mb-6">
           <h4 className="text-base md:text-xl font-black flex items-center gap-2 md:gap-3">
-            <Bell className="w-4 h-4 md:w-5 md:h-5 text-purple-500" /> 알림톡 사용량
+            <Bell className="w-4 h-4 md:w-5 md:h-5 text-blue-500" /> 알림톡 사용량
           </h4>
           <span className="text-[10px] md:text-xs font-bold text-slate-400">
             {usage.resetAt ? `${new Date(usage.resetAt).toLocaleDateString('ko-KR')} 갱신` : '이번 달'}
@@ -177,7 +177,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
           </div>
           <div className="bg-slate-50 rounded-xl md:rounded-2xl p-4 md:p-5">
             <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">잔여 건수</p>
-            <p className="text-xl md:text-3xl font-black text-purple-600">{remaining.toLocaleString()}<span className="text-xs md:text-sm text-slate-400 ml-1">건</span></p>
+            <p className="text-xl md:text-3xl font-black text-blue-600">{remaining.toLocaleString()}<span className="text-xs md:text-sm text-slate-400 ml-1">건</span></p>
           </div>
           <div className="bg-slate-50 rounded-xl md:rounded-2xl p-4 md:p-5">
             <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">예상 비용</p>
@@ -196,7 +196,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
             <span>{usagePct}%</span>
           </div>
           <div className="h-2 md:h-2.5 rounded-full bg-slate-100 overflow-hidden">
-            <div className={`h-full rounded-full transition-all ${usagePct >= 90 ? 'bg-red-500' : usagePct >= 70 ? 'bg-amber-500' : 'bg-purple-500'}`} style={{ width: `${usagePct}%` }} />
+            <div className={`h-full rounded-full transition-all ${usagePct >= 90 ? 'bg-red-500' : usagePct >= 70 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${usagePct}%` }} />
           </div>
           <p className="text-[10px] md:text-xs font-medium text-slate-400 mt-2 leading-relaxed">
             발송 건수에 따라 서비스 이용 요금이 책정됩니다. 한도를 초과하면 추가 발송이 제한될 수 있습니다.
@@ -227,7 +227,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
                     onClick={() => toggleGender(opt.value)}
                     className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl border font-black text-xs md:text-sm transition-all ${
                       active
-                        ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-500/20'
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20'
                         : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -278,7 +278,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="inline-flex items-center gap-2 bg-purple-600 text-white px-5 md:px-6 py-2.5 md:py-3 rounded-xl font-black text-xs md:text-sm hover:bg-purple-500 transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-5 md:px-6 py-2.5 md:py-3 rounded-xl font-black text-xs md:text-sm hover:bg-blue-500 transition-all disabled:opacity-50"
             >
               {saved ? <CheckCircle2 size={16} /> : <Save size={16} />}
               {saved ? '저장됨' : saving ? '저장 중...' : '저장하기'}

@@ -18,19 +18,19 @@ const AIScout: React.FC = () => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full text-[#7C3AED] text-[10px] font-black uppercase tracking-[0.2em] mb-8">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-[#2563EB] text-[10px] font-black uppercase tracking-[0.2em] mb-8">
               <Radar size={12} /> AI TREND SCOUT
             </div>
             <h2 className="text-4xl md:text-[56px] font-black text-white leading-[1.1] mb-8 tracking-tight">
               모든 플랫폼의<br />
-              <span className="text-[#7C3AED]">데이터를 한 눈에.</span>
+              <span className="text-[#2563EB]">데이터를 한 눈에.</span>
             </h2>
             <p className="text-slate-400 font-medium max-w-xl text-lg opacity-80">
               무신사, 올리브영, 29CM, KREAM의 실시간 급상승 키워드를 AI가 분석하여 당신의 큐레이션에 필요한 인사이트를 제안합니다.
             </p>
           </div>
           <button className="flex items-center gap-2 bg-[#121217] hover:bg-white/10 border border-white/5 px-8 py-4 rounded-full text-white text-sm font-black transition-all">
-            <RefreshCw size={14} className="text-[#7C3AED]" /> 실시간 데이터 새로고침
+            <RefreshCw size={14} className="text-[#2563EB]" /> 실시간 데이터 새로고침
           </button>
         </div>
 
@@ -41,7 +41,7 @@ const AIScout: React.FC = () => {
               <button
                 key={platform}
                 onClick={() => setActivePlatform(platform)}
-                className={`flex-1 lg:flex-none p-8 rounded-[2rem] border transition-all text-left ${activePlatform === platform ? 'bg-[#7C3AED] border-[#7C3AED] text-white shadow-2xl shadow-purple-900/30' : 'bg-[#121217] border-white/5 text-slate-500 hover:border-white/10'}`}
+                className={`flex-1 lg:flex-none p-8 rounded-[2rem] border transition-all text-left ${activePlatform === platform ? 'bg-[#2563EB] border-[#2563EB] text-white shadow-2xl shadow-blue-900/30' : 'bg-[#121217] border-white/5 text-slate-500 hover:border-white/10'}`}
               >
                 <p className="text-[10px] font-black uppercase opacity-50 mb-3 tracking-widest">PLATFORM</p>
                 <p className="text-xl font-black tracking-tight">{platform}</p>
@@ -68,7 +68,7 @@ const AIScout: React.FC = () => {
                     <span className="text-4xl md:text-5xl font-black text-slate-800 italic group-hover:text-slate-700 transition-colors tracking-tighter">{item.id}</span>
                     <div>
                       <div className="flex items-center gap-4 mb-2">
-                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${item.tag === 'UP' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : item.tag === 'NEW' ? 'bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20' : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'}`}>
+                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${item.tag === 'UP' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : item.tag === 'NEW' ? 'bg-[#2563EB]/10 text-[#2563EB] border border-[#2563EB]/20' : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'}`}>
                           {item.tag}
                         </span>
                         <h4 className="text-xl md:text-2xl font-black text-white tracking-tight">{item.keyword}</h4>

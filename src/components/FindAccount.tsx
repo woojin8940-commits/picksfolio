@@ -173,10 +173,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   };
 
   const accentClasses = {
-    ring: accountType === 'business' ? 'focus:ring-blue-500/20 focus:border-blue-500 focus-within:border-blue-500' : 'focus:ring-purple-500/20 focus:border-purple-500 focus-within:border-purple-500',
-    btn: accountType === 'business' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-purple-600 hover:bg-purple-500',
+    ring: accountType === 'business' ? 'focus:ring-blue-500/20 focus:border-blue-500 focus-within:border-blue-500' : 'focus:ring-blue-500/20 focus:border-blue-500 focus-within:border-blue-500',
+    btn: accountType === 'business' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-blue-600 hover:bg-blue-500',
     btnShadow: accountType === 'business' ? 'hover:shadow-[0_10px_30px_rgba(37,99,235,0.3)]' : 'hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)]',
-    text: accountType === 'business' ? 'text-blue-600' : 'text-purple-600',
+    text: accountType === 'business' ? 'text-blue-600' : 'text-blue-600',
   };
 
   const PhoneVerificationSection = () => (

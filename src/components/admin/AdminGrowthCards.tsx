@@ -47,7 +47,7 @@ const AdminGrowthCards: React.FC<Props> = ({ token }) => {
         </div>
         <div className="bg-slate-50 p-3 rounded-xl">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">신규 (7일)</p>
-          <p className="text-xl font-black text-purple-600">{data.newInfluencers.last7d}</p>
+          <p className="text-xl font-black text-blue-600">{data.newInfluencers.last7d}</p>
         </div>
         <div className="bg-slate-50 p-3 rounded-xl">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">신규 (30일)</p>

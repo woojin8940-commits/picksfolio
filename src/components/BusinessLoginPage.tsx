@@ -125,7 +125,7 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           </p>
           <p className="text-slate-400 text-xs font-bold">
             인플루언서이신가요?{' '}
-            <button onClick={onNavigateHome} className="text-slate-500 hover:text-purple-600 hover:underline" disabled={isLoading}>
+            <button onClick={onNavigateHome} className="text-slate-500 hover:text-blue-600 hover:underline" disabled={isLoading}>
               일반 로그인
             </button>
           </p>

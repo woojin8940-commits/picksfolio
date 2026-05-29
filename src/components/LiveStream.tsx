@@ -2242,7 +2242,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={openInExternalBrowser}
-              className="px-2.5 py-1 rounded-md bg-white text-purple-700 text-[11px] font-bold active:scale-95"
+              className="px-2.5 py-1 rounded-md bg-white text-blue-700 text-[11px] font-bold active:scale-95"
             >
               {isKakaoInApp ? 'Safari/Chrome에서 열기' : '브라우저로 열기'}
             </button>
@@ -2301,7 +2301,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             WebkitBackdropFilter: 'blur(8px)',
           }}
         >
-          <Loader2 size={12} className="animate-spin text-purple-300" />
+          <Loader2 size={12} className="animate-spin text-blue-300" />
           <span>네트워크가 느려요. 릴레이 서버로 전환 중…</span>
         </div>
       )}
@@ -2439,14 +2439,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   {isInAppBrowser && (
                     <button
                       onClick={openInExternalBrowser}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-white text-purple-700 text-sm font-black rounded-xl active:scale-95"
+                      className="flex items-center gap-2 px-5 py-2.5 bg-white text-blue-700 text-sm font-black rounded-xl active:scale-95"
                     >
                       {isKakaoInApp ? 'Safari/Chrome에서 열기' : '외부 브라우저로 열기'}
                     </button>
                   )}
                   <button
                     onClick={handleReconnect}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white text-sm font-bold rounded-xl hover:bg-purple-700 transition-all active:scale-95"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all active:scale-95"
                   >
                     <RefreshCw size={16} />
                     다시 연결하기
@@ -2461,7 +2461,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               </>
             ) : (
               <>
-                <Loader2 size={40} className="text-purple-500 animate-spin mb-4" />
+                <Loader2 size={40} className="text-blue-500 animate-spin mb-4" />
                 <p className="text-white/60 text-xs font-bold uppercase tracking-widest">
                   {connectionState === 'disconnected'
                     ? '재연결 시도 중...'
@@ -2491,14 +2491,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   {isInAppBrowser && (
                     <button
                       onClick={openInExternalBrowser}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-white text-purple-700 text-sm font-black rounded-xl active:scale-95"
+                      className="flex items-center gap-2 px-5 py-2.5 bg-white text-blue-700 text-sm font-black rounded-xl active:scale-95"
                     >
                       {isKakaoInApp ? 'Safari/Chrome에서 열기' : '외부 브라우저로 열기'}
                     </button>
                   )}
                   <button
                     onClick={handleReconnect}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white text-sm font-bold rounded-xl hover:bg-purple-700 transition-all active:scale-95"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-all active:scale-95"
                   >
                     <RefreshCw size={16} />
                     다시 연결하기
@@ -2507,7 +2507,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               </>
             ) : (
               <>
-                <Loader2 size={40} className="text-purple-500 animate-spin mb-4" />
+                <Loader2 size={40} className="text-blue-500 animate-spin mb-4" />
                 <p className="text-white/60 text-xs font-bold uppercase tracking-widest">HD 방송 연결 중...</p>
                 <p className="text-white/30 text-[10px] mt-2">잠시만 기다려주세요</p>
               </>
@@ -2518,7 +2518,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         {/* Top Overlay */}
         <div className="absolute top-0 left-0 right-0 z-20 flex justify-between items-start" style={{ padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full border-2 border-purple-500 overflow-hidden bg-slate-800">
+            <div className="w-10 h-10 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800">
               <SafeImage src={DEFAULT_AVATAR} className="w-full h-full object-cover" />
             </div>
             <div>
@@ -2546,7 +2546,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           </div>
           <div className="flex items-center gap-2">
             {kakaoUser && (
-              <span className="text-[10px] font-bold text-purple-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.nickname}</span>
+              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.nickname}</span>
             )}
             {/* Persistent unmute toggle — mobile autoplay forces muted start,  */}
             {/* and many viewers never realize they can tap for sound. Showing  */}
@@ -2556,7 +2556,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               <button
                 onClick={toggleMute}
                 aria-label="소리 켜기"
-                className="px-3 py-2 bg-purple-600/90 backdrop-blur-md rounded-full text-white hover:bg-purple-700 transition-all active:scale-95 flex items-center gap-1.5 animate-pulse"
+                className="px-3 py-2 bg-blue-600/90 backdrop-blur-md rounded-full text-white hover:bg-blue-700 transition-all active:scale-95 flex items-center gap-1.5 animate-pulse"
                 style={{ boxShadow: '0 2px 8px rgba(124, 58, 237, 0.45)' }}
               >
                 <VolumeX size={16} />
@@ -2693,7 +2693,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 <button
                   type="button"
                   onClick={handleOpenCheckout}
-                  className="px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wide bg-purple-600 text-white hover:bg-purple-700 transition-all flex items-center justify-center gap-1 active:scale-95"
+                  className="px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wide bg-blue-600 text-white hover:bg-blue-700 transition-all flex items-center justify-center gap-1 active:scale-95"
                 >
                   <CreditCard size={10} /> 바로 결제
                 </button>
@@ -2758,7 +2758,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     <div className="flex-1 min-w-0">
                       <p className="text-white text-xs font-bold truncate">{item.productName}</p>
                       {item.selectedOptions && Object.keys(item.selectedOptions).length > 0 && (
-                        <p className="text-purple-300 text-[10px]">{Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(' / ')}</p>
+                        <p className="text-blue-300 text-[10px]">{Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`).join(' / ')}</p>
                       )}
                       {item.productPrice && <p className="text-white/40 text-[10px]">{item.productPrice}</p>}
                     </div>
@@ -2766,7 +2766,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                       href={item.productLink?.startsWith('http') ? item.productLink : `https://${item.productLink}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`text-purple-400 text-[10px] font-bold hover:text-purple-300 flex-shrink-0 ${item.productLink ? '' : 'hidden'}`}
+                      className={`text-blue-400 text-[10px] font-bold hover:text-blue-300 flex-shrink-0 ${item.productLink ? '' : 'hidden'}`}
                     >
                       바로가기
                     </a>
@@ -2791,7 +2791,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               {batchTotal > 0 && (
                 <button
                   onClick={handleOpenBatchCheckout}
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-black text-sm hover:from-purple-700 hover:to-pink-600 transition-all active:scale-95 mb-2"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-pink-500 text-white py-3 rounded-xl font-black text-sm hover:from-blue-700 hover:to-pink-600 transition-all active:scale-95 mb-2"
                 >
                   <CreditCard size={16} />
                   {batchTotal.toLocaleString()}원 한 번에 결제하기
@@ -2846,13 +2846,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                               onClick={() => setPendingOptions(prev => ({ ...prev, [opt.name]: v.value }))}
                               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-0.5 ${
                                 selected
-                                  ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                                  ? 'bg-blue-600 text-white ring-2 ring-blue-400'
                                   : 'bg-white/10 text-white/60 hover:bg-white/20'
                               }`}
                             >
                               <span>{v.value}</span>
                               {meta.length > 0 && (
-                                <span className={`text-[9px] font-black ${selected ? 'text-purple-100' : 'text-white/40'}`}>
+                                <span className={`text-[9px] font-black ${selected ? 'text-blue-100' : 'text-white/40'}`}>
                                   {meta.join(' · ')}
                                 </span>
                               )}
@@ -2868,8 +2868,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   const eff = computeEffectivePrice(currentProduct, pendingOptions);
                   if (eff <= 0) return null;
                   return (
-                    <div className="flex items-center justify-between bg-purple-500/15 border border-purple-400/30 rounded-xl px-4 py-3">
-                      <span className="text-purple-200 text-[10px] font-black uppercase tracking-widest">결제 금액</span>
+                    <div className="flex items-center justify-between bg-blue-500/15 border border-blue-400/30 rounded-xl px-4 py-3">
+                      <span className="text-blue-200 text-[10px] font-black uppercase tracking-widest">결제 금액</span>
                       <span className="text-white text-base font-black">{formatKrwPrice(eff)}</span>
                     </div>
                   );
@@ -2880,7 +2880,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 disabled={!(currentProduct.options as { id: string; name: string; values: any[] }[]).every((opt) => pendingOptions[opt.name])}
                 className={`w-full py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
                   optionPickerMode === 'checkout'
-                    ? 'bg-purple-600 text-white hover:bg-purple-700'
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
                     : 'bg-orange-500 text-white hover:bg-orange-600'
                 }`}
               >
@@ -2906,7 +2906,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             >
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest">간편결제</p>
+                  <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">간편결제</p>
                   <h4 className="text-slate-900 text-base font-black">바로 결제</h4>
                 </div>
                 <button
@@ -3047,7 +3047,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             >
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest">한번에 결제</p>
+                  <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">한번에 결제</p>
                   <h4 className="text-slate-900 text-base font-black">담은 상품 {batchPayableItems.length}개 결제</h4>
                 </div>
                 <button
@@ -3194,7 +3194,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 <img src={msg.profileImage} alt="" className="w-6 h-6 rounded-full object-cover mt-0.5 flex-shrink-0" />
               )}
               <div className="min-w-0 bg-black/30 backdrop-blur-sm rounded-xl px-2.5 py-1.5 max-w-[85%]">
-                <span className="text-purple-300 text-[10px] font-black mr-1.5">{msg.user}</span>
+                <span className="text-blue-300 text-[10px] font-black mr-1.5">{msg.user}</span>
                 <span className="text-white/90 text-[13px] font-medium break-words">{msg.text}</span>
               </div>
             </div>
@@ -3211,11 +3211,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="메시지를 입력하세요..."
-                className="w-full bg-black/40 backdrop-blur-md border border-white/15 rounded-full py-2.5 px-5 pr-12 text-white text-[14px] focus:outline-none focus:border-purple-500/50 transition-all placeholder:text-white/30"
+                className="w-full bg-black/40 backdrop-blur-md border border-white/15 rounded-full py-2.5 px-5 pr-12 text-white text-[14px] focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-white/30"
               />
               <button
                 onClick={handleSendMessage}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-purple-400 hover:text-purple-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-blue-400 hover:text-blue-300"
               >
                 <Send size={18} />
               </button>

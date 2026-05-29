@@ -36,21 +36,49 @@ const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, force
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return;
+      revealed = true;
+      setVideoReady(true);
+    };
     const tryPlay = () => {
       el.play().catch(() => {});
     };
-    if (el.readyState >= 2) {
-      setVideoReady(true);
-      tryPlay();
-      return;
-    }
-    const onData = () => {
-      setVideoReady(true);
+    const onReady = () => {
+      reveal();
       tryPlay();
     };
-    el.addEventListener('loadeddata', onData);
-    el.load();
-    return () => el.removeEventListener('loadeddata', onData);
+
+    // Reveal on the earliest signal that a frame/metadata is available. Relying
+    // on a single 'loadeddata' event sometimes left covers/videos permanently
+    // hidden (event fired before the listener attached, or never fired).
+    const readyEvents = ['loadeddata', 'loadedmetadata', 'canplay', 'canplaythrough', 'playing'];
+    readyEvents.forEach(ev => el.addEventListener(ev, onReady));
+
+    // If the source fails to load, reveal the element instead of keeping it invisible.
+    const onError = () => reveal();
+    el.addEventListener('error', onError);
+
+    // Already buffered (e.g. served from cache) — show immediately. Otherwise
+    // explicitly kick off loading.
+    if (el.readyState >= 2) {
+      onReady();
+    } else {
+      try { el.load(); } catch { /* ignore */ }
+    }
+    tryPlay();
+
+    // Safety net: a slow or missed readiness event must never leave the media
+    // hidden forever — reveal regardless after a short grace period.
+    const fallbackTimer = setTimeout(reveal, 2500);
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      readyEvents.forEach(ev => el.removeEventListener(ev, onReady));
+      el.removeEventListener('error', onError);
+    };
   }, [src]);
 
   if (!src) return null;

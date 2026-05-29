@@ -353,9 +353,9 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                 <p className="text-xl md:text-2xl font-black text-indigo-600">{totalInfluencers}</p>
                 <p className="text-[10px] md:text-xs font-bold text-indigo-500">인플루언서</p>
               </div>
-              <div className="bg-purple-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-purple-600">{proposals.length}</p>
-                <p className="text-[10px] md:text-xs font-bold text-purple-500">총 협업</p>
+              <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center">
+                <p className="text-xl md:text-2xl font-black text-blue-600">{proposals.length}</p>
+                <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
               </div>
             </div>
             {totalRevenue > 0 && (

@@ -42,7 +42,7 @@ type SubView = 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-setting
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-[40vh]">
     <div className="text-center animate-in fade-in duration-300">
-      <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+      <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
       <p className="text-slate-400 font-semibold text-xs">로딩 중...</p>
     </div>
   </div>
@@ -1170,7 +1170,7 @@ const App: React.FC = () => {
       return (
         <div className="min-h-screen flex items-center justify-center bg-midnight">
           <div className="text-center">
-            <div className="w-8 h-8 border-3 border-purple-400/30 border-t-purple-400 rounded-full animate-spin mx-auto mb-3"></div>
+            <div className="w-8 h-8 border-3 border-blue-400/30 border-t-blue-400 rounded-full animate-spin mx-auto mb-3"></div>
             <p className="text-slate-400 text-sm">권한 확인 중...</p>
           </div>
         </div>
@@ -1202,7 +1202,7 @@ const App: React.FC = () => {
     if (!profileChecked) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-midnight">
-          <div className="w-8 h-8 border-3 border-purple-400/30 border-t-purple-400 rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-3 border-blue-400/30 border-t-blue-400 rounded-full animate-spin"></div>
         </div>
       );
     }
@@ -1230,7 +1230,7 @@ const App: React.FC = () => {
       return (
         <div className="min-h-screen flex items-center justify-center bg-[#f8fafc]">
           <div className="text-center">
-            <div className="w-8 h-8 border-3 border-purple-600/30 border-t-purple-600 rounded-full animate-spin mx-auto mb-3"></div>
+            <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
             <p className="text-slate-400 text-sm">프로필 확인 중...</p>
           </div>
         </div>
@@ -1241,7 +1241,7 @@ const App: React.FC = () => {
       return (
         <div className="min-h-screen flex items-center justify-center bg-[#f8fafc]">
           <div className="text-center animate-in fade-in duration-300">
-            <div className="w-10 h-10 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
             <p className="text-slate-500 font-bold text-sm">대시보드를 불러오는 중...</p>
           </div>
         </div>
@@ -1325,7 +1325,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background selection:bg-purple-primary/30 flex flex-col">
+    <div className="min-h-screen bg-background selection:bg-blue-primary/30 flex flex-col">
       <SiteHeader
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}
@@ -1352,7 +1352,7 @@ const App: React.FC = () => {
           (oauthProcessing || loginTransitioning) ? (
             <div className="min-h-screen flex items-center justify-center bg-midnight">
               <div className="text-center animate-in fade-in duration-300">
-                <div className="w-10 h-10 border-3 border-purple-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <div className="w-10 h-10 border-3 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                 <p className="text-slate-300 font-bold text-sm">{loginTransitioning ? '대시보드를 불러오는 중...' : '카카오 로그인 처리 중...'}</p>
               </div>
             </div>

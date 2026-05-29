@@ -138,7 +138,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                 type="text" 
                 value={id} 
                 onChange={handleIdChange} 
-                className="w-full bg-white/5 border border-white/10 p-4 pl-[5.5rem] rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all" 
+                className="w-full bg-white/5 border border-white/10 p-4 pl-[5.5rem] rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
                 placeholder=""
                 required
               />
@@ -152,7 +152,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
               placeholder="이름을 입력해 주세요"
               required
             />
@@ -166,7 +166,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
               autoComplete="new-password"
               value={password} 
               onChange={(e) => setPassword(e.target.value)} 
-              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all" 
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
               placeholder="비밀번호를 입력해 주세요"
               required
             />
@@ -180,7 +180,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
               autoComplete="new-password"
               value={confirmPassword} 
               onChange={(e) => setConfirmPassword(e.target.value)} 
-              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all" 
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
               placeholder="비밀번호를 다시 입력해 주세요"
               required
             />
@@ -193,7 +193,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+                className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 placeholder="01012345678"
                 required
                 inputMode="numeric"
@@ -219,7 +219,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                   type="text"
                   value={verificationCode}
                   onChange={(e) => setVerificationCode(e.target.value)}
-                  className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+                  className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                   placeholder="6자리 숫자 입력"
                   maxLength={6}
                   inputMode="numeric"
@@ -229,7 +229,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                 <button 
                   type="button"
                   onClick={handleVerifySMS}
-                  className="bg-purple-600/20 text-purple-400 px-5 rounded-2xl font-black text-[13px] hover:bg-purple-600/30 transition-colors whitespace-nowrap border border-purple-500/30 flex-shrink-0"
+                  className="bg-blue-600/20 text-blue-400 px-5 rounded-2xl font-black text-[13px] hover:bg-blue-600/30 transition-colors whitespace-nowrap border border-blue-500/30 flex-shrink-0"
                 >
                   확인
                 </button>
@@ -240,7 +240,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
           <button 
             type="submit"
             disabled={isLoading}
-            className="w-full bg-purple-600 hover:bg-purple-500 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-purple-500/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
@@ -258,7 +258,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
             이미 계정이 있으신가요?{' '}
             <button
               onClick={onNavigateLogin}
-              className="text-white hover:text-purple-400 hover:underline font-black ml-1 transition-colors"
+              className="text-white hover:text-blue-400 hover:underline font-black ml-1 transition-colors"
             >
               로그인
             </button>

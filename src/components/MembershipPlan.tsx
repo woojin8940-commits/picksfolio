@@ -310,9 +310,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       <section className="mb-12">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-5xl">
           {/* Standard Plan */}
-          <div className="relative rounded-2xl border-2 border-purple-200 bg-white p-6 md:p-8 shadow-sm">
+          <div className="relative rounded-2xl border-2 border-blue-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+              <span className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full">
                 스탠다드 멤버십
               </span>
             </div>
@@ -352,7 +352,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 type="button"
                 onClick={() => handleStartSubscribe('standard')}
                 disabled={saving}
-                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-purple-500 to-fuchsia-500 hover:from-purple-600 hover:to-fuchsia-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
                 4,900원으로 구독 시작
               </button>
@@ -362,7 +362,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           {/* Commerce Plan */}
           <div className="relative rounded-2xl border-2 border-pink-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-purple-600 to-pink-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+              <span className="bg-gradient-to-r from-blue-600 to-pink-500 text-white text-xs font-bold px-3 py-1 rounded-full">
                 커머스 멤버십 · 🎥 라이브
               </span>
             </div>
@@ -410,7 +410,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     type="button"
                     onClick={() => handleStartSubscribe('commerce')}
                     disabled={saving}
-                    className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+                    className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
                   >
                     {membershipActive && currentPlan === 'standard'
                       ? '커머스 멤버십으로 업그레이드'
@@ -436,7 +436,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <button
               type="button"
               onClick={() => { setError(null); setBizEditing(true); }}
-              className="text-xs font-bold text-purple-600 hover:text-purple-700 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-50"
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50"
             >
               {businessVerified ? '수정' : '등록하기'}
             </button>
@@ -471,7 +471,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   type="button"
                   onClick={submitBusiness}
                   disabled={saving}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
                 >
                   {saving ? '저장 중...' : '저장'}
                 </button>
@@ -508,7 +508,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <button
               type="button"
               onClick={() => { setError(null); setAcctEditing(true); }}
-              className="text-xs font-bold text-purple-600 hover:text-purple-700 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-50"
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50"
             >
               {settlementRegistered ? '수정' : '등록하기'}
             </button>
@@ -528,7 +528,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 <select
                   value={acct.bank_name}
                   onChange={(e) => setAcct({ ...acct, bank_name: e.target.value })}
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
                 >
                   {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>
@@ -549,7 +549,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   type="button"
                   onClick={submitSettlement}
                   disabled={saving}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
                 >
                   {saving ? '저장 중...' : '저장'}
                 </button>
@@ -591,7 +591,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
-                <p className="text-xs font-black text-purple-500 uppercase tracking-widest">{TIER_LABEL[selectedTier]}</p>
+                <p className="text-xs font-black text-blue-500 uppercase tracking-widest">{TIER_LABEL[selectedTier]}</p>
                 <h3 className="text-lg font-black text-slate-900">구독 결제 확인</h3>
               </div>
               <button
@@ -609,10 +609,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   {error}
                 </div>
               )}
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                <p className="text-xs font-black text-purple-500 uppercase tracking-widest mb-1">월 구독료</p>
-                <p className="text-3xl font-black text-purple-700">{TIER_PRICE[selectedTier].toLocaleString()}<span className="text-sm font-bold ml-1">원 / 월</span></p>
-                <p className="text-xs font-bold text-purple-500 mt-2">매월 자동결제, 언제든 해지 가능</p>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-1">월 구독료</p>
+                <p className="text-3xl font-black text-blue-700">{TIER_PRICE[selectedTier].toLocaleString()}<span className="text-sm font-bold ml-1">원 / 월</span></p>
+                <p className="text-xs font-bold text-blue-500 mt-2">매월 자동결제, 언제든 해지 가능</p>
               </div>
 
               <div>
@@ -623,7 +623,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     onClick={() => setPayMethod('CARD')}
                     className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                       payMethod === 'CARD'
-                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
                         : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                     }`}
                   >
@@ -698,7 +698,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
                     : payMethod === 'TOSSPAY'
                       ? 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
-                      : 'bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600'
+                      : 'bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600'
                 }`}
               >
                 {saving
@@ -742,7 +742,7 @@ const Field: React.FC<{
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       inputMode={inputMode}
-      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-purple-400"
+      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
     />
   </div>
 );

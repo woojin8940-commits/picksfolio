@@ -212,7 +212,7 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">동시 시청자</p>
-          <p className="text-2xl font-black text-purple-600">{totalViewers}</p>
+          <p className="text-2xl font-black text-blue-600">{totalViewers}</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">실시간 매출 추정</p>
@@ -257,7 +257,7 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-slate-400">시청자</p>
-                  <p className="font-black text-purple-600">{o.viewerCount}</p>
+                  <p className="font-black text-blue-600">{o.viewerCount}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-slate-400">매출(추정)</p>

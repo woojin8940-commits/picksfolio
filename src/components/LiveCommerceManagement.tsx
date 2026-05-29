@@ -251,9 +251,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           <p className="text-slate-500 font-medium text-[10px] md:text-base">실시간 방송으로 팬들과 소통하세요.</p>
         </header>
 
-        <div className="max-w-2xl bg-white border border-purple-100 rounded-2xl p-6 md:p-8 shadow-sm">
+        <div className="max-w-2xl bg-white border border-blue-100 rounded-2xl p-6 md:p-8 shadow-sm">
           <div className="flex items-start gap-3 mb-5">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-xl">🔒</div>
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl">🔒</div>
             <div>
               <h3 className="text-base md:text-lg font-black text-slate-900">라이브 방송을 이용하려면 인증이 필요합니다</h3>
               <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">
@@ -282,7 +282,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           <button
             type="button"
             onClick={() => onNavigateMembership?.()}
-            className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
+            className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
           >
             멤버십 플랜에서 인증 진행하기
           </button>
@@ -350,7 +350,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           </div>
 
           <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm">
-            <div className="w-8 h-8 md:w-10 md:h-10 bg-purple-50 rounded-xl md:rounded-2xl flex items-center justify-center text-purple-600 mb-2 md:mb-3">
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-50 rounded-xl md:rounded-2xl flex items-center justify-center text-blue-600 mb-2 md:mb-3">
               <Clock size={16} className="md:hidden" />
               <Clock size={20} className="hidden md:block" />
             </div>
@@ -395,12 +395,12 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                 value={broadcastTitle}
                 onChange={(e) => handleBroadcastTitleChange(e.target.value)}
                 placeholder="제목을 입력하세요"
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-purple-500/50 transition-all"
+                className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-blue-500/50 transition-all"
               />
             </div>
             <div>
               <label className="block text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5 md:mb-2">방송 카테고리</label>
-              <select className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-purple-500/50 transition-all appearance-none">
+              <select className="w-full bg-slate-50 border border-slate-100 rounded-xl py-3 md:py-4 px-4 md:px-6 text-sm md:text-slate-900 font-bold outline-none focus:border-blue-500/50 transition-all appearance-none">
                 <option>패션/스타일</option>
                 <option>뷰티/메이크업</option>
                 <option>라이프스타일</option>
@@ -447,7 +447,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
         {!productsLoaded ? (
           <div className="flex items-center justify-center py-8 md:py-12">
-            <div className="w-6 h-6 border-2 border-slate-200 border-t-purple-500 rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
           </div>
         ) : broadcastProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 md:py-12 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
@@ -528,7 +528,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
       <div className="mt-6 md:mt-10 bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div className="flex items-center justify-between mb-4 md:mb-8">
           <h4 className="text-base md:text-xl font-black flex items-center gap-2 md:gap-3">
-            <ImageIcon className="w-4 h-4 md:w-5 md:h-5 text-purple-500" /> 방송 자료 관리
+            <ImageIcon className="w-4 h-4 md:w-5 md:h-5 text-blue-500" /> 방송 자료 관리
           </h4>
           <span className="text-slate-400 text-[10px] md:text-xs font-bold">{materials.length}개 등록</span>
         </div>
@@ -542,12 +542,12 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="자료 이름 (예: 신상품 배너)"
-              className="bg-white border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold outline-none focus:border-purple-500/50 transition-all"
+              className="bg-white border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold outline-none focus:border-blue-500/50 transition-all"
             />
             <select
               value={newType}
               onChange={(e) => setNewType(e.target.value as any)}
-              className="bg-white border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold outline-none focus:border-purple-500/50 transition-all appearance-none"
+              className="bg-white border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold outline-none focus:border-blue-500/50 transition-all appearance-none"
             >
               <option value="banner">배너 (상단 가로)</option>
               <option value="product">상품 이미지 (우측 하단)</option>
@@ -556,7 +556,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             <div className="flex gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex-1 flex items-center justify-center gap-2 bg-purple-600 text-white rounded-xl py-3 px-4 text-sm font-bold hover:bg-purple-700 transition-all active:scale-95"
+                className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white rounded-xl py-3 px-4 text-sm font-bold hover:bg-blue-700 transition-all active:scale-95"
               >
                 <Upload size={16} /> 파일 업로드
               </button>
@@ -594,21 +594,21 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => updateSize(item.id, 30)}
-                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 30 ? 'bg-purple-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
+                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 30 ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
                     title="작은 크기"
                   >
                     S
                   </button>
                   <button
                     onClick={() => updateSize(item.id, 50)}
-                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 50 ? 'bg-purple-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
+                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 50 ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
                     title="중간 크기"
                   >
                     M
                   </button>
                   <button
                     onClick={() => updateSize(item.id, 90)}
-                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 90 ? 'bg-purple-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
+                    className={`px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold transition-all ${item.width === 90 ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-900'}`}
                     title="큰 크기"
                   >
                     L

@@ -17,7 +17,7 @@ interface CategoryBlock {
 }
 
 const CATEGORY_COLORS: Record<string, { accent: string; bg: string; text: string; badge: string }> = {
-  '50000000': { accent: 'from-purple-500 to-purple-600', bg: 'bg-purple-500/10', text: 'text-purple-400', badge: 'bg-purple-500/20 text-purple-300' },
+  '50000000': { accent: 'from-blue-500 to-blue-600', bg: 'bg-blue-500/10', text: 'text-blue-400', badge: 'bg-blue-500/20 text-blue-300' },
   '50000002': { accent: 'from-pink-500 to-pink-600', bg: 'bg-pink-500/10', text: 'text-pink-400', badge: 'bg-pink-500/20 text-pink-300' },
   '50000003': { accent: 'from-blue-500 to-blue-600', bg: 'bg-blue-500/10', text: 'text-blue-400', badge: 'bg-blue-500/20 text-blue-300' },
   '50000004': { accent: 'from-amber-500 to-amber-600', bg: 'bg-amber-500/10', text: 'text-amber-400', badge: 'bg-amber-500/20 text-amber-300' },
@@ -78,7 +78,7 @@ const DataBoardSection: React.FC = () => {
             네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5
           </p>
           <div className="flex items-center justify-center gap-3 flex-wrap">
-            <span className="flex items-center gap-1.5 bg-purple-500/20 text-purple-300 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
+            <span className="flex items-center gap-1.5 bg-blue-500/20 text-blue-300 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
               <Clock size={12} /> 매일 오후 2시 업데이트
             </span>
             {updatedAt && (

@@ -263,7 +263,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
           </p>
           <p className="text-slate-600 font-bold text-xs">
             인플루언서이신가요?{' '}
-            <button onClick={onNavigateHome} className="text-slate-400 hover:text-purple-400 hover:underline font-black transition-colors">
+            <button onClick={onNavigateHome} className="text-slate-400 hover:text-blue-400 hover:underline font-black transition-colors">
               일반 회원가입
             </button>
           </p>

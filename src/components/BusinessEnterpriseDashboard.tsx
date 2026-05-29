@@ -354,12 +354,12 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
           {/* Business management cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-12">
-            <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1">📢 캠페인 협업</h3>
                 <p className="opacity-80 font-bold text-[9px] md:text-base">캠페인을 등록하고 크리에이터의 지원을 받아보세요.</p>
               </div>
-              <button onClick={() => setCurrentSubView('campaign-collab')} className="bg-white text-purple-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캠페인 관리</button>
+              <button onClick={() => setCurrentSubView('campaign-collab')} className="bg-white text-blue-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캠페인 관리</button>
             </div>
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>

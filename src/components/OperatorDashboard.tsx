@@ -228,7 +228,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     switch (status) {
       case 'accepted': return 'bg-green-500';
       case 'completed': return 'bg-blue-500';
-      default: return 'bg-purple-500';
+      default: return 'bg-blue-500';
     }
   };
 
@@ -322,7 +322,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                   <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                     <h4 className="font-black text-slate-900 text-sm">알림</h4>
                     {unreadCount > 0 && (
-                      <button onClick={handleMarkAllRead} className="text-[10px] font-bold text-purple-600 hover:underline">
+                      <button onClick={handleMarkAllRead} className="text-[10px] font-bold text-blue-600 hover:underline">
                         모두 읽음
                       </button>
                     )}
@@ -334,7 +334,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                       </div>
                     ) : (
                       notifications.slice(0, 20).map(notif => (
-                        <div key={notif.id} className={`p-3 ${!notif.read ? 'bg-purple-50/50' : ''}`}>
+                        <div key={notif.id} className={`p-3 ${!notif.read ? 'bg-blue-50/50' : ''}`}>
                           <div className="flex items-start gap-2">
                             <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${notif.type === 'proposal_accepted' ? 'bg-green-500' : 'bg-red-500'}`} />
                             <div className="flex-1 min-w-0">
@@ -514,11 +514,11 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                         {/* Target Influencer */}
                         <div className="col-span-3 min-w-0">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center shrink-0">
+                            <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shrink-0">
                               <span className="text-[10px] font-black text-white">{proposal._username.slice(0, 1).toUpperCase()}</span>
                             </div>
                             <div className="min-w-0">
-                              <p className="font-black text-purple-600 text-xs truncate">@{proposal._username}</p>
+                              <p className="font-black text-blue-600 text-xs truncate">@{proposal._username}</p>
                               <p className="text-[10px] font-bold text-slate-400 truncate">
                                 {proposal.contact_email}{proposal.contact_phone ? ` · ${proposal.contact_phone}` : ''}
                               </p>
@@ -527,7 +527,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                         </div>
                         {/* Fee / Period */}
                         <div className="col-span-2">
-                          <p className="font-black text-purple-600 text-sm">{formatFee(proposal.fee)}</p>
+                          <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
                           <p className="text-[9px] font-bold text-slate-300">
                             {formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}
                           </p>
@@ -545,8 +545,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                         onClick={() => setExpandedId(expandedId === proposal.id ? null : proposal.id)}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center shrink-0">
-                            <span className="text-xs font-black text-purple-600">
+                          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                            <span className="text-xs font-black text-blue-600">
                               {proposal._username.slice(0, 2).toUpperCase()}
                             </span>
                           </div>
@@ -560,7 +560,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             <p className="text-[10px] font-bold text-slate-400">{proposal.company_name} · {proposal.contact_person}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-black text-purple-600 text-sm">{formatFee(proposal.fee)}</p>
+                            <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
                           </div>
                         </div>
                       </div>
@@ -580,7 +580,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             </div>
                             <div className="bg-slate-50 rounded-lg p-2.5">
                               <p className="text-[9px] font-black text-slate-400">인플루언서</p>
-                              <p className="text-xs font-bold text-purple-600">@{proposal._username}</p>
+                              <p className="text-xs font-bold text-blue-600">@{proposal._username}</p>
                             </div>
                             <div className="bg-slate-50 rounded-lg p-2.5">
                               <p className="text-[9px] font-black text-slate-400">이메일</p>
@@ -612,7 +612,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                                     href={link}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="block text-xs text-purple-600 font-bold hover:underline truncate"
+                                    className="block text-xs text-blue-600 font-bold hover:underline truncate"
                                   >
                                     {link}
                                   </a>
@@ -637,10 +637,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                                         <img
                                           src={url}
                                           alt={`첨부 ${idx + 1}`}
-                                          className="w-full h-24 object-cover rounded-lg border border-slate-200 hover:border-purple-400 transition-all"
+                                          className="w-full h-24 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all"
                                         />
                                       ) : (
-                                        <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-purple-400 transition-all flex flex-col items-center justify-center gap-1">
+                                        <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-blue-400 transition-all flex flex-col items-center justify-center gap-1">
                                           <span className="text-lg">
                                             {ext === 'pdf' ? '📄' : ['doc', 'docx'].includes(ext) ? '📝' : ['xls', 'xlsx'].includes(ext) ? '📊' : ['ppt', 'pptx'].includes(ext) ? '📑' : ext === 'zip' ? '📦' : '📎'}
                                           </span>
@@ -721,10 +721,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                       <button
                         key={username}
                         onClick={() => setSelectedInfluencer(isActive ? null : username)}
-                        className={`w-full p-4 text-left hover:bg-slate-50 transition-all ${isActive ? 'bg-purple-50 border-l-4 border-purple-500' : ''}`}
+                        className={`w-full p-4 text-left hover:bg-slate-50 transition-all ${isActive ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
                             <span className="text-sm font-black text-white">{username.slice(0, 1).toUpperCase()}</span>
                           </div>
                           <div className="flex-1 min-w-0">
@@ -740,7 +740,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-xs font-black text-purple-600">{formatFee(s?.totalFee || 0)}</p>
+                            <p className="text-xs font-black text-blue-600">{formatFee(s?.totalFee || 0)}</p>
                           </div>
                         </div>
                       </button>
@@ -798,7 +798,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             <p className="text-[10px] font-bold text-slate-400">{proposal.company_name} · {proposal.contact_person}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-black text-purple-600 text-sm">{formatFee(proposal.fee)}</p>
+                            <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
                             <p className="text-[9px] font-bold text-slate-300">
                               {formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}
                             </p>
@@ -842,7 +842,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                                       href={link}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="block text-xs text-purple-600 font-bold hover:underline truncate"
+                                      className="block text-xs text-blue-600 font-bold hover:underline truncate"
                                     >
                                       {link}
                                     </a>
@@ -867,10 +867,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                                           <img
                                             src={url}
                                             alt={`첨부 ${idx + 1}`}
-                                            className="w-full h-24 object-cover rounded-lg border border-slate-200 hover:border-purple-400 transition-all"
+                                            className="w-full h-24 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all"
                                           />
                                         ) : (
-                                          <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-purple-400 transition-all flex flex-col items-center justify-center gap-1">
+                                          <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-blue-400 transition-all flex flex-col items-center justify-center gap-1">
                                             <span className="text-lg">
                                               {ext === 'pdf' ? '📄' : ['doc', 'docx'].includes(ext) ? '📝' : ['xls', 'xlsx'].includes(ext) ? '📊' : ['ppt', 'pptx'].includes(ext) ? '📑' : ext === 'zip' ? '📦' : '📎'}
                                             </span>
@@ -959,8 +959,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                       <div
                         key={day}
                         onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                        className={`p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-purple-50/50 ${
-                          isSelected ? 'bg-purple-50 ring-2 ring-inset ring-purple-300' : ''
+                        className={`p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                          isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
                         }`}
                       >
                         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black ${
