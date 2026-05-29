@@ -938,6 +938,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
+      // Re-enable camera/mic before going live. Stopping a broadcast turns the
+      // camera off to release the device (see the "방송 종료" branch below), which
+      // tears down the canvas/camera streams. Without turning them back on here,
+      // restarting the broadcast never reacquires a stream — the broadcaster's
+      // preview and every viewer would see a black screen. Setting these as early
+      // as possible gives getUserMedia time to finish before the stream-readiness
+      // retry loop runs. It is a harmless no-op on the first broadcast (camera is
+      // already on).
+      setIsCameraOn(true);
+      setIsMicOn(true);
+
       // Clear previous cart data BEFORE going live to prevent stale data in polls
       try { await apiService.clearLiveCart(userName); } catch (e) { console.warn('[Live] clearLiveCart failed (non-blocking):', e); }
 
