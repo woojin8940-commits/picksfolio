@@ -58,7 +58,15 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "room is required" }, { status: 400 });
   }
 
-  const store = getStore(STORE_NAME);
+  // Strong consistency is REQUIRED here, not optional. WebRTC signaling needs
+  // viewer-join → offer → answer → ICE candidates to all be read back within
+  // ~1–2s of being written. The default "eventual" store can take up to 60s to
+  // propagate a write, so the broadcaster's list()/get() polls would not see a
+  // viewer's join (or the offer/answer/ICE that follow) until long after the
+  // peer connection has already timed out — leaving every viewer on a black
+  // screen. Strong consistency trades a little per-call latency for the
+  // immediate read-after-write the signaling protocol depends on.
+  const store = getStore({ name: STORE_NAME, consistency: "strong" });
   const prefix = `${room}/`;
 
   try {
