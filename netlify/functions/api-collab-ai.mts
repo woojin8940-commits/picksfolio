@@ -5,9 +5,17 @@ import { applyComplimentaryMembership } from "./_shared/complimentary-membership
 // Collaboration AI assistant.
 //
 // Backed by Gemini 2.5 Flash-Lite through Netlify AI Gateway. Flash-Lite is the
-// recommended model for the kind of work this assistant does (summarising a
-// collaboration thread, organising schedules, drafting replies) — it is fast,
+// recommended model for the kind of work this assistant does (summarising
+// collaboration threads, organising schedules, drafting replies) — it is fast,
 // cheap, and more than capable for lightweight summarisation/extraction.
+//
+// The assistant is "workspace aware": instead of only seeing the single
+// conversation the user is currently looking at, it is given a compact overview
+// of EVERY collaboration thread the account has (how many partners, which ones
+// are waiting on a reply, recent messages of each, plus a deeper transcript of
+// the conversation in focus). That lets it answer cross-conversation questions
+// such as "how many companies am I talking to?", "which collaborations need a
+// reply?", or "draft a reply to <company>" — not just summarise one thread.
 //
 // Two guard rails are enforced server-side so the feature stays safe and the
 // operator's AI bill stays predictable:
@@ -24,6 +32,187 @@ const MODEL = "gemini-2.5-flash-lite";
 const DAILY_LIMIT = 100;
 const MAX_CONTEXT_CHARS = 6000;
 const MAX_TURNS = 12;
+
+// Workspace overview bounds — keep the assembled context predictable in size.
+const WORKSPACE_MAX_CONVERSATIONS = 30; // most-recent conversations pulled into context
+const OTHER_CONV_MSGS = 5; // recent messages summarised per non-focused conversation
+const OTHER_CONV_CHARS = 600; // char cap on each non-focused transcript
+const ACTIVE_CONV_MSGS = 30; // recent messages for the conversation in focus
+const ACTIVE_CONV_CHARS = 3500; // char cap on the focused transcript
+const WORKSPACE_CONTEXT_CHARS = 12000; // overall cap on the assembled overview
+
+interface CollabComment {
+  authorType?: string;
+  authorName?: string;
+  authorUsername?: string;
+  content?: string;
+  createdAt?: string;
+  attachments?: unknown[];
+}
+
+interface CollabMeta {
+  proposalId: string;
+  influencerUsername?: string;
+  businessUsername?: string;
+  companyName?: string;
+  proposalTitle?: string;
+  createdAt?: string;
+}
+
+const oneLine = (s: string, max = 80) => {
+  const t = String(s || "").replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max) + "…" : t;
+};
+
+const relTime = (dateStr?: string) => {
+  if (!dateStr) return "";
+  const t = new Date(dateStr).getTime();
+  if (Number.isNaN(t)) return "";
+  const diff = Date.now() - t;
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(diff / 3600000);
+  const d = Math.floor(diff / 86400000);
+  if (m < 1) return "방금 전";
+  if (m < 60) return `${m}분 전`;
+  if (h < 24) return `${h}시간 전`;
+  if (d < 7) return `${d}일 전`;
+  return new Date(t).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+};
+
+const roleLabel = (authorType?: string) => (authorType === "business" ? "비즈니스" : "인플루언서");
+
+const previewOf = (c?: CollabComment) => {
+  if (!c) return "";
+  if (c.content) return oneLine(c.content, 70);
+  if (Array.isArray(c.attachments) && c.attachments.length > 0)
+    return `[첨부 파일 ${c.attachments.length}개]`;
+  return "[빈 메시지]";
+};
+
+const transcriptOf = (comments: CollabComment[], maxMsgs: number, maxChars: number) => {
+  const recent = comments.slice(-maxMsgs);
+  let s = recent
+    .map((c) => {
+      const text = c.content
+        ? c.content
+        : Array.isArray(c.attachments) && c.attachments.length > 0
+          ? `[첨부 파일 ${c.attachments.length}개]`
+          : "[빈 메시지]";
+      return `    ${c.authorName || "(이름 없음)"}(${roleLabel(c.authorType)}): ${oneLine(text, 240)}`;
+    })
+    .join("\n");
+  if (s.length > maxChars) s = "    …(이전 생략)\n" + s.slice(-maxChars);
+  return s;
+};
+
+// Assemble a compact, workspace-wide context string covering all of the user's
+// collaboration threads. Conversation metadata can be supplied by the client
+// (the list it already renders); transcripts are always read from the canonical
+// `timelines` Blobs store so the AI sees real message content.
+async function buildWorkspaceContext(
+  username: string,
+  userType: string,
+  activeProposalId: string,
+  clientTimelines: CollabMeta[],
+): Promise<string | null> {
+  const store = getStore("timelines");
+
+  let list: CollabMeta[] =
+    Array.isArray(clientTimelines) && clientTimelines.length > 0 ? clientTimelines : [];
+  if (list.length === 0) {
+    const idx = (await store
+      .get(`index_${userType}_${username}`, { type: "json" })
+      .catch(() => null)) as CollabMeta[] | null;
+    list = Array.isArray(idx) ? idx : [];
+  }
+  if (list.length === 0) return null;
+
+  // De-duplicate by proposalId, most-recent first, then cap.
+  const seen = new Set<string>();
+  const ordered = [...list]
+    .filter((t) => t && t.proposalId && !seen.has(t.proposalId) && seen.add(t.proposalId))
+    .sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+    );
+  const totalCount = ordered.length;
+  const capped = ordered.slice(0, WORKSPACE_MAX_CONVERSATIONS);
+
+  const details = await Promise.all(
+    capped.map((t) =>
+      store.get(`detail_${t.proposalId}`, { type: "json" }).catch(() => null),
+    ),
+  );
+
+  let needReplyCount = 0;
+  let unreadConvCount = 0;
+
+  const blocks: string[] = [];
+  let activeBlock = "";
+
+  capped.forEach((meta, i) => {
+    const detail = (details[i] || {}) as { comments?: CollabComment[] };
+    const comments = Array.isArray(detail.comments) ? detail.comments : [];
+    const partner =
+      userType === "business"
+        ? meta.influencerUsername || "(상대 정보 없음)"
+        : meta.companyName || meta.businessUsername || "(상대 정보 없음)";
+    const title = meta.proposalTitle || "(제목 없음)";
+    const last = comments[comments.length - 1];
+    const lastFromOther =
+      !!last && (last.authorUsername || "").toLowerCase() !== username;
+
+    // Incoming-unread is computed from each message's readBy list.
+    const unread = comments.filter((c) => {
+      const isIncoming = (c.authorUsername || "").toLowerCase() !== username;
+      const readBy = Array.isArray((c as any).readBy)
+        ? ((c as any).readBy as string[]).map((r) => String(r).toLowerCase())
+        : [];
+      return isIncoming && !readBy.includes(username);
+    }).length;
+
+    if (lastFromOther) needReplyCount++;
+    if (unread > 0) unreadConvCount++;
+
+    const isActive = !!activeProposalId && meta.proposalId === activeProposalId;
+    const header =
+      `${i + 1}. ${partner} — 제안 "${title}"${isActive ? " (지금 보고 있는 협업)" : ""}\n` +
+      `   메시지 ${comments.length}개 · 안 읽음 ${unread}개 · ${lastFromOther ? "⚠ 답장 필요" : "답장 완료"}\n` +
+      `   마지막: ${last ? `${last.authorName}(${roleLabel(last.authorType)}) "${previewOf(last)}" (${relTime(last.createdAt)})` : "메시지 없음"}`;
+
+    if (isActive) {
+      activeBlock =
+        `\n\n[지금 보고 있는 협업 상세]\n` +
+        `상대: ${partner} · 제안: "${title}"\n` +
+        `최근 대화:\n${transcriptOf(comments, ACTIVE_CONV_MSGS, ACTIVE_CONV_CHARS)}`;
+      blocks.push(header);
+    } else if (comments.length > 0) {
+      blocks.push(
+        header + `\n   최근 대화:\n${transcriptOf(comments, OTHER_CONV_MSGS, OTHER_CONV_CHARS)}`,
+      );
+    } else {
+      blocks.push(header);
+    }
+  });
+
+  const overview =
+    `[협업 워크스페이스 현황 — ${userType === "business" ? "비즈니스" : "인플루언서"} 계정: ${username}]\n` +
+    `- 진행 중인 협업(업체) 수: ${totalCount}개${totalCount > capped.length ? ` (아래 목록은 최근 ${capped.length}개)` : ""}\n` +
+    `- 상대의 마지막 메시지에 아직 답장하지 않은 협업: ${needReplyCount}개\n` +
+    `- 안 읽은 수신 메시지가 있는 협업: ${unreadConvCount}개`;
+
+  // Assemble within the overall char budget; the focused conversation detail is
+  // appended last so it is never dropped.
+  let body = `\n\n[협업 목록 (최근 활동순)]\n`;
+  for (const b of blocks) {
+    if (body.length + b.length > WORKSPACE_CONTEXT_CHARS) {
+      body += "\n…(이후 협업 생략)";
+      break;
+    }
+    body += b + "\n\n";
+  }
+
+  return overview + body + activeBlock;
+}
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -44,6 +233,9 @@ export default async (req: Request) => {
     ? body.messages
     : [];
   const context = body?.context || null;
+  const userType = body?.userType === "business" ? "business" : "influencer";
+  const activeProposalId = String(body?.activeProposalId || "");
+  const clientTimelines: CollabMeta[] = Array.isArray(body?.timelines) ? body.timelines : [];
 
   if (!username) {
     return Response.json({ error: "로그인이 필요합니다." }, { status: 401 });
@@ -101,16 +293,41 @@ export default async (req: Request) => {
     );
   }
 
-  const transcript = context?.transcript ? String(context.transcript).slice(-MAX_CONTEXT_CHARS) : "";
+  // Build the workspace-wide overview (all conversations). Falls back to the
+  // legacy single-conversation transcript the client used to send when the
+  // overview cannot be assembled.
+  let workspaceContext: string | null = null;
+  try {
+    workspaceContext = await buildWorkspaceContext(
+      username,
+      userType,
+      activeProposalId,
+      clientTimelines,
+    );
+  } catch (e) {
+    console.error("[collab-ai] failed to build workspace context", e);
+  }
+
+  const legacyTranscript = context?.transcript
+    ? String(context.transcript).slice(-MAX_CONTEXT_CHARS)
+    : "";
+
   const systemInstruction =
-    "당신은 픽스폴리오(Picksfolio)의 인플루언서·비즈니스 협업을 돕는 한국어 AI 어시스턴트입니다. " +
-    "협업 대화 요약, 일정·할 일 정리, 답장 메시지 초안 작성, 협상 포인트 정리를 도와주세요. " +
-    "제공된 협업 대화 맥락만 근거로 답하고, 맥락에 없는 내용은 추측하지 말고 모른다고 답하세요. " +
-    "항상 간결하고 친절한 한국어로, 핵심을 먼저 정리해 답하세요." +
-    (transcript
-      ? `\n\n[현재 협업: ${context?.title || "(제목 없음)"} · 상대: ${context?.partner || "(상대 정보 없음)"}]\n` +
-        `아래는 이 협업의 최근 대화 내용입니다. 이 내용을 바탕으로 답해 주세요:\n${transcript}`
-      : "\n\n현재 선택된 협업 대화가 없습니다. 일반적인 협업 도움을 제공하세요.");
+    "당신은 픽스폴리오(Picksfolio)의 인플루언서·비즈니스 협업을 돕는 유능한 한국어 AI 업무 비서입니다. " +
+    "당신에게는 사용자의 '모든' 협업 대화 목록과 현황이 제공됩니다. 따라서 다음과 같은 일을 도울 수 있습니다:\n" +
+    "- 전체 현황 파악: 지금 대화 중인 업체(협업)가 몇 곳인지, 어떤 협업이 답장이 필요한지, 안 읽은 메시지가 있는지 알려주기\n" +
+    "- 특정 업체 대응: 사용자가 언급한 업체와의 대화를 찾아 요약하고, 그 업체에 보낼 답장 초안을 작성하기\n" +
+    "- 우선순위 제안: 먼저 답해야 할 협업, 마감/일정이 임박한 협업을 정리해 주기\n" +
+    "- 일정·할 일 정리, 협상 포인트 정리, 메시지 톤 다듬기\n" +
+    "답변 규칙: 제공된 협업 데이터에 근거해서만 답하고, 데이터에 없는 내용은 추측하지 말고 모른다고 말하세요. " +
+    "업체를 지목할 때는 목록의 상대 이름이나 제안 제목으로 명확히 가리키세요. " +
+    "항상 핵심을 먼저 제시하고, 필요하면 목록이나 짧은 단락으로 간결하고 친절하게 한국어로 답하세요." +
+    (workspaceContext
+      ? `\n\n아래는 현재 사용자의 협업 현황 데이터입니다. 이 데이터를 근거로 답하세요:\n${workspaceContext}`
+      : legacyTranscript
+        ? `\n\n[현재 협업: ${context?.title || "(제목 없음)"} · 상대: ${context?.partner || "(상대 정보 없음)"}]\n` +
+          `아래는 이 협업의 최근 대화 내용입니다. 이 내용을 바탕으로 답해 주세요:\n${legacyTranscript}`
+        : "\n\n현재 불러올 수 있는 협업 대화가 없습니다. 협업이 아직 없다면 일반적인 협업·업무 도움을 제공하세요.");
 
   const contents = messages.slice(-MAX_TURNS).map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
