@@ -148,12 +148,28 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         }
       : null;
 
+    // Compact summary of every conversation the user has, so the AI can answer
+    // workspace-wide questions ("how many companies?", "which need a reply?",
+    // "draft a reply to <company>") — not just the one in focus. Transcripts
+    // are read server-side from the canonical store.
+    const timelineSummary = timelines.map(t => ({
+      proposalId: t.proposalId,
+      influencerUsername: t.influencerUsername,
+      businessUsername: t.businessUsername,
+      companyName: t.companyName,
+      proposalTitle: t.proposalTitle,
+      createdAt: t.createdAt,
+    }));
+
     try {
       const res = await fetch('/api/collab-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: normalizedUserName.toLowerCase(),
+          userType,
+          activeProposalId: selectedTimeline?.proposalId || '',
+          timelines: timelineSummary,
           messages: nextMessages,
           context,
         }),
@@ -609,7 +625,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   <span className="text-[13px] font-extrabold text-gray-900 truncate">AI 어시스턴트</span>
                   <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600 tracking-tight">BETA</span>
                 </div>
-                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">대화 요약 · 일정 정리 · 답장 초안</p>
+                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">전체 협업 현황 · 답장 초안 · 일정 정리</p>
               </div>
               <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
@@ -1152,8 +1168,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   // AI assistant chat panel (opened from the pinned item at the top of the list)
   const renderAiChat = () => {
     const suggestions = selectedTimeline
-      ? ['이 대화 요약해줘', '다음 할 일과 일정 정리해줘', '정중한 답장 초안 써줘']
-      : ['협업 제안 메시지 초안 써줘', '협상할 때 체크할 점 알려줘', '일정 관리 팁 알려줘'];
+      ? ['이 대화 요약해줘', `${userType === 'influencer' ? selectedTimeline.companyName : selectedTimeline.influencerUsername}에게 보낼 답장 초안 써줘`, '답장이 필요한 협업 알려줘', '다음 할 일과 일정 정리해줘']
+      : ['지금 대화 중인 업체가 몇 곳이야?', '답장이 필요한 협업 알려줘', '먼저 챙겨야 할 협업 우선순위 정리해줘', '협찬 계약서에서 꼭 확인할 점은?'];
 
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
@@ -1177,7 +1193,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600">BETA</span>
               </div>
               <p className="text-[10px] md:text-[11px] text-gray-500 font-medium truncate mt-0.5">
-                {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '협업 대화를 선택하면 그 내용을 함께 분석해요'}
+                {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '모든 협업을 함께 보고 업무를 도와드려요'}
               </p>
             </div>
           </div>
@@ -1213,7 +1229,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </div>
                   <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
                   <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed mb-4">
-                    협업 대화를 요약하거나, 일정을 정리하고, 답장 초안을 만들어 드릴게요.
+                    모든 협업을 한눈에 파악해 드려요. 대화 중인 업체 현황, 답장이 필요한 협업, 답장 초안은 물론 계약·정산·세금·광고 표시 같은 업무·법률 질문까지 물어보세요.
                   </p>
                   <div className="flex flex-col gap-2">
                     {suggestions.map((s) => (
