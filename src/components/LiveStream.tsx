@@ -2413,12 +2413,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
           className={`absolute top-0 left-0 w-full h-full ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          // objectFit: 'cover' fills the portrait viewport edge-to-edge so the
-          // live video never shows black letterbox bars on mobile. A landscape
-          // desktop broadcast is cropped to fit the phone screen rather than
-          // shrunk into a pillarboxed strip — matching the immersive full-screen
-          // look viewers expect from a mobile live feed.
-          style={{ objectFit: 'cover', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+          // objectFit: 'contain' shows the broadcaster's full frame exactly as it
+          // is captured, with no cropping. Previously this was 'cover', which on
+          // tall modern phones (~9:19.5) scaled the 9:16 broadcast up until it
+          // filled the screen, cropping ~11% off each side — so viewers saw a
+          // visibly more zoomed-in image than the broadcaster did. 'contain'
+          // matches the broadcaster's framing 1:1; the black background sits under
+          // the top bar and chat overlays, so the slim margins read as intentional.
+          style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
         />
         {/* HLS Video.js fallback */}
         {hlsPlaybackUrl && (
@@ -2437,7 +2439,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               x5-playsinline=""
               // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
               x5-video-player-type="h5-page"
-              style={{ objectFit: 'cover', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+              style={{ objectFit: 'contain', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         )}
@@ -2587,13 +2589,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         )}
 
         {/* Top Overlay */}
-        <div className="absolute top-0 left-0 right-0 z-20 flex justify-between items-start" style={{ padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800">
+        <div className="absolute top-0 left-0 right-0 z-20 flex justify-between items-start gap-2" style={{ padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}>
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800 flex-shrink-0">
               <SafeImage src={DEFAULT_AVATAR} className="w-full h-full object-cover" />
             </div>
-            <div>
-              <p className="text-white text-xs font-black tracking-tight">@{username}</p>
+            <div className="min-w-0">
+              <p className="text-white text-xs font-black tracking-tight truncate">@{username}</p>
               <div className="flex items-center gap-2">
                 <div className="bg-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
                   LIVE
@@ -2615,9 +2617,9 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {kakaoUser && (
-              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.username || kakaoUser.nickname}</span>
+              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full max-w-[90px] truncate">{kakaoUser.username || kakaoUser.nickname}</span>
             )}
             {/* Persistent unmute toggle — mobile autoplay forces muted start,  */}
             {/* and many viewers never realize they can tap for sound. Showing  */}
