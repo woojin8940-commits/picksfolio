@@ -133,6 +133,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [usernameError, setUsernameError] = useState('');
   const [usernameSaving, setUsernameSaving] = useState(false);
   const [showChatOverlay, setShowChatOverlay] = useState(true);
+  // How far the on-screen keyboard overlaps the bottom of the viewport while the
+  // chat input is focused. Used to lift the chat input above the keyboard while
+  // keeping the broadcast video pinned in place (see the visualViewport effect).
+  const [keyboardInset, setKeyboardInset] = useState(0);
   // Set when the host ends the broadcast (via the signaling broadcast-end event
   // or the live-state poll). Shows a brief notice, then the stream auto-closes.
   const [streamEnded, setStreamEnded] = useState(false);
@@ -1706,6 +1710,35 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // Keep the broadcast video fixed when the on-screen keyboard opens for chat.
+  // On mobile, focusing the chat input makes the browser shrink the visual
+  // viewport and scroll the page up to reveal the input — which drags the
+  // `fixed inset-0` video container up with it. We counter this by (a) snapping
+  // the window back to the top whenever it tries to scroll, and (b) lifting the
+  // chat overlay above the keyboard ourselves via the VisualViewport API so the
+  // browser never needs to move the page in the first place.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      // How much the keyboard overlaps the bottom of the layout viewport.
+      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKeyboardInset(overlap);
+      // Undo any auto-scroll the browser applied to reveal the input so the
+      // video stays pinned to the top.
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+    };
+
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+
   // Initialize Kakao SDK (for share/send features)
   useEffect(() => {
     const initKakao = () => {
@@ -3248,6 +3281,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         style={{
           maxHeight: 'min(38vh, 320px)',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          // Lift the chat input above the on-screen keyboard so the broadcast
+          // video underneath never has to scroll out of the way.
+          transform: keyboardInset ? `translateY(-${keyboardInset}px)` : undefined,
+          transition: 'transform 0.2s ease-out, opacity 0.3s',
         }}
       >
         {/* Chat toggle button */}
