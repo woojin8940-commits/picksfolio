@@ -182,8 +182,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const isInAppBrowser = isKakaoInApp || isNaverInApp || isLineInApp || isFacebookInApp || isIOSInApp;
   // Detect the specific in-app label for diagnostics reporting.
   const inAppLabel = isKakaoInApp ? 'kakao' : isNaverInApp ? 'naver' : isLineInApp ? 'line' : isFacebookInApp ? 'fb/ig' : (isIOSInApp ? 'ios-inapp' : '');
-  const [inAppBannerDismissed, setInAppBannerDismissed] = useState(false);
-  const showInAppBrowserBanner = isInAppBrowser && !inAppBannerDismissed;
+  // The in-app detection above still drives the HLS-first playback preference
+  // (more reliable inside KakaoTalk/Instagram/Line WebViews). We intentionally do
+  // NOT surface the "open in Safari/Chrome" recommendation banner to viewers —
+  // most arrive via Instagram/KakaoTalk and the prompt was confusing.
   const openInExternalBrowser = useCallback(() => {
     const url = typeof window !== 'undefined' ? window.location.href : '';
     if (!url) return;
@@ -1889,14 +1891,28 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   }, [currentProduct, pendingOptions, handleAddToCart, optionPickerMode]);
 
   // Detect broadcast end for ALL viewers and auto-close the stream so they
-  // return to the host's personal page.
+  // return to the host's personal page. A SINGLE isLive=false reading is not
+  // enough to close: mobile hosts can momentarily write isLive=false (a spurious
+  // pagehide when the app is briefly backgrounded, or a race while switching
+  // products), and a failed fetch returns null. Closing on the first false flip
+  // was force-ejecting viewers mid-broadcast. We now require several CONSECUTIVE
+  // confirmed-false readings before closing, and ignore null (network) reads.
+  // The broadcaster's heartbeat re-asserts isLive=true within ~8s, so genuine
+  // blips reset the counter long before it trips.
   useEffect(() => {
-    const endedRef = { current: false };
+    let consecutiveEnded = 0;
+    let closed = false;
     const checkEnded = async () => {
-      if (endedRef.current) return;
+      if (closed) return;
       const state = await apiService.getLiveState(username);
-      if (state && !state.isLive) {
-        endedRef.current = true;
+      if (!state) return; // fetch failed — don't count toward ending
+      if (state.isLive) {
+        consecutiveEnded = 0;
+        return;
+      }
+      consecutiveEnded += 1;
+      if (consecutiveEnded >= 3) {
+        closed = true;
         setTimeout(() => { onClose(); }, 1500);
       }
     };
@@ -2221,47 +2237,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         </div>
       )}
 
-      {/* --- IN-APP BROWSER BANNER ------------------------------------- */}
-      {/* KakaoTalk / Instagram / Line in-app WebViews have unreliable   */}
-      {/* WebRTC + TURN support, so prompt users to open the link in the */}
-      {/* OS browser (Safari / Chrome) where playback is far more stable.*/}
-      {showInAppBrowserBanner && (
-        <div
-          className="absolute left-0 right-0 z-[301] px-3 py-2 flex items-center justify-between gap-2 text-white"
-          style={{
-            top: debugMode ? 'calc(env(safe-area-inset-top, 0px) + 22px)' : 'env(safe-area-inset-top, 0px)',
-            backgroundColor: 'rgba(124, 58, 237, 0.95)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-          }}
-        >
-          <span className="text-[12px] font-semibold leading-tight">
-            {isKakaoInApp
-              ? '카카오톡에서는 방송이 잘 보이지 않을 수 있어요. 외부 브라우저로 여는 것을 권장합니다.'
-              : '인앱 브라우저에서는 방송이 불안정할 수 있어요. Safari/Chrome에서 여는 것을 권장합니다.'}
-          </span>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={openInExternalBrowser}
-              className="px-2.5 py-1 rounded-md bg-white text-blue-700 text-[11px] font-bold active:scale-95"
-            >
-              {isKakaoInApp ? 'Safari/Chrome에서 열기' : '브라우저로 열기'}
-            </button>
-            <button
-              onClick={() => setInAppBannerDismissed(true)}
-              aria-label="닫기"
-              className="px-1.5 py-1 rounded-md text-white/90 hover:text-white"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* --- CELLULAR / DATA-SAVER WARNING ----------------------------- */}
       {/* Mobile viewers on cellular can burn through their data plan     */}
       {/* quickly on a live video stream — give them one dismissable      */}
       {/* heads-up before they watch.                                     */}
-      {showDataWarning && !showInAppBrowserBanner && (
+      {showDataWarning && (
         <div
           className="absolute left-0 right-0 z-[301] px-3 py-2 flex items-center justify-between gap-2 text-white"
           style={{

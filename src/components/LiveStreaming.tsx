@@ -462,6 +462,30 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     });
   }, [activeProductId, activeMaterialId, isLive, userName, viewerCount, liveProducts, materials]);
 
+  // Live-state heartbeat: while broadcasting, re-assert isLive=true every few
+  // seconds. Mobile browsers can fire a spurious pagehide/beforeunload (e.g. the
+  // host briefly switches apps, answers a call, or the screen is touched), which
+  // writes isLive=false to the shared store. Without a heartbeat that flip would
+  // persist — kicking every viewer out mid-broadcast and dropping the "라이브 중"
+  // banner on the host's page until the host happens to change a product. The
+  // heartbeat heals any accidental false within ~8s, well inside the viewers'
+  // confirm-before-close window.
+  useEffect(() => {
+    if (!isLive) return;
+    const sendHeartbeat = () => {
+      const activeProduct = liveProducts.find(p => p.id === activeProductId) || null;
+      const material = materials.find(m => m.id === activeMaterialId) || null;
+      apiService.saveLiveState(userName, {
+        isLive: true,
+        viewerCount,
+        currentProduct: activeProduct,
+        activeMaterial: material,
+      }).catch(() => {});
+    };
+    const interval = setInterval(sendHeartbeat, 8000);
+    return () => clearInterval(interval);
+  }, [isLive, userName, viewerCount, activeProductId, activeMaterialId, liveProducts, materials]);
+
   // Canvas rendering loop: draws video with filters + mirror, produces stream for WebRTC
   // Uses shared drawFrame() with 30fps throttling and background tab support
   const startCanvasLoop = useCallback((sourceVideo: HTMLVideoElement) => {

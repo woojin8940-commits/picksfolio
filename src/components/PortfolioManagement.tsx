@@ -10,8 +10,9 @@ import { DesignSettings, TemplateType, SellerVerification } from '../types';
 import Toast from './Toast';
 import MediaAuto, { isVideoSource } from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
+import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
-import { normalizeContentToHtml, renderPortfolioHtml, sanitizeRichHtml } from './richText';
+import { normalizeContentToHtml, sanitizeRichHtml } from './richText';
 
 type BlockFontSize = 'sm' | 'md' | 'lg' | 'xl';
 type BlockGridColumns = 1 | 2 | 3 | 4;
@@ -37,48 +38,6 @@ interface PortfolioBlock {
   title?: string;
   icon?: string;
 }
-
-const ALL_CATEGORY_LABEL = '전체';
-
-interface PortfolioCategoryDescriptor {
-  id: string;
-  name: string;
-  image?: string;
-  description?: string;
-}
-
-const collectPortfolioCategories = (items: { id?: string; type?: string; content?: string; categoryImage?: string; categoryDescription?: string }[]): PortfolioCategoryDescriptor[] => {
-  const out: PortfolioCategoryDescriptor[] = [];
-  const seen = new Set<string>();
-  for (const it of items || []) {
-    if (!it || it.type !== 'category') continue;
-    const name = (it.content || '').trim();
-    if (!name) continue;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    out.push({ id: it.id || name, name, image: it.categoryImage, description: it.categoryDescription });
-  }
-  return out;
-};
-
-const filterPortfolioByCategory = <T extends { type?: string; content?: string }>(items: T[], categoryName: string): T[] => {
-  const out: T[] = [];
-  let active: string | null = null;
-  const isAll = !categoryName || categoryName === ALL_CATEGORY_LABEL;
-  for (const it of items || []) {
-    if (!it) continue;
-    if (it.type === 'category') {
-      active = (it.content || '').trim();
-      continue;
-    }
-    if (isAll) {
-      if (active === null) out.push(it);
-    } else if (active === categoryName) {
-      out.push(it);
-    }
-  }
-  return out;
-};
 
 const getBlockImages = (block: PortfolioBlock): string[] => {
   const cols = (block.gridColumns || 1) as number;
@@ -128,35 +87,6 @@ const getTextDecoration = (block: { underline?: boolean; strikethrough?: boolean
   if (block.underline) parts.push('underline');
   if (block.strikethrough) parts.push('line-through');
   return parts.length ? parts.join(' ') : undefined;
-};
-
-const chunkArray = <T,>(arr: T[], size: number): T[][] => {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-};
-
-type BlockGroup =
-  | { kind: 'single'; block: PortfolioBlock }
-  | { kind: 'imageGrid'; columns: BlockGridColumns; blocks: PortfolioBlock[] };
-
-const groupBlocksForRender = (items: PortfolioBlock[]): BlockGroup[] => {
-  const groups: BlockGroup[] = [];
-  for (const b of items) {
-    if (!b) continue;
-    if (b.type === 'image') {
-      const cols = (b.gridColumns || 1) as BlockGridColumns;
-      const last = groups[groups.length - 1];
-      if (last && last.kind === 'imageGrid' && last.columns === cols) {
-        last.blocks.push(b);
-      } else {
-        groups.push({ kind: 'imageGrid', columns: cols, blocks: [b] });
-      }
-    } else {
-      groups.push({ kind: 'single', block: b });
-    }
-  }
-  return groups;
 };
 
 interface RichTextEditorHandle {
@@ -402,7 +332,6 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const [videoCropperSrc, setVideoCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
-  const [previewCategory, setPreviewCategory] = useState<string>(ALL_CATEGORY_LABEL);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null);
   const [openHighlightPicker, setOpenHighlightPicker] = useState<string | null>(null);
@@ -2131,216 +2060,28 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
           <div className="sticky top-10">
             <div className="flex flex-col items-center justify-center gap-4">
             <PhoneFrame
-              size="md"
+              size="lg"
               label="실시간 미리보기"
               liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
-              contentClassName="bg-white text-slate-900"
+              contentClassName={design.theme === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
             >
-              {/* Header Image */}
-                <div
-                  className="h-40 relative overflow-hidden"
-                  style={{
-                    background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
-                  }}
-                >
-                  {design.portfolioHeaderImage && (
-                    <MediaAuto
-                      src={design.portfolioHeaderImage}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
-                    />
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-white via-white/40 to-transparent" />
-                </div>
-
-                <div className="pt-4 px-4 text-center space-y-4">
-                  <div>
-                    <h4 className="text-lg font-black text-slate-900 tracking-tighter">{profile.name}</h4>
-                    <p className={`font-black uppercase tracking-[0.3em] ${
-                      design.portfolioFontSize === 'small' ? 'text-[8px]' :
-                      design.portfolioFontSize === 'large' ? 'text-sm' :
-                      'text-[10px]'
-                    }`} style={{ color: design.accentColor || '#3B82F6' }}>{profile.bio || 'CREATOR & STYLIST'}</p>
-                  </div>
-
-                  <div className="flex justify-center gap-2 flex-wrap">
-                    {profile.links?.businessProposal && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: design.accentColor || '#3B82F6' }}><Briefcase size={12} /><span>비즈니스 제안</span></div>}
-                    {profile.links?.liveNotify && <div className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold bg-emerald-500 text-white shadow-sm"><Bell size={12} /><span>라이브 알림</span></div>}
-                    {(profile.links?.customButtons || []).filter(b => b.label.trim()).map(btn => (
-                      <div key={btn.id} className="flex items-center gap-1 px-3 py-2 rounded-xl text-[9px] font-bold text-white shadow-sm" style={{ backgroundColor: btn.color }}><Globe size={12} /><span>{btn.label}</span></div>
-                    ))}
-                  </div>
-
-                  <div className="h-[1px] bg-slate-100 w-full" />
-
-                  {/* Content sections ordered by homePriority */}
-                  <div className="flex flex-col w-full">
-                  <div style={{ order: design.homePriority === 'portfolio' ? 1 : 2 }}>
-                  {/* Dynamic Blocks Preview */}
-                  <div className="space-y-3 text-left">
-                    {(() => {
-                      const visibleBlocks = blocks.filter(Boolean);
-                      const categoryDescriptors = collectPortfolioCategories(visibleBlocks);
-                      const tabs = [ALL_CATEGORY_LABEL, ...categoryDescriptors.map(c => c.name)];
-                      if (categoryDescriptors.length === 0) return null;
-                      const activeName = tabs.includes(previewCategory) ? previewCategory : ALL_CATEGORY_LABEL;
-                      return (
-                        <div className="space-y-3">
-                          <div className="overflow-x-auto scrollbar-hide flex gap-1.5">
-                            {tabs.map(t => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => setPreviewCategory(t)}
-                                className={`px-3 py-1.5 rounded-full text-[10px] font-black whitespace-nowrap border transition-all ${
-                                  activeName === t
-                                    ? 'text-white border-transparent'
-                                    : 'bg-white border-slate-200 text-slate-500'
-                                }`}
-                                style={activeName === t ? { backgroundColor: design.accentColor || '#3B82F6' } : undefined}
-                              >
-                                {t}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    {groupBlocksForRender(filterPortfolioByCategory(blocks.filter(Boolean), previewCategory)).map((group, gi) => {
-                      if (group.kind === 'single') {
-                        if (group.block.type === 'category') {
-                          return (
-                            <div key={group.block.id} className="pt-2 pb-1 space-y-2">
-                              <div className="flex items-center gap-2">
-                                <Hash size={14} className="text-blue-500 shrink-0" />
-                                <h5 className="text-sm font-black text-slate-900 truncate">
-                                  {group.block.content || '카테고리'}
-                                </h5>
-                              </div>
-                            </div>
-                          );
-                        }
-                        const pxOnPreview = Math.max(8, Math.round(getBlockFontPx(group.block) * 0.72));
-                        return (
-                          <div key={group.block.id}>
-                            <div
-                              className="rounded-2xl border px-3 py-3"
-                              style={{
-                                backgroundColor: (group.block.highlight && group.block.highlight !== 'transparent') ? group.block.highlight : '#f1f5f9',
-                                borderColor: '#e2e8f0',
-                              }}
-                            >
-                              <div
-                                className={`whitespace-pre-wrap ${group.block.bold ? 'font-bold' : 'font-medium'}`}
-                                style={{
-                                  color: group.block.color || '#37352f',
-                                  fontSize: `${pxOnPreview}px`,
-                                  lineHeight: 1.75,
-                                  fontStyle: group.block.italic ? 'italic' : undefined,
-                                  textDecoration: getTextDecoration(group.block)
-                                }}
-                                dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(group.block.content || '') }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      const flatImgs: { key: string; src: string; pos?: { x: number; y: number } }[] = group.blocks.flatMap(b =>
-                        getBlockImages(b).map((src, i) => ({ key: `${b.id}-${i}`, src, pos: b.imagePositions?.[i] }))
-                      );
-
-                      const ImgTile: React.FC<{ src?: string; pos?: { x: number; y: number }; rounded?: string }> = ({ src, pos, rounded = 'rounded-xl' }) => (
-                        <div className={`${rounded} overflow-hidden border border-slate-200 bg-slate-50 w-full h-full`}>
-                          {src ? <MediaAuto src={src} alt="" className="w-full h-full object-cover" style={pos ? { objectPosition: `${pos.x}% ${pos.y}%` } : undefined} /> : null}
-                        </div>
-                      );
-
-                      if (group.columns === 3) {
-                        const chunks = chunkArray(flatImgs, 3);
-                        return (
-                          <div key={`grid-${gi}`} className="space-y-1.5">
-                            {chunks.map((ck, ci) => (
-                              ck.length === 3 ? (
-                                <div key={`m-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-1.5 aspect-[4/3]">
-                                  <div className="row-span-2 h-full"><ImgTile src={ck[0].src} pos={ck[0].pos} /></div>
-                                  <div className="h-full"><ImgTile src={ck[1].src} pos={ck[1].pos} /></div>
-                                  <div className="h-full"><ImgTile src={ck[2].src} pos={ck[2].pos} /></div>
-                                </div>
-                              ) : (
-                                <div key={`m-${ci}`} className={`grid gap-1.5 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                                  {ck.map(b => (
-                                    <div key={b.key} className="aspect-square"><ImgTile src={b.src} pos={b.pos} /></div>
-                                  ))}
-                                </div>
-                              )
-                            ))}
-                          </div>
-                        );
-                      }
-
-                      if (group.columns === 4) {
-                        return (
-                          <div key={`grid-${gi}`} className="grid grid-cols-2 gap-1.5">
-                            {flatImgs.map(img => (
-                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} pos={img.pos} /></div>
-                            ))}
-                          </div>
-                        );
-                      }
-
-                      if (group.columns === 2) {
-                        return (
-                          <div key={`grid-${gi}`} className="grid grid-cols-2 gap-1.5">
-                            {flatImgs.map(img => (
-                              <div key={img.key} className="aspect-square"><ImgTile src={img.src} pos={img.pos} /></div>
-                            ))}
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div key={`grid-${gi}`} className="space-y-1.5">
-                          {flatImgs.map(img => (
-                            <div key={img.key} className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                              {img.src ? <MediaAuto src={img.src} alt="" className="w-full h-auto object-cover" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} /> : <div className="aspect-video" />}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  </div>
-
-                  {linkGridBlocks.length > 0 && (
-                  <div style={{ order: design.homePriority === 'portfolio' ? 2 : 1 }} className="space-y-2 text-left pt-3">
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#3B82F6', opacity: 0.3 }}></div>
-                      <h4 className="text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: design.accentColor || '#3B82F6' }}>My Curations</h4>
-                      <div className="flex-1 h-[0.5px]" style={{ backgroundColor: design.accentColor || '#3B82F6', opacity: 0.3 }}></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {linkGridBlocks.map((block: any) => {
-                        const pos = block.coverMediaPosition || { x: 50, y: 50 };
-                        return (
-                          <div key={block.id} className="relative overflow-hidden aspect-square rounded-xl border border-slate-200 bg-slate-50">
-                            {block.coverMedia && <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" style={{ objectPosition: `${pos.x}% ${pos.y}%` }} />}
-                            <div className="absolute top-1 right-1">
-                              <span className="bg-black/60 backdrop-blur-md text-[6px] font-black px-1 py-0.5 rounded text-white">{block.products?.length || 0}</span>
-                            </div>
-                            <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
-                              <div className="text-[6px] font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                              <div className="text-[5px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  )}
-                  </div>
-
-                </div>
+              <PagePreview
+                theme={design.theme === 'white' ? 'white' : 'midnight'}
+                accentColor={design.accentColor || '#3B82F6'}
+                header={{
+                  color: design.portfolioHeaderColor,
+                  image: design.portfolioHeaderImage,
+                  imagePosition: design.portfolioHeaderImagePosition,
+                }}
+                profile={profile}
+                userName={userName}
+                portfolioFontSize={design.portfolioFontSize || 'medium'}
+                socials={profile.links || {}}
+                homePriority={design.homePriority === 'portfolio' ? 'portfolio' : 'curation'}
+                layoutTemplate={design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid'}
+                curationBlocks={linkGridBlocks}
+                portfolioBlocks={blocks.filter(Boolean)}
+              />
             </PhoneFrame>
             {/* Save Button - next to phone preview */}
             <div className="flex flex-row items-center gap-3">

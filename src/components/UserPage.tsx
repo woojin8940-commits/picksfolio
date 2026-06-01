@@ -557,35 +557,48 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   // Poll live state from API so viewers detect broadcasts without Supabase Realtime
   useEffect(() => {
     let active = true;
+    // Count consecutive isLive=false readings. The "라이브 중" banner is turned ON
+    // immediately, but only turned OFF after several consecutive confirmed-false
+    // readings. This keeps the banner steady through transient false blips (a host
+    // momentarily backgrounding the app, a product-switch race, a slow read) that
+    // previously made the banner vanish and then reappear a few seconds later.
+    let consecutiveOff = 0;
     const pollLive = async () => {
       try {
         const apiLive = await apiService.getLiveState(normalizedUsername);
-        if (active && apiLive) {
-          setLiveState((prev) => {
-            // Only update if changed to avoid unnecessary re-renders
-            const newProductId = apiLive.currentProduct?.id || null;
-            const prevProductId = prev.currentProduct?.id || null;
-            const newMaterialId = apiLive.activeMaterial?.id || null;
-            const prevMaterialId = prev.activeMaterial?.id || null;
-            const newMaterialUrl = apiLive.activeMaterial?.url || null;
-            const prevMaterialUrl = prev.activeMaterial?.url || null;
-            if (
-              prev.isLive !== apiLive.isLive ||
-              prev.viewerCount !== (apiLive.viewerCount || 0) ||
-              prevProductId !== newProductId ||
-              prevMaterialId !== newMaterialId ||
-              prevMaterialUrl !== newMaterialUrl
-            ) {
-              return {
-                isLive: apiLive.isLive,
-                currentProduct: apiLive.currentProduct,
-                viewerCount: apiLive.viewerCount || 0,
-                activeMaterial: apiLive.activeMaterial,
-              };
-            }
-            return prev;
-          });
+        if (!active || !apiLive) return; // null = fetch failed; keep current state
+        if (apiLive.isLive) {
+          consecutiveOff = 0;
+        } else {
+          consecutiveOff += 1;
         }
+        const suppressOff = !apiLive.isLive && consecutiveOff < 3;
+        setLiveState((prev) => {
+          // Broadcast briefly read as ended — hold the banner until confirmed.
+          if (suppressOff && prev.isLive) return prev;
+          // Only update if changed to avoid unnecessary re-renders
+          const newProductId = apiLive.currentProduct?.id || null;
+          const prevProductId = prev.currentProduct?.id || null;
+          const newMaterialId = apiLive.activeMaterial?.id || null;
+          const prevMaterialId = prev.activeMaterial?.id || null;
+          const newMaterialUrl = apiLive.activeMaterial?.url || null;
+          const prevMaterialUrl = prev.activeMaterial?.url || null;
+          if (
+            prev.isLive !== apiLive.isLive ||
+            prev.viewerCount !== (apiLive.viewerCount || 0) ||
+            prevProductId !== newProductId ||
+            prevMaterialId !== newMaterialId ||
+            prevMaterialUrl !== newMaterialUrl
+          ) {
+            return {
+              isLive: apiLive.isLive,
+              currentProduct: apiLive.currentProduct,
+              viewerCount: apiLive.viewerCount || 0,
+              activeMaterial: apiLive.activeMaterial,
+            };
+          }
+          return prev;
+        });
       } catch {}
     };
     const timer = setInterval(pollLive, 3000);
