@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef, useTransition } from 'react';
-import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, Tv, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
@@ -137,6 +137,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   // chat input is focused. Used to lift the chat input above the keyboard while
   // keeping the broadcast video pinned in place (see the visualViewport effect).
   const [keyboardInset, setKeyboardInset] = useState(0);
+  // The full-screen height (in px) captured while the keyboard is closed. The
+  // player is locked to this height so it never resizes or jumps when the
+  // on-screen keyboard opens for chat — regardless of the browser's
+  // interactive-widget mode (see the visualViewport effect).
+  const [lockedHeight, setLockedHeight] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerHeight : 0
+  );
   // Set when the host ends the broadcast (via the signaling broadcast-end event
   // or the live-state poll). Shows a brief notice, then the stream auto-closes.
   const [streamEnded, setStreamEnded] = useState(false);
@@ -1710,34 +1717,28 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Root cause of the "video jumps when I start typing" glitch:
+  // Keep the broadcast video locked full-screen while the on-screen keyboard
+  // opens for chat — and lift ONLY the chat input above the keyboard.
   //
-  // The app's global viewport meta uses `interactive-widget=resizes-content`,
-  // which tells the browser to SHRINK the whole layout viewport when the
-  // on-screen keyboard opens. Because the player is a `fixed inset-0` element,
-  // shrinking the layout viewport drags the entire broadcast frame upward and
-  // scales it down — the brief "screen moves" the viewer sees the moment the
-  // chat keyboard appears. Other platforms feel smooth because they let the
-  // keyboard *overlay* the video instead of resizing the page underneath it.
+  // Why the video used to "surge" / briefly reveal the host's page when typing:
+  // mobile browsers handle the keyboard one of two ways. With
+  // `interactive-widget=resizes-content` (this app's global default) the whole
+  // layout viewport shrinks when the keyboard opens, dragging the `fixed`
+  // player up and momentarily exposing the page underneath. The previous
+  // attempt tried to flip the page to `resizes-visual` at runtime, but browsers
+  // only read `interactive-widget` at page load, so the flip never took effect
+  // and the surge remained.
   //
-  // While the live viewer is open we switch the page to `resizes-visual` (the
-  // browser default): the layout viewport — and therefore the video — stays
-  // exactly where it is, the keyboard simply overlays the bottom, and we lift
-  // only the chat input above it (see the VisualViewport effect below). We also
-  // lock background scrolling so the browser can't nudge the fixed player while
-  // bringing the focused input into view. Both are restored on unmount so the
-  // rest of the app keeps its original behaviour.
+  // The robust fix is mode-agnostic: we remember the full-screen height while
+  // the keyboard is closed (`lockedHeight`) and pin the player to it, and we
+  // measure the keyboard overlap against that remembered height rather than the
+  // live `innerHeight`. That math is correct whether the browser shrinks the
+  // layout viewport (resizes-content) or overlays the keyboard (resizes-visual),
+  // so the video stays put, nothing peeks through behind it, and only the chat
+  // input rides up. We also lock background scrolling so the browser can't nudge
+  // the fixed player while bringing the focused input into view.
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const meta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
-    const prevViewport = meta?.getAttribute('content') ?? null;
-    if (meta && prevViewport) {
-      const next = /interactive-widget=/.test(prevViewport)
-        ? prevViewport.replace(/interactive-widget=[^,]+/, 'interactive-widget=resizes-visual')
-        : `${prevViewport}, interactive-widget=resizes-visual`;
-      meta.setAttribute('content', next);
-    }
-
     const html = document.documentElement;
     const body = document.body;
     const prevHtmlOverflow = html.style.overflow;
@@ -1747,29 +1748,28 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     // same spot on the host's page.
     html.style.overflow = 'hidden';
     body.style.overflow = 'hidden';
-
     return () => {
-      if (meta && prevViewport !== null) meta.setAttribute('content', prevViewport);
       html.style.overflow = prevHtmlOverflow;
       body.style.overflow = prevBodyOverflow;
     };
   }, []);
 
-  // Lift ONLY the chat input above the on-screen keyboard, keeping the broadcast
-  // video pinned in place. With `resizes-visual` active (see the effect above)
-  // the layout viewport no longer moves, so focusing the chat input no longer
-  // drags the video; all that's left is to raise the input so the keyboard
-  // doesn't cover it. We track the VisualViewport in real time (no CSS transition
-  // on the transform) so the input rides up in lockstep with the keyboard
-  // animation instead of lagging a beat behind it — which is what made the
-  // previous attempt feel janky.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
 
+    let full = window.innerHeight;
     const update = () => {
-      // How much the keyboard overlaps the bottom of the layout viewport.
-      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      // While the keyboard is closed, the visual viewport fills the screen and
+      // `full` tracks the real full-screen height. Once it opens we freeze that
+      // value and measure the keyboard overlap against it, which works in both
+      // resizes-content (innerHeight shrinks) and resizes-visual (vv.height
+      // shrinks) modes.
+      const overlap = Math.max(0, full - vv.height - vv.offsetTop);
+      if (overlap === 0) {
+        full = window.innerHeight;
+        setLockedHeight(full);
+      }
       setKeyboardInset(overlap);
       // Belt-and-suspenders: undo any residual scroll the browser applied while
       // revealing the focused input so the video stays pinned to the top.
@@ -2343,8 +2343,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
 
   return (
     <div
-      className="fixed inset-0 z-[200] bg-black overflow-hidden live-stream-container"
+      className="fixed top-0 left-0 right-0 z-[200] bg-black overflow-hidden live-stream-container"
       style={{
+        // Lock the player to the full-screen height captured while the keyboard
+        // was closed so it never resizes or jumps when the keyboard opens for
+        // chat (and never lets the host's page peek through behind it). Falls
+        // back to dynamic viewport units before the first measurement.
+        height: lockedHeight ? `${lockedHeight}px` : '100dvh',
         // Prevent the browser's pull-to-refresh and rubber-band scroll from
         // interfering with the immersive player. Safe here because the inner
         // scrollable zones (chat) opt in via their own overscroll rules.
@@ -2679,17 +2684,6 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                 <div className="bg-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse flex-shrink-0">
                   LIVE
                 </div>
-                {(streamConnected || hlsReady || streamMode === 'hls') && (
-                  <button
-                    onClick={() => setStreamMode(prev => prev === 'webrtc' ? 'hls' : prev === 'hls' ? 'auto' : 'webrtc')}
-                    className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[8px] font-bold text-white/80 hover:bg-black/60 transition-all flex-shrink-0"
-                    title={`현재: ${useHls ? 'HLS (Full HD)' : 'WebRTC (저지연)'} · 탭하여 화질 전환`}
-                    aria-label={useHls ? '고화질(HD) 모드 — 탭하여 전환' : '실시간 모드 — 탭하여 전환'}
-                  >
-                    {useHls ? <Tv size={10} /> : <Radio size={10} />}
-                    {useHls ? 'HD' : '실시간'}
-                  </button>
-                )}
                 <div className="flex items-center gap-1 text-white/60 text-[10px] font-bold flex-shrink-0">
                   <Users size={10} />
                   <span>{viewerCount.toLocaleString()}</span>
