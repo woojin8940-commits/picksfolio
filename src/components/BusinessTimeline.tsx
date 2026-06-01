@@ -1356,8 +1356,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   // Mobile: show list or detail
   // Desktop: two-panel layout
+  // When a conversation or the AI chat is open on mobile, the global bottom nav
+  // is hidden, so the panel should fill the full viewport height and the
+  // composer rests flush at the very bottom. In the list view the nav is still
+  // visible, so leave room for it.
+  const chatOpen = !!selectedTimeline || aiActive;
   return (
-    <div className="h-[calc(100vh-60px)] md:h-[calc(100vh-2rem)] w-full animate-in fade-in duration-300">
+    <div className={`${chatOpen ? 'h-[100dvh]' : 'h-[calc(100dvh-60px)]'} md:h-[calc(100vh-2rem)] w-full animate-in fade-in duration-300`}>
       {/* Desktop: Two-panel layout */}
       <div className="hidden md:flex h-full rounded-2xl overflow-hidden border border-gray-200 bg-gray-50 shadow-lg shadow-gray-200/50">
         <div className="w-[320px] shrink-0">

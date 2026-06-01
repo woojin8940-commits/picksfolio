@@ -21,8 +21,17 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         external: ['amazon-ivs-web-broadcast'],
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
+          // Split large third-party libraries into their own long-lived chunks
+          // so the homepage entry stays small and heavy dependencies are only
+          // fetched (and cached) by the routes that actually use them.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('react-dom') || /[\\/]react[\\/]/.test(id) || id.includes('scheduler')) return 'vendor-react';
+            if (id.includes('@supabase')) return 'vendor-supabase';
+            if (id.includes('framer-motion') || id.includes('/motion/') || id.includes('popmotion')) return 'vendor-motion';
+            if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) return 'vendor-charts';
+            if (id.includes('lucide-react')) return 'vendor-icons';
+            if (id.includes('dompurify')) return 'vendor-dompurify';
           },
         },
       },

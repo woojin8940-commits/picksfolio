@@ -195,8 +195,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         : []
       );
 
+  // The timeline (collaboration messages) is a full-height chat view that
+  // manages its own viewport height and pins its composer to the bottom, so it
+  // must not inherit the dashboard's bottom padding (which would otherwise push
+  // the conversation up and leave an empty band beneath it).
+  const isFullHeightView = currentSubView === 'timeline';
+
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 pb-20 md:pb-0">
+    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 ${isFullHeightView ? '' : 'pb-20'}`}>
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-60 bg-[#0b1221] text-white fixed h-full flex-col p-6 z-50">
         <div
@@ -379,7 +385,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* Content Area */}
-      <div className="flex-1 md:ml-60 w-full min-h-screen pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <div className={`flex-1 md:ml-60 w-full ${isFullHeightView ? 'md:min-h-screen' : 'min-h-screen pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-0'}`}>
         {children || (
           <ErrorBoundary>
             <main className="p-4 md:p-14 w-full animate-in fade-in duration-500">
