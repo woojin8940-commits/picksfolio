@@ -16,6 +16,13 @@ export const INCLUDED_MINUTES_PER_MONTH = 180 // 3 hours
 export const OVERAGE_RATE_KRW_PER_HOUR = 8900
 export const OVERAGE_RATE_KRW_PER_MINUTE = OVERAGE_RATE_KRW_PER_HOUR / 60 // ≈148.33
 
+// Prepaid top-up ("시간 충전하기") is sold by the hour at the same rate as
+// postpaid overage. Charged minutes extend the monthly allowance, and once the
+// allowance (included + charged) is consumed, broadcasting is blocked until the
+// seller charges more.
+export const CHARGE_RATE_KRW_PER_HOUR = OVERAGE_RATE_KRW_PER_HOUR
+export const MINUTES_PER_CHARGE_HOUR = 60
+
 export const DAILY_HARD_CAP_MINUTES = 8 * 60 // 480
 export const MONTHLY_HARD_CAP_MINUTES = 50 * 60 // 3000
 export const THRESHOLD_BILLING_AMOUNT_KRW = 30000
@@ -28,6 +35,13 @@ export interface LiveTimeUsage {
   totalMinutes: number
   includedMinutes: number
   includedMinutesRemaining: number
+  // Prepaid hours purchased via "시간 충전하기" for this calendar month.
+  chargedMinutes: number
+  // Allowance = included (180) + charged. When totalMinutes reaches it the
+  // seller is out of broadcast time (`exhausted`) and must charge more.
+  allowanceMinutes: number
+  remainingMinutes: number
+  exhausted: boolean
   overageMinutes: number
   overageAmountKrw: number
   monthlyHardCapMinutes: number
@@ -36,8 +50,11 @@ export interface LiveTimeUsage {
 
 export interface BroadcastRecordLite {
   started_at?: string | null
+  startedAt?: string | null
   ended_at?: string | null
+  endedAt?: string | null
   duration_minutes?: number | null
+  durationMinutes?: number | null
 }
 
 export const monthLabelFor = (d: Date): string => {
@@ -54,23 +71,36 @@ export const isInMonth = (iso: string | null | undefined, ref: Date): boolean =>
 }
 
 /**
- * Aggregate broadcast records for the calendar month containing `ref`,
- * matching on started_at first then created_at fallback (caller passes the
- * record shape they have).
+ * Aggregate broadcast records for the calendar month containing `ref`.
+ * Records may be snake_case (Supabase) or camelCase (Netlify Blobs) — both
+ * `started_at`/`startedAt` and `duration_minutes`/`durationMinutes` are read.
+ * `chargedMinutes` is the prepaid top-up balance for the month; the allowance
+ * is included (180) + charged, and `exhausted` flags when it's been consumed.
  */
 export const summarizeMonthlyLiveTime = (
   records: BroadcastRecordLite[],
   ref: Date = new Date(),
+  chargedMinutes = 0,
 ): LiveTimeUsage => {
-  const monthRecords = records.filter((r) => isInMonth(r.started_at, ref))
+  const startedAtOf = (r: BroadcastRecordLite) => r.started_at ?? r.startedAt ?? null
+  const durationOf = (r: BroadcastRecordLite) =>
+    r.duration_minutes ?? r.durationMinutes ?? 0
+  const monthRecords = records.filter((r) => isInMonth(startedAtOf(r), ref))
   const totalMinutes = monthRecords.reduce(
-    (sum, r) => sum + Math.max(0, Math.floor(Number(r.duration_minutes) || 0)),
+    (sum, r) => sum + Math.max(0, Math.floor(Number(durationOf(r)) || 0)),
     0,
   )
 
+  const charged = Math.max(0, Math.floor(Number(chargedMinutes) || 0))
+  const allowanceMinutes = INCLUDED_MINUTES_PER_MONTH + charged
   const includedMinutes = Math.min(totalMinutes, INCLUDED_MINUTES_PER_MONTH)
   const includedMinutesRemaining = Math.max(0, INCLUDED_MINUTES_PER_MONTH - totalMinutes)
-  const overageMinutes = Math.max(0, totalMinutes - INCLUDED_MINUTES_PER_MONTH)
+  const remainingMinutes = Math.max(0, allowanceMinutes - totalMinutes)
+  // Overage = time used beyond the included 3h that the prepaid charge did NOT
+  // cover (postpaid accumulation). Charged minutes are paid up-front, so they
+  // reduce the postpaid overage that gets billed later.
+  const grossOverageMinutes = Math.max(0, totalMinutes - INCLUDED_MINUTES_PER_MONTH)
+  const overageMinutes = Math.max(0, grossOverageMinutes - charged)
   const overageAmountKrw = Math.round(overageMinutes * OVERAGE_RATE_KRW_PER_MINUTE)
 
   return {
@@ -78,6 +108,10 @@ export const summarizeMonthlyLiveTime = (
     totalMinutes,
     includedMinutes,
     includedMinutesRemaining,
+    chargedMinutes: charged,
+    allowanceMinutes,
+    remainingMinutes,
+    exhausted: totalMinutes >= allowanceMinutes,
     overageMinutes,
     overageAmountKrw,
     monthlyHardCapMinutes: MONTHLY_HARD_CAP_MINUTES,

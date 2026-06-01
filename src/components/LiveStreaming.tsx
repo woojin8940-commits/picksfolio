@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
@@ -72,7 +72,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [ivsLoading, setIvsLoading] = useState(true);
   const [showStreamInfo, setShowStreamInfo] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [capBlock, setCapBlock] = useState<{ kind: 'monthly' | 'daily'; message: string } | null>(null);
+  const [capBlock, setCapBlock] = useState<{ kind: 'monthly' | 'daily' | 'exhausted'; message: string } | null>(null);
 
   // Live Products & Cart State
   const [liveProducts, setLiveProducts] = useState<{ id: string; name: string; price?: string; image?: string; link?: string; blockTitle?: string; options?: { id: string; name: string; values: any[] }[] }[]>([]);
@@ -95,9 +95,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     monthLabel: string;
     totalMinutes: number;
     includedMinutesRemaining: number;
+    chargedMinutes: number;
+    remainingMinutes: number;
+    exhausted: boolean;
     overageMinutes: number;
     overageAmountKrw: number;
   } | null>(null);
+  // Time-charging ("시간 충전하기") modal state.
+  const [showChargeModal, setShowChargeModal] = useState(false);
+  const [chargeHours, setChargeHours] = useState(1);
+  const [charging, setCharging] = useState(false);
+  const [chargeError, setChargeError] = useState<string | null>(null);
   const isLiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -381,9 +389,22 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           monthLabel: result.usage.monthLabel,
           totalMinutes: result.usage.totalMinutes,
           includedMinutesRemaining: result.usage.includedMinutesRemaining,
+          chargedMinutes: result.usage.chargedMinutes,
+          remainingMinutes: result.usage.remainingMinutes,
+          exhausted: result.usage.exhausted,
           overageMinutes: result.usage.overageMinutes,
           overageAmountKrw: result.usage.overageAmountKrw,
         });
+        // Keep the broadcast gate in sync: if the seller charged time, clear an
+        // "exhausted" block; if they're now out of time, raise it.
+        if (result.usage.exhausted) {
+          setCapBlock({
+            kind: 'exhausted',
+            message: '이번 달 라이브 잔여시간을 모두 사용했습니다. 시간을 충전해주세요.',
+          });
+        } else {
+          setCapBlock((prev) => (prev?.kind === 'exhausted' ? null : prev));
+        }
       }
     } catch (e) {
       console.warn('[Live] getLiveUsage failed (non-blocking):', e);
@@ -393,6 +414,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   useEffect(() => {
     refreshLiveUsage();
   }, [refreshLiveUsage]);
+
+  // Charge prepaid broadcast time by the hour (시간당 8,900원). On success the
+  // usage badge and the broadcast gate refresh immediately.
+  const CHARGE_RATE_KRW_PER_HOUR = 8900;
+  const handleChargeTime = useCallback(async () => {
+    if (charging) return;
+    setCharging(true);
+    setChargeError(null);
+    try {
+      const result = await apiService.chargeLiveTime(userName, chargeHours);
+      if (!result.success) {
+        setChargeError(result.error || '충전에 실패했습니다.');
+        return;
+      }
+      await refreshLiveUsage();
+      setShowChargeModal(false);
+    } catch (e) {
+      setChargeError('충전 중 오류가 발생했습니다.');
+    } finally {
+      setCharging(false);
+    }
+  }, [userName, chargeHours, charging, refreshLiveUsage]);
 
   // Sync refs for use in animation loop
   useEffect(() => { filtersRef.current = filters; }, [filters]);
@@ -962,6 +1005,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
+      // Block starting a broadcast when this month's time is exhausted. The
+      // stream-key endpoint also enforces this server-side, but guarding here
+      // gives immediate feedback and opens the charge modal.
+      if (liveUsage?.exhausted || capBlock?.kind === 'exhausted') {
+        setChargeError(null);
+        setShowChargeModal(true);
+        return;
+      }
+
       // Re-enable camera/mic before going live. Stopping a broadcast turns the
       // camera off to release the device (see the "방송 종료" branch below), which
       // tears down the canvas/camera streams. Without turning them back on here,
@@ -1065,7 +1117,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       const endTime = new Date().toISOString();
       const startTime = broadcastStartTimeRef.current || endTime;
       const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
-      const durationMinutes = Math.round(durationMs / 60000);
+      // Meter live time by rounding UP to the whole minute: any broadcast that
+      // actually went live consumes at least 1 minute of the monthly allowance,
+      // so short test sessions still reduce the remaining time (a sub-30s round
+      // to 0 would otherwise read as "usage never decreased").
+      const durationMinutes = durationMs > 0 ? Math.max(1, Math.ceil(durationMs / 60000)) : 0;
 
       // Get final cart stats (non-blocking — default to empty if fetch fails)
       let finalCartStats = { totalViewers: 0, totalItems: 0, totalRevenue: 0, productCounts: [] as any[] };
@@ -1294,20 +1350,41 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 )}
               </div>
               {liveUsage && (
-                <div
-                  className="bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2"
-                  title="이번 달 라이브 송출 시간 · 후불 누적 (시간당 8,900원) · 매출 수수료 8.5%(PG 포함)"
-                >
-                  <span className="text-white/40 uppercase tracking-widest text-[9px]">이번 달</span>
-                  <span>
-                    포함{' '}
-                    {Math.floor(liveUsage.includedMinutesRemaining / 60)}시간{' '}
-                    {liveUsage.includedMinutesRemaining % 60}분 남음
-                  </span>
-                  <span className="text-white/30">·</span>
-                  <span className={liveUsage.overageAmountKrw > 0 ? 'text-amber-300' : 'text-white/60'}>
-                    후불 {liveUsage.overageAmountKrw.toLocaleString()}원
-                  </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <div
+                    className={`backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2 ${liveUsage.exhausted ? 'bg-red-600/40 border-red-400/40' : 'bg-black/40 border-white/10'}`}
+                    title="이번 달 라이브 잔여시간 (포함 3시간 + 충전 시간) · 후불 누적 (시간당 8,900원) · 매출 수수료 8.5%(PG 포함)"
+                  >
+                    <span className="text-white/40 uppercase tracking-widest text-[9px]">잔여</span>
+                    <span className={liveUsage.exhausted ? 'text-red-200' : ''}>
+                      {Math.floor(liveUsage.remainingMinutes / 60)}시간{' '}
+                      {liveUsage.remainingMinutes % 60}분 남음
+                    </span>
+                    {liveUsage.chargedMinutes > 0 && (
+                      <>
+                        <span className="text-white/30">·</span>
+                        <span className="text-emerald-300">
+                          충전 {Math.floor(liveUsage.chargedMinutes / 60)}시간
+                        </span>
+                      </>
+                    )}
+                    {liveUsage.overageAmountKrw > 0 && (
+                      <>
+                        <span className="text-white/30">·</span>
+                        <span className="text-amber-300">
+                          후불 {liveUsage.overageAmountKrw.toLocaleString()}원
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                    className="backdrop-blur-md px-3 py-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 text-[10px] md:text-[11px] font-black flex items-center gap-1 transition-all active:scale-95"
+                    title="라이브 시간 충전하기 (시간당 8,900원)"
+                  >
+                    <Plus size={12} /> 시간 충전
+                  </button>
                 </div>
               )}
               {capBlock && (
@@ -1750,12 +1827,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
               <button
                 onClick={toggleLive}
-                disabled={!isLive && !!capBlock}
+                disabled={!isLive && !!capBlock && capBlock.kind !== 'exhausted'}
                 title={capBlock ? capBlock.message : undefined}
-                className={`px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? 'bg-slate-500 text-white/80 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                className={`px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
-                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : '오늘 한도 도달') : '라이브 시작'}
+                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : '라이브 시작'}
               </button>
             </div>
           </div>
@@ -2005,6 +2082,82 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
       </div>
+
+      {/* 시간 충전하기 — prepaid live-time top-up modal */}
+      {showChargeModal && (
+        <div
+          className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => { if (!charging) setShowChargeModal(false); }}
+        >
+          <div
+            className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-sm p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-white text-lg font-black flex items-center gap-2">
+                <Zap size={18} className="text-emerald-400" /> 라이브 시간 충전
+              </h3>
+              <button
+                onClick={() => { if (!charging) setShowChargeModal(false); }}
+                className="text-white/40 hover:text-white p-1 rounded-full"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-white/50 text-xs mb-5">
+              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다.
+            </p>
+
+            {liveUsage && (
+              <div className="bg-white/5 rounded-2xl px-4 py-3 mb-5 text-[11px] text-white/60 flex items-center justify-between">
+                <span>현재 잔여시간</span>
+                <span className="text-white font-bold">
+                  {Math.floor(liveUsage.remainingMinutes / 60)}시간 {liveUsage.remainingMinutes % 60}분
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-4 mb-5">
+              <button
+                onClick={() => setChargeHours((h) => Math.max(1, h - 1))}
+                disabled={charging || chargeHours <= 1}
+                className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
+              >
+                −
+              </button>
+              <div className="text-center min-w-[80px]">
+                <div className="text-white text-3xl font-black">{chargeHours}<span className="text-base font-bold text-white/50">시간</span></div>
+              </div>
+              <button
+                onClick={() => setChargeHours((h) => Math.min(50, h + 1))}
+                disabled={charging || chargeHours >= 50}
+                className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/20 rounded-2xl px-4 py-3 mb-4">
+              <span className="text-emerald-200/80 text-xs font-bold">결제 금액</span>
+              <span className="text-emerald-300 text-lg font-black">
+                {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원
+              </span>
+            </div>
+
+            {chargeError && (
+              <p className="text-red-400 text-xs font-bold mb-3 text-center">{chargeError}</p>
+            )}
+
+            <button
+              onClick={handleChargeTime}
+              disabled={charging}
+              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {charging ? '충전 중…' : <><Zap size={16} /> {chargeHours}시간 충전하기</>}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

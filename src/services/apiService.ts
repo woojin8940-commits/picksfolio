@@ -230,7 +230,7 @@ export const apiService = {
   },
 
   // AWS IVS Stream Key API
-  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily'; error?: string } | null> {
+  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily' | 'exhausted'; error?: string } | null> {
     try {
       const res = await fetch(`/api/stream-key/${encodeURIComponent(username.toLowerCase())}`);
       if (res.status === 403) {
@@ -575,6 +575,10 @@ export const apiService = {
       totalMinutes: number;
       includedMinutes: number;
       includedMinutesRemaining: number;
+      chargedMinutes: number;
+      allowanceMinutes: number;
+      remainingMinutes: number;
+      exhausted: boolean;
       overageMinutes: number;
       overageAmountKrw: number;
       monthlyHardCapMinutes: number;
@@ -584,6 +588,7 @@ export const apiService = {
       includedMinutesPerMonth: number;
       overageRateKrwPerHour: number;
       overageRateKrwPerMinute: number;
+      chargeRateKrwPerHour: number;
       liveCommissionRate: number;
       dailyHardCapMinutes: number;
       monthlyHardCapMinutes: number;
@@ -597,6 +602,40 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to get live usage:', e);
       return null;
+    }
+  },
+
+  // Prepaid live-time top-up ("시간 충전하기"). Charges `hours` of broadcast
+  // time at the per-hour rate and returns the refreshed usage so the caller
+  // can immediately reflect the new remaining time.
+  async chargeLiveTime(username: string, hours: number): Promise<{
+    success: boolean;
+    error?: string;
+    charged?: { hours: number; minutes: number; amountKrw: number };
+    usage?: {
+      totalMinutes: number;
+      chargedMinutes: number;
+      allowanceMinutes: number;
+      remainingMinutes: number;
+      exhausted: boolean;
+      includedMinutesRemaining: number;
+      overageMinutes: number;
+      overageAmountKrw: number;
+      monthLabel: string;
+    };
+  }> {
+    try {
+      const res = await fetch(`/api/live-credits/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hours }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: data?.error || '충전에 실패했습니다.' };
+      return data;
+    } catch (e) {
+      console.error('[API] Failed to charge live time:', e);
+      return { success: false, error: '네트워크 오류로 충전에 실패했습니다.' };
     }
   },
 
