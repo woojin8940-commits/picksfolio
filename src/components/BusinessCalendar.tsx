@@ -411,9 +411,10 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               ))}
             </div>
 
-            {/* Calendar Days — on desktop the grid fills the remaining viewport height so the
-                whole month is visible without scrolling; rows divide the space equally. */}
-            <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-290px)]">
+            {/* Calendar Days — on desktop the grid is enlarged to fill nearly the full viewport
+                height so the month cells are big; this also pushes the 협업 히스토리 list below the
+                fold so it only appears on scroll. Rows divide the space equally. */}
+            <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-170px)]">
               {Array.from({ length: firstDay }).map((_, i) => (
                 <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[80px] md:min-h-0 border-b border-r border-slate-50" />
               ))}

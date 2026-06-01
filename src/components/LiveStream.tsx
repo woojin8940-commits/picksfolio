@@ -133,6 +133,9 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [usernameError, setUsernameError] = useState('');
   const [usernameSaving, setUsernameSaving] = useState(false);
   const [showChatOverlay, setShowChatOverlay] = useState(true);
+  // Set when the host ends the broadcast (via the signaling broadcast-end event
+  // or the live-state poll). Shows a brief notice, then the stream auto-closes.
+  const [streamEnded, setStreamEnded] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [needsTap, setNeedsTap] = useState(false);
@@ -968,6 +971,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         if (prev.some(m => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+    });
+
+    // When the host ends the broadcast, the broadcaster pushes a broadcast-end
+    // signal. Show a brief notice and auto-close so viewers are returned to the
+    // host's page immediately instead of staring at a frozen/last frame.
+    signaling.onBroadcastEnd(() => {
+      setStreamEnded(true);
+      setTimeout(() => { onClose(); }, 2000);
     });
 
     // Only call connect() if we're NOT using a pre-connected signaling (it's already connected)
@@ -1971,6 +1982,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       consecutiveEnded += 1;
       if (consecutiveEnded >= 3) {
         closed = true;
+        setStreamEnded(true);
         setTimeout(() => { onClose(); }, 1500);
       }
     };
@@ -2263,6 +2275,19 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         touchAction: 'manipulation',
       }}
     >
+      {/* --- BROADCAST ENDED NOTICE ------------------------------------ */}
+      {/* Shown when the host ends the live stream; viewers see this briefly */}
+      {/* before being returned to the host's personal page automatically.   */}
+      {streamEnded && (
+        <div className="absolute inset-0 z-[320] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm px-8 text-center">
+          <div className="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center mb-4">
+            <Radio size={26} className="text-white/70" strokeWidth={2.5} />
+          </div>
+          <p className="text-white text-base font-black mb-1">방송이 종료되었습니다</p>
+          <p className="text-white/50 text-xs font-bold">잠시 후 자동으로 나갑니다…</p>
+        </div>
+      )}
+
       {/* --- DIAGNOSTIC BANNER (top) ------------------------------------ */}
       {/* Protocol + onStream-callback indicator for mobile debugging.    */}
       {/* Only surfaced when ?debug=1 is present in the URL so normal     */}

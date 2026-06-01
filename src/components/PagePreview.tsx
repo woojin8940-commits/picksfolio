@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Hash, ExternalLink, ChevronRight } from 'lucide-react';
+import { Hash, ExternalLink, ChevronRight, Briefcase, Bell } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
@@ -90,32 +90,40 @@ const PagePreview: React.FC<PagePreviewProps> = ({
         </div>
       </div>
 
-      {/* Social Links - matching personal page */}
-      {(socials.phone || socials.kakao || socials.instagram || socials.youtube || socials.naver || socials.tiktok) && (
-        <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
-          {socials.phone?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#3B82F6] text-white whitespace-nowrap">전화</span>
-          )}
-          {socials.kakao?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#FEE500] text-[#3C1E1E] whitespace-nowrap">카카오톡</span>
-          )}
-          {socials.instagram?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }}>인스타</span>
-          )}
-          {socials.youtube?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#FF0000] text-white whitespace-nowrap">유튜브</span>
-          )}
-          {socials.naver?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#03C75A] text-white whitespace-nowrap">네이버</span>
-          )}
-          {socials.tiktok?.trim() && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-black text-white whitespace-nowrap border border-white/10">틱톡</span>
-          )}
-          {socials.businessProposal && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: accentColor }}>비즈니스 제안</span>
-          )}
-        </div>
-      )}
+      {/* Contact / action buttons — must mirror the real personal page exactly.
+          The public page renders ONLY the business-proposal, live-notify and the
+          user's custom buttons here (it does NOT show standalone social-network
+          badges), so the preview shows the same set and nothing the user hasn't
+          actually enabled. */}
+      {(() => {
+        const customButtons = (socials.customButtons || []).filter(
+          (b: any) => b.label?.trim() && b.url?.trim()
+        );
+        const hasAny = socials.businessProposal || socials.liveNotify || customButtons.length > 0;
+        if (!hasAny) return null;
+        return (
+          <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
+            {socials.businessProposal && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: accentColor }}>
+                <Briefcase size={5} strokeWidth={2.5} />
+                비즈니스 제안
+              </span>
+            )}
+            {socials.liveNotify && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#2563EB] text-white whitespace-nowrap">
+                <Bell size={5} strokeWidth={2.5} />
+                라이브 알림받기
+              </span>
+            )}
+            {customButtons.map((btn: any) => (
+              <span key={btn.id} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: btn.color || '#2563EB' }}>
+                <ExternalLink size={5} strokeWidth={2.5} />
+                {btn.label}
+              </span>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Content sections ordered by homePriority */}
       <div className="flex flex-col">
