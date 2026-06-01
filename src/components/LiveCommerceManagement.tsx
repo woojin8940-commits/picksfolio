@@ -5,6 +5,12 @@ import LiveStreaming from './LiveStreaming';
 import MediaAuto from './MediaAuto';
 import { SellerVerification } from '../types';
 import { apiService } from '../services/apiService';
+import {
+  CHARGE_RATE_KRW_PER_HOUR,
+  CHARGE_PAY_METHODS,
+  payAndChargeLiveTime,
+  type ChargePayMethod,
+} from '../utils/liveCharge';
 
 interface LiveCommerceManagementProps {
   userName: string;
@@ -56,23 +62,55 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   const [liveUsage, setLiveUsage] = useState<{
     totalMinutes: number;
     includedMinutesRemaining: number;
+    chargedMinutes: number;
+    remainingMinutes: number;
+    exhausted: boolean;
     overageMinutes: number;
     overageAmountKrw: number;
   } | null>(null);
+  // 시간 충전하기 modal state.
+  const [showChargeModal, setShowChargeModal] = useState(false);
+  const [chargeHours, setChargeHours] = useState(1);
+  const [chargePayMethod, setChargePayMethod] = useState<ChargePayMethod>('CARD');
+  const [charging, setCharging] = useState(false);
+  const [chargeError, setChargeError] = useState<string | null>(null);
+
+  const loadLiveUsage = useCallback(async () => {
+    const result = await apiService.getLiveUsage(userName).catch(() => null);
+    if (!result?.usage) return;
+    setLiveUsage({
+      totalMinutes: result.usage.totalMinutes,
+      includedMinutesRemaining: result.usage.includedMinutesRemaining,
+      chargedMinutes: result.usage.chargedMinutes,
+      remainingMinutes: result.usage.remainingMinutes,
+      exhausted: result.usage.exhausted,
+      overageMinutes: result.usage.overageMinutes,
+      overageAmountKrw: result.usage.overageAmountKrw,
+    });
+  }, [userName]);
 
   useEffect(() => {
-    let cancelled = false;
-    apiService.getLiveUsage(userName).then((result) => {
-      if (cancelled || !result?.usage) return;
-      setLiveUsage({
-        totalMinutes: result.usage.totalMinutes,
-        includedMinutesRemaining: result.usage.includedMinutesRemaining,
-        overageMinutes: result.usage.overageMinutes,
-        overageAmountKrw: result.usage.overageAmountKrw,
-      });
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [userName]);
+    loadLiveUsage();
+  }, [loadLiveUsage]);
+
+  const handleChargeTime = useCallback(async () => {
+    if (charging) return;
+    setCharging(true);
+    setChargeError(null);
+    try {
+      const outcome = await payAndChargeLiveTime(userName, chargeHours, chargePayMethod);
+      if (!outcome.success) {
+        setChargeError(outcome.error || '충전에 실패했습니다.');
+        return;
+      }
+      await loadLiveUsage();
+      setShowChargeModal(false);
+    } catch {
+      setChargeError('충전 중 오류가 발생했습니다.');
+    } finally {
+      setCharging(false);
+    }
+  }, [userName, chargeHours, chargePayMethod, charging, loadLiveUsage]);
 
   // Broadcast title (saved per user, used for live-start alimtalk variable 라이브 제목)
   const [broadcastTitle, setBroadcastTitle] = useState<string>('');
@@ -358,17 +396,24 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-1">라이브 잔여 시간</p>
             {liveUsage ? (
               <>
-                <h3 className="text-xl md:text-3xl font-black text-slate-900">
-                  {Math.floor(liveUsage.includedMinutesRemaining / 60)}<span className="text-sm md:text-base font-bold text-slate-400">시간</span> {liveUsage.includedMinutesRemaining % 60}<span className="text-sm md:text-base font-bold text-slate-400">분</span>
+                <h3 className={`text-xl md:text-3xl font-black ${liveUsage.exhausted ? 'text-red-600' : 'text-slate-900'}`}>
+                  {Math.floor(liveUsage.remainingMinutes / 60)}<span className="text-sm md:text-base font-bold text-slate-400">시간</span> {liveUsage.remainingMinutes % 60}<span className="text-sm md:text-base font-bold text-slate-400">분</span>
                 </h3>
                 <p className="text-slate-400 text-[9px] md:text-[11px] font-medium mt-1 md:mt-2">
-                  월 3시간 중 {Math.floor(liveUsage.totalMinutes / 60)}시간 {liveUsage.totalMinutes % 60}분 사용
+                  월 3시간{liveUsage.chargedMinutes > 0 ? ` + 충전 ${Math.floor(liveUsage.chargedMinutes / 60)}시간` : ''} 중 {Math.floor(liveUsage.totalMinutes / 60)}시간 {liveUsage.totalMinutes % 60}분 사용
                 </p>
                 {liveUsage.overageMinutes > 0 && (
                   <p className="text-amber-600 text-[9px] md:text-[11px] font-bold mt-1">
                     초과 {Math.floor(liveUsage.overageMinutes / 60)}시간 {liveUsage.overageMinutes % 60}분 · {liveUsage.overageAmountKrw.toLocaleString()}원
                   </p>
                 )}
+                <button
+                  type="button"
+                  onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                  className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] md:text-xs font-black transition-all active:scale-95"
+                >
+                  <Plus size={12} /> 시간 충전하기
+                </button>
               </>
             ) : (
               <>
@@ -651,6 +696,103 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             setShowLiveStream(false);
           }}
         />
+      )}
+
+      {/* 시간 충전하기 — prepaid live-time top-up modal */}
+      {showChargeModal && (
+        <div
+          className="fixed inset-0 z-[300] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => { if (!charging) setShowChargeModal(false); }}
+        >
+          <div
+            className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-slate-900 text-lg font-black flex items-center gap-2">
+                <Clock size={18} className="text-emerald-500" /> 라이브 시간 충전
+              </h3>
+              <button
+                onClick={() => { if (!charging) setShowChargeModal(false); }}
+                className="text-slate-300 hover:text-slate-600 text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-slate-400 text-xs mb-5">
+              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다. (1회 결제)
+            </p>
+
+            {liveUsage && (
+              <div className="bg-slate-50 rounded-2xl px-4 py-3 mb-5 text-[11px] text-slate-500 flex items-center justify-between">
+                <span>현재 잔여시간</span>
+                <span className="text-slate-900 font-bold">
+                  {Math.floor(liveUsage.remainingMinutes / 60)}시간 {liveUsage.remainingMinutes % 60}분
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-4 mb-5">
+              <button
+                onClick={() => setChargeHours((h) => Math.max(1, h - 1))}
+                disabled={charging || chargeHours <= 1}
+                className="w-11 h-11 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xl font-black flex items-center justify-center disabled:opacity-30"
+              >
+                −
+              </button>
+              <div className="text-center min-w-[80px]">
+                <div className="text-slate-900 text-3xl font-black">{chargeHours}<span className="text-base font-bold text-slate-400">시간</span></div>
+              </div>
+              <button
+                onClick={() => setChargeHours((h) => Math.min(50, h + 1))}
+                disabled={charging || chargeHours >= 50}
+                className="w-11 h-11 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xl font-black flex items-center justify-center disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+
+            {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+            <div className="mb-4">
+              <p className="text-slate-400 text-[11px] font-bold mb-2">결제 수단</p>
+              <div className="grid grid-cols-3 gap-2">
+                {CHARGE_PAY_METHODS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setChargePayMethod(m.id)}
+                    disabled={charging}
+                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 ${
+                      chargePayMethod === m.id
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 mb-4">
+              <span className="text-emerald-700/80 text-xs font-bold">결제 금액</span>
+              <span className="text-emerald-700 text-lg font-black">
+                {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원
+              </span>
+            </div>
+
+            {chargeError && (
+              <p className="text-red-500 text-xs font-bold mb-3 text-center">{chargeError}</p>
+            )}
+
+            <button
+              onClick={handleChargeTime}
+              disabled={charging}
+              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50"
+            >
+              {charging ? '결제 진행 중…' : `${(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원 결제하고 ${chargeHours}시간 충전`}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

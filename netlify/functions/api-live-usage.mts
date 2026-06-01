@@ -1,9 +1,9 @@
-import { getSupabaseServer } from './_shared/supabase.mts'
+import { computeLiveUsage } from './_shared/live-usage.mts'
 import {
-  summarizeMonthlyLiveTime,
   INCLUDED_MINUTES_PER_MONTH,
   OVERAGE_RATE_KRW_PER_HOUR,
   OVERAGE_RATE_KRW_PER_MINUTE,
+  CHARGE_RATE_KRW_PER_HOUR,
   LIVE_COMMISSION_RATE,
   DAILY_HARD_CAP_MINUTES,
   MONTHLY_HARD_CAP_MINUTES,
@@ -22,22 +22,9 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
-    const supabase = getSupabaseServer()
-    const now = new Date()
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-
-    const { data, error } = await supabase
-      .from('broadcast_history')
-      .select('started_at, duration_minutes')
-      .eq('username', username)
-      .gte('started_at', monthStart)
-
-    if (error && !(error.code === '42P01' || error.message?.includes('does not exist'))) {
-      return Response.json({ error: error.message }, { status: 500 })
-    }
-
-    const records = (data || []) as Array<{ started_at: string; duration_minutes: number | null }>
-    const usage = summarizeMonthlyLiveTime(records, now)
+    // Aggregate from the Netlify Blobs broadcast-history store (the source the
+    // live dashboard actually writes to) plus any prepaid charge balance.
+    const usage = await computeLiveUsage(username, new Date())
 
     return Response.json({
       usage,
@@ -45,6 +32,7 @@ export default async (req: Request, context: Context) => {
         includedMinutesPerMonth: INCLUDED_MINUTES_PER_MONTH,
         overageRateKrwPerHour: OVERAGE_RATE_KRW_PER_HOUR,
         overageRateKrwPerMinute: OVERAGE_RATE_KRW_PER_MINUTE,
+        chargeRateKrwPerHour: CHARGE_RATE_KRW_PER_HOUR,
         liveCommissionRate: LIVE_COMMISSION_RATE,
         dailyHardCapMinutes: DAILY_HARD_CAP_MINUTES,
         monthlyHardCapMinutes: MONTHLY_HARD_CAP_MINUTES,
