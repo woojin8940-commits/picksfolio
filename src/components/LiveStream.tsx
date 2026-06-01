@@ -1710,13 +1710,59 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Keep the broadcast video fixed when the on-screen keyboard opens for chat.
-  // On mobile, focusing the chat input makes the browser shrink the visual
-  // viewport and scroll the page up to reveal the input — which drags the
-  // `fixed inset-0` video container up with it. We counter this by (a) snapping
-  // the window back to the top whenever it tries to scroll, and (b) lifting the
-  // chat overlay above the keyboard ourselves via the VisualViewport API so the
-  // browser never needs to move the page in the first place.
+  // Root cause of the "video jumps when I start typing" glitch:
+  //
+  // The app's global viewport meta uses `interactive-widget=resizes-content`,
+  // which tells the browser to SHRINK the whole layout viewport when the
+  // on-screen keyboard opens. Because the player is a `fixed inset-0` element,
+  // shrinking the layout viewport drags the entire broadcast frame upward and
+  // scales it down — the brief "screen moves" the viewer sees the moment the
+  // chat keyboard appears. Other platforms feel smooth because they let the
+  // keyboard *overlay* the video instead of resizing the page underneath it.
+  //
+  // While the live viewer is open we switch the page to `resizes-visual` (the
+  // browser default): the layout viewport — and therefore the video — stays
+  // exactly where it is, the keyboard simply overlays the bottom, and we lift
+  // only the chat input above it (see the VisualViewport effect below). We also
+  // lock background scrolling so the browser can't nudge the fixed player while
+  // bringing the focused input into view. Both are restored on unmount so the
+  // rest of the app keeps its original behaviour.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const meta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
+    const prevViewport = meta?.getAttribute('content') ?? null;
+    if (meta && prevViewport) {
+      const next = /interactive-widget=/.test(prevViewport)
+        ? prevViewport.replace(/interactive-widget=[^,]+/, 'interactive-widget=resizes-visual')
+        : `${prevViewport}, interactive-widget=resizes-visual`;
+      meta.setAttribute('content', next);
+    }
+
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    // overflow:hidden (rather than position:fixed) keeps the underlying page's
+    // scroll position intact, so closing the stream returns the viewer to the
+    // same spot on the host's page.
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+
+    return () => {
+      if (meta && prevViewport !== null) meta.setAttribute('content', prevViewport);
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+    };
+  }, []);
+
+  // Lift ONLY the chat input above the on-screen keyboard, keeping the broadcast
+  // video pinned in place. With `resizes-visual` active (see the effect above)
+  // the layout viewport no longer moves, so focusing the chat input no longer
+  // drags the video; all that's left is to raise the input so the keyboard
+  // doesn't cover it. We track the VisualViewport in real time (no CSS transition
+  // on the transform) so the input rides up in lockstep with the keyboard
+  // animation instead of lagging a beat behind it — which is what made the
+  // previous attempt feel janky.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -1725,8 +1771,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       // How much the keyboard overlaps the bottom of the layout viewport.
       const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       setKeyboardInset(overlap);
-      // Undo any auto-scroll the browser applied to reveal the input so the
-      // video stays pinned to the top.
+      // Belt-and-suspenders: undo any residual scroll the browser applied while
+      // revealing the focused input so the video stays pinned to the top.
       if (window.scrollY !== 0) window.scrollTo(0, 0);
     };
 
@@ -2623,27 +2669,28 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
 
         {/* Top Overlay */}
         <div className="absolute top-0 left-0 right-0 z-20 flex justify-between items-start gap-2" style={{ padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}>
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
             <div className="w-10 h-10 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800 flex-shrink-0">
               <SafeImage src={DEFAULT_AVATAR} className="w-full h-full object-cover" />
             </div>
             <div className="min-w-0">
               <p className="text-white text-xs font-black tracking-tight truncate">@{username}</p>
-              <div className="flex items-center gap-2">
-                <div className="bg-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="bg-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse flex-shrink-0">
                   LIVE
                 </div>
                 {(streamConnected || hlsReady || streamMode === 'hls') && (
                   <button
                     onClick={() => setStreamMode(prev => prev === 'webrtc' ? 'hls' : prev === 'hls' ? 'auto' : 'webrtc')}
-                    className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded text-[8px] font-bold text-white/80 hover:bg-black/60 transition-all"
-                    title={`현재: ${useHls ? 'HLS (Full HD)' : 'WebRTC (저지연)'}`}
+                    className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded text-[8px] font-bold text-white/80 hover:bg-black/60 transition-all flex-shrink-0"
+                    title={`현재: ${useHls ? 'HLS (Full HD)' : 'WebRTC (저지연)'} · 탭하여 화질 전환`}
+                    aria-label={useHls ? '고화질(HD) 모드 — 탭하여 전환' : '실시간 모드 — 탭하여 전환'}
                   >
                     {useHls ? <Tv size={10} /> : <Radio size={10} />}
-                    {useHls ? 'HD' : 'LIVE'}
+                    {useHls ? 'HD' : '실시간'}
                   </button>
                 )}
-                <div className="flex items-center gap-1 text-white/60 text-[10px] font-bold">
+                <div className="flex items-center gap-1 text-white/60 text-[10px] font-bold flex-shrink-0">
                   <Users size={10} />
                   <span>{viewerCount.toLocaleString()}</span>
                 </div>
@@ -2652,7 +2699,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {kakaoUser && (
-              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full max-w-[90px] truncate">{kakaoUser.username || kakaoUser.nickname}</span>
+              <span className="inline-block text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full max-w-[72px] truncate">{kakaoUser.username || kakaoUser.nickname}</span>
             )}
             {/* Persistent unmute toggle — mobile autoplay forces muted start,  */}
             {/* and many viewers never realize they can tap for sound. Showing  */}
@@ -3282,9 +3329,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           maxHeight: 'min(38vh, 320px)',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           // Lift the chat input above the on-screen keyboard so the broadcast
-          // video underneath never has to scroll out of the way.
+          // video underneath never has to scroll out of the way. No transition
+          // on the transform: it tracks the VisualViewport frame-by-frame as the
+          // keyboard animates, so the input glides up with the keyboard instead
+          // of trailing behind it.
           transform: keyboardInset ? `translateY(-${keyboardInset}px)` : undefined,
-          transition: 'transform 0.2s ease-out, opacity 0.3s',
+          transition: 'opacity 0.3s',
         }}
       >
         {/* Chat toggle button */}
