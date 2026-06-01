@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
+import { AiMarkdown } from './AiMarkdown';
 
 interface AiMessage {
   role: 'user' | 'assistant';
@@ -1256,12 +1257,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                       {m.role === 'user' ? getInitials(normalizedUserName) : '✨'}
                     </div>
                     <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
-                      <div className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] whitespace-pre-wrap break-words ${
+                      <div className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] break-words text-left ${
                         m.role === 'user'
-                          ? 'bg-blue-50 border border-blue-100 text-gray-900 rounded-tr-sm'
+                          ? 'bg-blue-50 border border-blue-100 text-gray-900 rounded-tr-sm whitespace-pre-wrap'
                           : 'bg-gray-50 border border-gray-100 text-gray-900 rounded-tl-sm'
                       }`}>
-                        {m.content}
+                        {m.role === 'assistant'
+                          ? <AiMarkdown content={m.content} />
+                          : m.content}
                       </div>
                     </div>
                   </div>
