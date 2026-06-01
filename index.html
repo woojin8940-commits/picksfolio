@@ -2,7 +2,17 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+    <!--
+      interactive-widget=overlays-content: when the on-screen keyboard opens it
+      OVERLAYS the page without resizing either viewport. This keeps the live
+      player's fixed, full-screen container perfectly pinned while a viewer types
+      in chat. `resizes-content` (the previous value) shrank the layout viewport,
+      dragging the fixed player up and briefly revealing the host's page behind it
+      ("화면이 솟는" surge). The chat input is lifted above the keyboard manually
+      via the VisualViewport API (see LiveStream.tsx); ordinary form inputs are
+      still scrolled into view by the browser within the unchanged layout viewport.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content">
     <meta name="theme-color" content="#2563EB">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
     <title>PICKSFOLIO | 일상을 큐레이션하다</title>
