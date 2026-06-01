@@ -316,40 +316,35 @@ export default async (req: Request) => {
       }
     }
 
-    // 3) Match by phone (exact)
+    // 3) Match by phone. The site signup stores phone digits-only (e.g. 01012345678)
+    //    while Kakao can return it in several shapes (+82, 8210…, formatted). A site
+    //    member who later opens a live stream and logs in with Kakao must be matched
+    //    to the SAME profile so they are never re-prompted for a link/username. We
+    //    therefore compare on the last 8 digits (the part that is stable across all
+    //    formats) and prefer a row that already has a real username. Using a list
+    //    query instead of .maybeSingle() also avoids silently failing when more than
+    //    one row happens to share the phone (e.g. a leftover Kakao stub profile).
     if (!linkedProfile && phone) {
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("phone", phone)
-        .not("phone", "eq", "")
-        .maybeSingle();
-      if (data && (!data.kakao_id || data.kakao_id === kakaoId)) {
-        linkedProfile = data;
-      }
-    }
-
-    // 4) Match by phone variations (0x vs 82x format)
-    if (!linkedProfile && phone) {
-      const phoneDigits = phone.replace(/\D/g, "");
-      const variations: string[] = [];
-      if (phoneDigits.startsWith("0")) {
-        variations.push("82" + phoneDigits.substring(1));
-      }
-      if (phoneDigits.startsWith("82") && !phoneDigits.startsWith("0")) {
-        variations.push("0" + phoneDigits.substring(2));
-      }
-      for (const variant of variations) {
-        if (linkedProfile) break;
-        const { data } = await supabase
+      const last8 = phone.replace(/\D/g, "").slice(-8);
+      if (last8.length === 8) {
+        const { data: phoneMatches } = await supabase
           .from("profiles")
           .select("*")
-          .eq("phone", variant)
+          .neq("id", user_id)
           .not("phone", "eq", "")
-          .not("username", "eq", "")
-          .maybeSingle();
-        if (data && (!data.kakao_id || data.kakao_id === kakaoId)) {
-          linkedProfile = data;
+          .ilike("phone", `%${last8}`)
+          .limit(20);
+        if (phoneMatches && phoneMatches.length > 0) {
+          const eligible = phoneMatches.filter(
+            (p: any) => !p.kakao_id || p.kakao_id === kakaoId
+          );
+          const withRealName = eligible.find(
+            (p: any) =>
+              p.username &&
+              !p.username.startsWith("_kakao_") &&
+              !p.username.startsWith("_kk_")
+          );
+          linkedProfile = withRealName || eligible[0] || null;
         }
       }
     }

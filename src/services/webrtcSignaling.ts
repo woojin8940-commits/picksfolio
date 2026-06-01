@@ -409,7 +409,7 @@ function logIceServerHealthOnce() {
 
 type SignalMessage = {
   id: string; // Unique ID to prevent processing duplicates
-  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat';
+  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat' | 'broadcast-end';
   senderId: string;
   targetId?: string;
   payload?: any;
@@ -1097,6 +1097,15 @@ export class BroadcasterSignaling {
 
   stop() {
     this.running = false;
+
+    // Tell every connected viewer the broadcast has ended so they close out
+    // immediately, instead of waiting ~15s for the live-state poll to trip.
+    postSignal(this.channelName, {
+      id: generateId(),
+      type: 'broadcast-end',
+      senderId: this.broadcasterId,
+    });
+
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -1114,8 +1123,13 @@ export class BroadcasterSignaling {
     this.processedIds.clear();
     this.localStream = null;
 
-    // Clean up signals on the server
-    fetch(`/api/signal/${encodeURIComponent(this.channelName)}`, { method: 'DELETE' }).catch(() => {});
+    // Clean up signals on the server — deferred so the broadcast-end signal
+    // posted above survives long enough for viewers (polling every ~1–2s) to
+    // receive it before the channel is wiped. The next broadcast's start() also
+    // clears stale signals, so a missed delete here is harmless.
+    setTimeout(() => {
+      fetch(`/api/signal/${encodeURIComponent(this.channelName)}`, { method: 'DELETE' }).catch(() => {});
+    }, 4000);
   }
 }
 
@@ -1163,6 +1177,8 @@ export class ViewerSignaling {
   private onStreamCallback: ((stream: MediaStream) => void) | null = null;
   private onConnectionStateCallback: ((state: RTCPeerConnectionState) => void) | null = null;
   private onChatCallback: ((msg: ChatMessage) => void) | null = null;
+  private onBroadcastEndCallback: (() => void) | null = null;
+  private broadcastEnded = false;
   private hasReceivedOffer = false;
   // Buffer stream/state that arrives before callbacks are registered (pre-connection mode)
   private bufferedStream: MediaStream | null = null;
@@ -1199,6 +1215,17 @@ export class ViewerSignaling {
       callback(msg);
     }
     this.bufferedChatMessages = [];
+  }
+
+  // Fires once when the broadcaster signals that the live stream has ended, so
+  // the viewer UI can close itself immediately. If the end signal already
+  // arrived before this callback was registered (pre-connection mode), invoke
+  // it right away.
+  onBroadcastEnd(callback: () => void) {
+    this.onBroadcastEndCallback = callback;
+    if (this.broadcastEnded) {
+      callback();
+    }
   }
 
   sendChat(msg: ChatMessage) {
@@ -1433,6 +1460,15 @@ export class ViewerSignaling {
           } else {
             this.bufferedChatMessages.push(msg.payload as ChatMessage);
           }
+        }
+        break;
+      case 'broadcast-end':
+        // The host ended the broadcast. Mark it so a late-registered callback
+        // still fires, stop polling, and notify the UI to close the stream.
+        this.broadcastEnded = true;
+        this.running = false;
+        if (this.onBroadcastEndCallback) {
+          this.onBroadcastEndCallback();
         }
         break;
     }
