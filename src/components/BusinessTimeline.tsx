@@ -1169,7 +1169,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const renderAiChat = () => {
     const suggestions = selectedTimeline
       ? ['이 대화 요약해줘', `${userType === 'influencer' ? selectedTimeline.companyName : selectedTimeline.influencerUsername}에게 보낼 답장 초안 써줘`, '답장이 필요한 협업 알려줘', '다음 할 일과 일정 정리해줘']
-      : ['지금 대화 중인 업체가 몇 곳이야?', '답장이 필요한 협업 알려줘', '먼저 챙겨야 할 협업 우선순위 정리해줘', '오늘 할 일 정리해줘'];
+      : ['지금 대화 중인 업체가 몇 곳이야?', '답장이 필요한 협업 알려줘', '먼저 챙겨야 할 협업 우선순위 정리해줘', '협찬 계약서에서 꼭 확인할 점은?'];
 
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
@@ -1229,7 +1229,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </div>
                   <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
                   <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed mb-4">
-                    모든 협업을 한눈에 파악해 드려요. 대화 중인 업체 현황, 답장이 필요한 협업, 특정 업체에 보낼 답장 초안까지 물어보세요.
+                    모든 협업을 한눈에 파악해 드려요. 대화 중인 업체 현황, 답장이 필요한 협업, 답장 초안은 물론 계약·정산·세금·광고 표시 같은 업무·법률 질문까지 물어보세요.
                   </p>
                   <div className="flex flex-col gap-2">
                     {suggestions.map((s) => (
