@@ -336,7 +336,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         </button>
       </div>
 
-      <div className="flex flex-col xl:flex-row gap-6">
+      {/* Calendar takes the full width; the history and stats panels stack
+          below it (they don't need to share a single screen). */}
+      <div className="flex flex-col gap-6">
         {/* Calendar Grid */}
         <div className="flex-1">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -411,7 +413,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
             {/* Calendar Days — on desktop the grid fills the remaining viewport height so the
                 whole month is visible without scrolling; rows divide the space equally. */}
-            <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-290px)]">
+            <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-230px)]">
               {Array.from({ length: firstDay }).map((_, i) => (
                 <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[80px] md:min-h-0 border-b border-r border-slate-50" />
               ))}
@@ -681,8 +683,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
           </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="xl:w-96 shrink-0 space-y-6">
+        {/* Sidebar — stacked below the full-width calendar as a stats row */}
+        <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
           {/* Stats */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">일정 현황</h4>

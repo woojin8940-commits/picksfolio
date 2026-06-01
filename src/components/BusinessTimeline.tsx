@@ -92,7 +92,15 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   // Whether the current account's plan includes the AI assistant. AI is bundled
   // into the 스탠다드 AI 멤버십 (6,900) and 커머스 멤버십 (13,900) tiers only — the
   // plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
-  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(() => {
+    const cached = apiService.getCachedSellerVerification(normalizedUserName);
+    if (!cached) return null;
+    const plan = cached.membership_plan;
+    return (
+      !!cached.membership_active &&
+      (plan === 'standard_ai' || plan === 'commerce' || plan === 'live')
+    );
+  });
   const aiEndRef = useRef<HTMLDivElement>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -108,6 +116,20 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     });
     return () => { cancelled = true; };
   }, [normalizedUserName]);
+
+  // While a conversation (or the AI chat) is open on mobile, hide the app's
+  // bottom navigation bar so the message composer can sit flush at the very
+  // bottom of the screen. The conversation has its own back button, so the
+  // global nav is not needed here. Cleared when returning to the list/unmount.
+  useEffect(() => {
+    const chatOpen = !!selectedTimeline || aiActive;
+    if (chatOpen) {
+      document.body.classList.add('timeline-chat-open');
+    } else {
+      document.body.classList.remove('timeline-chat-open');
+    }
+    return () => document.body.classList.remove('timeline-chat-open');
+  }, [selectedTimeline, aiActive]);
 
   useEffect(() => {
     aiEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -829,7 +851,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         </div>
 
         {/* Messages */}
-        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto py-3 md:py-4 pb-[68px] md:pb-4 scrollbar-hide">
+        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto py-3 md:py-4 pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-4 scrollbar-hide">
           {/* Bottom-anchored column: messages rest just above the composer even when the
               conversation is short, and grow upward / scroll normally once it overflows. */}
           <div className="min-h-full flex flex-col justify-end">
@@ -1065,8 +1087,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           </div>
         </div>
 
-        {/* Message Composer (fixed at bottom on mobile) */}
-        <div className="fixed bottom-[calc(60px+env(safe-area-inset-bottom,0px))] left-0 right-0 md:static md:bottom-auto px-2 pb-1 md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-20 md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
+        {/* Message Composer (fixed at the very bottom on mobile) */}
+        <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
           <div
             onDragOver={handleComposerDragOver}
             onDragEnter={handleComposerDragOver}
@@ -1226,7 +1248,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         ) : (
           <>
             {/* Messages */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-3 md:py-4 pb-[68px] md:pb-4 scrollbar-hide">
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-3 md:py-4 pb-[calc(72px+env(safe-area-inset-bottom,0px))] md:pb-4 scrollbar-hide">
               {aiMessages.length === 0 && (
                 <div className="max-w-lg mx-auto text-center pt-4 md:pt-8">
                   <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center mx-auto mb-3 shadow-lg">
@@ -1289,7 +1311,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </div>
 
             {/* Composer */}
-            <div className="fixed bottom-[calc(60px+env(safe-area-inset-bottom,0px))] left-0 right-0 md:static md:bottom-auto px-2 pb-1 md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-20 md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
+            <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
               <div className="max-w-3xl mx-auto relative bg-white border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-400 transition-all">
                 <div className="flex items-end gap-1.5 md:gap-2 p-2 md:p-2.5">
                   <textarea
