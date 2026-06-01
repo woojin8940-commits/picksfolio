@@ -4,14 +4,16 @@ import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
 import TemplateShowcase from './components/TemplateShowcase';
 import DataBoardSection from './components/DataBoardSection';
-import SignupPage from './components/SignupPage';
-import LoginPage from './components/LoginPage';
-import AdminDashboard from './components/AdminDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 
 const UserPage = lazy(() => import('./components/UserPage'));
+// Auth and the logged-in dashboard are not needed for the public homepage, so
+// they are code-split out of the initial bundle for a faster first paint.
+const SignupPage = lazy(() => import('./components/SignupPage'));
+const LoginPage = lazy(() => import('./components/LoginPage'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const LinkManagement = lazy(() => import('./components/LinkManagement'));
 const PortfolioManagement = lazy(() => import('./components/PortfolioManagement'));
 const LiveCommerceManagement = lazy(() => import('./components/LiveCommerceManagement'));
@@ -1304,6 +1306,7 @@ const App: React.FC = () => {
 
     return (
       <>
+        <Suspense fallback={<LazyFallback />}>
         <AdminDashboard
         userName={userName}
         onLogout={handleLogout}
@@ -1327,6 +1330,7 @@ const App: React.FC = () => {
           </ErrorBoundary>
         ) : null}
       </AdminDashboard>
+        </Suspense>
       </>
     );
   }
@@ -1349,12 +1353,14 @@ const App: React.FC = () => {
             <DataBoardSection />
           </>
         ) : view === 'signup' ? (
+          <Suspense fallback={<LazyFallback />}>
           <SignupPage
             initialId={initialId}
             onNavigateHome={() => navigate('home')}
             onNavigateLogin={() => navigate('login')}
             onSignupSuccess={() => navigate('login')}
           />
+          </Suspense>
         ) : (
           (oauthProcessing || loginTransitioning) ? (
             <div className="min-h-screen flex items-center justify-center bg-midnight">
@@ -1364,6 +1370,7 @@ const App: React.FC = () => {
               </div>
             </div>
           ) : (
+          <Suspense fallback={<LazyFallback />}>
           <LoginPage
             onNavigateHome={() => navigate('home')}
             onNavigateSignup={() => navigate('signup')}
@@ -1402,6 +1409,7 @@ const App: React.FC = () => {
               navigate('operator');
             }}
           />
+          </Suspense>
           )
         )}
       </main>

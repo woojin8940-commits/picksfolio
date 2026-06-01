@@ -499,7 +499,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   );
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 pb-20 md:pb-0">
+    <div className={`flex flex-col md:flex-row min-h-screen bg-[#f8fafc] text-slate-800 md:pb-0 ${currentSubView === 'timeline' ? '' : 'pb-20'}`}>
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 bg-[#0b1221] text-white fixed h-full flex-col p-8 z-50">
         <div
@@ -589,7 +589,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       )}
 
       {/* Main Content */}
-      <div className="flex-1 md:ml-64 w-full min-h-screen">
+      <div className={`flex-1 md:ml-64 w-full ${currentSubView === 'timeline' ? 'md:min-h-screen' : 'min-h-screen'}`}>
         {subComponent ? (
           <ErrorBoundary>
             {subComponent}
