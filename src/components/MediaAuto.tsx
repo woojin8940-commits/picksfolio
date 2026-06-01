@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { optimizeImageUrl } from '../utils/imageOptimize';
 
 const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v|avi|mkv)(\?.*)?$/i;
 
@@ -23,9 +24,15 @@ interface MediaAutoProps {
   style?: React.CSSProperties;
   alt?: string;
   forceVideo?: boolean;
+  // Above-the-fold media (e.g. the page cover) should load eagerly with high
+  // priority so it paints first. Everything else defaults to lazy loading so
+  // it doesn't compete with the cover for bandwidth.
+  priority?: boolean;
+  // Target render width in CSS px; used to size the on-demand image transform.
+  width?: number;
 }
 
-const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, forceVideo }) => {
+const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, forceVideo, priority, width }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoReady, setVideoReady] = useState(false);
 
@@ -94,7 +101,7 @@ const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, force
         loop
         muted
         playsInline
-        preload="metadata"
+        preload={priority ? 'auto' : 'metadata'}
         disablePictureInPicture
         controls={false}
       />
@@ -102,13 +109,14 @@ const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, force
   }
   return (
     <img
-      src={src}
+      src={optimizeImageUrl(src, { width: width ?? 1280 })}
       className={className}
       style={style}
       alt={alt}
       referrerPolicy="no-referrer"
       decoding="async"
-      loading="eager"
+      loading={priority ? 'eager' : 'lazy'}
+      fetchPriority={priority ? 'high' : 'auto'}
     />
   );
 };

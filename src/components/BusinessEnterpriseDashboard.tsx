@@ -160,13 +160,16 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       }
       setCurrentSubView('timeline');
     };
+    const handleNavigateMembership = () => setCurrentSubView('membership');
     window.addEventListener('storage', handleStorageChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('navigate-timeline', handleNavigateTimeline);
+    window.addEventListener('navigate-membership', handleNavigateMembership);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('navigate-timeline', handleNavigateTimeline);
+      window.removeEventListener('navigate-membership', handleNavigateMembership);
     };
   }, [loadPreviewData]);
 

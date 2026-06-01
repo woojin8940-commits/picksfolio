@@ -145,7 +145,7 @@ interface LinkData {
   category?: string;
 }
 
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=3840&q=100';
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 
 const UserPage: React.FC<UserPageProps> = ({ username }) => {
   const normalizedUsername = useMemo(() => (username || '').toLowerCase(), [username]);
@@ -1230,15 +1230,18 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               {design.portfolioHeaderImage && (
                 <MediaAuto
                   src={design.portfolioHeaderImage}
+                  priority
+                  width={1280}
                   className="w-full h-full object-cover"
                   style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
                 />
               )}
               {!design.portfolioHeaderImage && !design.portfolioHeaderColor && (
                 <SafeImage
-                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=3840&q=100"
+                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"
                   className="w-full h-full object-cover"
                   loading="eager"
+                  fetchPriority="high"
                 />
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: `linear-gradient(to top, ${themeBg || '#ffffff'} 0%, ${themeBg || '#ffffff'}88 15%, transparent 50%)` }}></div>
@@ -1744,7 +1747,9 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             >
               {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
                 <MediaAuto
-                  src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=3840&q=100"}
+                  src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"}
+                  priority
+                  width={1280}
                   className="w-full h-full object-cover"
                   style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
                 />

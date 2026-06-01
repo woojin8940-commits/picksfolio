@@ -17,7 +17,7 @@ export default async (req: Request) => {
       );
     }
 
-    if (tier !== "standard" && tier !== "commerce") {
+    if (tier !== "standard" && tier !== "standard_ai" && tier !== "commerce") {
       return Response.json(
         { success: false, error: "유효하지 않은 멤버십 플랜입니다." },
         { status: 400 },

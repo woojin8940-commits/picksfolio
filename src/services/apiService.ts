@@ -655,7 +655,7 @@ export const apiService = {
   async issueBillingKeyPayment(
     username: string,
     billingKey: string,
-    tier: 'standard' | 'commerce',
+    tier: 'standard' | 'standard_ai' | 'commerce',
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/billing-issue', {
@@ -821,7 +821,7 @@ export const apiService = {
   async updateAdminInfluencer(
     token: string,
     username: string,
-    body: { featured?: boolean; featured_note?: string; membership_plan?: 'standard' | 'commerce' | null }
+    body: { featured?: boolean; featured_note?: string; membership_plan?: 'standard' | 'standard_ai' | 'commerce' | null }
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };

@@ -26,7 +26,7 @@ export function getComplimentaryMembership(username: string | null | undefined):
 
 export interface MembershipOverlayInput {
   membership_active?: boolean
-  membership_plan?: 'standard' | 'commerce' | 'live' | null
+  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'live' | null
   membership_started_at?: string | null
   [key: string]: any
 }
