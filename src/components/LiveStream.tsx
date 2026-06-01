@@ -81,6 +81,11 @@ interface KakaoUser {
   nickname: string;
   profileImage?: string;
   provider?: 'kakao';
+  // The viewer's profile id, used to persist the link name they pick.
+  userId?: string;
+  // The viewer's signup "link name" (profile username) — this is what shows in
+  // chat. The Kakao `nickname` (real name) is kept only for payment.
+  username?: string;
 }
 
 interface LiveStreamProps {
@@ -107,7 +112,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [likes, setLikes] = useState<number[]>([]);
-  const [kakaoUser] = useState<KakaoUser | null>(() => {
+  const [kakaoUser, setKakaoUser] = useState<KakaoUser | null>(() => {
     try {
       const saved = localStorage.getItem('picks_kakao_user');
       if (saved) {
@@ -121,6 +126,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     return null;
   });
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  // A viewer who logged in with Kakao but never set their signup link name is
+  // asked to choose one — the same link name doubles as their chat username.
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameError, setUsernameError] = useState('');
+  const [usernameSaving, setUsernameSaving] = useState(false);
   const [showChatOverlay, setShowChatOverlay] = useState(true);
   const [streamConnected, setStreamConnected] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
@@ -1759,10 +1770,17 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       setShowLoginPrompt(true);
       return;
     }
+    // Logged in but hasn't set their signup link name yet — collect it first.
+    if (!kakaoUser.username) {
+      setUsernameInput('');
+      setUsernameError('');
+      setShowUsernameModal(true);
+      return;
+    }
     if (!newMessage.trim()) return;
     const msg: ChatMessage = {
       id: Date.now().toString(),
-      user: kakaoUser.nickname,
+      user: kakaoUser.username,
       text: newMessage,
       profileImage: kakaoUser.profileImage,
       timestamp: Date.now(),
@@ -1771,6 +1789,69 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     // Send to broadcaster and other viewers via signaling channel
     signalingRef.current?.sendChat(msg);
     setNewMessage('');
+  };
+
+  // A logged-in viewer who has not yet set their signup link name is prompted
+  // to choose one. That link name (the profile username) is what shows in chat.
+  useEffect(() => {
+    if (kakaoUser && !kakaoUser.username) {
+      setUsernameInput('');
+      setShowUsernameModal(true);
+    }
+  }, [kakaoUser]);
+
+  // Normalize input to the link-name charset as the viewer types (mirrors the
+  // signup SetupLink field): lowercase letters, numbers and underscore.
+  const handleUsernameInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const value = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (raw !== value && /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(raw)) {
+      setUsernameError('링크는 영문 소문자, 숫자, 밑줄(_)만 입력 가능합니다.');
+    } else {
+      setUsernameError('');
+    }
+    setUsernameInput(value);
+  };
+
+  // Validate and persist the viewer's link name. This is the same handle used
+  // at signup (the profile username), so it is saved to their profile and shown
+  // in chat from then on.
+  const handleSaveUsername = async () => {
+    const value = usernameInput.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(value)) {
+      setUsernameError('영문 소문자, 숫자, 밑줄(_) 3~20자로 입력해주세요.');
+      return;
+    }
+    if (usernameSaving) return;
+    setUsernameError('');
+    setUsernameSaving(true);
+
+    try {
+      if (kakaoUser?.userId) {
+        const res = await fetch('/.netlify/functions/kakao-set-username', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: kakaoUser.userId, username: value }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          setUsernameError(data.error || '저장 중 오류가 발생했습니다. 다시 시도해주세요.');
+          return;
+        }
+      }
+
+      setKakaoUser(prev => {
+        if (!prev) return prev;
+        const updated = { ...prev, username: value };
+        try { localStorage.setItem('picks_kakao_user', JSON.stringify(updated)); } catch {}
+        return updated;
+      });
+      setShowUsernameModal(false);
+    } catch {
+      setUsernameError('네트워크 오류가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      setUsernameSaving(false);
+    }
   };
 
   // Add product to cart (optimistic update to avoid video freeze)
@@ -2511,7 +2592,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           </div>
           <div className="flex items-center gap-2">
             {kakaoUser && (
-              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.nickname}</span>
+              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.username || kakaoUser.nickname}</span>
             )}
             {/* Persistent unmute toggle — mobile autoplay forces muted start,  */}
             {/* and many viewers never realize they can tap for sound. Showing  */}
@@ -3249,6 +3330,56 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               className="w-full text-slate-400 font-bold text-sm py-2 mt-3 hover:text-slate-600 transition-all"
             >
               닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Link-name setup modal — a viewer who logged in with Kakao but has not
+          set their signup link name yet picks it here. The link name is their
+          username and is what shows in chat. */}
+      {showUsernameModal && kakaoUser && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 max-w-sm mx-4 text-center animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <MessageCircle size={28} className="text-white" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2">링크 이름 설정</h3>
+            <p className="text-slate-500 text-sm font-medium mb-6">회원가입 때 정하는 나만의 링크 이름이에요.<br />이 이름이 유저네임이 되고 채팅에 표시됩니다.</p>
+
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 mb-2 focus-within:border-blue-500 transition-all">
+              <span className="text-slate-400 text-sm font-bold whitespace-nowrap">picks.me/</span>
+              <input
+                type="text"
+                value={usernameInput}
+                onChange={handleUsernameInputChange}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveUsername()}
+                placeholder="my_link"
+                autoFocus
+                maxLength={20}
+                disabled={usernameSaving}
+                className="w-full bg-transparent text-slate-900 text-base font-bold focus:outline-none placeholder:text-slate-300 placeholder:font-medium"
+              />
+            </div>
+            <p className="text-slate-400 text-[11px] font-medium mb-4">영문 소문자, 숫자, 밑줄(_) 3~20자 (한글 불가)</p>
+
+            {usernameError && (
+              <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 rounded-xl py-2 px-3">{usernameError}</p>
+            )}
+
+            <button
+              onClick={handleSaveUsername}
+              disabled={usernameSaving || usernameInput.length < 3}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-base text-white bg-blue-500 hover:opacity-90 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {usernameSaving ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  저장 중...
+                </>
+              ) : (
+                '설정 완료'
+              )}
             </button>
           </div>
         </div>

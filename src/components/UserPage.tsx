@@ -670,13 +670,53 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       return;
     }
 
-    const processKakaoUser = async (user: any) => {
+    const processKakaoUser = async (user: any, session: any = null) => {
       const meta = user.user_metadata;
-      const kakaoUser = {
+      const kakaoUser: {
+        nickname: string;
+        profileImage?: string;
+        provider: 'kakao';
+        userId: string;
+        username?: string;
+      } = {
         nickname: meta?.full_name || meta?.name || meta?.preferred_username || '카카오 사용자',
         profileImage: meta?.avatar_url || meta?.picture || undefined,
         provider: 'kakao' as const,
+        userId: user.id,
       };
+
+      // The viewer's chat name is the link name they chose at signup (their
+      // profile username) — not a separate per-stream nickname. Resolve it from
+      // the server so returning members chat under the same handle every time.
+      try {
+        const providerToken =
+          session?.provider_token ||
+          sessionStorage.getItem('kakao_provider_token') ||
+          '';
+        const setupRes = await fetch('/.netlify/functions/kakao-profile-setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user.id,
+            user_metadata: user.user_metadata || {},
+            identities: user.identities || [],
+            email: user.email || '',
+            provider_token: providerToken,
+          }),
+        });
+        const setupJson = await setupRes.json();
+        const linkName: string = setupJson?.profile?.username || '';
+        if (linkName && !linkName.startsWith('_kakao_') && !linkName.startsWith('_kk_')) {
+          kakaoUser.username = linkName;
+        }
+        const fetchedName = setupJson?.profile?.full_name;
+        if (fetchedName && (!kakaoUser.nickname || kakaoUser.nickname === '카카오 사용자')) {
+          kakaoUser.nickname = fetchedName;
+        }
+      } catch (e) {
+        console.warn('[UserPage] link-name resolve failed:', e);
+      }
+
       localStorage.setItem('picks_kakao_user', JSON.stringify(kakaoUser));
       localStorage.removeItem('picks_live_kakao_redirect');
 
@@ -741,7 +781,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       // Try getting existing session
       const { data: { session } } = await supabase!.auth.getSession();
       if (session?.user) {
-        processKakaoUser(session.user);
+        processKakaoUser(session.user, session);
         return true;
       }
       return false;
@@ -755,7 +795,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       // Fallback: listen for auth state change (only fresh sign-ins, not existing sessions)
       const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
-          processKakaoUser(session.user);
+          processKakaoUser(session.user, session);
           subscription.unsubscribe();
         }
       });
@@ -1235,7 +1275,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             )}
 
             <div
-              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-square flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
@@ -1753,7 +1793,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
-              className="relative h-[55vh] md:h-[60vh] flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-square flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
