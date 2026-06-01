@@ -1361,8 +1361,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   // composer rests flush at the very bottom. In the list view the nav is still
   // visible, so leave room for it.
   const chatOpen = !!selectedTimeline || aiActive;
+  // On desktop the whole app is rendered at `html { zoom: 0.75 }` (see index.css).
+  // A plain `100vh` height is therefore scaled down to ~75% of the real viewport,
+  // which left the panel's bottom edge floating in the middle of the page. Divide
+  // by the zoom factor — the same compensation index.css applies to min-h-screen —
+  // so the panel fills the full viewport height and its bottom sits at the very
+  // bottom of the page.
   return (
-    <div className={`${chatOpen ? 'h-[100dvh]' : 'h-[calc(100dvh-60px)]'} md:h-[calc(100vh-2rem)] w-full animate-in fade-in duration-300`}>
+    <div className={`${chatOpen ? 'h-[100dvh]' : 'h-[calc(100dvh-60px)]'} md:h-[calc(100vh/0.75)] w-full animate-in fade-in duration-300`}>
       {/* Desktop: Two-panel layout */}
       <div className="hidden md:flex h-full rounded-2xl overflow-hidden border border-gray-200 bg-gray-50 shadow-lg shadow-gray-200/50">
         <div className="w-[320px] shrink-0">
