@@ -4,7 +4,7 @@ import { requireAdmin } from './_shared/admin-auth.mts'
 import { applyComplimentaryMembership } from './_shared/complimentary-memberships.mts'
 import type { Config, Context } from '@netlify/functions'
 
-type MembershipPlan = 'standard' | 'commerce' | 'live'
+type MembershipPlan = 'standard' | 'standard_ai' | 'commerce' | 'live'
 
 interface SellerVerificationBlob {
   membership_active?: boolean
@@ -356,7 +356,7 @@ export default async (req: Request, context: Context) => {
       const body = (await req.json()) as {
         featured?: boolean
         featured_note?: string
-        membership_plan?: 'standard' | 'commerce' | null
+        membership_plan?: 'standard' | 'standard_ai' | 'commerce' | null
       }
 
       const profileUpdate: Record<string, any> = {}
@@ -390,15 +390,15 @@ export default async (req: Request, context: Context) => {
 
       let membershipResult: {
         membership_active: boolean
-        membership_plan: 'standard' | 'commerce' | null
+        membership_plan: 'standard' | 'standard_ai' | 'commerce' | null
         membership_started_at: string | null
       } | null = null
 
       if (membershipProvided) {
         const tier = body.membership_plan
-        if (tier !== null && tier !== 'standard' && tier !== 'commerce') {
+        if (tier !== null && tier !== 'standard' && tier !== 'standard_ai' && tier !== 'commerce') {
           return Response.json(
-            { error: 'membership_plan must be "standard", "commerce", or null' },
+            { error: 'membership_plan must be "standard", "standard_ai", "commerce", or null' },
             { status: 400 },
           )
         }
@@ -442,7 +442,7 @@ export default async (req: Request, context: Context) => {
         await sellerStore.setJSON(username, merged)
         membershipResult = {
           membership_active: !!merged.membership_active,
-          membership_plan: merged.membership_plan as 'standard' | 'commerce' | null,
+          membership_plan: merged.membership_plan as 'standard' | 'standard_ai' | 'commerce' | null,
           membership_started_at: merged.membership_started_at || null,
         }
       }

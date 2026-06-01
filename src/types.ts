@@ -175,7 +175,7 @@ export interface SellerVerification {
   business_verified?: boolean;
   settlement_registered?: boolean;
   membership_active?: boolean;
-  membership_plan?: 'standard' | 'commerce' | 'live' | null;
+  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'live' | null;
   membership_started_at?: string | null;
   billing_key?: string | null;
   billing_key_issued_at?: string | null;

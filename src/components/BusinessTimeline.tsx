@@ -1,5 +1,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { apiService } from '../services/apiService';
+
+interface AiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface TimelineAttachment {
   url: string;
@@ -76,6 +82,102 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastMessageCountRef = useRef<number>(0);
+
+  // Pinned AI assistant (top of the collaboration message list)
+  const [aiActive, setAiActive] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
+  const [aiInput, setAiInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  // Whether the current account's plan includes the AI assistant. AI is bundled
+  // into the 스탠다드 AI 멤버십 (6,900) and 커머스 멤버십 (13,900) tiers only — the
+  // plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
+  const aiEndRef = useRef<HTMLDivElement>(null);
+  const aiInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getSellerVerification(normalizedUserName).then((data) => {
+      if (cancelled) return;
+      const plan = data?.membership_plan;
+      setAiEnabled(
+        !!data?.membership_active &&
+          (plan === 'standard_ai' || plan === 'commerce' || plan === 'live'),
+      );
+    });
+    return () => { cancelled = true; };
+  }, [normalizedUserName]);
+
+  useEffect(() => {
+    aiEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [aiMessages, aiLoading]);
+
+  const openAiAssistant = () => {
+    setAiActive(true);
+    setShowList(false);
+  };
+
+  const sendAiMessage = async (text: string) => {
+    const content = text.trim();
+    if (!content || aiLoading) return;
+
+    if (aiEnabled === false) {
+      setAiMessages(prev => [
+        ...prev,
+        { role: 'user', content },
+        { role: 'assistant', content: 'AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.' },
+      ]);
+      setAiInput('');
+      return;
+    }
+
+    const nextMessages: AiMessage[] = [...aiMessages, { role: 'user', content }];
+    setAiMessages(nextMessages);
+    setAiInput('');
+    setAiLoading(true);
+    if (aiInputRef.current) aiInputRef.current.style.height = 'auto';
+
+    const context = selectedTimeline
+      ? {
+          title: selectedTimeline.proposalTitle,
+          partner: userType === 'influencer' ? selectedTimeline.companyName : selectedTimeline.influencerUsername,
+          transcript: (selectedTimeline.comments || [])
+            .slice(-40)
+            .map(c => `${c.authorName}(${c.authorType === 'business' ? '비즈니스' : '인플루언서'}): ${c.content || '[첨부 파일]'}`)
+            .join('\n'),
+        }
+      : null;
+
+    try {
+      const res = await fetch('/api/collab-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: normalizedUserName.toLowerCase(),
+          messages: nextMessages,
+          context,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data?.code === 'MEMBERSHIP_REQUIRED') setAiEnabled(false);
+        setAiMessages(prev => [...prev, { role: 'assistant', content: data?.error || 'AI 응답에 실패했어요. 잠시 후 다시 시도해 주세요.' }]);
+      } else {
+        setAiMessages(prev => [...prev, { role: 'assistant', content: data.reply || '...' }]);
+      }
+    } catch {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.' }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAiKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendAiMessage(aiInput);
+    }
+  };
 
   useEffect(() => {
     const onFocus = () => setWindowFocused(true);
@@ -486,6 +588,37 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         </div>
       </div>
 
+      {/* Pinned AI assistant — fixed at the very top of the message list.
+          Only shown when the account's plan includes AI (스탠다드 AI 6,900 / 커머스 13,900). */}
+      {aiEnabled === true && (
+        <div className="shrink-0 px-2 pb-2">
+          <button
+            onClick={openAiAssistant}
+            className={`w-full text-left px-3 py-3 rounded-xl transition-all group border ${
+              aiActive
+                ? 'bg-gradient-to-r from-violet-50 to-blue-50 border-violet-300 ring-1 ring-violet-300/40'
+                : 'bg-gradient-to-r from-violet-50/70 to-blue-50/70 border-violet-100 hover:border-violet-200 hover:from-violet-50 hover:to-blue-50'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-sm">
+                <span className="text-base leading-none">✨</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[13px] font-extrabold text-gray-900 truncate">AI 어시스턴트</span>
+                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600 tracking-tight">BETA</span>
+                </div>
+                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">대화 요약 · 일정 정리 · 답장 초안</p>
+              </div>
+              <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide">
         {loading ? (
@@ -523,6 +656,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <button
                   key={timeline.proposalId}
                   onClick={() => {
+                    setAiActive(false);
                     setSelectedTimeline(timeline);
                     fetchTimelineDetail(timeline.proposalId, true);
                     setShowList(false);
@@ -1015,6 +1149,166 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     );
   };
 
+  // AI assistant chat panel (opened from the pinned item at the top of the list)
+  const renderAiChat = () => {
+    const suggestions = selectedTimeline
+      ? ['이 대화 요약해줘', '다음 할 일과 일정 정리해줘', '정중한 답장 초안 써줘']
+      : ['협업 제안 메시지 초안 써줘', '협상할 때 체크할 점 알려줘', '일정 관리 팁 알려줘'];
+
+    return (
+      <div className="flex flex-col h-full bg-white overflow-hidden">
+        {/* Header */}
+        <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-sm z-10">
+          <div className="flex items-center gap-2 md:gap-3">
+            <button
+              onClick={() => { setAiActive(false); setShowList(true); }}
+              className="md:hidden p-1 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div className="shrink-0 w-7 h-7 md:w-9 md:h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-sm">
+              <span className="text-sm md:text-base leading-none">✨</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[13px] md:text-[15px] font-extrabold text-gray-900 truncate tracking-tight">AI 어시스턴트</h2>
+                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600">BETA</span>
+              </div>
+              <p className="text-[10px] md:text-[11px] text-gray-500 font-medium truncate mt-0.5">
+                {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '협업 대화를 선택하면 그 내용을 함께 분석해요'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Membership gate */}
+        {aiEnabled === false ? (
+          <div className="flex-1 flex items-center justify-center px-6">
+            <div className="max-w-sm text-center">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <span className="text-2xl leading-none">✨</span>
+              </div>
+              <h3 className="text-base font-extrabold text-gray-900 mb-1.5">AI 어시스턴트는 AI 멤버십 전용 기능입니다</h3>
+              <p className="text-xs text-gray-500 leading-relaxed mb-5">
+                스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십(13,900원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
+              </p>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                className="px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 transition-all shadow-md hover:shadow-lg"
+              >
+                멤버십 플랜 보기
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Messages */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-3 md:py-4 pb-[68px] md:pb-4 scrollbar-hide">
+              {aiMessages.length === 0 && (
+                <div className="max-w-lg mx-auto text-center pt-4 md:pt-8">
+                  <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center mx-auto mb-3 shadow-lg">
+                    <span className="text-xl md:text-2xl leading-none">✨</span>
+                  </div>
+                  <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
+                  <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed mb-4">
+                    협업 대화를 요약하거나, 일정을 정리하고, 답장 초안을 만들어 드릴게요.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => sendAiMessage(s)}
+                        className="w-full text-left px-3.5 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[12px] md:text-[13px] font-semibold text-gray-700 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-all"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3 md:space-y-4 max-w-3xl mx-auto">
+                {aiMessages.map((m, idx) => (
+                  <div key={idx} className={`flex gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                    <div className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+                      m.role === 'user'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gradient-to-br from-violet-500 to-blue-600 text-white'
+                    }`}>
+                      {m.role === 'user' ? getInitials(normalizedUserName) : '✨'}
+                    </div>
+                    <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
+                      <div className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] whitespace-pre-wrap break-words ${
+                        m.role === 'user'
+                          ? 'bg-blue-50 border border-blue-100 text-gray-900 rounded-tr-sm'
+                          : 'bg-gray-50 border border-gray-100 text-gray-900 rounded-tl-sm'
+                      }`}>
+                        {m.content}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {aiLoading && (
+                  <div className="flex gap-2.5">
+                    <div className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center text-xs">✨</div>
+                    <div className="inline-flex items-center gap-1 px-3.5 py-3 rounded-2xl rounded-tl-sm bg-gray-50 border border-gray-100">
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                )}
+                <div ref={aiEndRef} />
+              </div>
+            </div>
+
+            {/* Composer */}
+            <div className="fixed bottom-[calc(60px+env(safe-area-inset-bottom,0px))] left-0 right-0 md:static md:bottom-auto px-2 pb-1 md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-20 md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
+              <div className="max-w-3xl mx-auto relative bg-white border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-400 transition-all">
+                <div className="flex items-end gap-1.5 md:gap-2 p-2 md:p-2.5">
+                  <textarea
+                    ref={aiInputRef}
+                    value={aiInput}
+                    onChange={(e) => {
+                      setAiInput(e.target.value);
+                      const ta = e.target;
+                      ta.style.height = 'auto';
+                      ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
+                    }}
+                    onKeyDown={handleAiKeyDown}
+                    placeholder="AI에게 무엇이든 물어보세요..."
+                    rows={1}
+                    className="flex-1 bg-transparent text-[13px] md:text-[15px] text-gray-900 placeholder-gray-400 resize-none focus:outline-none py-1 px-1 leading-relaxed"
+                    style={{ maxHeight: '80px' }}
+                  />
+                  <button
+                    onClick={() => sendAiMessage(aiInput)}
+                    disabled={!aiInput.trim() || aiLoading}
+                    className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
+                      aiInput.trim() && !aiLoading
+                        ? 'bg-gradient-to-br from-violet-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
+                        : 'bg-gray-100 text-gray-400'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14m-7-7l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <p className="hidden md:block max-w-3xl mx-auto text-[10px] text-gray-400 font-medium mt-1.5 px-1">
+                AI는 협업에 도움을 주기 위한 참고용이며, 중요한 내용은 직접 확인해 주세요.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   // Mobile: show list or detail
   // Desktop: two-panel layout
   return (
@@ -1025,19 +1319,19 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           {renderSidebar()}
         </div>
         <div className="flex-1 min-w-0">
-          {renderMessages()}
+          {aiActive ? renderAiChat() : renderMessages()}
         </div>
       </div>
 
       {/* Mobile: Single panel */}
       <div className="md:hidden h-full overflow-hidden">
-        {showList && !selectedTimeline ? (
+        {!aiActive && showList && !selectedTimeline ? (
           <div className="h-full overflow-hidden border-t border-gray-200">
             {renderSidebar()}
           </div>
         ) : (
           <div className="h-full overflow-hidden flex flex-col">
-            {renderMessages()}
+            {aiActive ? renderAiChat() : renderMessages()}
           </div>
         )}
       </div>

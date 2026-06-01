@@ -990,6 +990,13 @@ const App: React.FC = () => {
     return () => window.removeEventListener('navigate-timeline', handler);
   }, []);
 
+  // Listen for navigate-membership custom events (e.g. AI assistant upsell)
+  useEffect(() => {
+    const handler = () => setSubView('membership');
+    window.addEventListener('navigate-membership', handler);
+    return () => window.removeEventListener('navigate-membership', handler);
+  }, []);
+
   useEffect(() => {
     const handleLocationChange = () => {
       const path = window.location.pathname.replace(/^\//, '');

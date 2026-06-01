@@ -92,7 +92,7 @@ interface LiveStreamProps {
   preConnectedSignaling?: ViewerSignaling | null;
 }
 
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=3840&q=100';
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 const KAKAO_APP_KEY = typeof window !== 'undefined'
   ? (window as any).__KAKAO_APP_KEY__ || import.meta.env.VITE_KAKAO_APP_KEY || ''
   : '';
@@ -2331,7 +2331,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       {/* Main Stream Area - Full Screen Edge-to-Edge */}
       <div className="absolute inset-0 bg-slate-900 overflow-hidden">
         {/* Live Video Stream */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 z-10 pointer-events-none" />
+        {/* Subtle scrim — kept light so the live video stays clearly visible.
+            Just enough darkening at the very top/bottom edges to keep the
+            overlaid controls and chat legible. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/45 z-10 pointer-events-none" />
 
         {/* WebRTC Video - always render and keep visible when connected */}
         <video
@@ -3193,9 +3196,9 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               {msg.profileImage && (
                 <img src={msg.profileImage} alt="" className="w-6 h-6 rounded-full object-cover mt-0.5 flex-shrink-0" />
               )}
-              <div className="min-w-0 bg-black/30 backdrop-blur-sm rounded-xl px-2.5 py-1.5 max-w-[85%]">
+              <div className="min-w-0 bg-black/20 rounded-xl px-2.5 py-1.5 max-w-[85%]" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                 <span className="text-blue-300 text-[10px] font-black mr-1.5">{msg.user}</span>
-                <span className="text-white/90 text-[13px] font-medium break-words">{msg.text}</span>
+                <span className="text-white text-[13px] font-medium break-words">{msg.text}</span>
               </div>
             </div>
           ))}
