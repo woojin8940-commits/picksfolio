@@ -830,6 +830,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
         {/* Messages */}
         <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto py-3 md:py-4 pb-[68px] md:pb-4 scrollbar-hide">
+          {/* Bottom-anchored column: messages rest just above the composer even when the
+              conversation is short, and grow upward / scroll normally once it overflows. */}
+          <div className="min-h-full flex flex-col justify-end">
           {/* Channel intro (Slack-style) */}
           <div className="px-3 md:px-5 pb-2 md:pb-4 mb-1 md:mb-2">
             <div className="w-9 h-9 md:w-12 md:h-12 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-2 md:mb-3">
@@ -1059,6 +1062,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             );
           })}
           <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Message Composer (fixed at bottom on mobile) */}

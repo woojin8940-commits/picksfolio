@@ -316,9 +316,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
 
   return (
-    <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+    <div className="p-4 md:px-14 md:py-6 w-full animate-in fade-in duration-500">
       {/* Header */}
-      <div className="mb-8 md:mb-12 flex flex-col md:flex-row md:items-end gap-4 justify-between">
+      <div className="mb-4 md:mb-6 flex flex-col md:flex-row md:items-end gap-4 justify-between">
         <div>
           <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 캘린더</h2>
           <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">
@@ -341,7 +341,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         <div className="flex-1">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             {/* Month Navigation + Date Jump */}
-            <div className="flex flex-col gap-3 p-5 md:p-8 border-b border-slate-100">
+            <div className="flex flex-col gap-3 p-4 md:p-5 border-b border-slate-100">
               <div className="flex items-center justify-between">
                 <button
                   onClick={prevMonth}
@@ -409,10 +409,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               ))}
             </div>
 
-            {/* Calendar Days */}
-            <div className="grid grid-cols-7">
+            {/* Calendar Days — on desktop the grid fills the remaining viewport height so the
+                whole month is visible without scrolling; rows divide the space equally. */}
+            <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-290px)]">
               {Array.from({ length: firstDay }).map((_, i) => (
-                <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[115px] md:min-h-[155px] border-b border-r border-slate-50" />
+                <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[80px] md:min-h-0 border-b border-r border-slate-50" />
               ))}
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
@@ -428,7 +429,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   <div
                     key={day}
                     onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                    className={`p-2 md:p-3 min-h-[115px] md:min-h-[155px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                    className={`p-2 md:p-3 min-h-[80px] md:min-h-0 overflow-hidden border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
                       isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
                     }`}
                   >
