@@ -53,7 +53,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [editForm, setEditForm] = useState<Partial<Block>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const [verification, setVerification] = useState<SellerVerification | null>(null);
+  const [verification, setVerification] = useState<SellerVerification | null>(
+    () => apiService.getCachedSellerVerification(userName.replace(/^biz\//, ''))
+  );
   const membershipActive = !!verification?.membership_active;
 
   useEffect(() => {

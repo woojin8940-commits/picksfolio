@@ -313,7 +313,9 @@ interface PortfolioProfile {
 const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onNavigateMembership }) => {
   const normalizedUsername = (userName || '').toLowerCase();
 
-  const [verification, setVerification] = useState<SellerVerification | null>(null);
+  const [verification, setVerification] = useState<SellerVerification | null>(
+    () => apiService.getCachedSellerVerification(userName.replace(/^biz\//, ''))
+  );
   const membershipActive = !!verification?.membership_active;
 
   const [profile, setProfile] = useState<PortfolioProfile>(() => {

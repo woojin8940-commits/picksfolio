@@ -240,6 +240,13 @@ h1, h2, h3, h4, h5, h6 {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* When a collaboration conversation (or AI chat) is open, hide the app's
+   mobile bottom nav so the message composer can rest flush at the very bottom
+   of the screen. The conversation provides its own back button. */
+body.timeline-chat-open .fixed-bottom-nav {
+  display: none;
+}
+
 /* Use this on main content when a fixed bottom nav is present (~64px tall). */
 .has-bottom-nav-pad {
   padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));

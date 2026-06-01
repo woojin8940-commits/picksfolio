@@ -538,7 +538,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-[#0b1221] text-white z-[100] border-t border-white/10">
+      <nav className="md:hidden fixed bottom-0 left-0 w-full bg-[#0b1221] text-white z-[100] border-t border-white/10 fixed-bottom-nav">
         <div className="flex overflow-x-auto scrollbar-hide px-1 py-2 gap-0.5" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}>
           <MobileNavItem icon="🏠" label="홈" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />

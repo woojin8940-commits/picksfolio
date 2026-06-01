@@ -45,8 +45,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   const [productsLoaded, setProductsLoaded] = useState(false);
 
   // Seller verification gate
-  const [verification, setVerification] = useState<SellerVerification | null>(null);
-  const [verificationLoaded, setVerificationLoaded] = useState(false);
+  const cachedVerification = apiService.getCachedSellerVerification(userName.replace(/^biz\//, ''));
+  const [verification, setVerification] = useState<SellerVerification | null>(cachedVerification);
+  const [verificationLoaded, setVerificationLoaded] = useState(!!cachedVerification);
 
   // Live notification subscriber count (people who opted in to be alerted when live starts)
   const [notifySubscriberCount, setNotifySubscriberCount] = useState<number>(0);

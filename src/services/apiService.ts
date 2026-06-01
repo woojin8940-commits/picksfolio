@@ -18,16 +18,63 @@ export interface SiteData {
   linkGridCategories?: string[];
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Client-side caches. Site data and seller verification are fetched on every
+// dashboard navigation; without caching each menu switch re-hits the network
+// and the UI flashes empty (products/content "사라진 것처럼") or shows the
+// membership gate before verification resolves. A short in-memory cache plus
+// in-flight de-duplication makes repeat navigation instant while keeping the
+// data fresh; the seller verification is additionally mirrored to
+// localStorage so the very first paint after a reload is already correct.
+// ─────────────────────────────────────────────────────────────────────────
+const SITE_DATA_TTL = 60 * 1000; // 1 minute
+const siteDataCache: Record<string, { data: SiteData; ts: number }> = {};
+const siteDataInflight: Record<string, Promise<SiteData | null>> = {};
+
+const VERIFICATION_TTL = 5 * 60 * 1000; // 5 minutes
+const verificationCache: Record<string, { data: SellerVerification | null; ts: number }> = {};
+
+const verifKey = (username: string) => `picks_verif_${username.toLowerCase()}`;
+
+const writeVerificationCache = (username: string, data: SellerVerification | null) => {
+  const key = username.toLowerCase();
+  verificationCache[key] = { data, ts: Date.now() };
+  try {
+    if (data) localStorage.setItem(verifKey(username), JSON.stringify(data));
+  } catch {
+    // localStorage may be unavailable (private mode) — memory cache still works.
+  }
+};
+
 export const apiService = {
-  async getSiteData(username: string): Promise<SiteData | null> {
-    try {
-      const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`);
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) {
-      console.error('[API] Failed to get site data:', e);
-      return null;
+  async getSiteData(username: string, opts?: { force?: boolean }): Promise<SiteData | null> {
+    const key = username.toLowerCase();
+    const cached = siteDataCache[key];
+    if (!opts?.force && cached && Date.now() - cached.ts < SITE_DATA_TTL) {
+      return cached.data;
     }
+    // De-duplicate concurrent requests (multiple components mount at once).
+    if (!opts?.force && key in siteDataInflight) {
+      return siteDataInflight[key];
+    }
+
+    const request = (async () => {
+      try {
+        const res = await fetch(`/api/site/${encodeURIComponent(key)}`);
+        if (!res.ok) return null;
+        const data = (await res.json()) as SiteData;
+        siteDataCache[key] = { data, ts: Date.now() };
+        return data;
+      } catch (e) {
+        console.error('[API] Failed to get site data:', e);
+        return null;
+      } finally {
+        delete siteDataInflight[key];
+      }
+    })();
+
+    siteDataInflight[key] = request;
+    return request;
   },
 
   async saveSiteData(username: string, data: Partial<SiteData>): Promise<boolean> {
@@ -37,6 +84,15 @@ export const apiService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
+      if (res.ok) {
+        // Keep the cache in sync with what we just persisted so a subsequent
+        // navigation doesn't briefly render pre-save data.
+        const key = username.toLowerCase();
+        const cached = siteDataCache[key];
+        if (cached) {
+          siteDataCache[key] = { data: { ...cached.data, ...data }, ts: Date.now() };
+        }
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to save site data:', e);
@@ -601,11 +657,29 @@ export const apiService = {
   },
 
   // Seller verification (business registration + settlement account + membership)
+  // Returns the last-known value synchronously (from memory, then localStorage)
+  // so gated screens can render their real state on the first paint instead of
+  // flashing the "멤버십 인증 필요" gate while the network request is in flight.
+  getCachedSellerVerification(username: string): SellerVerification | null {
+    const key = username.toLowerCase();
+    const mem = verificationCache[key];
+    if (mem && Date.now() - mem.ts < VERIFICATION_TTL) return mem.data;
+    try {
+      const raw = localStorage.getItem(verifKey(username));
+      if (raw) return JSON.parse(raw) as SellerVerification;
+    } catch {
+      // ignore parse/storage errors and fall through to a network fetch
+    }
+    return null;
+  },
+
   async getSellerVerification(username: string): Promise<SellerVerification | null> {
     try {
       const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`);
       if (!res.ok) return null;
-      return await res.json();
+      const data = (await res.json()) as SellerVerification;
+      writeVerificationCache(username, data);
+      return data;
     } catch (e) {
       console.error('[API] Failed to get seller verification:', e);
       return null;
@@ -621,6 +695,7 @@ export const apiService = {
       });
       const json = await res.json();
       if (!res.ok) return { success: false, error: json?.error || '저장 실패' };
+      if (json.data) writeVerificationCache(username, json.data);
       return { success: true, data: json.data };
     } catch (e) {
       console.error('[API] Failed to save seller verification:', e);
@@ -645,6 +720,7 @@ export const apiService = {
       if (!res.ok || !json.success) {
         return { success: false, error: json?.error || '결제 검증 실패' };
       }
+      if (json.data) writeVerificationCache(username, json.data);
       return { success: true, data: json.data };
     } catch (e) {
       console.error('[API] Failed to complete PortOne payment:', e);
@@ -667,6 +743,7 @@ export const apiService = {
       if (!res.ok || !json.success) {
         return { success: false, error: json?.error || '빌링 결제 실패' };
       }
+      if (json.data) writeVerificationCache(username, json.data);
       return { success: true, data: json.data };
     } catch (e) {
       console.error('[API] Failed to process billing key payment:', e);
