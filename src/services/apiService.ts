@@ -605,10 +605,16 @@ export const apiService = {
     }
   },
 
-  // Prepaid live-time top-up ("시간 충전하기"). Charges `hours` of broadcast
-  // time at the per-hour rate and returns the refreshed usage so the caller
-  // can immediately reflect the new remaining time.
-  async chargeLiveTime(username: string, hours: number): Promise<{
+  // Prepaid live-time top-up ("시간 충전하기"). After the seller completes a
+  // one-time PortOne payment (토스페이먼츠/토스페이/카카오페이) for `hours` of
+  // broadcast time at the per-hour rate, the verified `paymentId` is posted here
+  // so the server can confirm the payment and add the time. Returns the refreshed
+  // usage so the caller can immediately reflect the new remaining time.
+  async chargeLiveTime(
+    username: string,
+    hours: number,
+    payment: { paymentId: string; payMethod?: string },
+  ): Promise<{
     success: boolean;
     error?: string;
     charged?: { hours: number; minutes: number; amountKrw: number };
@@ -628,7 +634,7 @@ export const apiService = {
       const res = await fetch(`/api/live-credits/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hours }),
+        body: JSON.stringify({ hours, paymentId: payment.paymentId, payMethod: payment.payMethod }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { success: false, error: data?.error || '충전에 실패했습니다.' };

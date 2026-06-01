@@ -25,6 +25,10 @@ export interface ChargeEntry {
   hours: number
   minutes: number
   amountKrw: number
+  // Set once charging requires a verified one-time PortOne payment. Older
+  // entries (credited before payment verification existed) may omit these.
+  paymentId?: string
+  payMethod?: string
 }
 
 export interface LiveCredits {

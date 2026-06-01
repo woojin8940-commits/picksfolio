@@ -2,6 +2,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
 import { apiService } from '../services/apiService';
+import {
+  CHARGE_RATE_KRW_PER_HOUR,
+  CHARGE_PAY_METHODS,
+  payAndChargeLiveTime,
+  type ChargePayMethod,
+} from '../utils/liveCharge';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
 
@@ -104,8 +110,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Time-charging ("시간 충전하기") modal state.
   const [showChargeModal, setShowChargeModal] = useState(false);
   const [chargeHours, setChargeHours] = useState(1);
+  const [chargePayMethod, setChargePayMethod] = useState<ChargePayMethod>('CARD');
   const [charging, setCharging] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
+  // Low-time warning while broadcasting: elapsed seconds this session, and a
+  // one-shot flag so the 30분 알림 fires only once per broadcast.
+  const [liveElapsedSec, setLiveElapsedSec] = useState(0);
+  const [lowTimeWarned, setLowTimeWarned] = useState(false);
+  const [showLowTimeBanner, setShowLowTimeBanner] = useState(false);
   const isLiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -415,27 +427,75 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     refreshLiveUsage();
   }, [refreshLiveUsage]);
 
-  // Charge prepaid broadcast time by the hour (시간당 8,900원). On success the
-  // usage badge and the broadcast gate refresh immediately.
-  const CHARGE_RATE_KRW_PER_HOUR = 8900;
+  // Charge prepaid broadcast time by the hour (시간당 8,900원) via a one-time
+  // PortOne payment (토스페이먼츠/토스페이/카카오페이). On success the usage badge
+  // and the broadcast gate refresh immediately. Works while live so a seller can
+  // top up mid-broadcast when time is running low.
   const handleChargeTime = useCallback(async () => {
     if (charging) return;
     setCharging(true);
     setChargeError(null);
     try {
-      const result = await apiService.chargeLiveTime(userName, chargeHours);
-      if (!result.success) {
-        setChargeError(result.error || '충전에 실패했습니다.');
+      const outcome = await payAndChargeLiveTime(userName, chargeHours, chargePayMethod);
+      if (!outcome.success) {
+        setChargeError(outcome.error || '충전에 실패했습니다.');
         return;
       }
       await refreshLiveUsage();
+      // A successful top-up extends the allowance — clear the low-time warning so
+      // it can re-arm if the freshly added time later runs low again.
+      setLowTimeWarned(false);
+      setShowLowTimeBanner(false);
       setShowChargeModal(false);
     } catch (e) {
       setChargeError('충전 중 오류가 발생했습니다.');
     } finally {
       setCharging(false);
     }
-  }, [userName, chargeHours, charging, refreshLiveUsage]);
+  }, [userName, chargeHours, chargePayMethod, charging, refreshLiveUsage]);
+
+  // Tick the elapsed broadcast time while live. The server only learns the used
+  // minutes when the broadcast STOPS (the record is written then), so during a
+  // live session we estimate remaining time on the client: remaining-at-start
+  // (liveUsage.remainingMinutes) minus minutes elapsed this session.
+  useEffect(() => {
+    if (!isLive) { setLiveElapsedSec(0); return; }
+    const tick = () => {
+      const startIso = broadcastStartTimeRef.current;
+      const startMs = startIso ? new Date(startIso).getTime() : Date.now();
+      setLiveElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, [isLive]);
+
+  // Estimated remaining broadcast time during a live session (null when usage
+  // hasn't loaded yet). Used for the ticking badge and the 30분 잔여 알림.
+  const liveRemainingMinutes = liveUsage
+    ? Math.max(0, liveUsage.remainingMinutes - Math.floor(liveElapsedSec / 60))
+    : null;
+
+  // 잔여시간 30분 알림: when broadcasting and the estimated remaining time drops
+  // to 30 minutes, alert the broadcaster once and surface an in-broadcast charge
+  // banner so they can top up without leaving the live screen.
+  useEffect(() => {
+    if (!isLive || liveRemainingMinutes === null) return;
+    if (liveRemainingMinutes <= 30 && !lowTimeWarned) {
+      setLowTimeWarned(true);
+      setShowLowTimeBanner(true);
+      try { navigator.vibrate?.([200, 100, 200]); } catch {}
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `system-lowtime-${Date.now()}`,
+          user: 'System',
+          text: `라이브 잔여시간이 약 ${liveRemainingMinutes}분 남았습니다. 방송이 끊기지 않도록 시간을 충전해주세요.`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, [isLive, liveRemainingMinutes, lowTimeWarned]);
 
   // Sync refs for use in animation loop
   useEffect(() => { filtersRef.current = filters; }, [filters]);
@@ -1036,6 +1096,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       // any encoding surprises.
       broadcastIdRef.current = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       peakViewerCountRef.current = 0;
+      // Re-arm the 30분 잔여 알림 for this new session.
+      setLowTimeWarned(false);
+      setShowLowTimeBanner(false);
+      setLiveElapsedSec(0);
 
       // Reset all stats from previous broadcast
       setCartStats(null);
@@ -1349,16 +1413,24 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   </span>
                 )}
               </div>
-              {liveUsage && (
+              {liveUsage && (() => {
+                // While live, show the ticking client-side estimate; otherwise the
+                // server figure. Flag a low (≤30분) running balance in amber/red.
+                const shownRemaining =
+                  isLive && liveRemainingMinutes !== null
+                    ? liveRemainingMinutes
+                    : liveUsage.remainingMinutes;
+                const lowRunning = isLive && shownRemaining <= 30;
+                return (
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <div
-                    className={`backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2 ${liveUsage.exhausted ? 'bg-red-600/40 border-red-400/40' : 'bg-black/40 border-white/10'}`}
+                    className={`backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2 ${liveUsage.exhausted || shownRemaining <= 0 ? 'bg-red-600/40 border-red-400/40' : lowRunning ? 'bg-amber-600/40 border-amber-400/40' : 'bg-black/40 border-white/10'}`}
                     title="이번 달 라이브 잔여시간 (포함 3시간 + 충전 시간) · 후불 누적 (시간당 8,900원) · 매출 수수료 8.5%(PG 포함)"
                   >
                     <span className="text-white/40 uppercase tracking-widest text-[9px]">잔여</span>
-                    <span className={liveUsage.exhausted ? 'text-red-200' : ''}>
-                      {Math.floor(liveUsage.remainingMinutes / 60)}시간{' '}
-                      {liveUsage.remainingMinutes % 60}분 남음
+                    <span className={liveUsage.exhausted || shownRemaining <= 0 ? 'text-red-200' : lowRunning ? 'text-amber-100' : ''}>
+                      {Math.floor(shownRemaining / 60)}시간{' '}
+                      {shownRemaining % 60}분 남음
                     </span>
                     {liveUsage.chargedMinutes > 0 && (
                       <>
@@ -1386,11 +1458,35 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     <Plus size={12} /> 시간 충전
                   </button>
                 </div>
-              )}
+                );
+              })()}
               {capBlock && (
                 <div className="bg-red-600/90 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-red-400/40 text-white text-[10px] md:text-[11px] font-black flex items-center gap-2">
                   <span className="uppercase tracking-widest text-[9px]">자동 차단</span>
                   <span>{capBlock.message}</span>
+                </div>
+              )}
+              {isLive && showLowTimeBanner && (
+                <div className="w-full md:w-auto bg-amber-500/90 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-amber-300/50 text-white text-[10px] md:text-[11px] font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                  <Zap size={14} className="shrink-0" />
+                  <span>
+                    라이브 잔여시간이 {liveRemainingMinutes ?? 30}분 남았습니다. 방송이 끊기기 전에 충전하세요.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                    className="ml-1 bg-white text-amber-700 px-2.5 py-1 rounded-full text-[10px] font-black hover:bg-amber-50 active:scale-95 transition-all shrink-0"
+                  >
+                    지금 충전
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowLowTimeBanner(false)}
+                    className="text-white/80 hover:text-white shrink-0"
+                    aria-label="닫기"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               )}
             </div>
@@ -2105,14 +2201,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </button>
             </div>
             <p className="text-white/50 text-xs mb-5">
-              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다.
+              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다. (1회 결제)
             </p>
 
             {liveUsage && (
               <div className="bg-white/5 rounded-2xl px-4 py-3 mb-5 text-[11px] text-white/60 flex items-center justify-between">
                 <span>현재 잔여시간</span>
                 <span className="text-white font-bold">
-                  {Math.floor(liveUsage.remainingMinutes / 60)}시간 {liveUsage.remainingMinutes % 60}분
+                  {Math.floor((isLive && liveRemainingMinutes !== null ? liveRemainingMinutes : liveUsage.remainingMinutes) / 60)}시간 {(isLive && liveRemainingMinutes !== null ? liveRemainingMinutes : liveUsage.remainingMinutes) % 60}분
                 </span>
               </div>
             )}
@@ -2137,6 +2233,27 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </button>
             </div>
 
+            {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+            <div className="mb-4">
+              <p className="text-white/40 text-[11px] font-bold mb-2">결제 수단</p>
+              <div className="grid grid-cols-3 gap-2">
+                {CHARGE_PAY_METHODS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setChargePayMethod(m.id)}
+                    disabled={charging}
+                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 ${
+                      chargePayMethod === m.id
+                        ? 'bg-emerald-600 border-emerald-500 text-white'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:border-emerald-400/40'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/20 rounded-2xl px-4 py-3 mb-4">
               <span className="text-emerald-200/80 text-xs font-bold">결제 금액</span>
               <span className="text-emerald-300 text-lg font-black">
@@ -2153,7 +2270,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               disabled={charging}
               className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {charging ? '충전 중…' : <><Zap size={16} /> {chargeHours}시간 충전하기</>}
+              {charging ? '결제 진행 중…' : <><Zap size={16} /> {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원 결제하고 {chargeHours}시간 충전</>}
             </button>
           </div>
         </div>

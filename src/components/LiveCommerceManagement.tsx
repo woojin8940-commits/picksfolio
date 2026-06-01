@@ -5,6 +5,12 @@ import LiveStreaming from './LiveStreaming';
 import MediaAuto from './MediaAuto';
 import { SellerVerification } from '../types';
 import { apiService } from '../services/apiService';
+import {
+  CHARGE_RATE_KRW_PER_HOUR,
+  CHARGE_PAY_METHODS,
+  payAndChargeLiveTime,
+  type ChargePayMethod,
+} from '../utils/liveCharge';
 
 interface LiveCommerceManagementProps {
   userName: string;
@@ -65,9 +71,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   // 시간 충전하기 modal state.
   const [showChargeModal, setShowChargeModal] = useState(false);
   const [chargeHours, setChargeHours] = useState(1);
+  const [chargePayMethod, setChargePayMethod] = useState<ChargePayMethod>('CARD');
   const [charging, setCharging] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
-  const CHARGE_RATE_KRW_PER_HOUR = 8900;
 
   const loadLiveUsage = useCallback(async () => {
     const result = await apiService.getLiveUsage(userName).catch(() => null);
@@ -92,9 +98,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
     setCharging(true);
     setChargeError(null);
     try {
-      const result = await apiService.chargeLiveTime(userName, chargeHours);
-      if (!result.success) {
-        setChargeError(result.error || '충전에 실패했습니다.');
+      const outcome = await payAndChargeLiveTime(userName, chargeHours, chargePayMethod);
+      if (!outcome.success) {
+        setChargeError(outcome.error || '충전에 실패했습니다.');
         return;
       }
       await loadLiveUsage();
@@ -104,7 +110,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
     } finally {
       setCharging(false);
     }
-  }, [userName, chargeHours, charging, loadLiveUsage]);
+  }, [userName, chargeHours, chargePayMethod, charging, loadLiveUsage]);
 
   // Broadcast title (saved per user, used for live-start alimtalk variable 라이브 제목)
   const [broadcastTitle, setBroadcastTitle] = useState<string>('');
@@ -714,7 +720,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               </button>
             </div>
             <p className="text-slate-400 text-xs mb-5">
-              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다.
+              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다. (1회 결제)
             </p>
 
             {liveUsage && (
@@ -746,6 +752,27 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               </button>
             </div>
 
+            {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+            <div className="mb-4">
+              <p className="text-slate-400 text-[11px] font-bold mb-2">결제 수단</p>
+              <div className="grid grid-cols-3 gap-2">
+                {CHARGE_PAY_METHODS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setChargePayMethod(m.id)}
+                    disabled={charging}
+                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 ${
+                      chargePayMethod === m.id
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 mb-4">
               <span className="text-emerald-700/80 text-xs font-bold">결제 금액</span>
               <span className="text-emerald-700 text-lg font-black">
@@ -762,7 +789,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               disabled={charging}
               className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50"
             >
-              {charging ? '충전 중…' : `${chargeHours}시간 충전하기`}
+              {charging ? '결제 진행 중…' : `${(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원 결제하고 ${chargeHours}시간 충전`}
             </button>
           </div>
         </div>
