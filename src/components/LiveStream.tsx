@@ -81,6 +81,9 @@ interface KakaoUser {
   nickname: string;
   profileImage?: string;
   provider?: 'kakao';
+  // Viewer-chosen English display name shown in chat. The Kakao `nickname`
+  // (real name) is kept only for payment; chat never exposes it.
+  username?: string;
 }
 
 interface LiveStreamProps {
@@ -107,7 +110,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [likes, setLikes] = useState<number[]>([]);
-  const [kakaoUser] = useState<KakaoUser | null>(() => {
+  const [kakaoUser, setKakaoUser] = useState<KakaoUser | null>(() => {
     try {
       const saved = localStorage.getItem('picks_kakao_user');
       if (saved) {
@@ -121,6 +124,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     return null;
   });
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  // Viewers log in with Kakao but pick their own English username for chat, so
+  // their real name is never shown to other viewers.
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameError, setUsernameError] = useState('');
   const [showChatOverlay, setShowChatOverlay] = useState(true);
   const [streamConnected, setStreamConnected] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
@@ -1759,10 +1767,17 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       setShowLoginPrompt(true);
       return;
     }
+    // Logged in but hasn't chosen an English username yet — collect it first.
+    if (!kakaoUser.username) {
+      setUsernameInput('');
+      setUsernameError('');
+      setShowUsernameModal(true);
+      return;
+    }
     if (!newMessage.trim()) return;
     const msg: ChatMessage = {
       id: Date.now().toString(),
-      user: kakaoUser.nickname,
+      user: kakaoUser.username,
       text: newMessage,
       profileImage: kakaoUser.profileImage,
       timestamp: Date.now(),
@@ -1771,6 +1786,33 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     // Send to broadcaster and other viewers via signaling channel
     signalingRef.current?.sendChat(msg);
     setNewMessage('');
+  };
+
+  // A logged-in viewer who has not yet chosen an English chat username is
+  // prompted to set one. This keeps their Kakao real name private — only the
+  // English username they pick is ever shown in chat.
+  useEffect(() => {
+    if (kakaoUser && !kakaoUser.username) {
+      setUsernameInput('');
+      setShowUsernameModal(true);
+    }
+  }, [kakaoUser]);
+
+  // Validate and persist the viewer's chosen English username.
+  const handleSaveUsername = () => {
+    const value = usernameInput.trim();
+    if (!/^[A-Za-z0-9_]{2,20}$/.test(value) || !/[A-Za-z]/.test(value)) {
+      setUsernameError('영문/숫자 2~20자로 입력해주세요. (한글 불가, 영문 1자 이상 포함)');
+      return;
+    }
+    setUsernameError('');
+    setKakaoUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, username: value };
+      try { localStorage.setItem('picks_kakao_user', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+    setShowUsernameModal(false);
   };
 
   // Add product to cart (optimistic update to avoid video freeze)
@@ -2511,7 +2553,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           </div>
           <div className="flex items-center gap-2">
             {kakaoUser && (
-              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.nickname}</span>
+              <span className="text-[10px] font-bold text-blue-300 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">{kakaoUser.username || kakaoUser.nickname}</span>
             )}
             {/* Persistent unmute toggle — mobile autoplay forces muted start,  */}
             {/* and many viewers never realize they can tap for sound. Showing  */}
@@ -3249,6 +3291,43 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               className="w-full text-slate-400 font-bold text-sm py-2 mt-3 hover:text-slate-600 transition-all"
             >
               닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Username Setup Modal — viewers pick an English chat name after Kakao
+          login so their real name is never shown in chat. */}
+      {showUsernameModal && kakaoUser && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 max-w-sm mx-4 text-center animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <MessageCircle size={28} className="text-white" />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2">채팅 닉네임 설정</h3>
+            <p className="text-slate-500 text-sm font-medium mb-6">채팅에서 사용할 닉네임을 영어로 정해주세요.<br />다른 시청자에게는 이 닉네임만 표시됩니다.</p>
+
+            <input
+              type="text"
+              value={usernameInput}
+              onChange={(e) => setUsernameInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveUsername()}
+              placeholder="e.g. picks_fan"
+              autoFocus
+              maxLength={20}
+              className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 text-slate-900 text-base text-center font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-300 placeholder:font-medium mb-2"
+            />
+            <p className="text-slate-400 text-[11px] font-medium mb-4">영문/숫자 2~20자 (한글은 사용할 수 없습니다)</p>
+
+            {usernameError && (
+              <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 rounded-xl py-2 px-3">{usernameError}</p>
+            )}
+
+            <button
+              onClick={handleSaveUsername}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-base text-white bg-blue-500 hover:opacity-90 transition-all active:scale-95"
+            >
+              닉네임 설정 완료
             </button>
           </div>
         </div>
