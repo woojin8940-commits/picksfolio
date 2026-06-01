@@ -114,7 +114,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .video-js .vjs-tech {
-  object-fit: contain;
+  object-fit: cover;
   width: 100%;
   height: 100%;
 }
@@ -145,7 +145,7 @@ h1, h2, h3, h4, h5, h6 {
     height: 100% !important;
   }
   .video-js .vjs-tech {
-    object-fit: contain;
+    object-fit: cover;
     width: 100% !important;
     height: 100% !important;
     -webkit-transform: translateZ(0);
@@ -180,13 +180,15 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Live stream video must show the full broadcaster frame without cropping,
-   so mobile broadcaster view and PC viewer view share the same aspect ratio. */
+/* Live stream video fills the mobile viewport edge-to-edge with no black
+   letterbox bars. A landscape desktop broadcast is cropped to the phone's
+   portrait frame (object-fit: cover) instead of being shrunk into a pillarboxed
+   strip, giving viewers the immersive full-screen look of a mobile live feed. */
 .live-stream-container video,
 .live-stream-container .video-js {
   width: 100% !important;
   height: 100% !important;
-  object-fit: contain !important;
+  object-fit: cover !important;
   background-color: #000;
   -webkit-transform: translateZ(0);
   transform: translateZ(0);

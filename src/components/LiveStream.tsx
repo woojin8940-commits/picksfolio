@@ -121,10 +121,6 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     return null;
   });
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [liveConsentRequired, setLiveConsentRequired] = useState(false);
-  const [liveConsentPrivacy, setLiveConsentPrivacy] = useState(false);
-  const [liveConsentMarketing, setLiveConsentMarketing] = useState(false);
-  const [showLiveConsentDetail, setShowLiveConsentDetail] = useState<null | 'privacy' | 'marketing'>(null);
   const [showChatOverlay, setShowChatOverlay] = useState(true);
   const [streamConnected, setStreamConnected] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
@@ -1716,26 +1712,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [kakaoLoginError, setKakaoLoginError] = useState('');
   const kakaoAvailable = !!supabase;
 
-  // Reset consent state every time the login prompt opens so users
-  // explicitly tick the boxes for each session.
-  useEffect(() => {
-    if (showLoginPrompt) {
-      setLiveConsentRequired(false);
-      setLiveConsentPrivacy(false);
-      setLiveConsentMarketing(false);
-      setShowLiveConsentDetail(null);
-    }
-  }, [showLoginPrompt]);
-
+  // Pressing "카카오 로그인하기" immediately starts the Kakao OAuth flow. Consent
+  // is collected on Kakao's own agreement screen (the required/optional items
+  // are configured in the Kakao Developers console), so the app no longer gates
+  // the button behind its own checkboxes — the viewer taps login, Kakao shows
+  // the consent screen, they agree, and they're returned signed in.
   const handleKakaoLogin = useCallback(async () => {
     setKakaoLoginError('');
-
-    if (!liveConsentPrivacy) {
-      setLiveConsentRequired(true);
-      setKakaoLoginError('필수 동의항목에 체크해주세요.');
-      return;
-    }
-    setLiveConsentRequired(false);
 
     if (!supabase) {
       setKakaoLoginError('서비스가 초기화되지 않았습니다. 잠시 후 다시 시도해주세요.');
@@ -1745,14 +1728,6 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     try {
       // Save redirect info so we can restore live stream after OAuth callback
       localStorage.setItem('picks_live_kakao_redirect', username);
-      localStorage.setItem(
-        'picks_live_consent',
-        JSON.stringify({
-          privacy: true,
-          marketing: liveConsentMarketing,
-          at: new Date().toISOString(),
-        })
-      );
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'kakao',
@@ -1760,6 +1735,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           redirectTo: window.location.origin + '/' + username,
           scopes: 'openid profile_nickname account_email phone_number name',
           queryParams: {
+            // Force Kakao to present its consent (agreement) screen on every
+            // login so viewers always see and approve the requested items.
             prompt: 'login',
             auth_type: 'reauthenticate',
           },
@@ -1775,7 +1752,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       console.error('Kakao login error:', e);
       setKakaoLoginError('카카오 로그인 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
-  }, [username, liveConsentPrivacy, liveConsentMarketing]);
+  }, [username]);
 
   const handleSendMessage = () => {
     if (!kakaoUser) {
@@ -2330,7 +2307,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
           className={`absolute top-0 left-0 w-full h-full ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+          // objectFit: 'cover' fills the portrait viewport edge-to-edge so the
+          // live video never shows black letterbox bars on mobile. A landscape
+          // desktop broadcast is cropped to fit the phone screen rather than
+          // shrunk into a pillarboxed strip — matching the immersive full-screen
+          // look viewers expect from a mobile live feed.
+          style={{ objectFit: 'cover', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
         />
         {/* HLS Video.js fallback */}
         {hlsPlaybackUrl && (
@@ -2349,7 +2331,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               x5-playsinline=""
               // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
               x5-video-player-type="h5-page"
-              style={{ objectFit: 'contain', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+              style={{ objectFit: 'cover', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         )}
@@ -3225,65 +3207,20 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             <h3 className="text-xl font-black text-slate-900 mb-2">카카오 로그인</h3>
             <p className="text-slate-500 text-sm font-medium mb-6">채팅 및 상품 담기 기능을 이용하려면<br />카카오 로그인이 필요합니다.</p>
 
-            {/* Consent items */}
-            <div className={`mb-4 rounded-xl border text-left ${liveConsentRequired && !liveConsentPrivacy ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'} p-3 space-y-2`}>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={liveConsentPrivacy && liveConsentMarketing}
-                  onChange={(e) => {
-                    setLiveConsentPrivacy(e.target.checked);
-                    setLiveConsentMarketing(e.target.checked);
-                    if (e.target.checked) setLiveConsentRequired(false);
-                  }}
-                  className="mt-0.5 w-4 h-4 accent-yellow-500"
-                />
-                <span className="text-sm font-bold text-slate-900">전체 동의하기</span>
-              </label>
-              <div className="border-t border-slate-200 my-1"></div>
-              <div className="flex items-start gap-2">
-                <label className="flex items-start gap-2 cursor-pointer flex-1">
-                  <input
-                    type="checkbox"
-                    checked={liveConsentPrivacy}
-                    onChange={(e) => {
-                      setLiveConsentPrivacy(e.target.checked);
-                      if (e.target.checked) setLiveConsentRequired(false);
-                    }}
-                    className="mt-0.5 w-4 h-4 accent-yellow-500"
-                  />
-                  <span className="text-xs text-slate-700">
-                    <span className="font-bold text-yellow-600">[필수]</span> 개인정보 수집·이용 동의 (닉네임, 프로필 이미지)
-                  </span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowLiveConsentDetail('privacy')}
-                  className="text-xs text-slate-400 underline shrink-0"
-                >
-                  보기
-                </button>
-              </div>
-              <div className="flex items-start gap-2">
-                <label className="flex items-start gap-2 cursor-pointer flex-1">
-                  <input
-                    type="checkbox"
-                    checked={liveConsentMarketing}
-                    onChange={(e) => setLiveConsentMarketing(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 accent-yellow-500"
-                  />
-                  <span className="text-xs text-slate-700">
-                    <span className="font-bold text-slate-500">[선택]</span> 라이브/이벤트 알림 수신 동의
-                  </span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowLiveConsentDetail('marketing')}
-                  className="text-xs text-slate-400 underline shrink-0"
-                >
-                  보기
-                </button>
-              </div>
+            {/* Consent notice — the actual agreement is collected on Kakao's
+                own consent screen after the viewer taps login. This block just
+                tells them, up front, what Kakao will ask them to approve. */}
+            <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left space-y-1.5">
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">카카오 로그인 동의 항목</p>
+              <p className="text-xs text-slate-700">
+                <span className="font-bold text-yellow-600">[필수]</span> 개인정보 수집·이용 (닉네임, 프로필 이미지)
+              </p>
+              <p className="text-xs text-slate-700">
+                <span className="font-bold text-slate-500">[선택]</span> 라이브/이벤트 알림 수신
+              </p>
+              <p className="text-[11px] text-slate-400 leading-snug pt-1">
+                로그인하기를 누르면 카카오 동의 화면에서 위 항목에 동의 후 로그인이 완료됩니다.
+              </p>
             </div>
 
             {kakaoLoginError && (
@@ -3293,14 +3230,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             {kakaoAvailable ? (
               <button
                 onClick={handleKakaoLogin}
-                disabled={!liveConsentPrivacy}
-                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-base hover:opacity-90 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-base hover:opacity-90 transition-all active:scale-95"
                 style={{ backgroundColor: '#FEE500', color: '#000000' }}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
                   <path d="M12 3C6.48 3 2 6.36 2 10.44c0 2.62 1.72 4.92 4.32 6.24-.14.52-.92 3.36-.96 3.58 0 0-.02.16.08.22.1.06.22.02.22.02.3-.04 3.44-2.26 3.98-2.64.76.1 1.56.16 2.36.16 5.52 0 10-3.36 10-7.58C22 6.36 17.52 3 12 3z" fill="#000000"/>
                 </svg>
-                카카오로 1초 만에 시작하기
+                카카오 로그인하기
               </button>
             ) : (
               <p className="text-slate-500 text-xs font-medium bg-slate-50 rounded-xl py-3 px-4">
@@ -3315,37 +3251,6 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               닫기
             </button>
           </div>
-
-          {/* Consent detail sub-modal */}
-          {showLiveConsentDetail && (
-            <div className="fixed inset-0 z-[310] flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowLiveConsentDetail(null)}></div>
-              <div className="relative bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[80vh] overflow-y-auto text-left">
-                <button onClick={() => setShowLiveConsentDetail(null)} className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-xl font-bold">×</button>
-                {showLiveConsentDetail === 'privacy' ? (
-                  <div>
-                    <h4 className="text-base font-black text-slate-900 mb-3">개인정보 수집·이용 동의 (필수)</h4>
-                    <div className="text-xs text-slate-700 space-y-2 leading-relaxed">
-                      <p><span className="font-bold">수집 항목:</span> 카카오 닉네임, 프로필 이미지</p>
-                      <p><span className="font-bold">수집 목적:</span> 라이브 채팅 표시, 상품 담기 및 주문 시 본인 식별</p>
-                      <p><span className="font-bold">보유 기간:</span> 로그아웃 또는 회원 탈퇴 시까지</p>
-                      <p className="text-slate-500">동의를 거부할 권리가 있으며, 거부 시 라이브 채팅·구매 기능을 이용할 수 없습니다.</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <h4 className="text-base font-black text-slate-900 mb-3">라이브/이벤트 알림 수신 동의 (선택)</h4>
-                    <div className="text-xs text-slate-700 space-y-2 leading-relaxed">
-                      <p><span className="font-bold">수신 채널:</span> 카카오 알림톡</p>
-                      <p><span className="font-bold">발송 내용:</span> 라이브 시작 알림, 이벤트·프로모션 안내</p>
-                      <p><span className="font-bold">철회 방법:</span> 사용자 페이지에서 알림 해지 또는 채널 차단</p>
-                      <p className="text-slate-500">선택 동의 항목으로, 거부하셔도 라이브 채팅·구매 기능 이용이 가능합니다.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
