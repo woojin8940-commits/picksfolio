@@ -1147,6 +1147,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
+        {/* Viewer frame: a portrait phone-shaped preview so the broadcaster sees
+            exactly what viewers see, even when broadcasting from a computer. A
+            landscape desktop camera is cropped to the portrait frame (object-cover)
+            instead of being shown letterboxed with black bars, so the host's preview
+            matches the immersive full-screen mobile feed every viewer gets. */}
+        <div
+          className="relative h-full w-auto overflow-hidden bg-black"
+          style={{ aspectRatio: '9 / 16', maxHeight: '100%', maxWidth: '100%' }}
+        >
         {/* Source video: invisible but still rendered so browsers decode frames */}
         <video
           ref={videoRef}
@@ -1156,11 +1165,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           className="absolute w-px h-px opacity-0 pointer-events-none"
           style={{ top: 0, left: 0 }}
         />
-        {/* Canvas shows filtered/mirrored output */}
+        {/* Canvas shows filtered/mirrored output, cropped to the portrait frame so
+            it mirrors what viewers see rather than the full landscape source. */}
         <canvas
           ref={canvasRef}
-          className="w-full h-full object-contain"
-          style={{ objectFit: 'contain' }}
+          className="w-full h-full object-cover"
+          style={{ objectFit: 'cover' }}
         />
         
         {!isCameraOn && (
@@ -1262,6 +1272,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             </div>
           );
         })()}
+        </div>
+        {/* End viewer frame */}
 
         {/* Overlay UI */}
         <div className="absolute inset-0 p-3 md:p-8 flex flex-col justify-between pointer-events-none safe-area-pad">
