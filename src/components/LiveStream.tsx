@@ -948,7 +948,21 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           setStreamConnected(false);
           setVideoPlaying(false);
           setNeedsTap(false);
-          failConnection('peer-connection-state', 'failed', 'RTCPeerConnection reported state="failed" before any video frame rendered');
+          // First-entry resilience: ICE frequently bounces through "failed" once
+          // during the initial handshake (especially on mobile / relay) and then
+          // recovers. Surfacing the failure UI immediately produced the jarring
+          // "연결 중 → 오류 → 다시 연결" flash on entry. So we retry the signaling
+          // handshake silently while staying on the "방송에 연결 중..." spinner, and
+          // only fall back to the error screen once the retries are exhausted.
+          if (signalingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttemptsRef.current += 1;
+            console.warn(`[LiveStream] ICE failed before first frame — silent reconnect (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+            setConnectionState('connecting');
+            pcStateRef.current = 'connecting';
+            signalingRef.current.reconnect();
+          } else {
+            failConnection('peer-connection-state', 'failed', 'RTCPeerConnection reported state="failed" before any video frame rendered');
+          }
         } else {
           // WebRTC was working, treat as transient — signaling reconnect will handle it
           console.log('[LiveStream] Connection failed but video was playing/connected before, treating as transient');
@@ -1722,21 +1736,23 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   //
   // Why the video used to "surge" / briefly reveal the host's page when typing:
   // mobile browsers handle the keyboard one of two ways. With
-  // `interactive-widget=resizes-content` (this app's global default) the whole
-  // layout viewport shrinks when the keyboard opens, dragging the `fixed`
-  // player up and momentarily exposing the page underneath. The previous
-  // attempt tried to flip the page to `resizes-visual` at runtime, but browsers
-  // only read `interactive-widget` at page load, so the flip never took effect
-  // and the surge remained.
+  // `interactive-widget=resizes-content` (the app's previous global default) the
+  // whole layout viewport shrinks when the keyboard opens, dragging the `fixed`
+  // player up and momentarily exposing the page underneath. The page now ships
+  // `interactive-widget=overlays-content` (see index.html), so the keyboard
+  // overlays the page without resizing either viewport and the fixed player stays
+  // pinned. An earlier attempt to flip the mode at runtime failed because browsers
+  // only read `interactive-widget` at page load.
   //
-  // The robust fix is mode-agnostic: we remember the full-screen height while
-  // the keyboard is closed (`lockedHeight`) and pin the player to it, and we
-  // measure the keyboard overlap against that remembered height rather than the
-  // live `innerHeight`. That math is correct whether the browser shrinks the
-  // layout viewport (resizes-content) or overlays the keyboard (resizes-visual),
-  // so the video stays put, nothing peeks through behind it, and only the chat
-  // input rides up. We also lock background scrolling so the browser can't nudge
-  // the fixed player while bringing the focused input into view.
+  // This effect is the belt-and-suspenders layer that keeps things robust even if
+  // a browser still resizes: we remember the full-screen height while the keyboard
+  // is closed (`lockedHeight`) and pin the player to it, and we measure the
+  // keyboard overlap against that remembered height rather than the live
+  // `innerHeight`. That math is correct whether the browser overlays the keyboard
+  // (overlays-content / resizes-visual) or shrinks the layout viewport
+  // (resizes-content), so the video stays put, nothing peeks through behind it,
+  // and only the chat input rides up. We also lock background scrolling so the
+  // browser can't nudge the fixed player while bringing the focused input into view.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const html = document.documentElement;
