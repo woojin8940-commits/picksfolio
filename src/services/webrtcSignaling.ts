@@ -813,8 +813,16 @@ export class BroadcasterSignaling {
     // the (idempotent, usually already-resolved) refresh so the broadcaster
     // offers a real TURN path. This is the most common "broadcast invisible on
     // both PC and mobile" cause when the seller broadcasts from a phone.
-    if (isMobileSender() && !hasTurnServers()) {
-      console.log('[Broadcaster] Mobile sender with no TURN loaded yet — awaiting ICE server refresh before building peer connection');
+    //
+    // This applies even when the broadcaster is on desktop: mobile viewers start
+    // in relay-only mode (carrier-grade NAT / in-app WebViews), so they can only
+    // use the broadcaster's *relay* candidates. A desktop broadcaster that builds
+    // its offer before TURN has loaded hands those viewers host/srflx candidates
+    // they will never connect to, leaving them stuck on a black screen until the
+    // next rejoin. Awaiting the refresh whenever TURN isn't ready yet closes that
+    // intermittent "viewer won't connect" gap.
+    if (!hasTurnServers()) {
+      console.log('[Broadcaster] No TURN loaded yet — awaiting ICE server refresh before building peer connection');
       await refreshIceServers();
     }
     const pc = new RTCPeerConnection(buildIceConfig(isMobileSender()));
@@ -1499,12 +1507,14 @@ export class ViewerSignaling {
 
     // Build ICE config — force TURN relay if a prior attempt failed on mobile
     // (carrier-grade NAT routinely blocks direct P2P on cellular networks).
-    // If relay-only is desired but TURN servers haven't loaded from
+    // Regardless of relay mode, if TURN servers haven't loaded from
     // /api/ice-servers yet, wait for that (idempotent, usually already-resolved)
-    // fetch first — a relay-only peer connection with zero TURN servers gathers
-    // no relay candidates and fails instantly with a black screen.
-    if (this.forceRelay && !hasTurnServers()) {
-      console.log('[Viewer] Relay-only desired but no TURN loaded yet — awaiting ICE server refresh before building peer connection');
+    // fetch first. A relay-only peer connection with zero TURN servers gathers no
+    // relay candidates and fails instantly with a black screen — and even a
+    // direct-mode desktop viewer needs a relay candidate ready to reach a mobile
+    // (relay-only) broadcaster, so the wait closes that case too.
+    if (!hasTurnServers()) {
+      console.log('[Viewer] No TURN loaded yet — awaiting ICE server refresh before building peer connection');
       await refreshIceServers();
     }
     const pc = new RTCPeerConnection(buildIceConfig(this.forceRelay));
