@@ -47,10 +47,6 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             바로 만들기
           </button>
         </div>
-
-        <div className="text-xs md:text-base font-medium text-slate-500">
-          이미 <span className="text-blue-primary font-bold">4,281개</span>의 링크가 개설되었습니다
-        </div>
       </motion.div>
     </section>
   );
