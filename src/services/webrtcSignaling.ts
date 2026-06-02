@@ -79,11 +79,12 @@ function notifyTurnFailure(info: { failedUrls: string[]; totalTurnUrls: number }
   }
 }
 
-// Mobile-web optimized broadcaster bitrate cap. Applied uniformly to all
-// senders so mobile-web broadcasters don't melt the encoder and viewers stop
-// seeing frame drops / lag. 4500 kbps is near-transparent for 720p30 H.264
-// on detail-heavy commerce subjects while staying within typical mobile uplink.
-const MAX_VIDEO_BITRATE_BPS = 4_500_000;
+// Broadcaster video bitrate cap. Applied uniformly to all senders. Lifted to
+// 6 Mbps to feed the 1080p portrait broadcast profile — enough to keep product
+// labels, fabric texture and cosmetics detail crisp for live commerce while
+// staying within typical mobile uplink. When bandwidth or the device can't keep
+// up, degradationPreference scales resolution down rather than dropping frames.
+const MAX_VIDEO_BITRATE_BPS = 6_000_000;
 const MAX_VIDEO_BITRATE_KBPS = Math.round(MAX_VIDEO_BITRATE_BPS / 1000);
 
 /**
@@ -877,7 +878,7 @@ export class BroadcasterSignaling {
           const params = sender.getParameters();
           if (!params.encodings) params.encodings = [{}];
           params.encodings.forEach((enc) => {
-            enc.maxBitrate = MAX_VIDEO_BITRATE_BPS; // 4.5 Mbps cap — mobile-web optimized
+            enc.maxBitrate = MAX_VIDEO_BITRATE_BPS; // 6 Mbps cap — 1080p portrait
             enc.maxFramerate = 30;
             enc.scaleResolutionDownBy = 1.0;
             // When bandwidth is tight, let the encoder drop resolution before
