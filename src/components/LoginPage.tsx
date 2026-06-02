@@ -170,7 +170,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   }
 
   return (
-    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-8 sm:py-14 bg-midnight overflow-y-auto">
+    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-16 sm:pt-24 pb-8 sm:pb-14 bg-midnight overflow-y-auto">
       <div className="w-full max-w-[320px] bg-white rounded-[24px] sm:rounded-[28px] p-6 sm:p-8 md:p-8 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
         <div className="text-center mb-7">
           <h1 className="text-2xl font-black text-slate-900 mb-2">로그인</h1>
