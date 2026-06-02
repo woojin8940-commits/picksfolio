@@ -89,7 +89,7 @@ const DataBoardSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
+        <div className="max-w-6xl mx-auto grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
           {loading ? (
             <div className="col-span-full bg-surface rounded-2xl border border-white/5 p-8 text-center">
               <p className="text-slate-500 font-bold text-sm">데이터를 불러오는 중...</p>
@@ -110,30 +110,30 @@ const DataBoardSection: React.FC = () => {
                   transition={{ delay: catIdx * 0.08, duration: 0.4 }}
                   className="bg-surface rounded-2xl md:rounded-[2rem] border border-white/5 overflow-hidden shadow-xl"
                 >
-                  <div className="p-4 md:p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-8 h-8 rounded-xl ${color.bg} flex items-center justify-center`}>
-                          <BarChart3 size={16} className={color.text} />
+                  <div className="p-3 md:p-6">
+                    <div className="flex items-center justify-between mb-3 md:mb-4">
+                      <div className="flex items-center gap-1.5 md:gap-2.5 min-w-0">
+                        <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl ${color.bg} flex items-center justify-center shrink-0`}>
+                          <BarChart3 size={14} className={color.text} />
                         </div>
-                        <h3 className="text-white font-black text-sm md:text-base">{cat.label}</h3>
+                        <h3 className="text-white font-black text-xs md:text-base truncate">{cat.label}</h3>
                       </div>
-                      <span className={`text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full ${color.badge}`}>
+                      <span className={`hidden md:inline text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full ${color.badge}`}>
                         TOP 5
                       </span>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="space-y-0.5 md:space-y-1">
                       {cat.rankings.slice(0, 5).map((item) => (
                         <div
                           key={`${cat.cid}-${item.rank}`}
-                          className="flex items-center justify-between p-2.5 md:p-3 rounded-xl hover:bg-white/5 transition-colors"
+                          className="flex items-center justify-between p-1.5 md:p-3 rounded-lg md:rounded-xl hover:bg-white/5 transition-colors"
                         >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className={`w-5 text-center text-xs font-black tabular-nums ${item.rank <= 3 ? 'text-white' : 'text-slate-500'}`}>
+                          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                            <span className={`w-4 md:w-5 text-center text-[11px] md:text-xs font-black tabular-nums ${item.rank <= 3 ? 'text-white' : 'text-slate-500'}`}>
                               {item.rank}
                             </span>
-                            <span className="text-xs md:text-sm font-bold text-slate-300 truncate">
+                            <span className="text-[11px] md:text-sm font-bold text-slate-300 truncate">
                               {item.keyword}
                             </span>
                           </div>
