@@ -350,19 +350,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
               <NavItem
                 icon="🔗"
-                label="관리"
+                label="링크 & 그리드 관리"
                 active={currentSubView === 'links'}
                 onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
-              <NavItem icon="💼" label="소개" active={currentSubView === 'portfolio'} onClick={() => { onNavigatePortfolio(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="💼" label="포트폴리오 & 소개" active={currentSubView === 'portfolio'} onClick={() => { onNavigatePortfolio(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { onNavigateBroadcastSettings(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="📨" label="수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📨" label="비즈니스 수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
-              <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📅" label="협업 캘린더" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💰" label="정산 현황" active={currentSubView === 'settlement'} onClick={() => { onNavigateSettlement(); setIsMobileMenuOpen(false); }} />
             </nav>

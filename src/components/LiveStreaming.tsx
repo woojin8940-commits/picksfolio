@@ -60,6 +60,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [viewerCount, setViewerCount] = useState(0);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
+  // Surfaces camera access failures (denied permission, or in-app browsers such
+  // as the KakaoTalk webview that block getUserMedia) so the broadcaster sees a
+  // clear message instead of a silent black preview on mobile.
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null);
   const [showMaterialPanel, setShowMaterialPanel] = useState(false);
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
@@ -696,6 +700,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             return;
           }
           streamRef.current = stream;
+          setCameraError(null);
 
           // Set content hint for video tracks to optimize encoding for detail
           stream.getVideoTracks().forEach(track => {
@@ -739,8 +744,23 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             }
           }
         })
-        .catch(err => console.error("Error accessing camera:", err));
+        .catch(err => {
+          console.error("Error accessing camera:", err);
+          if (!mounted) return;
+          // Map common failures to a Korean message the broadcaster can act on.
+          const name = err?.name || '';
+          if (name === 'NotAllowedError' || name === 'SecurityError') {
+            setCameraError('카메라·마이크 접근이 차단되었습니다. 브라우저 설정에서 권한을 허용해 주세요. 카카오톡 등 인앱 브라우저를 사용 중이라면 Safari·Chrome 등 기본 브라우저로 열어 주세요.');
+          } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+            setCameraError('사용 가능한 카메라를 찾을 수 없습니다. 기기의 카메라를 확인해 주세요.');
+          } else if (name === 'NotReadableError') {
+            setCameraError('다른 앱에서 카메라를 사용 중입니다. 해당 앱을 종료한 뒤 다시 시도해 주세요.');
+          } else {
+            setCameraError('카메라를 시작할 수 없습니다. 페이지를 새로고침하거나 다른 브라우저로 시도해 주세요.');
+          }
+        });
     } else {
+      setCameraError(null);
       stopCanvasLoop();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -1276,20 +1296,26 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           className="relative h-full w-auto overflow-hidden bg-black"
           style={{ aspectRatio: '9 / 16', maxHeight: '100%', maxWidth: '100%' }}
         >
-        {/* Source video: invisible but still rendered so browsers decode frames */}
+        {/* Source video: rendered as a full-size base layer (not a 1px hidden
+            element) so mobile browsers — especially iOS Safari — keep decoding
+            and playing frames that feed the canvas. On desktop the opaque canvas
+            on top covers it; if the canvas pipeline ever stalls on mobile, the
+            broadcaster still sees their live camera through this layer instead of
+            a black screen. */}
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="absolute w-px h-px opacity-0 pointer-events-none"
-          style={{ top: 0, left: 0 }}
+          className="block w-full h-full object-cover pointer-events-none"
         />
         {/* Canvas shows filtered/mirrored output, cropped to the portrait frame so
-            it mirrors what viewers see rather than the full landscape source. */}
+            it mirrors what viewers see rather than the full landscape source. It is
+            layered on top of the source video; if the canvas pipeline stalls on
+            mobile the broadcaster still sees the live camera underneath. */}
         <canvas
           ref={canvasRef}
-          className="w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-cover"
           style={{ objectFit: 'cover' }}
         />
         
@@ -1300,6 +1326,26 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 <CameraOff size={40} className="text-slate-600" />
               </div>
               <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Camera is Off</p>
+            </div>
+          </div>
+        )}
+
+        {/* Camera access error — shown when the camera is meant to be on but the
+            stream could not start (e.g. blocked permission or an in-app browser). */}
+        {isCameraOn && cameraError && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/95 p-6">
+            <div className="text-center space-y-4 max-w-xs">
+              <div className="w-20 h-20 bg-red-500/20 border border-red-500/40 rounded-full flex items-center justify-center mx-auto">
+                <CameraOff size={36} className="text-red-400" />
+              </div>
+              <p className="text-white font-black text-sm">카메라를 시작할 수 없어요</p>
+              <p className="text-slate-300 text-xs font-medium leading-relaxed">{cameraError}</p>
+              <button
+                onClick={() => { setCameraError(null); setIsCameraOn(false); setTimeout(() => setIsCameraOn(true), 50); }}
+                className="px-5 py-2.5 bg-white text-slate-900 rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+              >
+                다시 시도
+              </button>
             </div>
           </div>
         )}
