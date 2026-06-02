@@ -1096,7 +1096,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
   };
 
   return (
-    <div className="p-4 md:p-14 max-w-6xl mx-auto animate-in fade-in duration-500">
+    <div className="p-4 md:px-8 md:py-12 max-w-6xl mx-auto animate-in fade-in duration-500">
       <input
         type="file"
         ref={fileInputRef}
@@ -1625,7 +1625,7 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                     <GripVertical size={20} />
                   </div>
 
-                  <div className="pl-7 md:pl-8 pr-12 md:pr-14">
+                  <div className="pl-5 md:pl-6 pr-9 md:pr-10">
                     {block.type === 'category' ? (
                       <div className="space-y-3 py-1">
                         <div className="flex items-center gap-3">
