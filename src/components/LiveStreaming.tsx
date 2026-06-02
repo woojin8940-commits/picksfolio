@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
@@ -117,6 +117,67 @@ const openCameraSettings = () => {
   }
 };
 
+// In-app browsers (KakaoTalk, Naver, etc.) and many older mobile browsers can
+// open the camera, but they routinely reject the strict ideal/min constraints
+// we prefer (specific resolution mins, a frame-rate floor, stereo 48kHz audio)
+// with OverconstrainedError or NotReadableError — even though the device is
+// perfectly capable of streaming with simpler settings. Instead of treating
+// that as "this browser can't broadcast" and pushing the user to the default
+// browser, we walk down a ladder of progressively relaxed constraints and use
+// the first set that succeeds. The final rung ({ video: true, audio: true }) is
+// what virtually every getUserMedia-capable browser — in-app or not — accepts,
+// so broadcasting works in KakaoTalk, Naver, and friends without leaving the app.
+const getBroadcastStream = async (
+  q: typeof MAX_QUALITY,
+  facingMode: 'user' | 'environment' = 'user'
+): Promise<MediaStream> => {
+  const ladder: MediaStreamConstraints[] = [
+    {
+      video: {
+        width: { ideal: q.width, min: 320 },
+        height: { ideal: q.height, min: 240 },
+        frameRate: { ideal: q.frameRate, max: q.frameRate, min: 15 },
+        facingMode,
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        channelCount: 2,
+      },
+    },
+    {
+      // Drop the hard minimums and stereo/sample-rate hints that in-app WebViews
+      // often can't satisfy, but keep the requested camera and quality targets.
+      video: {
+        width: { ideal: q.width },
+        height: { ideal: q.height },
+        frameRate: { ideal: q.frameRate },
+        facingMode,
+      },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    },
+    // Just ask for the requested camera and audio with no quality hints at all.
+    { video: { facingMode }, audio: true },
+    // Last resort: whatever camera and mic the browser is willing to hand over.
+    { video: true, audio: true },
+  ];
+
+  let lastErr: any;
+  for (const constraints of ladder) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (e: any) {
+      lastErr = e;
+      // A denied permission won't be fixed by relaxing constraints, so stop
+      // immediately and let the caller surface the permission guidance.
+      if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') throw e;
+    }
+  }
+  throw lastErr;
+};
+
 const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, selectedProductIds }) => {
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -135,6 +196,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isMirrored, setIsMirrored] = useState(true);
+  // Which physical camera to broadcast from: 'user' = front (셀카), 'environment'
+  // = rear (후면). Switching re-acquires the stream with the new facingMode.
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [filters, setFilters] = useState<VideoFilters>(DEFAULT_FILTERS);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [actualResolution, setActualResolution] = useState<string>('');
@@ -567,6 +631,18 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   useEffect(() => { filtersRef.current = filters; }, [filters]);
   useEffect(() => { isMirroredRef.current = isMirrored; }, [isMirrored]);
 
+  // Flip between the front (셀카) and rear (후면) camera. Rear-camera footage of
+  // the real world should not be mirrored, while the front camera defaults to a
+  // mirror so the broadcaster sees themselves naturally — so we move the mirror
+  // toggle along with the camera.
+  const switchCamera = useCallback(() => {
+    setFacingMode(prev => {
+      const next = prev === 'user' ? 'environment' : 'user';
+      setIsMirrored(next === 'user');
+      return next;
+    });
+  }, []);
+
   // Load pre-configured live products. Filter to the seller's per-broadcast
   // selection passed in from LiveCommerceManagement; if no selection was made,
   // fall back to showing every registered product.
@@ -739,23 +815,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
     if (isCameraOn) {
       const q = MAX_QUALITY;
-      const constraints: MediaStreamConstraints = {
-        video: {
-          width: { ideal: q.width, min: 320 },
-          height: { ideal: q.height, min: 240 },
-          frameRate: { ideal: q.frameRate, max: q.frameRate, min: 15 },
-          facingMode: 'user',
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 48000,
-          channelCount: 2
-        }
-      };
 
-      navigator.mediaDevices.getUserMedia(constraints)
+      getBroadcastStream(q, facingMode)
         .then(stream => {
           if (!mounted) {
             stream.getTracks().forEach(track => track.stop());
@@ -812,7 +873,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           // Map common failures to a Korean message the broadcaster can act on.
           const name = err?.name || '';
           if (name === 'NotAllowedError' || name === 'SecurityError') {
-            setCameraError('카메라·마이크 접근이 차단되었습니다. 브라우저 설정에서 권한을 허용해 주세요. 카카오톡 등 인앱 브라우저를 사용 중이라면 Safari·Chrome 등 기본 브라우저로 열어 주세요.');
+            setCameraError('카메라·마이크 권한을 허용해 주세요. 카카오톡·네이버 등 인앱 브라우저에서도 권한을 허용하면 바로 방송할 수 있어요. 권한 창이 보이지 않으면 "기본 브라우저로 열기"를 눌러 주세요.');
           } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
             setCameraError('사용 가능한 카메라를 찾을 수 없습니다. 기기의 카메라를 확인해 주세요.');
           } else if (name === 'NotReadableError') {
@@ -839,7 +900,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         streamRef.current = null;
       }
     };
-  }, [isCameraOn, startCanvasLoop, stopCanvasLoop]);
+  }, [isCameraOn, facingMode, startCanvasLoop, stopCanvasLoop]);
 
   // Toggle mic by enabling/disabling audio tracks (no stream recreation)
   useEffect(() => {
@@ -1403,20 +1464,24 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               <p className="text-white font-black text-sm">카메라를 시작할 수 없어요</p>
               <p className="text-slate-300 text-xs font-medium leading-relaxed">{cameraError}</p>
               <div className="flex flex-col gap-2.5">
-                {/* Primary fix: open the OS/browser settings (or bounce out of an
-                    in-app browser) so the broadcaster can actually grant the
-                    camera permission instead of being stuck on the message. */}
-                <button
-                  onClick={openCameraSettings}
-                  className="px-5 py-2.5 bg-blue-primary text-white rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  {detectInApp().isInApp ? '기본 브라우저로 열기' : '카메라 권한 설정 열기'}
-                </button>
+                {/* Primary action: retry in the current browser. Broadcasting is
+                    supported inside in-app browsers (KakaoTalk, Naver, etc.), so
+                    re-requesting the camera after the user grants permission is
+                    the path that keeps them in the app. */}
                 <button
                   onClick={() => { setCameraError(null); setIsCameraOn(false); setTimeout(() => setIsCameraOn(true), 50); }}
-                  className="px-5 py-2.5 bg-white text-slate-900 rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+                  className="px-5 py-2.5 bg-blue-primary text-white rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
                 >
                   다시 시도
+                </button>
+                {/* Last-resort fallback: open the OS/browser settings, or — only
+                    when the in-app browser truly refuses camera access — bounce
+                    out to the default browser where permission can be granted. */}
+                <button
+                  onClick={openCameraSettings}
+                  className="px-5 py-2.5 bg-white text-slate-900 rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  {detectInApp().isInApp ? '기본 브라우저로 열기' : '카메라 권한 설정 열기'}
                 </button>
               </div>
             </div>
@@ -1637,6 +1702,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 title="거울 모드"
               >
                 <FlipHorizontal2 size={20} />
+              </button>
+              {/* Front/rear camera switch */}
+              <button
+                onClick={switchCamera}
+                disabled={!isCameraOn}
+                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${facingMode === 'environment' ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'} disabled:opacity-40`}
+                title={facingMode === 'user' ? '후면 카메라로 전환' : '전면 카메라로 전환'}
+              >
+                <SwitchCamera size={20} />
               </button>
               {/* Filter panel toggle */}
               <button
@@ -2034,6 +2108,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   title="거울 모드"
                 >
                   <FlipHorizontal2 size={20} />
+                </button>
+                <button
+                  onClick={switchCamera}
+                  disabled={!isCameraOn}
+                  className={`p-3 md:p-4 rounded-full backdrop-blur-md transition-all ${facingMode === 'environment' ? 'bg-blue-500/80 text-white' : 'bg-white/10 text-white'} disabled:opacity-40`}
+                  title={facingMode === 'user' ? '후면 카메라로 전환' : '전면 카메라로 전환'}
+                >
+                  <SwitchCamera size={20} />
                 </button>
                 <button className="hidden md:block p-4 bg-white/10 backdrop-blur-md text-white rounded-full hover:bg-white/20 transition-all">
                   <Monitor size={24} />
