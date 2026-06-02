@@ -753,8 +753,23 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
     animFrameRef.current = requestAnimationFrame(draw);
 
-    // Create stream from canvas at 30fps for reliable WebRTC transmission
-    const canvasStream = canvas.captureStream(TARGET_FPS);
+    // Create stream from canvas at 30fps for reliable WebRTC transmission.
+    // Some in-app WebViews (older Android WebView and certain KakaoTalk/Naver
+    // builds) do not implement HTMLCanvasElement.captureStream. Calling it
+    // unconditionally would throw out of camera setup and abort the broadcast,
+    // so we guard it: when it is unavailable we return null and toggleLive
+    // falls back to broadcasting the raw camera stream (streamRef) — the picture
+    // loses the canvas filters/mirror, but in-app broadcasting still works.
+    let canvasStream: MediaStream | null = null;
+    if (typeof canvas.captureStream === 'function') {
+      try {
+        canvasStream = canvas.captureStream(TARGET_FPS);
+      } catch (e) {
+        console.warn('[LiveStreaming] canvas.captureStream failed — broadcasting raw camera stream instead:', e);
+      }
+    } else {
+      console.warn('[LiveStreaming] canvas.captureStream unsupported in this browser — broadcasting raw camera stream instead.');
+    }
     canvasStreamRef.current = canvasStream;
 
     // Start background timer preemptively so it's ready when tab goes hidden
@@ -864,6 +879,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               if (signalingRef.current && isLiveRef.current) {
                 signalingRef.current.updateStream(canvasStream);
               }
+            } else if (signalingRef.current && isLiveRef.current) {
+              // No canvas stream (in-app WebView without captureStream): keep the
+              // broadcast alive by pushing the raw camera stream to viewers.
+              signalingRef.current.updateStream(stream);
             }
           }
         })
