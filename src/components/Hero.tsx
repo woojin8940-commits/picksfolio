@@ -10,7 +10,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
   const [handle, setHandle] = useState('');
 
   return (
-    <section className="relative pt-14 pb-8 md:pt-32 md:pb-24 container mx-auto px-4 sm:px-6 text-center overflow-hidden">
+    <section className="relative pt-24 pb-10 md:pt-32 md:pb-24 container mx-auto px-4 sm:px-6 text-center overflow-hidden">
       {/* Background Glows */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[300px] md:w-[600px] h-[300px] md:h-[600px] bg-blue-primary/10 blur-[80px] md:blur-[120px] rounded-full -z-10 animate-pulse"></div>
 
