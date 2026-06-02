@@ -12,7 +12,14 @@
       via the VisualViewport API (see LiveStream.tsx); ordinary form inputs are
       still scrolled into view by the browser within the unchanged layout viewport.
     -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content">
+    <!--
+      maximum-scale=1.0, user-scalable=no: lock the visual viewport so the page
+      never zooms. Without this, focusing a text field or double-tapping on
+      mobile magnifies the layout and leaves it stuck mid-zoom — disorienting in
+      the full-screen broadcast/live views. Combined with the >=16px input
+      font-size rule in index.css, this keeps the screen fixed at all times.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
     <meta name="theme-color" content="#2563EB">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
     <title>PICKSFOLIO | 일상을 큐레이션하다</title>

@@ -28,6 +28,10 @@ body {
 html {
   /* Prevent overscroll chaining on the document */
   overscroll-behavior-y: none;
+  /* iOS Safari ignores `user-scalable=no`, so double-tap can still zoom there.
+     `touch-action: manipulation` disables double-tap-to-zoom across the page
+     while leaving panning/scrolling intact, keeping the screen fixed. */
+  touch-action: manipulation;
 }
 
 @media (min-width: 769px) {
