@@ -7,9 +7,9 @@ interface FooterProps {
 
 const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) => {
   return (
-    <footer className="bg-midnight pt-16 md:pt-24 pb-12 border-t border-white/5">
+    <footer className="bg-midnight pt-16 md:pt-20 pb-12 border-t border-white/5">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex flex-col md:flex-row justify-between gap-10 md:gap-12 mb-12 md:mb-16">
+        <div className="flex flex-col md:flex-row justify-between gap-10 md:gap-12 mb-10 md:mb-12">
           <div className="max-w-xs">
             <h2 className="text-2xl font-black text-white mb-6 md:mb-8 tracking-tighter">PICKS</h2>
             <p className="text-slate-500 text-sm font-bold leading-relaxed">

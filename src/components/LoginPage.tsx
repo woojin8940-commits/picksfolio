@@ -170,17 +170,17 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   }
 
   return (
-    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
-      <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
-        <div className="text-center mb-10">
-          <h1 className="text-3xl font-black text-slate-900 mb-2">로그인</h1>
+    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-8 sm:py-14 bg-midnight overflow-y-auto">
+      <div className="w-full max-w-[320px] bg-white rounded-[24px] sm:rounded-[28px] p-6 sm:p-8 md:p-8 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+        <div className="text-center mb-7">
+          <h1 className="text-2xl font-black text-slate-900 mb-2">로그인</h1>
           <p className="text-slate-500 text-sm font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">아이디 또는 이메일</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-blue-500 transition-colors">
               <input
                 type="text"
                 name="id"
@@ -201,7 +201,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
 
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">비밀번호</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-blue-500 transition-colors">
               <input
                 type="password"
                 name="password"
@@ -221,10 +221,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
             </div>
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl text-base font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-3 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
@@ -237,7 +237,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           </button>
         </form>
 
-        <div className="relative my-8 flex items-center">
+        <div className="relative my-6 flex items-center">
           <div className="flex-grow border-t border-slate-200"></div>
           <span className="flex-shrink mx-4 text-slate-400 text-xs font-bold">또는</span>
           <div className="flex-grow border-t border-slate-200"></div>
@@ -247,7 +247,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           type="button"
           onClick={handleKakaoLogin}
           disabled={isLoading}
-          className="w-full py-4 rounded-2xl text-base font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+          className="w-full py-3 rounded-2xl text-sm font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
           style={{ backgroundColor: '#FEE500', color: '#000000' }}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -256,7 +256,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           카카오로 1초 만에 시작하기
         </button>
 
-        <div className="text-center mt-8 text-slate-400 text-sm font-bold">
+        <div className="text-center mt-6 text-slate-400 text-sm font-bold">
           계정이 없으신가요? <button onClick={onNavigateSignup} className="text-slate-800 hover:underline" disabled={isLoading}>회원가입하기</button>
         </div>
 
@@ -264,7 +264,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           type="button"
           onClick={() => window.location.href = '/business-login'}
           disabled={isLoading}
-          className="w-full py-4 rounded-2xl text-base font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white mt-4"
+          className="w-full py-3 rounded-2xl text-sm font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white mt-3"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />
@@ -272,7 +272,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           비즈니스 회원 로그인하기
         </button>
 
-        <div className="text-center mt-4">
+        <div className="text-center mt-3">
           <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">홈으로 돌아가기</button>
         </div>
       </div>

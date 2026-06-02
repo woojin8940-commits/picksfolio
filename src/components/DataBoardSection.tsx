@@ -68,13 +68,13 @@ const DataBoardSection: React.FC = () => {
   };
 
   return (
-    <section className="py-16 md:py-32 bg-background">
+    <section className="py-16 md:py-24 bg-background">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="text-center mb-10 md:mb-16">
-          <h2 className="text-2xl md:text-7xl font-black text-white mb-4 md:mb-8 font-display tracking-tighter">
+        <div className="text-center mb-10 md:mb-12">
+          <h2 className="text-2xl md:text-5xl font-black text-white mb-4 md:mb-6 font-display tracking-tighter">
             실시간 트렌드 보드
           </h2>
-          <p className="text-sm md:text-xl text-slate-400 font-medium mb-3">
+          <p className="text-sm md:text-base text-slate-400 font-medium mb-3">
             네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5
           </p>
           <div className="flex items-center justify-center gap-3 flex-wrap">
