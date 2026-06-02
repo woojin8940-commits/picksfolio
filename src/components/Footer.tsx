@@ -7,11 +7,11 @@ interface FooterProps {
 
 const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) => {
   return (
-    <footer className="bg-midnight pt-16 md:pt-20 pb-12 border-t border-white/5">
+    <footer className="bg-midnight pt-12 md:pt-20 pb-10 border-t border-white/5">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex flex-col md:flex-row justify-between gap-10 md:gap-12 mb-10 md:mb-12">
+        <div className="flex flex-col md:flex-row justify-between gap-8 md:gap-12 mb-8 md:mb-12">
           <div className="max-w-xs">
-            <h2 className="text-2xl font-black text-white mb-6 md:mb-8 tracking-tighter">PICKS</h2>
+            <h2 className="text-xl md:text-2xl font-black text-white mb-5 md:mb-8 tracking-tighter">PICKS</h2>
             <p className="text-slate-500 text-sm font-bold leading-relaxed">
               일상을 큐레이션하고 스타일을 연결하는<br />자세한 소셜 커머스 링크 플랫폼.
             </p>

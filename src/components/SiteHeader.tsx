@@ -18,9 +18,9 @@ const SiteHeader: React.FC<HeaderProps> = ({
   isLoggedIn 
 }) => {
   return (
-    <header className="fixed top-0 left-0 w-full h-16 md:h-[4.5rem] z-[1000] bg-gradient-to-r from-[#1e3a8a]/90 via-blue-primary/85 to-blue-secondary/85 backdrop-blur-2xl border-b border-blue-secondary/30 flex items-center justify-between px-4 md:px-12 transition-all">
+    <header className="fixed top-0 left-0 w-full h-14 md:h-[4.5rem] z-[1000] bg-gradient-to-r from-[#1e3a8a]/90 via-blue-primary/85 to-blue-secondary/85 backdrop-blur-2xl border-b border-blue-secondary/30 flex items-center justify-between px-4 md:px-12 transition-all">
       <div
-        className="text-2xl md:text-2xl font-black text-white tracking-tighter cursor-pointer flex items-center font-display"
+        className="text-xl md:text-2xl font-black text-white tracking-tighter cursor-pointer flex items-center font-display"
         onClick={onNavigateHome}
       >
         PICKS
