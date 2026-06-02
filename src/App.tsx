@@ -521,12 +521,16 @@ const App: React.FC = () => {
         setProfileChecked(true);
 
         const currentView = viewRef.current;
-        // Only redirect away from "entry" pages; preserve settled/valid pages
+        // Only redirect away from the "login" entry page; preserve settled/valid pages.
+        // The home page is intentionally NOT auto-redirected: a logged-in user who
+        // visits the main homepage stays there and must press a button (e.g. the
+        // header "dashboard" link) to move to the dashboard. This prevents the
+        // homepage from jumping to the dashboard on its own after a restored session.
         // Exclude 'signup' and 'business-signup' — users who explicitly navigated there should stay
-        if (currentView === 'login' || currentView === 'home') {
-          // Redirect logged-in users to dashboard from home/login pages.
-          // This covers both fresh logins (OAuth callback) and restored sessions
-          // (e.g., user coming from KakaoTalk while already logged in).
+        if (currentView === 'login') {
+          // Redirect logged-in users to dashboard from the login page only.
+          // This covers fresh logins (OAuth callback) and restored sessions that
+          // land on the login page.
           // Set loginTransitioning BEFORE clearing oauthProcessing to prevent
           // a brief flash of the login page between the two state updates.
           setLoginTransitioning(true);

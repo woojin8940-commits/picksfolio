@@ -97,41 +97,41 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
         {loading ? (
-          <div className="md:col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
+          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
             카테고리 데이터를 불러오는 중...
           </div>
         ) : categories.length === 0 ? (
-          <div className="md:col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
+          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
             트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.
           </div>
         ) : null}
         {categories.map((cat) => {
           const accent = CATEGORY_ACCENTS[cat.cid] ?? DEFAULT_ACCENT;
           return (
-            <div key={cat.cid} className="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
+            <div key={cat.cid} className="bg-white p-2.5 md:p-6 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-3 md:mb-4">
-                <h4 className="font-black text-slate-900 flex items-center gap-2 text-xs md:text-sm">
-                  <BarChart3 size={16} className="text-blue-600" />
-                  <span className={`w-1.5 h-1.5 rounded-full ${accent.dot}`}></span>
-                  {cat.label}
+                <h4 className="font-black text-slate-900 flex items-center gap-1.5 text-[11px] md:text-sm min-w-0">
+                  <BarChart3 size={14} className="text-blue-600 shrink-0" />
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${accent.dot}`}></span>
+                  <span className="truncate">{cat.label}</span>
                 </h4>
-                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${accent.chip}`}>
+                <span className={`hidden md:inline text-[9px] font-black px-2 py-0.5 rounded-full ${accent.chip}`}>
                   TOP 5
                 </span>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-0.5 md:space-y-1.5">
                 {cat.rankings.map((item) => (
                   <div
                     key={`${cat.cid}-${item.rank}`}
-                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 transition-colors"
+                    className="flex items-center justify-between p-1.5 md:p-2.5 rounded-lg md:rounded-xl hover:bg-slate-50 transition-colors"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-4 text-xs font-black text-slate-400 tabular-nums shrink-0">
+                    <div className="flex items-center gap-2 md:gap-2.5 min-w-0">
+                      <span className="w-4 text-[11px] md:text-xs font-black text-slate-400 tabular-nums shrink-0">
                         {item.rank}
                       </span>
-                      <span className="text-xs font-bold text-slate-700 truncate">
+                      <span className="text-[11px] md:text-xs font-bold text-slate-700 truncate">
                         {item.keyword}
                       </span>
                     </div>

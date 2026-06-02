@@ -1715,8 +1715,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   <div key={product.id} className="bg-[#F8FAFC] p-6 rounded-[2.5rem] border border-[#E2E8F0] space-y-4">
                     <input type="text" placeholder="상품명" value={product.name} onChange={e => handleUpdateProduct(product.id, 'name', e.target.value)} className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
                     <input type="text" placeholder="가격 (선택사항, 예: 29,000원)" value={product.price || ''} onChange={e => handleUpdateProduct(product.id, 'price', e.target.value)} className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
-                    <div className="flex gap-3">
-                      <input type="text" placeholder="구매 링크 (URL)" value={product.link} onChange={e => handleUpdateProduct(product.id, 'link', e.target.value)} className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
+                    <div className="flex gap-3 min-w-0">
+                      <input type="text" placeholder="구매 링크 (URL)" value={product.link} onChange={e => handleUpdateProduct(product.id, 'link', e.target.value)} className="flex-1 min-w-0 bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
                       <button onClick={() => handleDeleteProduct(product.id)} className="w-14 h-14 bg-white border border-red-100 text-red-400 rounded-2xl flex items-center justify-center hover:text-red-500 transition-all"><Trash2 size={20} /></button>
                     </div>
 
@@ -1728,13 +1728,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       </div>
                       {(product.options || []).map(opt => (
                         <div key={opt.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3">
-                          <div className="flex gap-3 items-center">
+                          <div className="flex gap-3 items-center min-w-0">
                             <input
                               type="text"
                               placeholder="옵션명 (예: 사이즈, 컬러)"
                               value={opt.name}
                               onChange={e => handleUpdateOption(product.id, opt.id, 'name', e.target.value)}
-                              className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3 text-sm font-black"
+                              className="flex-1 min-w-0 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-4 py-3 text-sm font-black"
                             />
                             <button onClick={() => handleDeleteOption(product.id, opt.id)} className="w-10 h-10 bg-white border border-red-100 text-red-400 rounded-xl flex items-center justify-center hover:text-red-500 transition-all"><Trash2 size={14} /></button>
                           </div>

@@ -29,15 +29,14 @@ const templates = [
   },
 ];
 
-const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
+const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
   const [activeTab, setActiveTab] = useState('shoppable');
-  const activeTemplate = templates.find(t => t.id === activeTab)!;
 
   return (
-    <section className="py-16 md:py-24 bg-background">
+    <section className="py-8 md:py-16 bg-background">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="text-center mb-10 md:mb-12">
-          <h2 className="text-2xl md:text-5xl font-black text-white mb-6 md:mb-6 font-display tracking-tighter">
+        <div className="text-center mb-6 md:mb-10">
+          <h2 className="text-xl md:text-5xl font-black text-white mb-3 md:mb-6 font-display tracking-tighter">
             당신의 무드에 맞는 2가지 템플릿
           </h2>
           <p className="text-sm md:text-base text-slate-400 font-medium">
@@ -45,7 +44,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
           </p>
         </div>
 
-        <div className="flex justify-center mb-10 md:mb-14">
+        <div className="flex justify-center mb-6 md:mb-10">
           <div className="inline-flex p-1.5 bg-[#11141D] rounded-2xl border border-white/5">
             {templates.map((template) => (
               <button
@@ -64,10 +63,10 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 items-center">
+        <div className="flex justify-center">
           {/* Mobile Mockup */}
-          <div className="relative flex justify-center lg:justify-end">
-            <div className="w-[280px] h-[560px] md:w-[260px] md:h-[520px] bg-[#050505] rounded-[2.5rem] md:rounded-[3rem] border-[6px] md:border-[8px] border-[#1A1D26] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden relative">
+          <div className="relative flex justify-center">
+            <div className="w-[200px] h-[400px] md:w-[230px] md:h-[460px] bg-[#050505] rounded-[2rem] md:rounded-[2.5rem] border-[6px] md:border-[8px] border-[#1A1D26] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden relative">
               {/* Mockup Content */}
               <div className="p-4 pt-12 h-full flex flex-col">
                 <div className="flex items-center gap-3 mb-6">
@@ -144,49 +143,6 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = ({ onSignup }) => {
               {/* Home Indicator */}
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full"></div>
             </div>
-          </div>
-
-          {/* Template Info */}
-          <div className="text-left">
-            <div className="flex items-center gap-3 text-blue-primary font-bold text-sm uppercase tracking-widest mb-5">
-              <Grid className="w-4 h-4" />
-              TEMPLATE STYLE
-            </div>
-
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.4 }}
-              >
-                <h3 className="text-2xl md:text-[2.6rem] font-black text-white mb-4 md:mb-6 font-display">
-                  {activeTemplate.title}
-                </h3>
-                <p className="text-slate-400 text-sm md:text-lg font-medium mb-8 md:mb-10 leading-relaxed max-w-lg">
-                  {activeTemplate.subtitle}
-                </p>
-
-                <div className="space-y-3 md:space-y-4 mb-8 md:mb-10">
-                  {activeTemplate.features.map((feature, idx) => (
-                    <div key={idx} className="flex items-center gap-3 md:gap-4">
-                      <div className="w-5 h-5 md:w-6 md:h-6 rounded-full border border-blue-primary flex items-center justify-center">
-                        <CheckCircle2 className="w-3.5 h-3.5 md:w-4 md:h-4 text-blue-primary" />
-                      </div>
-                      <span className="text-white font-bold text-sm md:text-base">{feature}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  onClick={onSignup}
-                  className="bg-gradient-to-r from-blue-primary to-blue-secondary text-white hover:opacity-90 px-8 py-3.5 md:px-10 md:py-4 rounded-full text-base md:text-lg font-bold transition-all active:scale-95 shadow-lg shadow-blue-primary/20"
-                >
-                  이 템플릿으로 시작
-                </button>
-              </motion.div>
-            </AnimatePresence>
           </div>
         </div>
       </div>
