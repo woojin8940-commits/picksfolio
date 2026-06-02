@@ -2513,14 +2513,15 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
           className={`absolute top-0 left-0 w-full h-full ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          // objectFit: 'contain' shows the broadcaster's full frame exactly as it
-          // is captured, with no cropping. Previously this was 'cover', which on
-          // tall modern phones (~9:19.5) scaled the 9:16 broadcast up until it
-          // filled the screen, cropping ~11% off each side — so viewers saw a
-          // visibly more zoomed-in image than the broadcaster did. 'contain'
-          // matches the broadcaster's framing 1:1; the black background sits under
-          // the top bar and chat overlays, so the slim margins read as intentional.
-          style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+          // objectFit: 'cover' fills the viewer's screen edge-to-edge with no
+          // black bars. This is safe (and matches the broadcaster 1:1) because
+          // the broadcast frame is now composited to a fixed portrait 9:16 canvas
+          // on the sender — the host previews that same portrait frame with
+          // object-cover, so what the audience sees is what the host sees. On
+          // phones taller than 9:16 cover trims a sliver top/bottom rather than
+          // showing letterbox bars, which is the immersive full-screen feed
+          // expected for mobile live commerce.
+          style={{ objectFit: 'cover', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
         />
         {/* HLS Video.js fallback */}
         {hlsPlaybackUrl && (
@@ -2539,7 +2540,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               x5-playsinline=""
               // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
               x5-video-player-type="h5-page"
-              style={{ objectFit: 'contain', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+              style={{ objectFit: 'cover', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         )}

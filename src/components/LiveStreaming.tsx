@@ -40,19 +40,28 @@ interface VideoFilters {
 
 const DEFAULT_FILTERS: VideoFilters = { brightness: 100, contrast: 100, saturation: 100, warmth: 0, blur: 0 };
 
-// Mobile-web optimized broadcast profile. Applied uniformly to all senders:
-// 1080p @ 60fps from a phone overheats the encoder and produces severe frame
-// drops on viewers; capping every broadcaster at 720p30 with a 2-second GOP
-// keeps mobile devices within thermal budget. Bitrate is held at 4.5 Mbps —
-// near-transparent for 720p H.264 on detail-heavy commerce subjects (apparel,
-// cosmetics) while leaving uplink headroom on typical LTE/5G.
+// Vertical (portrait) broadcast profile for mobile live commerce.
+//
+// width/height describe the BROADCAST FRAME, not the camera sensor: every frame
+// is composited onto a fixed 1080×1920 (9:16) canvas before it is sent, so the
+// stream is always full-screen vertical regardless of whether the camera hands
+// us a portrait or landscape frame. This is what fixes the old "broadcast is
+// landscape but the preview/viewer is portrait" mismatch that made the feed look
+// cropped on the web and showed black bars on mobile.
+//
+// 1080p (vs the previous 720p) roughly doubles the pixels viewers see — text on
+// product labels and fabric/cosmetic detail stay legible, which is the whole
+// point of live commerce. 30fps + a 2-second GOP keeps a phone's software
+// encoder within thermal budget, and the WebRTC sender's degradationPreference
+// scales resolution down automatically on weaker devices/networks rather than
+// stuttering. Bitrate is lifted to 6 Mbps to feed the higher resolution.
 const MAX_QUALITY = {
-  width: 1280,
-  height: 720,
+  width: 1080,
+  height: 1920,
   frameRate: 30,
-  bitrate: 4_500_000,
+  bitrate: 6_000_000,
   keyframeIntervalSec: 2,
-  description: '720p 30fps (mobile-web optimized)',
+  description: '1080p 세로 (라이브 커머스 최적화)',
 };
 
 // In-app browsers (KakaoTalk, Naver, Instagram, etc.) frequently block
@@ -282,12 +291,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     if (now - lastDrawTimeRef.current < FRAME_INTERVAL) return;
     lastDrawTimeRef.current = now;
 
-    // Double-resolution buffer for high-DPI displays (only on foreground)
-    const dpr = isBackgroundRef.current ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-    const targetW = sourceVideo.videoWidth * dpr;
-    const targetH = sourceVideo.videoHeight * dpr;
-
-    // Conditional resize: avoid per-frame memory allocation and context reinitialization
+    // The canvas is the actual broadcast frame (captureStream reads from it), so
+    // we lock it to a fixed portrait 1080×1920 (9:16) buffer. This guarantees the
+    // stream is always vertical and full-screen — even when the camera delivers a
+    // landscape frame — so viewers see exactly the framing the broadcaster sees,
+    // with no black side/letterbox bars on mobile.
+    const targetW = MAX_QUALITY.width;
+    const targetH = MAX_QUALITY.height;
     if (canvas.width !== targetW || canvas.height !== targetH) {
       canvas.width = targetW;
       canvas.height = targetH;
@@ -296,16 +306,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       ctx.imageSmoothingQuality = 'high';
     }
 
+    // object-fit: cover — scale the camera frame so it fills the portrait canvas
+    // and center-crop whatever overflows. A landscape camera frame is cropped to
+    // its vertical centre; a portrait frame is drawn edge-to-edge. This is the
+    // same cover math the preview and the viewer use, so all three stay in sync.
+    const vw = sourceVideo.videoWidth;
+    const vh = sourceVideo.videoHeight;
+    const scale = Math.max(targetW / vw, targetH / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (targetW - dw) / 2;
+    const dy = (targetH - dh) / 2;
+
     const f = filtersRef.current;
     const filterStr = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) sepia(${f.warmth}%) blur(${f.blur}px)`;
 
     ctx.filter = filterStr;
     ctx.save();
     if (isMirroredRef.current) {
-      ctx.translate(canvas.width, 0);
+      ctx.translate(targetW, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(sourceVideo, dx, dy, dw, dh);
     ctx.restore();
   }, []);
 
@@ -1429,14 +1451,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
-        {/* Viewer frame: a portrait phone-shaped preview so the broadcaster sees
-            exactly what viewers see, even when broadcasting from a computer. A
-            landscape desktop camera is cropped to the portrait frame (object-cover)
-            instead of being shown letterboxed with black bars, so the host's preview
-            matches the immersive full-screen mobile feed every viewer gets. */}
+        {/* Viewer frame: fills the whole stage so the broadcaster's preview is
+            edge-to-edge with no black margins on mobile. The portrait broadcast
+            frame (built on the 1080×1920 canvas) is shown with object-cover, so
+            the host sees exactly the full-bleed, full-screen feed every viewer
+            gets. */}
         <div
-          className="relative h-full w-auto overflow-hidden bg-black"
-          style={{ aspectRatio: '9 / 16', maxHeight: '100%', maxWidth: '100%' }}
+          className="relative w-full h-full overflow-hidden bg-black"
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
