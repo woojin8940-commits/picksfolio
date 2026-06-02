@@ -1275,7 +1275,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             )}
 
             <div
-              className="relative aspect-square flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-[10/7] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
@@ -1793,7 +1793,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
-              className="relative aspect-square flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-[10/7] flex-shrink-0 -mx-4 md:-mx-8"
               style={{
                 background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
               }}
