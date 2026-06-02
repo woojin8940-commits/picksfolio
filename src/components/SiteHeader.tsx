@@ -18,30 +18,30 @@ const SiteHeader: React.FC<HeaderProps> = ({
   isLoggedIn 
 }) => {
   return (
-    <header className="fixed top-0 left-0 w-full h-16 md:h-24 z-[1000] bg-gradient-to-r from-[#1e3a8a]/90 via-blue-primary/85 to-blue-secondary/85 backdrop-blur-2xl border-b border-blue-secondary/30 flex items-center justify-between px-4 md:px-16 transition-all">
+    <header className="fixed top-0 left-0 w-full h-16 md:h-[4.5rem] z-[1000] bg-gradient-to-r from-[#1e3a8a]/90 via-blue-primary/85 to-blue-secondary/85 backdrop-blur-2xl border-b border-blue-secondary/30 flex items-center justify-between px-4 md:px-12 transition-all">
       <div
-        className="text-2xl md:text-3xl font-black text-white tracking-tighter cursor-pointer flex items-center font-display"
+        className="text-2xl md:text-2xl font-black text-white tracking-tighter cursor-pointer flex items-center font-display"
         onClick={onNavigateHome}
       >
         PICKS
       </div>
 
-      <nav className="hidden md:flex items-center space-x-8 text-base font-bold text-blue-100 uppercase tracking-widest">
+      <nav className="hidden md:flex items-center space-x-6 text-sm font-bold text-blue-100 uppercase tracking-widest">
         {isLoggedIn ? (
           <>
-            <button 
+            <button
               onClick={onNavigateDashboard}
-              className="bg-white/5 hover:bg-white/10 text-white px-8 py-3.5 rounded-full transition-all active:scale-95 font-bold border border-white/10 text-base"
+              className="bg-white/5 hover:bg-white/10 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold border border-white/10 text-sm"
             >
               대시보드
             </button>
-            <button 
+            <button
               type="button"
               onClick={() => {
                 console.log('Header logout button clicked');
                 onLogout();
               }}
-              className="bg-white hover:opacity-90 text-blue-primary px-8 py-3.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 cursor-pointer text-base"
+              className="bg-white hover:opacity-90 text-blue-primary px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 cursor-pointer text-sm"
             >
               로그아웃
             </button>
@@ -49,7 +49,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
         ) : (
           <button
             onClick={onNavigateLogin}
-            className="bg-white hover:opacity-90 text-blue-primary px-8 py-3.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 text-base"
+            className="bg-white hover:opacity-90 text-blue-primary px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 text-sm"
           >
             로그인
           </button>
