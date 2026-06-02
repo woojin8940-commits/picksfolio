@@ -55,6 +55,68 @@ const MAX_QUALITY = {
   description: '720p 30fps (mobile-web optimized)',
 };
 
+// In-app browsers (KakaoTalk, Naver, Instagram, etc.) frequently block
+// getUserMedia outright, and even when the OS permission is the real problem,
+// there is no web API that opens the system camera-permission screen directly.
+// The most actionable escape we can offer is to bounce the page out to the
+// device's default browser (Safari/Chrome), where the standard permission
+// prompt works. These helpers detect the in-app context and perform that bounce
+// using the same per-app schemes proven in LiveStream.tsx (viewer side).
+const detectInApp = () => {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const isKakao = /KAKAOTALK/i.test(ua);
+  const isNaver = /NAVER\(inapp/i.test(ua) || /; ?NAVER /i.test(ua);
+  const isLine = /\bLine\//i.test(ua);
+  const isFacebook = /FB_IAB|FBAN|FBAV|Instagram/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isInApp = isKakao || isNaver || isLine || isFacebook;
+  return { ua, isKakao, isNaver, isLine, isFacebook, isIOS, isInApp };
+};
+
+const openCameraSettings = () => {
+  const url = typeof window !== 'undefined' ? window.location.href : '';
+  if (!url) return;
+  const { isKakao, isLine, isNaver, isInApp, ua } = detectInApp();
+  try {
+    if (isInApp) {
+      // Inside an in-app WebView the only real fix is to reopen in the default
+      // browser, where camera permission can actually be granted.
+      if (isKakao) {
+        window.location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url);
+        return;
+      }
+      if (isLine) {
+        const u = new URL(url);
+        u.searchParams.set('openExternalBrowser', '1');
+        window.location.href = u.toString();
+        return;
+      }
+      if (isNaver && /Android/i.test(ua)) {
+        const stripped = url.replace(/^https?:\/\//, '');
+        window.location.href = `intent://${stripped}#Intent;scheme=https;package=com.android.chrome;end`;
+        return;
+      }
+      // Instagram/Facebook and other iOS in-app browsers expose no escape scheme;
+      // copy the link and tell the user to open it in Safari/Chrome.
+      if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+      alert('우측 상단 메뉴에서 "Safari로 열기" 또는 "기본 브라우저로 열기"를 선택해 주세요.\n주소가 클립보드에 복사되었습니다.');
+      return;
+    }
+    // A normal browser whose camera permission was denied: there is no JS hook
+    // into the OS settings page, so copy the address and surface step-by-step
+    // guidance for granting permission, then reopening.
+    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    alert(
+      '브라우저 설정에서 카메라·마이크 권한을 허용해 주세요.\n\n' +
+        '· iPhone(Safari): 설정 > Safari > 카메라/마이크 > "허용"\n' +
+        '· Android(Chrome): 주소창 좌측 자물쇠 > 권한 > 카메라/마이크 > "허용"\n\n' +
+        '권한을 허용한 뒤 "다시 시도"를 눌러 주세요. 주소가 클립보드에 복사되었습니다.'
+    );
+  } catch (e) {
+    console.warn('[LiveStreaming] openCameraSettings failed:', e);
+  }
+};
+
 const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, selectedProductIds }) => {
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -1340,12 +1402,23 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
               <p className="text-white font-black text-sm">카메라를 시작할 수 없어요</p>
               <p className="text-slate-300 text-xs font-medium leading-relaxed">{cameraError}</p>
-              <button
-                onClick={() => { setCameraError(null); setIsCameraOn(false); setTimeout(() => setIsCameraOn(true), 50); }}
-                className="px-5 py-2.5 bg-white text-slate-900 rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
-              >
-                다시 시도
-              </button>
+              <div className="flex flex-col gap-2.5">
+                {/* Primary fix: open the OS/browser settings (or bounce out of an
+                    in-app browser) so the broadcaster can actually grant the
+                    camera permission instead of being stuck on the message. */}
+                <button
+                  onClick={openCameraSettings}
+                  className="px-5 py-2.5 bg-blue-primary text-white rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  {detectInApp().isInApp ? '기본 브라우저로 열기' : '카메라 권한 설정 열기'}
+                </button>
+                <button
+                  onClick={() => { setCameraError(null); setIsCameraOn(false); setTimeout(() => setIsCameraOn(true), 50); }}
+                  className="px-5 py-2.5 bg-white text-slate-900 rounded-full text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  다시 시도
+                </button>
+              </div>
             </div>
           </div>
         )}
