@@ -18,6 +18,19 @@ export interface SiteData {
   linkGridCategories?: string[];
 }
 
+// Orderer (주문자) + shipping address (배송지) collected at live checkout.
+// Reused across orders by persisting it per-viewer via the shipping-profile API.
+export interface ShippingProfile {
+  ordererName: string;
+  ordererPhone: string;
+  recipientName: string;
+  recipientPhone: string;
+  postcode?: string;
+  address1: string;
+  address2?: string;
+  memo?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Client-side caches. Site data and seller verification are fetched on every
 // dashboard navigation; without caching each menu switch re-hits the network
@@ -814,6 +827,7 @@ export const apiService = {
       nickname?: string;
       profileImage?: string;
     };
+    shipping?: ShippingProfile;
   }): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch('/api/live-order-complete', {
@@ -855,6 +869,7 @@ export const apiService = {
       nickname?: string;
       profileImage?: string;
     };
+    shipping?: ShippingProfile;
   }): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch('/api/live-order-batch', {
@@ -873,6 +888,36 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to complete batch live order:', e);
       return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // ───────────────────── Live Shipping Profile (orderer + 배송지) ─────────────────────
+  // Fetch the viewer's last-used orderer/shipping details so the live checkout
+  // form can be pre-filled. Returns null when nothing has been saved yet.
+  async getShippingProfile(viewerId: string): Promise<ShippingProfile | null> {
+    try {
+      const res = await fetch(`/api/live-shipping-profile?viewerId=${encodeURIComponent(viewerId)}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return (json?.profile as ShippingProfile) || null;
+    } catch (e) {
+      console.error('[API] Failed to load shipping profile:', e);
+      return null;
+    }
+  },
+
+  // Persist the viewer's orderer/shipping details for reuse on their next order.
+  async saveShippingProfile(viewerId: string, profile: ShippingProfile): Promise<boolean> {
+    try {
+      const res = await fetch('/api/live-shipping-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ viewerId, profile }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to save shipping profile:', e);
+      return false;
     }
   },
 

@@ -2317,6 +2317,34 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             <span className="text-[10px] font-black tracking-tighter">POWERED BY</span>
             <span className="text-sm font-black text-blue-600 tracking-tighter">PICKSFOLIO</span>
           </div>
+
+          {/* 통신판매중개자 사업자 정보 및 고객센터 (전자상거래법 제20조 / 결제 연동 심사 대응) */}
+          <div className={`w-full max-w-md mx-auto pt-6 mt-2 border-t text-center space-y-1.5 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
+              본 페이지의 라이브 커머스 거래는 통신판매중개 플랫폼 픽스폴리오(Picksfolio)를 통해 이루어집니다.
+            </p>
+            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
+              상호명 픽스폴리오(Picksfolio) | 대표자 신우진
+            </p>
+            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
+              사업자등록번호 220-26-01995 | 통신판매업신고 제 2026-부천원미-0846 호
+            </p>
+            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
+              경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)
+            </p>
+            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
+              고객센터 010-3563-8940 | woojin8940@inplace-ad.com
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <a href="/terms" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+                이용약관
+              </a>
+              <span className={subTextColor}>|</span>
+              <a href="/privacy" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+                개인정보처리방침 · 취소/환불/배송 안내
+              </a>
+            </div>
+          </div>
         </footer>
 
         {/* Product Detail Drawer */}

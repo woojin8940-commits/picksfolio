@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef, useTransition } from 'react';
-import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, ShoppingBag, ShoppingCart, Package, RefreshCw, Volume2, VolumeX, Wifi, CreditCard, MapPin, Search } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
@@ -8,7 +8,7 @@ import { formatKRW, toAsciiSafeId } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
-import { apiService } from '../services/apiService';
+import { apiService, type ShippingProfile } from '../services/apiService';
 
 declare global {
   interface Window {
@@ -96,6 +96,145 @@ interface LiveStreamProps {
   onClose: () => void;
   preConnectedSignaling?: ViewerSignaling | null;
 }
+
+// ── Orderer & shipping (배송지) checkout form ──────────────────────────────
+type ShippingFormState = {
+  ordererName: string;
+  ordererPhone: string;
+  sameAsOrderer: boolean;
+  recipientName: string;
+  recipientPhone: string;
+  postcode: string;
+  address1: string;
+  address2: string;
+  memo: string;
+};
+
+const EMPTY_SHIPPING: ShippingFormState = {
+  ordererName: '', ordererPhone: '', sameAsOrderer: true,
+  recipientName: '', recipientPhone: '', postcode: '', address1: '', address2: '', memo: '',
+};
+
+// Format to 010-1234-5678 as the viewer types; keep only digits, cap at 11.
+const formatPhoneInput = (raw: string): string => {
+  const d = raw.replace(/[^0-9]/g, '').slice(0, 11);
+  if (d.length < 4) return d;
+  if (d.length < 8) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+};
+const isValidPhone = (raw: string): boolean => raw.replace(/[^0-9]/g, '').length >= 10;
+
+// Collapse the form (incl. the "주문자와 동일" toggle) into the persisted shape.
+const toShippingProfile = (s: ShippingFormState): ShippingProfile => ({
+  ordererName: s.ordererName.trim(),
+  ordererPhone: s.ordererPhone.trim(),
+  recipientName: (s.sameAsOrderer ? s.ordererName : s.recipientName).trim(),
+  recipientPhone: (s.sameAsOrderer ? s.ordererPhone : s.recipientPhone).trim(),
+  postcode: s.postcode.trim(),
+  address1: s.address1.trim(),
+  address2: s.address2.trim(),
+  memo: s.memo.trim(),
+});
+
+// Hydrate the form from a previously saved profile so repeat orders are filled.
+const fromShippingProfile = (p: ShippingProfile): ShippingFormState => {
+  const same = p.recipientName === p.ordererName && p.recipientPhone === p.ordererPhone;
+  return {
+    ordererName: p.ordererName || '',
+    ordererPhone: p.ordererPhone || '',
+    sameAsOrderer: same,
+    recipientName: same ? '' : (p.recipientName || ''),
+    recipientPhone: same ? '' : (p.recipientPhone || ''),
+    postcode: p.postcode || '',
+    address1: p.address1 || '',
+    address2: p.address2 || '',
+    memo: p.memo || '',
+  };
+};
+
+const isShippingValid = (s: ShippingFormState): boolean => {
+  const recName = s.sameAsOrderer ? s.ordererName : s.recipientName;
+  const recPhone = s.sameAsOrderer ? s.ordererPhone : s.recipientPhone;
+  return !!(
+    s.ordererName.trim() && isValidPhone(s.ordererPhone) &&
+    recName.trim() && isValidPhone(recPhone) &&
+    s.address1.trim()
+  );
+};
+
+// Lazy-load the Daum(카카오) postcode SDK so address search works without
+// bundling it. Resolves the global `daum` namespace; on failure the viewer can
+// still type the address manually.
+let daumPostcodePromise: Promise<any> | null = null;
+const loadDaumPostcode = (): Promise<any> => {
+  if (typeof window === 'undefined') return Promise.reject();
+  if ((window as any).daum?.Postcode) return Promise.resolve((window as any).daum);
+  if (daumPostcodePromise) return daumPostcodePromise;
+  daumPostcodePromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+    s.async = true;
+    s.onload = () => resolve((window as any).daum);
+    s.onerror = () => { daumPostcodePromise = null; reject(); };
+    document.head.appendChild(s);
+  });
+  return daumPostcodePromise;
+};
+
+const shInputCls = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-400 transition-colors';
+
+const ShippingFields: React.FC<{
+  shipping: ShippingFormState;
+  setShipping: React.Dispatch<React.SetStateAction<ShippingFormState>>;
+  onSearchPostcode: () => void;
+  disabled?: boolean;
+}> = ({ shipping, setShipping, onSearchPostcode, disabled }) => {
+  const upd = (patch: Partial<ShippingFormState>) => setShipping(prev => ({ ...prev, ...patch }));
+  return (
+    <div className="space-y-2.5 mb-4">
+      <div className="flex items-center gap-1.5">
+        <MapPin size={13} className="text-blue-500" />
+        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">주문자 정보</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input className={shInputCls} placeholder="주문자 이름" value={shipping.ordererName} disabled={disabled}
+          onChange={e => upd({ ordererName: e.target.value })} />
+        <input className={shInputCls} placeholder="연락처 010-0000-0000" inputMode="numeric" value={shipping.ordererPhone} disabled={disabled}
+          onChange={e => upd({ ordererPhone: formatPhoneInput(e.target.value) })} />
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">배송지 정보</p>
+        <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 cursor-pointer select-none">
+          <input type="checkbox" className="accent-blue-500" checked={shipping.sameAsOrderer} disabled={disabled}
+            onChange={e => upd({ sameAsOrderer: e.target.checked })} />
+          주문자와 동일
+        </label>
+      </div>
+      {!shipping.sameAsOrderer && (
+        <div className="grid grid-cols-2 gap-2">
+          <input className={shInputCls} placeholder="받는 분 이름" value={shipping.recipientName} disabled={disabled}
+            onChange={e => upd({ recipientName: e.target.value })} />
+          <input className={shInputCls} placeholder="받는 분 연락처" inputMode="numeric" value={shipping.recipientPhone} disabled={disabled}
+            onChange={e => upd({ recipientPhone: formatPhoneInput(e.target.value) })} />
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input className={`${shInputCls} flex-1`} placeholder="우편번호" value={shipping.postcode} readOnly onClick={onSearchPostcode} />
+        <button type="button" onClick={onSearchPostcode} disabled={disabled}
+          className="px-3 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1 shrink-0 hover:bg-slate-800 disabled:opacity-50">
+          <Search size={13} /> 주소 검색
+        </button>
+      </div>
+      <input className={shInputCls} placeholder="기본 주소" value={shipping.address1} disabled={disabled}
+        onChange={e => upd({ address1: e.target.value })} />
+      <input className={shInputCls} placeholder="상세 주소 (동/호수 등)" value={shipping.address2} disabled={disabled}
+        onChange={e => upd({ address2: e.target.value })} />
+      <input className={shInputCls} placeholder="배송 요청사항 (선택)" value={shipping.memo} disabled={disabled}
+        onChange={e => upd({ memo: e.target.value })} />
+    </div>
+  );
+};
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 const KAKAO_APP_KEY = typeof window !== 'undefined'
@@ -379,6 +518,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchSuccess, setBatchSuccess] = useState(false);
+  // Orderer + 배송지 collected before payment. Shared by both the single and
+  // batch checkout modals (a viewer has one delivery profile per order session)
+  // and pre-filled from their last saved profile so repeat orders are 1-tap.
+  const [shipping, setShipping] = useState<ShippingFormState>(EMPTY_SHIPPING);
+  const shippingLoadedRef = useRef(false);
   const viewerIdRef = useRef<string>((() => {
     try {
       const saved = localStorage.getItem('picks_viewer_id');
@@ -389,6 +533,46 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     return id;
   })());
   const [, startTransition] = useTransition();
+
+  // Load the viewer's last-used orderer/배송지 profile once so the checkout
+  // form opens pre-filled. Falls back to seeding the orderer name from their
+  // Kakao nickname when nothing has been saved yet.
+  useEffect(() => {
+    if (shippingLoadedRef.current) return;
+    shippingLoadedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      const saved = await apiService.getShippingProfile(viewerIdRef.current);
+      if (cancelled) return;
+      if (saved && (saved.ordererName || saved.address1)) {
+        setShipping(fromShippingProfile(saved));
+      } else if (kakaoUser?.nickname) {
+        setShipping(prev => (prev.ordererName ? prev : { ...prev, ordererName: kakaoUser.nickname }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kakaoUser?.nickname]);
+
+  // Open the Daum(카카오) postcode popup and fill in 우편번호 + 기본 주소.
+  const handlePostcodeSearch = useCallback(async () => {
+    try {
+      const daum = await loadDaumPostcode();
+      new daum.Postcode({
+        oncomplete: (data: any) => {
+          setShipping(prev => ({
+            ...prev,
+            postcode: data.zonecode || '',
+            address1: data.roadAddress || data.jibunAddress || '',
+          }));
+        },
+      }).open();
+    } catch {
+      // SDK failed to load — the viewer can still type the address by hand.
+    }
+  }, []);
+
+  const shippingValid = isShippingValid(shipping);
+
   const [hlsReady, setHlsReady] = useState(false);
   const [hlsPlaybackUrl, setHlsPlaybackUrl] = useState<string>('');
   const videoResetCountRef = useRef(0); // Track how many times we've reset the video element
@@ -2148,6 +2332,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       return;
     }
 
+    if (!isShippingValid(shipping)) {
+      setCheckoutError('주문자 정보와 배송지를 모두 입력해 주세요.');
+      return;
+    }
+    const shippingProfile = toShippingProfile(shipping);
+
     setCheckoutError(null);
     setCheckoutProcessing(true);
     try {
@@ -2201,12 +2391,15 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           nickname: kakaoUser.nickname,
           profileImage: kakaoUser.profileImage,
         },
+        shipping: shippingProfile,
       });
       if (!verifyRes.success) {
         setCheckoutError(verifyRes.error || '결제 검증에 실패했습니다. 고객센터로 문의해 주세요.');
         return;
       }
 
+      // Remember this delivery profile for the viewer's next order.
+      apiService.saveShippingProfile(viewerIdRef.current, shippingProfile).catch(() => {});
       setCheckoutSuccess(true);
     } catch (err) {
       console.error('[LiveCheckout] PortOne payment error:', err);
@@ -2214,7 +2407,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     } finally {
       setCheckoutProcessing(false);
     }
-  }, [checkoutProduct, checkoutPayMethod, checkoutOptions, kakaoUser, username]);
+  }, [checkoutProduct, checkoutPayMethod, checkoutOptions, kakaoUser, username, shipping]);
 
   const handleCloseCheckout = useCallback(() => {
     if (checkoutProcessing) return;
@@ -2276,6 +2469,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       return;
     }
 
+    if (!isShippingValid(shipping)) {
+      setBatchError('주문자 정보와 배송지를 모두 입력해 주세요.');
+      return;
+    }
+    const shippingProfile = toShippingProfile(shipping);
+
     setBatchError(null);
     setBatchProcessing(true);
     try {
@@ -2329,12 +2528,16 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           nickname: kakaoUser.nickname,
           profileImage: kakaoUser.profileImage,
         },
+        shipping: shippingProfile,
       });
 
       if (!verifyRes.success) {
         setBatchError(verifyRes.error || '결제 검증에 실패했습니다. 고객센터로 문의해 주세요.');
         return;
       }
+
+      // Remember this delivery profile for the viewer's next order.
+      apiService.saveShippingProfile(viewerIdRef.current, shippingProfile).catch(() => {});
 
       // Remove paid items from local cart; keep any unpriceable ones so the
       // viewer can still jump to the seller's external link for those.
@@ -2347,7 +2550,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     } finally {
       setBatchProcessing(false);
     }
-  }, [kakaoUser, batchPayableItems, batchTotal, batchPayMethod, username]);
+  }, [kakaoUser, batchPayableItems, batchTotal, batchPayMethod, username, shipping]);
 
   const addLike = () => {
     const id = Date.now();
@@ -3064,7 +3267,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           >
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
             <div
-              className="relative w-full max-w-md bg-white rounded-t-3xl p-5 animate-in slide-in-from-bottom-8 duration-300 shadow-2xl"
+              className="relative w-full max-w-md bg-white rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-8 duration-300 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)' }}
             >
@@ -3128,6 +3331,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     </div>
                   )}
 
+                  <ShippingFields
+                    shipping={shipping}
+                    setShipping={setShipping}
+                    onSearchPostcode={handlePostcodeSearch}
+                    disabled={checkoutProcessing}
+                  />
+
                   <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
                   <div className="grid grid-cols-2 gap-2 mb-4">
                     <button
@@ -3172,7 +3382,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   <button
                     type="button"
                     onClick={handleConfirmCheckout}
-                    disabled={checkoutProcessing}
+                    disabled={checkoutProcessing || !shippingValid}
                     className={`w-full py-3 rounded-xl text-sm font-black text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
                       checkoutPayMethod === 'KAKAOPAY'
                         ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
@@ -3188,6 +3398,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                       </>
                     )}
                   </button>
+                  {!shippingValid && (
+                    <p className="mt-2 text-[10px] text-amber-600 font-bold text-center">
+                      주문자 이름·연락처와 배송지 주소를 입력하면 결제할 수 있어요.
+                    </p>
+                  )}
                   <p className="mt-3 text-[10px] text-slate-400 leading-relaxed text-center">
                     결제 진행 시 픽스폴리오의 결제 약관 및 PG사 약관에 동의하는 것으로 간주됩니다.
                   </p>
@@ -3205,7 +3420,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           >
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
             <div
-              className="relative w-full max-w-md bg-white rounded-t-3xl p-5 animate-in slide-in-from-bottom-8 duration-300 shadow-2xl"
+              className="relative w-full max-w-md bg-white rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-8 duration-300 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)' }}
             >
@@ -3274,6 +3489,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                     </div>
                   )}
 
+                  <ShippingFields
+                    shipping={shipping}
+                    setShipping={setShipping}
+                    onSearchPostcode={handlePostcodeSearch}
+                    disabled={batchProcessing}
+                  />
+
                   <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
                   <div className="grid grid-cols-2 gap-2 mb-4">
                     <button
@@ -3307,7 +3529,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                   <button
                     type="button"
                     onClick={handleConfirmBatchCheckout}
-                    disabled={batchProcessing}
+                    disabled={batchProcessing || !shippingValid}
                     className={`w-full py-3 rounded-xl text-sm font-black text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
                       batchPayMethod === 'KAKAOPAY'
                         ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
@@ -3323,6 +3545,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
                       </>
                     )}
                   </button>
+                  {!shippingValid && (
+                    <p className="mt-2 text-[10px] text-amber-600 font-bold text-center">
+                      주문자 이름·연락처와 배송지 주소를 입력하면 결제할 수 있어요.
+                    </p>
+                  )}
                   <p className="mt-3 text-[10px] text-slate-400 leading-relaxed text-center">
                     여러 상품을 한 번의 결제로 처리합니다. 결제 진행 시 픽스폴리오 결제 약관 및 PG사 약관에 동의하는 것으로 간주됩니다.
                   </p>
