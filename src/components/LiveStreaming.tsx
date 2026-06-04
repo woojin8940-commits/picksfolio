@@ -306,13 +306,26 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       ctx.imageSmoothingQuality = 'high';
     }
 
-    // object-fit: cover — scale the camera frame so it fills the portrait canvas
-    // and center-crop whatever overflows. A landscape camera frame is cropped to
-    // its vertical centre; a portrait frame is drawn edge-to-edge. This is the
-    // same cover math the preview and the viewer use, so all three stay in sync.
+    // Orientation-aware fit onto the portrait canvas.
+    //
+    // A portrait (or square) camera frame is drawn with object-fit: cover, so a
+    // phone held upright fills the 9:16 canvas edge-to-edge with no black bars —
+    // the immersive full-screen feed live commerce expects, with at most a sliver
+    // cropped because the aspect ratios are close.
+    //
+    // A LANDSCAPE camera frame (most desktop webcams, and the in-app webviews —
+    // KakaoTalk/Naver/Instagram — that ignore our portrait request and hand back
+    // the sensor's native wide frame) is instead drawn with object-fit: contain.
+    // Cover would scale a wide frame up until its height filled the tall canvas,
+    // cropping ~70% off the sides and making the broadcaster look drastically
+    // zoomed in. Contain shows the whole frame at its true framing; the unused
+    // top/bottom area stays black. This is what fixes the "too zoomed in" feed.
     const vw = sourceVideo.videoWidth;
     const vh = sourceVideo.videoHeight;
-    const scale = Math.max(targetW / vw, targetH / vh);
+    const isLandscapeSource = vw > vh;
+    const scale = isLandscapeSource
+      ? Math.min(targetW / vw, targetH / vh)
+      : Math.max(targetW / vw, targetH / vh);
     const dw = vw * scale;
     const dh = vh * scale;
     const dx = (targetW - dw) / 2;
@@ -320,6 +333,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
     const f = filtersRef.current;
     const filterStr = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) sepia(${f.warmth}%) blur(${f.blur}px)`;
+
+    // Paint the canvas black first so any letterbox area left by a contained
+    // landscape frame is clean instead of showing the previous frame's edges.
+    ctx.filter = 'none';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, targetW, targetH);
 
     ctx.filter = filterStr;
     ctx.save();
