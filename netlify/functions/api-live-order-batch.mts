@@ -14,6 +14,36 @@ import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricin
 
 const PORTONE_API_BASE = 'https://api.portone.io'
 
+interface ShippingInfo {
+  ordererName?: string
+  ordererPhone?: string
+  recipientName?: string
+  recipientPhone?: string
+  postcode?: string
+  address1?: string
+  address2?: string
+  memo?: string
+}
+
+// Trim and length-cap a shipping snapshot so an oversized/garbage payload can't
+// bloat the seller's orders blob. Returns undefined when nothing usable is set.
+function normalizeShipping(raw: any): ShippingInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const cap = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '')
+  const s: ShippingInfo = {
+    ordererName: cap(raw.ordererName, 60),
+    ordererPhone: cap(raw.ordererPhone, 30),
+    recipientName: cap(raw.recipientName, 60),
+    recipientPhone: cap(raw.recipientPhone, 30),
+    postcode: cap(raw.postcode, 20),
+    address1: cap(raw.address1, 200),
+    address2: cap(raw.address2, 200),
+    memo: cap(raw.memo, 200),
+  }
+  if (!s.recipientName && !s.address1 && !s.ordererName) return undefined
+  return s
+}
+
 interface BatchItem {
   productId?: string
   productName?: string
@@ -33,6 +63,7 @@ interface BatchBody {
     profileImage?: string
   }
   items?: BatchItem[]
+  shipping?: ShippingInfo
 }
 
 interface OrderRecord {
@@ -59,6 +90,7 @@ interface OrderRecord {
     nickname?: string
     profileImage?: string
   }
+  shipping?: ShippingInfo
 }
 
 interface LiveOrdersData {
@@ -222,8 +254,7 @@ export default async (req: Request, _context: Context) => {
   const records: OrderRecord[] = items.map((it, idx) => {
     const itemAmount = Number(it.amount)
     const split = splitLiveCommission(itemAmount)
-    return {
-      paymentId: `${paymentId}#${idx + 1}`,
+    return {      paymentId: `${paymentId}#${idx + 1}`,
       pgTxId: payment.pgTxId,
       amount: itemAmount,
       paidAt: payment.paidAt || now,
@@ -246,6 +277,7 @@ export default async (req: Request, _context: Context) => {
         nickname: body.viewer?.nickname,
         profileImage: body.viewer?.profileImage,
       },
+      shipping: normalizeShipping(body.shipping),
     }
   })
 
