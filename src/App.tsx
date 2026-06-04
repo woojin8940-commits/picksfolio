@@ -4,37 +4,74 @@ import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
 import TemplateShowcase from './components/TemplateShowcase';
 import DataBoardSection from './components/DataBoardSection';
-import ErrorBoundary from './components/ErrorBoundary';
+import ErrorBoundary, { clearChunkReloadFlag } from './components/ErrorBoundary';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 
-const UserPage = lazy(() => import('./components/UserPage'));
+// Wrap React.lazy so a failed dynamic import() (the usual cause of the
+// intermittent "앱을 표시할 수 없습니다" crash — a stale chunk after a new deploy,
+// or a dropped request inside an in-app WebView) retries before giving up, and
+// falls back to a one-time page reload that pulls the fresh asset manifest. The
+// reload is guarded by sessionStorage so it can never loop.
+const CHUNK_RELOAD_KEY = 'picks_chunk_reload';
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>,
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    try {
+      const mod = await factory();
+      // A chunk loaded successfully — reset the one-time reload guard so a
+      // future deploy can recover again.
+      try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch {}
+      return mod;
+    } catch (err) {
+      // Retry once after a short delay (covers transient network blips), then
+      // fall back to a single hard reload to fetch the new manifest.
+      try {
+        await new Promise((r) => setTimeout(r, 400));
+        return await factory();
+      } catch (err2) {
+        try {
+          if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+            sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+            window.location.reload();
+            // Keep the Suspense fallback up until the reload navigates away.
+            return await new Promise<{ default: T }>(() => {});
+          }
+        } catch {}
+        throw err2;
+      }
+    }
+  });
+}
+
+const UserPage = lazyWithRetry(() => import('./components/UserPage'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
 // they are code-split out of the initial bundle for a faster first paint.
-const SignupPage = lazy(() => import('./components/SignupPage'));
-const LoginPage = lazy(() => import('./components/LoginPage'));
-const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
-const LinkManagement = lazy(() => import('./components/LinkManagement'));
-const PortfolioManagement = lazy(() => import('./components/PortfolioManagement'));
-const LiveCommerceManagement = lazy(() => import('./components/LiveCommerceManagement'));
-const BroadcastSettings = lazy(() => import('./components/BroadcastSettings'));
-const BroadcastHistory = lazy(() => import('./components/BroadcastHistory'));
-const BusinessProposalForm = lazy(() => import('./components/BusinessProposalForm'));
-const BusinessDashboard = lazy(() => import('./components/BusinessDashboard'));
-const BusinessCalendar = lazy(() => import('./components/BusinessCalendar'));
-const OpenScheduleManagement = lazy(() => import('./components/OpenScheduleManagement'));
-const UserCampaignBrowse = lazy(() => import('./components/UserCampaignBrowse'));
-const MembershipPlan = lazy(() => import('./components/MembershipPlan'));
-const OperatorLogin = lazy(() => import('./components/OperatorLogin'));
-const OperatorDashboard = lazy(() => import('./components/OperatorDashboard'));
-const SetupLink = lazy(() => import('./components/SetupLink'));
-const TermsOfService = lazy(() => import('./components/TermsOfService'));
-const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
-const BusinessSignupPage = lazy(() => import('./components/BusinessSignupPage'));
-const BusinessLoginPage = lazy(() => import('./components/BusinessLoginPage'));
-const BusinessEnterpriseDashboard = lazy(() => import('./components/BusinessEnterpriseDashboard'));
-const UserSettlement = lazy(() => import('./components/UserSettlement'));
-const BusinessTimeline = lazy(() => import('./components/BusinessTimeline'));
+const SignupPage = lazyWithRetry(() => import('./components/SignupPage'));
+const LoginPage = lazyWithRetry(() => import('./components/LoginPage'));
+const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
+const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
+const PortfolioManagement = lazyWithRetry(() => import('./components/PortfolioManagement'));
+const LiveCommerceManagement = lazyWithRetry(() => import('./components/LiveCommerceManagement'));
+const BroadcastSettings = lazyWithRetry(() => import('./components/BroadcastSettings'));
+const BroadcastHistory = lazyWithRetry(() => import('./components/BroadcastHistory'));
+const BusinessProposalForm = lazyWithRetry(() => import('./components/BusinessProposalForm'));
+const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashboard'));
+const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalendar'));
+const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenScheduleManagement'));
+const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
+const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
+const OperatorLogin = lazyWithRetry(() => import('./components/OperatorLogin'));
+const OperatorDashboard = lazyWithRetry(() => import('./components/OperatorDashboard'));
+const SetupLink = lazyWithRetry(() => import('./components/SetupLink'));
+const TermsOfService = lazyWithRetry(() => import('./components/TermsOfService'));
+const PrivacyPolicy = lazyWithRetry(() => import('./components/PrivacyPolicy'));
+const BusinessSignupPage = lazyWithRetry(() => import('./components/BusinessSignupPage'));
+const BusinessLoginPage = lazyWithRetry(() => import('./components/BusinessLoginPage'));
+const BusinessEnterpriseDashboard = lazyWithRetry(() => import('./components/BusinessEnterpriseDashboard'));
+const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement'));
+const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeline'));
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 
@@ -86,6 +123,13 @@ const App: React.FC = () => {
 
   // Track the user's role from the Supabase profile (e.g. 'user', 'admin')
   const [, setProfileRole] = useState<string>('');
+
+  // The app rendered successfully — clear the one-time chunk-reload guard so a
+  // future stale-chunk error (after the next deploy) can recover with a reload
+  // again instead of being suppressed.
+  useEffect(() => {
+    clearChunkReloadFlag();
+  }, []);
 
   // loginTransitioning: true during the brief period between login success and admin dashboard ready.
   // Shows a smooth loading screen instead of a blank/flickering dashboard.

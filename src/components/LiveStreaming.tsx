@@ -40,28 +40,28 @@ interface VideoFilters {
 
 const DEFAULT_FILTERS: VideoFilters = { brightness: 100, contrast: 100, saturation: 100, warmth: 0, blur: 0 };
 
-// Vertical (portrait) broadcast profile for mobile live commerce.
+// Broadcast quality profile for mobile live commerce.
 //
-// width/height describe the BROADCAST FRAME, not the camera sensor: every frame
-// is composited onto a fixed 1080×1920 (9:16) canvas before it is sent, so the
-// stream is always full-screen vertical regardless of whether the camera hands
-// us a portrait or landscape frame. This is what fixes the old "broadcast is
-// landscape but the preview/viewer is portrait" mismatch that made the feed look
-// cropped on the web and showed black bars on mobile.
+// frameRate / bitrate / keyframe settings describe the ENCODER target. The
+// broadcast frame itself is NOT forced to a fixed resolution or aspect ratio:
+// every frame is composited onto a canvas sized to the camera's native
+// resolution, so the stream keeps the camera's default ratio and full field of
+// view. (Forcing a 9:16 portrait capture used to crop the sensor and make the
+// feed look heavily zoomed in.) width/height below are only a fallback used by
+// the IVS/HLS path before the live canvas size is known.
 //
-// 1080p (vs the previous 720p) roughly doubles the pixels viewers see — text on
-// product labels and fabric/cosmetic detail stay legible, which is the whole
-// point of live commerce. 30fps + a 2-second GOP keeps a phone's software
-// encoder within thermal budget, and the WebRTC sender's degradationPreference
-// scales resolution down automatically on weaker devices/networks rather than
-// stuttering. Bitrate is lifted to 6 Mbps to feed the higher resolution.
+// 30fps + a 2-second GOP keeps a phone's software encoder within thermal budget,
+// and the WebRTC sender's degradationPreference scales resolution down
+// automatically on weaker devices/networks rather than stuttering. Bitrate is
+// 6 Mbps to feed high-resolution detail (product labels, fabric/cosmetic
+// texture) — the whole point of live commerce.
 const MAX_QUALITY = {
   width: 1080,
   height: 1920,
   frameRate: 30,
   bitrate: 6_000_000,
   keyframeIntervalSec: 2,
-  description: '1080p 세로 (라이브 커머스 최적화)',
+  description: '카메라 기본 비율 (라이브 커머스 최적화)',
 };
 
 // In-app browsers (KakaoTalk, Naver, Instagram, etc.) frequently block
@@ -142,9 +142,13 @@ const getBroadcastStream = async (
 ): Promise<MediaStream> => {
   const ladder: MediaStreamConstraints[] = [
     {
+      // Do NOT pin a width/height (and therefore an aspect ratio). Requesting a
+      // 9:16 portrait resolution forced phone cameras to crop their sensor down
+      // to that aspect, throwing away most of the horizontal field of view so
+      // the broadcaster looked heavily zoomed in. Asking only for the camera,
+      // frame rate and audio lets the device hand back its NATIVE resolution and
+      // aspect ratio — the same default framing the stock camera app shows.
       video: {
-        width: { ideal: q.width, min: 320 },
-        height: { ideal: q.height, min: 240 },
         frameRate: { ideal: q.frameRate, max: q.frameRate, min: 15 },
         facingMode,
       },
@@ -157,11 +161,9 @@ const getBroadcastStream = async (
       },
     },
     {
-      // Drop the hard minimums and stereo/sample-rate hints that in-app WebViews
-      // often can't satisfy, but keep the requested camera and quality targets.
+      // Drop the frame-rate min/max and stereo/sample-rate hints that in-app
+      // WebViews often can't satisfy, but keep the requested camera.
       video: {
-        width: { ideal: q.width },
-        height: { ideal: q.height },
         frameRate: { ideal: q.frameRate },
         facingMode,
       },
@@ -291,62 +293,37 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     if (now - lastDrawTimeRef.current < FRAME_INTERVAL) return;
     lastDrawTimeRef.current = now;
 
-    // The canvas is the actual broadcast frame (captureStream reads from it), so
-    // we lock it to a fixed portrait 1080×1920 (9:16) buffer. This guarantees the
-    // stream is always vertical and full-screen — even when the camera delivers a
-    // landscape frame — so viewers see exactly the framing the broadcaster sees,
-    // with no black side/letterbox bars on mobile.
-    const targetW = MAX_QUALITY.width;
-    const targetH = MAX_QUALITY.height;
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-      canvas.width = targetW;
-      canvas.height = targetH;
+    // The canvas IS the broadcast frame (captureStream reads from it). Size it to
+    // the camera's NATIVE resolution and draw the frame 1:1 — no forced 9:16 crop.
+    // Pinning a portrait canvas and cover-cropping the source is what previously
+    // made the feed look zoomed in; keeping the camera's own width/height/aspect
+    // preserves its default framing and full field of view. The preview and the
+    // viewer display the frame with object-contain, so the whole image is shown.
+    const vw = sourceVideo.videoWidth;
+    const vh = sourceVideo.videoHeight;
+    if (canvas.width !== vw || canvas.height !== vh) {
+      canvas.width = vw;
+      canvas.height = vh;
       // Re-apply after resize (canvas state resets on dimension change)
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
     }
 
-    // Orientation-aware fit onto the portrait canvas.
-    //
-    // A portrait (or square) camera frame is drawn with object-fit: cover, so a
-    // phone held upright fills the 9:16 canvas edge-to-edge with no black bars —
-    // the immersive full-screen feed live commerce expects, with at most a sliver
-    // cropped because the aspect ratios are close.
-    //
-    // A LANDSCAPE camera frame (most desktop webcams, and the in-app webviews —
-    // KakaoTalk/Naver/Instagram — that ignore our portrait request and hand back
-    // the sensor's native wide frame) is instead drawn with object-fit: contain.
-    // Cover would scale a wide frame up until its height filled the tall canvas,
-    // cropping ~70% off the sides and making the broadcaster look drastically
-    // zoomed in. Contain shows the whole frame at its true framing; the unused
-    // top/bottom area stays black. This is what fixes the "too zoomed in" feed.
-    const vw = sourceVideo.videoWidth;
-    const vh = sourceVideo.videoHeight;
-    const isLandscapeSource = vw > vh;
-    const scale = isLandscapeSource
-      ? Math.min(targetW / vw, targetH / vh)
-      : Math.max(targetW / vw, targetH / vh);
-    const dw = vw * scale;
-    const dh = vh * scale;
-    const dx = (targetW - dw) / 2;
-    const dy = (targetH - dh) / 2;
-
     const f = filtersRef.current;
     const filterStr = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) sepia(${f.warmth}%) blur(${f.blur}px)`;
 
-    // Paint the canvas black first so any letterbox area left by a contained
-    // landscape frame is clean instead of showing the previous frame's edges.
+    // Clear first so nothing from a previous frame bleeds through on a resize.
     ctx.filter = 'none';
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, targetW, targetH);
+    ctx.fillRect(0, 0, vw, vh);
 
     ctx.filter = filterStr;
     ctx.save();
     if (isMirroredRef.current) {
-      ctx.translate(targetW, 0);
+      ctx.translate(vw, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(sourceVideo, dx, dy, dw, dh);
+    ctx.drawImage(sourceVideo, 0, 0, vw, vh);
     ctx.restore();
   }, []);
 
@@ -1242,8 +1219,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       (async () => {
         try {
           await broadcaster.init({
-            width: MAX_QUALITY.width,
-            height: MAX_QUALITY.height,
+            // Match the live canvas (camera-native) resolution so the HLS/IVS
+            // path keeps the same default aspect ratio as WebRTC instead of
+            // letterboxing the frame into a fixed 9:16 composition.
+            width: canvasRef.current?.width || MAX_QUALITY.width,
+            height: canvasRef.current?.height || MAX_QUALITY.height,
             frameRate: MAX_QUALITY.frameRate,
             bitrate: MAX_QUALITY.bitrate,
             keyframeIntervalSec: MAX_QUALITY.keyframeIntervalSec,
@@ -1470,11 +1450,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
-        {/* Viewer frame: fills the whole stage so the broadcaster's preview is
-            edge-to-edge with no black margins on mobile. The portrait broadcast
-            frame (built on the 1080×1920 canvas) is shown with object-cover, so
-            the host sees exactly the full-bleed, full-screen feed every viewer
-            gets. */}
+        {/* Viewer frame: the broadcast frame (built on a canvas sized to the
+            camera's native resolution) is shown with object-contain so the host
+            sees the full, un-cropped camera framing — the same default ratio the
+            stock camera app shows — letterboxed within the stage rather than
+            zoom-cropped to fill it. */}
         <div
           className="relative w-full h-full overflow-hidden bg-black"
         >
@@ -1489,16 +1469,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           autoPlay
           muted
           playsInline
-          className="block w-full h-full object-cover pointer-events-none"
+          className="block w-full h-full object-contain pointer-events-none"
         />
-        {/* Canvas shows filtered/mirrored output, cropped to the portrait frame so
-            it mirrors what viewers see rather than the full landscape source. It is
-            layered on top of the source video; if the canvas pipeline stalls on
-            mobile the broadcaster still sees the live camera underneath. */}
+        {/* Canvas shows filtered/mirrored output at the camera's native aspect
+            ratio, displayed with object-contain so the whole frame is visible
+            (no zoom crop). It is layered on top of the source video; if the
+            canvas pipeline stalls on mobile the broadcaster still sees the live
+            camera underneath. */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ objectFit: 'cover' }}
+          className="absolute inset-0 w-full h-full object-contain"
+          style={{ objectFit: 'contain' }}
         />
         
         {!isCameraOn && (
