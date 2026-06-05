@@ -8,7 +8,6 @@ interface PhoneCollectBannerProps {
 const PhoneCollectBanner: React.FC<PhoneCollectBannerProps> = ({ onPhoneUpdated }) => {
   const [phone, setPhone] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
   const [step, setStep] = useState<'input' | 'verify' | 'saving'>('input');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
@@ -24,14 +23,14 @@ const PhoneCollectBanner: React.FC<PhoneCollectBannerProps> = ({ onPhoneUpdated 
       const response = await fetch('/.netlify/functions/send-sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver: phone.replace(/\D/g, '') }),
+        body: JSON.stringify({ receiver: phone.replace(/\D/g, ''), purpose: 'update_phone' }),
       });
       const data = await response.json();
-      if (response.ok && data.code) {
-        setGeneratedCode(data.code);
+      if (response.ok && data.success) {
+        setVerificationCode('');
         setStep('verify');
       } else {
-        setError(data.error || '인증번호 발송에 실패했습니다.');
+        setError(data.error || data.message || '인증번호 발송에 실패했습니다.');
       }
     } catch {
       setError('서버 오류가 발생했습니다.');
@@ -41,13 +40,26 @@ const PhoneCollectBanner: React.FC<PhoneCollectBannerProps> = ({ onPhoneUpdated 
   };
 
   const handleVerifyAndSave = async () => {
-    if (verificationCode !== generatedCode) {
-      setError('인증번호가 일치하지 않습니다.');
+    if (!verificationCode) {
+      setError('인증번호를 입력해 주세요.');
       return;
     }
     setStep('saving');
     setError('');
     try {
+      // Verify the code against the server (the code never leaves the server)
+      const verifyRes = await fetch('/.netlify/functions/verify-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone.replace(/\D/g, ''), code: verificationCode, purpose: 'update_phone' }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) {
+        setError(verifyData.error || '인증번호가 일치하지 않습니다.');
+        setStep('verify');
+        return;
+      }
+
       const session = await supabase?.auth.getSession();
       const token = session?.data?.session?.access_token;
       if (!token) {
