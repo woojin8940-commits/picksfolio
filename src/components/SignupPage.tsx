@@ -125,15 +125,16 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
 
       const result = await response.json();
 
-      if (!response.ok) {
-        alert(result.error || '회원가입 실패');
+      // auth-signup always responds with HTTP 200 and signals failure via
+      // { success: false, error }. Treat anything that isn't an explicit
+      // success as a failure so the user always gets feedback.
+      if (!response.ok || !result.success) {
+        alert(result.error || '회원가입에 실패했습니다. 다시 시도해 주세요.');
         return;
       }
 
-      if (result.success) {
-        alert('회원가입이 완료되었습니다. 로그인해주세요.');
-        onSignupSuccess();
-      }
+      alert('회원가입이 완료되었습니다. 로그인해주세요.');
+      onSignupSuccess();
     } catch (error: any) {
       console.error('Signup catch error:', error);
       alert('서버 오류가 발생했습니다: ' + error.message);
