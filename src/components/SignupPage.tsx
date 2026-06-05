@@ -16,8 +16,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [showVerificationInput, setShowVerificationInput] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -39,21 +39,24 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
       alert('휴대폰 번호를 입력해 주세요.');
       return;
     }
-    
+
+    const isResend = showVerificationInput;
     setIsSending(true);
     try {
       const response = await fetch('/.netlify/functions/send-sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver: phone }),
+        body: JSON.stringify({ receiver: phone, purpose: 'signup' }),
       });
       const data = await response.json();
-      if (response.ok) {
-        setGeneratedCode(data.code);
-        alert('인증번호가 발송되었습니다.');
+      if (response.ok && data.success) {
+        // The code lives only on the server; clear any previously typed value
+        setVerificationCode('');
         setShowVerificationInput(true);
+        alert(isResend ? '인증번호를 재전송했습니다.' : '인증번호가 발송되었습니다.');
       } else {
-        alert(data.message || '인증번호 발송에 실패했습니다.');
+        // send-sms returns its reason in `error` (e.g. rate-limit message)
+        alert(data.error || data.message || '인증번호 발송에 실패했습니다.');
       }
     } catch (error) {
       alert('서버 오류가 발생했습니다.');
@@ -62,12 +65,30 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
     }
   };
 
-  const handleVerifySMS = () => {
-    if (verificationCode === generatedCode && generatedCode !== '') {
-      alert('인증되었습니다.');
-      setIsVerified(true);
-    } else {
-      alert('인증번호가 일치하지 않습니다.');
+  const handleVerifySMS = async () => {
+    if (!verificationCode) {
+      alert('인증번호를 입력해 주세요.');
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const response = await fetch('/.netlify/functions/verify-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code: verificationCode, purpose: 'signup' }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert('인증되었습니다.');
+        setIsVerified(true);
+      } else {
+        alert(data.error || '인증번호가 일치하지 않습니다.');
+      }
+    } catch (error) {
+      alert('서버 오류가 발생했습니다.');
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -226,7 +247,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                 disabled={isSending || isVerified}
                 className="bg-white/10 text-white px-4 rounded-2xl font-black text-[12px] hover:bg-white/20 transition-colors whitespace-nowrap border border-white/10 disabled:opacity-50 flex-shrink-0"
               >
-                {isSending ? '발송 중...' : isVerified ? '인증 완료' : '인증번호 전송'}
+                {isSending ? '발송 중...' : isVerified ? '인증 완료' : showVerificationInput ? '인증번호 재전송' : '인증번호 전송'}
               </button>
             </div>
           </div>
@@ -246,12 +267,13 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                   autoComplete="one-time-code"
                   pattern="[0-9]*"
                 />
-                <button 
+                <button
                   type="button"
                   onClick={handleVerifySMS}
-                  className="bg-blue-600/20 text-blue-400 px-5 rounded-2xl font-black text-[13px] hover:bg-blue-600/30 transition-colors whitespace-nowrap border border-blue-500/30 flex-shrink-0"
+                  disabled={isVerifying}
+                  className="bg-blue-600/20 text-blue-400 px-5 rounded-2xl font-black text-[13px] hover:bg-blue-600/30 transition-colors whitespace-nowrap border border-blue-500/30 flex-shrink-0 disabled:opacity-50"
                 >
-                  확인
+                  {isVerifying ? '확인 중...' : '확인'}
                 </button>
               </div>
             </div>
