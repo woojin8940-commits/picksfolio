@@ -9,7 +9,9 @@ export interface SiteData {
     avatar_url?: string;
     aboutSections?: { id: string; title: string; content: string }[];
   };
-  socials?: Record<string, string | boolean>;
+  // socials holds simple flags/handles (strings, booleans) plus the
+  // customButtons array, so the value type must allow arrays as well.
+  socials?: Record<string, string | boolean | unknown[]>;
   portfolio?: any[];
   productFolders?: ProductFolder[];
   openSchedule?: OpenScheduleItem[];

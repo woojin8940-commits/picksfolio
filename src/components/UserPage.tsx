@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Instagram, ExternalLink, Share2, Radio, Users, Briefcase, Search, Bell, Hash } from 'lucide-react';
+import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Bell, Hash } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
 import { supabase, withTimeout } from '../services/supabase';
