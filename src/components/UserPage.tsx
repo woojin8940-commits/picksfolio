@@ -1312,7 +1312,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               {/* Social & Contact Links */}
               <div className="flex gap-2.5 pt-4 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: design.accentColor }}>
+                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     비즈니스 제안
                   </button>
@@ -1822,7 +1822,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
               <div className="flex gap-2.5 overflow-x-auto scrollbar-hide justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: design.accentColor }}>
+                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     비즈니스 제안
                   </button>

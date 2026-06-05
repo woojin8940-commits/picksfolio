@@ -628,7 +628,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <p className="text-sm text-slate-400 font-medium">새로운 캠페인이 등록되면 여기에 표시됩니다</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5 md:gap-5 py-1">
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
             const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
@@ -636,7 +636,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div
                 key={campaign.id}
                 onClick={() => setSelectedCampaign(campaign)}
-                className="bg-white rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
+                className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.12)] hover:border-blue-200 hover:shadow-[0_12px_28px_-6px_rgba(37,99,235,0.25)] hover:-translate-y-1 transition-all duration-300 cursor-pointer group overflow-hidden"
               >
                 {/* Thumbnail */}
                 <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
