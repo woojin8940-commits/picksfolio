@@ -12,6 +12,11 @@ function getSupabaseAdmin() {
   });
 }
 
+// Normalize a Korean/Latin name for tolerant comparison (ignore case + whitespace).
+function normalizeName(value: string | null | undefined): string {
+  return (value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
 async function isPhoneVerified(phone: string, purpose: string): Promise<boolean> {
   const db = getDatabase();
   const results = await db.sql`
@@ -33,10 +38,15 @@ export default async (req: Request) => {
 
   try {
     const body = await req.json();
-    const { action, phone, account_type } = body;
+    const { action, phone, name, account_type } = body;
 
     if (!phone) {
       return Response.json({ success: false, error: "전화번호를 입력해 주세요." });
+    }
+
+    const cleanName = (name || "").trim();
+    if (!cleanName) {
+      return Response.json({ success: false, error: "이름을 입력해 주세요." });
     }
 
     const cleanPhone = phone.replace(/\D/g, "");
@@ -51,72 +61,83 @@ export default async (req: Request) => {
       });
     }
 
-    if (action === "find-id") {
-      if (account_type === "business") {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("username, full_name, created_at")
-          .eq("phone", cleanPhone)
-          .in("role", ["operator", "admin"]);
+    const roleFilter =
+      account_type === "business" ? ["operator", "admin"] : ["user"];
 
-        if (!profiles || profiles.length === 0) {
-          return Response.json({ success: false, error: "해당 전화번호로 등록된 비즈니스 계정이 없습니다." });
-        }
+    if (action === "find-id" || action === "reset-lookup") {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("username, full_name, created_at")
+        .eq("phone", cleanPhone)
+        .in("role", roleFilter);
 
+      const matched = (profiles || []).filter(
+        (p) => normalizeName(p.full_name) === normalizeName(cleanName)
+      );
+
+      if (matched.length === 0) {
         return Response.json({
-          success: true,
-          accounts: profiles.map((p) => ({
-            username: p.username,
-            display_name: p.full_name || "",
-            created_at: p.created_at,
-          })),
-        });
-      } else {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("username, full_name, created_at")
-          .eq("phone", cleanPhone)
-          .eq("role", "user");
-
-        if (!profiles || profiles.length === 0) {
-          return Response.json({ success: false, error: "해당 전화번호로 등록된 계정이 없습니다." });
-        }
-
-        return Response.json({
-          success: true,
-          accounts: profiles.map((p) => ({
-            username: p.username,
-            display_name: p.full_name || "",
-            created_at: p.created_at,
-          })),
+          success: false,
+          error: "이름과 전화번호가 일치하는 계정이 없습니다.",
         });
       }
+
+      return Response.json({
+        success: true,
+        accounts: matched.map((p) => ({
+          username: p.username,
+          display_name: p.full_name || "",
+          created_at: p.created_at,
+        })),
+      });
     }
 
     if (action === "reset-password") {
       const { username, new_password } = body;
 
-      if (!username || !new_password) {
-        return Response.json({ success: false, error: "아이디와 새 비밀번호를 입력해 주세요." });
+      if (!new_password) {
+        return Response.json({ success: false, error: "새 비밀번호를 입력해 주세요." });
       }
 
       if (new_password.length < 6) {
         return Response.json({ success: false, error: "비밀번호는 6자 이상이어야 합니다." });
       }
 
-      const { data: profile } = await supabase
+      const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, phone")
-        .eq("username", username)
-        .maybeSingle();
+        .select("id, username, full_name")
+        .eq("phone", cleanPhone)
+        .in("role", roleFilter);
 
-      if (!profile) {
-        return Response.json({ success: false, error: "존재하지 않는 계정입니다." });
+      let matched = (profiles || []).filter(
+        (p) => normalizeName(p.full_name) === normalizeName(cleanName)
+      );
+
+      // When the client knows which account to reset (multiple share a name +
+      // phone), narrow down to the selected username.
+      if (username) {
+        matched = matched.filter((p) => p.username === username);
       }
 
-      if (profile.phone !== cleanPhone) {
-        return Response.json({ success: false, error: "전화번호가 일치하지 않습니다." });
+      if (matched.length === 0) {
+        return Response.json({
+          success: false,
+          error: "이름과 전화번호가 일치하는 계정이 없습니다.",
+        });
       }
+
+      if (matched.length > 1) {
+        return Response.json({
+          success: false,
+          error: "여러 계정이 확인되었습니다. 아이디를 선택해 주세요.",
+          accounts: matched.map((p) => ({
+            username: p.username,
+            display_name: p.full_name || "",
+          })),
+        });
+      }
+
+      const profile = matched[0];
 
       const { error: updateError } = await supabase.auth.admin.updateUserById(
         profile.id,

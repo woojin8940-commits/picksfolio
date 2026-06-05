@@ -31,7 +31,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
 
         <div className="relative inline-flex flex-col md:flex-row items-stretch md:items-center bg-[#11141D] border border-white/5 p-2.5 md:p-3 rounded-[1.5rem] md:rounded-full w-full md:w-auto shadow-2xl backdrop-blur-xl mb-6 md:mb-10">
           <div className="flex items-center px-3 md:px-6 mb-2 md:mb-0">
-            <span className="text-slate-500 font-bold text-sm md:text-lg tracking-tight whitespace-nowrap">picks.me/</span>
+            <span className="text-slate-500 font-bold text-sm md:text-lg tracking-tight whitespace-nowrap">picks-folio.com/</span>
             <input
               type="text"
               placeholder="yourname"

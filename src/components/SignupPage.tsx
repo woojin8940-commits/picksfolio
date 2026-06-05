@@ -11,6 +11,7 @@ interface SignupPageProps {
 const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNavigateLogin, onSignupSuccess }) => {
   const [id, setId] = useState(initialId);
   const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -76,6 +77,11 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
       alert('비밀번호가 일치하지 않습니다.');
       return;
     }
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      alert('올바른 이메일을 입력해 주세요.');
+      return;
+    }
     if (!isVerified) {
       alert('휴대폰 인증을 완료해 주세요.');
       return;
@@ -90,6 +96,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
         body: JSON.stringify({
           username: id.trim(),
           password,
+          email: cleanEmail,
           phone: phone.replace(/\D/g, ''),
           full_name: fullName.trim(),
         }),
@@ -133,12 +140,12 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
           <div>
             <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">아이디 (내 링크 주소)</label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-base">picks.me/</span>
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-base">picks-folio.com/</span>
               <input 
                 type="text" 
                 value={id} 
                 onChange={handleIdChange} 
-                className="w-full bg-white/5 border border-white/10 p-4 pl-[5.5rem] rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
+                className="w-full bg-white/5 border border-white/10 p-4 pl-[9.5rem] rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 placeholder=""
                 required
               />
@@ -154,6 +161,19 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
               onChange={(e) => setFullName(e.target.value)}
               className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
               placeholder="이름을 입력해 주세요"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">이메일</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              placeholder="email@example.com"
+              autoComplete="email"
               required
             />
           </div>

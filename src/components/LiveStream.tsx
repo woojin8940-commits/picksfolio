@@ -3698,7 +3698,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             <p className="text-slate-500 text-sm font-medium mb-6">회원가입 때 정하는 나만의 링크 이름이에요.<br />이 이름이 유저네임이 되고 채팅에 표시됩니다.</p>
 
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-4 mb-2 focus-within:border-blue-500 transition-all">
-              <span className="text-slate-400 text-sm font-bold whitespace-nowrap">picks.me/</span>
+              <span className="text-slate-400 text-sm font-bold whitespace-nowrap">picks-folio.com/</span>
               <input
                 type="text"
                 value={usernameInput}

@@ -114,7 +114,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Spring Windbreaker</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/1</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/1</div>
                           </div>
                         </div>
                         <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
@@ -123,7 +123,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Wide Denim Pants</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/2</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/2</div>
                           </div>
                         </div>
                         <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
@@ -132,7 +132,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                           </div>
                           <div className="flex-1">
                             <div className="text-[10px] font-bold text-white">Salomon XT-6</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks.me/product/3</div>
+                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/3</div>
                           </div>
                         </div>
                       </div>
