@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { isTestUsername } from '../../utils/testData';
 
 interface InfluencerRow {
   username: string;
@@ -81,6 +82,8 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [busy, setBusy] = useState<string | null>(null);
+  // Hide seed/QA accounts (testuser, biz_tester123, picksfolio12 …) by default.
+  const [showTestData, setShowTestData] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -96,6 +99,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = rows;
+    if (!showTestData) list = list.filter(r => !isTestUsername(r.username));
     if (q) {
       list = list.filter(r =>
         r.username.toLowerCase().includes(q) ||
@@ -113,11 +117,12 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
       if (typeof av === 'string') return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
       return ((av as number) - (bv as number)) * dir;
     });
-  }, [rows, search, sortKey, sortDir]);
+  }, [rows, search, sortKey, sortDir, showTestData]);
 
   const filteredBusinesses = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = businesses;
+    if (!showTestData) list = list.filter(b => !isTestUsername(b.raw_username || b.username));
     if (q) {
       list = list.filter(b =>
         b.username.toLowerCase().includes(q) ||
@@ -131,7 +136,13 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
       const bv = new Date(b.created_at || 0).getTime();
       return sortDir === 'asc' ? av - bv : bv - av;
     });
-  }, [businesses, search, sortDir]);
+  }, [businesses, search, sortDir, showTestData]);
+
+  const hiddenTestCount = useMemo(
+    () => rows.filter(r => isTestUsername(r.username)).length
+      + businesses.filter(b => isTestUsername(b.raw_username || b.username)).length,
+    [rows, businesses]
+  );
 
   const filteredLiveCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -241,6 +252,17 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
             </span>
           </button>
         ))}
+        {hiddenTestCount > 0 && (
+          <button
+            onClick={() => setShowTestData(v => !v)}
+            className={`ml-auto px-3 py-2 rounded-xl text-[11px] font-black transition-all ${
+              showTestData ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+            title="testuser, biz_tester123, picksfolio12 등 QA/시드 계정을 숨기거나 표시합니다."
+          >
+            {showTestData ? `테스트 계정 표시중 (${hiddenTestCount})` : `테스트 계정 ${hiddenTestCount}개 숨김`}
+          </button>
+        )}
       </div>
 
       {segment === 'users' && (

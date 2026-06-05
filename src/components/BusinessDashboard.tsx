@@ -11,6 +11,17 @@ type SortMode = 'latest' | 'deadline' | 'fee';
 type TabCategory = '광고' | '커머스';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
+// Quick-select reasons. Wording is chosen so the admin workflow console can
+// classify them (단가 / 일정 / 카테고리 / 컨셉 / 바쁨 / 경쟁 keywords).
+const REJECTION_PRESETS = [
+  '제안 단가가 낮아요',
+  '진행 일정이 맞지 않아요',
+  '카테고리가 맞지 않아요',
+  '브랜드 컨셉이 맞지 않아요',
+  '지금은 일정이 바빠요',
+  '경쟁사와 진행 중이에요',
+];
+
 const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   const [proposals, setProposals] = useState<BusinessProposal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,7 +67,9 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
 
   const handleRejectConfirm = () => {
     if (rejectingId) {
-      handleStatusUpdate(rejectingId, 'rejected', rejectionReason || undefined);
+      const reason = rejectionReason.trim();
+      if (!reason) return; // require a reason so the admin 거절 사유 통계 stays meaningful
+      handleStatusUpdate(rejectingId, 'rejected', reason);
     }
   };
 
@@ -546,11 +559,27 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setRejectingId(null); setRejectionReason(''); }}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-slate-900 text-lg mb-2">거절 사유 입력</h3>
-            <p className="text-slate-400 text-sm font-bold mb-4">거절 사유를 입력하면 관리자가 광고주에게 대안을 제시할 때 참고할 수 있습니다.</p>
+            <p className="text-slate-400 text-sm font-bold mb-4">거절 사유는 관리자가 광고주에게 대안을 제시하고 매칭을 개선하는 데 사용됩니다. 아래에서 선택하거나 직접 입력해 주세요.</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {REJECTION_PRESETS.map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setRejectionReason(preset)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all ${
+                    rejectionReason === preset
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
             <textarea
               value={rejectionReason}
               onChange={e => setRejectionReason(e.target.value)}
-              placeholder="거절 사유를 입력해주세요 (선택사항)"
+              placeholder="거절 사유를 입력해주세요"
               className="w-full border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500 resize-none h-28 mb-4"
             />
             <div className="flex gap-3">
@@ -562,8 +591,8 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
               </button>
               <button
                 onClick={handleRejectConfirm}
-                disabled={updatingId === rejectingId}
-                className="flex-1 py-3 rounded-xl font-black text-sm bg-red-500 text-white hover:bg-red-600 transition-all disabled:opacity-60"
+                disabled={updatingId === rejectingId || !rejectionReason.trim()}
+                className="flex-1 py-3 rounded-xl font-black text-sm bg-red-500 text-white hover:bg-red-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {updatingId === rejectingId ? '처리 중...' : '거절 확인'}
               </button>

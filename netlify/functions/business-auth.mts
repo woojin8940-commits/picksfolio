@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Config } from "@netlify/functions";
+import { verifyBusinessStatus } from "./_shared/nts-business.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -63,6 +64,15 @@ export default async (req: Request) => {
         return Response.json({ success: false, error: "모든 필수 항목을 입력해 주세요." });
       }
 
+      // 국세청 사업자등록정보 상태조회로 서버 측에서 재검증한다(클라이언트 플래그를 신뢰하지 않음).
+      const ntsResult = await verifyBusinessStatus(business_number);
+      if (!ntsResult.verified) {
+        return Response.json({
+          success: false,
+          error: ntsResult.error || "유효한 사업자등록번호가 아닙니다. 사업자 조회를 확인해 주세요.",
+        });
+      }
+
       const supabase = getSupabaseAdmin();
       const cleanUsername = username.trim().toLowerCase();
       const email = `biz_${cleanUsername}@picks.me`;
@@ -85,6 +95,9 @@ export default async (req: Request) => {
           user_metadata: {
             company_name,
             business_number,
+            business_verified: true,
+            business_status: ntsResult.status || "계속사업자",
+            business_verified_at: new Date().toISOString(),
             contact_person,
             contact_email,
             contact_phone: (contact_phone || "").replace(/\D/g, ""),

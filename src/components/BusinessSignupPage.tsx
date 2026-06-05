@@ -10,6 +10,10 @@ interface BusinessSignupPageProps {
 const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome, onNavigateLogin, onSignupSuccess }) => {
   const [companyName, setCompanyName] = useState('');
   const [businessNumber, setBusinessNumber] = useState('');
+  const [isBizVerifying, setIsBizVerifying] = useState(false);
+  const [isBizVerified, setIsBizVerified] = useState(false);
+  const [bizVerifyMsg, setBizVerifyMsg] = useState('');
+  const [bizVerifyError, setBizVerifyError] = useState('');
   const [contactPerson, setContactPerson] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
@@ -69,6 +73,46 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
     }
   };
 
+  const handleBusinessNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBusinessNumber(e.target.value);
+    // 번호가 바뀌면 직전 인증 상태를 초기화한다.
+    if (isBizVerified || bizVerifyMsg || bizVerifyError) {
+      setIsBizVerified(false);
+      setBizVerifyMsg('');
+      setBizVerifyError('');
+    }
+  };
+
+  const handleVerifyBusiness = async () => {
+    const digits = businessNumber.replace(/\D/g, '');
+    if (digits.length !== 10) {
+      setBizVerifyError('사업자등록번호 10자리를 정확히 입력해 주세요.');
+      return;
+    }
+    setIsBizVerifying(true);
+    setBizVerifyError('');
+    setBizVerifyMsg('');
+    try {
+      const response = await fetch('/.netlify/functions/business-verify-nts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_number: digits }),
+      });
+      const result = await response.json();
+      if (result.verified) {
+        setIsBizVerified(true);
+        setBizVerifyMsg(`국세청 확인 완료 · ${result.status || '계속사업자'}`);
+      } else {
+        setIsBizVerified(false);
+        setBizVerifyError(result.error || '사업자 조회에 실패했습니다.');
+      }
+    } catch {
+      setBizVerifyError('서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setIsBizVerifying(false);
+    }
+  };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
@@ -83,6 +127,10 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
       alert('모든 필수 항목을 입력해 주세요.');
       return;
     }
+    if (!isBizVerified) {
+      alert('사업자등록번호 조회(국세청 확인)를 완료해 주세요.');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -93,6 +141,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
           action: 'signup',
           company_name: companyName.trim(),
           business_number: businessNumber.trim(),
+          business_verified: true,
           contact_person: contactPerson.trim(),
           contact_email: contactEmail.trim(),
           contact_phone: contactPhone.replace(/\D/g, ''),
@@ -153,10 +202,25 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
 
           <div>
             <label className={labelClass}>사업자등록번호 *</label>
-            <input
-              type="text" value={businessNumber} onChange={(e) => setBusinessNumber(e.target.value)}
-              className={inputClass} placeholder="000-00-00000" required
-            />
+            <div className="flex gap-2">
+              <input
+                type="text" value={businessNumber} onChange={handleBusinessNumberChange}
+                className={`flex-1 ${inputClass}`} placeholder="000-00-00000" required
+                disabled={isBizVerified}
+              />
+              <button
+                type="button" onClick={handleVerifyBusiness} disabled={isBizVerifying || isBizVerified}
+                className="bg-white/10 text-white px-4 rounded-2xl font-black text-[12px] hover:bg-white/20 transition-colors whitespace-nowrap border border-white/10 disabled:opacity-50 flex-shrink-0"
+              >
+                {isBizVerifying ? '조회 중...' : isBizVerified ? '확인 완료' : '사업자 조회'}
+              </button>
+            </div>
+            {bizVerifyMsg && (
+              <p className="text-[12px] text-emerald-400 font-bold mt-2 ml-1">✓ {bizVerifyMsg}</p>
+            )}
+            {bizVerifyError && (
+              <p className="text-[12px] text-red-400 font-bold mt-2 ml-1">{bizVerifyError}</p>
+            )}
           </div>
 
           <div>

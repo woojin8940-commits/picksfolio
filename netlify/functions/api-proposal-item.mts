@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { getSupabaseServer } from "./_shared/supabase.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -40,14 +41,36 @@ export default async (req: Request, context: Context) => {
     try {
       const { getDatabase } = await import("@netlify/database");
       const db = getDatabase();
+      // Persist the rejection reason too — it feeds the admin "거절 사유 통계".
+      const rejectionReason = body.rejection_reason ?? updatedProposal.rejection_reason ?? null;
       await db.sql`
         UPDATE proposals SET
           status = ${body.status || updatedProposal.status || 'pending'},
+          rejection_reason = ${rejectionReason},
           updated_at = NOW()
         WHERE id = ${proposalId}
       `;
     } catch (dbErr) {
       console.error("[api-proposal-item] Failed to update SQL:", dbErr);
+    }
+
+    // Mirror the status + rejection reason into Supabase `business_proposals`,
+    // which is the table the operator dashboard / 거절 사유 통계 read from. This
+    // is best-effort: a different id space simply updates 0 rows and is ignored.
+    if (body.status) {
+      try {
+        const supabase = getSupabaseServer();
+        const patch: Record<string, any> = {
+          status: body.status,
+          updated_at: new Date().toISOString(),
+        };
+        if (body.status === "rejected") {
+          patch.rejection_reason = body.rejection_reason ?? updatedProposal.rejection_reason ?? null;
+        }
+        await supabase.from("business_proposals").update(patch).eq("id", proposalId);
+      } catch (sbErr) {
+        console.error("[api-proposal-item] Failed to mirror status to Supabase:", sbErr);
+      }
     }
 
     if (body.status === "accepted") {
