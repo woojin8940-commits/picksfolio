@@ -171,10 +171,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
 
   return (
     <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-24 sm:pt-28 pb-10 sm:pb-14 bg-midnight overflow-y-auto">
-      <div className="w-full max-w-[270px] bg-white rounded-[22px] sm:rounded-[26px] p-4 sm:p-6 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+      <div className="w-full max-w-sm sm:max-w-md bg-white rounded-[22px] sm:rounded-[26px] p-6 sm:p-9 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
         <div className="text-center mb-7">
-          <h1 className="text-xl font-black text-slate-900 mb-1">로그인</h1>
-          <p className="text-slate-500 text-xs font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
+          <h1 className="text-2xl font-black text-slate-900 mb-1">로그인</h1>
+          <p className="text-slate-500 text-sm font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
