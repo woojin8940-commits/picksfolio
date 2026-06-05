@@ -128,7 +128,7 @@ const SetupLink: React.FC<SetupLinkProps> = ({ userId, onSetupComplete }) => {
           <div className="space-y-2">
             <label className="block text-sm font-black text-slate-800 ml-1">나만의 링크</label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors flex items-center gap-2">
-              <span className="text-slate-400 text-sm font-bold whitespace-nowrap">picks.me/</span>
+              <span className="text-slate-400 text-sm font-bold whitespace-nowrap">picks-folio.com/</span>
               <input
                 type="text"
                 placeholder="my-link"

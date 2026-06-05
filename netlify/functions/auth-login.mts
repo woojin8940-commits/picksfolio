@@ -30,7 +30,22 @@ export default async (req: Request) => {
     const supabase = getSupabaseAdmin();
     const usernameClean = username.trim().toLowerCase();
     const isEmail = usernameClean.includes("@");
-    const email = isEmail ? usernameClean : `${usernameClean}@picks.me`;
+
+    // Resolve the real auth email. Accounts now sign up with a user-supplied
+    // email, so look it up by username. Older accounts created with the
+    // generated `<username>@picks.me` identifier still resolve via the
+    // fallback below, keeping login backward compatible.
+    let email: string;
+    if (isEmail) {
+      email = usernameClean;
+    } else {
+      const { data: profileByUsername } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("username", usernameClean)
+        .maybeSingle();
+      email = profileByUsername?.email || `${usernameClean}@picks.me`;
+    }
 
     const { data, error } =
       await supabase.auth.signInWithPassword({ email, password });

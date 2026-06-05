@@ -7,6 +7,7 @@ interface FindAccountProps {
 
 const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   const [step, setStep] = useState<'choose' | 'find-id' | 'reset-pw'>('choose');
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
@@ -30,6 +31,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   }, [cooldown]);
 
   const handleSendSMS = async () => {
+    if (!name.trim()) {
+      alert('이름을 입력해 주세요.');
+      return;
+    }
     if (!phone) {
       alert('휴대폰 번호를 입력해 주세요.');
       return;
@@ -56,6 +61,20 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
     }
   };
 
+  const fetchAccounts = async (lookupAction: 'find-id' | 'reset-lookup' = 'find-id') => {
+    const res = await fetch('/.netlify/functions/find-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: lookupAction,
+        name: name.trim(),
+        phone: phone.replace(/\D/g, ''),
+        account_type: accountType,
+      }),
+    });
+    return res.json();
+  };
+
   const handleVerifySMS = async () => {
     if (!verificationCode || verificationCode.length !== 6) {
       alert('6자리 인증번호를 입력해 주세요.');
@@ -74,8 +93,23 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
       });
       const data = await response.json();
       if (data.success) {
-        alert('인증되었습니다.');
         setIsVerified(true);
+        // For password reset, resolve the account(s) tied to this name + phone
+        // so the user does not have to remember their ID.
+        if (step === 'reset-pw') {
+          try {
+            const accData = await fetchAccounts('reset-lookup');
+            if (accData.success && accData.accounts?.length) {
+              setFoundAccounts(accData.accounts);
+              setSelectedUsername(accData.accounts[0].username);
+            } else {
+              alert(accData.error || '이름과 전화번호가 일치하는 계정을 찾을 수 없습니다.');
+            }
+          } catch {
+            /* surfaced below when resetting */
+          }
+        }
+        alert('인증되었습니다.');
       } else {
         alert(data.error || '인증번호가 일치하지 않습니다.');
       }
@@ -93,16 +127,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
     }
     setIsLoading(true);
     try {
-      const res = await fetch('/.netlify/functions/find-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'find-id',
-          phone: phone.replace(/\D/g, ''),
-          account_type: accountType,
-        }),
-      });
-      const data = await res.json();
+      const data = await fetchAccounts();
       if (data.success) {
         setFoundAccounts(data.accounts);
       } else {
@@ -139,7 +164,9 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'reset-password',
+          name: name.trim(),
           phone: phone.replace(/\D/g, ''),
+          account_type: accountType,
           username: selectedUsername.trim().toLowerCase(),
           new_password: newPassword,
         }),
@@ -158,6 +185,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   };
 
   const resetState = () => {
+    setName('');
     setPhone('');
     setIsSending(false);
     setVerificationCode('');
@@ -181,6 +209,19 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
   const PhoneVerificationSection = () => (
     <>
+      <div className="space-y-2">
+        <label className="block text-sm font-black text-slate-800 ml-1">이름</label>
+        <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+          <input
+            type="text" value={name}
+            onChange={e => setName(e.target.value)}
+            className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+            placeholder="가입 시 등록한 이름"
+            disabled={isVerified}
+          />
+        </div>
+      </div>
+
       <div className="space-y-2">
         <label className="block text-sm font-black text-slate-800 ml-1">휴대폰 번호</label>
         <div className="flex gap-2">
@@ -252,7 +293,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 text-sm">아이디 찾기</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">등록된 전화번호로 아이디를 찾습니다</p>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">이름과 전화번호로 아이디를 찾습니다</p>
                 </div>
               </div>
             </button>
@@ -267,7 +308,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 text-sm">비밀번호 재설정</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">전화번호 인증 후 새 비밀번호를 설정합니다</p>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">이름·전화번호 인증 후 새 비밀번호를 설정합니다</p>
                 </div>
               </div>
             </button>
@@ -289,11 +330,11 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
           <div className="text-center mb-8">
             <h1 className="text-2xl font-black text-slate-900 mb-2">아이디 찾기</h1>
-            <p className="text-slate-500 text-sm font-medium">회원가입 시 등록한 전화번호로 아이디를 찾습니다.</p>
+            <p className="text-slate-500 text-sm font-medium">회원가입 시 등록한 이름과 전화번호로 아이디를 찾습니다.</p>
           </div>
 
           <div className="space-y-4">
-            <PhoneVerificationSection />
+            {PhoneVerificationSection()}
 
             {isVerified && foundAccounts.length === 0 && (
               <button
@@ -344,7 +385,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
           <div className="text-center mb-8">
             <h1 className="text-2xl font-black text-slate-900 mb-2">비밀번호 재설정</h1>
-            <p className="text-slate-500 text-sm font-medium">전화번호 인증 후 새 비밀번호를 설정합니다.</p>
+            <p className="text-slate-500 text-sm font-medium">이름·전화번호 인증 후 새 비밀번호를 설정합니다.</p>
           </div>
 
           {resultMessage ? (
@@ -358,20 +399,30 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
             </div>
           ) : (
             <div className="space-y-4">
-              <PhoneVerificationSection />
+              {PhoneVerificationSection()}
 
               {isVerified && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="space-y-2">
                     <label className="block text-sm font-black text-slate-800 ml-1">아이디</label>
-                    <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
-                      <input
-                        type="text" value={selectedUsername}
-                        onChange={e => setSelectedUsername(e.target.value)}
-                        className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
-                        placeholder="아이디를 입력해 주세요"
-                      />
-                    </div>
+                    {foundAccounts.length > 1 ? (
+                      <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+                        <select
+                          value={selectedUsername}
+                          onChange={e => setSelectedUsername(e.target.value)}
+                          className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                        >
+                          {foundAccounts.map((acc, i) => (
+                            <option key={i} value={acc.username}>{acc.username}{acc.display_name ? ` (${acc.display_name})` : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 flex items-center justify-between">
+                        <span className={`font-black ${accentClasses.text}`}>{selectedUsername || '확인된 계정이 없습니다'}</span>
+                        <span className="text-[11px] text-slate-400 font-bold">인증된 계정</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
