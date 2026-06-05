@@ -19,28 +19,38 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
     try { return cachedProfileRaw ? JSON.parse(cachedProfileRaw) : null; } catch { return null; }
   })();
 
+  // Draft of the proposal — kept in sessionStorage so the content survives a
+  // login redirect (write proposal → 제안서 보내기 → login → come back with draft intact).
+  const draftKey = `picks_proposal_draft_${username.toLowerCase()}`;
+  const savedDraft = (() => {
+    try {
+      const raw = typeof window !== 'undefined' ? sessionStorage.getItem(draftKey) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
   const [isBusinessLoggedIn, setIsBusinessLoggedIn] = useState(!!initialSession);
   const [businessUsername, setBusinessUsername] = useState(initialSession || '');
 
-  const [category, setCategory] = useState<ProposalCategory>('광고');
-  const [companyName, setCompanyName] = useState(cachedProfile?.company_name || '');
-  const [contactPerson, setContactPerson] = useState(cachedProfile?.contact_person || '');
-  const [contactEmail, setContactEmail] = useState(cachedProfile?.contact_email || '');
-  const [contactPhone, setContactPhone] = useState(cachedProfile?.contact_phone || '');
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [fee, setFee] = useState('');
-  const [feeDisplay, setFeeDisplay] = useState('');
-  const [revenueShare, setRevenueShare] = useState('');
+  const [category, setCategory] = useState<ProposalCategory>(savedDraft?.category || '광고');
+  const [companyName, setCompanyName] = useState(savedDraft?.company_name ?? cachedProfile?.company_name ?? '');
+  const [contactPerson, setContactPerson] = useState(savedDraft?.contact_person ?? cachedProfile?.contact_person ?? '');
+  const [contactEmail, setContactEmail] = useState(savedDraft?.contact_email ?? cachedProfile?.contact_email ?? '');
+  const [contactPhone, setContactPhone] = useState(savedDraft?.contact_phone ?? cachedProfile?.contact_phone ?? '');
+  const [title, setTitle] = useState(savedDraft?.title || '');
+  const [content, setContent] = useState(savedDraft?.content || '');
+  const [startDate, setStartDate] = useState(savedDraft?.start_date || '');
+  const [endDate, setEndDate] = useState(savedDraft?.end_date || '');
+  const [fee, setFee] = useState(savedDraft?.fee || '');
+  const [feeDisplay, setFeeDisplay] = useState(savedDraft?.fee ? formatNumberWithCommas(savedDraft.fee) : '');
+  const [revenueShare, setRevenueShare] = useState(savedDraft?.revenue_share || '');
 
   const handleFeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = stripCommas(e.target.value);
     setFee(raw);
     setFeeDisplay(raw ? formatNumberWithCommas(raw) : '');
   };
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<string[]>(savedDraft?.attachments || []);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -78,6 +88,26 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
       .catch(() => {});
   }, [initialSession]);
 
+  // Persist the draft on every change so it survives a login redirect.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({
+        category,
+        company_name: companyName,
+        contact_person: contactPerson,
+        contact_email: contactEmail,
+        contact_phone: contactPhone,
+        title,
+        content,
+        start_date: startDate,
+        end_date: endDate,
+        fee,
+        revenue_share: revenueShare,
+        attachments,
+      }));
+    } catch {}
+  }, [category, companyName, contactPerson, contactEmail, contactPhone, title, content, startDate, endDate, fee, revenueShare, attachments, draftKey]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -112,6 +142,16 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+
+    // Login is only required to actually send. The draft is already persisted
+    // in sessionStorage, so after logging in the user returns to a filled form.
+    if (!isBusinessLoggedIn) {
+      sessionStorage.setItem('picks_business_redirect', `/${username}/proposal`);
+      window.history.pushState(null, '', '/business-login');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return;
+    }
+
     setIsSubmitting(true);
 
     const proposal = {
@@ -134,6 +174,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
     const success = await apiService.submitProposal(username, proposal);
     setIsSubmitting(false);
     if (success) {
+      try { sessionStorage.removeItem(draftKey); } catch {}
       setSubmitted(true);
     } else {
       alert('제안 전송에 실패했습니다. 다시 시도해주세요.');
@@ -159,51 +200,8 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
     );
   }
 
-  // Require business login to submit proposals
-  if (!isBusinessLoggedIn) {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl p-6 md:p-12 max-w-lg w-full text-center shadow-xl border border-slate-100">
-          <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-black text-slate-900 mb-3">비즈니스 로그인이 필요합니다</h2>
-          <p className="text-slate-500 font-medium text-sm leading-relaxed mb-8">
-            <span className="font-black text-blue-600">@{username}</span>님에게 비즈니스 제안을 보내려면
-            <br />비즈니스 계정으로 로그인해 주세요.
-          </p>
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                sessionStorage.setItem('picks_business_redirect', `/${username}/proposal`);
-                window.history.pushState(null, '', '/business-login');
-                window.dispatchEvent(new PopStateEvent('popstate'));
-              }}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all active:scale-[0.99]"
-            >
-              비즈니스 로그인
-            </button>
-            <p className="text-slate-400 text-sm font-bold">
-              비즈니스 계정이 없으신가요?{' '}
-              <button
-                onClick={() => {
-                  sessionStorage.setItem('picks_business_redirect', `/${username}/proposal`);
-                  window.history.pushState(null, '', '/business-signup');
-                  window.dispatchEvent(new PopStateEvent('popstate'));
-                }}
-                className="text-slate-800 hover:underline font-black"
-              >
-                회원가입하기
-              </button>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // The form is shown to everyone; business login is only requested when the
+  // proposal is actually sent (see handleSubmit), and the draft is preserved.
   return (
     <div className="min-h-screen bg-[#f8fafc]">
       {/* Header */}
@@ -463,10 +461,15 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]"
+          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99] cursor-pointer"
         >
           {isSubmitting ? '전송 중...' : '제안서 보내기'}
         </button>
+        {!isBusinessLoggedIn && (
+          <p className="text-center text-xs text-slate-400 font-bold -mt-2">
+            전송 시 비즈니스 로그인이 필요합니다. 작성하신 내용은 그대로 유지됩니다.
+          </p>
+        )}
       </form>
     </div>
   );
