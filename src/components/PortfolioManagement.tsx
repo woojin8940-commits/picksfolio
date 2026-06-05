@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Instagram, Youtube, Save, Trash2, Camera, Phone, MessageCircle, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
+import { Save, Trash2, Camera, Image as ImageIcon, Type, GripVertical, Globe, Palette, User, Briefcase, Bell, Plus, X, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, Highlighter, ChevronDown, ChevronUp, Lock, Hash } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import VideoCropper from './VideoCropper';
 import ImagePositionEditor from './ImagePositionEditor';

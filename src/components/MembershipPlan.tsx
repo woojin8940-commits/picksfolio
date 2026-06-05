@@ -304,8 +304,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     <main className="p-3 md:p-14 w-full animate-in fade-in duration-500">
       <header className="mb-8 md:mb-12">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">멤버십 플랜</h2>
-        <p className="text-slate-500 mt-2 text-sm md:text-base">
-          스탠다드 멤버십(월 4,900원)으로 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성을 풀고, 스탠다드 AI 멤버십(월 6,900원)으로 여기에 협업 타임라인 AI 어시스턴트를 더하세요. 커머스 멤버십(월 13,900원)은 AI를 포함한 전체 기능에 라이브 송출 월 3시간 포함 + 매출 수수료 8.5%(PG 결제 수수료 포함)까지 제공합니다.
+        <p className="text-slate-500 mt-2 text-sm md:text-base leading-relaxed max-w-3xl">
+          콘텐츠 기능이 필요하면 <strong className="text-slate-700">스탠다드</strong>, 협업 AI까지 더하려면 <strong className="text-slate-700">스탠다드 AI</strong>, 라이브 커머스까지 모두 이용하려면 <strong className="text-slate-700">커머스</strong> 멤버십을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있습니다.
         </p>
       </header>
 
@@ -321,7 +321,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           {/* Standard Plan */}
           <div className="relative rounded-2xl border-2 border-blue-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+              <span className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 스탠다드 멤버십
               </span>
             </div>
@@ -331,9 +331,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">콘텐츠 풀 액세스</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>포트폴리오 상단 커버 <strong>영상 업로드</strong></li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>상품·포트폴리오 <strong>영상 업로드</strong></li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>포트폴리오 <strong>콘텐츠 구성</strong>(텍스트·이미지 블록) 편집</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 상단 커버 <strong>영상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>상품·포트폴리오 <strong>영상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 <strong>콘텐츠 구성</strong>(텍스트·이미지 블록) 편집</li>
             </ul>
 
             {loading ? (
@@ -375,7 +375,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           {/* Standard + AI Plan */}
           <div className="relative rounded-2xl border-2 border-violet-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-violet-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+              <span className="bg-gradient-to-r from-violet-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 스탠다드 AI 멤버십 · ✨ AI
               </span>
             </div>
@@ -385,9 +385,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">스탠다드 전체 + 협업 AI</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>대화 요약 · 일정 정리 · 답장 초안 작성</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>대화 요약 · 일정 정리 · 답장 초안 작성</li>
             </ul>
 
             {loading ? (
@@ -427,7 +427,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           {/* Commerce Plan */}
           <div className="relative rounded-2xl border-2 border-pink-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-blue-600 to-pink-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+              <span className="bg-gradient-to-r from-blue-600 to-pink-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 커머스 멤버십 · 🎥 라이브
               </span>
             </div>
@@ -437,12 +437,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">라이브 커머스 + 스탠다드 전체</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 포함</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>라이브 송출 월 3시간 포함</strong> · 초과분 시간당 8,900원 후불</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span><strong>라이브 매출 수수료 8.5%</strong> (PG 결제 수수료 포함)</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>실시간 채팅 &amp; 상품 연동</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">✓</span>방송 기록 &amp; 분석 리포트 · 라이브 시작 알림톡</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 포함</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>라이브 송출 월 3시간 포함</strong> · 초과분 시간당 8,900원 후불</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>라이브 매출 수수료 8.5%</strong> (PG 결제 수수료 포함)</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>실시간 채팅 &amp; 상품 연동</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>방송 기록 &amp; 분석 리포트 · 라이브 시작 알림톡</li>
             </ul>
 
             {loading ? (
@@ -642,13 +642,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
             <span>ℹ️</span> 안내사항
           </h4>
-          <ul className="space-y-2 text-sm text-slate-500">
-            <li>• 스탠다드 멤버십은 월 4,900원, 스탠다드 AI 멤버십은 월 6,900원, 커머스 멤버십은 월 13,900원이며, 언제든 해지할 수 있습니다.</li>
-            <li>• 스탠다드 멤버십 구독 시 포트폴리오 상단 커버 영상 업로드 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
-            <li>• 협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 스탠다드 AI 멤버십(6,900원)과 커머스 멤버십(13,900원)에 포함됩니다. 스탠다드 멤버십(4,900원)에는 포함되지 않습니다.</li>
-            <li>• 커머스 멤버십은 스탠다드 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
-            <li>• 라이브 매출 수수료는 결제액의 8.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
-            <li>• 라이브 송출에는 사업자 인증과 정산 계좌 등록이 추가로 필요합니다. 등록된 정산 계좌로 라이브 판매 수익이 입금되며, 계좌 예금주명은 사업자 대표자와 일치해야 합니다.</li>
+          <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
+            <li>스탠다드 멤버십은 월 4,900원, 스탠다드 AI 멤버십은 월 6,900원, 커머스 멤버십은 월 13,900원이며, 언제든 해지할 수 있습니다.</li>
+            <li>스탠다드 멤버십 구독 시 포트폴리오 상단 커버 영상 업로드 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
+            <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 스탠다드 AI 멤버십(6,900원)과 커머스 멤버십(13,900원)에 포함됩니다. 스탠다드 멤버십(4,900원)에는 포함되지 않습니다.</li>
+            <li>커머스 멤버십은 스탠다드 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
+            <li>라이브 매출 수수료는 결제액의 8.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
+            <li>라이브 송출에는 사업자 인증과 정산 계좌 등록이 추가로 필요합니다. 등록된 정산 계좌로 라이브 판매 수익이 입금되며, 계좌 예금주명은 사업자 대표자와 일치해야 합니다.</li>
           </ul>
         </div>
       </section>
@@ -695,7 +695,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     }`}
                   >
                     <span>💳</span>
-                    <span>카드</span>
+                    <span className="whitespace-nowrap">카드</span>
                   </button>
                   <button
                     type="button"
@@ -707,7 +707,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     }`}
                   >
                     <span className="font-black text-blue-600">toss</span>
-                    <span>토스페이</span>
+                    <span className="whitespace-nowrap">토스페이</span>
                   </button>
                   <button
                     type="button"
@@ -719,7 +719,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     }`}
                   >
                     <span className="font-black text-yellow-700">pay</span>
-                    <span>카카오페이</span>
+                    <span className="whitespace-nowrap">카카오페이</span>
                   </button>
                 </div>
                 {payMethod === 'CARD' && (
