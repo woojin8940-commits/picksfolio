@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { login, acceptInvite, handleAuthCallback, AuthError, MissingIdentityError } from '@netlify/identity';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
-const ADMIN_USERNAMES = ['picksfolio'];
+const ADMIN_USERNAMES = ['picksfolio', 'picksfolio12'];
 
 interface OperatorLoginProps {
   onLoginSuccess: (info?: { username: string; token: string }) => void;

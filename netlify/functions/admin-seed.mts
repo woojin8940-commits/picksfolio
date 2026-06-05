@@ -5,6 +5,7 @@ const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
 const ADMIN_ACCOUNTS = [
   { username: "picksfolio", password: "picksfolio12@", full_name: "Picksfolio Admin" },
+  { username: "picksfolio12", password: "picksfolio12@", full_name: "Picksfolio Admin" },
 ];
 
 function getSupabaseAdmin() {
