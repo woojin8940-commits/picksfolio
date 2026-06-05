@@ -9,6 +9,8 @@ import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
+import AdminRevenueCards from './admin/AdminRevenueCards';
+import { isTestProposal } from '../utils/testData';
 
 type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
@@ -20,6 +22,41 @@ interface AdminStats {
   accepted: number;
   completed: number;
   rejected: number;
+}
+
+// A settlement row as returned by /api/admin/settlements-overview.
+interface SettlementRow {
+  id: string;
+  proposal_id: string;
+  influencer_username: string;
+  business_username: string;
+  company_name?: string;
+  title: string;
+  amount: number;
+  scheduled_date: string;
+  status: 'scheduled' | 'pending' | 'completed';
+  completed_at?: string | null;
+}
+
+interface SettlementSummary {
+  total: number;
+  scheduled: number;
+  pending: number;
+  completed: number;
+  totalAmount: number;
+  paidAmount: number;
+  pendingAmount: number;
+}
+
+// Unified calendar event spanning collab proposals and settlement due-dates.
+interface CalEvent {
+  id: string;
+  kind: 'proposal' | 'settlement';
+  username: string;
+  title: string;
+  company: string;
+  amount: number;
+  status: string;
 }
 
 interface AdminNotification {
@@ -42,6 +79,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [proposals, setProposals] = useState<(BusinessProposal & { _username: string })[]>([]);
   const [influencers, setInfluencers] = useState<string[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [settlements, setSettlements] = useState<SettlementRow[]>([]);
+  const [settlementSummary, setSettlementSummary] = useState<SettlementSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<OperatorTab>('overview');
@@ -50,6 +89,9 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // Operators work against real accounts by default; seed/QA data is hidden
+  // until this toggle is flipped on.
+  const [showTestData, setShowTestData] = useState(false);
 
   // Notifications
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
@@ -117,6 +159,17 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       const notifData = await apiService.getAdminNotifications(token);
       setNotifications(notifData.notifications || []);
       setUnreadCount(notifData.unreadCount || 0);
+
+      // Pull settlement data so the calendar deadlines and the overview revenue
+      // summary share the same source as the 정산·매출 tab.
+      try {
+        const settlementData = await apiService.getAdminSettlementsOverview(token);
+        setSettlements(settlementData.settlements || []);
+        setSettlementSummary(settlementData.summary || null);
+      } catch {
+        setSettlements([]);
+        setSettlementSummary(null);
+      }
     } catch {
       setError('네트워크 오류가 발생했습니다.');
     }
@@ -143,6 +196,9 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   // Filter proposals by status + influencer
   const filteredProposals = useMemo(() => {
     let filtered = proposals;
+    if (!showTestData) {
+      filtered = filtered.filter(p => !isTestProposal(p));
+    }
     if (statusFilter !== 'all') {
       filtered = filtered.filter(p => p.status === statusFilter);
     }
@@ -150,7 +206,12 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       filtered = filtered.filter(p => p._username === selectedInfluencer);
     }
     return filtered;
-  }, [proposals, statusFilter, selectedInfluencer]);
+  }, [proposals, statusFilter, selectedInfluencer, showTestData]);
+
+  const hiddenTestCount = useMemo(
+    () => proposals.filter(p => isTestProposal(p)).length,
+    [proposals]
+  );
 
   // Calendar helpers
   const year = currentDate.getFullYear();
@@ -163,12 +224,33 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
   const calendarProposals = useMemo(
-    () => proposals.filter(p => p.status === 'accepted' || p.status === 'completed'),
-    [proposals]
+    () => proposals.filter(p =>
+      (p.status === 'accepted' || p.status === 'completed') && (showTestData || !isTestProposal(p))
+    ),
+    [proposals, showTestData]
+  );
+
+  // Settlement rows that carry a scheduled due-date — these drive the calendar
+  // markers and the "다가오는 마감" list alongside collab proposals.
+  const calendarSettlements = useMemo(
+    () => settlements.filter(s =>
+      s.scheduled_date && (showTestData || !isTestProposal({
+        influencer_username: s.influencer_username,
+        business_username: s.business_username,
+        company_name: s.company_name,
+        title: s.title,
+      }))
+    ),
+    [settlements, showTestData]
   );
 
   const eventsMap = useMemo(() => {
-    const map: Record<string, (BusinessProposal & { _username: string })[]> = {};
+    const map: Record<string, CalEvent[]> = {};
+    const push = (key: string, ev: CalEvent) => {
+      if (!map[key]) map[key] = [];
+      map[key].push(ev);
+    };
+    // Collab proposals span every day between start and end.
     calendarProposals.forEach(p => {
       if (!p.start_date || !p.end_date) return;
       const start = new Date(p.start_date);
@@ -176,15 +258,63 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       const cursor = new Date(start);
       while (cursor <= end) {
         const key = cursor.toISOString().split('T')[0];
-        if (!map[key]) map[key] = [];
-        map[key].push(p);
+        push(key, {
+          id: `p_${p.id}`,
+          kind: 'proposal',
+          username: p._username,
+          title: p.title,
+          company: p.company_name,
+          amount: p.fee || 0,
+          status: p.status,
+        });
         cursor.setDate(cursor.getDate() + 1);
       }
     });
+    // Settlements land on their scheduled due-date.
+    calendarSettlements.forEach(s => {
+      const key = (s.scheduled_date || '').split('T')[0];
+      if (!key) return;
+      push(key, {
+        id: `s_${s.id}`,
+        kind: 'settlement',
+        username: s.influencer_username,
+        title: `정산 · ${s.title}`,
+        company: s.company_name || s.business_username || '',
+        amount: s.amount || 0,
+        status: s.status,
+      });
+    });
     return map;
-  }, [calendarProposals]);
+  }, [calendarProposals, calendarSettlements]);
 
   const selectedEvents = selectedDate ? (eventsMap[selectedDate] || []) : [];
+
+  // Total distinct calendar events (used to keep "전체 일정 현황" in sync with
+  // what is actually plotted on the grid).
+  const calendarEventTotal = useMemo(() => {
+    const ids = new Set<string>();
+    Object.values(eventsMap).forEach(list => list.forEach(ev => ids.add(ev.id)));
+    return ids.size;
+  }, [eventsMap]);
+
+  // "다가오는 마감" merges collab end-dates with settlement due-dates. Unpaid
+  // settlements are always included (even if overdue) because they remain
+  // actionable for the operator until they are completed.
+  const upcomingDeadlines = useMemo(() => {
+    const now = Date.now();
+    type Deadline = { id: string; date: string; username: string; title: string; sub: string; kind: 'proposal' | 'settlement' };
+    const items: Deadline[] = [];
+    calendarProposals.forEach(p => {
+      if (p.status !== 'accepted' || !p.end_date) return;
+      if (new Date(p.end_date).getTime() < now) return;
+      items.push({ id: `p_${p.id}`, date: p.end_date, username: p._username, title: p.title, sub: p.company_name, kind: 'proposal' });
+    });
+    calendarSettlements.forEach(s => {
+      if (s.status === 'completed' || !s.scheduled_date) return;
+      items.push({ id: `s_${s.id}`, date: s.scheduled_date, username: s.influencer_username, title: `정산 · ${s.title}`, sub: s.company_name || s.business_username || '', kind: 'settlement' });
+    });
+    return items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 8);
+  }, [calendarProposals, calendarSettlements]);
 
   // Per-influencer stats
   const influencerStats = useMemo(() => {
@@ -224,12 +354,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'accepted': return 'bg-green-500';
-      case 'completed': return 'bg-blue-500';
-      default: return 'bg-blue-500';
+  // Calendar marker color: settlements are visually distinct from collabs so an
+  // operator can tell a payout due-date from an active collaboration at a glance.
+  const eventColor = (ev: CalEvent) => {
+    if (ev.kind === 'settlement') {
+      return ev.status === 'completed' ? 'bg-indigo-500' : 'bg-amber-500';
     }
+    return ev.status === 'completed' ? 'bg-blue-500' : 'bg-green-500';
   };
 
   const getDaysLeft = (endDate: string) => {
@@ -384,7 +515,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
-            { key: 'live' as OperatorTab, label: '라이브 운영' },
+            { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
             { key: 'workflow' as OperatorTab, label: '제안 워크플로' },
             { key: 'influencer' as OperatorTab, label: '인플루언서별' },
             { key: 'calendar' as OperatorTab, label: '일정 캘린더' },
@@ -392,13 +523,20 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             <button
               key={tab.key}
               onClick={() => { setActiveTab(tab.key); setSelectedInfluencer(null); setSelectedDate(null); setStatusFilter('all'); }}
-              className={`px-4 py-2.5 rounded-xl font-black text-sm transition-all ${
+              className={`px-4 py-2.5 rounded-xl font-black text-sm transition-all flex items-center gap-1.5 ${
                 activeTab === tab.key
                   ? 'bg-slate-900 text-white shadow-lg'
                   : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
               }`}
             >
               {tab.label}
+              {tab.badge && (
+                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${
+                  activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'
+                }`}>
+                  {tab.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -414,6 +552,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           <div className="space-y-6">
             {/* Growth metrics */}
             {adminToken && <AdminGrowthCards token={adminToken} />}
+            {/* Revenue summary (same source as 정산·매출 tab) */}
+            {adminToken && <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} />}
             {/* Stats Grid */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
@@ -472,11 +612,24 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
             {/* Enhanced Proposal List - One-Line Format */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
                 <h3 className="font-black text-slate-900">
                   {statusFilter === 'all' ? '전체 제안 목록' : `${statusFilter === 'pending' ? '대기중' : statusFilter === 'accepted' ? '수락됨' : statusFilter === 'rejected' ? '거절됨' : '완료'} 제안`}
                 </h3>
-                <span className="text-xs font-bold text-slate-400">{filteredProposals.length}건</span>
+                <div className="flex items-center gap-3">
+                  {hiddenTestCount > 0 && (
+                    <button
+                      onClick={() => setShowTestData(v => !v)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition-all ${
+                        showTestData ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                      title="testuser, 더미 제안 등 운영과 무관한 데이터를 숨기거나 표시합니다."
+                    >
+                      {showTestData ? `테스트 데이터 표시중 (${hiddenTestCount})` : `테스트 데이터 ${hiddenTestCount}건 숨김`}
+                    </button>
+                  )}
+                  <span className="text-xs font-bold text-slate-400">{filteredProposals.length}건</span>
+                </div>
               </div>
 
               {/* Table Header */}
@@ -686,21 +839,48 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         {/* Live Commerce Console Tab */}
         {activeTab === 'live' && (
           adminToken
-            ? <AdminLiveConsole token={adminToken} />
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="amber"
+                  title="라이브 운영 · 준비중"
+                  body="라이브 커머스 기능은 정식 출시 전 단계입니다. 아래 콘솔(진행 중 방송·사후 리포트·송출 시간·채팅 모더레이션)은 실데이터가 쌓이면 자동으로 채워집니다."
+                />
+                <AdminLiveConsole token={adminToken} />
+              </div>
+            )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 데이터가 표시됩니다." />
         )}
 
         {/* Workflow Console Tab */}
         {activeTab === 'workflow' && (
           adminToken
-            ? <AdminWorkflowConsole token={adminToken} proposals={proposals} />
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="제안 워크플로 · 1:1 다이렉트 제안 분석"
+                  body="광고주가 특정 인플루언서에게 직접 보낸 협업 제안의 수락/거절·카테고리·금액·거절 사유를 분석합니다. (공개 모집형 캠페인 승인은 '캠페인 승인' 탭에서 처리합니다.)"
+                />
+                <AdminWorkflowConsole token={adminToken} proposals={proposals} />
+              </div>
+            )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 워크플로 분석이 표시됩니다." />
         )}
 
         {/* Campaign Approval Tab */}
         {activeTab === 'campaigns' && (
           adminToken
-            ? <AdminCampaignApproval token={adminToken} />
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="캠페인 승인 · 공개 모집형 캠페인 심사"
+                  body="광고주가 등록한 공개 모집 캠페인(여러 인플루언서가 지원)을 노출 전에 승인/거절합니다. (특정 인플루언서 대상 1:1 제안 분석은 '제안 워크플로' 탭에 있습니다.)"
+                />
+                <AdminCampaignApproval token={adminToken} />
+              </div>
+            )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
         )}
 
@@ -975,9 +1155,9 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                           {events.slice(0, 2).map(ev => (
                             <div
                               key={ev.id}
-                              className={`${getStatusColor(ev.status)} text-white text-[10px] font-bold px-1 py-0.5 rounded truncate leading-tight`}
+                              className={`${eventColor(ev)} text-white text-[10px] font-bold px-1 py-0.5 rounded truncate leading-tight`}
                             >
-                              <span className="opacity-70">@{ev._username}</span> {ev.title}
+                              <span className="opacity-70">{ev.kind === 'settlement' ? '💰' : `@${ev.username}`}</span> {ev.title}
                             </div>
                           ))}
                           {events.length > 2 && (
@@ -997,18 +1177,26 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                     <p className="text-slate-400 text-sm font-bold">이 날짜에 예정된 일정이 없습니다.</p>
                   ) : (
                     <div className="space-y-3">
-                      {selectedEvents.map(ev => (
-                        <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                          <div className={`w-2 h-12 rounded-full shrink-0 ${getStatusColor(ev.status)}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
-                            <p className="text-xs font-bold text-slate-400">@{ev._username} · {ev.company_name} · {formatFee(ev.fee)}</p>
+                      {selectedEvents.map(ev => {
+                        const statusLabel = ev.kind === 'settlement'
+                          ? (ev.status === 'completed' ? '정산 완료' : ev.status === 'pending' ? '정산 진행' : '정산 예정')
+                          : (ev.status === 'completed' ? '완료' : '진행중');
+                        const statusClass = ev.kind === 'settlement'
+                          ? (ev.status === 'completed' ? 'text-indigo-500' : 'text-amber-500')
+                          : (ev.status === 'completed' ? 'text-blue-500' : 'text-green-500');
+                        return (
+                          <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                            <div className={`w-2 h-12 rounded-full shrink-0 ${eventColor(ev)}`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
+                              <p className="text-xs font-bold text-slate-400">@{ev.username} · {ev.company} · {formatFee(ev.amount)}</p>
+                            </div>
+                            <span className={`text-xs font-black ${statusClass}`}>
+                              {statusLabel}
+                            </span>
                           </div>
-                          <span className={`text-xs font-black ${ev.status === 'completed' ? 'text-blue-500' : 'text-green-500'}`}>
-                            {ev.status === 'completed' ? '완료' : '진행중'}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1018,15 +1206,26 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             {/* Calendar Sidebar */}
             <div className="xl:w-80 shrink-0 space-y-4">
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">전체 일정 현황</h4>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">전체 일정 현황</h4>
+                  <span className="text-[10px] font-bold text-slate-400">{calendarEventTotal}건</span>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-green-50 rounded-xl p-3 text-center">
                     <p className="text-xl font-black text-green-600">{calendarProposals.filter(p => p.status === 'accepted').length}</p>
-                    <p className="text-[10px] font-bold text-green-500">진행중</p>
+                    <p className="text-[10px] font-bold text-green-500">협업 진행중</p>
                   </div>
                   <div className="bg-blue-50 rounded-xl p-3 text-center">
                     <p className="text-xl font-black text-blue-600">{calendarProposals.filter(p => p.status === 'completed').length}</p>
-                    <p className="text-[10px] font-bold text-blue-500">완료</p>
+                    <p className="text-[10px] font-bold text-blue-500">협업 완료</p>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl p-3 text-center">
+                    <p className="text-xl font-black text-amber-600">{calendarSettlements.filter(s => s.status !== 'completed').length}</p>
+                    <p className="text-[10px] font-bold text-amber-500">정산 예정</p>
+                  </div>
+                  <div className="bg-indigo-50 rounded-xl p-3 text-center">
+                    <p className="text-xl font-black text-indigo-600">{calendarSettlements.filter(s => s.status === 'completed').length}</p>
+                    <p className="text-[10px] font-bold text-indigo-500">정산 완료</p>
                   </div>
                 </div>
               </div>
@@ -1034,31 +1233,28 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">다가오는 마감</h4>
                 <div className="space-y-3">
-                  {(() => {
-                    const upcoming = calendarProposals
-                      .filter(p => p.status === 'accepted' && new Date(p.end_date) >= new Date())
-                      .sort((a, b) => new Date(a.end_date).getTime() - new Date(b.end_date).getTime())
-                      .slice(0, 8);
-                    if (upcoming.length === 0) {
-                      return <p className="text-slate-400 text-xs font-bold text-center py-2">아직 데이터가 없습니다.</p>;
-                    }
-                    return upcoming.map(p => {
-                      const diff = Math.ceil((new Date(p.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                      const isUrgent = diff <= 3;
+                  {upcomingDeadlines.length === 0 ? (
+                    <p className="text-slate-400 text-xs font-bold text-center py-2">예정된 마감/정산 일정이 없습니다.</p>
+                  ) : (
+                    upcomingDeadlines.map(d => {
+                      const diff = Math.ceil((new Date(d.date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      const isOverdue = diff < 0;
+                      const isUrgent = diff >= 0 && diff <= 3;
+                      const accent = d.kind === 'settlement' ? 'text-amber-600' : 'text-slate-400';
                       return (
-                        <div key={p.id} className={`p-3 rounded-xl border ${isUrgent ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50'}`}>
+                        <div key={d.id} className={`p-3 rounded-xl border ${isOverdue ? 'border-red-300 bg-red-50' : isUrgent ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50'}`}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className={`text-xs font-black ${isUrgent ? 'text-red-500' : 'text-slate-400'}`}>
-                              {diff < 0 ? '마감됨' : diff === 0 ? 'D-Day' : `D-${diff}`}
+                            <span className={`text-xs font-black ${isOverdue || isUrgent ? 'text-red-500' : accent}`}>
+                              {d.kind === 'settlement' ? '💰 ' : ''}{isOverdue ? `지연 ${Math.abs(diff)}일` : diff === 0 ? 'D-Day' : `D-${diff}`}
                             </span>
-                            <span className="text-[10px] font-bold text-slate-300">@{p._username}</span>
+                            <span className="text-[10px] font-bold text-slate-300">@{d.username}</span>
                           </div>
-                          <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
-                          <p className="text-xs font-bold text-slate-400 mt-0.5">{p.company_name}</p>
+                          <p className="font-black text-slate-900 text-sm truncate">{d.title}</p>
+                          <p className="text-xs font-bold text-slate-400 mt-0.5">{d.sub}</p>
                         </div>
                       );
-                    });
-                  })()}
+                    })
+                  )}
                 </div>
               </div>
 
@@ -1067,11 +1263,19 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-green-500" />
-                    <span className="text-sm font-bold text-slate-600">진행중 (수락됨)</span>
+                    <span className="text-sm font-bold text-slate-600">협업 진행중 (수락됨)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-blue-500" />
-                    <span className="text-sm font-bold text-slate-600">완료됨</span>
+                    <span className="text-sm font-bold text-slate-600">협업 완료</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-amber-500" />
+                    <span className="text-sm font-bold text-slate-600">정산 예정 (미지급)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-indigo-500" />
+                    <span className="text-sm font-bold text-slate-600">정산 완료</span>
                   </div>
                 </div>
               </div>
@@ -1094,5 +1298,19 @@ const EmptyTabState: React.FC<{ message: string; subMessage?: string }> = ({ mes
     {subMessage && <p className="text-slate-300 font-bold text-xs mt-1">{subMessage}</p>}
   </div>
 );
+
+// Short explainer banner shown at the top of a tab to clarify its purpose and
+// keep overlapping tabs (캠페인 승인 vs 제안 워크플로) clearly distinct.
+const TabIntro: React.FC<{ title: string; body: string; tone?: 'blue' | 'amber' }> = ({ title, body, tone = 'blue' }) => {
+  const palette = tone === 'amber'
+    ? 'bg-amber-50/70 border-amber-100'
+    : 'bg-blue-50/60 border-blue-100';
+  return (
+    <div className={`${palette} border rounded-2xl px-4 py-3`}>
+      <p className="text-xs font-black text-slate-800">{title}</p>
+      <p className="text-[11px] font-bold text-slate-500 leading-relaxed mt-0.5">{body}</p>
+    </div>
+  );
+};
 
 export default OperatorDashboard;
