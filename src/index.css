@@ -18,6 +18,14 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.02em;
+  /* Korean line-breaking: keep words whole instead of wrapping mid-word.
+     `word-break: keep-all` stops Korean (CJK) text from splitting a single word
+     across two lines — e.g. "사업자 인증" no longer drops a lone "증" onto the
+     next line; the whole word moves together at the space. `overflow-wrap:
+     anywhere` is the safety valve: genuinely unbreakable runs (long URLs,
+     numbers, English words) can still break so they never overflow the layout. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   /* Prevent horizontal page scroll caused by w-screen / 100vw children on iOS */
   overflow-x: hidden;
   /* Disable iOS text size auto-adjust on orientation change */
