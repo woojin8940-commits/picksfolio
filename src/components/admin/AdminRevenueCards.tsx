@@ -70,14 +70,48 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
 
   const liveFeeTotal = liveOverage + liveCommission;
   const pendingCount = settlementSummary ? settlementSummary.scheduled + settlementSummary.pending : 0;
+  // 픽스폴리오 플랫폼 이번달 수익 = 멤버십 구독료 + 라이브커머스 수수료.
+  const platformRevenue = (membershipRevenue || 0) + liveFeeTotal;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-black text-slate-900">매출 요약</h3>
+        <h3 className="font-black text-slate-900">픽스폴리오 수익 집계</h3>
+        <span className="text-[10px] font-bold text-slate-400">이번달 기준</span>
+      </div>
+
+      {/* 픽스폴리오 플랫폼 수익 — 이번달 멤버십 수익 / 라이브커머스 수수료 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <div className="bg-gradient-to-br from-slate-900 to-slate-700 p-4 rounded-2xl text-white">
+          <p className="text-[9px] font-black text-white/60 uppercase tracking-widest mb-1">픽스폴리오 이번달 수익</p>
+          <p className="text-2xl font-black">{loaded ? won(platformRevenue) : '—'}</p>
+          <p className="text-[9px] font-bold text-white/50 mt-1">멤버십 + 라이브커머스 수수료</p>
+        </div>
+        <div className="bg-pink-50 p-4 rounded-2xl border border-pink-100">
+          <p className="text-[9px] font-black text-pink-500 uppercase tracking-widest mb-1">이번달 멤버십 수익</p>
+          <p className="text-2xl font-black text-pink-600">{loaded && membershipRevenue != null ? won(membershipRevenue) : '—'}</p>
+          {loaded && (
+            <p className="text-[9px] font-bold text-pink-400/80 mt-1">
+              스탠다드 {membershipBreakdown.standard} · AI {membershipBreakdown.standard_ai} · 커머스 {membershipBreakdown.commerce}
+            </p>
+          )}
+        </div>
+        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
+          <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-1">라이브커머스 수수료</p>
+          <p className="text-2xl font-black text-indigo-600">{loaded ? won(liveFeeTotal) : '—'}</p>
+          {loaded && (
+            <p className="text-[9px] font-bold text-indigo-400/80 mt-1">
+              판매 8.5% {won(liveCommission)} · 송출 초과 {won(liveOverage)}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">정산·거래 현황</p>
         <span className="text-[10px] font-bold text-slate-400">정산·매출 탭과 동일 소스</span>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-slate-50 p-3 rounded-xl">
           <div className="flex items-center justify-between mb-1">
             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">총 거래액</p>
@@ -97,27 +131,9 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">미지급 건수</p>
           <p className="text-lg font-black text-slate-900">{pendingCount}건</p>
         </div>
-        <div className="bg-slate-50 p-3 rounded-xl">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">멤버십 이번달 수익</p>
-          <p className="text-lg font-black text-pink-500">{loaded && membershipRevenue != null ? won(membershipRevenue) : '—'}</p>
-          {loaded && (
-            <p className="text-[9px] font-bold text-slate-400 mt-0.5">
-              S {membershipBreakdown.standard} · AI {membershipBreakdown.standard_ai} · C {membershipBreakdown.commerce}
-            </p>
-          )}
-        </div>
-        <div className="bg-slate-50 p-3 rounded-xl">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">라이브 수수료 수익</p>
-          <p className="text-lg font-black text-indigo-600">{loaded ? won(liveFeeTotal) : '—'}</p>
-          {loaded && (
-            <p className="text-[9px] font-bold text-slate-400 mt-0.5">
-              판매 8.5% {won(liveCommission)} · 송출 초과 {won(liveOverage)}
-            </p>
-          )}
-        </div>
       </div>
       <p className="text-[10px] font-bold text-slate-400 mt-3">
-        멤버십 수익은 활성 구독자 × 월 구독료 기준이며, 라이브 수수료는 라이브 판매액의 8.5%와 송출 초과 후불 합계 추정치입니다.
+        멤버십 수익은 활성 구독자 × 월 구독료 기준이며, 라이브커머스 수수료는 라이브 판매액의 8.5%와 송출 초과 후불 합계 추정치입니다.
       </p>
     </div>
   );

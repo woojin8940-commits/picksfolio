@@ -86,6 +86,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
 
+  // 국세청 사업자등록번호 상태조회 — 조회에 성공해야 사업자 정보를 저장할 수 있다.
+  const [bizVerifying, setBizVerifying] = useState(false);
+  const [bizNtsVerified, setBizNtsVerified] = useState(false);
+  const [bizNtsMsg, setBizNtsMsg] = useState('');
+  const [bizNtsError, setBizNtsError] = useState('');
+
   const [biz, setBiz] = useState({
     company_name: '',
     business_number: '',
@@ -116,6 +122,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         business_item: data.business.business_item || '',
         business_address: data.business.business_address || '',
       });
+      // 이미 인증된 사업자라면 국세청 조회 통과 상태로 간주한다.
+      if (data.business_verified || data.business.nts_verified) {
+        setBizNtsVerified(true);
+        setBizNtsMsg(`국세청 확인 완료 · ${data.business.nts_status || '계속사업자'}`);
+      }
     }
     if (data?.settlement) {
       setAcct({
@@ -140,6 +151,45 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     window.setTimeout(() => setSuccessMsg(null), 2500);
   };
 
+  // 사업자등록번호가 바뀌면 국세청 조회 상태를 초기화한다.
+  const handleBizNumberChange = (v: string) => {
+    setBiz({ ...biz, business_number: formatBusinessNumber(v) });
+    setBizNtsVerified(false);
+    setBizNtsMsg('');
+    setBizNtsError('');
+  };
+
+  // 국세청 사업자등록정보 상태조회. 조회에 성공(계속사업자)하면 등록이 가능해진다.
+  const verifyBusinessNts = async () => {
+    const digits = biz.business_number.replace(/[^0-9]/g, '');
+    if (digits.length !== 10) {
+      setBizNtsError('사업자등록번호 10자리를 정확히 입력해 주세요.');
+      return;
+    }
+    setBizVerifying(true);
+    setBizNtsError('');
+    setBizNtsMsg('');
+    try {
+      const response = await fetch('/.netlify/functions/business-verify-nts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_number: digits }),
+      });
+      const result = await response.json();
+      if (result.verified) {
+        setBizNtsVerified(true);
+        setBizNtsMsg(`국세청 확인 완료 · ${result.status || '계속사업자'}`);
+      } else {
+        setBizNtsVerified(false);
+        setBizNtsError(result.error || '국세청에 등록되지 않은 사업자등록번호입니다.');
+      }
+    } catch {
+      setBizNtsError('국세청 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setBizVerifying(false);
+    }
+  };
+
   const submitBusiness = async () => {
     setError(null);
     if (!biz.company_name.trim() || !biz.business_number.trim() || !biz.representative_name.trim() || !biz.contact_phone.trim()) {
@@ -151,8 +201,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       setError('사업자등록번호는 10자리 숫자여야 합니다.');
       return;
     }
+    if (!bizNtsVerified) {
+      setError('국세청 사업자 조회를 먼저 완료해 주세요. 조회 결과 정상 영업 중인 사업자만 등록할 수 있습니다.');
+      return;
+    }
     setSaving(true);
-    const res = await apiService.saveSellerVerification(normalizedUserName, { business: biz });
+    const res = await apiService.saveSellerVerification(normalizedUserName, {
+      business: { ...biz, nts_verified: true, nts_status: (bizNtsMsg.split('·')[1] || '계속사업자').trim() },
+    });
     setSaving(false);
     if (!res.success) {
       setError(res.error || '저장 중 오류가 발생했습니다.');
@@ -518,7 +574,33 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
               )}
               <Field label="상호(사업자명) *" value={biz.company_name} onChange={(v) => setBiz({ ...biz, company_name: v })} placeholder="픽스폴리오" />
-              <Field label="사업자등록번호 *" value={biz.business_number} onChange={(v) => setBiz({ ...biz, business_number: formatBusinessNumber(v) })} placeholder="000-00-00000" inputMode="numeric" />
+              <div>
+                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록번호 *</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={biz.business_number}
+                    onChange={(e) => handleBizNumberChange(e.target.value)}
+                    placeholder="000-00-00000"
+                    inputMode="numeric"
+                    disabled={bizNtsVerified}
+                    className="flex-1 px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={verifyBusinessNts}
+                    disabled={bizVerifying || bizNtsVerified}
+                    className="px-4 rounded-lg text-xs font-black whitespace-nowrap border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {bizVerifying ? '조회 중...' : bizNtsVerified ? '확인 완료' : '조회'}
+                  </button>
+                </div>
+                {bizNtsMsg && <p className="text-[11px] text-emerald-600 font-bold mt-1.5">✓ {bizNtsMsg}</p>}
+                {bizNtsError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizNtsError}</p>}
+                {!bizNtsVerified && !bizNtsMsg && (
+                  <p className="text-[10px] text-slate-400 font-bold mt-1.5">국세청에 등록된 사업자만 등록할 수 있습니다. 조회 후 저장이 활성화됩니다.</p>
+                )}
+              </div>
               <Field label="대표자명 *" value={biz.representative_name} onChange={(v) => setBiz({ ...biz, representative_name: v })} placeholder="홍길동" />
               <Field label="연락처 *" value={biz.contact_phone} onChange={(v) => setBiz({ ...biz, contact_phone: formatPhone(v) })} placeholder="010-0000-0000" inputMode="tel" />
               <Field label="업태" value={biz.business_type} onChange={(v) => setBiz({ ...biz, business_type: v })} placeholder="소매업" />
@@ -536,7 +618,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 <button
                   type="button"
                   onClick={submitBusiness}
-                  disabled={saving}
+                  disabled={saving || !bizNtsVerified}
+                  title={!bizNtsVerified ? '국세청 사업자 조회를 먼저 완료해 주세요.' : undefined}
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
                 >
                   {saving ? '저장 중...' : '저장'}
@@ -552,6 +635,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
               {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
               {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
+              {(verification.business.nts_verified || businessVerified) && (
+                <div className="col-span-2 mt-1"><span className="text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">✓ 국세청 확인 · {verification.business.nts_status || '계속사업자'}</span></div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-slate-500">

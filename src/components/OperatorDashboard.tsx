@@ -86,6 +86,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState<OperatorTab>('overview');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedInfluencer, setSelectedInfluencer] = useState<string | null>(null);
+  const [influencerSearch, setInfluencerSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -297,6 +298,40 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     return ids.size;
   }, [eventsMap]);
 
+  // 현재 보고 있는 달(year/month)의 협업/정산 금액 합계. 캘린더 사이드바에 노출해
+  // 운영자가 월 단위 거래 규모를 한눈에 볼 수 있게 한다.
+  const monthSummary = useMemo(() => {
+    const monthStart = new Date(year, month, 1).getTime();
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59).getTime();
+    let collabAmount = 0;
+    let collabCount = 0;
+    calendarProposals.forEach(p => {
+      if (!p.start_date || !p.end_date) return;
+      const start = new Date(p.start_date).getTime();
+      const end = new Date(p.end_date).getTime();
+      // 협업 기간이 이번 달과 겹치면 포함.
+      if (start <= monthEnd && end >= monthStart) {
+        collabAmount += p.fee || 0;
+        collabCount++;
+      }
+    });
+    let settlementAmount = 0;
+    let settlementCount = 0;
+    calendarSettlements.forEach(s => {
+      const d = new Date((s.scheduled_date || '').split('T')[0]).getTime();
+      if (d >= monthStart && d <= monthEnd) {
+        settlementAmount += s.amount || 0;
+        settlementCount++;
+      }
+    });
+    return { collabAmount, collabCount, settlementAmount, settlementCount, total: collabAmount + settlementAmount };
+  }, [calendarProposals, calendarSettlements, year, month]);
+
+  const isCurrentMonth = useMemo(() => {
+    const now = new Date();
+    return now.getFullYear() === year && now.getMonth() === month;
+  }, [year, month]);
+
   // "다가오는 마감" merges collab end-dates with settlement due-dates. Unpaid
   // settlements are always included (even if overdue) because they remain
   // actionable for the operator until they are completed.
@@ -316,20 +351,32 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     return items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 8);
   }, [calendarProposals, calendarSettlements]);
 
-  // Per-influencer stats
+  // Per-influencer stats. `revenue` counts only proposals the influencer
+  // approved (accepted/completed) — pending and rejected proposals are excluded
+  // from revenue. `totalFee` keeps the gross of all proposals for reference.
   const influencerStats = useMemo(() => {
-    const map: Record<string, { total: number; pending: number; accepted: number; completed: number; totalFee: number }> = {};
+    const map: Record<string, { total: number; pending: number; accepted: number; completed: number; rejected: number; totalFee: number; revenue: number }> = {};
     proposals.forEach(p => {
       const u = p._username;
-      if (!map[u]) map[u] = { total: 0, pending: 0, accepted: 0, completed: 0, totalFee: 0 };
+      if (!map[u]) map[u] = { total: 0, pending: 0, accepted: 0, completed: 0, rejected: 0, totalFee: 0, revenue: 0 };
       map[u].total++;
       if (p.status === 'pending') map[u].pending++;
       if (p.status === 'accepted') map[u].accepted++;
       if (p.status === 'completed') map[u].completed++;
+      if (p.status === 'rejected') map[u].rejected++;
       map[u].totalFee += p.fee || 0;
+      if (p.status === 'accepted' || p.status === 'completed') map[u].revenue += p.fee || 0;
     });
     return map;
   }, [proposals]);
+
+  // 인플루언서별 탭: 검색어로 필터링하고 매출(승인된 제안 금액) 높은 순으로 정렬.
+  const sortedInfluencers = useMemo(() => {
+    const q = influencerSearch.trim().toLowerCase();
+    return influencers
+      .filter(u => !q || u.toLowerCase().includes(q))
+      .sort((a, b) => (influencerStats[b]?.revenue || 0) - (influencerStats[a]?.revenue || 0));
+  }, [influencers, influencerSearch, influencerStats]);
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -890,11 +937,26 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             {/* Influencer List */}
             <div className="lg:w-80 shrink-0">
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-                <div className="p-4 border-b border-slate-100">
-                  <h3 className="font-black text-slate-900 text-sm">인플루언서 목록 ({influencers.length})</h3>
+                <div className="p-4 border-b border-slate-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-black text-slate-900 text-sm">인플루언서 목록 ({sortedInfluencers.length})</h3>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">매출순</span>
+                  </div>
+                  <div className="relative">
+                    <svg className="w-4 h-4 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={influencerSearch}
+                      onChange={(e) => setInfluencerSearch(e.target.value)}
+                      placeholder="인플루언서 검색 (@아이디)"
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
                 </div>
                 <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
-                  {influencers.map(username => {
+                  {sortedInfluencers.map((username, idx) => {
                     const s = influencerStats[username];
                     const isActive = selectedInfluencer === username;
                     return (
@@ -904,8 +966,11 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                         className={`w-full p-4 text-left hover:bg-slate-50 transition-all ${isActive ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0 relative">
                             <span className="text-sm font-black text-white">{username.slice(0, 1).toUpperCase()}</span>
+                            {idx < 3 && (s?.revenue || 0) > 0 && (
+                              <span className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-amber-400 text-white text-[9px] font-black rounded-full flex items-center justify-center">{idx + 1}</span>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-black text-slate-900 text-sm">@{username}</p>
@@ -920,15 +985,16 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-xs font-black text-blue-600">{formatFee(s?.totalFee || 0)}</p>
+                            <p className="text-xs font-black text-blue-600">{formatFee(s?.revenue || 0)}</p>
+                            <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">매출</p>
                           </div>
                         </div>
                       </button>
                     );
                   })}
-                  {influencers.length === 0 && (
+                  {sortedInfluencers.length === 0 && (
                     <div className="p-8 text-center">
-                      <p className="text-slate-400 text-sm font-bold">등록된 인플루언서가 없습니다.</p>
+                      <p className="text-slate-400 text-sm font-bold">{influencerSearch ? '검색 결과가 없습니다.' : '등록된 인플루언서가 없습니다.'}</p>
                     </div>
                   )}
                 </div>
@@ -940,7 +1006,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               {selectedInfluencer ? (
                 <div className="space-y-4">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                    <h3 className="font-black text-slate-900 text-lg mb-1">@{selectedInfluencer}</h3>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <h3 className="font-black text-slate-900 text-lg mb-1">@{selectedInfluencer}</h3>
+                      <div className="text-right">
+                        <p className="text-xl font-black text-blue-600">{formatFee(influencerStats[selectedInfluencer]?.revenue || 0)}</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">승인 제안 매출</p>
+                      </div>
+                    </div>
                     <div className="grid grid-cols-4 gap-3 mt-4">
                       <div className="bg-slate-50 rounded-xl p-3 text-center">
                         <p className="text-lg font-black text-slate-900">{influencerStats[selectedInfluencer]?.total || 0}</p>
@@ -1105,14 +1177,24 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                     </svg>
                   </button>
                   <h3 className="text-xl md:text-2xl font-black text-slate-900">{year}년 {month + 1}월</h3>
-                  <button
-                    onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
-                    className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {!isCurrentMonth && (
+                      <button
+                        onClick={() => { setCurrentDate(new Date()); setSelectedDate(null); }}
+                        className="px-3 h-12 rounded-xl bg-slate-900 text-white text-xs font-black hover:bg-slate-800 transition-all"
+                      >
+                        오늘
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
+                      className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center hover:bg-slate-100 transition-all"
+                    >
+                      <svg className="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-7">
@@ -1205,6 +1287,26 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
             {/* Calendar Sidebar */}
             <div className="xl:w-80 shrink-0 space-y-4">
+              <div className="bg-gradient-to-br from-slate-900 to-slate-700 rounded-2xl shadow-sm p-5 text-white">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-black text-white/60 uppercase tracking-widest">{month + 1}월 거래액</h4>
+                  <span className="text-[10px] font-bold text-white/50">{monthSummary.collabCount + monthSummary.settlementCount}건</span>
+                </div>
+                <p className="text-3xl font-black mb-3">{formatFee(monthSummary.total)}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-white/10 rounded-xl p-2.5">
+                    <p className="text-[9px] font-bold text-white/50 uppercase tracking-widest">협업</p>
+                    <p className="text-sm font-black">{formatFee(monthSummary.collabAmount)}</p>
+                    <p className="text-[9px] font-bold text-white/40">{monthSummary.collabCount}건</p>
+                  </div>
+                  <div className="bg-white/10 rounded-xl p-2.5">
+                    <p className="text-[9px] font-bold text-white/50 uppercase tracking-widest">정산</p>
+                    <p className="text-sm font-black">{formatFee(monthSummary.settlementAmount)}</p>
+                    <p className="text-[9px] font-bold text-white/40">{monthSummary.settlementCount}건</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">전체 일정 현황</h4>

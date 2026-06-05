@@ -26,6 +26,17 @@ interface Summary {
   pendingAmount: number;
 }
 
+// Deal-flow totals split by the influencer's decision on each proposal.
+// Only the approved bucket counts as revenue; pending/rejected are excluded.
+interface ProposalSummary {
+  approvedAmount: number;
+  approvedCount: number;
+  pendingAmount: number;
+  pendingCount: number;
+  rejectedAmount: number;
+  rejectedCount: number;
+}
+
 interface Ranking {
   username?: string;
   key?: string;
@@ -48,6 +59,7 @@ const won = (n: number) => formatKRW(n);
 const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [proposalSummary, setProposalSummary] = useState<ProposalSummary | null>(null);
   const [influencerRanking, setInfluencerRanking] = useState<Ranking[]>([]);
   const [businessRanking, setBusinessRanking] = useState<Ranking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +70,7 @@ const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
     const data = await apiService.getAdminSettlementsOverview(token);
     setSettlements(data.settlements || []);
     setSummary(data.summary || null);
+    setProposalSummary(data.proposalSummary || null);
     setInfluencerRanking(data.influencerRanking || []);
     setBusinessRanking(data.businessRanking || []);
     setLoading(false);
@@ -93,6 +106,43 @@ const AdminSettlementConsole: React.FC<Props> = ({ token }) => {
 
   return (
     <div className="space-y-4">
+      {/* Deal-flow by influencer decision. Only 승인된 제안 counts as revenue;
+          대기중·거절된 제안은 매출에서 제외된다. */}
+      {proposalSummary && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-black text-slate-900 text-sm">유저 제안 거래 현황</h3>
+            <span className="text-[10px] font-bold text-slate-400">승인된 제안만 수익으로 집계됩니다</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white p-4 rounded-2xl border border-green-100 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-green-600 uppercase tracking-widest">승인된 제안 총액</p>
+                <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-600 text-[8px] font-black">수익 집계</span>
+              </div>
+              <p className="text-xl font-black text-green-600">{won(proposalSummary.approvedAmount)}</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">{proposalSummary.approvedCount}건 (수락+완료)</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest">대기중 금액</p>
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 text-[8px] font-black">집계 제외</span>
+              </div>
+              <p className="text-xl font-black text-amber-500">{won(proposalSummary.pendingAmount)}</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">{proposalSummary.pendingCount}건</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-red-500 uppercase tracking-widest">거절된 금액</p>
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 text-[8px] font-black">집계 제외</span>
+              </div>
+              <p className="text-xl font-black text-red-400">{won(proposalSummary.rejectedAmount)}</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">{proposalSummary.rejectedCount}건</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {summary && (
         <>
           <div className="bg-blue-50/60 border border-blue-100 rounded-2xl px-4 py-3">

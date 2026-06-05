@@ -4,7 +4,7 @@ import type { Config, Context } from '@netlify/functions'
 
 // Admin settlement & revenue console
 // GET /api/admin/settlements-overview
-//   returns: { settlements, summary, influencerRanking, businessRanking }
+//   returns: { settlements, summary, proposalSummary, influencerRanking, businessRanking }
 export default async (req: Request, _context: Context) => {
   const auth = await requireAdmin(req)
   if (!auth.ok) return auth.response
@@ -22,11 +22,30 @@ export default async (req: Request, _context: Context) => {
       .order('scheduled_date', { ascending: false })
     if (error) throw error
 
-    // Pull cumulative gross from completed proposals as additional revenue source
-    const { data: completedProposals } = await supabase
+    // Pull every proposal so the operator can see deal flow split by the
+    // influencer's decision. Revenue (rankings + cumulative GMV) only counts
+    // proposals the influencer ACCEPTED (or completed) — pending and rejected
+    // proposals never contribute to revenue.
+    const { data: allProposals } = await supabase
       .from('business_proposals')
       .select('influencer_username, business_username, company_name, fee, status')
-      .in('status', ['accepted', 'completed'])
+
+    const proposalRows = allProposals || []
+    const acceptedProposals = proposalRows.filter(p => p.status === 'accepted' || p.status === 'completed')
+
+    // Deal-flow summary by the influencer's decision (approved / pending /
+    // rejected). Only the approved bucket feeds revenue elsewhere.
+    const sumFee = (rows: any[]) => rows.reduce((s, p) => s + (Number(p.fee) || 0), 0)
+    const pendingProposals = proposalRows.filter(p => p.status === 'pending')
+    const rejectedProposals = proposalRows.filter(p => p.status === 'rejected')
+    const proposalSummary = {
+      approvedAmount: sumFee(acceptedProposals),
+      approvedCount: acceptedProposals.length,
+      pendingAmount: sumFee(pendingProposals),
+      pendingCount: pendingProposals.length,
+      rejectedAmount: sumFee(rejectedProposals),
+      rejectedCount: rejectedProposals.length,
+    }
 
     const list = settlements || []
     const summary = {
@@ -48,7 +67,7 @@ export default async (req: Request, _context: Context) => {
       influencerMap[u].settlementCount++
       if (s.status === 'completed') influencerMap[u].paidAmount += Number(s.amount) || 0
     }
-    for (const p of completedProposals || []) {
+    for (const p of acceptedProposals) {
       const u = (p as any).influencer_username
       if (!influencerMap[u]) influencerMap[u] = { username: u, settlementAmount: 0, proposalAmount: 0, settlementCount: 0, paidAmount: 0 }
       influencerMap[u].proposalAmount += Number((p as any).fee) || 0
@@ -67,7 +86,7 @@ export default async (req: Request, _context: Context) => {
       if (s.status === 'completed') businessMap[key].paidAmount += Number(s.amount) || 0
       else businessMap[key].pendingAmount += Number(s.amount) || 0
     }
-    for (const p of completedProposals || []) {
+    for (const p of acceptedProposals) {
       const key = ((p as any).business_username || (p as any).company_name || 'unknown').toLowerCase()
       if (!businessMap[key]) businessMap[key] = { key, companyName: (p as any).company_name || (p as any).business_username || 'unknown', settlementAmount: 0, proposalAmount: 0, paidAmount: 0, pendingAmount: 0, count: 0 }
       businessMap[key].proposalAmount += Number((p as any).fee) || 0
@@ -79,6 +98,7 @@ export default async (req: Request, _context: Context) => {
     return Response.json({
       settlements: list,
       summary,
+      proposalSummary,
       influencerRanking,
       businessRanking,
     })

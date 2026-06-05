@@ -161,6 +161,9 @@ export interface SellerBusinessVerification {
   business_type?: string;
   business_item?: string;
   business_address?: string;
+  // 국세청(NTS) 사업자등록정보 상태조회 결과
+  nts_verified?: boolean;
+  nts_status?: string;
 }
 
 export interface SellerSettlementAccount {

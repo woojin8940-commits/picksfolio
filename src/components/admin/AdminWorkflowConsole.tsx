@@ -74,8 +74,24 @@ const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
     });
   }, [proposals, categoryFilter, feeFilter, statusFilter]);
 
-  const openTimeline = async (id: string) => {
-    setSelectedProposalId(id);
+  // 워크플로 핵심 지표. 매출(파이프라인 가치)은 수락/완료된 제안 금액만 합산하며,
+  // 대기·거절 제안은 매출에서 제외한다.
+  const pipeline = useMemo(() => {
+    const total = proposals.length;
+    const accepted = proposals.filter(p => p.status === 'accepted').length;
+    const completed = proposals.filter(p => p.status === 'completed').length;
+    const pending = proposals.filter(p => p.status === 'pending').length;
+    const rejected = proposals.filter(p => p.status === 'rejected').length;
+    const decided = accepted + completed + rejected;
+    const approvedRevenue = proposals
+      .filter(p => p.status === 'accepted' || p.status === 'completed')
+      .reduce((s, p) => s + (p.fee || 0), 0);
+    const acceptanceRate = decided > 0 ? Math.round(((accepted + completed) / decided) * 100) : 0;
+    const avgApprovedFee = (accepted + completed) > 0 ? Math.round(approvedRevenue / (accepted + completed)) : 0;
+    return { total, accepted, completed, pending, rejected, approvedRevenue, acceptanceRate, avgApprovedFee };
+  }, [proposals]);
+
+  const openTimeline = async (id: string) => {    setSelectedProposalId(id);
     setTimelineEvents(null);
     setTimelineLoading(true);
     const data = await apiService.getAdminProposalTimeline(token, id);
@@ -102,6 +118,30 @@ const AdminWorkflowConsole: React.FC<Props> = ({ token, proposals }) => {
 
   return (
     <div className="space-y-4">
+      {/* 핵심 지표 요약 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">전체 제안</p>
+          <p className="text-2xl font-black text-slate-900">{pipeline.total}</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-0.5">대기 {pipeline.pending} · 진행 {pipeline.accepted} · 완료 {pipeline.completed}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">수락률</p>
+          <p className="text-2xl font-black text-green-600">{pipeline.acceptanceRate}%</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-0.5">결정된 제안 기준 · 거절 {pipeline.rejected}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">승인 파이프라인 매출</p>
+          <p className="text-2xl font-black text-blue-600">{won(pipeline.approvedRevenue)}</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-0.5">수락+완료 제안 합계</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">평균 승인 단가</p>
+          <p className="text-2xl font-black text-indigo-600">{won(pipeline.avgApprovedFee)}</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-0.5">승인 제안 1건당</p>
+        </div>
+      </div>
+
       {/* Aggregate cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
