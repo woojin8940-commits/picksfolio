@@ -20,6 +20,34 @@ export interface SiteData {
   linkGridCategories?: string[];
 }
 
+// Claude plan credit wallet — public shape returned by /api/claude-credits.
+export interface ClaudeCreditUsage {
+  at: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costKrw: number;
+  chargedKrw: number;
+}
+
+export interface ClaudeCreditsResponse {
+  success?: boolean;
+  credits: {
+    planActive: boolean;
+    planActivatedAt: string | null;
+    balanceKrw: number;
+    autoRecharge: boolean;
+    autoRechargeAmountKrw: number;
+    hasBillingKey: boolean;
+    recentUsage: ClaudeCreditUsage[];
+  };
+  activationPriceKrw: number;
+  activationGrantKrw: number;
+  rechargePacksKrw: number[];
+  marginMultiplier?: number;
+}
+
 // Orderer (주문자) + shipping address (배송지) collected at live checkout.
 // Reused across orders by persisting it per-viewer via the shipping-profile API.
 export interface ShippingProfile {
@@ -808,6 +836,66 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to process billing key payment:', e);
       return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // ── Claude plan credit wallet ───────────────────────────────────────────
+  // The premium Claude model in the collaboration AI is metered by a prepaid
+  // credit wallet, sold separately from the memberships. These methods read the
+  // wallet, grant credits after a verified PortOne payment, and toggle
+  // auto-recharge. The public credit shape mirrors `publicCredits` server-side.
+  async getClaudeCredits(username: string): Promise<ClaudeCreditsResponse | null> {
+    try {
+      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) return null;
+      return (await res.json()) as ClaudeCreditsResponse;
+    } catch (e) {
+      console.error('[API] Failed to get Claude credits:', e);
+      return null;
+    }
+  },
+
+  async payClaudeCredits(
+    username: string,
+    payload: {
+      kind: 'activation' | 'recharge';
+      amountKrw: number;
+      paymentId: string;
+      payMethod?: string;
+      billingKey?: string;
+    },
+  ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: data?.error || '크레딧 적립에 실패했습니다.' } as any;
+      return data;
+    } catch (e) {
+      console.error('[API] Failed to pay Claude credits:', e);
+      return { success: false, error: '네트워크 오류로 처리에 실패했습니다.' } as any;
+    }
+  },
+
+  async setClaudeAutoRecharge(
+    username: string,
+    settings: { autoRecharge?: boolean; autoRechargeAmountKrw?: number; billingKey?: string },
+  ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: data?.error || '설정 저장에 실패했습니다.' } as any;
+      return data;
+    } catch (e) {
+      console.error('[API] Failed to set Claude auto-recharge:', e);
+      return { success: false, error: '네트워크 오류로 저장에 실패했습니다.' } as any;
     }
   },
 

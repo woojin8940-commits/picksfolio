@@ -1,6 +1,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
+import type { ClaudeCreditsResponse } from '../services/apiService';
+import {
+  payClaudePlan,
+  issueClaudeBillingKey,
+  CLAUDE_PAY_METHODS,
+  type ClaudePayMethod,
+} from '../utils/claudeCharge';
 import { AiMarkdown } from './AiMarkdown';
 
 interface AiMessage {
@@ -104,6 +111,28 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const aiEndRef = useRef<HTMLDivElement>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Model selection. Gemini (default) is the membership-bundled model; Claude is
+  // the optional premium model billed against the separately-purchased Claude plan
+  // credit wallet. Switching models keeps the same conversation — the chat history
+  // is held here and re-sent on every request, so neither model "forgets" the other.
+  const [aiModel, setAiModel] = useState<'gemini' | 'claude'>('gemini');
+  const [claudeData, setClaudeData] = useState<ClaudeCreditsResponse | null>(null);
+  const [claudeModalOpen, setClaudeModalOpen] = useState(false);
+  const [lastClaudeCost, setLastClaudeCost] = useState<number | null>(null);
+
+  const refreshClaudeCredits = useCallback(async () => {
+    const data = await apiService.getClaudeCredits(normalizedUserName);
+    if (data) setClaudeData(data);
+    return data;
+  }, [normalizedUserName]);
+
+  // Load the wallet the first time Claude is chosen (and keep it fresh thereafter).
+  useEffect(() => {
+    if (aiModel === 'claude' && !claudeData) {
+      refreshClaudeCredits();
+    }
+  }, [aiModel, claudeData, refreshClaudeCredits]);
+
   useEffect(() => {
     let cancelled = false;
     apiService.getSellerVerification(normalizedUserName).then((data) => {
@@ -144,7 +173,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     const content = text.trim();
     if (!content || aiLoading) return;
 
-    if (aiEnabled === false) {
+    // Gemini requires an AI membership; Claude requires an active Claude plan with
+    // a positive credit balance. Pre-checks keep the user from sending a doomed
+    // request — but the server is the source of truth and re-validates either way.
+    if (aiModel === 'gemini' && aiEnabled === false) {
       setAiMessages(prev => [
         ...prev,
         { role: 'user', content },
@@ -152,6 +184,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       ]);
       setAiInput('');
       return;
+    }
+    if (aiModel === 'claude') {
+      const c = claudeData?.credits;
+      if (c && (!c.planActive || c.balanceKrw <= 0)) {
+        setClaudeModalOpen(true);
+        return;
+      }
     }
 
     const nextMessages: AiMessage[] = [...aiMessages, { role: 'user', content }];
@@ -191,6 +230,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         body: JSON.stringify({
           username: normalizedUserName.toLowerCase(),
           userType,
+          model: aiModel,
           activeProposalId: selectedTimeline?.proposalId || '',
           timelines: timelineSummary,
           messages: nextMessages,
@@ -200,9 +240,25 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       const data = await res.json();
       if (!res.ok) {
         if (data?.code === 'MEMBERSHIP_REQUIRED') setAiEnabled(false);
+        // Claude plan not active / credits exhausted — surface the wallet modal so
+        // the user can activate or recharge without losing the conversation.
+        if (data?.code === 'CLAUDE_PLAN_REQUIRED' || data?.code === 'CLAUDE_CREDITS_EMPTY') {
+          await refreshClaudeCredits();
+          setAiMessages(prev => prev.slice(0, -1));
+          setAiInput(content);
+          setClaudeModalOpen(true);
+          return;
+        }
         setAiMessages(prev => [...prev, { role: 'assistant', content: data?.error || 'AI 응답에 실패했어요. 잠시 후 다시 시도해 주세요.' }]);
       } else {
         setAiMessages(prev => [...prev, { role: 'assistant', content: data.reply || '...' }]);
+        // Reflect the credit deduction returned by the Claude path.
+        if (data.model === 'claude' && typeof data.balanceKrw === 'number') {
+          setLastClaudeCost(typeof data.creditsUsed === 'number' ? data.creditsUsed : null);
+          setClaudeData(prev =>
+            prev ? { ...prev, credits: { ...prev.credits, balanceKrw: data.balanceKrw } } : prev,
+          );
+        }
       }
     } catch {
       setAiMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.' }]);
@@ -1223,11 +1279,46 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '모든 협업을 함께 보고 업무를 도와드려요'}
               </p>
             </div>
+
+            {/* Model selector — Gemini (free, membership) vs Claude (premium credits).
+                Switching keeps the same conversation; neither model forgets the other. */}
+            <div className="shrink-0 flex items-center gap-1.5">
+              {aiModel === 'claude' && claudeData?.credits.planActive && (
+                <button
+                  type="button"
+                  onClick={() => setClaudeModalOpen(true)}
+                  title="클로드 크레딧 관리"
+                  className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-black hover:bg-orange-100 transition-colors"
+                >
+                  🪙 {(claudeData.credits.balanceKrw || 0).toLocaleString()}원
+                </button>
+              )}
+              <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setAiModel('gemini')}
+                  className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
+                    aiModel === 'gemini' ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  ✨ 제미나이
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiModel('claude')}
+                  className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
+                    aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🤖 클로드
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Membership gate */}
-        {aiEnabled === false ? (
+        {/* Membership gate (Gemini only — Claude is gated by its own plan/wallet) */}
+        {aiModel === 'gemini' && aiEnabled === false ? (
           <div className="flex-1 flex items-center justify-center px-6">
             <div className="max-w-sm text-center">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
@@ -1344,11 +1435,42 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </button>
                 </div>
               </div>
+              {aiModel === 'claude' && (
+                <div className="max-w-3xl mx-auto flex items-center justify-between gap-2 mt-1.5 px-1">
+                  {claudeData?.credits.planActive ? (
+                    <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
+                      🤖 클로드 · 남은 크레딧 <span className="text-orange-600">{(claudeData.credits.balanceKrw || 0).toLocaleString()}원</span>
+                      {lastClaudeCost != null && <span className="text-gray-400 font-medium"> · 직전 답변 {lastClaudeCost.toLocaleString()}원</span>}
+                      {claudeData.credits.autoRecharge && <span className="text-gray-400 font-medium"> · 자동충전 켜짐</span>}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
+                      🤖 클로드는 클로드 플랜 전용이에요. 시작하면 기본 크레딧이 지급됩니다.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setClaudeModalOpen(true)}
+                    className="shrink-0 text-[11px] font-black text-orange-600 hover:text-orange-700 px-2 py-1 rounded-lg border border-orange-200 hover:bg-orange-50 transition-colors"
+                  >
+                    {claudeData?.credits.planActive ? '크레딧 충전' : '클로드 플랜 시작'}
+                  </button>
+                </div>
+              )}
               <p className="hidden md:block max-w-3xl mx-auto text-[10px] text-gray-400 font-medium mt-1.5 px-1">
                 AI는 협업에 도움을 주기 위한 참고용이며, 중요한 내용은 직접 확인해 주세요.
               </p>
             </div>
           </>
+        )}
+
+        {claudeModalOpen && claudeData && (
+          <ClaudePlanModal
+            username={normalizedUserName}
+            data={claudeData}
+            onClose={() => setClaudeModalOpen(false)}
+            onUpdated={(d) => setClaudeData(d)}
+          />
         )}
       </div>
     );
@@ -1390,6 +1512,185 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {aiActive ? renderAiChat() : renderMessages()}
           </div>
         )}
+      </div>
+    </div>
+  );
+};
+
+// Claude plan wallet management — activation, manual recharge, and auto-recharge.
+// Rendered as a modal from the AI chat when the user picks Claude and either has
+// no active plan or has run their credits down. Sold separately from memberships.
+const krw = (n: number) => `${(n || 0).toLocaleString()}원`;
+
+const ClaudePlanModal: React.FC<{
+  username: string;
+  data: ClaudeCreditsResponse;
+  onClose: () => void;
+  onUpdated: (d: ClaudeCreditsResponse) => void;
+}> = ({ username, data, onClose, onUpdated }) => {
+  const [payMethod, setPayMethod] = useState<ClaudePayMethod>('CARD');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const credits = data.credits;
+  const active = credits.planActive;
+
+  const handleActivate = async () => {
+    setError(null); setNotice(null); setBusy(true);
+    const out = await payClaudePlan(username, 'activation', data.activationPriceKrw, payMethod);
+    setBusy(false);
+    if (!out.success || !out.result) { setError(out.error || '결제에 실패했습니다.'); return; }
+    onUpdated(out.result);
+    setNotice(`클로드 플랜이 시작되었어요. 기본 크레딧 ${krw(data.activationGrantKrw)}이 지급되었습니다.`);
+  };
+
+  const handleRecharge = async (amountKrw: number) => {
+    setError(null); setNotice(null); setBusy(true);
+    const out = await payClaudePlan(username, 'recharge', amountKrw, payMethod);
+    setBusy(false);
+    if (!out.success || !out.result) { setError(out.error || '충전에 실패했습니다.'); return; }
+    onUpdated(out.result);
+    setNotice(`${krw(amountKrw)} 크레딧이 충전되었습니다.`);
+  };
+
+  const handleAutoToggle = async () => {
+    setError(null); setNotice(null); setBusy(true);
+    try {
+      if (credits.autoRecharge) {
+        const res = await apiService.setClaudeAutoRecharge(username, { autoRecharge: false });
+        if (!res.success) { setError(res.error || '설정 변경에 실패했습니다.'); return; }
+        onUpdated(res as ClaudeCreditsResponse);
+        setNotice('자동충전을 껐어요.');
+      } else {
+        // Enabling needs a billing key so the server can charge without a window.
+        const issued = await issueClaudeBillingKey(username, payMethod);
+        if (!issued.success || !issued.billingKey) { setError(issued.error || '결제수단 등록에 실패했습니다.'); return; }
+        const res = await apiService.setClaudeAutoRecharge(username, {
+          autoRecharge: true,
+          billingKey: issued.billingKey,
+        });
+        if (!res.success) { setError(res.error || '설정 저장에 실패했습니다.'); return; }
+        onUpdated(res as ClaudeCreditsResponse);
+        setNotice(`크레딧이 ${krw(credits.autoRechargeAmountKrw)} 미만이 되면 자동으로 충전됩니다.`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white text-sm">🤖</div>
+            <div>
+              <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest">Claude</p>
+              <h3 className="text-base font-black text-slate-900">클로드 플랜</h3>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl" aria-label="닫기">×</button>
+        </div>
+
+        <div className="p-5 space-y-4 overflow-y-auto">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">{error}</div>}
+          {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg px-3 py-2">✓ {notice}</div>}
+
+          {/* Payment method */}
+          <div>
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
+            <div className="grid grid-cols-3 gap-2">
+              {CLAUDE_PAY_METHODS.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setPayMethod(m.id)}
+                  className={`py-2.5 px-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                    payMethod === m.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!active ? (
+            <>
+              <div className="bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-4">
+                <p className="text-xs font-black text-orange-500 uppercase tracking-widest mb-1">플랜 시작</p>
+                <p className="text-3xl font-black text-orange-700">{krw(data.activationPriceKrw)}</p>
+                <p className="text-xs font-bold text-orange-600 mt-2">결제 즉시 기본 크레딧 {krw(data.activationGrantKrw)} 지급</p>
+                <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (깊은 분석·문서 검토에 강함)</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>크레딧 소진 시 재충전 또는 자동충전 선택</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
+                </ul>
+              </div>
+              <button
+                type="button"
+                onClick={handleActivate}
+                disabled={busy}
+                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 transition-all shadow-md disabled:opacity-50"
+              >
+                {busy ? '처리 중...' : `${krw(data.activationPriceKrw)}으로 클로드 플랜 시작`}
+              </button>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 결제 시점에 표시 금액만 결제되며, 자동충전을 켜기 전에는 자동으로 결제되지 않습니다.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">남은 크레딧</p>
+                <p className="text-3xl font-black text-slate-900">{krw(credits.balanceKrw)}</p>
+                {credits.balanceKrw <= 0 && (
+                  <p className="text-xs font-bold text-red-500 mt-1.5">크레딧을 모두 사용했어요. 충전하면 계속 이용할 수 있습니다.</p>
+                )}
+              </div>
+
+              <div>
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">크레딧 충전</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {data.rechargePacksKrw.map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => handleRecharge(amt)}
+                      disabled={busy}
+                      className="py-3 px-2 rounded-xl border-2 border-orange-200 bg-white text-orange-700 text-sm font-black hover:bg-orange-50 transition-all disabled:opacity-50"
+                    >
+                      {krw(amt)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-800">자동충전</p>
+                  <p className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                    잔액이 {krw(credits.autoRechargeAmountKrw)} 미만이면 {krw(credits.autoRechargeAmountKrw)}을 자동으로 충전합니다.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAutoToggle}
+                  disabled={busy}
+                  className={`shrink-0 relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${credits.autoRecharge ? 'bg-orange-500' : 'bg-slate-300'}`}
+                  aria-pressed={credits.autoRecharge}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${credits.autoRecharge ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                자동충전을 켜면 결제 수단(빌링키)을 등록하고, 잔액이 부족할 때 등록된 수단으로 자동 결제됩니다. 하루 자동충전 횟수에는 안전 상한이 있습니다. 언제든 끌 수 있어요.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

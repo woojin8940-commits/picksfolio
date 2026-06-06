@@ -1033,8 +1033,8 @@ const App: React.FC = () => {
       const detail = (e as CustomEvent).detail;
       if (detail?.proposalId) {
         setTimelineProposalId(detail.proposalId);
-        setSubView('timeline');
       }
+      setSubView('timeline');
     };
     window.addEventListener('navigate-timeline', handler);
     return () => window.removeEventListener('navigate-timeline', handler);

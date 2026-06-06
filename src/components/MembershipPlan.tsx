@@ -19,6 +19,11 @@ type MembershipTier = 'standard' | 'standard_ai' | 'commerce';
 const STANDARD_PRICE = 4900;
 const STANDARD_AI_PRICE = 6900;
 const COMMERCE_PRICE = 13900;
+// Claude plan (separate prepaid AI add-on) — display figures only; the wallet and
+// payments are handled in the 협업 타임라인 AI. Keep in sync with the server's
+// claude-credits pricing module.
+const ACTIVATION_PRICE_KRW = 9900;
+const ACTIVATION_GRANT_KRW = 9900;
 const TIER_PRICE: Record<MembershipTier, number> = {
   standard: STANDARD_PRICE,
   standard_ai: STANDARD_AI_PRICE,
@@ -541,6 +546,42 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 )}
               </>
             )}
+          </div>
+        </div>
+      </section>
+
+      {/* Claude plan — sold SEPARATELY from the memberships above. It is not a
+          membership tier; it is an optional premium AI add-on with its own prepaid
+          credit wallet, activated and managed from the 협업 타임라인 AI. */}
+      <section className="mb-12 max-w-6xl">
+        <div className="relative rounded-2xl border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 p-6 md:p-8 shadow-sm">
+          <div className="absolute -top-3 left-6">
+            <span className="bg-gradient-to-r from-orange-500 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+              클로드 플랜 · 🤖 Claude (별도)
+            </span>
+          </div>
+          <div className="md:flex md:items-center md:justify-between gap-6 mt-2">
+            <div className="flex-1">
+              <h4 className="font-bold text-slate-800 text-lg mb-2">협업 AI를 Claude로 — 선불 크레딧</h4>
+              <p className="text-sm text-slate-600 leading-relaxed mb-3">
+                협업 타임라인 AI는 기본적으로 제미나이(무료, AI 멤버십 포함)로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 멤버십과 <strong>별도로 결제</strong>하는 선불 크레딧이며, 결제 시 기본 크레딧이 지급됩니다.
+              </p>
+              <ul className="space-y-1.5 text-sm text-slate-600">
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원으로 시작 · 기본 크레딧 {ACTIVATION_GRANT_KRW.toLocaleString()}원 지급</li>
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>사용한 토큰만큼만 차감 · 남은 크레딧은 이월(매월 소멸 없음)</li>
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 소진 시 <strong>재충전</strong> 또는 <strong>자동충전</strong> 선택</li>
+              </ul>
+            </div>
+            <div className="shrink-0 mt-4 md:mt-0">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-timeline'))}
+                className="w-full md:w-auto px-6 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 transition-all shadow-md hover:shadow-lg"
+              >
+                협업 AI에서 클로드 플랜 시작
+              </button>
+              <p className="text-[11px] text-slate-400 font-medium mt-2 text-center md:text-right">멤버십 없이도 이용 가능</p>
+            </div>
           </div>
         </div>
       </section>

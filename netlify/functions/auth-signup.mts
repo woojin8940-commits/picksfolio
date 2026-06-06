@@ -12,16 +12,6 @@ function getSupabaseAdmin() {
   });
 }
 
-// Convert a Korean phone number (e.g. "01012345678") to E.164 ("+821012345678")
-// so it can be stored in the Supabase auth.users phone column.
-function toE164KR(raw: string): string {
-  const digits = (raw || "").replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("82")) return `+${digits}`;
-  if (digits.startsWith("0")) return `+82${digits.slice(1)}`;
-  return `+82${digits}`;
-}
-
 function generateProfileCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
@@ -65,8 +55,8 @@ export default async (req: Request) => {
     const cleanUsername = username.trim().toLowerCase();
     const email = cleanEmail;
     const cleanPhone = (phone || "").replace(/\D/g, "");
-    const phoneE164 = toE164KR(cleanPhone);
 
+    // 아이디(링크 주소)는 변경할 수 없는 고유 식별자이므로 같은 아이디로는 재가입할 수 없다.
     const { data: existingProfile } = await supabase
       .from("profiles")
       .select("id")
@@ -80,45 +70,76 @@ export default async (req: Request) => {
       });
     }
 
-    const { data: authData, error: authError } =
+    // 같은 사람(휴대폰 번호 기준)이 이미 가입했어도 계정을 더 만들 수 있게 허용한다.
+    // 단, 무제한 생성은 막기 위해 한 번호당 최대 10개까지만 만들 수 있도록 제한한다.
+    const MAX_ACCOUNTS_PER_PERSON = 10;
+    if (cleanPhone) {
+      const { data: sameOwner } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("phone", cleanPhone)
+        .eq("role", "user");
+
+      if ((sameOwner?.length || 0) >= MAX_ACCOUNTS_PER_PERSON) {
+        return Response.json({
+          success: false,
+          error: `하나의 휴대폰 번호로는 최대 ${MAX_ACCOUNTS_PER_PERSON}개의 계정까지만 만들 수 있습니다.`,
+        });
+      }
+    }
+
+    // 동일인이 같은 이메일·휴대폰으로 여러 계정을 만들 수 있어야 하므로, Supabase
+    // auth 단계의 고유 제약(이메일·휴대폰)에 막히지 않도록 처리한다.
+    //  - 휴대폰: auth 단계에서 고유 제약을 걸지 않는다(번호는 profiles에만 저장).
+    //  - 이메일: 실제 이메일로 먼저 시도하고, 이미 쓰인 이메일이면(=재가입) 아이디
+    //    기반의 고유 이메일로 대체한다. 로그인은 profiles.email로 인증하므로,
+    //    어떤 경우든 실제로 사용된 인증 이메일을 profiles.email에 저장한다.
+    const userMetadata = {
+      full_name: full_name || username,
+      phone: cleanPhone,
+      contact_email: email,
+    };
+
+    let authEmail = email;
+    let { data: authData, error: authError } =
       await supabase.auth.admin.createUser({
-        email,
+        email: authEmail,
         password,
         email_confirm: true,
-        ...(phoneE164 ? { phone: phoneE164, phone_confirm: true } : {}),
-        user_metadata: {
-          full_name: full_name || username,
-          phone: cleanPhone,
-        },
+        user_metadata: userMetadata,
       });
 
     if (authError) {
-      const msg = authError.message || "";
-      if (
+      const msg = (authError.message || "").toLowerCase();
+      const emailTaken =
         msg.includes("already been registered") ||
         msg.includes("already exists") ||
-        msg.toLowerCase().includes("email")
-      ) {
-        return Response.json({
-          success: false,
-          error: "이미 사용 중인 이메일입니다.",
-        });
+        msg.includes("email");
+
+      // 이미 가입한 사람의 재가입: 아이디 기반 고유 이메일로 다시 시도한다.
+      // (아이디는 위에서 고유성이 보장됐으므로 이 이메일도 항상 고유하다.)
+      if (emailTaken) {
+        authEmail = `${cleanUsername}@picks.me`;
+        ({ data: authData, error: authError } =
+          await supabase.auth.admin.createUser({
+            email: authEmail,
+            password,
+            email_confirm: true,
+            user_metadata: userMetadata,
+          }));
       }
-      if (msg.toLowerCase().includes("phone")) {
-        return Response.json({
-          success: false,
-          error: "이미 사용 중인 휴대폰 번호입니다.",
-        });
-      }
+    }
+
+    if (authError) {
       return Response.json({ success: false, error: authError.message });
     }
 
-    if (authData.user) {
+    if (authData?.user) {
       await supabase.from("profiles").upsert(
         {
           id: authData.user.id,
           username: cleanUsername,
-          email,
+          email: authEmail,
           full_name: full_name || "",
           phone: cleanPhone,
           role: "user",
