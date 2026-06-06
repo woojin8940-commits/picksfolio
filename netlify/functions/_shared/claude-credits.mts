@@ -1,0 +1,231 @@
+import { getStore } from '@netlify/blobs'
+
+/**
+ * Claude (Anthropic) credit wallet for the collaboration AI assistant.
+ *
+ * The collaboration AI normally runs on Gemini Flash-Lite, which is bundled into
+ * the AI-enabled memberships at no extra usage cost. Claude is offered as an
+ * OPTIONAL premium model for heavier work (deep analysis, file/contract review)
+ * and is sold SEPARATELY from the regular memberships through its own "클로드 플랜":
+ *
+ *   1. The member activates the Claude plan with a one-time payment that grants a
+ *      base credit balance (a ₩-denominated wallet).
+ *   2. Each Claude request deducts credits based on the actual tokens it consumed,
+ *      with an operator margin baked into the deduction rate — so the credit price
+ *      always exceeds the raw inference cost and the feature can never run at a loss.
+ *   3. When the balance runs low the member either recharges manually (another
+ *      one-time payment) or, if they opted in, the server auto-recharges via a
+ *      stored PortOne billing key.
+ *
+ * Credits are a prepaid wallet (NOT monthly-scoped — unlike live-time credits they
+ * carry over until spent). The wallet lives in the Netlify Blobs `claude-credits`
+ * store, one document per bare username (the `biz/` prefix is stripped by callers
+ * so a business account and an influencer account share one wallet).
+ */
+
+// ── Pricing ────────────────────────────────────────────────────────────────
+// Claude model used for the premium option. Sonnet is the quality tier that
+// justifies the upgrade over Gemini for heavy analysis / document review.
+export const CLAUDE_MODEL = 'claude-sonnet-4-6'
+
+export const USD_TO_KRW = 1380
+
+// claude-sonnet-4-6 list price (USD per 1M tokens) as billed through AI Gateway.
+const INPUT_USD_PER_MTOK = 3
+const OUTPUT_USD_PER_MTOK = 15
+// Anthropic cache multipliers: writing the cache costs 1.25× input, reading from
+// it costs 0.10× input. We mirror these so the deduction tracks the true cost and
+// the member benefits from caching on long conversations (cheaper repeat context).
+const CACHE_WRITE_MULTIPLIER = 1.25
+const CACHE_READ_MULTIPLIER = 0.1
+
+// Operator margin: the member is charged this multiple of the raw inference cost.
+// Because the deduction is always ≥ cost × margin, the wallet can never run a loss.
+export const MARGIN_MULTIPLIER = 2.5
+// Floor so a near-empty request still deducts something sensible.
+const MIN_DEDUCTION_KRW = 5
+
+// Plan economics (all ₩). Activation and recharge grant credits 1:1 with the
+// amount paid; the margin is already inside the per-request deduction, so a full
+// wallet of N credits costs the operator only N / margin in real inference.
+export const ACTIVATION_PRICE_KRW = 9900
+export const ACTIVATION_GRANT_KRW = 9900
+export const RECHARGE_PACKS_KRW = [4900, 9900, 19900]
+export const AUTO_RECHARGE_DEFAULT_KRW = 9900
+// When the balance falls below this after a request, auto-recharge (if enabled)
+// tops the wallet back up using the stored billing key.
+export const AUTO_RECHARGE_THRESHOLD_KRW = 1000
+// Safety cap: never auto-recharge more than this many times per calendar day, so
+// a runaway loop or abuse cannot rack up unbounded billing-key charges.
+export const AUTO_RECHARGE_DAILY_CAP = 5
+
+export interface ClaudeTokenUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}
+
+/** Raw inference cost (₩) for a single Claude response, mirroring gateway billing. */
+export const rawCostKrw = (usage: ClaudeTokenUsage): number => {
+  const input = Math.max(0, Number(usage.input_tokens) || 0)
+  const cacheWrite = Math.max(0, Number(usage.cache_creation_input_tokens) || 0)
+  const cacheRead = Math.max(0, Number(usage.cache_read_input_tokens) || 0)
+  const output = Math.max(0, Number(usage.output_tokens) || 0)
+  const inputUsd =
+    ((input + cacheWrite * CACHE_WRITE_MULTIPLIER + cacheRead * CACHE_READ_MULTIPLIER) /
+      1_000_000) *
+    INPUT_USD_PER_MTOK
+  const outputUsd = (output / 1_000_000) * OUTPUT_USD_PER_MTOK
+  return (inputUsd + outputUsd) * USD_TO_KRW
+}
+
+/** Credits to deduct for a response = raw cost × margin (with a small floor). */
+export const deductionKrw = (usage: ClaudeTokenUsage): number =>
+  Math.max(MIN_DEDUCTION_KRW, Math.round(rawCostKrw(usage) * MARGIN_MULTIPLIER))
+
+// ── Wallet storage ───────────────────────────────────────────────────────────
+export interface ClaudeGrant {
+  at: string
+  amountKrw: number
+  kind: 'activation' | 'recharge' | 'auto'
+  paymentId?: string
+  payMethod?: string
+}
+
+export interface ClaudeUsageEntry {
+  at: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  costKrw: number
+  chargedKrw: number
+}
+
+export interface ClaudeCredits {
+  planActive: boolean
+  planActivatedAt: string | null
+  balanceKrw: number
+  autoRecharge: boolean
+  autoRechargeAmountKrw: number
+  // Stored PortOne billing key used for auto-recharge. Held in the wallet (not the
+  // membership record) so the Claude plan stays independent of the membership.
+  billingKey: string | null
+  // Per-day count of automatic recharges, used to enforce AUTO_RECHARGE_DAILY_CAP.
+  autoRechargeDay: string | null
+  autoRechargeCountToday: number
+  grants: ClaudeGrant[]
+  usage: ClaudeUsageEntry[]
+  lifetimeChargedKrw: number
+  lifetimeSpentKrw: number
+}
+
+const STORE = 'claude-credits'
+const creditsKey = (username: string) => `credits_${username}`
+
+const blank = (): ClaudeCredits => ({
+  planActive: false,
+  planActivatedAt: null,
+  balanceKrw: 0,
+  autoRecharge: false,
+  autoRechargeAmountKrw: AUTO_RECHARGE_DEFAULT_KRW,
+  billingKey: null,
+  autoRechargeDay: null,
+  autoRechargeCountToday: 0,
+  grants: [],
+  usage: [],
+  lifetimeChargedKrw: 0,
+  lifetimeSpentKrw: 0,
+})
+
+export const readClaudeCredits = async (username: string): Promise<ClaudeCredits> => {
+  const store = getStore(STORE)
+  const stored = (await store
+    .get(creditsKey(username), { type: 'json' })
+    .catch(() => null)) as Partial<ClaudeCredits> | null
+  if (!stored) return blank()
+  const base = blank()
+  return {
+    ...base,
+    ...stored,
+    balanceKrw: Math.max(0, Math.floor(Number(stored.balanceKrw) || 0)),
+    autoRechargeAmountKrw:
+      Math.floor(Number(stored.autoRechargeAmountKrw) || 0) || AUTO_RECHARGE_DEFAULT_KRW,
+    grants: Array.isArray(stored.grants) ? stored.grants : [],
+    usage: Array.isArray(stored.usage) ? stored.usage : [],
+  }
+}
+
+export const writeClaudeCredits = async (
+  username: string,
+  credits: ClaudeCredits,
+): Promise<void> => {
+  const store = getStore(STORE)
+  await store.setJSON(creditsKey(username), credits)
+}
+
+/** Public-facing summary (omits the billing key; exposes only whether one exists). */
+export const publicCredits = (c: ClaudeCredits) => ({
+  planActive: c.planActive,
+  planActivatedAt: c.planActivatedAt,
+  balanceKrw: c.balanceKrw,
+  autoRecharge: c.autoRecharge,
+  autoRechargeAmountKrw: c.autoRechargeAmountKrw,
+  hasBillingKey: !!c.billingKey,
+  recentUsage: c.usage.slice(0, 10),
+})
+
+// ── PortOne billing-key charge (auto-recharge) ────────────────────────────────
+// storeId is a public PortOne V2 identifier (same one the browser SDK uses for
+// one-time payments); the API secret is server-only.
+const PORTONE_API_BASE = 'https://api.portone.io'
+const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5'
+
+const asciiSafe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'
+
+/**
+ * Charge `amountKrw` against a stored PortOne billing key (used for auto-recharge,
+ * which has no interactive payment window). Returns the verified paymentId on
+ * success. Fails softly — the caller skips the top-up and asks the member to
+ * recharge manually rather than blocking their request.
+ */
+export const chargeBillingKey = async (
+  username: string,
+  billingKey: string,
+  amountKrw: number,
+): Promise<{ success: boolean; paymentId?: string; error?: string }> => {
+  const apiSecret = process.env.PORTONE_V2_API_SECRET
+  if (!apiSecret) return { success: false, error: 'PORTONE_V2_API_SECRET 미설정' }
+
+  const paymentId = `claudeauto-${asciiSafe(username)}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`
+  try {
+    const res = await fetch(
+      `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}/billing-key`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `PortOne ${apiSecret}`,
+        },
+        body: JSON.stringify({
+          billingKey,
+          storeId: PORTONE_STORE_ID,
+          orderName: `클로드 크레딧 자동충전 ${amountKrw.toLocaleString()}원`,
+          customer: { customerId: asciiSafe(username) },
+          amount: { total: amountKrw },
+          currency: 'KRW',
+        }),
+      },
+    )
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      return { success: false, error: `PortOne ${res.status}: ${detail.slice(0, 200)}` }
+    }
+    return { success: true, paymentId }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'PortOne 자동충전 요청 실패' }
+  }
+}

@@ -1,6 +1,17 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
+import {
+  CLAUDE_MODEL,
+  AUTO_RECHARGE_THRESHOLD_KRW,
+  AUTO_RECHARGE_DAILY_CAP,
+  chargeBillingKey,
+  deductionKrw,
+  rawCostKrw,
+  readClaudeCredits,
+  writeClaudeCredits,
+  type ClaudeCredits,
+} from "./_shared/claude-credits.mts";
 
 // Collaboration AI assistant.
 //
@@ -214,6 +225,44 @@ async function buildWorkspaceContext(
   return overview + body + activeBlock;
 }
 
+// Top up the Claude wallet via the stored billing key when the balance has fallen
+// below the auto-recharge threshold and the member opted in. Enforces a per-day cap
+// so a runaway loop can never run unbounded charges. Fails soft: on any problem the
+// wallet is returned unchanged and the member is steered to manual recharge instead.
+async function maybeAutoRecharge(
+  username: string,
+  credits: ClaudeCredits,
+): Promise<{ credits: ClaudeCredits; recharged: boolean }> {
+  if (!credits.autoRecharge || !credits.billingKey) return { credits, recharged: false };
+  if (credits.balanceKrw >= AUTO_RECHARGE_THRESHOLD_KRW) return { credits, recharged: false };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const countToday = credits.autoRechargeDay === today ? credits.autoRechargeCountToday : 0;
+  if (countToday >= AUTO_RECHARGE_DAILY_CAP) return { credits, recharged: false };
+
+  const amount = credits.autoRechargeAmountKrw;
+  const charge = await chargeBillingKey(username, credits.billingKey, amount);
+  if (!charge.success) {
+    console.error("[collab-ai] auto-recharge failed", charge.error);
+    return { credits, recharged: false };
+  }
+
+  credits.balanceKrw += amount;
+  credits.lifetimeChargedKrw += amount;
+  credits.autoRechargeDay = today;
+  credits.autoRechargeCountToday = countToday + 1;
+  credits.grants = [
+    {
+      at: new Date().toISOString(),
+      amountKrw: amount,
+      kind: "auto" as const,
+      paymentId: charge.paymentId,
+    },
+    ...credits.grants,
+  ].slice(0, 100);
+  return { credits, recharged: true };
+}
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -236,6 +285,9 @@ export default async (req: Request) => {
   const userType = body?.userType === "business" ? "business" : "influencer";
   const activeProposalId = String(body?.activeProposalId || "");
   const clientTimelines: CollabMeta[] = Array.isArray(body?.timelines) ? body.timelines : [];
+  // Which model to answer with. Gemini (default) is bundled into the AI memberships;
+  // Claude is the optional premium model gated on the separately-purchased Claude plan.
+  const useClaude = body?.model === "claude";
 
   if (!username) {
     return Response.json({ error: "로그인이 필요합니다." }, { status: 401 });
@@ -244,53 +296,97 @@ export default async (req: Request) => {
     return Response.json({ error: "메시지가 비어 있습니다." }, { status: 400 });
   }
 
-  // 1. Membership gate (same membership record for business and influencer accounts).
-  //    AI is included only in the AI-enabled tiers: standard_ai (6,900) and
-  //    commerce (13,900). Legacy 'live' is treated as commerce. The plain
-  //    standard (4,900) tier is excluded.
-  const sellerStore = getStore("seller-verification");
-  const record = applyComplimentaryMembership(
-    username,
-    (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
-  );
-  const plan = record?.membership_plan;
-  const aiEnabled =
-    !!record?.membership_active &&
-    (plan === "standard_ai" || plan === "commerce" || plan === "live");
-  if (!aiEnabled) {
-    return Response.json(
-      {
-        error:
-          "AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
-        code: "MEMBERSHIP_REQUIRED",
-      },
-      { status: 403 },
-    );
-  }
+  // Gating differs by model:
+  //  • Gemini (default) — bundled into the AI memberships; requires an AI-enabled
+  //    membership and is limited by a per-user daily soft quota.
+  //  • Claude — the optional premium model; requires an active, separately-purchased
+  //    Claude plan with credit balance. Independent of the membership tier, so a
+  //    member can use Claude even without an AI membership.
+  let claudeCredits: ClaudeCredits | null = null;
+  let usageStore: ReturnType<typeof getStore> | null = null;
+  let usageKey = "";
+  let used = 0;
 
-  // 2. Per-user daily soft quota
-  const usageStore = getStore("ai-usage");
-  const day = new Date().toISOString().slice(0, 10);
-  const usageKey = `collab_${username}_${day}`;
-  const used =
-    ((await usageStore.get(usageKey, { type: "json" })) as { count?: number } | null)?.count || 0;
-  if (used >= DAILY_LIMIT) {
-    return Response.json(
-      {
-        error: "오늘 사용할 수 있는 AI 질문 횟수를 모두 사용했어요. 내일 다시 이용해 주세요.",
-        code: "RATE_LIMITED",
-      },
-      { status: 429 },
+  if (useClaude) {
+    claudeCredits = await readClaudeCredits(username);
+    if (!claudeCredits.planActive) {
+      return Response.json(
+        {
+          error:
+            "클로드(Claude)는 클로드 플랜 전용 기능이에요. 클로드 플랜을 시작하면 기본 크레딧이 지급되어 바로 사용할 수 있습니다.",
+          code: "CLAUDE_PLAN_REQUIRED",
+        },
+        { status: 403 },
+      );
+    }
+    // A depleted wallet can be revived by auto-recharge before the request runs.
+    if (claudeCredits.balanceKrw <= 0) {
+      const r = await maybeAutoRecharge(username, claudeCredits);
+      claudeCredits = r.credits;
+      if (r.recharged) await writeClaudeCredits(username, claudeCredits);
+    }
+    if (claudeCredits.balanceKrw <= 0) {
+      return Response.json(
+        {
+          error:
+            "클로드 크레딧을 모두 사용했어요. 크레딧을 충전하면 계속 이용할 수 있습니다. (제미나이는 그대로 무료로 사용할 수 있어요.)",
+          code: "CLAUDE_CREDITS_EMPTY",
+        },
+        { status: 402 },
+      );
+    }
+    if (!process.env.ANTHROPIC_API_KEY || !process.env.ANTHROPIC_BASE_URL) {
+      return Response.json(
+        { error: "클로드 기능이 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요." },
+        { status: 503 },
+      );
+    }
+  } else {
+    // Gemini membership gate (same membership record for business and influencer
+    // accounts). AI is included only in the AI-enabled tiers: standard_ai (6,900)
+    // and commerce (13,900). Legacy 'live' is treated as commerce. The plain
+    // standard (4,900) tier is excluded.
+    const sellerStore = getStore("seller-verification");
+    const record = applyComplimentaryMembership(
+      username,
+      (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
     );
-  }
+    const plan = record?.membership_plan;
+    const aiEnabled =
+      !!record?.membership_active &&
+      (plan === "standard_ai" || plan === "commerce" || plan === "live");
+    if (!aiEnabled) {
+      return Response.json(
+        {
+          error:
+            "AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
+          code: "MEMBERSHIP_REQUIRED",
+        },
+        { status: 403 },
+      );
+    }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  const baseUrl = process.env.GOOGLE_GEMINI_BASE_URL;
-  if (!apiKey || !baseUrl) {
-    return Response.json(
-      { error: "AI 기능이 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요." },
-      { status: 503 },
-    );
+    // Per-user daily soft quota (Gemini only — Claude is bounded by its wallet).
+    usageStore = getStore("ai-usage");
+    usageKey = `collab_${username}_${new Date().toISOString().slice(0, 10)}`;
+    used =
+      ((await usageStore.get(usageKey, { type: "json" })) as { count?: number } | null)?.count || 0;
+    if (used >= DAILY_LIMIT) {
+      return Response.json(
+        {
+          error: "오늘 사용할 수 있는 AI 질문 횟수를 모두 사용했어요. 내일 다시 이용해 주세요.",
+          code: "RATE_LIMITED",
+        },
+        { status: 429 },
+      );
+    }
+
+    if (!process.env.GEMINI_API_KEY || !process.env.GOOGLE_GEMINI_BASE_URL) {
+      return Response.json(
+        { error: "AI 기능이 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요." },
+        { status: 503 },
+      );
+    }
   }
 
   // Build the workspace-wide overview (all conversations). Falls back to the
@@ -347,21 +443,116 @@ export default async (req: Request) => {
           `아래는 이 협업의 최근 대화 내용입니다. 이 내용을 바탕으로 답해 주세요:\n${legacyTranscript}`
         : "\n\n현재 불러올 수 있는 협업 대화가 없습니다. 협업이 아직 없다면 일반적인 협업·업무 도움을 제공하세요.");
 
+  // ── Claude (premium, credit-metered) ───────────────────────────────────────
+  if (useClaude) {
+    const credits = claudeCredits as ClaudeCredits;
+    // Anthropic message format. The large system instruction (role + workspace
+    // overview) is sent as a cached block, so repeat turns within ~5 minutes are
+    // billed at the discounted cache-read rate — the saving is passed through to
+    // the member's credit deduction, keeping long conversations cheap.
+    const claudeMessages = messages.slice(-MAX_TURNS).map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: String(m.content || ""),
+    }));
+
+    try {
+      const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: 1024,
+          temperature: 0.6,
+          system: [
+            { type: "text", text: systemInstruction, cache_control: { type: "ephemeral" } },
+          ],
+          messages: claudeMessages,
+        }),
+      });
+
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        console.error("[collab-ai] Claude error", res.status, detail);
+        return Response.json(
+          { error: "클로드 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요." },
+          { status: 502 },
+        );
+      }
+
+      const data = await res.json();
+      const reply: string =
+        (data?.content || [])
+          .map((p: any) => (p?.type === "text" ? p.text || "" : ""))
+          .join("")
+          .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
+
+      // Deduct credits based on the tokens actually consumed, then (if opted in
+      // and the balance is now low) auto-recharge for the next request.
+      const usage = data?.usage || {};
+      const charged = deductionKrw(usage);
+      credits.balanceKrw = Math.max(0, credits.balanceKrw - charged);
+      credits.lifetimeSpentKrw += charged;
+      credits.usage = [
+        {
+          at: new Date().toISOString(),
+          model: CLAUDE_MODEL,
+          inputTokens:
+            (Number(usage.input_tokens) || 0) +
+            (Number(usage.cache_creation_input_tokens) || 0) +
+            (Number(usage.cache_read_input_tokens) || 0),
+          outputTokens: Number(usage.output_tokens) || 0,
+          cachedTokens: Number(usage.cache_read_input_tokens) || 0,
+          costKrw: Math.round(rawCostKrw(usage)),
+          chargedKrw: charged,
+        },
+        ...credits.usage,
+      ].slice(0, 50);
+
+      const after = await maybeAutoRecharge(username, credits);
+      await writeClaudeCredits(username, after.credits);
+
+      return Response.json({
+        reply,
+        model: "claude",
+        creditsUsed: charged,
+        balanceKrw: after.credits.balanceKrw,
+        autoRecharged: after.recharged,
+      });
+    } catch (e) {
+      console.error("[collab-ai] claude request failed", e);
+      return Response.json(
+        { error: "AI 응답 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." },
+        { status: 500 },
+      );
+    }
+  }
+
+  // ── Gemini (default, membership-bundled) ───────────────────────────────────
   const contents = messages.slice(-MAX_TURNS).map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: String(m.content || "") }],
   }));
 
   try {
-    const res = await fetch(`${baseUrl}/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        generationConfig: { temperature: 0.6, maxOutputTokens: 1024 },
-      }),
-    });
+    const res = await fetch(
+      `${process.env.GOOGLE_GEMINI_BASE_URL}/v1beta/models/${MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": process.env.GEMINI_API_KEY as string,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents,
+          generationConfig: { temperature: 0.6, maxOutputTokens: 1024 },
+        }),
+      },
+    );
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
@@ -380,9 +571,9 @@ export default async (req: Request) => {
         .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
 
     // Record usage only after a successful response.
-    await usageStore.setJSON(usageKey, { count: used + 1 });
+    if (usageStore) await usageStore.setJSON(usageKey, { count: used + 1 });
 
-    return Response.json({ reply, remaining: Math.max(0, DAILY_LIMIT - used - 1) });
+    return Response.json({ reply, model: "gemini", remaining: Math.max(0, DAILY_LIMIT - used - 1) });
   } catch (e) {
     console.error("[collab-ai] request failed", e);
     return Response.json(
