@@ -13,6 +13,12 @@ import { AiMarkdown } from './AiMarkdown';
 interface AiMessage {
   role: 'user' | 'assistant';
   content: string;
+  // For Claude answers: the credit charged for THIS answer and the wallet balance
+  // left afterward, both reported by the server. Shown under the message, the way
+  // the Netlify Claude agent reports usage per response.
+  model?: 'gemini' | 'claude';
+  creditsUsed?: number;
+  balanceKrw?: number;
 }
 
 interface TimelineAttachment {
@@ -251,14 +257,22 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         }
         setAiMessages(prev => [...prev, { role: 'assistant', content: data?.error || 'AI 응답에 실패했어요. 잠시 후 다시 시도해 주세요.' }]);
       } else {
-        setAiMessages(prev => [...prev, { role: 'assistant', content: data.reply || '...' }]);
-        // Reflect the credit deduction returned by the Claude path.
+        // Attach this answer's Claude cost + remaining balance to the message itself,
+        // so the usage is shown right under the response (like the Netlify Claude agent).
+        const assistantMsg: AiMessage = { role: 'assistant', content: data.reply || '...' };
         if (data.model === 'claude' && typeof data.balanceKrw === 'number') {
+          assistantMsg.model = 'claude';
+          assistantMsg.creditsUsed = typeof data.creditsUsed === 'number' ? data.creditsUsed : undefined;
+          assistantMsg.balanceKrw = data.balanceKrw;
           setLastClaudeCost(typeof data.creditsUsed === 'number' ? data.creditsUsed : null);
           setClaudeData(prev =>
             prev ? { ...prev, credits: { ...prev.credits, balanceKrw: data.balanceKrw } } : prev,
           );
+          // Re-read the wallet from the server so the displayed balance reflects the
+          // actual remaining credit (including any auto-recharge that just ran).
+          refreshClaudeCredits();
         }
+        setAiMessages(prev => [...prev, assistantMsg]);
       }
     } catch {
       setAiMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.' }]);
@@ -1250,10 +1264,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   // AI assistant chat panel (opened from the pinned item at the top of the list)
   const renderAiChat = () => {
-    const suggestions = selectedTimeline
-      ? ['이 대화 요약해줘', `${userType === 'influencer' ? selectedTimeline.companyName : selectedTimeline.influencerUsername}에게 보낼 답장 초안 써줘`, '답장이 필요한 협업 알려줘', '다음 할 일과 일정 정리해줘']
-      : ['지금 대화 중인 업체가 몇 곳이야?', '답장이 필요한 협업 알려줘', '먼저 챙겨야 할 협업 우선순위 정리해줘', '협찬 계약서에서 꼭 확인할 점은?'];
-
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
         {/* Header */}
@@ -1346,20 +1356,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     <span className="text-xl md:text-2xl leading-none">✨</span>
                   </div>
                   <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
-                  <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed mb-4">
+                  <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed">
                     모든 협업을 한눈에 파악해 드려요. 대화 중인 업체 현황, 답장이 필요한 협업, 답장 초안은 물론 계약·정산·세금·광고 표시 같은 업무·법률 질문까지 물어보세요.
                   </p>
-                  <div className="flex flex-col gap-2">
-                    {suggestions.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => sendAiMessage(s)}
-                        className="w-full text-left px-3.5 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-[12px] md:text-[13px] font-semibold text-gray-700 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-all"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -1383,6 +1382,17 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                           ? <AiMarkdown content={m.content} />
                           : m.content}
                       </div>
+                      {/* Per-answer Claude usage: how much this question cost and how
+                          much credit is left, mirroring the Netlify Claude agent. */}
+                      {m.role === 'assistant' && m.model === 'claude' && m.creditsUsed != null && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] md:text-[11px] text-gray-400 font-semibold">
+                          <span className="text-orange-500">🤖</span>
+                          <span>이 답변 <span className="text-orange-600">{m.creditsUsed.toLocaleString()}원</span> 사용</span>
+                          {typeof m.balanceKrw === 'number' && (
+                            <span className="text-gray-400">· 남은 크레딧 {m.balanceKrw.toLocaleString()}원</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
