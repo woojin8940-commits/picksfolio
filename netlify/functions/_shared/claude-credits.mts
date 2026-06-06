@@ -8,14 +8,21 @@ import { getStore } from '@netlify/blobs'
  * OPTIONAL premium model for heavier work (deep analysis, file/contract review)
  * and is sold SEPARATELY from the regular memberships through its own "클로드 플랜":
  *
- *   1. The member activates the Claude plan with a one-time payment that grants a
- *      base credit balance (a ₩-denominated wallet).
+ *   1. The member activates the Claude plan with a one-time ₩ payment that grants
+ *      a base balance of CREDITS (a credit-denominated wallet, NOT ₩). The 9,900원
+ *      activation grants 3,000 credits.
  *   2. Each Claude request deducts credits based on the actual tokens it consumed,
  *      with an operator margin baked into the deduction rate — so the credit price
  *      always exceeds the raw inference cost and the feature can never run at a loss.
  *   3. When the balance runs low the member either recharges manually (another
- *      one-time payment) or, if they opted in, the server auto-recharges via a
- *      stored PortOne billing key.
+ *      one-time ₩ payment, converted to credits at the same rate) or, if they opted
+ *      in, the server auto-recharges via a stored PortOne billing key.
+ *
+ * Money vs. credits: amounts the member actually PAYS stay in ₩ (activation price,
+ * recharge packs, auto-recharge amount, lifetime charged). The wallet BALANCE and
+ * per-request deductions are denominated in CREDITS and are what the UI shows — the
+ * member never sees their AI balance in ₩. Credits convert from ₩ at a fixed rate
+ * (CREDITS_PER_KRW) anchored on the 9,900원 → 3,000 credit activation grant.
  *
  * Credits are a prepaid wallet (NOT monthly-scoped — unlike live-time credits they
  * carry over until spent). The wallet lives in the Netlify Blobs `claude-credits`
@@ -42,19 +49,26 @@ const CACHE_READ_MULTIPLIER = 0.1
 // Operator margin: the member is charged this multiple of the raw inference cost.
 // Because the deduction is always ≥ cost × margin, the wallet can never run a loss.
 export const MARGIN_MULTIPLIER = 2.5
-// Floor so a near-empty request still deducts something sensible.
-const MIN_DEDUCTION_KRW = 5
+// Floor (in credits) so a near-empty request still deducts something sensible.
+const MIN_DEDUCTION_CREDITS = 1
 
-// Plan economics (all ₩). Activation and recharge grant credits 1:1 with the
-// amount paid; the margin is already inside the per-request deduction, so a full
-// wallet of N credits costs the operator only N / margin in real inference.
+// Plan economics. Members PAY in ₩ (activation price, recharge packs) but the
+// wallet is denominated in CREDITS. The activation grant anchors the conversion
+// rate: 9,900원 buys 3,000 credits. The margin is already inside the per-request
+// deduction, so a full wallet costs the operator only its ₩-equivalent / margin in
+// real inference.
 export const ACTIVATION_PRICE_KRW = 9900
-export const ACTIVATION_GRANT_KRW = 9900
+export const ACTIVATION_GRANT_CREDITS = 3000
+// Credits granted per ₩ paid. Recharges grant credits proportionally at this rate.
+export const CREDITS_PER_KRW = ACTIVATION_GRANT_CREDITS / ACTIVATION_PRICE_KRW
+/** Credits granted for a ₩ payment (activation grant rate). */
+export const creditsForKrw = (amountKrw: number): number =>
+  Math.max(0, Math.round((Number(amountKrw) || 0) * CREDITS_PER_KRW))
 export const RECHARGE_PACKS_KRW = [4900, 9900, 19900]
 export const AUTO_RECHARGE_DEFAULT_KRW = 9900
-// When the balance falls below this after a request, auto-recharge (if enabled)
-// tops the wallet back up using the stored billing key.
-export const AUTO_RECHARGE_THRESHOLD_KRW = 1000
+// When the credit balance falls below this after a request, auto-recharge (if
+// enabled) tops the wallet back up using the stored billing key.
+export const AUTO_RECHARGE_THRESHOLD_CREDITS = 300
 // Safety cap: never auto-recharge more than this many times per calendar day, so
 // a runaway loop or abuse cannot rack up unbounded billing-key charges.
 export const AUTO_RECHARGE_DAILY_CAP = 5
@@ -80,14 +94,21 @@ export const rawCostKrw = (usage: ClaudeTokenUsage): number => {
   return (inputUsd + outputUsd) * USD_TO_KRW
 }
 
-/** Credits to deduct for a response = raw cost × margin (with a small floor). */
-export const deductionKrw = (usage: ClaudeTokenUsage): number =>
-  Math.max(MIN_DEDUCTION_KRW, Math.round(rawCostKrw(usage) * MARGIN_MULTIPLIER))
+/** Credits to deduct for a response = raw cost × margin, converted to credits
+ * at the activation rate (with a small floor so every answer costs something). */
+export const deductionCredits = (usage: ClaudeTokenUsage): number =>
+  Math.max(
+    MIN_DEDUCTION_CREDITS,
+    Math.round(rawCostKrw(usage) * MARGIN_MULTIPLIER * CREDITS_PER_KRW),
+  )
 
 // ── Wallet storage ───────────────────────────────────────────────────────────
 export interface ClaudeGrant {
   at: string
+  // ₩ actually paid for this grant (real money).
   amountKrw: number
+  // Credits added to the wallet for this grant.
+  credits: number
   kind: 'activation' | 'recharge' | 'auto'
   paymentId?: string
   payMethod?: string
@@ -99,15 +120,20 @@ export interface ClaudeUsageEntry {
   inputTokens: number
   outputTokens: number
   cachedTokens: number
+  // Raw inference cost (₩) kept for operator bookkeeping; the member is charged
+  // in credits (chargedCredits).
   costKrw: number
-  chargedKrw: number
+  chargedCredits: number
 }
 
 export interface ClaudeCredits {
   planActive: boolean
   planActivatedAt: string | null
-  balanceKrw: number
+  // Wallet balance in CREDITS (the unit shown to the member), not ₩.
+  balanceCredits: number
   autoRecharge: boolean
+  // Auto-recharge tops up by PAYING this many ₩ (a recharge pack); the resulting
+  // credits are granted at CREDITS_PER_KRW.
   autoRechargeAmountKrw: number
   // Stored PortOne billing key used for auto-recharge. Held in the wallet (not the
   // membership record) so the Claude plan stays independent of the membership.
@@ -117,8 +143,9 @@ export interface ClaudeCredits {
   autoRechargeCountToday: number
   grants: ClaudeGrant[]
   usage: ClaudeUsageEntry[]
+  // Lifetime ₩ actually paid (real money) and lifetime credits spent.
   lifetimeChargedKrw: number
-  lifetimeSpentKrw: number
+  lifetimeSpentCredits: number
 }
 
 const STORE = 'claude-credits'
@@ -127,7 +154,7 @@ const creditsKey = (username: string) => `credits_${username}`
 const blank = (): ClaudeCredits => ({
   planActive: false,
   planActivatedAt: null,
-  balanceKrw: 0,
+  balanceCredits: 0,
   autoRecharge: false,
   autoRechargeAmountKrw: AUTO_RECHARGE_DEFAULT_KRW,
   billingKey: null,
@@ -136,20 +163,35 @@ const blank = (): ClaudeCredits => ({
   grants: [],
   usage: [],
   lifetimeChargedKrw: 0,
-  lifetimeSpentKrw: 0,
+  lifetimeSpentCredits: 0,
 })
 
 export const readClaudeCredits = async (username: string): Promise<ClaudeCredits> => {
   const store = getStore(STORE)
   const stored = (await store
     .get(creditsKey(username), { type: 'json' })
-    .catch(() => null)) as Partial<ClaudeCredits> | null
+    .catch(() => null)) as (Partial<ClaudeCredits> & {
+    // Legacy ₩-denominated fields, migrated to credits on read (see below).
+    balanceKrw?: number
+    lifetimeSpentKrw?: number
+  }) | null
   if (!stored) return blank()
   const base = blank()
+  // Migrate wallets written before the ₩→credit switch: their balance was held in
+  // ₩, so convert at the activation rate (9,900원 → 3,000 credits).
+  const balanceCredits =
+    stored.balanceCredits != null
+      ? Math.max(0, Math.floor(Number(stored.balanceCredits) || 0))
+      : creditsForKrw(Number(stored.balanceKrw) || 0)
+  const lifetimeSpentCredits =
+    stored.lifetimeSpentCredits != null
+      ? Math.max(0, Math.floor(Number(stored.lifetimeSpentCredits) || 0))
+      : creditsForKrw(Number(stored.lifetimeSpentKrw) || 0)
   return {
     ...base,
     ...stored,
-    balanceKrw: Math.max(0, Math.floor(Number(stored.balanceKrw) || 0)),
+    balanceCredits,
+    lifetimeSpentCredits,
     autoRechargeAmountKrw:
       Math.floor(Number(stored.autoRechargeAmountKrw) || 0) || AUTO_RECHARGE_DEFAULT_KRW,
     grants: Array.isArray(stored.grants) ? stored.grants : [],
@@ -169,7 +211,7 @@ export const writeClaudeCredits = async (
 export const publicCredits = (c: ClaudeCredits) => ({
   planActive: c.planActive,
   planActivatedAt: c.planActivatedAt,
-  balanceKrw: c.balanceKrw,
+  balanceCredits: c.balanceCredits,
   autoRecharge: c.autoRecharge,
   autoRechargeAmountKrw: c.autoRechargeAmountKrw,
   hasBillingKey: !!c.billingKey,

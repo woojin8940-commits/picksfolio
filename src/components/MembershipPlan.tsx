@@ -23,7 +23,7 @@ const COMMERCE_PRICE = 13900;
 // payments are handled in the 협업 타임라인 AI. Keep in sync with the server's
 // claude-credits pricing module.
 const ACTIVATION_PRICE_KRW = 9900;
-const ACTIVATION_GRANT_KRW = 9900;
+const ACTIVATION_GRANT_CREDITS = 3000;
 const TIER_PRICE: Record<MembershipTier, number> = {
   standard: STANDARD_PRICE,
   standard_ai: STANDARD_AI_PRICE,
@@ -567,7 +567,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 협업 타임라인 AI는 기본적으로 제미나이(무료, AI 멤버십 포함)로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 멤버십과 <strong>별도로 결제</strong>하는 선불 크레딧이며, 결제 시 기본 크레딧이 지급됩니다.
               </p>
               <ul className="space-y-1.5 text-sm text-slate-600">
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원으로 시작 · 기본 크레딧 {ACTIVATION_GRANT_KRW.toLocaleString()}원 지급</li>
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원으로 시작 · 기본 크레딧 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧 지급</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>사용한 토큰만큼만 차감 · 남은 크레딧은 이월(매월 소멸 없음)</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 소진 시 <strong>재충전</strong> 또는 <strong>자동충전</strong> 선택</li>
               </ul>

@@ -27,8 +27,9 @@ export interface ClaudeCreditUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  // Raw inference cost in ₩ (operator bookkeeping); the member is charged in credits.
   costKrw: number;
-  chargedKrw: number;
+  chargedCredits: number;
 }
 
 export interface ClaudeCreditsResponse {
@@ -36,15 +37,18 @@ export interface ClaudeCreditsResponse {
   credits: {
     planActive: boolean;
     planActivatedAt: string | null;
-    balanceKrw: number;
+    // Wallet balance in credits (the unit shown to the member), not ₩.
+    balanceCredits: number;
     autoRecharge: boolean;
     autoRechargeAmountKrw: number;
     hasBillingKey: boolean;
     recentUsage: ClaudeCreditUsage[];
   };
   activationPriceKrw: number;
-  activationGrantKrw: number;
+  activationGrantCredits: number;
   rechargePacksKrw: number[];
+  // Credits granted per ₩ paid (used to show how many credits a ₩ pack buys).
+  creditsPerKrw: number;
   marginMultiplier?: number;
 }
 
