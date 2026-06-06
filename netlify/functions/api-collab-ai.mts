@@ -3,10 +3,11 @@ import type { Config } from "@netlify/functions";
 import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
 import {
   CLAUDE_MODEL,
-  AUTO_RECHARGE_THRESHOLD_KRW,
+  AUTO_RECHARGE_THRESHOLD_CREDITS,
   AUTO_RECHARGE_DAILY_CAP,
   chargeBillingKey,
-  deductionKrw,
+  creditsForKrw,
+  deductionCredits,
   rawCostKrw,
   readClaudeCredits,
   writeClaudeCredits,
@@ -234,7 +235,7 @@ async function maybeAutoRecharge(
   credits: ClaudeCredits,
 ): Promise<{ credits: ClaudeCredits; recharged: boolean }> {
   if (!credits.autoRecharge || !credits.billingKey) return { credits, recharged: false };
-  if (credits.balanceKrw >= AUTO_RECHARGE_THRESHOLD_KRW) return { credits, recharged: false };
+  if (credits.balanceCredits >= AUTO_RECHARGE_THRESHOLD_CREDITS) return { credits, recharged: false };
 
   const today = new Date().toISOString().slice(0, 10);
   const countToday = credits.autoRechargeDay === today ? credits.autoRechargeCountToday : 0;
@@ -247,7 +248,9 @@ async function maybeAutoRecharge(
     return { credits, recharged: false };
   }
 
-  credits.balanceKrw += amount;
+  // The member is charged `amount` ₩; the wallet gains the equivalent credits.
+  const grantedCredits = creditsForKrw(amount);
+  credits.balanceCredits += grantedCredits;
   credits.lifetimeChargedKrw += amount;
   credits.autoRechargeDay = today;
   credits.autoRechargeCountToday = countToday + 1;
@@ -255,6 +258,7 @@ async function maybeAutoRecharge(
     {
       at: new Date().toISOString(),
       amountKrw: amount,
+      credits: grantedCredits,
       kind: "auto" as const,
       paymentId: charge.paymentId,
     },
@@ -320,12 +324,12 @@ export default async (req: Request) => {
       );
     }
     // A depleted wallet can be revived by auto-recharge before the request runs.
-    if (claudeCredits.balanceKrw <= 0) {
+    if (claudeCredits.balanceCredits <= 0) {
       const r = await maybeAutoRecharge(username, claudeCredits);
       claudeCredits = r.credits;
       if (r.recharged) await writeClaudeCredits(username, claudeCredits);
     }
-    if (claudeCredits.balanceKrw <= 0) {
+    if (claudeCredits.balanceCredits <= 0) {
       return Response.json(
         {
           error:
@@ -493,9 +497,9 @@ export default async (req: Request) => {
       // Deduct credits based on the tokens actually consumed, then (if opted in
       // and the balance is now low) auto-recharge for the next request.
       const usage = data?.usage || {};
-      const charged = deductionKrw(usage);
-      credits.balanceKrw = Math.max(0, credits.balanceKrw - charged);
-      credits.lifetimeSpentKrw += charged;
+      const charged = deductionCredits(usage);
+      credits.balanceCredits = Math.max(0, credits.balanceCredits - charged);
+      credits.lifetimeSpentCredits += charged;
       credits.usage = [
         {
           at: new Date().toISOString(),
@@ -507,7 +511,7 @@ export default async (req: Request) => {
           outputTokens: Number(usage.output_tokens) || 0,
           cachedTokens: Number(usage.cache_read_input_tokens) || 0,
           costKrw: Math.round(rawCostKrw(usage)),
-          chargedKrw: charged,
+          chargedCredits: charged,
         },
         ...credits.usage,
       ].slice(0, 50);
@@ -519,7 +523,7 @@ export default async (req: Request) => {
         reply,
         model: "claude",
         creditsUsed: charged,
-        balanceKrw: after.credits.balanceKrw,
+        balanceCredits: after.credits.balanceCredits,
         autoRecharged: after.recharged,
       });
     } catch (e) {

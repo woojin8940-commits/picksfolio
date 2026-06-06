@@ -1,10 +1,12 @@
 import type { Config, Context } from '@netlify/functions'
 import {
-  ACTIVATION_GRANT_KRW,
+  ACTIVATION_GRANT_CREDITS,
   ACTIVATION_PRICE_KRW,
   AUTO_RECHARGE_DEFAULT_KRW,
+  CREDITS_PER_KRW,
   MARGIN_MULTIPLIER,
   RECHARGE_PACKS_KRW,
+  creditsForKrw,
   readClaudeCredits,
   writeClaudeCredits,
   publicCredits,
@@ -14,15 +16,17 @@ import {
 // Claude plan credit wallet API.
 //
 //   GET   /api/claude-credits/:username
-//         → { credits, activationPriceKrw, activationGrantKrw, rechargePacksKrw }
+//         → { credits, activationPriceKrw, activationGrantCredits, rechargePacksKrw, creditsPerKrw }
 //
 //   POST  /api/claude-credits/:username
 //         body { kind: 'activation' | 'recharge', amountKrw, paymentId, payMethod, billingKey? }
 //         Verifies a ONE-TIME PortOne payment server-side (status PAID, KRW, amount
 //         matches) before granting credits — identical guarantee to live-time top-up.
-//         'activation' marks the plan active and grants the base credits; 'recharge'
-//         tops up an already-active wallet. A billingKey may be supplied to enable
-//         auto-recharge in the same step.
+//         The member pays in ₩; the wallet is credited in CREDITS at CREDITS_PER_KRW.
+//         'activation' marks the plan active and grants the base 3,000 credits;
+//         'recharge' tops up an already-active wallet with credits proportional to the
+//         ₩ pack paid. A billingKey may be supplied to enable auto-recharge in the
+//         same step.
 //
 //   PATCH /api/claude-credits/:username
 //         body { autoRecharge?, autoRechargeAmountKrw?, billingKey? }
@@ -75,8 +79,9 @@ const respond = (credits: ClaudeCredits, extra: Record<string, unknown> = {}) =>
     success: true,
     credits: publicCredits(credits),
     activationPriceKrw: ACTIVATION_PRICE_KRW,
-    activationGrantKrw: ACTIVATION_GRANT_KRW,
+    activationGrantCredits: ACTIVATION_GRANT_CREDITS,
     rechargePacksKrw: RECHARGE_PACKS_KRW,
+    creditsPerKrw: CREDITS_PER_KRW,
     marginMultiplier: MARGIN_MULTIPLIER,
     ...extra,
   })
@@ -124,9 +129,12 @@ export default async (req: Request, context: Context) => {
         return Response.json({ error: verified.error }, { status: 400 })
       }
 
-      // Payment verified — grant credits 1:1 with the amount paid.
-      const grantKrw = kind === 'activation' ? ACTIVATION_GRANT_KRW : amountKrw
-      credits.balanceKrw += grantKrw
+      // Payment verified — grant credits. Activation grants the fixed base; a
+      // recharge grants credits proportional to the ₩ paid. lifetimeChargedKrw
+      // tracks real money; the wallet balance tracks credits.
+      const grantCredits =
+        kind === 'activation' ? ACTIVATION_GRANT_CREDITS : creditsForKrw(amountKrw)
+      credits.balanceCredits += grantCredits
       credits.lifetimeChargedKrw += amountKrw
       if (kind === 'activation') {
         credits.planActive = true
@@ -137,12 +145,19 @@ export default async (req: Request, context: Context) => {
         credits.autoRecharge = true
       }
       credits.grants = [
-        { at: new Date().toISOString(), amountKrw: grantKrw, kind, paymentId, payMethod },
+        {
+          at: new Date().toISOString(),
+          amountKrw,
+          credits: grantCredits,
+          kind,
+          paymentId,
+          payMethod,
+        },
         ...credits.grants,
       ].slice(0, 100)
 
       await writeClaudeCredits(username, credits)
-      return respond(credits, { granted: { amountKrw: grantKrw, kind } })
+      return respond(credits, { granted: { credits: grantCredits, amountKrw, kind } })
     }
 
     if (req.method === 'PATCH') {
