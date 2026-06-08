@@ -289,11 +289,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   const handleApplicantStatus = async (applicantId: string, status: string) => {
     try {
-      await fetch('/api/campaign-applicants', {
+      const res = await fetch('/api/campaign-applicants', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: applicantId, status }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || '상태 변경에 실패했습니다.');
+        return;
+      }
+      if (status === 'accepted') {
+        alert('지원자를 수락했습니다. 타임라인이 생성되어 채팅으로 협업을 진행할 수 있습니다.');
+      }
       if (selectedCampaign) fetchApplicants(selectedCampaign.id);
     } catch {
       alert('상태 변경에 실패했습니다.');
@@ -480,7 +488,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     {app.status === 'accepted' && selectedCampaign && (
                       <button
                         onClick={() => {
-                          const proposalId = `campaign_${selectedCampaign.id}_${app.applicant_username}`;
+                          const proposalId = `campaign_${selectedCampaign.id}_${app.applicant_username.toLowerCase()}`;
                           window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
                         }}
                         className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 transition-colors ml-3 flex-shrink-0 flex items-center gap-1"
