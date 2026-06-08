@@ -13,7 +13,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
 
   // Top section tabs — mirrors the influencer's 협업 현황: the collaboration
-  // calendar, the list of collaboration deals (협업한 건들), and the settlement
+  // calendar, the list of collaboration deals (협업 내역), and the settlement
   // (정산금) summary, all in one place.
   const [topTab, setTopTab] = useState<'calendar' | 'collabs' | 'settlement'>('calendar');
 
@@ -53,6 +53,15 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfWeek = new Date(year, month, 1).getDay();
   const today = new Date().toISOString().split('T')[0];
+
+  // Keep the calendar status in sync with the dates: an accepted proposal whose
+  // end date has already passed (or which is already settled/completed) is shown
+  // as 완료됨 instead of lingering as 진행중. Dates are compared as YYYY-MM-DD.
+  const isCollabDone = (p: BusinessProposal): boolean => {
+    if (p.status === 'completed') return true;
+    const end = (p.end_date || '').split('T')[0];
+    return !!end && end < today;
+  };
 
   const getDateStr = (day: number) => {
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -113,15 +122,15 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   }, [proposals]);
 
   // Stats
-  const acceptedCount = proposals.filter(p => p.status === 'accepted').length;
-  const completedCount = proposals.filter(p => p.status === 'completed').length;
+  const acceptedCount = proposals.filter(p => !isCollabDone(p)).length;
+  const completedCount = proposals.filter(p => isCollabDone(p)).length;
   const totalInfluencers = new Set(proposals.map(p => p.influencer_username)).size;
-  const totalRevenue = proposals.filter(p => p.status === 'completed').reduce((sum, p) => sum + (p.fee || 0), 0);
+  const totalRevenue = proposals.filter(p => isCollabDone(p)).reduce((sum, p) => sum + (p.fee || 0), 0);
 
   // Upcoming deadlines
   const upcomingDeadlines = useMemo(() => {
     return proposals
-      .filter(p => p.status === 'accepted' && new Date(p.end_date) >= new Date())
+      .filter(p => !isCollabDone(p) && new Date(p.end_date) >= new Date())
       .map(p => ({ id: p.id, title: p.title, influencer: p.influencer_username, endDate: p.end_date, fee: p.fee }))
       .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
       .slice(0, 6);
@@ -167,7 +176,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
         <div>
           <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 현황</h2>
           <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">
-            협업 캘린더, 협업한 건들, 정산금을 한곳에서 관리합니다
+            협업 캘린더, 협업 내역, 정산금을 한곳에서 관리합니다
           </p>
         </div>
       </div>
@@ -176,7 +185,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
       <div className="flex gap-2 mb-5 md:mb-6 overflow-x-auto scrollbar-hide">
         {([
           { id: 'calendar', label: '협업 캘린더', icon: '📅' },
-          { id: 'collabs', label: '협업한 건들', icon: '🤝' },
+          { id: 'collabs', label: '협업 내역', icon: '🤝' },
           { id: 'settlement', label: '정산금', icon: '💰' },
         ] as const).map(t => (
           <button
@@ -265,7 +274,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                         .slice(0, 2)
                         .map(p => {
                           const { isFirst, isLast } = getEventPosition(p.start_date, p.end_date, dateStr);
-                          const colorClass = p.status === 'completed' ? 'bg-blue-500' : 'bg-green-500';
+                          const colorClass = isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500';
                           return (
                             <div
                               key={p.id}
@@ -302,14 +311,14 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                 <div className="space-y-3">
                   {selectedDateProposals.map(p => (
                     <div key={p.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                      <div className={`w-2 h-12 rounded-full shrink-0 ${p.status === 'completed' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                      <div className={`w-2 h-12 rounded-full shrink-0 ${isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500'}`} />
                       <div className="flex-1 min-w-0">
                         <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
                         <p className="text-xs font-bold text-slate-400">@{p.influencer_username} · {formatFee(p.fee)}</p>
                         <p className="text-[10px] font-bold text-slate-300 mt-0.5">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</p>
                       </div>
-                      <span className={`text-xs font-black shrink-0 ${p.status === 'completed' ? 'text-blue-500' : 'text-green-500'}`}>
-                        {p.status === 'completed' ? '완료' : '진행중'}
+                      <span className={`text-xs font-black shrink-0 ${isCollabDone(p) ? 'text-blue-500' : 'text-green-500'}`}>
+                        {isCollabDone(p) ? '완료' : '진행중'}
                       </span>
                     </div>
                   ))}
@@ -348,9 +357,9 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                             <p className="text-slate-400 text-[10px] font-bold">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</p>
                           </div>
                           <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black ${
-                            p.status === 'completed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                            isCollabDone(p) ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                           }`}>
-                            {p.status === 'completed' ? '완료' : '진행중'}
+                            {isCollabDone(p) ? '완료' : '진행중'}
                           </span>
                         </div>
                       ))}
@@ -476,15 +485,15 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                   .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
                   .map(p => (
                     <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all">
-                      <div className={`w-2 h-10 rounded-full shrink-0 ${p.status === 'completed' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                      <div className={`w-2 h-10 rounded-full shrink-0 ${isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500'}`} />
                       <div className="flex-1 min-w-0">
                         <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
                         <p className="text-xs font-bold text-slate-400">
                           @{p.influencer_username} · {formatDate(p.start_date)} ~ {formatDate(p.end_date)} · {formatFee(p.fee)}
                         </p>
                       </div>
-                      <span className={`text-xs font-black shrink-0 ${p.status === 'completed' ? 'text-blue-500' : 'text-green-500'}`}>
-                        {p.status === 'completed' ? '완료' : '진행중'}
+                      <span className={`text-xs font-black shrink-0 ${isCollabDone(p) ? 'text-blue-500' : 'text-green-500'}`}>
+                        {isCollabDone(p) ? '완료' : '진행중'}
                       </span>
                     </div>
                   ))}
