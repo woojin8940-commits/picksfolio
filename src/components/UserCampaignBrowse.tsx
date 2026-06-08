@@ -453,7 +453,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     </div>
                     <button
                       onClick={() => {
-                        const proposalId = `campaign_${selectedCampaign.id}_${userName}`;
+                        const proposalId = `campaign_${selectedCampaign.id}_${userName.toLowerCase()}`;
                         window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
                       }}
                       className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"

@@ -80,7 +80,7 @@ export default async (req: Request) => {
                 authorType: "business",
                 authorName: companyName || businessUsername,
                 authorUsername: businessUsername,
-                content: `캠페인 "${campaignTitle}" 협업이 시작되었습니다. 메시지를 보내 소통을 시작해보세요!`,
+                content: `🎉 지원하신 "${campaignTitle}" 캠페인에 선정되셨습니다! 지금부터 ${companyName || businessUsername}와(과) 이곳에서 메시지를 주고받으며 협업을 진행할 수 있습니다.`,
                 createdAt: nowISO,
                 readBy: [businessUsername],
               },
@@ -233,31 +233,6 @@ export default async (req: Request) => {
           }
         } catch (stlErr) {
           console.error("[campaign-applicants] Failed to auto-create settlement:", stlErr);
-        }
-
-        // 4) Send alimtalk notification to the accepted creator
-        try {
-          const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-          const templateId = Netlify.env.get("SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID") || "";
-          const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
-
-          await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              username: creatorUsername,
-              message: `[픽스폴리오] 캠페인 지원 수락\n\n${companyName}의 "${campaignTitle}" 캠페인 지원이 수락되었습니다!\n\n아래 링크에서 타임라인을 확인하세요.\n${magicLink}`,
-              templateId,
-              variables: {
-                "#{고객명}": creatorUsername,
-                "#{업체명}": companyName,
-                "#{프로젝트명}": campaignTitle,
-                "#{링크연결}": magicLink,
-              },
-            }),
-          });
-        } catch (notifErr) {
-          console.error("[campaign-applicants] Failed to send acceptance alimtalk:", notifErr);
         }
       }
 
