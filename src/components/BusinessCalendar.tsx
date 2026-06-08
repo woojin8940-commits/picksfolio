@@ -33,7 +33,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   // deals (커머스/광고/기타), or the settlement (정산금) summary.
   const [topTab, setTopTab] = useState<'calendar' | 'collabs' | 'settlement'>('calendar');
   const [collabFilter, setCollabFilter] = useState<'전체' | '커머스' | '광고' | '기타'>('전체');
-  // Period filter for the 협업한 건들 / 정산금 views: a quick month/year preset
+  // Period filter for the 협업 내역 / 정산금 views: a quick month/year preset
   // or a custom start~end date range. Empty range means "전체 기간".
   const [periodPreset, setPeriodPreset] = useState<'all' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'>('all');
   const [rangeStart, setRangeStart] = useState('');
@@ -283,6 +283,36 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     }
   };
 
+  const getCollabStatusTextColor = (status: string) => {
+    switch (status) {
+      case 'scheduled': return 'text-amber-500';
+      case 'in_progress': return 'text-orange-500';
+      case 'completed': return 'text-teal-500';
+      case 'cancelled': return 'text-slate-400';
+      default: return 'text-amber-500';
+    }
+  };
+
+  // Keep the displayed status in sync with the calendar. A 예정/진행중 record whose
+  // work window has already ended (or whose settlement is done) is shown as 완료됨,
+  // so a deal whose date has passed no longer lingers as "진행중". Explicit
+  // 'completed'/'cancelled' records are left untouched. Dates are YYYY-MM-DD, so
+  // plain string comparison is correct.
+  const effectiveCollabStatus = (c: CollabRecord): CollabRecord['status'] => {
+    if (c.status === 'completed' || c.status === 'cancelled') return c.status;
+    const end = c.end_date || c.date;
+    if (end && end < today) return 'completed';
+    return c.status;
+  };
+
+  // An accepted business proposal whose end date has passed is treated as
+  // 완료됨 in the calendar, mirroring the collab-record behaviour above.
+  const isProposalDone = (p: BusinessProposal): boolean => {
+    if (p.status === 'completed') return true;
+    const end = (p.end_date || '').split('T')[0];
+    return !!end && end < today;
+  };
+
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case '광고': return 'bg-pink-100 text-pink-700';
@@ -293,10 +323,10 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   // Stats
   const totalCollabs = collabRecords.length;
-  const completedCollabs = collabRecords.filter(c => c.status === 'completed').length;
-  const inProgressCollabs = collabRecords.filter(c => c.status === 'in_progress').length;
-  const scheduledCollabs = collabRecords.filter(c => c.status === 'scheduled').length;
-  const totalRevenue = collabRecords.filter(c => c.status === 'completed').reduce((sum, c) => sum + c.fee, 0);
+  const completedCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'completed').length;
+  const inProgressCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'in_progress').length;
+  const scheduledCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'scheduled').length;
+  const totalRevenue = collabRecords.filter(c => effectiveCollabStatus(c) === 'completed').reduce((sum, c) => sum + c.fee, 0);
 
   // Upcoming deadlines (proposals + collabs combined)
   const upcomingDeadlines = useMemo(() => {
@@ -304,7 +334,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       .filter(p => p.status === 'accepted' && new Date(p.end_date) >= new Date())
       .map(p => ({ id: p.id, title: p.title, company: p.company_name, endDate: p.end_date, type: 'proposal' as const }));
     const collabItems = collabRecords
-      .filter(c => (c.status === 'scheduled' || c.status === 'in_progress') && new Date(c.end_date || c.date) >= new Date())
+      .filter(c => (effectiveCollabStatus(c) === 'scheduled' || effectiveCollabStatus(c) === 'in_progress') && new Date(c.end_date || c.date) >= new Date())
       .map(c => ({ id: c.id, title: c.title, company: c.company_name, endDate: c.end_date || c.date, type: 'collab' as const }));
     return [...proposalItems, ...collabItems]
       .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
@@ -362,7 +392,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return `${rangeStart || '처음'} ~ ${rangeEnd || '오늘'}`;
   }, [rangeStart, rangeEnd]);
 
-  // Collab deals filtered by category AND period for the 협업한 건들 tab.
+  // Collab deals filtered by category AND period for the 협업 내역 tab.
   const filteredCollabs = useMemo(() => {
     return allCollabsSorted
       .filter(c => collabFilter === '전체' || c.category === collabFilter)
@@ -377,7 +407,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   );
   const periodTotalFee = useMemo(() => periodCollabs.reduce((sum, c) => sum + c.fee, 0), [periodCollabs]);
   const periodCompletedFee = useMemo(
-    () => periodCollabs.filter(c => c.status === 'completed').reduce((sum, c) => sum + c.fee, 0),
+    () => periodCollabs.filter(c => effectiveCollabStatus(c) === 'completed').reduce((sum, c) => sum + c.fee, 0),
     [periodCollabs]
   );
 
@@ -393,7 +423,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         <div>
           <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 현황</h2>
           <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">
-            협업 캘린더, 협업한 건들(커머스·광고), 정산금을 한곳에서 관리합니다
+            협업 캘린더, 협업 내역(커머스·광고), 정산금을 한곳에서 관리합니다
           </p>
         </div>
         {topTab !== 'settlement' && (
@@ -413,7 +443,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       <div className="flex gap-2 mb-5 md:mb-6 overflow-x-auto scrollbar-hide">
         {([
           { id: 'calendar', label: '협업 캘린더', icon: '📅' },
-          { id: 'collabs', label: '협업한 건들', icon: '🤝' },
+          { id: 'collabs', label: '협업 내역', icon: '🤝' },
           { id: 'settlement', label: '정산금', icon: '💰' },
         ] as const).map(t => (
           <button
@@ -552,7 +582,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                           return (
                             <div
                               key={ev.id}
-                              className={`${getProposalStatusColor(ev.status)} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
+                              className={`${getProposalStatusColor(isProposalDone(ev) ? 'completed' : ev.status)} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
                                 isFirst && isLast ? 'rounded px-1.5 mx-0' :
                                 isFirst ? 'rounded-l pl-1.5 -mr-[13px] md:-mr-[13px]' :
                                 isLast ? 'rounded-r pr-1.5 -ml-[13px] md:-ml-[13px]' :
@@ -570,7 +600,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         return (
                           <div
                             key={ev.id}
-                            className={`${getCollabStatusColor(ev.status)} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
+                            className={`${getCollabStatusColor(effectiveCollabStatus(ev))} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
                               isFirst && isLast ? 'rounded px-1.5 mx-0' :
                               isFirst ? 'rounded-l pl-1.5 -mr-[13px] md:-mr-[13px]' :
                               isLast ? 'rounded-r pr-1.5 -ml-[13px] md:-ml-[13px]' :
@@ -632,17 +662,17 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">비즈니스 제안</p>}
                   {selectedProposalEvents.map(ev => (
                     <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                      <div className={`w-2 h-12 rounded-full shrink-0 ${getProposalStatusColor(ev.status)}`} />
+                      <div className={`w-2 h-12 rounded-full shrink-0 ${getProposalStatusColor(isProposalDone(ev) ? 'completed' : ev.status)}`} />
                       <div className="flex-1 min-w-0">
                         <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
                         <p className="text-xs font-bold text-slate-400">{ev.company_name} · {formatFee(ev.fee)}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className={`text-xs font-black ${ev.status === 'completed' ? 'text-blue-500' : 'text-green-500'}`}>
-                          {ev.status === 'completed' ? '완료' : '진행중'}
+                        <span className={`text-xs font-black ${isProposalDone(ev) ? 'text-blue-500' : 'text-green-500'}`}>
+                          {isProposalDone(ev) ? '완료' : '진행중'}
                         </span>
                       </div>
-                      {ev.status === 'accepted' && (
+                      {ev.status === 'accepted' && !isProposalDone(ev) && (
                         <button
                           onClick={() => handleComplete(ev.id)}
                           disabled={updatingId === ev.id}
@@ -661,7 +691,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">협업 기록</p>}
                   {selectedCollabEvents.map(ev => (
                     <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                      <div className={`w-2 h-12 rounded-full shrink-0 ${getCollabStatusColor(ev.status)}`} />
+                      <div className={`w-2 h-12 rounded-full shrink-0 ${getCollabStatusColor(effectiveCollabStatus(ev))}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
                           <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
@@ -676,13 +706,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         {ev.memo && <p className="text-xs text-slate-400 mt-1 truncate">{ev.memo}</p>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-xs font-black ${
-                          ev.status === 'completed' ? 'text-teal-500' :
-                          ev.status === 'in_progress' ? 'text-orange-500' :
-                          ev.status === 'cancelled' ? 'text-slate-400' :
-                          'text-amber-500'
-                        }`}>
-                          {getCollabStatusLabel(ev.status)}
+                        <span className={`text-xs font-black ${getCollabStatusTextColor(effectiveCollabStatus(ev))}`}>
+                          {getCollabStatusLabel(effectiveCollabStatus(ev))}
                         </span>
                         <div className="flex gap-1">
                           <button
@@ -740,7 +765,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       setSelectedDate(c.date);
                     }}
                   >
-                    <div className={`w-2 h-8 rounded-full shrink-0 ${getCollabStatusColor(c.status)}`} />
+                    <div className={`w-2 h-8 rounded-full shrink-0 ${getCollabStatusColor(effectiveCollabStatus(c))}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-black text-slate-900 text-sm truncate">{c.title}</p>
@@ -752,15 +777,10 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         {formatDate(c.date)}{c.end_date ? ` ~ ${formatDate(c.end_date)}` : ''} · {c.company_name || '미지정'} · {formatFee(c.fee)}
                       </p>
                     </div>
-                    <span className={`text-xs font-black shrink-0 ${
-                      c.status === 'completed' ? 'text-teal-500' :
-                      c.status === 'in_progress' ? 'text-orange-500' :
-                      c.status === 'cancelled' ? 'text-slate-400' :
-                      'text-amber-500'
-                    }`}>
-                      {getCollabStatusLabel(c.status)}
+                    <span className={`text-xs font-black shrink-0 ${getCollabStatusTextColor(effectiveCollabStatus(c))}`}>
+                      {getCollabStatusLabel(effectiveCollabStatus(c))}
                     </span>
-                    {c.status !== 'completed' && c.status !== 'cancelled' && (
+                    {effectiveCollabStatus(c) !== 'completed' && effectiveCollabStatus(c) !== 'cancelled' && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -790,11 +810,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 <p className="text-[10px] md:text-xs font-bold text-amber-500">예정</p>
               </div>
               <div className="bg-orange-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-orange-600">{inProgressCollabs + acceptedProposals.filter(p => p.status === 'accepted').length}</p>
+                <p className="text-xl md:text-2xl font-black text-orange-600">{inProgressCollabs + acceptedProposals.filter(p => !isProposalDone(p)).length}</p>
                 <p className="text-[10px] md:text-xs font-bold text-orange-500">진행중</p>
               </div>
               <div className="bg-teal-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-teal-600">{completedCollabs + acceptedProposals.filter(p => p.status === 'completed').length}</p>
+                <p className="text-xl md:text-2xl font-black text-teal-600">{completedCollabs + acceptedProposals.filter(p => isProposalDone(p)).length}</p>
                 <p className="text-[10px] md:text-xs font-bold text-teal-500">완료됨</p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center">
@@ -1005,7 +1025,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     key={c.id}
                     className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all group"
                   >
-                    <div className={`w-2 h-10 rounded-full shrink-0 ${getCollabStatusColor(c.status)}`} />
+                    <div className={`w-2 h-10 rounded-full shrink-0 ${getCollabStatusColor(effectiveCollabStatus(c))}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-black text-slate-900 text-sm truncate">{c.title}</p>
@@ -1018,13 +1038,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       </p>
                       {c.memo && <p className="text-xs text-slate-400 mt-0.5 truncate">{c.memo}</p>}
                     </div>
-                    <span className={`text-xs font-black shrink-0 ${
-                      c.status === 'completed' ? 'text-teal-500' :
-                      c.status === 'in_progress' ? 'text-orange-500' :
-                      c.status === 'cancelled' ? 'text-slate-400' :
-                      'text-amber-500'
-                    }`}>
-                      {getCollabStatusLabel(c.status)}
+                    <span className={`text-xs font-black shrink-0 ${getCollabStatusTextColor(effectiveCollabStatus(c))}`}>
+                      {getCollabStatusLabel(effectiveCollabStatus(c))}
                     </span>
                     <div className="flex gap-1 shrink-0">
                       <button
