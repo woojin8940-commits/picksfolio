@@ -33,6 +33,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   // deals (커머스/광고/기타), or the settlement (정산금) summary.
   const [topTab, setTopTab] = useState<'calendar' | 'collabs' | 'settlement'>('calendar');
   const [collabFilter, setCollabFilter] = useState<'전체' | '커머스' | '광고' | '기타'>('전체');
+  // Period filter for the 협업한 건들 / 정산금 views: a quick month/year preset
+  // or a custom start~end date range. Empty range means "전체 기간".
+  const [periodPreset, setPeriodPreset] = useState<'all' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'>('all');
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
 
   // Form state
   const [formData, setFormData] = useState({
@@ -318,11 +323,63 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return [...collabRecords].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [collabRecords]);
 
-  // Collab deals filtered by category for the 협업한 건들 tab.
+  // --- Period (월별 / 기간 지정) filtering ---------------------------------
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const applyPreset = (preset: 'all' | 'thisMonth' | 'lastMonth' | 'thisYear') => {
+    setPeriodPreset(preset);
+    const now = new Date();
+    if (preset === 'all') {
+      setRangeStart('');
+      setRangeEnd('');
+    } else if (preset === 'thisMonth') {
+      setRangeStart(ymd(new Date(now.getFullYear(), now.getMonth(), 1)));
+      setRangeEnd(ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
+    } else if (preset === 'lastMonth') {
+      setRangeStart(ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
+      setRangeEnd(ymd(new Date(now.getFullYear(), now.getMonth(), 0)));
+    } else if (preset === 'thisYear') {
+      setRangeStart(ymd(new Date(now.getFullYear(), 0, 1)));
+      setRangeEnd(ymd(new Date(now.getFullYear(), 11, 31)));
+    }
+  };
+
+  // A collab overlaps the selected period if its [date, end_date] window
+  // intersects [rangeStart, rangeEnd]. Empty range = include everything.
+  // YYYY-MM-DD strings compare lexicographically, so plain string comparison works.
+  const inSelectedPeriod = (startStr: string, endStr?: string) => {
+    if (!rangeStart && !rangeEnd) return true;
+    const s = startStr;
+    const e = endStr || startStr;
+    if (rangeStart && e < rangeStart) return false;
+    if (rangeEnd && s > rangeEnd) return false;
+    return true;
+  };
+
+  const periodLabel = useMemo(() => {
+    if (!rangeStart && !rangeEnd) return '전체 기간';
+    return `${rangeStart || '처음'} ~ ${rangeEnd || '오늘'}`;
+  }, [rangeStart, rangeEnd]);
+
+  // Collab deals filtered by category AND period for the 협업한 건들 tab.
   const filteredCollabs = useMemo(() => {
-    if (collabFilter === '전체') return allCollabsSorted;
-    return allCollabsSorted.filter(c => c.category === collabFilter);
-  }, [allCollabsSorted, collabFilter]);
+    return allCollabsSorted
+      .filter(c => collabFilter === '전체' || c.category === collabFilter)
+      .filter(c => inSelectedPeriod(c.date, c.end_date));
+  }, [allCollabsSorted, collabFilter, rangeStart, rangeEnd]);
+
+  // Totals scoped to the current period filter (ignores the category filter so
+  // the summary always reflects the whole selected period).
+  const periodCollabs = useMemo(
+    () => allCollabsSorted.filter(c => inSelectedPeriod(c.date, c.end_date)),
+    [allCollabsSorted, rangeStart, rangeEnd]
+  );
+  const periodTotalFee = useMemo(() => periodCollabs.reduce((sum, c) => sum + c.fee, 0), [periodCollabs]);
+  const periodCompletedFee = useMemo(
+    () => periodCollabs.filter(c => c.status === 'completed').reduce((sum, c) => sum + c.fee, 0),
+    [periodCollabs]
+  );
 
   const commerceCount = useMemo(() => collabRecords.filter(c => c.category === '커머스').length, [collabRecords]);
   const adCount = useMemo(() => collabRecords.filter(c => c.category === '광고').length, [collabRecords]);
@@ -864,6 +921,70 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             ))}
           </div>
 
+          {/* Period filter: 월별 / 기간 지정 */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest">기간별 보기</p>
+              <p className="text-[11px] font-bold text-blue-600">{periodLabel}</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {([
+                { id: 'all', label: '전체' },
+                { id: 'thisMonth', label: '이번 달' },
+                { id: 'lastMonth', label: '지난 달' },
+                { id: 'thisYear', label: '올해' },
+              ] as const).map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => applyPreset(p.id)}
+                  className={`px-3.5 py-2 text-xs font-black rounded-lg transition-all ${
+                    periodPreset === p.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="date"
+                value={rangeStart}
+                onChange={e => { setRangeStart(e.target.value); setPeriodPreset('custom'); }}
+                className="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
+              />
+              <span className="text-slate-300 font-bold text-xs">~</span>
+              <input
+                type="date"
+                value={rangeEnd}
+                onChange={e => { setRangeEnd(e.target.value); setPeriodPreset('custom'); }}
+                className="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
+              />
+              {(rangeStart || rangeEnd) && (
+                <button
+                  onClick={() => applyPreset('all')}
+                  className="px-3 py-2 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 transition-all"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+            {/* Period summary */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="bg-slate-50 rounded-xl p-3 text-center">
+                <p className="text-base md:text-lg font-black text-slate-900">{periodCollabs.length}<span className="text-xs font-bold">건</span></p>
+                <p className="text-[10px] font-bold text-slate-400">기간 내 협업</p>
+              </div>
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <p className="text-sm md:text-lg font-black text-blue-700">{formatFee(periodTotalFee)}</p>
+                <p className="text-[10px] font-bold text-blue-400">총 금액</p>
+              </div>
+              <div className="bg-teal-50 rounded-xl p-3 text-center">
+                <p className="text-sm md:text-lg font-black text-teal-700">{formatFee(periodCompletedFee)}</p>
+                <p className="text-[10px] font-bold text-teal-400">완료 정산금</p>
+              </div>
+            </div>
+          </div>
+
           {/* Collab list */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-8">
             {loading ? (
@@ -871,7 +992,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             ) : filteredCollabs.length === 0 ? (
               <div className="text-center py-10">
                 <p className="text-slate-400 text-sm font-bold">
-                  {collabFilter === '전체' ? '아직 기록된 협업이 없습니다.' : `${collabFilter} 협업 기록이 없습니다.`}
+                  {rangeStart || rangeEnd
+                    ? '선택한 기간에 해당하는 협업 기록이 없습니다.'
+                    : collabFilter === '전체' ? '아직 기록된 협업이 없습니다.' : `${collabFilter} 협업 기록이 없습니다.`}
                 </p>
                 <p className="text-slate-300 text-xs mt-1">상단의 "협업 기록 추가" 버튼으로 기록을 남겨보세요.</p>
               </div>

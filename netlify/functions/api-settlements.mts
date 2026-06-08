@@ -76,33 +76,49 @@ export default async (req: Request) => {
     return Response.json({ success: true, settlement });
   }
 
-  if (req.method === "PATCH" && role === "business" && settlementId) {
+  // Both the business AND the influencer can update a settlement. The business
+  // may edit any field; the influencer may only change the status (e.g. mark a
+  // settlement as completed once they've confirmed payment). Whichever side
+  // makes the change is mirrored to the counterpart's record so both dashboards
+  // stay in sync.
+  if (req.method === "PATCH" && settlementId && (role === "business" || role === "influencer")) {
     const body = await req.json();
     const now = new Date().toISOString();
 
-    const bizRecords = await getRecords(store, bizKey(username));
-    const idx = bizRecords.findIndex((s: any) => s.id === settlementId);
+    // Influencers are limited to status changes only — they cannot rewrite the
+    // amount, schedule, or other business-owned fields.
+    const patch: any = role === "business"
+      ? body
+      : (body.status ? { status: body.status } : {});
+
+    const primaryKey = role === "business" ? bizKey(username) : infKey(username);
+    const primaryRecords = await getRecords(store, primaryKey);
+    const idx = primaryRecords.findIndex((s: any) => s.id === settlementId);
     if (idx === -1) {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
 
-    const updated = { ...bizRecords[idx], ...body, updated_at: now };
-    if (body.status === "completed") {
+    const updated = { ...primaryRecords[idx], ...patch, updated_at: now };
+    if (patch.status === "completed" && !updated.completed_at) {
       updated.completed_at = now;
     }
-    bizRecords[idx] = updated;
-    await saveRecords(store, bizKey(username), bizRecords);
+    primaryRecords[idx] = updated;
+    await saveRecords(store, primaryKey, primaryRecords);
 
-    const influencerUsername = (updated.influencer_username || "").toLowerCase();
-    if (influencerUsername) {
-      const infRecords = await getRecords(store, infKey(influencerUsername));
-      const infIdx = infRecords.findIndex((s: any) => s.id === settlementId);
-      if (infIdx !== -1) {
-        infRecords[infIdx] = updated;
+    // Mirror the change to the counterpart's record.
+    const counterpartUsername = (
+      role === "business" ? updated.influencer_username : updated.business_username
+    ) ? String(role === "business" ? updated.influencer_username : updated.business_username).toLowerCase() : "";
+    const counterpartKey = role === "business" ? infKey(counterpartUsername) : bizKey(counterpartUsername);
+    if (counterpartUsername) {
+      const counterpartRecords = await getRecords(store, counterpartKey);
+      const cIdx = counterpartRecords.findIndex((s: any) => s.id === settlementId);
+      if (cIdx !== -1) {
+        counterpartRecords[cIdx] = updated;
       } else {
-        infRecords.push(updated);
+        counterpartRecords.push(updated);
       }
-      await saveRecords(store, infKey(influencerUsername), infRecords);
+      await saveRecords(store, counterpartKey, counterpartRecords);
     }
 
     return Response.json({ success: true, settlement: updated });

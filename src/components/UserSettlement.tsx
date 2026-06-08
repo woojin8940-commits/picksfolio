@@ -12,6 +12,35 @@ interface UserSettlementProps {
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  // Let the influencer confirm a settlement themselves. Previously only the
+  // business account could press "정산 완료"; now either side can finalize it and
+  // the change is mirrored to the business via the shared settlements API.
+  const handleComplete = async (settlementId: string) => {
+    if (!confirm('정산을 완료 처리하시겠습니까? 비즈니스 계정에도 완료로 표시됩니다.')) return;
+    setUpdatingId(settlementId);
+    try {
+      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettlements(prev => prev.map(s =>
+          s.id === settlementId
+            ? (data.settlement || { ...s, status: 'completed', completed_at: new Date().toISOString() })
+            : s
+        ));
+      } else {
+        alert('정산 완료 처리에 실패했습니다.');
+      }
+    } catch {
+      alert('정산 완료 처리에 실패했습니다.');
+    }
+    setUpdatingId(null);
+  };
 
   const fetchSettlements = async () => {
     setLoading(true);
@@ -144,6 +173,13 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                     {s.memo && (
                       <p className="text-[11px] text-slate-500 font-medium mt-2 pl-1">{s.memo}</p>
                     )}
+                    <button
+                      onClick={() => handleComplete(s.id)}
+                      disabled={updatingId === s.id}
+                      className="w-full mt-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
+                    >
+                      {updatingId === s.id ? '처리 중...' : '정산 완료 처리'}
+                    </button>
                   </div>
                 ))}
               </div>
