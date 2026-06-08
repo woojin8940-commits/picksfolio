@@ -4,9 +4,12 @@ import { formatKRW } from '../utils/formatters';
 
 interface UserSettlementProps {
   userName: string;
+  // When rendered inside the 협업 현황 정산금 tab, drop the standalone page padding
+  // and the big page title so it sits cleanly within the tab.
+  embedded?: boolean;
 }
 
-const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
+const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -58,11 +61,13 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName }) => {
   };
 
   return (
-    <div className="p-3 md:p-14 w-full animate-in fade-in duration-500">
-      <div className="mb-6 md:mb-10">
-        <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 현황</h2>
-        <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">협업 제안이 수락되면 정산 일정이 자동으로 추가됩니다</p>
-      </div>
+    <div className={embedded ? 'w-full animate-in fade-in duration-500' : 'p-3 md:p-14 w-full animate-in fade-in duration-500'}>
+      {!embedded && (
+        <div className="mb-6 md:mb-10">
+          <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 현황</h2>
+          <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">협업 제안이 수락되면 정산 일정이 자동으로 추가됩니다</p>
+        </div>
+      )}
 
       {/* Stats Summary */}
       <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8">

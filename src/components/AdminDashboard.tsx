@@ -23,7 +23,6 @@ interface AdminDashboardProps {
   onNavigateCalendar: () => void;
   onNavigateMembership: () => void;
   onNavigateOpenSchedule: () => void;
-  onNavigateSettlement: () => void;
   onNavigateTimeline: () => void;
   onNavigateCampaigns: () => void;
   children?: React.ReactNode;
@@ -42,7 +41,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateCalendar,
   onNavigateMembership,
   onNavigateOpenSchedule,
-  onNavigateSettlement,
   onNavigateTimeline,
   onNavigateCampaigns,
   children
@@ -266,7 +264,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           />
           <NavItem
             icon="📅"
-            label="협업 캘린더"
+            label="협업 현황"
             active={currentSubView === 'calendar'}
             onClick={onNavigateCalendar}
           />
@@ -275,12 +273,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             label="오픈 일정"
             active={currentSubView === 'open-schedule'}
             onClick={onNavigateOpenSchedule}
-          />
-          <NavItem
-            icon="💰"
-            label="정산 현황"
-            active={currentSubView === 'settlement'}
-            onClick={onNavigateSettlement}
           />
         </nav>
 
@@ -362,9 +354,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
-              <NavItem icon="📅" label="협업 캘린더" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💰" label="정산 현황" active={currentSubView === 'settlement'} onClick={() => { onNavigateSettlement(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
               <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
@@ -493,7 +484,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <QuickCard icon="💼" label="포트폴리오" onClick={onNavigatePortfolio} />
               <QuickCard icon="🎥" label="라이브 커머스" onClick={onNavigateLive} />
               <QuickCard icon="📨" label="비즈니스 수신함" onClick={onNavigateBusiness} />
-              <QuickCard icon="📅" label="협업 캘린더" onClick={onNavigateCalendar} />
+              <QuickCard icon="📅" label="협업 현황" onClick={onNavigateCalendar} />
             </div>
 
             {/* Data Overview */}

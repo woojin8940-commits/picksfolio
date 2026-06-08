@@ -1367,7 +1367,6 @@ const App: React.FC = () => {
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
         onNavigateOpenSchedule={() => setSubView('open-schedule')}
-        onNavigateSettlement={() => setSubView('settlement')}
         onNavigateTimeline={() => setSubView('timeline')}
         onNavigateMembership={() => setSubView('membership')}
         onNavigateCampaigns={() => setSubView('campaigns')}
