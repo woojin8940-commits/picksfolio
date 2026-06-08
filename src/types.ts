@@ -182,8 +182,25 @@ export interface SellerVerification {
   membership_started_at?: string | null;
   billing_key?: string | null;
   billing_key_issued_at?: string | null;
+  // Recurring (anniversary) billing state for the paid memberships. The Claude
+  // plan is billed separately and does not use these fields.
+  membership_amount_krw?: number | null;
+  last_billing_at?: string | null;
+  next_billing_date?: string | null;
+  billing_failures?: number;
+  billing_history?: MembershipBillingHistoryEntry[];
   verified_at?: string;
   updated_at?: string;
+}
+
+export interface MembershipBillingHistoryEntry {
+  at: string;
+  tier: 'standard' | 'standard_ai' | 'commerce';
+  amountKrw: number;
+  kind: 'initial' | 'recurring';
+  success: boolean;
+  paymentId?: string;
+  error?: string;
 }
 
 export type SettlementStatus = 'scheduled' | 'pending' | 'completed';
