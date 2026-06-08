@@ -1,15 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
+import BusinessSettlement from './BusinessSettlement';
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
   companyName: string;
 }
 
-const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername }) => {
+const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername, companyName }) => {
   const cleanUsername = businessUsername.replace(/^biz\//, '');
   const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
+
+  // Top section tabs — mirrors the influencer's 협업 현황: the collaboration
+  // calendar, the list of collaboration deals (협업한 건들), and the settlement
+  // (정산금) summary, all in one place.
+  const [topTab, setTopTab] = useState<'calendar' | 'collabs' | 'settlement'>('calendar');
 
   const cachedProposals = (() => {
     try {
@@ -159,13 +165,34 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
       <div className="mb-8 md:mb-12 flex flex-col md:flex-row md:items-end gap-4 justify-between">
         <div>
-          <h2 className="text-2xl md:text-4xl font-black text-slate-900">인플루언서 캘린더</h2>
+          <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 현황</h2>
           <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">
-            수락된 인플루언서들의 협업 일정을 한눈에 확인합니다
+            협업 캘린더, 협업한 건들, 정산금을 한곳에서 관리합니다
           </p>
         </div>
       </div>
 
+      {/* Top section tabs */}
+      <div className="flex gap-2 mb-5 md:mb-6 overflow-x-auto scrollbar-hide">
+        {([
+          { id: 'calendar', label: '협업 캘린더', icon: '📅' },
+          { id: 'collabs', label: '협업한 건들', icon: '🤝' },
+          { id: 'settlement', label: '정산금', icon: '💰' },
+        ] as const).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTopTab(t.id)}
+            className={`px-4 md:px-5 py-2.5 text-sm font-black rounded-xl transition-all shrink-0 flex items-center gap-1.5 ${
+              topTab === t.id ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            <span>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {topTab === 'calendar' && (
       <div className="flex flex-col xl:flex-row gap-6">
         {/* Calendar Grid */}
         <div className="flex-1">
@@ -411,6 +438,65 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
           </div>
         </div>
       </div>
+      )}
+
+      {topTab === 'collabs' && (
+        <div className="space-y-5">
+          {/* Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-green-50 rounded-2xl p-4 text-center">
+              <p className="text-xl md:text-2xl font-black text-green-600">{acceptedCount}</p>
+              <p className="text-[10px] md:text-xs font-bold text-green-500">진행중</p>
+            </div>
+            <div className="bg-blue-50 rounded-2xl p-4 text-center">
+              <p className="text-xl md:text-2xl font-black text-blue-600">{completedCount}</p>
+              <p className="text-[10px] md:text-xs font-bold text-blue-500">완료됨</p>
+            </div>
+            <div className="bg-indigo-50 rounded-2xl p-4 text-center">
+              <p className="text-xl md:text-2xl font-black text-indigo-600">{proposals.length}</p>
+              <p className="text-[10px] md:text-xs font-bold text-indigo-500">총 협업</p>
+            </div>
+            <div className="bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl p-4 text-center">
+              <p className="text-base md:text-xl font-black text-teal-700">{formatFee(totalRevenue)}</p>
+              <p className="text-[10px] md:text-xs font-bold text-teal-500">완료 수익</p>
+            </div>
+          </div>
+
+          {/* Collab list */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-8">
+            {proposals.length === 0 ? (
+              <div className="text-center py-10">
+                <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🤝</div>
+                <p className="text-slate-400 text-sm font-bold">아직 진행 중인 협업이 없습니다.</p>
+                <p className="text-slate-300 text-xs mt-1">인플루언서가 제안을 수락하면 여기에 협업 건들이 표시됩니다.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[...proposals]
+                  .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
+                  .map(p => (
+                    <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all">
+                      <div className={`w-2 h-10 rounded-full shrink-0 ${p.status === 'completed' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                        <p className="text-xs font-bold text-slate-400">
+                          @{p.influencer_username} · {formatDate(p.start_date)} ~ {formatDate(p.end_date)} · {formatFee(p.fee)}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-black shrink-0 ${p.status === 'completed' ? 'text-blue-500' : 'text-green-500'}`}>
+                        {p.status === 'completed' ? '완료' : '진행중'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {topTab === 'settlement' && (
+        <BusinessSettlement businessUsername={businessUsername} companyName={companyName} embedded />
+      )}
     </div>
   );
 };
