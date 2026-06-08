@@ -5,11 +5,14 @@ import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatt
 interface BusinessSettlementProps {
   businessUsername: string;
   companyName: string;
+  // When rendered inside the 협업 현황 정산금 tab, drop the standalone page padding
+  // and the big page title so it sits cleanly within the tab.
+  embedded?: boolean;
 }
 
 type EditingField = { id: string; field: 'amount' | 'date'; value: string } | null;
 
-const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsername, companyName }) => {
+const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsername, companyName, embedded = false }) => {
   const cleanBusinessUsername = businessUsername.replace(/^biz\//, '');
   const settlementsBaseUrl = `/api/settlements/${encodeURIComponent(cleanBusinessUsername)}`;
   const cacheKey = `picks_biz_settlements_${cleanBusinessUsername.toLowerCase()}`;
@@ -188,12 +191,16 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
   const inputClass = "w-full border border-slate-200 rounded-xl p-3 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500";
 
   return (
-    <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+    <div className={embedded ? 'w-full animate-in fade-in duration-500' : 'p-4 md:p-14 w-full animate-in fade-in duration-500'}>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 md:mb-10">
-        <div>
-          <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 관리</h2>
-          <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">인플루언서 정산 일정과 금액을 관리합니다</p>
-        </div>
+        {!embedded ? (
+          <div>
+            <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 관리</h2>
+            <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">인플루언서 정산 일정과 금액을 관리합니다</p>
+          </div>
+        ) : (
+          <div />
+        )}
         <button
           onClick={() => setShowCreateModal(true)}
           className="bg-blue-600 text-white px-5 py-3 rounded-xl font-black text-sm hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
