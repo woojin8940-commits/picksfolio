@@ -330,6 +330,28 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             + 새로운 포스트 & 링크 등록
           </button>
 
+          {/* AI Trend section — embedded directly on the home like the user
+              dashboard, so the business account sees the same AI capability. */}
+          <section className="mb-6 md:mb-12">
+            <Suspense fallback={<BizLazyFallback />}>
+              <AITrendAnalysis userName={businessUsername} embedded />
+            </Suspense>
+          </section>
+
+          {/* Collaboration Timeline CTA (AI 협업 도우미) — mirrors the user
+              dashboard's prominent 협업 entry point. */}
+          <button
+            onClick={() => setCurrentSubView('timeline')}
+            className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-12 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3 relative"
+          >
+            <span className="text-xl">💬</span>
+            협업 타임라인 열기
+            {timelineUnread > 0 && (
+              <span className="bg-white text-blue-600 text-[10px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full">{timelineUnread > 99 ? '99+' : timelineUnread}</span>
+            )}
+            <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+          </button>
+
           {/* Feature Cards (matching user dashboard) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-12">
             <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[360px] shadow-xl">
@@ -376,8 +398,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-12">
             <div className="bg-gradient-to-br from-amber-600 to-orange-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
-                <h3 className="text-sm md:text-2xl font-black mb-1">📅 인플루언서 캘린더</h3>
-                <p className="opacity-80 font-bold text-[9px] md:text-base">수락된 제안 일정을 캘린더로 관리하세요.</p>
+                <h3 className="text-sm md:text-2xl font-black mb-1">📅 협업 현황</h3>
+                <p className="opacity-80 font-bold text-[9px] md:text-base">수락된 제안 일정과 정산을 한곳에서 관리하세요.</p>
               </div>
               <button onClick={() => setCurrentSubView('calendar')} className="bg-white text-amber-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캘린더 보기</button>
             </div>
@@ -520,7 +542,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
-          <NavItem icon="📅" label="인플루언서 캘린더" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
+          <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
           <NavItem icon="💰" label="정산 관리" active={currentSubView === 'settlement'} onClick={() => setCurrentSubView('settlement')} />
         </nav>
@@ -548,7 +570,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
-          <MobileNavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
+          <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
           <MobileNavItem icon="💰" label="정산" active={currentSubView === 'settlement'} onClick={() => setCurrentSubView('settlement')} />
           <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
@@ -574,7 +596,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="보낸 제안" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
-              <NavItem icon="📅" label="캘린더" active={currentSubView === 'calendar'} onClick={() => { setCurrentSubView('calendar'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => { setCurrentSubView('calendar'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💰" label="정산 관리" active={currentSubView === 'settlement'} onClick={() => { setCurrentSubView('settlement'); setIsMobileMenuOpen(false); }} />
             </nav>

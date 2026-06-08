@@ -106,6 +106,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   // into the 스탠다드 AI 멤버십 (6,900) and 커머스 멤버십 (13,900) tiers only — the
   // plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(() => {
+    // Business (company) accounts always get the AI assistant — it is part of the
+    // business collaboration workspace, not gated behind the influencer AI
+    // membership. Regular accounts unlock it through their AI-enabled membership.
+    if (userType === 'business') return true;
     const cached = apiService.getCachedSellerVerification(normalizedUserName);
     if (!cached) return null;
     const plan = cached.membership_plan;
@@ -140,6 +144,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   }, [aiModel, claudeData, refreshClaudeCredits]);
 
   useEffect(() => {
+    // Business accounts have the AI assistant unconditionally; skip the
+    // influencer membership lookup for them.
+    if (userType === 'business') {
+      setAiEnabled(true);
+      return;
+    }
     let cancelled = false;
     apiService.getSellerVerification(normalizedUserName).then((data) => {
       if (cancelled) return;
@@ -150,7 +160,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       );
     });
     return () => { cancelled = true; };
-  }, [normalizedUserName]);
+  }, [normalizedUserName, userType]);
 
   // While a conversation (or the AI chat) is open on mobile, hide the app's
   // bottom navigation bar so the message composer can sit flush at the very

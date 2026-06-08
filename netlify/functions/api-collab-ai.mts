@@ -31,15 +31,14 @@ import {
 //
 // Two guard rails are enforced server-side so the feature stays safe and the
 // operator's AI bill stays predictable:
-//   1. Membership gate — only members on an AI-enabled plan may call the AI.
-//      AI is bundled into the 스탠다드 AI 멤버십 (6,900) and the 커머스 멤버십
-//      (13,900) tiers; the plain 스탠다드 (4,900) tier does NOT include it. The
-//      check is keyed on the bare username (the `biz/` prefix is stripped
-//      first), so business accounts and regular influencer accounts unlock it
-//      through the exact same membership record. There is no separate business
-//      membership.
+//   1. Membership gate — for influencer accounts, only members on an AI-enabled
+//      plan may call the AI. AI is bundled into the 스탠다드 AI 멤버십 (6,900) and
+//      the 커머스 멤버십 (13,900) tiers; the plain 스탠다드 (4,900) tier does NOT
+//      include it. Business (company) accounts are exempt from this gate — the AI
+//      assistant is part of their collaboration workspace — and reach the AI
+//      through the same endpoint with `userType: "business"`.
 //   2. Per-user daily quota — a soft cap stored in Blobs prevents a single heavy
-//      user from running up the shared AI credit bill.
+//      user (business or influencer) from running up the shared AI credit bill.
 const MODEL = "gemini-2.5-flash-lite";
 const DAILY_LIMIT = 100;
 const MAX_CONTEXT_CHARS = 6000;
@@ -346,28 +345,33 @@ export default async (req: Request) => {
       );
     }
   } else {
-    // Gemini membership gate (same membership record for business and influencer
-    // accounts). AI is included only in the AI-enabled tiers: standard_ai (6,900)
-    // and commerce (13,900). Legacy 'live' is treated as commerce. The plain
-    // standard (4,900) tier is excluded.
-    const sellerStore = getStore("seller-verification");
-    const record = applyComplimentaryMembership(
-      username,
-      (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
-    );
-    const plan = record?.membership_plan;
-    const aiEnabled =
-      !!record?.membership_active &&
-      (plan === "standard_ai" || plan === "commerce" || plan === "live");
-    if (!aiEnabled) {
-      return Response.json(
-        {
-          error:
-            "AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
-          code: "MEMBERSHIP_REQUIRED",
-        },
-        { status: 403 },
+    // Gemini membership gate. AI is included only in the AI-enabled tiers:
+    // standard_ai (6,900) and commerce (13,900). Legacy 'live' is treated as
+    // commerce. The plain standard (4,900) tier is excluded.
+    //
+    // Business (company) accounts are exempt from this gate — the AI assistant is
+    // part of their collaboration workspace, not an influencer membership add-on.
+    // They are still bounded by the per-user daily quota below.
+    if (userType !== "business") {
+      const sellerStore = getStore("seller-verification");
+      const record = applyComplimentaryMembership(
+        username,
+        (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
       );
+      const plan = record?.membership_plan;
+      const aiEnabled =
+        !!record?.membership_active &&
+        (plan === "standard_ai" || plan === "commerce" || plan === "live");
+      if (!aiEnabled) {
+        return Response.json(
+          {
+            error:
+              "AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
+            code: "MEMBERSHIP_REQUIRED",
+          },
+          { status: 403 },
+        );
+      }
     }
 
     // Per-user daily soft quota (Gemini only — Claude is bounded by its wallet).
