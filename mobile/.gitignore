@@ -1,0 +1,31 @@
+# Learn more https://docs.expo.io/guides/customizing-metro
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+
+# Local env
+.env
+.env.local
+
+# Expo / EAS
+expo-env.d.ts
