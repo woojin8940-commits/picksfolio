@@ -2,26 +2,29 @@ import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from '@/hooks/useAuth';
 import { colors } from '@/theme';
 
-/** Root layout: wires global providers and the top-level navigation stack. */
+/**
+ * Root layout. The app is a single full-screen WebView shell over the PICKS
+ * Folio mobile web app, so there is no native navigation beyond the entry
+ * screen and the not-found fallback.
+ */
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="login" options={{ presentation: 'modal' }} />
-        </Stack>
-      </AuthProvider>
+      <StatusBar style="light" />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="broadcast"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
+      </Stack>
     </SafeAreaProvider>
   );
 }
