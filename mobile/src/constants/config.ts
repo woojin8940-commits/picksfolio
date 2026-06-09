@@ -1,14 +1,19 @@
 /**
- * Runtime configuration, sourced from public Expo env vars.
- * `EXPO_PUBLIC_`-prefixed vars are inlined into the JS bundle at build time.
+ * Runtime configuration for the PICKS Folio native shell.
+ *
+ * The native app is a thin wrapper around the production mobile web app, so
+ * everything (login, Kakao OAuth, payments, live commerce, settlements …)
+ * behaves exactly like the website. The only thing that needs configuring is
+ * which web origin to load. `EXPO_PUBLIC_`-prefixed vars are inlined into the
+ * JS bundle at build time, so the URL can be overridden per build/channel
+ * without touching code.
  */
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://picks-folio.com';
 
 export const config = {
-  supabaseUrl: SUPABASE_URL,
-  supabaseAnonKey: SUPABASE_ANON_KEY,
-  /** True when a live backend is configured; otherwise the app uses sample data. */
-  hasBackend: Boolean(SUPABASE_URL && SUPABASE_ANON_KEY),
+  /** Origin of the production web app the shell renders. */
+  webUrl: WEB_URL,
   brandName: 'PICKS Folio',
+  /** Background shown behind the WebView (matches the web app canvas). */
+  backgroundColor: '#0B0B0F',
 } as const;
