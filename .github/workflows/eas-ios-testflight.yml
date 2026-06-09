@@ -1,0 +1,88 @@
+name: EAS iOS → TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS build profile'
+        type: choice
+        default: production
+        options:
+          - production
+          - preview
+      submit:
+        description: 'Submit to TestFlight after the build'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'mobile-v*'
+
+concurrency:
+  group: eas-ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & submit iOS
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up EAS / Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Verify EXPO_TOKEN is configured
+        run: |
+          if [ -z "${EXPO_TOKEN}" ]; then
+            echo "::error::EXPO_TOKEN secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Resolve build parameters
+        id: params
+        run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          SUBMIT="${{ github.event.inputs.submit }}"
+          echo "profile=${PROFILE:-production}" >> "$GITHUB_OUTPUT"
+          echo "submit=${SUBMIT:-true}" >> "$GITHUB_OUTPUT"
+
+      - name: EAS build (+ auto-submit to TestFlight)
+        if: steps.params.outputs.submit == 'true'
+        run: >-
+          eas build
+          --platform ios
+          --profile "${{ steps.params.outputs.profile }}"
+          --non-interactive
+          --no-wait
+          --auto-submit-with-profile "${{ steps.params.outputs.profile }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: EAS build (no submit)
+        if: steps.params.outputs.submit != 'true'
+        run: >-
+          eas build
+          --platform ios
+          --profile "${{ steps.params.outputs.profile }}"
+          --non-interactive
+          --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
