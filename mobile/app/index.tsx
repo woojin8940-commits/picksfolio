@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import type {
@@ -37,6 +37,56 @@ function isInternalUrl(url: string): boolean {
   // PG checkout pages stay inside the WebView so the session is preserved.
   return INTERNAL_SCHEME.test(url);
 }
+
+/** Deep link the web app can navigate to in order to open the native broadcast. */
+const BROADCAST_DEEPLINK = /^picksfolio:\/\/broadcast/i;
+
+/** Parse a `key=value&…` query string without relying on URLSearchParams. */
+function parseQuery(url: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const q = url.split('?')[1];
+  if (!q) return out;
+  for (const pair of q.split('&')) {
+    const [k, v = ''] = pair.split('=');
+    if (k) out[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, ' '));
+  }
+  return out;
+}
+
+/** Open the native broadcast screen, forwarding only the params we recognise. */
+function openNativeBroadcast(raw: Record<string, unknown>): void {
+  const params: Record<string, string> = {};
+  for (const key of ['username', 'ingestServer', 'streamKey'] as const) {
+    const value = raw[key];
+    if (typeof value === 'string' && value) params[key] = value;
+  }
+  router.push({ pathname: '/broadcast', params });
+}
+
+/**
+ * Injected before the web app loads. Advertises the native shell + native
+ * broadcast capability and exposes `PicksFolioNative.openBroadcast(...)`, which
+ * the web live console calls to hand the broadcast off to the native IVS screen
+ * instead of running the in-WebView (getUserMedia) broadcast path.
+ */
+const NATIVE_BRIDGE = `
+  (function () {
+    if (window.__PICKSFOLIO_NATIVE__) return;
+    window.__PICKSFOLIO_NATIVE__ = true;
+    window.__PICKSFOLIO_NATIVE_BROADCAST__ = true;
+    function post(payload) {
+      try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
+    }
+    window.PicksFolioNative = {
+      version: 1,
+      broadcastSupported: true,
+      openBroadcast: function (opts) {
+        post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
+      },
+    };
+  })();
+  true;
+`;
 
 export default function WebAppScreen() {
   const webRef = useRef<WebView>(null);
@@ -67,6 +117,12 @@ export default function WebAppScreen() {
   // out to the OS; keep all web traffic inside the WebView.
   const onShouldStartLoad = useCallback((req: { url: string }): boolean => {
     const { url } = req;
+    // Native broadcast deep link: open the IVS broadcast screen instead of
+    // handing the custom scheme to the OS.
+    if (BROADCAST_DEEPLINK.test(url)) {
+      openNativeBroadcast(parseQuery(url));
+      return false;
+    }
     if (isInternalUrl(url)) return true;
     if (EXTERNAL_SCHEME.test(url)) {
       Linking.openURL(url).catch(() => {
@@ -84,9 +140,19 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Bridge: lets the web app trigger native behaviours later if needed
-  // (currently a no-op sink so postMessage calls never throw in-app).
-  const onMessage = useCallback((_e: WebViewMessageEvent) => {}, []);
+  // Bridge: the web live console calls window.PicksFolioNative.openBroadcast()
+  // to hand the broadcast off to the native IVS screen.
+  const onMessage = useCallback((e: WebViewMessageEvent) => {
+    let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
+    try {
+      msg = JSON.parse(e.nativeEvent.data);
+    } catch {
+      return;
+    }
+    if (msg?.type === 'OPEN_NATIVE_BROADCAST') {
+      openNativeBroadcast(msg.payload ?? {});
+    }
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -94,6 +160,8 @@ export default function WebAppScreen() {
         ref={webRef}
         source={{ uri: config.webUrl }}
         style={styles.web}
+        // Advertise the native shell + expose the native broadcast hand-off.
+        injectedJavaScriptBeforeContentLoaded={NATIVE_BRIDGE}
         // Keep the auth/session cookies that Kakao + Supabase rely on.
         sharedCookiesEnabled
         thirdPartyCookiesEnabled

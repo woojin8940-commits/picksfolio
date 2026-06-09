@@ -15,7 +15,30 @@ hand-off, 결제 앱 전환, 권한, 뒤로가기, 새로고침) are handled by 
 - Expo SDK 52 / React Native 0.76
 - `expo-router` (typed, file-based routing)
 - `react-native-webview`
+- `amazon-ivs-react-native-broadcast` (native live broadcast)
 - TypeScript (strict)
+
+## Native live broadcast (Amazon IVS)
+
+Going live no longer runs inside the WebView. Tapping **방송 시작** in the web
+live console while inside the app hands off to a native broadcast screen
+(`app/broadcast.tsx`) that pushes the phone camera straight to the seller's
+Amazon IVS channel over RTMPS using the hardware encoder
+(`amazon-ivs-react-native-broadcast`). The screen supports:
+
+- 후면/전면 카메라 전환, 마이크 on/off, 방송 시작/종료
+- 세로 1080p · 30fps 인코딩 프로파일 (자동 비트레이트)
+- 실시간 상태 표시 (대기 중 / 연결 중 / 방송 중 / 오류)
+- IVS 인제스트 서버·스트림 키를 직접 입력하거나, `/api/stream-key/:username`
+  에서 저장된 채널 정보를 불러오기
+
+While live, the screen mirrors the channel's live state to `/api/live/:username`
+so web viewers discover and play the broadcast exactly as before. The native
+broadcast module requires a dev/EAS build — it does not run in Expo Go.
+
+The web app hands off via a small bridge the shell injects
+(`window.PicksFolioNative.openBroadcast(...)`); the native screen can also be
+reached with the `picksfolio://broadcast?username=…` deep link.
 
 ## Getting started
 

@@ -1248,6 +1248,24 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
+      // Inside the PICKS Folio native app: hand the broadcast off to the native
+      // Amazon IVS broadcast screen (hardware encoder) instead of running the
+      // in-WebView getUserMedia pipeline. The native shell loads the stream key
+      // itself; we forward the username (and any already-resolved IVS config).
+      const native = (window as unknown as {
+        __PICKSFOLIO_NATIVE_BROADCAST__?: boolean;
+        PicksFolioNative?: { openBroadcast?: (opts: Record<string, unknown>) => void };
+      });
+      if (native.__PICKSFOLIO_NATIVE_BROADCAST__ && native.PicksFolioNative?.openBroadcast) {
+        native.PicksFolioNative.openBroadcast({
+          username: normalizedUsername,
+          ...(ivsConfig
+            ? { ingestServer: ivsConfig.ingestServer, streamKey: ivsConfig.streamKey }
+            : {}),
+        });
+        return;
+      }
+
       // Block starting a broadcast when this month's time is exhausted. The
       // stream-key endpoint also enforces this server-side, but guarding here
       // gives immediate feedback and opens the charge modal.
