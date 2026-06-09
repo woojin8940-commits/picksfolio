@@ -70,7 +70,8 @@
       ]
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "./plugins/withDisableBitcode"
     ],
     "experiments": {
       "typedRoutes": true
