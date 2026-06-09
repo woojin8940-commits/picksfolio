@@ -19,6 +19,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "ENABLE_BITCODE": "NO"
+      },
       "ios": {
         "image": "latest"
       }
