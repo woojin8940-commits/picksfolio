@@ -5,9 +5,18 @@
 // Podfile we inject into the generated file at prebuild time via a dangerous
 // mod rather than editing a committed Podfile (which would be overwritten).
 //
-// The injected block disables ENABLE_BITCODE for all Pod targets, which is
-// required for `amazon-ivs-react-native-broadcast` (the AmazonIVSBroadcast
-// SDK ships without bitcode). Bitcode is also deprecated in modern Xcode.
+// The injected block does two things, both required for
+// `amazon-ivs-react-native-broadcast`:
+//
+//   1. Disables ENABLE_BITCODE for all Pod targets. This controls how the
+//      pods compiled from source are built (bitcode is deprecated in modern
+//      Xcode), but it has NO effect on precompiled binaries.
+//   2. Strips bitcode from the AmazonIVSBroadcast framework binary. That SDK
+//      ships as a precompiled framework that was built WITH bitcode, so the
+//      ENABLE_BITCODE setting never touches it and App Store Connect rejects
+//      the upload ("Invalid Executable ... contains bitcode", 409). Running
+//      `xcrun bitcode_strip -r` on the binary removes the bitcode so the
+//      archive validates.
 
 const { withDangerousMod } = require('@expo/config-plugins');
 const fs = require('fs');
@@ -21,6 +30,14 @@ const SNIPPET = [
   '      target.build_configurations.each do |config|',
   "        config.build_settings['ENABLE_BITCODE'] = 'NO'",
   '      end',
+  '    end',
+  '    # AmazonIVSBroadcast ships precompiled WITH bitcode, which ENABLE_BITCODE',
+  '    # above cannot remove. Strip it from the binary so App Store Connect',
+  '    # accepts the upload (otherwise: Invalid Executable ... contains bitcode).',
+  '    bitcode_strip = `xcrun --find bitcode_strip`.strip',
+  "    Dir.glob(File.join(installer.sandbox.root.to_s, '**', 'AmazonIVSBroadcast.framework', 'AmazonIVSBroadcast')).each do |binary|",
+  '      puts "[withDisableBitcode] stripping bitcode from #{binary}"',
+  "      system(bitcode_strip, binary, '-r', '-o', binary)",
   '    end',
 ].join('\n');
 
