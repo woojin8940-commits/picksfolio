@@ -297,5 +297,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   retryPressed: { opacity: 0.85 },
-  retryText: { color: colors.background, fontSize: 16, fontWeight: '600' },
+  retryText: { color: colors.text, fontSize: 16, fontWeight: '600' },
 });

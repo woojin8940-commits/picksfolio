@@ -387,9 +387,9 @@ export default function BroadcastScreen({
           <Ionicons
             name={broadcasting ? 'stop' : 'radio-outline'}
             size={26}
-            color={broadcasting ? colors.text : colors.background}
+            color={colors.text}
           />
-          <Text style={[styles.liveButtonText, broadcasting && styles.liveButtonTextStop]}>
+          <Text style={styles.liveButtonText}>
             {broadcasting ? '방송 종료' : '방송 시작'}
           </Text>
         </Pressable>
@@ -525,9 +525,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   liveButtonStart: { backgroundColor: colors.accent },
-  liveButtonStop: { backgroundColor: 'rgba(224,101,95,0.18)', borderWidth: 1, borderColor: colors.danger },
+  liveButtonStop: { backgroundColor: colors.danger },
   liveButtonDisabled: { opacity: 0.4 },
-  liveButtonText: { color: colors.background, fontSize: 16, fontWeight: '700' },
-  liveButtonTextStop: { color: colors.danger },
+  liveButtonText: { color: colors.text, fontSize: 16, fontWeight: '700' },
   pressed: { opacity: 0.7 },
 });

@@ -6,12 +6,12 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#0B0B0F",
+    "backgroundColor": "#050507",
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#050507"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -76,7 +76,7 @@
       [
         "expo-notifications",
         {
-          "color": "#0B0B0F"
+          "color": "#2563EB"
         }
       ],
       "./plugins/withDisableBitcode"

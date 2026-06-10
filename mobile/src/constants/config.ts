@@ -15,7 +15,7 @@ export const config = {
   webUrl: WEB_URL,
   brandName: 'PICKS Folio',
   /** Background shown behind the WebView (matches the web app canvas). */
-  backgroundColor: '#0B0B0F',
+  backgroundColor: '#050507',
 } as const;
 
 /**

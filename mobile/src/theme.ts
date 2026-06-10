@@ -1,20 +1,22 @@
 /**
- * PICKS Folio design tokens — a refined, high-end link-in-bio palette
- * (near-black canvas, warm off-white type, a single confident accent).
- * Mirrors the visual language of the PICKS Folio web product.
+ * PICKS Folio design tokens — mirror the web product 1:1: a near-black canvas,
+ * pure-white type and the blue brand accent (#2563EB). These values are lifted
+ * straight from the web app's CSS theme (src/index.css) so the native shell and
+ * the website are visually identical; there is no separate native palette.
  */
 export const colors = {
-  background: '#0B0B0F',
-  surface: '#15151C',
-  surfaceElevated: '#1E1E27',
-  border: '#2A2A35',
-  text: '#F5F3EE',
-  textMuted: '#9A98A6',
-  textFaint: '#6A6877',
-  accent: '#C8A86B', // muted gold
-  accentSoft: 'rgba(200, 168, 107, 0.14)',
-  success: '#5BBE8B',
-  danger: '#E0655F',
+  background: '#050507', // --color-background / --color-midnight
+  surface: '#0f1117', // --color-surface
+  surfaceElevated: '#1e1e2e', // --color-surface-light
+  border: 'rgba(255,255,255,0.10)', // web uses border-white/10 throughout
+  text: '#ffffff',
+  textMuted: '#94A3B8', // slate-400
+  textFaint: '#64748B', // slate-500
+  accent: '#2563EB', // --color-blue-primary (web brand blue)
+  accentSecondary: '#3B82F6', // --color-blue-secondary
+  accentSoft: 'rgba(37, 99, 235, 0.14)',
+  success: '#22C55E', // green-500
+  danger: '#EF4444', // red-500 (live / stop)
 } as const;
 
 export const spacing = {
