@@ -78,6 +78,7 @@
           "color": "#0B0B0F"
         }
       ],
+      "./plugins/withoutIosPushEntitlement",
       "./plugins/withDisableBitcode"
     ],
     "experiments": {
