@@ -20,6 +20,16 @@
 // (`src/services/push.ts`) degrades gracefully on iOS — `getExpoPushTokenAsync`
 // simply returns null without the entitlement — and Android push is unaffected.
 //
+// IMPORTANT — plugin ordering: `@expo/config-plugins` runs same-target mods
+// (here, `ios.entitlements`) in REVERSE of their order in the `plugins` array,
+// so the plugin listed LATER in the array mutates the entitlements FIRST. This
+// removal must therefore be listed BEFORE `expo-notifications` in `app.json`, so
+// that it runs AFTER `expo-notifications` has added `aps-environment` and can
+// actually delete it. Listing it after `expo-notifications` makes the deletion a
+// no-op (it runs before the entitlement exists), the entitlement survives into
+// the final file, and the archive fails with the push profile error above. Do
+// not reorder these two without preserving that relationship.
+//
 // To fully enable iOS remote push later: enable the Push Notifications
 // capability for `com.picksfolio.app` in the Apple Developer portal, regenerate
 // the App Store provisioning profile (e.g. `eas credentials`), then delete this
