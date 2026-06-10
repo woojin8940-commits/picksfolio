@@ -45,10 +45,24 @@ export default async (req: Request, context: Context) => {
     }
 
     const data = await store.get(key, { type: "json" });
-    if (!data) {
-      return Response.json(null, { status: 404 });
+    if (data) {
+      return Response.json(data);
     }
-    return Response.json(data);
+
+    // No per-seller channel stored yet — fall back to the shared Amazon IVS
+    // channel provisioned via environment variables. Without this, the live
+    // console (web) and the native broadcast screen both get a 404 and treat it
+    // as "저장된 스트림 정보가 없어요", leaving the seller unable to go live even
+    // though a perfectly good shared channel exists.
+    const ingestServer = process.env.IVS_INGEST_SERVER;
+    const streamKey = process.env.IVS_STREAM_KEY;
+    if (ingestServer && streamKey) {
+      const playbackUrl = process.env.VITE_IVS_PLAYBACK_URL || "";
+      const rtmpUrl = `${ingestServer.replace(/\/$/, "")}/${streamKey}`;
+      return Response.json({ ingestServer, streamKey, playbackUrl, rtmpUrl });
+    }
+
+    return Response.json(null, { status: 404 });
   }
 
   if (req.method === "POST") {
