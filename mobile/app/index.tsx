@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import type {
@@ -17,6 +18,7 @@ import type {
   WebViewNavigation,
 } from 'react-native-webview';
 import { config } from '@/constants/config';
+import { registerPushForUser } from '@/services/push';
 import { colors } from '@/theme';
 
 /** Schemes that are internal to the WebView and must never be delegated out. */
@@ -68,31 +70,77 @@ function openNativeBroadcast(raw: Record<string, unknown>): void {
  * broadcast capability and exposes `PicksFolioNative.openBroadcast(...)`, which
  * the web live console calls to hand the broadcast off to the native IVS screen
  * instead of running the in-WebView (getUserMedia) broadcast path.
+ *
+ * It also advertises native push support and exposes
+ * `PicksFolioNative.registerPush(username, userType)` so the web app can hand
+ * the signed-in user to the shell, which registers the device's push token for
+ * new-message alerts.
  */
 const NATIVE_BRIDGE = `
   (function () {
     if (window.__PICKSFOLIO_NATIVE__) return;
     window.__PICKSFOLIO_NATIVE__ = true;
     window.__PICKSFOLIO_NATIVE_BROADCAST__ = true;
+    window.__PICKSFOLIO_NATIVE_PUSH__ = true;
     function post(payload) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
     }
     window.PicksFolioNative = {
-      version: 1,
+      version: 2,
       broadcastSupported: true,
+      pushSupported: true,
       openBroadcast: function (opts) {
         post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
+      },
+      registerPush: function (username, userType) {
+        post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType } });
       },
     };
   })();
   true;
 `;
 
+/** Resolve a deep-link path (or absolute url) from a push payload to a full url. */
+function resolveUrl(path: string): string {
+  return /^https?:\/\//i.test(path) ? path : `${config.webUrl}${path}`;
+}
+
 export default function WebAppScreen() {
   const webRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
+  const [sourceUri, setSourceUri] = useState(config.webUrl);
   const canGoBack = useRef(false);
+  const loadedRef = useRef(false);
+
+  // Jump the WebView to a deep-linked path (used when a push is tapped). If the
+  // page is already loaded, navigate in place; otherwise point the initial load
+  // at the target (cold start from a notification tap).
+  const navigateTo = useCallback((path: string) => {
+    const url = resolveUrl(path);
+    if (loadedRef.current && webRef.current) {
+      webRef.current.injectJavaScript(
+        `(function(){ try { window.location.href = ${JSON.stringify(url)}; } catch (e) {} })(); true;`,
+      );
+    } else {
+      setSourceUri(url);
+    }
+  }, []);
+
+  // Handle taps on push notifications. Expo buffers the response that launched
+  // the app from a cold start and delivers it once the listener is attached, so
+  // this covers both warm and cold opens.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response?.notification?.request?.content?.data as
+        | { path?: unknown }
+        | undefined;
+      if (data && typeof data.path === 'string' && data.path) {
+        navigateTo(data.path);
+      }
+    });
+    return () => sub.remove();
+  }, [navigateTo]);
 
   // Android hardware back button mirrors browser history.
   useFocusEffect(
@@ -151,6 +199,12 @@ export default function WebAppScreen() {
     }
     if (msg?.type === 'OPEN_NATIVE_BROADCAST') {
       openNativeBroadcast(msg.payload ?? {});
+    } else if (msg?.type === 'REGISTER_PUSH') {
+      const username = msg.payload?.username;
+      const userType = msg.payload?.userType === 'business' ? 'business' : 'influencer';
+      if (typeof username === 'string' && username) {
+        registerPushForUser(username, userType);
+      }
     }
   }, []);
 
@@ -158,7 +212,7 @@ export default function WebAppScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <WebView
         ref={webRef}
-        source={{ uri: config.webUrl }}
+        source={{ uri: sourceUri }}
         style={styles.web}
         // Advertise the native shell + expose the native broadcast hand-off.
         injectedJavaScriptBeforeContentLoaded={NATIVE_BRIDGE}
@@ -185,7 +239,10 @@ export default function WebAppScreen() {
         onShouldStartLoadWithRequest={onShouldStartLoad}
         onMessage={onMessage}
         onLoadStart={() => setLoading(true)}
-        onLoadEnd={() => setLoading(false)}
+        onLoadEnd={() => {
+          setLoading(false);
+          loadedRef.current = true;
+        }}
         onError={() => {
           setErrored(true);
           setLoading(false);

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { sendPushToUser } from "./_shared/push.mts";
 
 export default async (req: Request, context: Context) => {
   const proposalId = context.params.proposalId;
@@ -131,6 +132,23 @@ export default async (req: Request, context: Context) => {
                 sendAfter: new Date(Date.now() + 30_000).toISOString(),
               });
             }
+
+            // Native push is immediate — its whole value is reaching the
+            // recipient the moment the message lands (the Kakao alimtalk above
+            // is debounced 30s and acts as the fallback when the app is gone).
+            const projectName = existing.proposalTitle || "협업 프로젝트";
+            const senderName = body.authorName || existing.companyName || "상대방";
+            const pushBody = messagePreview
+              || (body.attachments?.length ? "사진을 보냈어요." : "새 메시지가 도착했어요.");
+            await sendPushToUser(recipientUsername, {
+              title: `${senderName} · ${projectName}`,
+              body: pushBody,
+              data: {
+                type: "timeline",
+                proposalId,
+                path: `/admin?tab=timeline&proposal=${proposalId}`,
+              },
+            });
           }
         } catch (notifErr) {
           console.error("[timeline-comment] Failed to queue notification:", notifErr);

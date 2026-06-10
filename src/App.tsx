@@ -952,6 +952,22 @@ const App: React.FC = () => {
     };
   }, [isBusinessLoggedIn]);
 
+  // Register the device for native push notifications once a user is signed in.
+  // Only the WebView shell exposes PicksFolioNative.registerPush; on the web it
+  // is a no-op. This lets the app deliver immediate alerts for new collaboration
+  // (chat) messages even when the app is closed.
+  useEffect(() => {
+    const native = (window as unknown as {
+      PicksFolioNative?: { registerPush?: (username: string, userType: string) => void };
+    }).PicksFolioNative;
+    if (!native || typeof native.registerPush !== 'function') return;
+    if (isBusinessLoggedIn && businessUsername) {
+      native.registerPush(businessUsername.replace(/^biz\//, ''), 'business');
+    } else if (isLoggedIn && userName) {
+      native.registerPush(userName, 'influencer');
+    }
+  }, [isLoggedIn, userName, isBusinessLoggedIn, businessUsername]);
+
   // Clear login transition after a brief delay to allow state to settle
   useEffect(() => {
     if (loginTransitioning && (view === 'admin' || view === 'operator') && userName && isLoggedIn) {
