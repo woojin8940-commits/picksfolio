@@ -291,6 +291,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const [needsTap, setNeedsTap] = useState(false);
   const [connectionState, setConnectionState] = useState<string>('connecting');
   const [streamMode, setStreamMode] = useState<'auto' | 'webrtc' | 'hls'>('auto');
+  // True when the broadcaster streams from the native app's Amazon IVS hardware
+  // encoder. There is no WebRTC broadcaster in that case, so the viewer should
+  // play the IVS HLS stream directly instead of waiting for a WebRTC handshake
+  // that can never connect.
+  const [nativeStream, setNativeStream] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
   const [hlsFailed, setHlsFailed] = useState(false);
   // Preflight live-state: before wasting 20s on a WebRTC handshake that will
@@ -643,6 +648,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       // failure is worse than waiting for the next poll to clarify.
       if (state === null) return;
       setBroadcastLive(!!state.isLive);
+      // A native-app broadcast has no WebRTC peer — remember so we go HLS-first.
+      if ((state as any).streamSource === 'native') setNativeStream(true);
     };
     check();
     // Re-poll while we still think the broadcast is offline, so the UI flips
@@ -1487,6 +1494,18 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     console.log(`[LiveStream] In-app WebView (${inAppLabel}) detected with HLS URL — preferring HLS-first`);
     setStreamMode('hls');
   }, [isInAppBrowser, inAppLabel, hlsPlaybackUrl, streamMode]);
+
+  // Native-app broadcast: the video comes from the native Amazon IVS encoder, so
+  // there is no WebRTC broadcaster to connect to. Go straight to HLS as soon as a
+  // playback URL is known instead of waiting out the WebRTC timeout.
+  useEffect(() => {
+    if (!nativeStream) return;
+    if (!hlsPlaybackUrl) return;
+    if (streamMode !== 'auto') return;
+    if (webrtcEverConnectedRef.current) return;
+    console.log('[LiveStream] Native-app (IVS) broadcast detected — preferring HLS-first');
+    setStreamMode('hls');
+  }, [nativeStream, hlsPlaybackUrl, streamMode]);
 
   // If HLS fails in an in-app WebView, fall back to WebRTC one last time
   // instead of showing a dead-end error. WebRTC signaling has been running in

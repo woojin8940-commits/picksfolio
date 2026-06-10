@@ -189,6 +189,55 @@ const getBroadcastStream = async (
   throw lastErr;
 };
 
+/**
+ * Native broadcast integration.
+ *
+ * The PICKS Folio native app can run this live console in two native contexts:
+ *
+ *  - **Broadcast console mode** (`__PICKSFOLIO_BROADCAST_CONSOLE__` /
+ *    `?broadcastConsole=1`): the console is embedded as a transparent overlay
+ *    above the native Amazon IVS camera encoder. The heavy media work — camera
+ *    capture, WebRTC and the in-browser IVS push — is owned by the native layer
+ *    for broadcast-grade video. This console then runs as a pure control surface
+ *    (products, banners, chat, cart, plus all live-state/usage bookkeeping) and
+ *    delegates start/stop/flip/mute to native over the WebView bridge.
+ *
+ *  - **Native shell** (`PicksFolioNative.broadcastSupported`): the console runs
+ *    in the app's main WebView. Tapping "라이브 시작" here hands off to the native
+ *    broadcast studio instead of broadcasting inside the WebView.
+ */
+const nativeBroadcastBridge = (() => {
+  if (typeof window === 'undefined') return null;
+  const w = window as any;
+  let flagged = !!w.__PICKSFOLIO_BROADCAST_CONSOLE__;
+  if (!flagged) {
+    try {
+      flagged = new URLSearchParams(window.location.search).get('broadcastConsole') === '1';
+    } catch {}
+  }
+  if (!flagged || !w.ReactNativeWebView) return null;
+  return {
+    post(type: string, payload?: Record<string, unknown>) {
+      try {
+        w.ReactNativeWebView.postMessage(JSON.stringify({ type, payload: payload || {} }));
+      } catch {}
+    },
+  };
+})();
+
+/** True when this console is the transparent overlay inside the native studio. */
+const IS_BROADCAST_CONSOLE = !!nativeBroadcastBridge;
+
+/** The native shell that can take over the broadcast (only when NOT the overlay). */
+const nativeShell: any =
+  typeof window !== 'undefined' ? (window as any).PicksFolioNative : null;
+
+/** True when running in the app's main WebView, which hands off to native. */
+const IS_NATIVE_BROADCAST_SHELL =
+  !IS_BROADCAST_CONSOLE &&
+  !!nativeShell?.broadcastSupported &&
+  typeof nativeShell?.startBroadcast === 'function';
+
 const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, selectedProductIds }) => {
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -657,6 +706,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     setFacingMode(prev => {
       const next = prev === 'user' ? 'environment' : 'user';
       setIsMirrored(next === 'user');
+      // In the native studio the camera is owned by the native encoder — flip it
+      // there instead of re-acquiring getUserMedia in this overlay.
+      if (IS_BROADCAST_CONSOLE) {
+        nativeBroadcastBridge?.post('FLIP_CAMERA', { position: next === 'user' ? 'front' : 'back' });
+      }
       return next;
     });
   }, []);
@@ -721,7 +775,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       isLive: true,
       viewerCount,
       currentProduct: activeProduct,
-      activeMaterial: material
+      activeMaterial: material,
+      // Preserve the native-encoder hint so viewers keep playing the IVS HLS
+      // stream across merchandising updates (see toggleLive).
+      ...(IS_BROADCAST_CONSOLE ? { streamSource: 'native' } : {}),
     });
   }, [activeProductId, activeMaterialId, isLive, userName, viewerCount, liveProducts, materials]);
 
@@ -743,6 +800,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         viewerCount,
         currentProduct: activeProduct,
         activeMaterial: material,
+        ...(IS_BROADCAST_CONSOLE ? { streamSource: 'native' } : {}),
       }).catch(() => {});
     };
     const interval = setInterval(sendHeartbeat, 8000);
@@ -845,6 +903,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Get camera stream and pipe through canvas for filters/mirror
   useEffect(() => {
     let mounted = true;
+
+    // In the native app the broadcast video is captured and encoded by the
+    // native Amazon IVS layer, so this console never opens getUserMedia: the
+    // overlay shows the native camera behind it, and the shell hands off before
+    // going live. Skipping camera setup also avoids two simultaneous camera
+    // users on the device.
+    if (IS_BROADCAST_CONSOLE || IS_NATIVE_BROADCAST_SHELL) return;
 
     if (isCameraOn) {
       const q = MAX_QUALITY;
@@ -1248,23 +1313,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
-      // Inside the PICKS Folio native app: hand the broadcast off to the native
-      // Amazon IVS broadcast screen (hardware encoder) instead of running the
-      // in-WebView getUserMedia pipeline. The native shell loads the stream key
-      // itself; we forward the username (and any already-resolved IVS config).
-      const native = (window as unknown as {
-        __PICKSFOLIO_NATIVE_BROADCAST__?: boolean;
-        PicksFolioNative?: { openBroadcast?: (opts: Record<string, unknown>) => void };
-      });
-      if (native.__PICKSFOLIO_NATIVE_BROADCAST__ && native.PicksFolioNative?.openBroadcast) {
-        native.PicksFolioNative.openBroadcast({
-          username: normalizedUsername,
-          ...(ivsConfig
-            ? { ingestServer: ivsConfig.ingestServer, streamKey: ivsConfig.streamKey }
-            : {}),
-        });
-        return;
-      }
+      // Going live takes one of three paths depending on where the console runs:
+      //  - Native broadcast console (overlay): the native Amazon IVS hardware
+      //    encoder owns the video; this console delegates start to it (below) and
+      //    keeps doing all merchandising/chat/cart + live-state bookkeeping.
+      //  - Native shell (main WebView): hand the broadcast off to the native
+      //    studio (handled right after the cap check below).
+      //  - Plain web: the in-browser getUserMedia + WebRTC/IVS pipeline runs here.
 
       // Block starting a broadcast when this month's time is exhausted. The
       // stream-key endpoint also enforces this server-side, but guarding here
@@ -1272,6 +1327,22 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       if (liveUsage?.exhausted || capBlock?.kind === 'exhausted') {
         setChargeError(null);
         setShowChargeModal(true);
+        return;
+      }
+
+      // Native shell: hand the broadcast off to the native studio (native Amazon
+      // IVS hardware encoder for broadcast-grade video) instead of running the
+      // in-WebView getUserMedia + WebRTC/IVS pipeline. The studio re-opens this
+      // same console as a transparent overlay, so the seller keeps every web
+      // console feature — products, banners, cart and chat. Carry the seller and
+      // their per-broadcast product selection, then close this preview.
+      if (IS_NATIVE_BROADCAST_SHELL) {
+        try {
+          nativeShell.startBroadcast(userName, (selectedProductIds || []).join(','));
+        } catch (e) {
+          console.warn('[Live] native startBroadcast failed:', e);
+        }
+        onClose();
         return;
       }
 
@@ -1313,42 +1384,54 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       setIsLive(newState);
       isLiveRef.current = newState;
 
-      // Start WebRTC signaling to broadcast canvas stream (with filters) to viewers
-      // Try canvas stream first (has filters/mirror), then raw camera, with retry
-      let broadcastStream = canvasStreamRef.current || streamRef.current;
+      if (IS_BROADCAST_CONSOLE) {
+        // Broadcast console overlay: the native encoder owns the video. Ask it to
+        // start, handing over the seller's IVS credentials we already loaded. The
+        // encoder reports back via window.__picksNativeBroadcastState; viewers
+        // play the native IVS HLS stream (live-state carries streamSource:'native'
+        // below so the viewer prefers HLS over the absent WebRTC broadcaster).
+        nativeBroadcastBridge?.post('REQUEST_START', {
+          ingestServer: ivsConfig?.ingestServer || '',
+          streamKey: ivsConfig?.streamKey || '',
+        });
+      } else {
+        // Start WebRTC signaling to broadcast canvas stream (with filters) to viewers
+        // Try canvas stream first (has filters/mirror), then raw camera, with retry
+        let broadcastStream = canvasStreamRef.current || streamRef.current;
 
-      // If no stream available yet, wait for camera to initialize with retries
-      if (!broadcastStream) {
-        for (let i = 0; i < 6; i++) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          broadcastStream = canvasStreamRef.current || streamRef.current;
-          if (broadcastStream) break;
-        }
-      }
-
-      // If still no stream after initial retries, show notice and auto-retry after 1 second
-      if (!broadcastStream) {
-        console.warn('[Broadcast] 카메라 준비 중 — 1초 후 자동 재시도합니다.');
-        setMessages(prev => [
-          ...prev,
-          {
-            id: `system-camera-${Date.now()}`,
-            user: 'System',
-            text: '카메라 준비 중입니다. 잠시 후 자동으로 재시도합니다.',
-            timestamp: Date.now(),
-          },
-        ]);
-        setTimeout(async () => {
-          const retryStream = canvasStreamRef.current || streamRef.current;
-          if (retryStream && signalingRef.current && isLiveRef.current) {
-            console.log('[Broadcast] 자동 재시도 — 스트림 발견, 방송 시작');
-            startBroadcastWithStream(retryStream);
-          } else {
-            console.error('[Broadcast] 자동 재시도 실패 — 여전히 스트림 없음. 방송을 다시 시작해주세요.');
+        // If no stream available yet, wait for camera to initialize with retries
+        if (!broadcastStream) {
+          for (let i = 0; i < 6; i++) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            broadcastStream = canvasStreamRef.current || streamRef.current;
+            if (broadcastStream) break;
           }
-        }, 1000);
-      } else if (signalingRef.current && broadcastStream) {
-        startBroadcastWithStream(broadcastStream);
+        }
+
+        // If still no stream after initial retries, show notice and auto-retry after 1 second
+        if (!broadcastStream) {
+          console.warn('[Broadcast] 카메라 준비 중 — 1초 후 자동 재시도합니다.');
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `system-camera-${Date.now()}`,
+              user: 'System',
+              text: '카메라 준비 중입니다. 잠시 후 자동으로 재시도합니다.',
+              timestamp: Date.now(),
+            },
+          ]);
+          setTimeout(async () => {
+            const retryStream = canvasStreamRef.current || streamRef.current;
+            if (retryStream && signalingRef.current && isLiveRef.current) {
+              console.log('[Broadcast] 자동 재시도 — 스트림 발견, 방송 시작');
+              startBroadcastWithStream(retryStream);
+            } else {
+              console.error('[Broadcast] 자동 재시도 실패 — 여전히 스트림 없음. 방송을 다시 시작해주세요.');
+            }
+          }, 1000);
+        } else if (signalingRef.current && broadcastStream) {
+          startBroadcastWithStream(broadcastStream);
+        }
       }
 
       const initialActiveMaterial = activeMaterialId
@@ -1367,6 +1450,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         activeMaterial: initialActiveMaterial,
         broadcastTitle: savedBroadcastTitle,
         startedAt: broadcastStartTimeRef.current,
+        // Tell viewers the video originates from the native IVS encoder so they
+        // play the HLS stream directly instead of waiting on a WebRTC broadcaster
+        // that never connects in native-broadcast mode.
+        ...(IS_BROADCAST_CONSOLE ? { streamSource: 'native' } : {}),
       };
 
       // Update LocalStorage for immediate local sync
@@ -1430,6 +1517,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         setIvsBroadcasting(false);
       }
 
+      // Broadcast console overlay: stop the native encoder (there is no in-WebView
+      // WebRTC/IVS broadcaster to tear down here).
+      if (IS_BROADCAST_CONSOLE) {
+        nativeBroadcastBridge?.post('REQUEST_STOP');
+      }
+
       const liveData = { isLive: false, viewerCount: 0, currentProduct: null, activeMaterial: null };
 
       // Update LocalStorage
@@ -1442,6 +1535,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       apiService.clearLiveCart(userName).catch(e => console.warn('[Live] clearLiveCart failed:', e));
     }
   };
+
+  // Keep a live reference to toggleLive (recreated each render) so the native
+  // bridge listener below can call the latest version without re-subscribing.
+  const toggleLiveRef = useRef(toggleLive);
+  toggleLiveRef.current = toggleLive;
+
+  // Broadcast console overlay: the native encoder reports its phase here. If the
+  // native broadcast stops or errors out while we still think we are live (e.g.
+  // a fatal encoder error, or the OS reclaiming the camera), run the normal
+  // "방송 종료" path so history/usage are recorded and viewers see us go offline.
+  useEffect(() => {
+    if (!IS_BROADCAST_CONSOLE) return;
+    const w = window as any;
+    w.__picksNativeBroadcastState = (state: string) => {
+      if ((state === 'idle' || state === 'error') && isLiveRef.current) {
+        toggleLiveRef.current();
+      }
+    };
+    return () => {
+      try { delete w.__picksNativeBroadcastState; } catch {}
+    };
+  }, []);
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -1465,29 +1580,31 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   };
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
+    <div className={`fixed inset-0 z-[200] flex flex-col md:flex-row ${IS_BROADCAST_CONSOLE ? 'bg-transparent' : 'bg-slate-950'}`}>
       {/* Main Stream Area */}
-      <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
+      <div className={`flex-1 min-h-0 relative overflow-hidden flex items-center justify-center ${IS_BROADCAST_CONSOLE ? 'bg-transparent' : 'bg-black'}`}>
         {/* Viewer frame: the broadcast frame (built on a canvas sized to the
             camera's native resolution) is shown with object-contain so the host
             sees the full, un-cropped camera framing — the same default ratio the
             stock camera app shows — letterboxed within the stage rather than
             zoom-cropped to fill it. */}
         <div
-          className="relative w-full h-full overflow-hidden bg-black"
+          className={`relative w-full h-full overflow-hidden ${IS_BROADCAST_CONSOLE ? 'bg-transparent' : 'bg-black'}`}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
             and playing frames that feed the canvas. On desktop the opaque canvas
             on top covers it; if the canvas pipeline ever stalls on mobile, the
             broadcaster still sees their live camera through this layer instead of
-            a black screen. */}
+            a black screen. In the native broadcast console the video comes from
+            the native encoder behind this transparent overlay, so these layers
+            are hidden to let the native camera preview show through. */}
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="block w-full h-full object-contain pointer-events-none"
+          className={`block w-full h-full object-contain pointer-events-none ${IS_BROADCAST_CONSOLE ? 'hidden' : ''}`}
         />
         {/* Canvas shows filtered/mirrored output at the camera's native aspect
             ratio, displayed with object-contain so the whole frame is visible
@@ -1496,11 +1613,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             camera underneath. */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-contain"
+          className={`absolute inset-0 w-full h-full object-contain ${IS_BROADCAST_CONSOLE ? 'hidden' : ''}`}
           style={{ objectFit: 'contain' }}
         />
-        
-        {!isCameraOn && (
+
+        {!isCameraOn && !IS_BROADCAST_CONSOLE && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-4">
               <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mx-auto">
@@ -1513,7 +1630,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
         {/* Camera access error — shown when the camera is meant to be on but the
             stream could not start (e.g. blocked permission or an in-app browser). */}
-        {isCameraOn && cameraError && (
+        {isCameraOn && cameraError && !IS_BROADCAST_CONSOLE && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/95 p-6">
             <div className="text-center space-y-4 max-w-xs">
               <div className="w-20 h-20 bg-red-500/20 border border-red-500/40 rounded-full flex items-center justify-center mx-auto">
@@ -1791,7 +1908,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
 
           {/* Bottom Menu Bar */}
-          <div className="flex flex-col gap-3 md:gap-4 pointer-events-auto max-h-[70vh] md:max-h-none overflow-y-auto scrollbar-hide">
+          <div className="flex flex-col gap-3 md:gap-4 pointer-events-auto">
+            {/* Scrollable panel stack — capped so it can never push the primary
+                control bar (라이브 시작) off the bottom of the screen on mobile,
+                where the live area is only ~65vh (the chat/products sidebar
+                takes the other 35vh). */}
+            <div className="flex flex-col gap-3 md:gap-4 max-h-[50vh] md:max-h-none overflow-y-auto scrollbar-hide">
             {/* AWS IVS Stream Info Panel (One-Click Broadcast) */}
             {showStreamInfo && (
               <div className="bg-black/60 backdrop-blur-xl border border-white/10 p-4 md:p-5 rounded-2xl md:rounded-[2rem] w-full max-w-lg animate-in slide-in-from-bottom-4 duration-300">
@@ -2146,6 +2268,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
+            </div>
+            {/* End scrollable panel stack — the control bar below always stays
+                visible at the bottom of the live area. */}
             <div className="flex justify-between items-end">
               <div className="flex items-center gap-2 md:gap-3">
                 <button
@@ -2155,7 +2280,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   {isCameraOn ? <Camera size={20} /> : <CameraOff size={20} />}
                 </button>
                 <button
-                  onClick={() => setIsMicOn(!isMicOn)}
+                  onClick={() => {
+                    const next = !isMicOn;
+                    setIsMicOn(next);
+                    // In the native studio the mic is on the native encoder.
+                    if (IS_BROADCAST_CONSOLE) {
+                      nativeBroadcastBridge?.post('SET_MUTED', { muted: !next });
+                    }
+                  }}
                   className={`p-3 md:p-4 rounded-full backdrop-blur-md transition-all ${isMicOn ? 'bg-white/10 text-white' : 'bg-red-500 text-white'}`}
                 >
                   {isMicOn ? <Mic size={20} /> : <MicOff size={20} />}

@@ -54,6 +54,7 @@ const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard')
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
 const PortfolioManagement = lazyWithRetry(() => import('./components/PortfolioManagement'));
 const LiveCommerceManagement = lazyWithRetry(() => import('./components/LiveCommerceManagement'));
+const LiveStreaming = lazyWithRetry(() => import('./components/LiveStreaming'));
 const BroadcastSettings = lazyWithRetry(() => import('./components/BroadcastSettings'));
 const BroadcastHistory = lazyWithRetry(() => import('./components/BroadcastHistory'));
 const BusinessProposalForm = lazyWithRetry(() => import('./components/BusinessProposalForm'));
@@ -1169,6 +1170,45 @@ const App: React.FC = () => {
     alert('정상적으로 로그아웃되었습니다.');
     window.location.href = window.location.origin + '/business-login';
   };
+
+  // Native broadcast console: the PICKS Folio app's native broadcast studio
+  // embeds this web live console as a transparent overlay above the native
+  // Amazon IVS camera encoder (see LiveStreaming's broadcast-console mode), so
+  // the seller keeps the full web merchandising/chat/cart console while the
+  // native layer streams broadcast-grade video. Render the console bare for the
+  // signed-in seller; user + per-broadcast product selection arrive in the URL.
+  const broadcastConsole = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('broadcastConsole') !== '1') return null;
+      const user = params.get('user') || localStorage.getItem('picks_user_session') || '';
+      if (!user) return null;
+      const products = (params.get('products') || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      return { user, products };
+    } catch {
+      return null;
+    }
+  })();
+  if (broadcastConsole) {
+    return (
+      <Suspense fallback={<LazyFallback />}>
+        <LiveStreaming
+          userName={broadcastConsole.user}
+          selectedProductIds={broadcastConsole.products}
+          onClose={() => {
+            try {
+              (window as any).ReactNativeWebView?.postMessage(
+                JSON.stringify({ type: 'CLOSE_BROADCAST' }),
+              );
+            } catch {}
+          }}
+        />
+      </Suspense>
+    );
+  }
 
   // Business views
   if (view === 'business-signup') {

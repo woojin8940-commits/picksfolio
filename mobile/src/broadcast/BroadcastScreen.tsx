@@ -1,19 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   AppState,
-  KeyboardAvoidingView,
   PermissionsAndroid,
   Platform,
-  Pressable,
-  ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
+import type { WebViewMessageEvent } from 'react-native-webview';
 import {
   IVSBroadcastCameraView,
   type CameraPosition,
@@ -21,40 +16,17 @@ import {
   type IIVSBroadcastCameraView,
   type StateStatusUnion,
 } from 'amazon-ivs-react-native-broadcast';
-import { broadcastConfig } from '@/constants/config';
-import { fetchStreamKey, setLiveState } from '@/services/streamKey';
-import { colors, radius, spacing } from '@/theme';
-
-/** Re-assert live state on this cadence so a brief interruption doesn't drop viewers. */
-const HEARTBEAT_MS = 8000;
+import { config, broadcastConfig } from '@/constants/config';
+import { fetchStreamKey } from '@/services/streamKey';
 
 type Phase = 'idle' | 'connecting' | 'live' | 'error';
 
-interface StatusMeta {
-  label: string;
-  color: string;
-  pulse: boolean;
-}
-
-/** Map the SDK broadcast state to a Korean status the host understands. */
-function phaseMeta(phase: Phase): StatusMeta {
-  switch (phase) {
-    case 'connecting':
-      return { label: '연결 중', color: colors.accent, pulse: true };
-    case 'live':
-      return { label: '방송 중', color: colors.danger, pulse: true };
-    case 'error':
-      return { label: '오류', color: colors.danger, pulse: false };
-    default:
-      return { label: '대기 중', color: colors.textMuted, pulse: false };
-  }
-}
-
 /** Normalise the state coming back from the native event (string or numeric). */
 function toPhase(state: StateStatusUnion | number): Phase {
-  const s = typeof state === 'number'
-    ? (['INVALID', 'DISCONNECTED', 'CONNECTING', 'CONNECTED', 'ERROR'][state] ?? 'INVALID')
-    : state;
+  const s =
+    typeof state === 'number'
+      ? (['INVALID', 'DISCONNECTED', 'CONNECTING', 'CONNECTED', 'ERROR'][state] ?? 'INVALID')
+      : state;
   switch (s) {
     case 'CONNECTING':
       return 'connecting';
@@ -67,99 +39,127 @@ function toPhase(state: StateStatusUnion | number): Phase {
   }
 }
 
+/**
+ * Injected before the embedded console loads. Flags the web live console so it
+ * runs in "broadcast console" mode: it skips its own camera/WebRTC/IVS pipeline
+ * (the native layer below owns broadcast-grade video) and runs purely as the
+ * control surface — products, banners, cart, chat and all live-state/usage
+ * bookkeeping — delegating start/stop/flip/mute to native over this bridge.
+ *
+ * The body is made transparent so the native Amazon IVS camera preview shows
+ * through the console's (now-transparent) video area.
+ */
+const CONSOLE_BRIDGE = `
+  (function () {
+    window.__PICKSFOLIO_BROADCAST_CONSOLE__ = true;
+    try {
+      var s = document.createElement('style');
+      s.innerHTML = 'html,body{background:transparent !important;}';
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {}
+  })();
+  true;
+`;
+
 export interface BroadcastScreenProps {
-  /** Seller username; when present, the stream key is auto-loaded from the backend. */
+  /** Seller username; passed to the embedded console and stream-key lookup. */
   username?: string;
-  /** Optional credentials handed in by the web app, to skip the lookup. */
-  initialIngestServer?: string;
-  initialStreamKey?: string;
+  /** Per-broadcast product selection forwarded to the console (comma-separated). */
+  productIds?: string;
   /** Leave the broadcast screen (returns to the WebView shell). */
   onClose: () => void;
 }
 
+/**
+ * Native live-broadcast studio.
+ *
+ * Two layers:
+ *  1. `IVSBroadcastCameraView` (full screen) — the phone camera streamed to
+ *     Amazon IVS over RTMPS via the device's hardware encoder. This is the video
+ *     viewers see, at broadcast-grade quality.
+ *  2. A transparent full-screen WebView (on top) — the production web live
+ *     console in "broadcast console" mode. It owns all merchandising (products,
+ *     banners), chat, cart and the live-state/usage bookkeeping, and renders its
+ *     controls over the camera exactly like the web console.
+ *
+ * The console drives the broadcast through the WebView bridge: it sends
+ * REQUEST_START (with the seller's IVS ingest server + stream key it already
+ * loaded), REQUEST_STOP, FLIP_CAMERA and SET_MUTED; this screen reports the
+ * encoder state back via `window.__picksNativeBroadcastState(...)` so the
+ * console can confirm the broadcast actually went live before writing state.
+ */
 export default function BroadcastScreen({
   username,
-  initialIngestServer,
-  initialStreamKey,
+  productIds,
   onClose,
 }: BroadcastScreenProps) {
   const cameraRef = useRef<IIVSBroadcastCameraView>(null);
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const webRef = useRef<WebView>(null);
 
-  const [permissionGranted, setPermissionGranted] = useState(Platform.OS === 'ios');
-  const [ingestServer, setIngestServer] = useState(
-    initialIngestServer ?? broadcastConfig.defaultIngestServer,
-  );
-  const [streamKey, setStreamKey] = useState(initialStreamKey ?? '');
+  const [ingestServer, setIngestServer] = useState(broadcastConfig.defaultIngestServer);
+  const [streamKey, setStreamKey] = useState('');
   const [cameraPosition, setCameraPosition] = useState<CameraPosition>('back');
   const [muted, setMuted] = useState(false);
-  const [phase, setPhase] = useState<Phase>('idle');
   const [broadcasting, setBroadcasting] = useState(false);
-  const [loadingKey, setLoadingKey] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
 
   const broadcastingRef = useRef(false);
   broadcastingRef.current = broadcasting;
 
+  const consoleUri = `${config.webUrl.replace(/\/$/, '')}/?broadcastConsole=1&user=${encodeURIComponent(
+    username ?? '',
+  )}&products=${encodeURIComponent(productIds ?? '')}`;
+
   // --- Android runtime permissions (camera + microphone) ---------------------
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    (async () => {
-      try {
-        const result = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        ]);
-        const ok =
-          result[PermissionsAndroid.PERMISSIONS.CAMERA] === 'granted' &&
-          result[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === 'granted';
-        setPermissionGranted(ok);
-        if (!ok) setNotice('카메라·마이크 권한을 허용해야 방송할 수 있어요.');
-      } catch {
-        setPermissionGranted(false);
-      }
-    })();
+    PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.CAMERA,
+      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+    ]).catch(() => {});
   }, []);
 
-  // --- Load the seller's IVS credentials from the backend --------------------
-  useEffect(() => {
-    if (!username || (initialIngestServer && initialStreamKey)) return;
-    let cancelled = false;
-    setLoadingKey(true);
-    fetchStreamKey(username).then((res) => {
-      if (cancelled) return;
-      setLoadingKey(false);
-      if (res.ok) {
-        setIngestServer(res.data.ingestServer);
-        setStreamKey(res.data.streamKey);
-      } else if (res.reason === 'cap') {
-        setNotice(res.message);
-      } else if (res.reason === 'not-found') {
-        setNotice('저장된 스트림 정보가 없어요. 인제스트 서버와 스트림 키를 입력해 주세요.');
-        setShowSettings(true);
-      } else {
-        setNotice(res.message);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [username, initialIngestServer, initialStreamKey]);
-
-  const stopHeartbeat = useCallback(() => {
-    if (heartbeatRef.current) {
-      clearInterval(heartbeatRef.current);
-      heartbeatRef.current = null;
-    }
+  /** Tell the embedded console the current encoder phase. */
+  const notifyConsole = useCallback((phase: Phase) => {
+    webRef.current?.injectJavaScript(
+      `(function(){ try { window.__picksNativeBroadcastState && window.__picksNativeBroadcastState(${JSON.stringify(
+        phase,
+      )}); } catch (e) {} })(); true;`,
+    );
   }, []);
 
-  const markOffline = useCallback(() => {
-    stopHeartbeat();
-    if (username) void setLiveState(username, false);
-  }, [stopHeartbeat, username]);
+  const startBroadcast = useCallback(
+    async (ingest?: string, key?: string) => {
+      let rtmps = (ingest ?? '').trim() || ingestServer.trim();
+      let sk = (key ?? '').trim() || streamKey.trim();
 
-  // Going to the background while live should not leave a ghost "라이브 중" state.
+      // Fall back to the backend lookup if the console didn't hand us credentials.
+      if ((!rtmps || !sk) && username) {
+        const res = await fetchStreamKey(username);
+        if (res.ok) {
+          rtmps = res.data.ingestServer;
+          sk = res.data.streamKey;
+        }
+      }
+      if (!rtmps || !sk) {
+        notifyConsole('error');
+        return;
+      }
+
+      setIngestServer(rtmps);
+      setStreamKey(sk);
+      setBroadcasting(true);
+      cameraRef.current?.start({ rtmpsUrl: rtmps, streamKey: sk });
+    },
+    [ingestServer, streamKey, username, notifyConsole],
+  );
+
+  const stopBroadcast = useCallback(() => {
+    cameraRef.current?.stop();
+    setBroadcasting(false);
+    notifyConsole('idle');
+  }, [notifyConsole]);
+
+  // Going to the background while live should not leave a ghost broadcast.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' && broadcastingRef.current) {
@@ -169,70 +169,69 @@ export default function BroadcastScreen({
     return () => sub.remove();
   }, []);
 
-  // Ensure live state is cleared if the screen unmounts mid-broadcast.
-  useEffect(() => () => markOffline(), [markOffline]);
-
-  const canBroadcast =
-    permissionGranted && ingestServer.trim().length > 0 && streamKey.trim().length > 0;
-
-  const handleStart = useCallback(() => {
-    if (!canBroadcast || broadcasting) return;
-    setNotice(null);
-    setPhase('connecting');
-    setBroadcasting(true);
-    cameraRef.current?.start({
-      rtmpsUrl: ingestServer.trim(),
-      streamKey: streamKey.trim(),
-    });
-  }, [canBroadcast, broadcasting, ingestServer, streamKey]);
-
-  const handleStop = useCallback(() => {
-    cameraRef.current?.stop();
-    setBroadcasting(false);
-    setPhase('idle');
-    markOffline();
-  }, [markOffline]);
+  // Console → native control messages.
+  const onConsoleMessage = useCallback(
+    (e: WebViewMessageEvent) => {
+      let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
+      try {
+        msg = JSON.parse(e.nativeEvent.data);
+      } catch {
+        return;
+      }
+      switch (msg?.type) {
+        case 'REQUEST_START': {
+          const ingest = typeof msg.payload?.ingestServer === 'string' ? msg.payload.ingestServer : undefined;
+          const key = typeof msg.payload?.streamKey === 'string' ? msg.payload.streamKey : undefined;
+          void startBroadcast(ingest, key);
+          break;
+        }
+        case 'REQUEST_STOP':
+          stopBroadcast();
+          break;
+        case 'FLIP_CAMERA':
+          setCameraPosition((p) => (p === 'back' ? 'front' : 'back'));
+          break;
+        case 'SET_MUTED':
+          setMuted(msg.payload?.muted === true);
+          break;
+        case 'CLOSE_BROADCAST':
+          if (broadcastingRef.current) cameraRef.current?.stop();
+          onClose();
+          break;
+        default:
+          break;
+      }
+    },
+    [startBroadcast, stopBroadcast, onClose],
+  );
 
   const handleStateChange = useCallback(
     (state: StateStatusUnion | number) => {
       const next = toPhase(state);
-      setPhase(next);
-      if (next === 'live') {
-        // Now actually connected — surface as "라이브 중" to web viewers and
-        // re-assert it on a heartbeat the way the web console does.
-        if (username) {
-          void setLiveState(username, true, { startedAt: new Date().toISOString() });
-          stopHeartbeat();
-          heartbeatRef.current = setInterval(() => {
-            void setLiveState(username, true);
-          }, HEARTBEAT_MS);
-        }
-      } else if (next === 'idle' || next === 'error') {
-        setBroadcasting(false);
-        markOffline();
-      }
+      notifyConsole(next);
+      if (next === 'idle' || next === 'error') setBroadcasting(false);
     },
-    [username, stopHeartbeat, markOffline],
+    [notifyConsole],
   );
 
-  const handleError = useCallback((message: string) => {
-    setPhase('error');
+  const handleError = useCallback(() => {
     setBroadcasting(false);
-    setNotice(message || '방송 중 오류가 발생했어요. 다시 시도해 주세요.');
-  }, []);
+    notifyConsole('error');
+  }, [notifyConsole]);
 
-  const handleBroadcastError = useCallback((error: IBroadcastSessionError) => {
-    setNotice(error?.detail || '방송 세션 오류가 발생했어요.');
-    if (error?.isFatal) {
-      setPhase('error');
-      setBroadcasting(false);
-    }
-  }, []);
-
-  const status = phaseMeta(phase);
+  const handleBroadcastError = useCallback(
+    (error: IBroadcastSessionError) => {
+      if (error?.isFatal) {
+        setBroadcasting(false);
+        notifyConsole('error');
+      }
+    },
+    [notifyConsole],
+  );
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.root} edges={[]}>
+      {/* Layer 1: native camera + hardware encoder → Amazon IVS (the video). */}
       <IVSBroadcastCameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -258,276 +257,35 @@ export default function BroadcastScreen({
         onBroadcastError={handleBroadcastError}
       />
 
-      {/* Top bar: close + live status pill */}
-      <View style={styles.topBar} pointerEvents="box-none">
-        <Pressable
-          onPress={onClose}
-          hitSlop={12}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-down" size={24} color={colors.text} />
-        </Pressable>
-
-        <View style={[styles.statusPill, { borderColor: status.color }]}>
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: status.color, opacity: status.pulse ? 1 : 0.6 },
-            ]}
-          />
-          <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-        </View>
-
-        <Pressable
-          onPress={() => setShowSettings((s) => !s)}
-          hitSlop={12}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="options-outline" size={22} color={colors.text} />
-        </Pressable>
-      </View>
-
-      {notice && (
-        <View style={styles.notice} pointerEvents="none">
-          <Text style={styles.noticeText}>{notice}</Text>
-        </View>
-      )}
-
-      {loadingKey && (
-        <View style={styles.notice} pointerEvents="none">
-          <ActivityIndicator color={colors.accent} />
-          <Text style={styles.noticeText}>스트림 정보를 불러오는 중…</Text>
-        </View>
-      )}
-
-      {/* Stream settings: manual ingest server / stream key entry */}
-      {showSettings && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.settingsWrap}
-        >
-          <ScrollView
-            style={styles.settings}
-            contentContainerStyle={styles.settingsContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.settingsTitle}>스트림 설정</Text>
-            <Text style={styles.fieldLabel}>인제스트 서버 (RTMPS)</Text>
-            <TextInput
-              value={ingestServer}
-              onChangeText={setIngestServer}
-              editable={!broadcasting}
-              placeholder="rtmps://…live-video.net:443/app/"
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
-            <Text style={styles.fieldLabel}>스트림 키</Text>
-            <TextInput
-              value={streamKey}
-              onChangeText={setStreamKey}
-              editable={!broadcasting}
-              placeholder="sk_..."
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              style={styles.input}
-            />
-            {username ? (
-              <Pressable
-                disabled={loadingKey || broadcasting}
-                onPress={() => {
-                  setLoadingKey(true);
-                  setNotice(null);
-                  fetchStreamKey(username).then((res) => {
-                    setLoadingKey(false);
-                    if (res.ok) {
-                      setIngestServer(res.data.ingestServer);
-                      setStreamKey(res.data.streamKey);
-                      setNotice('스트림 정보를 불러왔어요.');
-                    } else if (res.reason === 'cap') {
-                      setNotice(res.message);
-                    } else {
-                      setNotice('저장된 스트림 정보를 찾지 못했어요.');
-                    }
-                  });
-                }}
-                style={({ pressed }) => [styles.reloadButton, pressed && styles.pressed]}
-              >
-                <Ionicons name="cloud-download-outline" size={16} color={colors.accent} />
-                <Text style={styles.reloadText}>저장된 정보 불러오기</Text>
-              </Pressable>
-            ) : null}
-          </ScrollView>
-        </KeyboardAvoidingView>
-      )}
-
-      {/* Bottom controls: camera flip · start/stop · mic */}
-      <View style={styles.controls} pointerEvents="box-none">
-        <Pressable
-          onPress={() => setCameraPosition((p) => (p === 'back' ? 'front' : 'back'))}
-          style={({ pressed }) => [styles.controlButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="camera-reverse-outline" size={26} color={colors.text} />
-          <Text style={styles.controlLabel}>{cameraPosition === 'back' ? '후면' : '전면'}</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={broadcasting ? handleStop : handleStart}
-          disabled={!broadcasting && !canBroadcast}
-          style={({ pressed }) => [
-            styles.liveButton,
-            broadcasting ? styles.liveButtonStop : styles.liveButtonStart,
-            !broadcasting && !canBroadcast && styles.liveButtonDisabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Ionicons
-            name={broadcasting ? 'stop' : 'radio-outline'}
-            size={26}
-            color={broadcasting ? colors.text : colors.background}
-          />
-          <Text style={[styles.liveButtonText, broadcasting && styles.liveButtonTextStop]}>
-            {broadcasting ? '방송 종료' : '방송 시작'}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setMuted((m) => !m)}
-          style={({ pressed }) => [styles.controlButton, pressed && styles.pressed]}
-        >
-          <Ionicons name={muted ? 'mic-off-outline' : 'mic-outline'} size={26} color={muted ? colors.danger : colors.text} />
-          <Text style={[styles.controlLabel, muted && { color: colors.danger }]}>
-            {muted ? '음소거' : '마이크'}
-          </Text>
-        </Pressable>
-      </View>
+      {/* Layer 2: transparent web live console overlaid on the camera. It is the
+          entire UI — products, banners, chat, cart and the go-live controls —
+          and delegates the actual broadcast to the native encoder above. */}
+      <WebView
+        ref={webRef}
+        source={{ uri: consoleUri }}
+        style={styles.console}
+        // Transparent so the native camera shows through the console's video area.
+        opaque={false}
+        backgroundColor="transparent"
+        injectedJavaScriptBeforeContentLoaded={CONSOLE_BRIDGE}
+        sharedCookiesEnabled
+        thirdPartyCookiesEnabled
+        domStorageEnabled
+        javaScriptEnabled
+        allowsInlineMediaPlayback
+        mediaPlaybackRequiresUserAction={false}
+        originWhitelist={['*']}
+        setSupportMultipleWindows={false}
+        applicationNameForUserAgent="PicksFolioApp"
+        onMessage={onConsoleMessage}
+        renderError={() => <View style={styles.fill} />}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { fontSize: 13, fontWeight: '700' },
-  notice: {
-    position: 'absolute',
-    top: 72,
-    left: spacing.lg,
-    right: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-  },
-  noticeText: { color: colors.text, fontSize: 13, textAlign: 'center', flexShrink: 1 },
-  settingsWrap: {
-    position: 'absolute',
-    top: 116,
-    left: spacing.lg,
-    right: spacing.lg,
-    maxHeight: '50%',
-  },
-  settings: {
-    backgroundColor: 'rgba(11,11,15,0.92)',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  settingsContent: { padding: spacing.lg, gap: spacing.sm },
-  settingsTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: spacing.xs },
-  fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600', marginTop: spacing.sm },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: 14,
-  },
-  reloadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.accent,
-  },
-  reloadText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
-  controls: {
-    position: 'absolute',
-    bottom: spacing.xxl,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: spacing.xl,
-  },
-  controlButton: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
-  controlLabel: { color: colors.text, fontSize: 11, fontWeight: '600' },
-  liveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderRadius: radius.pill,
-    minWidth: 150,
-    justifyContent: 'center',
-  },
-  liveButtonStart: { backgroundColor: colors.accent },
-  liveButtonStop: { backgroundColor: 'rgba(224,101,95,0.18)', borderWidth: 1, borderColor: colors.danger },
-  liveButtonDisabled: { opacity: 0.4 },
-  liveButtonText: { color: colors.background, fontSize: 16, fontWeight: '700' },
-  liveButtonTextStop: { color: colors.danger },
-  pressed: { opacity: 0.7 },
+  console: { flex: 1, backgroundColor: 'transparent' },
+  fill: { flex: 1, backgroundColor: 'transparent' },
 });

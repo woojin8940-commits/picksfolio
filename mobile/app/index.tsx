@@ -40,60 +40,40 @@ function isInternalUrl(url: string): boolean {
   return INTERNAL_SCHEME.test(url);
 }
 
-/** Deep link the web app can navigate to in order to open the native broadcast. */
-const BROADCAST_DEEPLINK = /^picksfolio:\/\/broadcast/i;
-
-/** Parse a `key=value&…` query string without relying on URLSearchParams. */
-function parseQuery(url: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const q = url.split('?')[1];
-  if (!q) return out;
-  for (const pair of q.split('&')) {
-    const [k, v = ''] = pair.split('=');
-    if (k) out[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, ' '));
-  }
-  return out;
-}
-
-/** Open the native broadcast screen, forwarding only the params we recognise. */
-function openNativeBroadcast(raw: Record<string, unknown>): void {
-  const params: Record<string, string> = {};
-  for (const key of ['username', 'ingestServer', 'streamKey'] as const) {
-    const value = raw[key];
-    if (typeof value === 'string' && value) params[key] = value;
-  }
-  router.push({ pathname: '/broadcast', params });
-}
-
 /**
- * Injected before the web app loads. Advertises the native shell + native
- * broadcast capability and exposes `PicksFolioNative.openBroadcast(...)`, which
- * the web live console calls to hand the broadcast off to the native IVS screen
- * instead of running the in-WebView (getUserMedia) broadcast path.
+ * Injected before the web app loads. Advertises the native shell, native push,
+ * and the native live-broadcast capability.
  *
- * It also advertises native push support and exposes
- * `PicksFolioNative.registerPush(username, userType)` so the web app can hand
- * the signed-in user to the shell, which registers the device's push token for
- * new-message alerts.
+ * Exposes `window.PicksFolioNative`:
+ *  - `registerPush(username, userType)` — hand the signed-in user to the shell so
+ *    the device's push token is registered for new-message alerts.
+ *  - `startBroadcast(username, productIds)` — hand the live broadcast off to the
+ *    native broadcast studio. The studio pushes the phone camera to Amazon IVS
+ *    through the device's hardware encoder (broadcast-grade video), while the web
+ *    live console — products, banners, cart and chat — runs as a transparent
+ *    overlay above the camera, so the seller keeps the full web console they know.
+ *
+ * The presence of `broadcastSupported` lets the web app detect the native shell
+ * and route "라이브 시작" to the native studio instead of the in-WebView pipeline.
  */
 const NATIVE_BRIDGE = `
   (function () {
     if (window.__PICKSFOLIO_NATIVE__) return;
     window.__PICKSFOLIO_NATIVE__ = true;
-    window.__PICKSFOLIO_NATIVE_BROADCAST__ = true;
     window.__PICKSFOLIO_NATIVE_PUSH__ = true;
+    window.__PICKSFOLIO_NATIVE_BROADCAST__ = true;
     function post(payload) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
     }
     window.PicksFolioNative = {
-      version: 2,
-      broadcastSupported: true,
+      version: 4,
       pushSupported: true,
-      openBroadcast: function (opts) {
-        post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
-      },
+      broadcastSupported: true,
       registerPush: function (username, userType) {
         post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType } });
+      },
+      startBroadcast: function (username, productIds) {
+        post({ type: 'START_NATIVE_BROADCAST', payload: { username: username, productIds: productIds || '' } });
       },
     };
   })();
@@ -165,12 +145,6 @@ export default function WebAppScreen() {
   // out to the OS; keep all web traffic inside the WebView.
   const onShouldStartLoad = useCallback((req: { url: string }): boolean => {
     const { url } = req;
-    // Native broadcast deep link: open the IVS broadcast screen instead of
-    // handing the custom scheme to the OS.
-    if (BROADCAST_DEEPLINK.test(url)) {
-      openNativeBroadcast(parseQuery(url));
-      return false;
-    }
     if (isInternalUrl(url)) return true;
     if (EXTERNAL_SCHEME.test(url)) {
       Linking.openURL(url).catch(() => {
@@ -188,8 +162,8 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Bridge: the web live console calls window.PicksFolioNative.openBroadcast()
-  // to hand the broadcast off to the native IVS screen.
+  // Bridge: the web app calls window.PicksFolioNative.registerPush() to hand the
+  // signed-in user to the shell so the device's push token can be registered.
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
     try {
@@ -197,13 +171,27 @@ export default function WebAppScreen() {
     } catch {
       return;
     }
-    if (msg?.type === 'OPEN_NATIVE_BROADCAST') {
-      openNativeBroadcast(msg.payload ?? {});
-    } else if (msg?.type === 'REGISTER_PUSH') {
+    if (msg?.type === 'REGISTER_PUSH') {
       const username = msg.payload?.username;
       const userType = msg.payload?.userType === 'business' ? 'business' : 'influencer';
       if (typeof username === 'string' && username) {
         registerPushForUser(username, userType);
+      }
+    } else if (msg?.type === 'START_NATIVE_BROADCAST') {
+      // Hand the live broadcast off to the native studio: the phone camera is
+      // pushed to Amazon IVS by the device's hardware encoder, with the web live
+      // console (products/banners/cart/chat) layered over it as a transparent
+      // overlay. Carry the seller and their per-broadcast product selection.
+      const username = msg.payload?.username;
+      const products = msg.payload?.productIds;
+      if (typeof username === 'string' && username) {
+        router.push({
+          pathname: '/broadcast',
+          params: {
+            username,
+            products: typeof products === 'string' ? products : '',
+          },
+        });
       }
     }
   }, []);
