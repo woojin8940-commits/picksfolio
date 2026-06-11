@@ -115,7 +115,10 @@ export default function WebAppScreen() {
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
   const [sourceUri, setSourceUri] = useState(config.webUrl);
+  // Tracked both as a ref (read synchronously by the Android hardware back
+  // handler) and as state (drives the visible back button's appearance).
   const canGoBack = useRef(false);
+  const [showBack, setShowBack] = useState(false);
   const loadedRef = useRef(false);
 
   // Jump the WebView to a deep-linked path (used when a push is tapped). If the
@@ -164,6 +167,14 @@ export default function WebAppScreen() {
 
   const onNavStateChange = useCallback((nav: WebViewNavigation) => {
     canGoBack.current = nav.canGoBack;
+    setShowBack(nav.canGoBack);
+  }, []);
+
+  // Visible back button: navigate the WebView's history back one step. Gives
+  // iOS users (who otherwise only have the edge-swipe gesture) and Android
+  // users an always-visible way out of any page the WebView lands on.
+  const goBack = useCallback(() => {
+    webRef.current?.goBack();
   }, []);
 
   // Ask for the camera + microphone permission once, up front, so the in-WebView
@@ -281,6 +292,18 @@ export default function WebAppScreen() {
         renderError={() => <View style={styles.fill} />}
       />
 
+      {showBack && !errored && (
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로 가기"
+          hitSlop={8}
+          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+        >
+          <Text style={styles.backIcon}>‹</Text>
+        </Pressable>
+      )}
+
       {loading && !errored && (
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator color={colors.accent} size="large" />
@@ -309,6 +332,27 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   web: { flex: 1, backgroundColor: colors.background },
   fill: { flex: 1, backgroundColor: colors.background },
+  backButton: {
+    position: 'absolute',
+    top: 8,
+    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(15,17,23,0.78)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonPressed: { opacity: 0.7 },
+  backIcon: {
+    color: colors.text,
+    fontSize: 30,
+    lineHeight: 32,
+    marginTop: -2,
+    fontWeight: '600',
+  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.background,
