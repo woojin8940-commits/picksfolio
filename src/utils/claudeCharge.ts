@@ -1,5 +1,13 @@
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
+import { isNativeApp } from './appEnv';
+
+// Digital-goods purchases (membership, Claude credits) are sold on the website
+// only; the native app never triggers them. This message is a hard backstop in
+// case any entry point is reached inside the app — the UI that opens these flows
+// is already hidden there.
+const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.';
+
 
 // Claude plan payments. Two flavours, both through PortOne V2:
 //   • One-time payment (requestPayment) — used to ACTIVATE the Claude plan and to
@@ -44,6 +52,9 @@ export async function payClaudePlan(
   payMethod: ClaudePayMethod,
   billingKey?: string,
 ): Promise<ClaudePayOutcome> {
+  if (isNativeApp()) {
+    return { success: false, error: NATIVE_BLOCK_MESSAGE };
+  }
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
@@ -101,6 +112,9 @@ export async function issueClaudeBillingKey(
   username: string,
   payMethod: ClaudePayMethod,
 ): Promise<{ success: boolean; billingKey?: string; error?: string }> {
+  if (isNativeApp()) {
+    return { success: false, error: NATIVE_BLOCK_MESSAGE };
+  }
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }

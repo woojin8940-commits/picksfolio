@@ -59,24 +59,26 @@ html {
     min-height: calc(100vh / 0.75) !important;
   }
 
-  /* The live-stream viewer is a fixed overlay whose height is set inline in JS
-     to window.innerHeight (device pixels) so the player stays locked while the
-     on-screen keyboard opens during mobile chat. Under the desktop `zoom: 0.75`
-     above, any *computed* height (a pixel value, or `100dvh`, or even
-     `100dvh / 0.75`) is at the mercy of how a given browser version reconciles
-     viewport units with CSS `zoom` — which is exactly why earlier height-math
-     fixes kept leaving an empty band at the bottom that exposed the host's
-     personal page behind the player.
+  /* The live-stream viewer is a full-viewport fixed overlay. Every previous
+     attempt to make it fill the screen *under* the desktop `zoom: 0.75` above
+     fought the same losing battle: whatever height we computed — a JS pixel
+     value, `100dvh`, `100dvh / 0.75`, or even anchoring `bottom: 0` — was
+     reinterpreted through the fractional page zoom, and different browser
+     versions reconcile viewport geometry with CSS `zoom` differently. That kept
+     leaving a band at the bottom that exposed the host's personal page behind
+     the player, and it also skewed how `object-fit` framed the video.
 
-     The definitive fix is to stop computing a height at all. The overlay's
-     utility classes already pin top/left/right to 0; pinning `bottom: 0` here
-     (and forcing `height: auto` to defeat the inline JS pixel height) makes the
-     browser size the box from the four viewport edges directly. An edge-anchored
-     fixed box always fills the real viewport rectangle regardless of how `zoom`
-     scales lengths, so the broadcast can never be cut off and the page can never
-     peek through. Desktop has no on-screen keyboard, so the JS height lock it
-     overrides here is not needed. */
+     The definitive fix is to take this one overlay out of the page zoom instead
+     of doing height math against it. CSS `zoom` compounds multiplicatively down
+     the tree, so giving the overlay its own `zoom` of 1 / 0.75 returns it to an
+     effective scale of 1.0 — it now maps 1:1 to the real device viewport. With
+     the zoom neutralised, the overlay's own `top/left/right` pins plus `bottom`
+     fill the real viewport rectangle exactly: the broadcast can never be cut off
+     and the page can never peek through, on any browser. Desktop has no
+     on-screen keyboard, so the inline JS height lock (forced to `auto` here) is
+     not needed. */
   .live-stream-container {
+    zoom: 1.3333333;
     bottom: 0 !important;
     height: auto !important;
   }
@@ -231,33 +233,24 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Live stream video fills the mobile viewport edge-to-edge with no black
-   letterbox bars. A landscape desktop broadcast is cropped to the phone's
-   portrait frame (object-fit: cover) instead of being shrunk into a pillarboxed
-   strip, giving viewers the immersive full-screen look of a mobile live feed. */
+/* Live stream video shows the WHOLE broadcast frame, never a zoom-crop. The
+   native app encodes a portrait 9:16 feed; viewers reported the player looking
+   "확대"(zoomed) because `object-fit: cover` center-cropped that feed to fill
+   whatever stage it landed on — hard horizontal cropping on a wide desktop
+   window, and edge cropping on taller-than-16:9 phones. `contain` fits the full
+   frame inside the stage at its true ratio (letterboxed against the black
+   background) so nothing is ever cut off or magnified, matching exactly what the
+   broadcaster sees. The black container fills any leftover area, so the host's
+   page can still never show through. */
 .live-stream-container video,
-.live-stream-container .video-js {
+.live-stream-container .video-js,
+.live-stream-container .video-js .vjs-tech {
   width: 100% !important;
   height: 100% !important;
-  object-fit: cover !important;
+  object-fit: contain !important;
   background-color: #000;
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
-}
-
-/* Desktop "web version": the viewer overlay is a full-width landscape stage, so
-   cropping the broadcast to fill it (object-fit: cover) center-cuts a phone's
-   native-ratio feed hard — viewers reported it looking "extremely zoomed in".
-   On desktop, show the whole frame at its true ratio (object-contain), the same
-   un-cropped framing the broadcaster sees, letterboxed instead of zoom-cropped.
-   Mobile keeps the immersive `cover` crop above (portrait phone matches the
-   feed, so there is no meaningful crop there). */
-@media (min-width: 769px) {
-  .live-stream-container video,
-  .live-stream-container .video-js,
-  .live-stream-container .video-js .vjs-tech {
-    object-fit: contain !important;
-  }
 }
 
 /* ===== Desktop UserPage Layout ===== */

@@ -13,6 +13,7 @@ import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
 import { normalizeContentToHtml, sanitizeRichHtml } from './richText';
+import { isNativeApp } from '../utils/appEnv';
 
 type BlockFontSize = 'sm' | 'md' | 'lg' | 'xl';
 type BlockGridColumns = 1 | 2 | 3 | 4;
@@ -1529,29 +1530,33 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ userName, onN
                   <div className="flex-1">
                     <h4 className="text-base md:text-lg font-black text-slate-900">콘텐츠 구성은 스탠다드 멤버십 전용입니다</h4>
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1.5 leading-relaxed">
-                      포트폴리오 본문(텍스트 · 이미지 블록)과 상단 커버 영상 업로드, 상품·포트폴리오 영상 업로드는 월 4,900원 스탠다드 멤버십에 포함됩니다. 라이브 커머스 송출까지 사용하시려면 월 13,900원 커머스 멤버십을 선택해 주세요.
+                      {isNativeApp()
+                        ? '포트폴리오 본문(텍스트 · 이미지 블록)과 커버·상품·포트폴리오 영상 업로드는 멤버십 기능입니다. 멤버십은 PICKS Folio 웹사이트에서 가입할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.'
+                        : '포트폴리오 본문(텍스트 · 이미지 블록)과 상단 커버 영상 업로드, 상품·포트폴리오 영상 업로드는 월 4,900원 스탠다드 멤버십에 포함됩니다. 라이브 커머스 송출까지 사용하시려면 월 13,900원 커머스 멤버십을 선택해 주세요.'}
                     </p>
                     <ul className="space-y-1.5 mt-4 text-xs md:text-sm text-slate-600 font-medium">
                       <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>상단 커버 <strong>영상</strong> 업로드</li>
                       <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>상품·포트폴리오 <strong>영상</strong> 업로드</li>
                       <li className="flex items-center gap-2"><span className="text-blue-500 font-black">✓</span>텍스트 · 이미지 블록 무제한 편집</li>
                     </ul>
-                    <div className="flex flex-col sm:flex-row gap-2 mt-5">
-                      <button
-                        type="button"
-                        onClick={() => onNavigateMembership?.()}
-                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md text-sm"
-                      >
-                        스탠다드 멤버십 4,900원으로 풀기
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onNavigateMembership?.()}
-                        className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md text-sm"
-                      >
-                        커머스 멤버십 13,900원
-                      </button>
-                    </div>
+                    {!isNativeApp() && (
+                      <div className="flex flex-col sm:flex-row gap-2 mt-5">
+                        <button
+                          type="button"
+                          onClick={() => onNavigateMembership?.()}
+                          className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md text-sm"
+                        >
+                          스탠다드 멤버십 4,900원으로 풀기
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateMembership?.()}
+                          className="flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md text-sm"
+                        >
+                          커머스 멤버십 13,900원
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

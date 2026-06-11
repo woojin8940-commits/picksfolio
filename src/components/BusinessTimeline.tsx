@@ -8,6 +8,7 @@ import {
   CLAUDE_PAY_METHODS,
   type ClaudePayMethod,
 } from '../utils/claudeCharge';
+import { isNativeApp } from '../utils/appEnv';
 import { AiMarkdown } from './AiMarkdown';
 
 interface AiMessage {
@@ -1303,7 +1304,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {/* Model selector — Gemini (free, membership) vs Claude (premium credits).
                 Switching keeps the same conversation; neither model forgets the other. */}
             <div className="shrink-0 flex items-center gap-1.5">
-              {aiModel === 'claude' && claudeData?.credits.planActive && (
+              {!isNativeApp() && aiModel === 'claude' && claudeData?.credits.planActive && (
                 <button
                   type="button"
                   onClick={() => setClaudeModalOpen(true)}
@@ -1323,15 +1324,21 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 >
                   ✨ 제미나이
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setAiModel('claude')}
-                  className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
-                    aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  🤖 클로드
-                </button>
+                {/* Claude is a paid prepaid-credit add-on. It is hidden inside the
+                    native app because its credits can only be purchased on the
+                    website (digital-goods policy); the app keeps Gemini, which is
+                    included with the AI membership. */}
+                {!isNativeApp() && (
+                  <button
+                    type="button"
+                    onClick={() => setAiModel('claude')}
+                    className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
+                      aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    🤖 클로드
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1345,15 +1352,23 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <span className="text-2xl leading-none">✨</span>
               </div>
               <h3 className="text-base font-extrabold text-gray-900 mb-1.5">AI 어시스턴트는 AI 멤버십 전용 기능입니다</h3>
-              <p className="text-xs text-gray-500 leading-relaxed mb-5">
-                스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십(13,900원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
-              </p>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
-                className="px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 transition-all shadow-md hover:shadow-lg"
-              >
-                멤버십 플랜 보기
-              </button>
+              {isNativeApp() ? (
+                <p className="text-xs text-gray-500 leading-relaxed mb-1">
+                  AI 멤버십에 가입하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 이용할 수 있어요. 멤버십 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500 leading-relaxed mb-5">
+                    스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십(13,900원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
+                  </p>
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                    className="px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 transition-all shadow-md hover:shadow-lg"
+                  >
+                    멤버십 플랜 보기
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (

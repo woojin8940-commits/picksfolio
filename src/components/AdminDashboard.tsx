@@ -4,6 +4,7 @@ import { getStatsForRange, getTopClickedItemsForRange } from '../services/analyt
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
+import { isNativeApp } from '../utils/appEnv';
 import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
 
@@ -277,12 +278,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          <NavItem
-            icon="💎"
-            label="멤버십 플랜"
-            active={currentSubView === 'membership'}
-            onClick={onNavigateMembership}
-          />
+          {!isNativeApp() && (
+            <NavItem
+              icon="💎"
+              label="멤버십 플랜"
+              active={currentSubView === 'membership'}
+              onClick={onNavigateMembership}
+            />
+          )}
           <button
             type="button"
             onClick={() => {
@@ -358,7 +361,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
+              {!isNativeApp() && (
+                <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
+              )}
               <button
                 type="button"
                 onClick={() => {
