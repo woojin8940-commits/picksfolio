@@ -2716,13 +2716,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
           className={`absolute top-0 left-0 w-full h-full ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          // objectFit: 'contain' shows the whole broadcast frame at the camera's
-          // native aspect ratio — the same default framing the host sees in their
-          // preview (which also uses contain). The broadcaster no longer force-
-          // crops to a fixed 9:16 portrait, so cover here would zoom/crop the
-          // image and diverge from the host. Any unused area is letterboxed
-          // against the black stage.
-          style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+          // objectFit: 'cover' fills the full viewing stage edge-to-edge so the
+          // broadcast is presented immersively, the way viewers expect a live
+          // stream to look. The broadcaster captures at the camera's native
+          // resolution, which is often landscape — with 'contain' that frame was
+          // letterboxed into a thin band, leaving large empty areas that read as
+          // a "cut off" / broken viewing screen. 'cover' centre-crops the minimum
+          // needed to fill the viewport instead.
+          style={{ objectFit: 'cover', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
         />
         {/* HLS Video.js fallback */}
         {hlsPlaybackUrl && (
@@ -2741,7 +2742,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               x5-playsinline=""
               // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
               x5-video-player-type="h5-page"
-              style={{ objectFit: 'contain', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+              style={{ objectFit: 'cover', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         )}
