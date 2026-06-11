@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../services/apiService';
+import { isNativeApp } from '../utils/appEnv';
 import { SellerVerification } from '../types';
 
 interface MembershipGateProps {
@@ -48,6 +49,32 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
 
   if (verification?.membership_active) {
     return <>{children}</>;
+  }
+
+  // Inside the native app we still gate the feature, but show no pricing or
+  // "구독" payment CTA — digital-goods purchases happen on the website only.
+  if (isNativeApp()) {
+    return (
+      <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+        <header className="mb-6 md:mb-10">
+          <h2 className="text-xl md:text-3xl font-black text-slate-900 mb-1 md:mb-2">{featureName}</h2>
+          <p className="text-slate-500 font-medium text-[10px] md:text-base">{featureDescription}</p>
+        </header>
+        <div className="max-w-2xl bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-xl">{icon}</div>
+            <div>
+              <h3 className="text-base md:text-lg font-black text-slate-900">
+                {featureName}은(는) 멤버십 전용 기능입니다
+              </h3>
+              <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">
+                멤버십에 가입하면 이 기능을 사용할 수 있어요. 웹에서 가입한 멤버십은 앱에서도 그대로 이용됩니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

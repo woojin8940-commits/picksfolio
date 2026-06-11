@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { payClaudePlan, CLAUDE_PAY_METHODS, type ClaudePayMethod } from '../utils/claudeCharge';
+import { isNativeApp } from '../utils/appEnv';
 import type { SellerVerification } from '../types';
 
 interface MembershipPlanProps {
@@ -412,6 +413,24 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         : rawPlan === 'commerce' || rawPlan === 'live'
           ? 'commerce'
           : null;
+
+  // Inside the native app, membership and Claude-plan purchases are not offered
+  // — digital goods are sold on the website only. Show a neutral notice instead
+  // of any plan/pricing or payment UI (App Store / Play Store digital-goods
+  // policy). Web behaviour is unchanged.
+  if (isNativeApp()) {
+    return (
+      <main className="p-3 md:p-14 w-full animate-in fade-in duration-500">
+        <div className="max-w-xl mx-auto mt-10 md:mt-16 bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl mx-auto mb-4">💎</div>
+          <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2">멤버십 안내</h2>
+          <p className="text-slate-500 text-sm font-medium leading-relaxed">
+            멤버십 구독과 변경은 PICKS Folio 웹사이트에서 관리할 수 있어요. 웹에서 가입한 멤버십은 앱에서도 그대로 이용됩니다.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="p-3 md:p-14 w-full animate-in fade-in duration-500">

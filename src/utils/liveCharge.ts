@@ -1,5 +1,6 @@
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
+import { isNativeApp } from './appEnv';
 
 // Prepaid live-time top-up ("시간 충전하기") — a ONE-TIME (non-recurring) payment.
 // The seller pays for N hours of broadcast time through PortOne and the verified
@@ -40,6 +41,11 @@ export async function payAndChargeLiveTime(
   hours: number,
   payMethod: ChargePayMethod,
 ): Promise<ChargeOutcome> {
+  if (isNativeApp()) {
+    // Broadcast-time top-up is a digital-goods purchase, sold on the website
+    // only. Hard backstop — the charge UI is already hidden inside the app.
+    return { success: false, error: '이 결제는 앱에서 지원되지 않습니다.' };
+  }
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }

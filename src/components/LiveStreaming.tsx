@@ -8,6 +8,7 @@ import {
   payAndChargeLiveTime,
   type ChargePayMethod,
 } from '../utils/liveCharge';
+import { isNativeApp } from '../utils/appEnv';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
 
@@ -1691,14 +1692,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       </>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => { setChargeError(null); setShowChargeModal(true); }}
-                    className="backdrop-blur-md px-3 py-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 text-[10px] md:text-[11px] font-black flex items-center gap-1 transition-all active:scale-95"
-                    title="라이브 시간 충전하기 (시간당 8,900원)"
-                  >
-                    <Plus size={12} /> 시간 충전
-                  </button>
+                  {!isNativeApp() && (
+                    <button
+                      type="button"
+                      onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                      className="backdrop-blur-md px-3 py-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 text-[10px] md:text-[11px] font-black flex items-center gap-1 transition-all active:scale-95"
+                      title="라이브 시간 충전하기 (시간당 8,900원)"
+                    >
+                      <Plus size={12} /> 시간 충전
+                    </button>
+                  )}
                 </div>
                 );
               })()}
@@ -1712,15 +1715,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 <div className="w-full md:w-auto bg-amber-500/90 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-amber-300/50 text-white text-[10px] md:text-[11px] font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                   <Zap size={14} className="shrink-0" />
                   <span>
-                    라이브 잔여시간이 {liveRemainingMinutes ?? 30}분 남았습니다. 방송이 끊기기 전에 충전하세요.
+                    {isNativeApp()
+                      ? `라이브 잔여시간이 ${liveRemainingMinutes ?? 30}분 남았습니다. 시간 충전은 웹사이트에서 할 수 있습니다.`
+                      : `라이브 잔여시간이 ${liveRemainingMinutes ?? 30}분 남았습니다. 방송이 끊기기 전에 충전하세요.`}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => { setChargeError(null); setShowChargeModal(true); }}
-                    className="ml-1 bg-white text-amber-700 px-2.5 py-1 rounded-full text-[10px] font-black hover:bg-amber-50 active:scale-95 transition-all shrink-0"
-                  >
-                    지금 충전
-                  </button>
+                  {!isNativeApp() && (
+                    <button
+                      type="button"
+                      onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                      className="ml-1 bg-white text-amber-700 px-2.5 py-1 rounded-full text-[10px] font-black hover:bg-amber-50 active:scale-95 transition-all shrink-0"
+                    >
+                      지금 충전
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setShowLowTimeBanner(false)}
@@ -2460,10 +2467,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </button>
             </div>
             <p className="text-white/50 text-xs mb-5">
-              시간당 {CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다. (1회 결제)
+              {isNativeApp()
+                ? '이번 달 라이브 시간을 모두 사용했습니다. 시간 충전은 PICKS Folio 웹사이트에서 진행해 주세요. 웹에서 충전한 시간은 앱에서도 그대로 사용할 수 있습니다.'
+                : `시간당 ${CHARGE_RATE_KRW_PER_HOUR.toLocaleString()}원 · 충전한 시간은 이번 달 잔여시간에 즉시 추가됩니다. (1회 결제)`}
             </p>
 
-            {liveUsage && (
+            {!isNativeApp() && liveUsage && (
               <div className="bg-white/5 rounded-2xl px-4 py-3 mb-5 text-[11px] text-white/60 flex items-center justify-between">
                 <span>현재 잔여시간</span>
                 <span className="text-white font-bold">
@@ -2472,65 +2481,78 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            <div className="flex items-center justify-center gap-4 mb-5">
-              <button
-                onClick={() => setChargeHours((h) => Math.max(1, h - 1))}
-                disabled={charging || chargeHours <= 1}
-                className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
-              >
-                −
-              </button>
-              <div className="text-center min-w-[80px]">
-                <div className="text-white text-3xl font-black">{chargeHours}<span className="text-base font-bold text-white/50">시간</span></div>
-              </div>
-              <button
-                onClick={() => setChargeHours((h) => Math.min(50, h + 1))}
-                disabled={charging || chargeHours >= 50}
-                className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
-              >
-                +
-              </button>
-            </div>
-
-            {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
-            <div className="mb-4">
-              <p className="text-white/40 text-[11px] font-bold mb-2">결제 수단</p>
-              <div className="grid grid-cols-3 gap-2">
-                {CHARGE_PAY_METHODS.map((m) => (
+            {!isNativeApp() && (
+              <>
+                <div className="flex items-center justify-center gap-4 mb-5">
                   <button
-                    key={m.id}
-                    onClick={() => setChargePayMethod(m.id)}
-                    disabled={charging}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 ${
-                      chargePayMethod === m.id
-                        ? 'bg-emerald-600 border-emerald-500 text-white'
-                        : 'bg-white/5 border-white/10 text-white/60 hover:border-emerald-400/40'
-                    }`}
+                    onClick={() => setChargeHours((h) => Math.max(1, h - 1))}
+                    disabled={charging || chargeHours <= 1}
+                    className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
                   >
-                    {m.label}
+                    −
                   </button>
-                ))}
-              </div>
-            </div>
+                  <div className="text-center min-w-[80px]">
+                    <div className="text-white text-3xl font-black">{chargeHours}<span className="text-base font-bold text-white/50">시간</span></div>
+                  </div>
+                  <button
+                    onClick={() => setChargeHours((h) => Math.min(50, h + 1))}
+                    disabled={charging || chargeHours >= 50}
+                    className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl font-black flex items-center justify-center disabled:opacity-30"
+                  >
+                    +
+                  </button>
+                </div>
 
-            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/20 rounded-2xl px-4 py-3 mb-4">
-              <span className="text-emerald-200/80 text-xs font-bold">결제 금액</span>
-              <span className="text-emerald-300 text-lg font-black">
-                {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원
-              </span>
-            </div>
+                {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+                <div className="mb-4">
+                  <p className="text-white/40 text-[11px] font-bold mb-2">결제 수단</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {CHARGE_PAY_METHODS.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => setChargePayMethod(m.id)}
+                        disabled={charging}
+                        className={`py-2.5 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 ${
+                          chargePayMethod === m.id
+                            ? 'bg-emerald-600 border-emerald-500 text-white'
+                            : 'bg-white/5 border-white/10 text-white/60 hover:border-emerald-400/40'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {chargeError && (
-              <p className="text-red-400 text-xs font-bold mb-3 text-center">{chargeError}</p>
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/20 rounded-2xl px-4 py-3 mb-4">
+                  <span className="text-emerald-200/80 text-xs font-bold">결제 금액</span>
+                  <span className="text-emerald-300 text-lg font-black">
+                    {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원
+                  </span>
+                </div>
+
+                {chargeError && (
+                  <p className="text-red-400 text-xs font-bold mb-3 text-center">{chargeError}</p>
+                )}
+
+                <button
+                  onClick={handleChargeTime}
+                  disabled={charging}
+                  className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {charging ? '결제 진행 중…' : <><Zap size={16} /> {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원 결제하고 {chargeHours}시간 충전</>}
+                </button>
+              </>
             )}
 
-            <button
-              onClick={handleChargeTime}
-              disabled={charging}
-              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {charging ? '결제 진행 중…' : <><Zap size={16} /> {(chargeHours * CHARGE_RATE_KRW_PER_HOUR).toLocaleString()}원 결제하고 {chargeHours}시간 충전</>}
-            </button>
+            {isNativeApp() && (
+              <button
+                onClick={() => setShowChargeModal(false)}
+                className="w-full py-3.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-black text-sm transition-all active:scale-95"
+              >
+                확인
+              </button>
+            )}
           </div>
         </div>
       )}

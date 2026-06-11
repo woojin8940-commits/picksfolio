@@ -11,6 +11,7 @@ import {
   payAndChargeLiveTime,
   type ChargePayMethod,
 } from '../utils/liveCharge';
+import { isNativeApp } from '../utils/appEnv';
 
 interface LiveCommerceManagementProps {
   userName: string;
@@ -318,16 +319,24 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
             ))}
           </ul>
 
-          <button
-            type="button"
-            onClick={() => onNavigateMembership?.()}
-            className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
-          >
-            멤버십 플랜에서 인증 진행하기
-          </button>
-          <p className="text-[11px] text-slate-400 font-medium mt-3 text-center">
-            월 13,900원 · 언제든 해지 가능 · 구독 후 즉시 방송 가능
-          </p>
+          {isNativeApp() ? (
+            <p className="text-xs md:text-sm text-slate-500 font-medium text-center leading-relaxed">
+              라이브 커머스 송출 권한은 PICKS Folio 웹사이트에서 멤버십에 가입하면 활성화됩니다. 웹에서 설정한 권한은 앱에서도 그대로 적용됩니다.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onNavigateMembership?.()}
+                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
+              >
+                멤버십 플랜에서 인증 진행하기
+              </button>
+              <p className="text-[11px] text-slate-400 font-medium mt-3 text-center">
+                월 13,900원 · 언제든 해지 가능 · 구독 후 즉시 방송 가능
+              </p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -407,13 +416,15 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                     초과 {Math.floor(liveUsage.overageMinutes / 60)}시간 {liveUsage.overageMinutes % 60}분 · {liveUsage.overageAmountKrw.toLocaleString()}원
                   </p>
                 )}
-                <button
-                  type="button"
-                  onClick={() => { setChargeError(null); setShowChargeModal(true); }}
-                  className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] md:text-xs font-black transition-all active:scale-95"
-                >
-                  <Plus size={12} /> 시간 충전하기
-                </button>
+                {!isNativeApp() && (
+                  <button
+                    type="button"
+                    onClick={() => { setChargeError(null); setShowChargeModal(true); }}
+                    className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] md:text-xs font-black transition-all active:scale-95"
+                  >
+                    <Plus size={12} /> 시간 충전하기
+                  </button>
+                )}
               </>
             ) : (
               <>

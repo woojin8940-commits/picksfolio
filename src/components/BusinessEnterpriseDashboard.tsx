@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import ErrorBoundary from './ErrorBoundary';
+import { isNativeApp } from '../utils/appEnv';
 
 const BusinessInbox = lazy(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
@@ -399,7 +400,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-          <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
+          {!isNativeApp() && (
+            <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
+          )}
           <button
             type="button" onClick={onLogout}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
@@ -423,7 +426,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
           <MobileNavItem icon="🗓️" label="오픈일정" active={currentSubView === 'open-schedule'} onClick={() => setCurrentSubView('open-schedule')} />
-          <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
+          {!isNativeApp() && (
+            <MobileNavItem icon="💎" label="멤버십" active={currentSubView === 'membership'} onClick={() => setCurrentSubView('membership')} />
+          )}
         </div>
       </nav>
 
@@ -449,7 +454,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { setCurrentSubView('open-schedule'); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
-              <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { setCurrentSubView('membership'); setIsMobileMenuOpen(false); }} />
+              {!isNativeApp() && (
+                <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { setCurrentSubView('membership'); setIsMobileMenuOpen(false); }} />
+              )}
               <button type="button" onClick={onLogout} className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm">
                 <span>👤</span><span>로그아웃</span>
               </button>
