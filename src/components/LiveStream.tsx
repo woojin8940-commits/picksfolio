@@ -2695,7 +2695,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       )}
 
       {/* Main Stream Area - Full Screen Edge-to-Edge */}
-      <div className="absolute inset-0 bg-slate-900 overflow-hidden">
+     <div className="absolute inset-0 bg-black overflow-hidden">
         {/* Live Video Stream */}
         {/* Subtle scrim — kept light so the live video stays clearly visible.
             Just enough darkening at the very top/bottom edges to keep the
