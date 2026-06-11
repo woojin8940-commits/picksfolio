@@ -62,13 +62,23 @@ html {
   /* The live-stream viewer is a fixed overlay whose height is set inline in JS
      to window.innerHeight (device pixels) so the player stays locked while the
      on-screen keyboard opens during mobile chat. Under the desktop `zoom: 0.75`
-     above, that pixel height renders at only 75% of the real screen, leaving an
-     empty band at the bottom and making the broadcast look cut off. Desktop has
-     no on-screen keyboard to guard against, so pin the overlay to the full
-     (zoom-compensated) viewport here instead — `!important` is required to win
-     over the inline height. */
+     above, any *computed* height (a pixel value, or `100dvh`, or even
+     `100dvh / 0.75`) is at the mercy of how a given browser version reconciles
+     viewport units with CSS `zoom` — which is exactly why earlier height-math
+     fixes kept leaving an empty band at the bottom that exposed the host's
+     personal page behind the player.
+
+     The definitive fix is to stop computing a height at all. The overlay's
+     utility classes already pin top/left/right to 0; pinning `bottom: 0` here
+     (and forcing `height: auto` to defeat the inline JS pixel height) makes the
+     browser size the box from the four viewport edges directly. An edge-anchored
+     fixed box always fills the real viewport rectangle regardless of how `zoom`
+     scales lengths, so the broadcast can never be cut off and the page can never
+     peek through. Desktop has no on-screen keyboard, so the JS height lock it
+     overrides here is not needed. */
   .live-stream-container {
-    height: calc(100dvh / 0.75) !important;
+    bottom: 0 !important;
+    height: auto !important;
   }
 }
 
