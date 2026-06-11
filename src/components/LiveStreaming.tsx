@@ -2146,8 +2146,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            <div className="flex justify-between items-end">
-              <div className="flex items-center gap-2 md:gap-3">
+            <div className="flex justify-between items-end gap-2 flex-wrap">
+              <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                 <button
                   onClick={() => setIsCameraOn(!isCameraOn)}
                   className={`p-3 md:p-4 rounded-full backdrop-blur-md transition-all ${isCameraOn ? 'bg-white/10 text-white' : 'bg-red-500 text-white'}`}
@@ -2184,7 +2184,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 onClick={toggleLive}
                 disabled={!isLive && !!capBlock && capBlock.kind !== 'exhausted'}
                 title={capBlock ? capBlock.message : undefined}
-                className={`px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
                 {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : '라이브 시작'}
