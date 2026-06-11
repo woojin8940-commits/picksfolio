@@ -22,6 +22,15 @@ interface AiMessage {
   balanceCredits?: number;
 }
 
+// Inside the native app, Claude can be SELECTED and used by anyone who already
+// has an active Claude plan with credits (purchased on the website). But the
+// plan/recharge purchase itself is a digital good, so it cannot be sold in-app
+// (Apple/Google policy). When an app user has no active plan or no credits left,
+// we do not open the payment flow — we simply point them to the website, where a
+// purchase made there immediately works inside the app too.
+const CLAUDE_WEB_GUIDE =
+  '클로드 플랜과 크레딧 충전은 PICKS Folio 웹사이트에서 이용할 수 있어요. 웹에서 시작하면 앱에서도 클로드를 그대로 사용할 수 있습니다.';
+
 interface TimelineAttachment {
   url: string;
   fileName: string;
@@ -205,7 +214,18 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     if (aiModel === 'claude') {
       const c = claudeData?.credits;
       if (c && (!c.planActive || c.balanceCredits <= 0)) {
-        setClaudeModalOpen(true);
+        // No active plan / no credits. On the website we open the purchase modal;
+        // inside the native app we only guide the user to the web (no in-app sale).
+        if (isNativeApp()) {
+          setAiMessages(prev => [
+            ...prev,
+            { role: 'user', content },
+            { role: 'assistant', content: CLAUDE_WEB_GUIDE },
+          ]);
+          setAiInput('');
+        } else {
+          setClaudeModalOpen(true);
+        }
         return;
       }
     }
@@ -261,6 +281,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         // the user can activate or recharge without losing the conversation.
         if (data?.code === 'CLAUDE_PLAN_REQUIRED' || data?.code === 'CLAUDE_CREDITS_EMPTY') {
           await refreshClaudeCredits();
+          // Inside the app, guide to the website instead of opening the purchase
+          // modal; on the web, surface the wallet modal without losing the input.
+          if (isNativeApp()) {
+            setAiMessages(prev => [...prev, { role: 'assistant', content: CLAUDE_WEB_GUIDE }]);
+            return;
+          }
           setAiMessages(prev => prev.slice(0, -1));
           setAiInput(content);
           setClaudeModalOpen(true);
@@ -1304,15 +1330,25 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {/* Model selector — Gemini (free, membership) vs Claude (premium credits).
                 Switching keeps the same conversation; neither model forgets the other. */}
             <div className="shrink-0 flex items-center gap-1.5">
-              {!isNativeApp() && aiModel === 'claude' && claudeData?.credits.planActive && (
-                <button
-                  type="button"
-                  onClick={() => setClaudeModalOpen(true)}
-                  title="클로드 크레딧 관리"
-                  className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-black hover:bg-orange-100 transition-colors"
-                >
-                  🪙 {(claudeData.credits.balanceCredits || 0).toLocaleString()} 크레딧
-                </button>
+              {aiModel === 'claude' && claudeData?.credits.planActive && (
+                isNativeApp() ? (
+                  // In-app: show remaining credits as read-only info (no purchase modal).
+                  <span
+                    title="남은 클로드 크레딧"
+                    className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-black"
+                  >
+                    🪙 {(claudeData.credits.balanceCredits || 0).toLocaleString()} 크레딧
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setClaudeModalOpen(true)}
+                    title="클로드 크레딧 관리"
+                    className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-black hover:bg-orange-100 transition-colors"
+                  >
+                    🪙 {(claudeData.credits.balanceCredits || 0).toLocaleString()} 크레딧
+                  </button>
+                )
               )}
               <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
                 <button
@@ -1324,21 +1360,20 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 >
                   ✨ 제미나이
                 </button>
-                {/* Claude is a paid prepaid-credit add-on. It is hidden inside the
-                    native app because its credits can only be purchased on the
-                    website (digital-goods policy); the app keeps Gemini, which is
-                    included with the AI membership. */}
-                {!isNativeApp() && (
-                  <button
-                    type="button"
-                    onClick={() => setAiModel('claude')}
-                    className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
-                      aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    🤖 클로드
-                  </button>
-                )}
+                {/* Claude is a paid prepaid-credit add-on. It is selectable everywhere
+                    (including the native app) so members who already activated the
+                    plan on the website can use it in the app. The purchase/recharge
+                    itself is web-only (digital-goods policy) — in-app users with no
+                    plan are guided to the website rather than shown a payment flow. */}
+                <button
+                  type="button"
+                  onClick={() => setAiModel('claude')}
+                  className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
+                    aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🤖 클로드
+                </button>
               </div>
             </div>
           </div>
@@ -1480,16 +1515,22 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     </p>
                   ) : (
                     <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
-                      🤖 클로드는 클로드 플랜 전용이에요. 시작하면 기본 크레딧이 지급됩니다.
+                      🤖 {isNativeApp()
+                        ? '클로드 플랜은 웹사이트에서 시작할 수 있어요. 웹에서 시작하면 앱에서도 그대로 사용됩니다.'
+                        : '클로드는 클로드 플랜 전용이에요. 시작하면 기본 크레딧이 지급됩니다.'}
                     </p>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setClaudeModalOpen(true)}
-                    className="shrink-0 text-[11px] font-black text-orange-600 hover:text-orange-700 px-2 py-1 rounded-lg border border-orange-200 hover:bg-orange-50 transition-colors"
-                  >
-                    {claudeData?.credits.planActive ? '크레딧 충전' : '클로드 플랜 시작'}
-                  </button>
+                  {/* Purchase/recharge is web-only (digital-goods policy). In the app
+                      the button is hidden; users are guided to the website instead. */}
+                  {!isNativeApp() && (
+                    <button
+                      type="button"
+                      onClick={() => setClaudeModalOpen(true)}
+                      className="shrink-0 text-[11px] font-black text-orange-600 hover:text-orange-700 px-2 py-1 rounded-lg border border-orange-200 hover:bg-orange-50 transition-colors"
+                    >
+                      {claudeData?.credits.planActive ? '크레딧 충전' : '클로드 플랜 시작'}
+                    </button>
+                  )}
                 </div>
               )}
               <p className="hidden md:block max-w-3xl mx-auto text-[10px] text-gray-400 font-medium mt-1.5 px-1">
