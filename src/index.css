@@ -58,6 +58,18 @@ html {
   .min-h-\[100vh\] {
     min-height: calc(100vh / 0.75) !important;
   }
+
+  /* The live-stream viewer is a fixed overlay whose height is set inline in JS
+     to window.innerHeight (device pixels) so the player stays locked while the
+     on-screen keyboard opens during mobile chat. Under the desktop `zoom: 0.75`
+     above, that pixel height renders at only 75% of the real screen, leaving an
+     empty band at the bottom and making the broadcast look cut off. Desktop has
+     no on-screen keyboard to guard against, so pin the overlay to the full
+     (zoom-compensated) viewport here instead — `!important` is required to win
+     over the inline height. */
+  .live-stream-container {
+    height: calc(100dvh / 0.75) !important;
+  }
 }
 
 /* Remove the 300ms tap delay and the gray flash on iOS / Android */
@@ -221,6 +233,21 @@ h1, h2, h3, h4, h5, h6 {
   background-color: #000;
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
+}
+
+/* Desktop "web version": the viewer overlay is a full-width landscape stage, so
+   cropping the broadcast to fill it (object-fit: cover) center-cuts a phone's
+   native-ratio feed hard — viewers reported it looking "extremely zoomed in".
+   On desktop, show the whole frame at its true ratio (object-contain), the same
+   un-cropped framing the broadcaster sees, letterboxed instead of zoom-cropped.
+   Mobile keeps the immersive `cover` crop above (portrait phone matches the
+   feed, so there is no meaningful crop there). */
+@media (min-width: 769px) {
+  .live-stream-container video,
+  .live-stream-container .video-js,
+  .live-stream-container .video-js .vjs-tech {
+    object-fit: contain !important;
+  }
 }
 
 /* ===== Desktop UserPage Layout ===== */
