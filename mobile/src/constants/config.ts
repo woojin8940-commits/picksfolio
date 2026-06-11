@@ -37,19 +37,26 @@ export const broadcastConfig = {
    * Portrait 1080p encoder profile. `bitrate` values are in bits-per-second as
    * expected by amazon-ivs-react-native-broadcast. Auto-bitrate lets IVS dial
    * the rate down on weak uplinks instead of dropping frames.
+   *
+   * Tuned for maximum quality: the target/max bitrate is raised to 8.5 Mbps —
+   * the input ceiling for an IVS standard channel at 1080p — so on a healthy
+   * Wi-Fi/LTE uplink the stream uses the full bitrate budget instead of the old
+   * conservative 6 Mbps cap. The floor is kept at 2 Mbps so that on a weak
+   * network auto-bitrate still has room to back off without 1080p turning to
+   * mush.
    */
   video: {
     width: 1080,
     height: 1920,
     targetFrameRate: 30,
     keyframeInterval: 2 as const,
-    bitrate: 6_000_000,
-    minBitrate: 1_000_000,
-    maxBitrate: 6_500_000,
+    bitrate: 8_000_000,
+    minBitrate: 2_000_000,
+    maxBitrate: 8_500_000,
     isAutoBitrate: true,
   },
   audio: {
-    bitrate: 128_000,
+    bitrate: 160_000,
   },
 } as const;
 

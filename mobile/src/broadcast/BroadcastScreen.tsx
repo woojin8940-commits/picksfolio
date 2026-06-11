@@ -28,6 +28,13 @@ import { colors, radius, spacing } from '@/theme';
 /** Re-assert live state on this cadence so a brief interruption doesn't drop viewers. */
 const HEARTBEAT_MS = 8000;
 
+/**
+ * Aspect ratio (width / height) of the encoded stream. The camera preview is
+ * locked to this exact box so the host sees precisely the frame viewers receive
+ * — see the preview wrapper below.
+ */
+const BROADCAST_ASPECT = broadcastConfig.video.width / broadcastConfig.video.height;
+
 type Phase = 'idle' | 'connecting' | 'live' | 'error';
 
 interface StatusMeta {
@@ -233,30 +240,39 @@ export default function BroadcastScreen({
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <IVSBroadcastCameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        rtmpsUrl={ingestServer.trim()}
-        streamKey={streamKey.trim()}
-        cameraPosition={cameraPosition}
-        cameraPreviewAspectMode="fill"
-        isCameraPreviewMirrored={cameraPosition === 'front'}
-        isMuted={muted}
-        videoConfig={{
-          width: broadcastConfig.video.width,
-          height: broadcastConfig.video.height,
-          targetFrameRate: broadcastConfig.video.targetFrameRate,
-          keyframeInterval: broadcastConfig.video.keyframeInterval,
-          bitrate: broadcastConfig.video.bitrate,
-          minBitrate: broadcastConfig.video.minBitrate,
-          maxBitrate: broadcastConfig.video.maxBitrate,
-          isAutoBitrate: broadcastConfig.video.isAutoBitrate,
-        }}
-        audioConfig={{ bitrate: broadcastConfig.audio.bitrate }}
-        onBroadcastStateChanged={handleStateChange}
-        onError={handleError}
-        onBroadcastError={handleBroadcastError}
-      />
+      {/* The preview is locked to the exact aspect ratio of the encoded stream
+          (broadcastConfig.video → 1080×1920, 9:16). With "fill" the camera is
+          cropped to this same box, which matches how the IVS encoder composes
+          the camera onto its 9:16 canvas. The result is WYSIWYG: the host sees
+          precisely the frame the viewers receive — no content that's off-screen
+          for the host but visible to viewers (or vice-versa). The rest of the
+          (taller) phone screen is letterboxed against the black stage. */}
+      <View style={styles.previewWrap} pointerEvents="none">
+        <IVSBroadcastCameraView
+          ref={cameraRef}
+          style={styles.cameraPreview}
+          rtmpsUrl={ingestServer.trim()}
+          streamKey={streamKey.trim()}
+          cameraPosition={cameraPosition}
+          cameraPreviewAspectMode="fill"
+          isCameraPreviewMirrored={cameraPosition === 'front'}
+          isMuted={muted}
+          videoConfig={{
+            width: broadcastConfig.video.width,
+            height: broadcastConfig.video.height,
+            targetFrameRate: broadcastConfig.video.targetFrameRate,
+            keyframeInterval: broadcastConfig.video.keyframeInterval,
+            bitrate: broadcastConfig.video.bitrate,
+            minBitrate: broadcastConfig.video.minBitrate,
+            maxBitrate: broadcastConfig.video.maxBitrate,
+            isAutoBitrate: broadcastConfig.video.isAutoBitrate,
+          }}
+          audioConfig={{ bitrate: broadcastConfig.audio.bitrate }}
+          onBroadcastStateChanged={handleStateChange}
+          onError={handleError}
+          onBroadcastError={handleBroadcastError}
+        />
+      </View>
 
       {/* Top bar: close + live status pill */}
       <View style={styles.topBar} pointerEvents="box-none">
@@ -410,6 +426,18 @@ export default function BroadcastScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
+  previewWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Full screen width, height derived from the encoded aspect ratio so the
+  // preview shows exactly the 9:16 frame the encoder sends. Letterboxed against
+  // the black root on taller phones.
+  cameraPreview: {
+    width: '100%',
+    aspectRatio: BROADCAST_ASPECT,
+  },
   topBar: {
     position: 'absolute',
     top: 0,
