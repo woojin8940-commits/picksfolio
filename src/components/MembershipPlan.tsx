@@ -352,11 +352,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         issueName: `픽스폴리오 ${tierLabel} 정기결제`,
         displayAmount: tierAmount,
         currency: 'KRW',
+        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 지정된다.
+        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 빌링
+        // 인증창이 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
         ...(payMethod === 'KAKAOPAY' && {
           easyPay: { easyPayProvider: 'KAKAOPAY' },
-        }),
-        ...(payMethod === 'TOSSPAY' && {
-          easyPay: { easyPayProvider: 'TOSSPAY' },
         }),
         customer: {
           customerId: safeUserName,

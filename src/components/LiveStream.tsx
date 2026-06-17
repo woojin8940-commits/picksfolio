@@ -2360,7 +2360,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         totalAmount: amount,
         currency: 'KRW',
         payMethod: 'EASY_PAY',
-        easyPay: { easyPayProvider: checkoutPayMethod },
+        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 정해진다.
+        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 결제창이
+        // 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
+        ...(checkoutPayMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
@@ -2498,7 +2501,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         totalAmount: batchTotal,
         currency: 'KRW',
         payMethod: 'EASY_PAY',
-        easyPay: { easyPayProvider: batchPayMethod },
+        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 정해진다.
+        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 결제창이
+        // 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
+        ...(batchPayMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
