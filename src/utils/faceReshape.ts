@@ -161,7 +161,7 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   if (s.face > 0) {
     const amt = s.face / 100;
     const r = faceH * 0.5;
-    const push = faceH * 0.11 * amt;
+    const push = faceH * 0.05 * amt;
     for (const i of [...IDX.cheekL, ...IDX.cheekR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
@@ -173,19 +173,19 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   if (s.jaw > 0) {
     const amt = s.jaw / 100;
     const r = faceH * 0.42;
-    const pushX = faceH * 0.09 * amt;
-    const lift = faceH * 0.045 * amt;
+    const pushX = faceH * 0.04 * amt;
+    const lift = faceH * 0.02 * amt;
     for (const i of [...IDX.jawL, ...IDX.jawR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
       trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: dir * pushX, ty: -lift });
     }
-    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.32) * (faceH * 0.32), tx: 0, ty: -faceH * 0.06 * amt });
+    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.32) * (faceH * 0.32), tx: 0, ty: -faceH * 0.028 * amt });
   }
 
   // 눈 크게 — bulge (magnify) around each eye centre.
   if (s.eye > 0) {
-    const k = (s.eye / 100) * 0.42;
+    const k = (s.eye / 100) * 0.18;
     const le = avg(IDX.eyeL);
     const re = avg(IDX.eyeR);
     const eyeW = Math.max(1, dist(P(33), P(133)));
@@ -198,7 +198,7 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   if (s.nose > 0) {
     const amt = s.nose / 100;
     const r = faceH * 0.18;
-    const push = faceH * 0.045 * amt;
+    const push = faceH * 0.02 * amt;
     const ln = P(IDX.noseL);
     const rn = P(IDX.noseR);
     trans.push({ cx: ln.x, cy: ln.y, r2: r * r, tx: (Math.sign(nose.x - ln.x) || 1) * push, ty: 0 });
