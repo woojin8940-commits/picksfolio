@@ -14,7 +14,8 @@ const CONFIRM_URL = `${API_BASE}/payments/confirm`
 const BILLING_AUTH_ISSUE_URL = `${API_BASE}/billing/authorizations/issue`
 
 // 토스 공식 문서 공개 테스트 시크릿 키. 운영 전환 시 TOSS_SECRET_KEY 를 반드시 설정할 것.
-const TEST_SECRET_KEY = 'test_gsk_docs_OaPz8L5KdmQXkzRz3y47BMw6'
+// 클라이언트 키(test_ck_…)와 동일한 "API 개별 연동" 쌍이어야 한다 → 위젯용 test_gsk_ 가 아닌 test_sk_.
+const TEST_SECRET_KEY = 'test_sk_docs_OaPz8L5KdmQXkzRz3y47BMw6'
 
 const secretKey = () => process.env.TOSS_SECRET_KEY || TEST_SECRET_KEY
 const authHeader = () => `Basic ${Buffer.from(`${secretKey()}:`).toString('base64')}`

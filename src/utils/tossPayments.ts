@@ -16,9 +16,22 @@ import { toAsciiSafeId } from './formatters';
 
 // 브라우저 공개용 클라이언트 키. 운영 키는 VITE_TOSS_CLIENT_KEY 로 주입하고, 미설정 시
 // 토스 공식 문서의 공개 테스트 키(샌드박스)로 동작한다. (시크릿 키는 서버 전용.)
+//
+// ⚠️ 토스페이먼츠 클라이언트 키는 두 종류가 있고 서로 호환되지 않는다:
+//   - "API 개별 연동 키"  : test_ck_... / live_ck_...  → 이 standard SDK(payment().requestPayment)용
+//   - "결제위젯 연동 키"  : test_gck_... / live_gck_... → 결제위젯(payment-widget) 전용
+// 위젯 키(_gck_)를 standard SDK 에 넘기면 토스가
+// "API 개별 연동 키의 클라이언트 키로 SDK를 연동해주세요. 결제위젯 연동 키는 지원하지 않습니다."
+// 라며 거부한다. 그래서 폴백 테스트 키도 반드시 API 개별 연동 키(test_ck_...)를 쓴다.
 const TOSS_CLIENT_KEY =
   (import.meta.env.VITE_TOSS_CLIENT_KEY as string | undefined) ||
-  'test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm';
+  'test_ck_docs_Ovk5rk1EwkEbP0W43n07xlzm';
+
+// 잘못된 위젯 키(_gck_)가 주입됐는지 미리 확인해 SDK 호출 전에 명확한 한국어 오류를 돌려준다.
+const widgetKeyError = (): string | null =>
+  /_gck_/.test(TOSS_CLIENT_KEY)
+    ? '토스페이먼츠 클라이언트 키가 "결제위젯 연동 키"로 설정돼 있습니다. 토스페이먼츠 개발자센터에서 "API 개별 연동 키"의 클라이언트 키(test_ck_… / live_ck_…)로 VITE_TOSS_CLIENT_KEY 를 다시 설정해주세요.'
+    : null;
 
 const SDK_URL = 'https://js.tosspayments.com/v2/standard';
 const INTENT_KEY = 'toss_pending_intent';
@@ -94,6 +107,8 @@ export async function startTossCardPayment(
   if (typeof window === 'undefined') {
     return { success: false, error: '브라우저 환경에서만 결제할 수 있습니다.' };
   }
+  const keyError = widgetKeyError();
+  if (keyError) return { success: false, error: keyError };
   saveIntent(intent);
   try {
     await loadTossSdk();
@@ -128,6 +143,8 @@ export async function startTossCardBilling(
   if (typeof window === 'undefined') {
     return { success: false, error: '브라우저 환경에서만 결제할 수 있습니다.' };
   }
+  const keyError = widgetKeyError();
+  if (keyError) return { success: false, error: keyError };
   saveIntent(intent);
   try {
     await loadTossSdk();
