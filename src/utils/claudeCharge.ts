@@ -2,6 +2,15 @@ import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
 import { isNativeApp } from './appEnv';
 import { startTossCardPayment, startTossCardBilling } from './tossPayments';
+import {
+  PORTONE_STORE_ID,
+  channelKeyFor,
+  easyPayParam,
+  portoneRedirectUrl,
+  savePortOneIntent,
+  clearPortOneIntent,
+  genPortOneId,
+} from './portonePayments';
 
 // Digital-goods purchases (membership, Claude credits) are sold on the website
 // only; the native app never triggers them. This message is a hard backstop in
@@ -19,11 +28,7 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 //     a payment window when the balance runs low.
 //
 // storeId and channelKey are public browser identifiers; the V2 API secret lives
-// server-side only.
-const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
-const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
-
+// server-side only. 토스페이 / 카카오페이는 리다이렉트 방식으로 호출한다(portonePayments).
 export type ClaudePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 export const CLAUDE_PAY_METHODS: { id: ClaudePayMethod; label: string }[] = [
@@ -37,9 +42,6 @@ export interface ClaudePayOutcome {
   error?: string;
   result?: Awaited<ReturnType<typeof apiService.payClaudeCredits>>;
 }
-
-const channelFor = (m: ClaudePayMethod) =>
-  m === 'KAKAOPAY' ? PORTONE_KAKAOPAY_CHANNEL_KEY : PORTONE_TOSSPAY_CHANNEL_KEY;
 
 /**
  * Run a one-time PortOne payment for `amountKrw` (activation or recharge) and, on
@@ -77,27 +79,39 @@ export async function payClaudePlan(
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
 
-  const paymentId = `claude-${kind}-${toAsciiSafeId(username)}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const paymentId = genPortOneId(`claude-${kind}`, username);
+  // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
+  const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+
+  // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 결제창으로 페이지를 넘기고, 돌아온
+  // /portone/return 페이지가 paymentId 로 서버 검증·크레딧 적립을 마무리한다. (PC 팝업으로
+  // promise 가 resolve 되면 아래 인라인 처리도 동작한다.)
+  savePortOneIntent({
+    type: 'claude',
+    username,
+    payMethod: ppMethod,
+    kind,
+    amountKrw,
+    orderName,
+    returnPath: window.location.pathname + window.location.search,
+  });
 
   try {
     const response = await window.PortOne.requestPayment({
       storeId: PORTONE_STORE_ID,
-      channelKey: channelFor(payMethod),
+      channelKey: channelKeyFor(ppMethod),
       paymentId,
       orderName,
       totalAmount: amountKrw,
       currency: 'KRW',
       payMethod: 'EASY_PAY',
-      // 토스페이는 PortOne 의 TossPay v2 채널이므로 채널 키만으로 PG(토스페이 신모듈)가
-      // 지정된다. easyPayProvider 에 (구)토스페이 식별자 'TOSSPAY' 를 넘기면 v2 채널과
-      // 충돌해 결제창이 뜨지 않는다. 카카오페이는 일반 간편결제 채널이라 그대로 명시한다.
-      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
+      redirectUrl: portoneRedirectUrl(),
+      ...easyPayParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
     if (!response || response.code) {
+      clearPortOneIntent();
       return {
         success: false,
         error:
@@ -113,11 +127,13 @@ export async function payClaudePlan(
       payMethod,
       billingKey,
     });
+    clearPortOneIntent();
     if (!result.success) {
       return { success: false, error: result.error || '크레딧 적립에 실패했습니다.', result };
     }
     return { success: true, result };
   } catch (e) {
+    clearPortOneIntent();
     console.error('[ClaudeCharge] payment error:', e);
     return { success: false, error: '결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.' };
   }
@@ -153,25 +169,36 @@ export async function issueClaudeBillingKey(
   }
 
   const safeUserName = toAsciiSafeId(username);
-  const issueId = `claudebilling-${safeUserName}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const issueId = genPortOneId('claudebilling', username);
+  // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
+  const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+
+  // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
+  // 돌아온 /portone/return 페이지가 발급된 billingKey 로 자동충전을 켠다. (PC 팝업으로
+  // promise 가 resolve 되면 아래 인라인 처리로 호출부가 billingKey 를 받아 처리한다.)
+  savePortOneIntent({
+    type: 'claude-billing',
+    username,
+    payMethod: ppMethod,
+    orderName: '클로드 크레딧 자동충전 결제수단 등록',
+    returnPath: window.location.pathname + window.location.search,
+  });
 
   try {
     const response = await window.PortOne.requestIssueBillingKey({
       storeId: PORTONE_STORE_ID,
-      channelKey: channelFor(payMethod),
+      channelKey: channelKeyFor(ppMethod),
       billingKeyMethod: 'EASY_PAY',
       issueId,
       issueName: '클로드 크레딧 자동충전 결제수단 등록',
       currency: 'KRW',
-      // TossPay v2 채널은 채널 키로 PG가 정해진다. (구)토스페이 식별자를 넘기지 않는다.
-      // 카카오페이만 간편결제 provider 를 명시한다.
-      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
+      redirectUrl: portoneRedirectUrl(),
+      ...easyPayParam(ppMethod),
       customer: { customerId: safeUserName },
     });
 
     if (!response || response.code || !response.billingKey) {
+      clearPortOneIntent();
       return {
         success: false,
         error:
@@ -179,8 +206,10 @@ export async function issueClaudeBillingKey(
           (response?.code ? `결제수단 등록 실패 (${response.code})` : '결제수단 등록이 취소되었습니다.'),
       };
     }
+    clearPortOneIntent();
     return { success: true, billingKey: response.billingKey };
   } catch (e) {
+    clearPortOneIntent();
     console.error('[ClaudeCharge] billing key error:', e);
     return { success: false, error: '결제수단 등록 중 오류가 발생했습니다. 다시 시도해 주세요.' };
   }

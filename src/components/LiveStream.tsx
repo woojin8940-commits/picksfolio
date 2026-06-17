@@ -4,11 +4,20 @@ import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, ShoppingBa
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import { formatKRW, toAsciiSafeId } from '../utils/formatters';
+import { formatKRW } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
 import { apiService, type ShippingProfile } from '../services/apiService';
+import {
+  PORTONE_STORE_ID,
+  channelKeyFor,
+  easyPayParam,
+  portoneRedirectUrl,
+  savePortOneIntent,
+  clearPortOneIntent,
+  genPortOneId,
+} from '../utils/portonePayments';
 
 declare global {
   interface Window {
@@ -19,11 +28,9 @@ declare global {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET)
-// and is used by /api/live-order-complete to verify payments.
-// 토스페이먼츠 채널 (MID: iamporttest_4) — 토스페이·카드 결제
-const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
-const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
+// and is used by /api/live-order-complete to verify payments. 토스페이는 리다이렉트
+// 전용 PG 라, 결제 후 주문 맥락을 sessionStorage 에 보존하고 /portone/return 에서 마무리한다.
+// (storeId·channelKey 는 portonePayments 모듈에서 공유한다.)
 
 // Extract a KRW integer price from a formatted string like "29,900원" → 29900.
 // Returns 0 if no digits are present so the caller can decide to fall back to
@@ -2341,29 +2348,52 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     setCheckoutError(null);
     setCheckoutProcessing(true);
     try {
-      const paymentId = `live-${toAsciiSafeId(username)}-${checkoutProduct.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const channelKey =
-        checkoutPayMethod === 'KAKAOPAY'
-          ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : PORTONE_TOSSPAY_CHANNEL_KEY;
+      const paymentId = genPortOneId(`live-${checkoutProduct.id}`, username);
 
       const optionSuffix = checkoutOptions && Object.keys(checkoutOptions).length > 0
         ? ` (${Object.values(checkoutOptions).join('/')})`
         : '';
       const orderName = `${checkoutProduct.name}${optionSuffix}`.slice(0, 100);
 
+      // 토스페이는 리다이렉트 전용 PG 다. 주문 맥락(상품·시청자·배송지)을 intent 에 담아 두고
+      // redirectUrl 로 결제창에 넘긴다. 돌아온 /portone/return 페이지가 paymentId 로 주문을
+      // 마무리한다. (PC 팝업으로 promise 가 resolve 되면 아래 인라인 처리도 동작한다.)
+      const orderBody = {
+        username,
+        expectedAmount: amount,
+        product: {
+          id: checkoutProduct.id,
+          name: checkoutProduct.name,
+          link: checkoutProduct.link,
+          image: checkoutProduct.image,
+          selectedOptions: checkoutOptions,
+        },
+        viewer: {
+          viewerId: viewerIdRef.current,
+          nickname: kakaoUser.nickname,
+          profileImage: kakaoUser.profileImage,
+        },
+        shipping: shippingProfile,
+      };
+      savePortOneIntent({
+        type: 'live-order',
+        username,
+        payMethod: checkoutPayMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY',
+        orderName,
+        returnPath: window.location.pathname + window.location.search,
+        order: orderBody,
+      });
+
       const response = await window.PortOne.requestPayment({
         storeId: PORTONE_STORE_ID,
-        channelKey,
+        channelKey: channelKeyFor(checkoutPayMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY'),
         paymentId,
         orderName,
         totalAmount: amount,
         currency: 'KRW',
         payMethod: 'EASY_PAY',
-        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 정해진다.
-        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 결제창이
-        // 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
-        ...(checkoutPayMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
+        redirectUrl: portoneRedirectUrl(),
+        ...easyPayParam(checkoutPayMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY'),
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
@@ -2371,6 +2401,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       });
 
       if (!response || response.code) {
+        clearPortOneIntent();
         if (response?.code) {
           setCheckoutError(response.message || `결제 실패 (${response.code})`);
         }
@@ -2396,6 +2427,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         },
         shipping: shippingProfile,
       });
+      clearPortOneIntent();
       if (!verifyRes.success) {
         setCheckoutError(verifyRes.error || '결제 검증에 실패했습니다. 고객센터로 문의해 주세요.');
         return;
@@ -2481,11 +2513,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     setBatchError(null);
     setBatchProcessing(true);
     try {
-      const paymentId = `live-batch-${toAsciiSafeId(username)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const channelKey =
-        batchPayMethod === 'KAKAOPAY'
-          ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : PORTONE_TOSSPAY_CHANNEL_KEY;
+      const paymentId = genPortOneId('live-batch', username);
 
       const firstName = batchPayableItems[0]?.productName || '상품';
       const orderName = (batchPayableItems.length === 1
@@ -2493,18 +2521,48 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         : `${firstName} 외 ${batchPayableItems.length - 1}건`
       ).slice(0, 100);
 
+      const batchMethod = batchPayMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+      const orderItems = batchPayableItems.map(it => ({
+        productId: it.productId,
+        productName: it.productName,
+        productLink: it.productLink,
+        productImage: it.productImage,
+        selectedOptions: it.selectedOptions,
+        amount: parseKrwPrice(it.productPrice),
+      }));
+      const viewerInfo = {
+        viewerId: viewerIdRef.current,
+        nickname: kakaoUser.nickname,
+        profileImage: kakaoUser.profileImage,
+      };
+
+      // 토스페이는 리다이렉트 전용 PG 다. 장바구니 주문 맥락을 intent 에 담아 두고 redirectUrl
+      // 로 결제창에 넘긴다. 돌아온 /portone/return 페이지가 paymentId 로 주문을 마무리한다.
+      savePortOneIntent({
+        type: 'live-order-batch',
+        username,
+        payMethod: batchMethod,
+        orderName,
+        returnPath: window.location.pathname + window.location.search,
+        order: {
+          username,
+          expectedAmount: batchTotal,
+          items: orderItems,
+          viewer: viewerInfo,
+          shipping: shippingProfile,
+        },
+      });
+
       const response = await window.PortOne.requestPayment({
         storeId: PORTONE_STORE_ID,
-        channelKey,
+        channelKey: channelKeyFor(batchMethod),
         paymentId,
         orderName,
         totalAmount: batchTotal,
         currency: 'KRW',
         payMethod: 'EASY_PAY',
-        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 정해진다.
-        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 결제창이
-        // 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
-        ...(batchPayMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
+        redirectUrl: portoneRedirectUrl(),
+        ...easyPayParam(batchMethod),
         customer: {
           customerId: viewerIdRef.current,
           fullName: kakaoUser.nickname || undefined,
@@ -2512,6 +2570,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
       });
 
       if (!response || response.code) {
+        clearPortOneIntent();
         if (response?.code) setBatchError(response.message || `결제 실패 (${response.code})`);
         return;
       }
@@ -2521,21 +2580,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
         paymentId: returnedPaymentId,
         username,
         expectedAmount: batchTotal,
-        items: batchPayableItems.map(it => ({
-          productId: it.productId,
-          productName: it.productName,
-          productLink: it.productLink,
-          productImage: it.productImage,
-          selectedOptions: it.selectedOptions,
-          amount: parseKrwPrice(it.productPrice),
-        })),
-        viewer: {
-          viewerId: viewerIdRef.current,
-          nickname: kakaoUser.nickname,
-          profileImage: kakaoUser.profileImage,
-        },
+        items: orderItems,
+        viewer: viewerInfo,
         shipping: shippingProfile,
       });
+      clearPortOneIntent();
 
       if (!verifyRes.success) {
         setBatchError(verifyRes.error || '결제 검증에 실패했습니다. 고객센터로 문의해 주세요.');

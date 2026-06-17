@@ -2,6 +2,15 @@ import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
 import { isNativeApp } from './appEnv';
 import { startTossCardPayment } from './tossPayments';
+import {
+  PORTONE_STORE_ID,
+  channelKeyFor,
+  easyPayParam,
+  portoneRedirectUrl,
+  savePortOneIntent,
+  clearPortOneIntent,
+  genPortOneId,
+} from './portonePayments';
 
 // Prepaid live-time top-up ("시간 충전하기") — a ONE-TIME (non-recurring) payment.
 // The seller pays for N hours of broadcast time and the verified payment is then
@@ -11,11 +20,8 @@ import { startTossCardPayment } from './tossPayments';
 // Two providers by method:
 //   • 토스페이먼츠(카드) → 토스페이먼츠 직접 연동 (PortOne 미사용). The browser redirects
 //     through the TossPayments SDK; the return page finalises the top-up.
-//   • 토스페이 / 카카오페이 → PortOne V2. storeId·channelKey are public browser
-//     identifiers; the V2 API secret lives server-side only.
-const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
-const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
+//   • 토스페이 / 카카오페이 → PortOne V2 (리다이렉트 방식). storeId·channelKey are public
+//     browser identifiers; the V2 API secret lives server-side only.
 
 export const CHARGE_RATE_KRW_PER_HOUR = 8900;
 
@@ -71,27 +77,38 @@ export async function payAndChargeLiveTime(
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
 
-  const paymentId = `livecredit-${toAsciiSafeId(username)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const channelKey =
-    payMethod === 'KAKAOPAY' ? PORTONE_KAKAOPAY_CHANNEL_KEY : PORTONE_TOSSPAY_CHANNEL_KEY;
+  const paymentId = genPortOneId('livecredit', username);
+  // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
+  const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+
+  // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 결제창으로 페이지를 넘기고,
+  // 돌아온 /portone/return 페이지가 paymentId 로 서버 검증·시간 충전을 마무리한다. intent 를
+  // 미리 저장해 둔다. (PC 에서 팝업으로 떠 promise 가 resolve 되면 아래 인라인 처리도 동작한다.)
+  savePortOneIntent({
+    type: 'live',
+    username,
+    payMethod: ppMethod,
+    hours,
+    orderName: `라이브 시간 충전 ${hours}시간`,
+    returnPath: window.location.pathname + window.location.search,
+  });
 
   try {
     const response = await window.PortOne.requestPayment({
       storeId: PORTONE_STORE_ID,
-      channelKey,
+      channelKey: channelKeyFor(ppMethod),
       paymentId,
       orderName: `라이브 시간 충전 ${hours}시간`,
       totalAmount: amount,
       currency: 'KRW',
       payMethod: 'EASY_PAY',
-      // 토스페이는 PortOne 의 TossPay v2 채널이므로 채널 키만으로 PG(토스페이 신모듈)가
-      // 지정된다. easyPayProvider 에 (구)토스페이 식별자 'TOSSPAY' 를 넘기면 v2 채널과
-      // 충돌해 결제창이 뜨지 않는다. 카카오페이는 일반 간편결제 채널이라 그대로 명시한다.
-      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
+      redirectUrl: portoneRedirectUrl(),
+      ...easyPayParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
     if (!response || response.code) {
+      clearPortOneIntent();
       return {
         success: false,
         error: response?.message || (response?.code ? `결제 실패 (${response.code})` : '결제가 취소되었습니다.'),
@@ -102,11 +119,13 @@ export async function payAndChargeLiveTime(
       paymentId: response.paymentId || paymentId,
       payMethod,
     });
+    clearPortOneIntent();
     if (!result.success) {
       return { success: false, error: result.error || '충전에 실패했습니다.', result };
     }
     return { success: true, result };
   } catch (e) {
+    clearPortOneIntent();
     console.error('[LiveCharge] payment error:', e);
     return { success: false, error: '결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.' };
   }

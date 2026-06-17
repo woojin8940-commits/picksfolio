@@ -48,6 +48,12 @@
   to = "/toss-fail.html"
   status = 200
 
+# PortOne(토스페이·카카오페이) 간편결제 리다이렉트 복귀 정적 페이지. SPA catch-all 보다 먼저 매칭.
+[[redirects]]
+  from = "/portone/return"
+  to = "/portone-return.html"
+  status = 200
+
 [[redirects]]
   from = "/auth-callback"
   to = "/index.html"
