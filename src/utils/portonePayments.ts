@@ -20,7 +20,7 @@ import { toAsciiSafeId } from './formatters';
 
 // PortOne V2 공개 식별자 (브라우저 노출용). 라이브 충전 / 클로드 / 멤버십 결제가 공유한다.
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
+export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 
 export type PortOnePayMethod = 'TOSSPAY' | 'KAKAOPAY';

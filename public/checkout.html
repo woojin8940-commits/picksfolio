@@ -68,8 +68,10 @@
       <button class="pay-btn" id="payment-button" disabled>결제하기</button>
     </div>
     <p class="hint">
-      토스페이먼츠 테스트 모드로 동작합니다. 실제 카드 승인은 일어나지 않으며,
-      테스트 카드 정보로 결제 흐름을 확인할 수 있습니다.
+      토스페이먼츠 <b>테스트(샌드박스) 모드</b>로 동작합니다. 실제 카드 승인은 일어나지 않습니다.
+      금액·상품명은 주소 뒤에 <code>?amount=4900&amp;orderName=상품명</code> 형태로 바꿀 수 있어요.<br />
+      [결제하기]를 누르면 토스페이먼츠 테스트 결제창이 열리며, 카드를 선택해 그대로 진행하면
+      <code>/success</code>(서버 승인 → 완료) 또는 <code>/fail</code>로 돌아옵니다.
     </p>
   </div>
 
