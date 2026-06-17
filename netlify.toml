@@ -3,6 +3,16 @@
   publish = "dist"
   functions = "netlify/functions"
 
+  # 아래 VITE_* 키들은 "브라우저 공개용" 클라이언트 식별자다(토스페이먼츠 클라이언트 키,
+  # Supabase URL·anon 키, IVS 재생 URL). Vite 가 빌드 시점에 클라이언트 번들(dist/assets/*)
+  # 안으로 그대로 인라인하는 게 정상 동작이며, 시크릿이 아니다. 이 키들이 자동 민감변수
+  # 목록(NETLIFY_SENSITIVE_ENV_KEYS)에 잡혀 있어, 그 값이 번들에서 발견되면 시크릿 스캔이
+  # 배포를 실패시킬 수 있다 → 새 번들이 안 올라가 환경변수를 넣어도 반영되지 않는다.
+  # 공개 키이므로 스캔 대상에서 제외해 배포가 항상 성공하도록 한다. (시크릿 키는 서버 전용
+  # TOSS_SECRET_KEY / *_API_SECRET 등으로 분리돼 있고 여기에 포함하지 않는다.)
+  [build.environment]
+    SECRETS_SCAN_OMIT_KEYS = "VITE_TOSS_CLIENT_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_IVS_PLAYBACK_URL"
+
 [functions]
   node_bundler = "esbuild"
 
