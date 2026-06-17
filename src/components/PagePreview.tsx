@@ -78,7 +78,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
         )}
         <div
           className="absolute inset-0"
-          style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#F8FAFC' : '#1E1E2E'}88 20%, transparent 50%)` }}
+          style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#ffffff' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#ffffff' : '#1E1E2E'}88 20%, transparent 50%)` }}
         />
         <div className="absolute bottom-2 left-3 right-3">
           <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>

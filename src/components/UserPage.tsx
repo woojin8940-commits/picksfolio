@@ -1185,7 +1185,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
   const themeBg = design.theme === 'custom' ? (design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)') : 
                 design.theme === 'midnight' ? '#050a15' : 
-                design.theme === 'white' ? '#F8FAFC' : '#f3f0ff';
+                design.theme === 'white' ? '#ffffff' : '#f3f0ff';
   
   const isDark = design.theme === 'midnight' || design.theme === 'custom';
   const textColor = isDark ? 'text-white' : 'text-slate-900';
