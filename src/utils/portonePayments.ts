@@ -50,11 +50,14 @@ export interface PortOneIntent {
 export const channelKeyFor = (m: PortOnePayMethod) =>
   m === 'KAKAOPAY' ? PORTONE_KAKAOPAY_CHANNEL_KEY : PORTONE_TOSSPAY_CHANNEL_KEY;
 
-// 카카오페이는 일반 간편결제 채널이라 easyPayProvider 를 명시한다. 토스페이는 PortOne 의
-// TossPay v2 채널이라 채널 키만으로 PG 가 지정되며, (구)토스페이 식별자를 넘기면 v2 채널과
-// 충돌해 결제창이 뜨지 않으므로 비운다.
+// PortOne V2 간편결제(EASY_PAY)는 채널 키와 함께 호출할 간편결제 서비스를 easyPayProvider 로
+// 지정해야 한다. 토스페이(신모듈 tosspay_v2 포함)는 'TOSSPAY', 카카오페이는 'KAKAOPAY' 다.
+// (토스페이에서 easyPayProvider 를 비우면 채널만으로 PG 가 확정되지 않아 결제창이 뜨지 않거나
+//  결제가 시작되지 않는다 — PortOne V2 공식 문서 기준.)
 export const easyPayParam = (m: PortOnePayMethod) =>
-  m === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {};
+  m === 'KAKAOPAY'
+    ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
+    : { easyPay: { easyPayProvider: 'TOSSPAY' } };
 
 const origin = () => window.location.origin;
 
