@@ -11,7 +11,7 @@
   # 공개 키이므로 스캔 대상에서 제외해 배포가 항상 성공하도록 한다. (시크릿 키는 서버 전용
   # TOSS_SECRET_KEY / *_API_SECRET 등으로 분리돼 있고 여기에 포함하지 않는다.)
   [build.environment]
-    SECRETS_SCAN_OMIT_KEYS = "VITE_TOSS_CLIENT_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_IVS_PLAYBACK_URL"
+    SECRETS_SCAN_OMIT_KEYS = "VITE_TOSS_CLIENT_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_IVS_PLAYBACK_URL,VITE_BANUBA_TOKEN"
 
 [functions]
   node_bundler = "esbuild"

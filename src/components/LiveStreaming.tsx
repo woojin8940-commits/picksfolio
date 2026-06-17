@@ -11,6 +11,7 @@ import {
 import { isNativeApp } from '../utils/appEnv';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
+import { createBeautyProcessor, isBeautySupported, type BeautyProcessor } from '../services/banubaBeauty';
 
 import MediaAuto from './MediaAuto';
 
@@ -213,6 +214,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [filters, setFilters] = useState<VideoFilters>(DEFAULT_FILTERS);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  // 얼굴 보정 (Banuba Face AR): on/off, strength 0-100, and async load/error state.
+  const beautySupported = isBeautySupported();
+  const [beautyEnabled, setBeautyEnabled] = useState(false);
+  const [beautyStrength, setBeautyStrength] = useState(50);
+  const [beautyLoading, setBeautyLoading] = useState(false);
+  const [beautyError, setBeautyError] = useState<string | null>(null);
   const [actualResolution, setActualResolution] = useState<string>('');
 
   // AWS IVS Stream State
@@ -265,6 +272,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filtersRef = useRef<VideoFilters>(DEFAULT_FILTERS);
   const isMirroredRef = useRef(true);
+  // Banuba beauty pipeline: the processed-video element drawFrame reads from, the
+  // live processor instance, a draw-loop gate, and the current strength (0..1).
+  const beautyVideoRef = useRef<HTMLVideoElement | null>(null);
+  const beautyProcessorRef = useRef<BeautyProcessor | null>(null);
+  const beautyActiveRef = useRef(false);
+  const beautyStrengthRef = useRef(0.5);
+  // The current camera MediaStream, surfaced as state so the beauty effect can
+  // (re)initialize whenever the camera is (re)acquired (e.g. front/rear switch).
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const broadcastStartTimeRef = useRef<string>('');
   const broadcastIdRef = useRef<string>('');
   const peakViewerCountRef = useRef(0);
@@ -286,7 +302,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
 
   // Draw a single frame to the canvas (shared by both rAF and background timer)
-  const drawFrame = useCallback((sourceVideo: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
+  const drawFrame = useCallback((rawVideo: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
+    // When 얼굴 보정 is active, draw the Banuba-processed video (skin/face
+    // retouch baked in) instead of the raw camera. Until Banuba has decoded its
+    // first frame (videoWidth === 0) we keep drawing the raw camera so the feed
+    // never goes black while the SDK warms up.
+    const beautyVideo = beautyVideoRef.current;
+    const sourceVideo =
+      beautyActiveRef.current && beautyVideo && beautyVideo.videoWidth
+        ? beautyVideo
+        : rawVideo;
     if (!sourceVideo.videoWidth) return;
 
     // 30fps throttle: skip frame if not enough time has elapsed
@@ -857,6 +882,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             return;
           }
           streamRef.current = stream;
+          setActiveStream(stream);
           setCameraError(null);
 
           // Set content hint for video tracks to optimize encoding for detail
@@ -927,6 +953,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
+      setActiveStream(null);
       if (videoRef.current) videoRef.current.srcObject = null;
     }
 
@@ -937,8 +964,73 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
+      setActiveStream(null);
     };
   }, [isCameraOn, facingMode, startCanvasLoop, stopCanvasLoop]);
+
+  // 얼굴 보정 lifecycle: when enabled and a camera stream is available, spin up a
+  // Banuba processor around that stream and route its processed video into the
+  // hidden beauty <video> that drawFrame reads from. Tearing down on disable,
+  // camera switch (activeStream changes) or unmount releases the WASM player.
+  useEffect(() => {
+    let cancelled = false;
+
+    const teardown = async () => {
+      beautyActiveRef.current = false;
+      const proc = beautyProcessorRef.current;
+      beautyProcessorRef.current = null;
+      if (proc) { try { await proc.destroy(); } catch {} }
+      if (beautyVideoRef.current) {
+        try { beautyVideoRef.current.srcObject = null; } catch {}
+      }
+    };
+
+    if (!beautyEnabled || !activeStream) {
+      teardown();
+      return;
+    }
+
+    setBeautyLoading(true);
+    setBeautyError(null);
+    createBeautyProcessor(activeStream, beautyStrengthRef.current)
+      .then(proc => {
+        if (cancelled || !proc) {
+          if (!proc && !cancelled) {
+            setBeautyError('얼굴 보정 기능을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+            setBeautyEnabled(false);
+          }
+          proc?.destroy().catch(() => {});
+          return;
+        }
+        beautyProcessorRef.current = proc;
+        const track = proc.getVideoTrack();
+        const vid = beautyVideoRef.current;
+        if (track && vid) {
+          vid.srcObject = new MediaStream([track]);
+          vid.play().catch(() => {});
+          beautyActiveRef.current = true;
+        } else {
+          setBeautyError('얼굴 보정 영상을 가져오지 못했습니다.');
+          setBeautyEnabled(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBeautyError('얼굴 보정 초기화에 실패했습니다.');
+          setBeautyEnabled(false);
+        }
+      })
+      .finally(() => { if (!cancelled) setBeautyLoading(false); });
+
+    return () => { cancelled = true; teardown(); };
+  }, [beautyEnabled, activeStream]);
+
+  // Push strength-slider changes to the live effect without re-creating it.
+  useEffect(() => {
+    const s = beautyStrength / 100;
+    beautyStrengthRef.current = s;
+    beautyProcessorRef.current?.setStrength(s);
+  }, [beautyStrength]);
 
   // Toggle mic by enabling/disabling audio tracks (no stream recreation)
   useEffect(() => {
@@ -1500,7 +1592,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           className="absolute inset-0 w-full h-full object-contain"
           style={{ objectFit: 'contain' }}
         />
-        
+        {/* Hidden sink for the Banuba-processed (얼굴 보정) video. drawFrame reads
+            frames from this element when beauty is active; it is never shown
+            directly. Kept 1px/opacity-0 (not display:none) so the browser keeps
+            decoding it. */}
+        <video
+          ref={beautyVideoRef}
+          autoPlay
+          muted
+          playsInline
+          aria-hidden="true"
+          className="absolute w-px h-px opacity-0 pointer-events-none"
+        />
+
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-4">
@@ -1891,6 +1995,55 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       >
                         초기화
                       </button>
+                    </div>
+
+                    {/* 얼굴 보정 (Banuba Face AR) — skin smoothing + subtle morphs.
+                        Loads the SDK lazily on first enable. */}
+                    <div className="mb-4 p-3 rounded-2xl bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-400/20">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white text-xs md:text-sm font-bold flex items-center gap-2">
+                            <Sparkles size={15} className="text-pink-400" /> 얼굴 보정
+                          </span>
+                          {beautyLoading && (
+                            <span className="text-pink-300/80 text-[10px] font-bold animate-pulse">불러오는 중…</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setBeautyError(null); setBeautyEnabled(v => !v); }}
+                          disabled={!beautySupported || beautyLoading}
+                          role="switch"
+                          aria-checked={beautyEnabled}
+                          title={beautySupported ? '얼굴 보정 켜기/끄기' : '얼굴 보정 토큰이 설정되지 않았습니다'}
+                          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 disabled:opacity-40 ${beautyEnabled ? 'bg-pink-500' : 'bg-white/20'}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${beautyEnabled ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </div>
+
+                      {beautyEnabled && (
+                        <div className="space-y-1.5 mt-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-white/60 text-xs font-bold">보정 강도</label>
+                            <span className="text-white/40 text-[10px] font-mono">{beautyStrength}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={beautyStrength}
+                            onChange={(e) => setBeautyStrength(Number(e.target.value))}
+                            className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-pink-400"
+                          />
+                        </div>
+                      )}
+
+                      {beautyError && (
+                        <p className="text-red-400 text-[11px] font-bold mt-2">{beautyError}</p>
+                      )}
+                      {!beautySupported && (
+                        <p className="text-white/40 text-[10px] mt-2">얼굴 보정 토큰(VITE_BANUBA_TOKEN)이 설정되어 있지 않습니다.</p>
+                      )}
                     </div>
 
                     <div className="space-y-4">
