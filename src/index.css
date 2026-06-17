@@ -253,6 +253,19 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateZ(0);
 }
 
+/* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
+   gradients and box-shadows with subpixel-rounding seams. On the green
+   "정산 완료 처리" settlement bar this surfaced as thin, broken white lines
+   streaking across the gradient. Promoting the button to its own GPU
+   compositing layer forces a single clean rasterization, so the seam disappears
+   while the gradient and shadow look identical. */
+.gradient-btn-fix {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
 /* ===== Desktop UserPage Layout ===== */
 
 .phone-frame-notch {

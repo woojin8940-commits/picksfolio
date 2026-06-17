@@ -268,7 +268,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                     <button
                       onClick={() => handleComplete(s.id)}
                       disabled={updatingId === s.id}
-                      className="w-full mt-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
+                      className="gradient-btn-fix w-full mt-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
                     >
                       {updatingId === s.id ? '처리 중...' : '정산 완료 처리'}
                     </button>

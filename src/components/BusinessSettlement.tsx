@@ -327,7 +327,7 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
                       <button
                         onClick={() => handleComplete(s.id)}
                         disabled={updatingId === s.id}
-                        className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
+                        className="gradient-btn-fix flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
                       >
                         {updatingId === s.id ? '처리 중...' : '정산 완료'}
                       </button>
