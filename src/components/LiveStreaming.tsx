@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Sun, Contrast, Droplets, Thermometer, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Sun, Droplets, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
@@ -11,9 +11,16 @@ import {
 import { isNativeApp } from '../utils/appEnv';
 import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
-import { createBeautyProcessor, isBeautySupported, type BeautyProcessor } from '../services/banubaBeauty';
 
 import MediaAuto from './MediaAuto';
+import {
+  type FaceShapeSettings,
+  FACE_SHAPE_OFF,
+  hasFaceShape,
+  ensureFaceLandmarker,
+  detectFaceLandmarks,
+  warpFaceShape,
+} from '../utils/faceReshape';
 
 interface LiveStreamingProps {
   userName: string;
@@ -32,15 +39,29 @@ interface MaterialItem {
   opacity: number; // 0-100
 }
 
-interface VideoFilters {
-  brightness: number;   // 50-150, default 100
-  contrast: number;     // 50-150, default 100
-  saturation: number;   // 0-200, default 100
-  warmth: number;       // 0-100, default 0 (sepia %)
-  blur: number;         // 0-5, default 0 (px)
+// 얼굴 보정 (face beauty) — modeled on beauty-cam platforms (yycam 등) instead of
+// raw photo controls. Every parameter is 0-100 "강도" and is applied on-device in
+// the canvas draw loop (drawFrame), so the effect always works with no SDK/token:
+//   smooth  피부 보정  — soft-focus skin smoothing (blurred layer blended back)
+//   whiten  미백       — brighten + gently lift/desaturate the skin
+//   rosy    혈색       — warm rosy glow tint
+//   bright  밝기       — overall exposure lift
+interface BeautySettings {
+  smooth: number;
+  whiten: number;
+  rosy: number;
+  bright: number;
 }
 
-const DEFAULT_FILTERS: VideoFilters = { brightness: 100, contrast: 100, saturation: 100, warmth: 0, blur: 0 };
+// A natural "켜자마자 예쁜" default, like beauty cams ship with beauty on.
+const DEFAULT_BEAUTY: BeautySettings = { smooth: 45, whiten: 25, rosy: 20, bright: 15 };
+const BEAUTY_OFF: BeautySettings = { smooth: 0, whiten: 0, rosy: 0, bright: 0 };
+
+// 얼굴형 조정 (face-shape reshaping) — the *geometric* half of the beauty
+// system. Unlike the color controls above, these physically warp the face
+// using detected landmarks (see utils/faceReshape). Gentle defaults so the
+// face is subtly sculpted out of the box, the way beauty cams ship.
+const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 30, jaw: 28, eye: 25, nose: 18 };
 
 // Broadcast quality profile for mobile live commerce.
 //
@@ -212,14 +233,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Which physical camera to broadcast from: 'user' = front (셀카), 'environment'
   // = rear (후면). Switching re-acquires the stream with the new facingMode.
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [filters, setFilters] = useState<VideoFilters>(DEFAULT_FILTERS);
+  const [beauty, setBeauty] = useState<BeautySettings>(DEFAULT_BEAUTY);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  // 얼굴 보정 (Banuba Face AR): on/off, strength 0-100, and async load/error state.
-  const beautySupported = isBeautySupported();
-  const [beautyEnabled, setBeautyEnabled] = useState(false);
-  const [beautyStrength, setBeautyStrength] = useState(50);
-  const [beautyLoading, setBeautyLoading] = useState(false);
-  const [beautyError, setBeautyError] = useState<string | null>(null);
+  // 얼굴형 조정 (geometric face reshaping) — separate from the color beauty
+  // above. faceModelReady flips true once the on-device landmark model has
+  // loaded; faceDetected reflects whether a face is currently being tracked.
+  const [faceShape, setFaceShape] = useState<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
+  const [faceModelReady, setFaceModelReady] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(false);
+  // 얼굴 보정 master switch. On by default so it visibly does something out of the
+  // box; flipping it off broadcasts the raw camera.
+  const [beautyEnabled, setBeautyEnabled] = useState(true);
   const [actualResolution, setActualResolution] = useState<string>('');
 
   // AWS IVS Stream State
@@ -270,17 +294,17 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const isLiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const filtersRef = useRef<VideoFilters>(DEFAULT_FILTERS);
   const isMirroredRef = useRef(true);
-  // Banuba beauty pipeline: the processed-video element drawFrame reads from, the
-  // live processor instance, a draw-loop gate, and the current strength (0..1).
-  const beautyVideoRef = useRef<HTMLVideoElement | null>(null);
-  const beautyProcessorRef = useRef<BeautyProcessor | null>(null);
-  const beautyActiveRef = useRef(false);
-  const beautyStrengthRef = useRef(0.5);
-  // The current camera MediaStream, surfaced as state so the beauty effect can
-  // (re)initialize whenever the camera is (re)acquired (e.g. front/rear switch).
-  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+  // 얼굴 보정 live values, mirrored into refs so the canvas draw loop reads them
+  // without re-creating the loop on every slider move.
+  const beautyRef = useRef<BeautySettings>(DEFAULT_BEAUTY);
+  const beautyEnabledRef = useRef(true);
+  // 얼굴형 조정 live values + offscreen processing canvas. The color beauty is
+  // rendered onto procCanvas first, then warped onto the broadcast canvas.
+  const faceShapeRef = useRef<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
+  const procCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const procCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const faceDetectedRef = useRef(false);
   const broadcastStartTimeRef = useRef<string>('');
   const broadcastIdRef = useRef<string>('');
   const peakViewerCountRef = useRef(0);
@@ -303,15 +327,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   // Draw a single frame to the canvas (shared by both rAF and background timer)
   const drawFrame = useCallback((rawVideo: HTMLVideoElement, canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
-    // When 얼굴 보정 is active, draw the Banuba-processed video (skin/face
-    // retouch baked in) instead of the raw camera. Until Banuba has decoded its
-    // first frame (videoWidth === 0) we keep drawing the raw camera so the feed
-    // never goes black while the SDK warms up.
-    const beautyVideo = beautyVideoRef.current;
-    const sourceVideo =
-      beautyActiveRef.current && beautyVideo && beautyVideo.videoWidth
-        ? beautyVideo
-        : rawVideo;
+    const sourceVideo = rawVideo;
     if (!sourceVideo.videoWidth) return;
 
     // 30fps throttle: skip frame if not enough time has elapsed
@@ -335,22 +351,111 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       ctx.imageSmoothingQuality = 'high';
     }
 
-    const f = filtersRef.current;
-    const filterStr = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) sepia(${f.warmth}%) blur(${f.blur}px)`;
+    // 얼굴 보정 — beauty processing applied off-screen, then composited (and,
+    // for 얼굴형 조정, geometrically warped) onto the broadcast canvas. When the
+    // switch is off we fall back to the untouched camera frame.
+    const beautyOn = beautyEnabledRef.current;
+    const b = beautyOn ? beautyRef.current : BEAUTY_OFF;
+    const shape = beautyOn ? faceShapeRef.current : FACE_SHAPE_OFF;
+    const mirror = isMirroredRef.current;
+
+    // The color beauty is drawn onto an offscreen "processing" canvas so it can
+    // serve as the texture source for the face-shape warp. (Warping in place on
+    // the canvas you're reading from is not possible.)
+    let proc = procCanvasRef.current;
+    if (!proc) {
+      proc = document.createElement('canvas');
+      procCanvasRef.current = proc;
+      procCtxRef.current = proc.getContext('2d');
+    }
+    const pctx = procCtxRef.current;
+    if (!pctx) return;
+    if (proc.width !== vw || proc.height !== vh) {
+      proc.width = vw;
+      proc.height = vh;
+      pctx.imageSmoothingEnabled = true;
+      pctx.imageSmoothingQuality = 'high';
+    }
+
+    // Color pass: brightness lifts overall exposure (밝기) plus a touch of the
+    // 미백 lift, while 미백 also gently desaturates toward a brighter skin tone.
+    const brightness = 1 + (b.bright / 100) * 0.3 + (b.whiten / 100) * 0.12;
+    const saturation = 1 - (b.whiten / 100) * 0.15;
+    const baseFilter = `brightness(${brightness.toFixed(3)}) saturate(${saturation.toFixed(3)})`;
+
+    // Draw the source (optionally mirrored) onto the proc canvas under a given
+    // CSS filter / opacity. Mirror is baked in here so landmark detection and
+    // warping operate in the same orientation the viewer sees.
+    const paint = (filter: string, alpha: number) => {
+      pctx.save();
+      pctx.filter = filter;
+      pctx.globalAlpha = alpha;
+      if (mirror) {
+        pctx.translate(vw, 0);
+        pctx.scale(-1, 1);
+      }
+      pctx.drawImage(sourceVideo, 0, 0, vw, vh);
+      pctx.restore();
+    };
 
     // Clear first so nothing from a previous frame bleeds through on a resize.
-    ctx.filter = 'none';
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, vw, vh);
+    pctx.filter = 'none';
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = 'source-over';
+    pctx.fillStyle = '#000';
+    pctx.fillRect(0, 0, vw, vh);
 
-    ctx.filter = filterStr;
-    ctx.save();
-    if (isMirroredRef.current) {
-      ctx.translate(vw, 0);
-      ctx.scale(-1, 1);
+    // 1) Base, color-corrected frame.
+    paint(baseFilter, 1);
+
+    // 2) 피부 보정 (skin smoothing): blend a blurred copy back on top. Blending a
+    //    soft-focus layer at partial opacity evens skin tone while the base layer
+    //    underneath preserves enough edge detail to avoid an obvious "smear".
+    if (b.smooth > 0) {
+      const radius = Math.max(1, Math.round((Math.min(vw, vh) / 220) * (b.smooth / 100) * 3));
+      const alpha = (b.smooth / 100) * 0.6;
+      paint(`${baseFilter} blur(${radius}px)`, alpha);
     }
-    ctx.drawImage(sourceVideo, 0, 0, vw, vh);
-    ctx.restore();
+
+    // 3) 혈색 (rosy glow): overlay a warm rosy tint with soft-light so it reads as
+    //    healthy color rather than a flat wash.
+    if (b.rosy > 0) {
+      pctx.save();
+      pctx.filter = 'none';
+      pctx.globalCompositeOperation = 'soft-light';
+      pctx.globalAlpha = (b.rosy / 100) * 0.35;
+      pctx.fillStyle = '#ff7a93';
+      pctx.fillRect(0, 0, vw, vh);
+      pctx.restore();
+    }
+    pctx.filter = 'none';
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = 'source-over';
+
+    // Composite the processed frame onto the broadcast canvas. If 얼굴형 조정 is
+    // active and a face is tracked, warp the face region; otherwise copy 1:1.
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(proc, 0, 0);
+
+    let detected = false;
+    if (beautyOn && hasFaceShape(shape)) {
+      const landmarks = detectFaceLandmarks(proc, now, vw, vh);
+      if (landmarks) {
+        detected = true;
+        warpFaceShape(ctx, proc, landmarks, vw, vh, shape);
+      }
+    }
+    if (detected !== faceDetectedRef.current) {
+      faceDetectedRef.current = detected;
+      setFaceDetected(detected);
+    }
+
+    // Reset shared context state for the next frame / other drawers.
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }, []);
 
   // Start WebAudio-based background timer (keeps canvas alive when tab is hidden)
@@ -672,8 +777,22 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   }, [isLive, liveRemainingMinutes, lowTimeWarned]);
 
   // Sync refs for use in animation loop
-  useEffect(() => { filtersRef.current = filters; }, [filters]);
+  useEffect(() => { beautyRef.current = beauty; }, [beauty]);
+  useEffect(() => { beautyEnabledRef.current = beautyEnabled; }, [beautyEnabled]);
+  useEffect(() => { faceShapeRef.current = faceShape; }, [faceShape]);
   useEffect(() => { isMirroredRef.current = isMirrored; }, [isMirrored]);
+
+  // Load the on-device face-landmark model once the beauty panel is opened, so
+  // 얼굴형 조정 has landmarks to work with. Loading is lazy + idempotent and
+  // failures degrade gracefully (shape warp simply stays inactive).
+  useEffect(() => {
+    if (!showFilterPanel || faceModelReady) return;
+    let cancelled = false;
+    ensureFaceLandmarker().then((lm) => {
+      if (!cancelled && lm) setFaceModelReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [showFilterPanel, faceModelReady]);
 
   // Flip between the front (셀카) and rear (후면) camera. Rear-camera footage of
   // the real world should not be mirrored, while the front camera defaults to a
@@ -790,6 +909,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     // Reset timing for fresh start
     lastDrawTimeRef.current = 0;
 
+    // Warm up the on-device face-landmark model so 얼굴형 조정 works as soon as
+    // the camera is live (defaults ship with gentle reshaping on).
+    ensureFaceLandmarker().then((lm) => { if (lm) setFaceModelReady(true); });
+
     const draw = () => {
       drawFrame(sourceVideo, canvas, ctx);
       animFrameRef.current = requestAnimationFrame(draw);
@@ -882,7 +1005,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             return;
           }
           streamRef.current = stream;
-          setActiveStream(stream);
           setCameraError(null);
 
           // Set content hint for video tracks to optimize encoding for detail
@@ -953,7 +1075,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
-      setActiveStream(null);
       if (videoRef.current) videoRef.current.srcObject = null;
     }
 
@@ -964,73 +1085,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
-      setActiveStream(null);
     };
   }, [isCameraOn, facingMode, startCanvasLoop, stopCanvasLoop]);
-
-  // 얼굴 보정 lifecycle: when enabled and a camera stream is available, spin up a
-  // Banuba processor around that stream and route its processed video into the
-  // hidden beauty <video> that drawFrame reads from. Tearing down on disable,
-  // camera switch (activeStream changes) or unmount releases the WASM player.
-  useEffect(() => {
-    let cancelled = false;
-
-    const teardown = async () => {
-      beautyActiveRef.current = false;
-      const proc = beautyProcessorRef.current;
-      beautyProcessorRef.current = null;
-      if (proc) { try { await proc.destroy(); } catch {} }
-      if (beautyVideoRef.current) {
-        try { beautyVideoRef.current.srcObject = null; } catch {}
-      }
-    };
-
-    if (!beautyEnabled || !activeStream) {
-      teardown();
-      return;
-    }
-
-    setBeautyLoading(true);
-    setBeautyError(null);
-    createBeautyProcessor(activeStream, beautyStrengthRef.current)
-      .then(proc => {
-        if (cancelled || !proc) {
-          if (!proc && !cancelled) {
-            setBeautyError('얼굴 보정 기능을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
-            setBeautyEnabled(false);
-          }
-          proc?.destroy().catch(() => {});
-          return;
-        }
-        beautyProcessorRef.current = proc;
-        const track = proc.getVideoTrack();
-        const vid = beautyVideoRef.current;
-        if (track && vid) {
-          vid.srcObject = new MediaStream([track]);
-          vid.play().catch(() => {});
-          beautyActiveRef.current = true;
-        } else {
-          setBeautyError('얼굴 보정 영상을 가져오지 못했습니다.');
-          setBeautyEnabled(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setBeautyError('얼굴 보정 초기화에 실패했습니다.');
-          setBeautyEnabled(false);
-        }
-      })
-      .finally(() => { if (!cancelled) setBeautyLoading(false); });
-
-    return () => { cancelled = true; teardown(); };
-  }, [beautyEnabled, activeStream]);
-
-  // Push strength-slider changes to the live effect without re-creating it.
-  useEffect(() => {
-    const s = beautyStrength / 100;
-    beautyStrengthRef.current = s;
-    beautyProcessorRef.current?.setStrength(s);
-  }, [beautyStrength]);
 
   // Toggle mic by enabling/disabling audio tracks (no stream recreation)
   useEffect(() => {
@@ -1592,19 +1648,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           className="absolute inset-0 w-full h-full object-contain"
           style={{ objectFit: 'contain' }}
         />
-        {/* Hidden sink for the Banuba-processed (얼굴 보정) video. drawFrame reads
-            frames from this element when beauty is active; it is never shown
-            directly. Kept 1px/opacity-0 (not display:none) so the browser keeps
-            decoding it. */}
-        <video
-          ref={beautyVideoRef}
-          autoPlay
-          muted
-          playsInline
-          aria-hidden="true"
-          className="absolute w-px h-px opacity-0 pointer-events-none"
-        />
-
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-4">
@@ -1881,11 +1924,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               >
                 <SwitchCamera size={20} />
               </button>
-              {/* Filter panel toggle */}
+              {/* 얼굴 보정 panel toggle */}
               <button
                 onClick={() => { setShowFilterPanel(!showFilterPanel); setShowMaterialPanel(false); }}
                 className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${showFilterPanel ? 'bg-pink-600' : 'bg-black/40 hover:bg-black/60'}`}
-                title="필터"
+                title="얼굴 보정"
               >
                 <Sparkles size={20} />
               </button>
@@ -1982,194 +2025,186 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            {/* Filter Panel */}
+            {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied
+                on-device in the canvas draw loop. No SDK/token required. */}
             {showFilterPanel && (
               <div className="bg-black/60 backdrop-blur-xl border border-white/10 p-4 md:p-5 rounded-2xl md:rounded-[2rem] w-full max-w-lg animate-in slide-in-from-bottom-4 duration-300">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-white font-black text-xs md:text-sm uppercase tracking-widest flex items-center gap-2">
-                        <Sparkles size={16} className="text-pink-400" /> 영상 필터
+                        <Sparkles size={16} className="text-pink-400" /> 얼굴 보정
                       </h4>
                       <button
-                        onClick={() => setFilters(DEFAULT_FILTERS)}
+                        onClick={() => { setBeauty(DEFAULT_BEAUTY); setFaceShape(DEFAULT_FACE_SHAPE); }}
                         className="text-white/40 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10"
                       >
                         초기화
                       </button>
                     </div>
 
-                    {/* 얼굴 보정 (Banuba Face AR) — skin smoothing + subtle morphs.
-                        Loads the SDK lazily on first enable. */}
+                    {/* Master on/off — off broadcasts the untouched camera. */}
                     <div className="mb-4 p-3 rounded-2xl bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-400/20">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-white text-xs md:text-sm font-bold flex items-center gap-2">
-                            <Sparkles size={15} className="text-pink-400" /> 얼굴 보정
-                          </span>
-                          {beautyLoading && (
-                            <span className="text-pink-300/80 text-[10px] font-bold animate-pulse">불러오는 중…</span>
-                          )}
-                        </div>
+                        <span className="text-white text-xs md:text-sm font-bold flex items-center gap-2">
+                          <Sparkles size={15} className="text-pink-400" /> 보정 사용
+                        </span>
                         <button
-                          onClick={() => { setBeautyError(null); setBeautyEnabled(v => !v); }}
-                          disabled={!beautySupported || beautyLoading}
+                          onClick={() => setBeautyEnabled(v => !v)}
                           role="switch"
                           aria-checked={beautyEnabled}
-                          title={beautySupported ? '얼굴 보정 켜기/끄기' : '얼굴 보정 토큰이 설정되지 않았습니다'}
-                          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 disabled:opacity-40 ${beautyEnabled ? 'bg-pink-500' : 'bg-white/20'}`}
+                          title="얼굴 보정 켜기/끄기"
+                          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 ${beautyEnabled ? 'bg-pink-500' : 'bg-white/20'}`}
                         >
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${beautyEnabled ? 'translate-x-5' : ''}`} />
                         </button>
                       </div>
+                      <p className="text-white/40 text-[10px] mt-2">
+                        피부결을 매끄럽게, 톤을 화사하게 다듬어 줍니다.
+                      </p>
+                    </div>
 
-                      {beautyEnabled && (
-                        <div className="space-y-1.5 mt-3">
+                    {/* 얼굴형 조정 — real geometric reshaping driven by on-device
+                        face landmarks (not a color filter). */}
+                    <div className={`mb-5 transition-opacity ${beautyEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="text-white/80 text-[11px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <SwitchCamera size={14} className="text-purple-400" /> 얼굴형 조정
+                        </h5>
+                        {/* Live detection status so the broadcaster knows the
+                            geometric reshaping is actually tracking a face. */}
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                            !faceModelReady
+                              ? 'bg-white/10 text-white/40'
+                              : faceDetected
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            !faceModelReady ? 'bg-white/40' : faceDetected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                          }`} />
+                          {!faceModelReady ? '모델 로딩 중' : faceDetected ? '얼굴 인식됨' : '얼굴 찾는 중'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-4">
+                        {([
+                          { key: 'face' as const, label: '얼굴 축소', dot: 'bg-purple-400', accent: 'accent-purple-400' },
+                          { key: 'jaw' as const, label: 'V라인 턱', dot: 'bg-fuchsia-400', accent: 'accent-fuchsia-400' },
+                          { key: 'eye' as const, label: '눈 크게', dot: 'bg-indigo-400', accent: 'accent-indigo-400' },
+                          { key: 'nose' as const, label: '코 슬림', dot: 'bg-violet-400', accent: 'accent-violet-400' },
+                        ]).map(({ key, label, dot, accent }) => (
+                          <div key={key} className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-white/60 text-xs font-bold flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full ${dot}`} /> {label}
+                              </label>
+                              <span className="text-white/40 text-[10px] font-mono">{faceShape[key]}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={faceShape[key]}
+                              onChange={(e) => setFaceShape(s => ({ ...s, [key]: Number(e.target.value) }))}
+                              className={`w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer ${accent}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 얼굴형 presets */}
+                      <div className="flex gap-2 mt-3 flex-wrap">
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape(FACE_SHAPE_OFF); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 text-white/60 hover:text-white transition-all"
+                        >
+                          원본
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 20, jaw: 18, eye: 18, nose: 12 }); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all"
+                        >
+                          은은하게
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape(DEFAULT_FACE_SHAPE); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-fuchsia-500/20 text-fuchsia-300 hover:bg-fuchsia-500/30 transition-all"
+                        >
+                          V라인
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 55, jaw: 50, eye: 55, nose: 35 }); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-all"
+                        >
+                          또렷하게
+                        </button>
+                      </div>
+                      <p className="text-white/40 text-[10px] mt-2">
+                        얼굴·턱선·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
+                      </p>
+                    </div>
+
+                    <h5 className="text-white/80 text-[11px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2 mb-3">
+                      <Sparkles size={14} className="text-pink-400" /> 피부 톤
+                    </h5>
+                    <div className={`space-y-4 transition-opacity ${beautyEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                      {([
+                        { key: 'smooth' as const, label: '피부 보정', icon: <Eye size={14} className="text-pink-400" />, accent: 'accent-pink-400' },
+                        { key: 'whiten' as const, label: '미백', icon: <Sparkles size={14} className="text-sky-300" />, accent: 'accent-sky-300' },
+                        { key: 'rosy' as const, label: '혈색', icon: <Droplets size={14} className="text-rose-400" />, accent: 'accent-rose-400' },
+                        { key: 'bright' as const, label: '밝기', icon: <Sun size={14} className="text-yellow-400" />, accent: 'accent-yellow-400' },
+                      ]).map(({ key, label, icon, accent }) => (
+                        <div key={key} className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <label className="text-white/60 text-xs font-bold">보정 강도</label>
-                            <span className="text-white/40 text-[10px] font-mono">{beautyStrength}%</span>
+                            <label className="text-white/60 text-xs font-bold flex items-center gap-2">
+                              {icon} {label}
+                            </label>
+                            <span className="text-white/40 text-[10px] font-mono">{beauty[key]}</span>
                           </div>
                           <input
                             type="range"
                             min="0"
                             max="100"
-                            value={beautyStrength}
-                            onChange={(e) => setBeautyStrength(Number(e.target.value))}
-                            className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-pink-400"
+                            value={beauty[key]}
+                            onChange={(e) => setBeauty(b => ({ ...b, [key]: Number(e.target.value) }))}
+                            className={`w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer ${accent}`}
                           />
                         </div>
-                      )}
-
-                      {beautyError && (
-                        <p className="text-red-400 text-[11px] font-bold mt-2">{beautyError}</p>
-                      )}
-                      {!beautySupported && (
-                        <p className="text-white/40 text-[10px] mt-2">얼굴 보정 토큰(VITE_BANUBA_TOKEN)이 설정되어 있지 않습니다.</p>
-                      )}
+                      ))}
                     </div>
 
-                    <div className="space-y-4">
-                      {/* Brightness */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Sun size={14} className="text-yellow-400" /> 밝기
-                          </label>
-                          <span className="text-white/40 text-[10px] font-mono">{filters.brightness}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="50"
-                          max="150"
-                          value={filters.brightness}
-                          onChange={(e) => setFilters(f => ({ ...f, brightness: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-yellow-400"
-                        />
-                      </div>
-
-                      {/* Contrast */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Contrast size={14} className="text-orange-400" /> 대비
-                          </label>
-                          <span className="text-white/40 text-[10px] font-mono">{filters.contrast}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="50"
-                          max="150"
-                          value={filters.contrast}
-                          onChange={(e) => setFilters(f => ({ ...f, contrast: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-orange-400"
-                        />
-                      </div>
-
-                      {/* Saturation */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Droplets size={14} className="text-blue-400" /> 채도
-                          </label>
-                          <span className="text-white/40 text-[10px] font-mono">{filters.saturation}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="200"
-                          value={filters.saturation}
-                          onChange={(e) => setFilters(f => ({ ...f, saturation: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-blue-400"
-                        />
-                      </div>
-
-                      {/* Warmth */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Thermometer size={14} className="text-red-400" /> 따뜻함
-                          </label>
-                          <span className="text-white/40 text-[10px] font-mono">{filters.warmth}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={filters.warmth}
-                          onChange={(e) => setFilters(f => ({ ...f, warmth: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-red-400"
-                        />
-                      </div>
-
-                      {/* Blur (Skin Smoothing) */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                            <Eye size={14} className="text-blue-400" /> 스무딩
-                          </label>
-                          <span className="text-white/40 text-[10px] font-mono">{filters.blur}px</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="5"
-                          step="0.5"
-                          value={filters.blur}
-                          onChange={(e) => setFilters(f => ({ ...f, blur: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-blue-400"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Filter presets */}
+                    {/* Beauty presets */}
                     <div className="flex gap-2 mt-4 flex-wrap">
                       <button
-                        onClick={() => setFilters(DEFAULT_FILTERS)}
+                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 20, whiten: 10, rosy: 10, bright: 5 }); }}
                         className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 text-white/60 hover:text-white transition-all"
                       >
-                        기본
+                        내추럴
                       </button>
                       <button
-                        onClick={() => setFilters({ brightness: 110, contrast: 105, saturation: 120, warmth: 10, blur: 0.5 })}
+                        onClick={() => { setBeautyEnabled(true); setBeauty(DEFAULT_BEAUTY); }}
                         className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-pink-500/20 text-pink-400 hover:bg-pink-500/30 transition-all"
                       >
-                        뷰티
+                        자연 보정
                       </button>
                       <button
-                        onClick={() => setFilters({ brightness: 105, contrast: 110, saturation: 130, warmth: 15, blur: 0 })}
+                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 70, whiten: 45, rosy: 30, bright: 25 }); }}
+                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-all"
+                      >
+                        뽀샤시
+                      </button>
+                      <button
+                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 60, whiten: 65, rosy: 15, bright: 20 }); }}
+                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 transition-all"
+                      >
+                        우유빛
+                      </button>
+                      <button
+                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 40, whiten: 30, rosy: 40, bright: 30 }); }}
                         className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-all"
                       >
-                        따뜻한
-                      </button>
-                      <button
-                        onClick={() => setFilters({ brightness: 105, contrast: 115, saturation: 110, warmth: 0, blur: 0 })}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-all"
-                      >
-                        선명한
-                      </button>
-                      <button
-                        onClick={() => setFilters({ brightness: 110, contrast: 95, saturation: 80, warmth: 5, blur: 1 })}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-all"
-                      >
-                        소프트
+                        화사
                       </button>
                     </div>
               </div>
