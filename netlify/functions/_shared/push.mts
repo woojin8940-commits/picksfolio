@@ -34,7 +34,11 @@ function isExpoToken(token: unknown): token is string {
  * pruned so the table does not accumulate dead devices.
  */
 export async function sendPushToUser(username: string, payload: PushPayload): Promise<void> {
-  const uname = (username || "").trim().toLowerCase();
+  // Normalize identically to registration (api-push-register.mts): business
+  // usernames are stored with a `biz/` prefix throughout the app, but tokens are
+  // keyed by the bare username. Strip the prefix here or the lookup misses every
+  // business device.
+  const uname = (username || "").trim().toLowerCase().replace(/^biz\//, "");
   if (!uname) return;
 
   const db = getDatabase();
