@@ -3,6 +3,15 @@ import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { payClaudePlan, CLAUDE_PAY_METHODS, type ClaudePayMethod } from '../utils/claudeCharge';
 import { startTossCardBilling } from '../utils/tossPayments';
+import {
+  PORTONE_STORE_ID,
+  channelKeyFor,
+  easyPayParam,
+  portoneRedirectUrl,
+  savePortOneIntent,
+  clearPortOneIntent,
+  genPortOneId,
+} from '../utils/portonePayments';
 import { isNativeApp } from '../utils/appEnv';
 import type { SellerVerification } from '../types';
 
@@ -13,10 +22,7 @@ interface MembershipPlanProps {
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
 // 토스페이먼츠(카드)는 PortOne 을 거치지 않고 토스페이먼츠와 직접 연동한다(startTossCardBilling).
-// PortOne 은 토스페이 / 카카오페이 간편결제 빌링키 발급에만 사용한다.
-const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
-const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
+// PortOne 은 토스페이 / 카카오페이 간편결제 빌링키 발급에만 사용한다(리다이렉트 방식).
 
 type MembershipTier = 'standard' | 'standard_ai' | 'commerce';
 const STANDARD_PRICE = 4900;
@@ -338,26 +344,33 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setSaving(true);
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
-      const issueId = `billing-${safeUserName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const channelKey =
-        payMethod === 'KAKAOPAY'
-          ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : PORTONE_TOSSPAY_CHANNEL_KEY;
+      const issueId = genPortOneId('billing', normalizedUserName);
+      // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
+      const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+
+      // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
+      // 돌아온 /portone/return 페이지가 발급된 billingKey 로 첫 달 결제·멤버십 활성화를
+      // 마무리한다. intent 를 미리 저장한다. (PC 팝업으로 promise 가 resolve 되면 아래 인라인
+      // 처리도 동작한다.)
+      savePortOneIntent({
+        type: 'membership',
+        username: normalizedUserName,
+        payMethod: ppMethod,
+        tier: selectedTier,
+        orderName: `픽스폴리오 ${tierLabel} 정기결제`,
+        returnPath: window.location.pathname + window.location.search,
+      });
 
       const response = await window.PortOne.requestIssueBillingKey({
         storeId: PORTONE_STORE_ID,
-        channelKey,
+        channelKey: channelKeyFor(ppMethod),
         billingKeyMethod: 'EASY_PAY',
         issueId,
         issueName: `픽스폴리오 ${tierLabel} 정기결제`,
         displayAmount: tierAmount,
         currency: 'KRW',
-        // 토스페이는 PortOne 의 TossPay v2 채널이라 채널 키로 PG(토스페이 신모듈)가 지정된다.
-        // (구)토스페이 식별자 'TOSSPAY' 를 easyPayProvider 로 넘기면 v2 채널과 충돌해 빌링
-        // 인증창이 뜨지 않는다. 카카오페이만 간편결제 provider 를 명시한다.
-        ...(payMethod === 'KAKAOPAY' && {
-          easyPay: { easyPayProvider: 'KAKAOPAY' },
-        }),
+        redirectUrl: portoneRedirectUrl(),
+        ...easyPayParam(ppMethod),
         customer: {
           customerId: safeUserName,
           fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
@@ -366,6 +379,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       });
 
       if (!response || response.code) {
+        clearPortOneIntent();
         if (response?.code) {
           const detail = response.code === 'PORTONE_ERROR'
             ? '결제 모듈 오류입니다. 채널 설정(결제모듈·PG상점아이디)을 확인해 주세요.'
@@ -379,12 +393,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       const billingKey = response.billingKey;
       if (!billingKey) {
+        clearPortOneIntent();
         setError('빌링키를 받지 못했습니다. 다시 시도해 주세요.');
         setSaving(false);
         return;
       }
 
       const verifyRes = await apiService.issueBillingKeyPayment(normalizedUserName, billingKey, selectedTier);
+      clearPortOneIntent();
       if (!verifyRes.success) {
         setError(verifyRes.error || '빌링 결제에 실패했습니다. 고객센터로 문의해 주세요.');
         setSaving(false);

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>결제 처리 중 · 픽스폴리오</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+        "Malgun Gothic", system-ui, sans-serif;
+      background: #f2f4f6; color: #191f28;
+    }
+    .card {
+      background: #fff; border-radius: 16px; padding: 36px 28px; width: 100%; max-width: 420px;
+      margin: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center;
+    }
+    .icon { font-size: 44px; line-height: 1; }
+    h1 { font-size: 20px; margin: 16px 0 8px; }
+    p { color: #4e5968; font-size: 14px; line-height: 1.7; margin: 4px 0; }
+    a.btn { display: inline-block; margin-top: 22px; padding: 13px 20px; border-radius: 12px;
+      background: #3182f6; color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+    .muted { color: #8b95a1; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon">⏳</div>
+    <h1>결제를 처리하는 중이에요</h1>
+    <p class="muted">잠시만 기다려 주세요…</p>
+  </div>
+
+  <script>
+    // PortOne(포트원) 간편결제(토스페이 / 카카오페이) 리다이렉트 복귀 처리.
+    //
+    // 토스페이는 리다이렉트 전용 PG 라, 결제창에서 결제가 끝나면 PortOne 이 redirectUrl 로
+    // 결과 쿼리(paymentId / billingKey / code …)를 붙여 돌려보낸다. 결제 시작 직전에 저장해 둔
+    // intent 와 합쳐 서버에서 검증·적립을 마무리한다. (시크릿 키는 서버 전용.)
+    const params = new URLSearchParams(location.search);
+    // PortOne V2 redirect 결과: 실패 시에만 code 가 채워진다.
+    const code = params.get("code");
+    const message = params.get("message");
+    const pgMessage = params.get("pgMessage");
+    const paymentId = params.get("paymentId");
+    const billingKey = params.get("billingKey");
+
+    const card = document.getElementById("card");
+    const INTENT_KEY = "portone_pending_intent";
+
+    let intent = null;
+    try { intent = JSON.parse(sessionStorage.getItem(INTENT_KEY) || "null"); } catch (e) {}
+
+    function fail(msg, errCode) {
+      const back = (intent && intent.returnPath) || "/";
+      card.innerHTML =
+        '<div class="icon">❌</div>' +
+        '<h1>결제에 실패했어요</h1>' +
+        '<p>' + (msg || "결제가 정상적으로 처리되지 않았습니다.") + '</p>' +
+        (errCode ? '<p class="muted">오류 코드: ' + errCode + '</p>' : '') +
+        '<a class="btn" href="' + back + '">돌아가기</a>';
+    }
+
+    function done(returnPath) {
+      const back = returnPath || "/";
+      card.innerHTML =
+        '<div class="icon">✅</div>' +
+        '<h1>결제가 완료되었어요</h1>' +
+        '<p class="muted">잠시 후 자동으로 이동합니다…</p>' +
+        '<a class="btn" href="' + back + '">돌아가기</a>';
+      setTimeout(function () { location.replace(back); }, 1400);
+    }
+
+    function enc(s) { return encodeURIComponent(String(s).toLowerCase()); }
+
+    async function send(method, url, body) {
+      const res = await fetch(url, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      return { ok: res.ok, data: data };
+    }
+
+    async function finalize() {
+      if (!intent || !intent.type) {
+        fail("결제 정보가 만료되었습니다. 다시 시도해 주세요.");
+        return;
+      }
+
+      // PortOne 이 code 를 붙여 돌아오면 결제 실패/취소다.
+      if (code) {
+        fail(pgMessage || message || "결제가 취소되었거나 실패했습니다.", code);
+        return;
+      }
+
+      const payMethod = intent.payMethod || "TOSSPAY";
+
+      // ── 빌링(자동결제) 등록 흐름 ── billingKey 로 돌아온다.
+      if (intent.type === "membership") {
+        if (!billingKey) { fail("빌링키를 받지 못했습니다. 다시 시도해 주세요."); return; }
+        const r = await send("POST", "/api/billing-issue", {
+          username: intent.username,
+          tier: intent.tier,
+          billingKey: billingKey,
+        });
+        if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
+        sessionStorage.removeItem(INTENT_KEY);
+        done(intent.returnPath);
+        return;
+      }
+
+      if (intent.type === "claude-billing") {
+        if (!billingKey) { fail("빌링키를 받지 못했습니다. 다시 시도해 주세요."); return; }
+        const r = await send("PATCH", "/api/claude-credits/" + enc(intent.username), {
+          autoRecharge: true,
+          billingKey: billingKey,
+        });
+        if (!r.ok || !r.data.success) { fail(r.data.error || "결제수단 등록에 실패했습니다."); return; }
+        sessionStorage.removeItem(INTENT_KEY);
+        done(intent.returnPath);
+        return;
+      }
+
+      // ── 단건 결제 흐름 ── paymentId 로 돌아온다.
+      if (!paymentId) { fail("결제 정보가 올바르지 않습니다."); return; }
+
+      if (intent.type === "live") {
+        const r = await send("POST", "/api/live-credits/" + enc(intent.username), {
+          hours: intent.hours,
+          payMethod: payMethod,
+          paymentId: paymentId,
+        });
+        if (!r.ok || r.data.error) { fail(r.data.error || "시간 충전에 실패했습니다."); return; }
+        sessionStorage.removeItem(INTENT_KEY);
+        done(intent.returnPath);
+        return;
+      }
+
+      if (intent.type === "claude") {
+        const r = await send("POST", "/api/claude-credits/" + enc(intent.username), {
+          kind: intent.kind || "activation",
+          amountKrw: intent.amountKrw,
+          payMethod: payMethod,
+          paymentId: paymentId,
+        });
+        if (!r.ok || r.data.error || r.data.success === false) {
+          fail(r.data.error || "크레딧 적립에 실패했습니다."); return;
+        }
+        sessionStorage.removeItem(INTENT_KEY);
+        done(intent.returnPath);
+        return;
+      }
+
+      // ── 라이브 커머스 시청자 주문 ── 저장해 둔 주문 본문에 paymentId 만 더해 검증한다.
+      if (intent.type === "live-order" || intent.type === "live-order-batch") {
+        const url = intent.type === "live-order"
+          ? "/api/live-order-complete"
+          : "/api/live-order-batch";
+        const order = intent.order || {};
+        const r = await send("POST", url, Object.assign({}, order, { paymentId: paymentId }));
+        if (!r.ok || !r.data.success) { fail(r.data.error || "결제 검증에 실패했습니다."); return; }
+        sessionStorage.removeItem(INTENT_KEY);
+        done(intent.returnPath);
+        return;
+      }
+
+      fail("결제 정보가 올바르지 않습니다.");
+    }
+
+    finalize().catch(function (err) {
+      fail((err && err.message) || "결제 처리 중 오류가 발생했습니다.");
+    });
+  </script>
+</body>
+</html>
