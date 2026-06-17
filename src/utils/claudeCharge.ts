@@ -90,7 +90,10 @@ export async function payClaudePlan(
       totalAmount: amountKrw,
       currency: 'KRW',
       payMethod: 'EASY_PAY',
-      easyPay: { easyPayProvider: payMethod },
+      // 토스페이는 PortOne 의 TossPay v2 채널이므로 채널 키만으로 PG(토스페이 신모듈)가
+      // 지정된다. easyPayProvider 에 (구)토스페이 식별자 'TOSSPAY' 를 넘기면 v2 채널과
+      // 충돌해 결제창이 뜨지 않는다. 카카오페이는 일반 간편결제 채널이라 그대로 명시한다.
+      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
@@ -162,7 +165,9 @@ export async function issueClaudeBillingKey(
       issueId,
       issueName: '클로드 크레딧 자동충전 결제수단 등록',
       currency: 'KRW',
-      easyPay: { easyPayProvider: payMethod },
+      // TossPay v2 채널은 채널 키로 PG가 정해진다. (구)토스페이 식별자를 넘기지 않는다.
+      // 카카오페이만 간편결제 provider 를 명시한다.
+      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
       customer: { customerId: safeUserName },
     });
 

@@ -84,7 +84,10 @@ export async function payAndChargeLiveTime(
       totalAmount: amount,
       currency: 'KRW',
       payMethod: 'EASY_PAY',
-      easyPay: { easyPayProvider: payMethod },
+      // 토스페이는 PortOne 의 TossPay v2 채널이므로 채널 키만으로 PG(토스페이 신모듈)가
+      // 지정된다. easyPayProvider 에 (구)토스페이 식별자 'TOSSPAY' 를 넘기면 v2 채널과
+      // 충돌해 결제창이 뜨지 않는다. 카카오페이는 일반 간편결제 채널이라 그대로 명시한다.
+      ...(payMethod === 'KAKAOPAY' ? { easyPay: { easyPayProvider: 'KAKAOPAY' } } : {}),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
