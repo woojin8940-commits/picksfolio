@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { payClaudePlan, CLAUDE_PAY_METHODS, type ClaudePayMethod } from '../utils/claudeCharge';
+import { startTossCardBilling } from '../utils/tossPayments';
 import { isNativeApp } from '../utils/appEnv';
 import type { SellerVerification } from '../types';
 
@@ -11,9 +12,9 @@ interface MembershipPlanProps {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
-// 토스페이먼츠 채널 (MID: iamporttest_4) — 카드·토스페이 결제
+// 토스페이먼츠(카드)는 PortOne 을 거치지 않고 토스페이먼츠와 직접 연동한다(startTossCardBilling).
+// PortOne 은 토스페이 / 카카오페이 간편결제 빌링키 발급에만 사용한다.
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-const PORTONE_CARD_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
 const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-4e4b5bcd-12b4-48b1-ac74-50e634d1a0e2';
 
@@ -305,6 +306,30 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const confirmSubscribe = async () => {
     setError(null);
 
+    const tierLabel = TIER_LABEL[selectedTier];
+    const tierAmount = TIER_PRICE[selectedTier];
+
+    // 토스페이먼츠(카드) — PortOne 을 거치지 않고 토스페이먼츠 빌링 인증창으로 리다이렉트한다.
+    // 돌아온 뒤 /toss/return 페이지가 빌링키 발급·첫 달 결제·멤버십 활성화를 마무리한다.
+    if (payMethod === 'CARD') {
+      setSaving(true);
+      const out = await startTossCardBilling({
+        type: 'membership',
+        username: normalizedUserName,
+        tier: selectedTier,
+        amountKrw: tierAmount,
+        orderName: `픽스폴리오 ${tierLabel} 정기결제`,
+        payMethod: 'CARD',
+        returnPath: window.location.pathname + window.location.search,
+      });
+      // 정상 흐름이면 위에서 페이지가 떠난다. 시작 전 오류만 여기서 처리한다.
+      if (!out.success) {
+        setError(out.error || '결제 요청을 시작하지 못했습니다. 다시 시도해 주세요.');
+        setSaving(false);
+      }
+      return;
+    }
+
     if (typeof window === 'undefined' || !window.PortOne) {
       setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
       return;
@@ -312,23 +337,17 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
     setSaving(true);
     try {
-      const tierLabel = TIER_LABEL[selectedTier];
-      const tierAmount = TIER_PRICE[selectedTier];
       const safeUserName = toAsciiSafeId(normalizedUserName);
       const issueId = `billing-${safeUserName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const channelKey =
         payMethod === 'KAKAOPAY'
           ? PORTONE_KAKAOPAY_CHANNEL_KEY
-          : payMethod === 'TOSSPAY'
-            ? PORTONE_TOSSPAY_CHANNEL_KEY
-            : PORTONE_CARD_CHANNEL_KEY;
-
-      const billingKeyMethod = payMethod === 'CARD' ? 'CARD' : 'EASY_PAY';
+          : PORTONE_TOSSPAY_CHANNEL_KEY;
 
       const response = await window.PortOne.requestIssueBillingKey({
         storeId: PORTONE_STORE_ID,
         channelKey,
-        billingKeyMethod,
+        billingKeyMethod: 'EASY_PAY',
         issueId,
         issueName: `픽스폴리오 ${tierLabel} 정기결제`,
         displayAmount: tierAmount,

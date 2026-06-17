@@ -13,6 +13,52 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // Inline editing of the settlement amount. The influencer can adjust the
+  // figure the business proposed when the agreed payout differs.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState<string>('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const startEditAmount = (s: Settlement) => {
+    setEditingId(s.id);
+    setEditAmount(String(s.amount ?? 0));
+  };
+
+  const cancelEditAmount = () => {
+    setEditingId(null);
+    setEditAmount('');
+  };
+
+  const handleSaveAmount = async (settlementId: string) => {
+    const amount = parseInt(editAmount, 10);
+    if (isNaN(amount) || amount < 0) {
+      alert('올바른 금액을 입력해주세요.');
+      return;
+    }
+    setSavingId(settlementId);
+    try {
+      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettlements(prev => prev.map(s =>
+          s.id === settlementId
+            ? (data.settlement || { ...s, amount })
+            : s
+        ));
+        setEditingId(null);
+        setEditAmount('');
+      } else {
+        alert('정산금 수정에 실패했습니다.');
+      }
+    } catch {
+      alert('정산금 수정에 실패했습니다.');
+    }
+    setSavingId(null);
+  };
 
   // Let the influencer confirm a settlement themselves. Previously only the
   // business account could press "정산 완료"; now either side can finalize it and
@@ -155,8 +201,54 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-black text-blue-600 text-base">{formatFee(s.amount)}</p>
-                        {getDaysUntil(s.scheduled_date)}
+                        {editingId === s.id ? (
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                value={editAmount}
+                                onChange={e => setEditAmount(e.target.value)}
+                                autoFocus
+                                className="w-28 md:w-32 text-right font-black text-blue-600 text-base border-2 border-blue-200 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                              />
+                              <span className="text-xs font-bold text-slate-400">원</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleSaveAmount(s.id)}
+                                disabled={savingId === s.id}
+                                className="px-3 py-1 bg-blue-600 text-white rounded-lg font-black text-[10px] hover:bg-blue-700 transition-colors disabled:opacity-60"
+                              >
+                                {savingId === s.id ? '저장 중...' : '저장'}
+                              </button>
+                              <button
+                                onClick={cancelEditAmount}
+                                disabled={savingId === s.id}
+                                className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg font-black text-[10px] hover:bg-slate-200 transition-colors disabled:opacity-60"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <p className="font-black text-blue-600 text-base">{formatFee(s.amount)}</p>
+                              <button
+                                onClick={() => startEditAmount(s)}
+                                className="text-slate-300 hover:text-blue-500 transition-colors"
+                                title="정산금 수정"
+                                aria-label="정산금 수정"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                            </div>
+                            {getDaysUntil(s.scheduled_date)}
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between bg-slate-50 rounded-xl p-3 mt-2">

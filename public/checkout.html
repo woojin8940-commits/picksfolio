@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>결제하기 · 픽스폴리오</title>
+  <!--
+    토스페이먼츠 결제위젯 v2 (주문서형 연동하기)
+    https://docs.tosspayments.com/guides/v2/payment-widget/integration
+  -->
+  <script src="https://js.tosspayments.com/v2/standard"></script>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+        "Malgun Gothic", system-ui, sans-serif;
+      background: #f2f4f6;
+      color: #191f28;
+    }
+    .wrap { max-width: 540px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 20px; font-weight: 700; margin: 8px 4px 20px; }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+      overflow: hidden;
+    }
+    .summary {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 20px;
+      border-bottom: 1px solid #f2f4f6;
+    }
+    .summary .name { font-size: 15px; color: #4e5968; }
+    .summary .amount { font-size: 22px; font-weight: 700; }
+    #payment-method, #agreement { padding: 4px 8px; }
+    .pay-btn {
+      width: calc(100% - 32px);
+      margin: 8px 16px 16px;
+      padding: 16px;
+      border: 0;
+      border-radius: 12px;
+      background: #3182f6;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .pay-btn:disabled { background: #b0c4e8; cursor: not-allowed; }
+    .hint { margin: 14px 6px 0; font-size: 12px; color: #8b95a1; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>주문 결제</h1>
+    <div class="card">
+      <div class="summary">
+        <span class="name" id="order-name">상품 결제</span>
+        <span class="amount" id="order-amount">0원</span>
+      </div>
+      <!-- 결제 UI -->
+      <div id="payment-method"></div>
+      <!-- 이용약관 UI -->
+      <div id="agreement"></div>
+      <button class="pay-btn" id="payment-button" disabled>결제하기</button>
+    </div>
+    <p class="hint">
+      토스페이먼츠 테스트 모드로 동작합니다. 실제 카드 승인은 일어나지 않으며,
+      테스트 카드 정보로 결제 흐름을 확인할 수 있습니다.
+    </p>
+  </div>
+
+  <script>
+    // ── 결제 정보 ──────────────────────────────────────────────────────────
+    // 쿼리스트링으로 금액/상품명을 받아 어떤 상품에도 재사용할 수 있게 한다.
+    //   예) /checkout?amount=4900&orderName=스탠다드%20멤버십
+    const params = new URLSearchParams(location.search);
+    const amount = {
+      currency: "KRW",
+      value: Math.max(100, Number(params.get("amount")) || 50000),
+    };
+    const orderName = params.get("orderName") || "토스 티셔츠 외 2건";
+
+    document.getElementById("order-name").textContent = orderName;
+    document.getElementById("order-amount").textContent =
+      amount.value.toLocaleString("ko-KR") + "원";
+
+    // ── 클라이언트 키 (브라우저 공개용 — 토스 문서 테스트 위젯 키) ─────────────
+    // 운영 키로 교체해 사용하세요.
+    const clientKey = "test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm";
+
+    // 회원 결제: 고객마다 고유하고 추측 불가능한 customerKey 를 사용한다.
+    // (비회원 결제는 TossPayments.ANONYMOUS 사용)
+    let customerKey = localStorage.getItem("toss_customer_key");
+    if (!customerKey) {
+      customerKey =
+        "cust_" +
+        (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "" + Math.random().toString(36).slice(2));
+      localStorage.setItem("toss_customer_key", customerKey);
+    }
+
+    async function main() {
+      const tossPayments = TossPayments(clientKey);
+
+      // 결제위젯 초기화
+      const widgets = tossPayments.widgets({ customerKey });
+
+      // 결제 금액 설정
+      await widgets.setAmount(amount);
+
+      // 결제 UI / 이용약관 UI 렌더링
+      await Promise.all([
+        widgets.renderPaymentMethods({ selector: "#payment-method", variantKey: "DEFAULT" }),
+        widgets.renderAgreement({ selector: "#agreement", variantKey: "AGREEMENT" }),
+      ]);
+
+      const button = document.getElementById("payment-button");
+      button.disabled = false;
+
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          // 결제 요청. 성공/실패 시 아래 URL 로 리다이렉트되며,
+          // successUrl 에는 paymentKey·orderId·amount 쿼리가 자동으로 붙는다.
+          await widgets.requestPayment({
+            orderId: "order_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+            orderName,
+            successUrl: window.location.origin + "/success",
+            failUrl: window.location.origin + "/fail",
+            customerEmail: "customer@example.com",
+            customerName: "고객",
+          });
+        } catch (err) {
+          button.disabled = false;
+          alert("결제 요청 중 오류가 발생했습니다: " + (err && err.message ? err.message : err));
+        }
+      });
+    }
+
+    main().catch((err) => {
+      console.error(err);
+      alert("결제위젯을 불러오지 못했습니다. 페이지를 새로고침해 주세요.");
+    });
+  </script>
+</body>
+</html>

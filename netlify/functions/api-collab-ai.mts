@@ -241,7 +241,10 @@ async function maybeAutoRecharge(
   if (countToday >= AUTO_RECHARGE_DAILY_CAP) return { credits, recharged: false };
 
   const amount = credits.autoRechargeAmountKrw;
-  const charge = await chargeBillingKey(username, credits.billingKey, amount);
+  const charge = await chargeBillingKey(username, credits.billingKey, amount, {
+    provider: credits.billingProvider,
+    customerKey: credits.billingCustomerKey,
+  });
   if (!charge.success) {
     console.error("[collab-ai] auto-recharge failed", charge.error);
     return { credits, recharged: false };

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>결제 실패 · 픽스폴리오</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+        "Malgun Gothic", system-ui, sans-serif;
+      background: #f2f4f6; color: #191f28;
+    }
+    .card {
+      background: #fff; border-radius: 16px; padding: 36px 28px; width: 100%; max-width: 420px;
+      margin: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center;
+    }
+    .icon { font-size: 44px; }
+    h1 { font-size: 20px; margin: 16px 0 8px; }
+    p { color: #4e5968; font-size: 14px; line-height: 1.7; }
+    .code { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 8px;
+      background: #f2f4f6; color: #6b7684; font-size: 12px; }
+    .btns { margin-top: 24px; display: flex; gap: 10px; justify-content: center; }
+    a.btn { padding: 13px 20px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 15px; }
+    a.primary { background: #3182f6; color: #fff; }
+    a.ghost { background: #f2f4f6; color: #4e5968; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">❌</div>
+    <h1>결제에 실패했어요</h1>
+    <p id="message">결제가 정상적으로 처리되지 않았습니다.</p>
+    <div class="code" id="code"></div>
+    <div class="btns">
+      <a class="btn primary" href="/checkout">다시 시도</a>
+      <a class="btn ghost" href="/">홈으로</a>
+    </div>
+  </div>
+
+  <script>
+    // 토스페이먼츠가 failUrl 로 붙여준 code·message(또는 승인 단계에서 전달된 값).
+    const params = new URLSearchParams(location.search);
+    const message = params.get("message");
+    const code = params.get("code");
+    if (message) document.getElementById("message").textContent = message;
+    const codeEl = document.getElementById("code");
+    if (code) codeEl.textContent = "오류 코드: " + code; else codeEl.style.display = "none";
+  </script>
+</body>
+</html>

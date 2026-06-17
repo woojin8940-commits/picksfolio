@@ -75,6 +75,8 @@ export const isDue = (dueIso: string | null | undefined, now: Date): boolean => 
 // ── PortOne billing-key charge ───────────────────────────────────────────────
 // storeId is the public PortOne V2 identifier (same one the browser SDK uses);
 // the API secret is server-only.
+import { chargeTossBillingKey } from './toss-payments.mts'
+
 const PORTONE_API_BASE = 'https://api.portone.io'
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5'
 
@@ -125,6 +127,53 @@ export const chargeMembershipBillingKey = async (
   } catch (e: any) {
     return { success: false, amountKrw, error: e?.message || 'PortOne 정기결제 요청 실패' }
   }
+}
+
+/**
+ * Charge one month of a membership against a stored TossPayments billing key
+ * (토스페이먼츠 카드, 토스페이먼츠 직접 연동). Mirrors `chargeMembershipBillingKey`
+ * but uses the TossPayments billing API; requires the customerKey captured when the
+ * billing key was issued.
+ */
+export const chargeTossMembershipBillingKey = async (
+  username: string,
+  billingKey: string,
+  customerKey: string,
+  tier: MembershipTier,
+): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
+  const amountKrw = TIER_PRICE_KRW[tier]
+  const orderId = `membership-${asciiSafe(username)}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`
+  const charge = await chargeTossBillingKey(
+    billingKey,
+    customerKey,
+    amountKrw,
+    orderId,
+    `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
+  )
+  if (!charge.ok) return { success: false, amountKrw, error: charge.error }
+  return { success: true, paymentId: charge.paymentKey || orderId, amountKrw }
+}
+
+/**
+ * Charge one month of a membership using whichever provider issued the billing key.
+ * `provider === 'toss'` uses TossPayments (and needs `tossCustomerKey`); anything
+ * else uses PortOne. Recurring billing (the daily scheduler) calls this so it never
+ * has to know which provider a member used at subscribe time.
+ */
+export const chargeMembershipMonthly = async (
+  username: string,
+  billingKey: string,
+  tier: MembershipTier,
+  provider?: string | null,
+  tossCustomerKey?: string | null,
+): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
+  if (provider === 'toss') {
+    if (!tossCustomerKey) return { success: false, amountKrw: TIER_PRICE_KRW[tier], error: '토스페이먼츠 customerKey 누락' }
+    return chargeTossMembershipBillingKey(username, billingKey, tossCustomerKey, tier)
+  }
+  return chargeMembershipBillingKey(username, billingKey, tier)
 }
 
 // ── Subscription record shape (stored on the seller-verification blob) ────────
