@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import {
-  chargeMembershipBillingKey,
+  chargeMembershipMonthly,
   addOneMonth,
   normalizeTier,
   isDue,
@@ -66,7 +66,13 @@ export default async () => {
       }
 
       const username = blob.key.replace(/^seller_/, "");
-      const charge = await chargeMembershipBillingKey(username, record.billing_key, tier);
+      const charge = await chargeMembershipMonthly(
+        username,
+        record.billing_key,
+        tier,
+        (record.billing_provider as string | undefined) ?? "portone",
+        (record.toss_customer_key as string | undefined) ?? null,
+      );
       const at = new Date().toISOString();
       const history = Array.isArray(record.billing_history) ? record.billing_history : [];
 

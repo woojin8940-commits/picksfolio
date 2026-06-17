@@ -1,4 +1,5 @@
 import type { Config, Context } from '@netlify/functions'
+import { confirmTossPayment, issueTossBillingKey } from './_shared/toss-payments.mts'
 import {
   ACTIVATION_GRANT_CREDITS,
   ACTIVATION_PRICE_KRW,
@@ -102,13 +103,21 @@ export default async (req: Request, context: Context) => {
       const body = await req.json().catch(() => ({}))
       const kind: 'activation' | 'recharge' =
         (body as any)?.kind === 'recharge' ? 'recharge' : 'activation'
-      const paymentId = String((body as any)?.paymentId || '').trim()
       const payMethod = String((body as any)?.payMethod || '').trim()
       const billingKey = String((body as any)?.billingKey || '').trim()
       const requestedAmount = Math.floor(Number((body as any)?.amountKrw) || 0)
+      const provider = String((body as any)?.provider || '').trim().toLowerCase()
+      const isToss = provider === 'toss'
+      // PortOne identifies a one-time payment by paymentId; TossPayments by paymentKey.
+      const paymentKey = String((body as any)?.paymentKey || '').trim()
+      const orderId = String((body as any)?.orderId || '').trim()
+      const paymentId = isToss ? paymentKey : String((body as any)?.paymentId || '').trim()
 
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
+      }
+      if (isToss && !orderId) {
+        return Response.json({ error: '결제 정보(orderId)가 필요합니다.' }, { status: 400 })
       }
 
       // Activation is a fixed price; recharge must be one of the offered packs.
@@ -119,14 +128,28 @@ export default async (req: Request, context: Context) => {
 
       const credits = await readClaudeCredits(username)
 
-      // Idempotency: never credit the same PortOne payment twice.
+      // Idempotency: never credit the same payment twice.
       if (credits.grants.some((g) => g.paymentId && g.paymentId === paymentId)) {
         return respond(credits, { alreadyProcessed: true })
       }
 
-      const verified = await verifyPortOnePayment(paymentId, amountKrw)
-      if (!verified.ok) {
-        return Response.json({ error: verified.error }, { status: 400 })
+      if (isToss) {
+        // 토스페이먼츠(카드) — confirm (실제 매입) and match the amount.
+        const confirm = await confirmTossPayment(paymentKey, orderId, amountKrw)
+        if (!confirm.ok) {
+          return Response.json({ error: confirm.error || '토스페이먼츠 결제 승인에 실패했습니다.' }, { status: 400 })
+        }
+        if ((confirm.amountKrw ?? 0) !== amountKrw) {
+          return Response.json(
+            { error: `결제 금액이 일치하지 않습니다. (기대: ${amountKrw}, 실제: ${confirm.amountKrw})` },
+            { status: 400 },
+          )
+        }
+      } else {
+        const verified = await verifyPortOnePayment(paymentId, amountKrw)
+        if (!verified.ok) {
+          return Response.json({ error: verified.error }, { status: 400 })
+        }
       }
 
       // Payment verified — grant credits. Activation grants the fixed base; a
@@ -141,7 +164,12 @@ export default async (req: Request, context: Context) => {
         if (!credits.planActivatedAt) credits.planActivatedAt = new Date().toISOString()
       }
       if (billingKey) {
+        // A billing key supplied alongside a one-time payment is always a PortOne
+        // (토스페이/카카오페이) key — TossPayments card billing is registered via the
+        // PATCH/authKey path, never here.
         credits.billingKey = billingKey
+        credits.billingProvider = 'portone'
+        credits.billingCustomerKey = null
         credits.autoRecharge = true
       }
       credits.grants = [
@@ -171,8 +199,31 @@ export default async (req: Request, context: Context) => {
       if (amt && RECHARGE_PACKS_KRW.includes(amt)) {
         credits.autoRechargeAmountKrw = amt
       }
-      const billingKey = String((body as any)?.billingKey || '').trim()
-      if (billingKey) credits.billingKey = billingKey
+
+      const provider = String((body as any)?.provider || '').trim().toLowerCase()
+      if (provider === 'toss') {
+        // 토스페이먼츠(카드) 자동충전 — requestBillingAuth 후 받은 authKey·customerKey 를
+        // 서버에서 빌링키로 교환해 저장한다. (토스페이/카카오페이는 PortOne billingKey 사용.)
+        const authKey = String((body as any)?.authKey || '').trim()
+        const customerKey = String((body as any)?.customerKey || '').trim()
+        if (!authKey || !customerKey) {
+          return Response.json({ error: '결제수단 등록 정보(authKey)가 필요합니다.' }, { status: 400 })
+        }
+        const issued = await issueTossBillingKey(authKey, customerKey)
+        if (!issued.ok || !issued.billingKey) {
+          return Response.json({ error: issued.error || '토스페이먼츠 결제수단 등록에 실패했습니다.' }, { status: 400 })
+        }
+        credits.billingKey = issued.billingKey
+        credits.billingProvider = 'toss'
+        credits.billingCustomerKey = customerKey
+      } else {
+        const billingKey = String((body as any)?.billingKey || '').trim()
+        if (billingKey) {
+          credits.billingKey = billingKey
+          credits.billingProvider = 'portone'
+          credits.billingCustomerKey = null
+        }
+      }
       // Turning auto-recharge on without a billing key is meaningless — reject it
       // so the client knows it must capture a billing key first.
       if (credits.autoRecharge && !credits.billingKey) {

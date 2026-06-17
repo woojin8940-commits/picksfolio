@@ -21,6 +21,33 @@
   to = "/profile.html"
   status = 200
 
+# 토스페이먼츠 결제위젯 페이지 (정적 HTML). SPA catch-all 보다 먼저 매칭되어야 한다.
+[[redirects]]
+  from = "/checkout"
+  to = "/checkout.html"
+  status = 200
+
+[[redirects]]
+  from = "/success"
+  to = "/success.html"
+  status = 200
+
+[[redirects]]
+  from = "/fail"
+  to = "/fail.html"
+  status = 200
+
+# 토스페이먼츠 직접 연동(카드) 결제 후 돌아오는 정적 페이지. SPA catch-all 보다 먼저 매칭.
+[[redirects]]
+  from = "/toss/return"
+  to = "/toss-return.html"
+  status = 200
+
+[[redirects]]
+  from = "/toss/fail"
+  to = "/toss-fail.html"
+  status = 200
+
 [[redirects]]
   from = "/auth-callback"
   to = "/index.html"

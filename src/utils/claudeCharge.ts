@@ -1,6 +1,7 @@
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
 import { isNativeApp } from './appEnv';
+import { startTossCardPayment, startTossCardBilling } from './tossPayments';
 
 // Digital-goods purchases (membership, Claude credits) are sold on the website
 // only; the native app never triggers them. This message is a hard backstop in
@@ -55,6 +56,23 @@ export async function payClaudePlan(
   if (isNativeApp()) {
     return { success: false, error: NATIVE_BLOCK_MESSAGE };
   }
+
+  const orderName = kind === 'activation' ? '클로드 플랜 시작' : `클로드 크레딧 충전 ${amountKrw.toLocaleString()}원`;
+
+  // 토스페이먼츠(카드) — PortOne 을 거치지 않고 토스페이먼츠 결제창으로 리다이렉트한다.
+  // 돌아온 뒤 /toss/return 페이지가 크레딧 적립을 마무리한다.
+  if (payMethod === 'CARD') {
+    return startTossCardPayment({
+      type: 'claude',
+      username,
+      kind,
+      amountKrw,
+      orderName,
+      payMethod: 'CARD',
+      returnPath: window.location.pathname + window.location.search,
+    });
+  }
+
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
@@ -62,7 +80,6 @@ export async function payClaudePlan(
   const paymentId = `claude-${kind}-${toAsciiSafeId(username)}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-  const orderName = kind === 'activation' ? '클로드 플랜 시작' : `클로드 크레딧 충전 ${amountKrw.toLocaleString()}원`;
 
   try {
     const response = await window.PortOne.requestPayment({
@@ -72,8 +89,8 @@ export async function payClaudePlan(
       orderName,
       totalAmount: amountKrw,
       currency: 'KRW',
-      payMethod: payMethod === 'CARD' ? 'CARD' : 'EASY_PAY',
-      ...(payMethod !== 'CARD' && { easyPay: { easyPayProvider: payMethod } }),
+      payMethod: 'EASY_PAY',
+      easyPay: { easyPayProvider: payMethod },
       customer: { customerId: toAsciiSafeId(username) },
     });
 
@@ -115,6 +132,19 @@ export async function issueClaudeBillingKey(
   if (isNativeApp()) {
     return { success: false, error: NATIVE_BLOCK_MESSAGE };
   }
+
+  // 토스페이먼츠(카드) 자동충전 결제수단 등록 — 토스페이먼츠 빌링 인증창으로 리다이렉트한다.
+  // 돌아온 뒤 /toss/return 페이지가 빌링키 발급·자동충전 설정을 마무리한다.
+  if (payMethod === 'CARD') {
+    return startTossCardBilling({
+      type: 'claude-billing',
+      username,
+      orderName: '클로드 크레딧 자동충전 결제수단 등록',
+      payMethod: 'CARD',
+      returnPath: window.location.pathname + window.location.search,
+    });
+  }
+
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
@@ -128,11 +158,11 @@ export async function issueClaudeBillingKey(
     const response = await window.PortOne.requestIssueBillingKey({
       storeId: PORTONE_STORE_ID,
       channelKey: channelFor(payMethod),
-      billingKeyMethod: payMethod === 'CARD' ? 'CARD' : 'EASY_PAY',
+      billingKeyMethod: 'EASY_PAY',
       issueId,
       issueName: '클로드 크레딧 자동충전 결제수단 등록',
       currency: 'KRW',
-      ...(payMethod !== 'CARD' && { easyPay: { easyPayProvider: payMethod } }),
+      easyPay: { easyPayProvider: payMethod },
       customer: { customerId: safeUserName },
     });
 

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>결제 처리 중 · 픽스폴리오</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+        "Malgun Gothic", system-ui, sans-serif;
+      background: #f2f4f6; color: #191f28;
+    }
+    .card {
+      background: #fff; border-radius: 16px; padding: 36px 28px; width: 100%; max-width: 420px;
+      margin: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center;
+    }
+    .icon { font-size: 44px; line-height: 1; }
+    h1 { font-size: 20px; margin: 16px 0 8px; }
+    p { color: #4e5968; font-size: 14px; line-height: 1.7; margin: 4px 0; }
+    a.btn { display: inline-block; margin-top: 22px; padding: 13px 20px; border-radius: 12px;
+      background: #3182f6; color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+    .muted { color: #8b95a1; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon">⏳</div>
+    <h1>결제를 처리하는 중이에요</h1>
+    <p class="muted">잠시만 기다려 주세요…</p>
+  </div>
+
+  <script>
+    // 토스페이먼츠가 successUrl 로 붙여준 결과 + 결제 시작 시 저장해 둔 intent 를 합쳐
+    // 서버 처리를 마저 수행한다. (결제 승인 / 빌링키 발급은 서버에서 시크릿 키로 처리.)
+    const params = new URLSearchParams(location.search);
+    const paymentKey = params.get("paymentKey");
+    const orderId = params.get("orderId");
+    const amount = params.get("amount");
+    const authKey = params.get("authKey");
+    const customerKey = params.get("customerKey");
+
+    const card = document.getElementById("card");
+    const INTENT_KEY = "toss_pending_intent";
+
+    let intent = null;
+    try { intent = JSON.parse(sessionStorage.getItem(INTENT_KEY) || "null"); } catch (e) {}
+
+    function fail(message, code) {
+      const back = (intent && intent.returnPath) || "/";
+      card.innerHTML =
+        '<div class="icon">❌</div>' +
+        '<h1>결제에 실패했어요</h1>' +
+        '<p>' + (message || "결제가 정상적으로 처리되지 않았습니다.") + '</p>' +
+        (code ? '<p class="muted">오류 코드: ' + code + '</p>' : '') +
+        '<a class="btn" href="' + back + '">돌아가기</a>';
+    }
+
+    function done(returnPath) {
+      const back = returnPath || "/";
+      card.innerHTML =
+        '<div class="icon">✅</div>' +
+        '<h1>결제가 완료되었어요</h1>' +
+        '<p class="muted">잠시 후 자동으로 이동합니다…</p>' +
+        '<a class="btn" href="' + back + '">돌아가기</a>';
+      setTimeout(function () { location.replace(back); }, 1400);
+    }
+
+    function enc(s) { return encodeURIComponent(String(s).toLowerCase()); }
+
+    async function post(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      return { ok: res.ok, data: data };
+    }
+
+    async function patch(url, body) {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      return { ok: res.ok, data: data };
+    }
+
+    async function finalize() {
+      if (!intent || !intent.type) {
+        fail("결제 정보가 만료되었습니다. 다시 시도해 주세요.");
+        return;
+      }
+
+      // ── 빌링(자동결제) 등록 흐름 ── authKey · customerKey 로 돌아온다.
+      if (authKey && customerKey) {
+        if (intent.type === "membership") {
+          const r = await post("/api/billing-issue", {
+            username: intent.username,
+            tier: intent.tier,
+            provider: "toss",
+            authKey: authKey,
+            customerKey: customerKey,
+          });
+          if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
+          sessionStorage.removeItem(INTENT_KEY);
+          done(intent.returnPath);
+          return;
+        }
+        if (intent.type === "claude-billing") {
+          const r = await patch("/api/claude-credits/" + enc(intent.username), {
+            autoRecharge: true,
+            autoRechargeAmountKrw: intent.autoRechargeAmountKrw,
+            provider: "toss",
+            authKey: authKey,
+            customerKey: customerKey,
+          });
+          if (!r.ok || !r.data.success) { fail(r.data.error || "결제수단 등록에 실패했습니다."); return; }
+          sessionStorage.removeItem(INTENT_KEY);
+          done(intent.returnPath);
+          return;
+        }
+        fail("결제 정보가 올바르지 않습니다.");
+        return;
+      }
+
+      // ── 단건 결제 흐름 ── paymentKey · orderId · amount 로 돌아온다.
+      if (paymentKey && orderId && amount) {
+        if (intent.type === "live") {
+          const r = await post("/api/live-credits/" + enc(intent.username), {
+            hours: intent.hours,
+            payMethod: "CARD",
+            provider: "toss",
+            paymentKey: paymentKey,
+            orderId: orderId,
+            amount: Number(amount),
+          });
+          if (!r.ok || r.data.error) { fail(r.data.error || "시간 충전에 실패했습니다."); return; }
+          sessionStorage.removeItem(INTENT_KEY);
+          done(intent.returnPath);
+          return;
+        }
+        if (intent.type === "claude") {
+          const r = await post("/api/claude-credits/" + enc(intent.username), {
+            kind: intent.kind || "activation",
+            amountKrw: intent.amountKrw,
+            payMethod: "CARD",
+            provider: "toss",
+            paymentKey: paymentKey,
+            orderId: orderId,
+            amount: Number(amount),
+          });
+          if (!r.ok || r.data.error || r.data.success === false) {
+            fail(r.data.error || "크레딧 적립에 실패했습니다."); return;
+          }
+          sessionStorage.removeItem(INTENT_KEY);
+          done(intent.returnPath);
+          return;
+        }
+        fail("결제 정보가 올바르지 않습니다.");
+        return;
+      }
+
+      fail("결제 정보가 올바르지 않습니다.");
+    }
+
+    finalize().catch(function (err) {
+      fail((err && err.message) || "결제 처리 중 오류가 발생했습니다.");
+    });
+  </script>
+</body>
+</html>

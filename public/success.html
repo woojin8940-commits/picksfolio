@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>결제 처리 중 · 픽스폴리오</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard",
+        "Malgun Gothic", system-ui, sans-serif;
+      background: #f2f4f6; color: #191f28;
+    }
+    .card {
+      background: #fff; border-radius: 16px; padding: 36px 28px; width: 100%; max-width: 420px;
+      margin: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center;
+    }
+    .icon { font-size: 44px; line-height: 1; }
+    h1 { font-size: 20px; margin: 16px 0 8px; }
+    p { color: #4e5968; font-size: 14px; line-height: 1.7; margin: 4px 0; }
+    .row { display: flex; justify-content: space-between; font-size: 13px; color: #4e5968;
+      border-top: 1px solid #f2f4f6; padding: 10px 0; }
+    .row span:last-child { color: #191f28; font-weight: 600; word-break: break-all; text-align: right; }
+    .detail { margin-top: 20px; text-align: left; }
+    a.btn { display: inline-block; margin-top: 22px; padding: 13px 20px; border-radius: 12px;
+      background: #3182f6; color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+    .muted { color: #8b95a1; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="icon">⏳</div>
+    <h1>결제를 승인하는 중이에요</h1>
+    <p class="muted">잠시만 기다려 주세요…</p>
+  </div>
+
+  <script>
+    // 토스페이먼츠가 successUrl 로 붙여준 결제 정보.
+    const params = new URLSearchParams(location.search);
+    const paymentKey = params.get("paymentKey");
+    const orderId = params.get("orderId");
+    const amount = params.get("amount");
+
+    const card = document.getElementById("card");
+
+    function render(html) { card.innerHTML = html; }
+
+    async function confirm() {
+      // 서버에서 토스페이먼츠 결제 승인 API 를 호출한다(시크릿 키는 서버 전용).
+      const res = await fetch("/api/payments/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentKey, orderId, amount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const code = data.code ? " (" + data.code + ")" : "";
+        location.replace(
+          "/fail?code=" + encodeURIComponent(data.code || "CONFIRM_FAILED") +
+          "&message=" + encodeURIComponent((data.message || "결제 승인 실패") + code)
+        );
+        return;
+      }
+      render(
+        '<div class="icon">✅</div>' +
+        '<h1>결제가 완료되었어요</h1>' +
+        '<div class="detail">' +
+          '<div class="row"><span>주문명</span><span>' + (data.orderName || "-") + '</span></div>' +
+          '<div class="row"><span>결제 금액</span><span>' +
+            Number(data.totalAmount || amount).toLocaleString("ko-KR") + '원</span></div>' +
+          '<div class="row"><span>주문번호</span><span>' + (data.orderId || orderId) + '</span></div>' +
+          '<div class="row"><span>결제수단</span><span>' + (data.method || "-") + '</span></div>' +
+        '</div>' +
+        '<a class="btn" href="/">홈으로</a>'
+      );
+    }
+
+    if (!paymentKey || !orderId || !amount) {
+      location.replace("/fail?code=MISSING_PARAMS&message=" +
+        encodeURIComponent("결제 정보가 올바르지 않습니다."));
+    } else {
+      confirm().catch((err) => {
+        location.replace("/fail?code=NETWORK_ERROR&message=" +
+          encodeURIComponent(err && err.message ? err.message : "결제 승인 요청 실패"));
+      });
+    }
+  </script>
+</body>
+</html>

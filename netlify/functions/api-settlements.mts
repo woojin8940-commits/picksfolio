@@ -77,19 +77,27 @@ export default async (req: Request) => {
   }
 
   // Both the business AND the influencer can update a settlement. The business
-  // may edit any field; the influencer may only change the status (e.g. mark a
-  // settlement as completed once they've confirmed payment). Whichever side
-  // makes the change is mirrored to the counterpart's record so both dashboards
-  // stay in sync.
+  // may edit any field; the influencer may change the status (e.g. mark a
+  // settlement as completed once they've confirmed payment) and the settlement
+  // amount (so they can correct the figure proposed by the business when the
+  // agreed payout differs). Whichever side makes the change is mirrored to the
+  // counterpart's record so both dashboards stay in sync.
   if (req.method === "PATCH" && settlementId && (role === "business" || role === "influencer")) {
     const body = await req.json();
     const now = new Date().toISOString();
 
-    // Influencers are limited to status changes only — they cannot rewrite the
-    // amount, schedule, or other business-owned fields.
-    const patch: any = role === "business"
-      ? body
-      : (body.status ? { status: body.status } : {});
+    // Influencers are limited to the status and amount fields — they cannot
+    // rewrite the schedule or other business-owned fields.
+    let patch: any;
+    if (role === "business") {
+      patch = body;
+    } else {
+      patch = {};
+      if (body.status) patch.status = body.status;
+      if (body.amount !== undefined && body.amount !== null && body.amount !== "") {
+        patch.amount = parseInt(body.amount, 10) || 0;
+      }
+    }
 
     const primaryKey = role === "business" ? bizKey(username) : infKey(username);
     const primaryRecords = await getRecords(store, primaryKey);
