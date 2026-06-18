@@ -159,11 +159,13 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
 
   // 얼굴 축소 — push cheek silhouette horizontally toward the mid-line. The
   // displacement coefficient is kept very small so even at full 강도 the warp
-  // stays gentle and natural rather than visibly squeezing the face.
+  // stays gentle and natural rather than visibly squeezing the face. The radius
+  // is also kept tight around the cheek so the warp does not reach out into the
+  // background (which otherwise ripples along with the face).
   if (s.face > 0) {
     const amt = s.face / 100;
-    const r = faceH * 0.5;
-    const push = faceH * 0.015 * amt;
+    const r = faceH * 0.34;
+    const push = faceH * 0.0015 * amt;
     for (const i of [...IDX.cheekL, ...IDX.cheekR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
@@ -173,18 +175,19 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
 
   // V라인 — pull the lower jaw inward and slightly up, plus lift the chin. Like
   // 얼굴 축소 above, the coefficients are intentionally tiny so the jaw is only
-  // subtly refined instead of dramatically reshaped.
+  // subtly refined instead of dramatically reshaped, and the radius is held
+  // close to the jaw so the surrounding background is left untouched.
   if (s.jaw > 0) {
     const amt = s.jaw / 100;
-    const r = faceH * 0.42;
-    const pushX = faceH * 0.012 * amt;
-    const lift = faceH * 0.006 * amt;
+    const r = faceH * 0.3;
+    const pushX = faceH * 0.0012 * amt;
+    const lift = faceH * 0.0006 * amt;
     for (const i of [...IDX.jawL, ...IDX.jawR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
       trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: dir * pushX, ty: -lift });
     }
-    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.32) * (faceH * 0.32), tx: 0, ty: -faceH * 0.008 * amt });
+    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.24) * (faceH * 0.24), tx: 0, ty: -faceH * 0.0008 * amt });
   }
 
   // 눈 크게 — bulge (magnify) around each eye centre.
@@ -298,8 +301,11 @@ export function warpFaceShape(
   const { trans, bulges } = buildOps(landmarks, settings);
   if (trans.length === 0 && bulges.length === 0) return;
 
-  // Face bounding box from the landmarks, padded generously so every warp
-  // radius decays to zero before the grid edge (keeps the seam invisible).
+  // Face bounding box from the landmarks, padded just enough that every warp
+  // radius decays to zero before the grid edge. The padding is kept modest so
+  // the resampled grid hugs the face: everything outside it stays exactly as
+  // the originally-drawn frame, so the background no longer ripples with the
+  // warp.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of landmarks) {
     if (p.x < minX) minX = p.x;
@@ -307,8 +313,8 @@ export function warpFaceShape(
     if (p.x > maxX) maxX = p.x;
     if (p.y > maxY) maxY = p.y;
   }
-  const padX = (maxX - minX) * 0.6;
-  const padY = (maxY - minY) * 0.6;
+  const padX = (maxX - minX) * 0.35;
+  const padY = (maxY - minY) * 0.35;
   const x0 = Math.max(0, minX - padX);
   const y0 = Math.max(0, minY - padY);
   const x1 = Math.min(width, maxX + padX);
