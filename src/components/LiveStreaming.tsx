@@ -152,13 +152,17 @@ const getBroadcastStream = async (
 ): Promise<MediaStream> => {
   const ladder: MediaStreamConstraints[] = [
     {
-      // Do NOT pin a width/height (and therefore an aspect ratio). Requesting a
-      // 9:16 portrait resolution forced phone cameras to crop their sensor down
-      // to that aspect, throwing away most of the horizontal field of view so
-      // the broadcaster looked heavily zoomed in. Asking only for the camera,
-      // frame rate and audio lets the device hand back its NATIVE resolution and
-      // aspect ratio — the same default framing the stock camera app shows.
+      // Ask for a 1080p (1920×1080) capture as a soft `ideal` hint to nudge the
+      // camera toward its high-resolution mode for crisper detail. We use `ideal`
+      // (never `exact`/`min`) on purpose: a hard portrait/landscape resolution
+      // forced phone cameras to crop their sensor to that aspect, throwing away
+      // most of the horizontal field of view so the broadcaster looked heavily
+      // zoomed in. With `ideal`, the device is free to hand back its NATIVE
+      // resolution and aspect ratio when it can't match exactly — preserving the
+      // stock camera app's default framing while preferring 1080p when available.
       video: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
         frameRate: { ideal: q.frameRate, max: q.frameRate, min: 15 },
         facingMode,
       },
@@ -1347,7 +1351,18 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         __PICKSFOLIO_NATIVE_BROADCAST__?: boolean;
         PicksFolioNative?: { openBroadcast?: (opts: Record<string, unknown>) => void };
       });
+      // Diagnostic: log the native-handoff decision at the moment a broadcast
+      // actually starts. Confirms whether the __PICKSFOLIO_NATIVE_BROADCAST__
+      // branch is taken and surfaces the exact conditions that gate it.
+      console.log('[LiveStreaming] toggleLive start — native broadcast handoff check:', {
+        nativeBroadcastFlag: native.__PICKSFOLIO_NATIVE_BROADCAST__ ?? false,
+        hasOpenBroadcast: typeof native.PicksFolioNative?.openBroadcast === 'function',
+        willHandOffToNative:
+          !!native.__PICKSFOLIO_NATIVE_BROADCAST__ &&
+          typeof native.PicksFolioNative?.openBroadcast === 'function',
+      });
       if (native.__PICKSFOLIO_NATIVE_BROADCAST__ && native.PicksFolioNative?.openBroadcast) {
+        console.log('[LiveStreaming] __PICKSFOLIO_NATIVE_BROADCAST__ branch ACTIVE — handing broadcast off to native IVS screen.');
         native.PicksFolioNative.openBroadcast({
           username: normalizedUsername,
           ...(ivsConfig
