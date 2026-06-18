@@ -165,9 +165,12 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   // so the cheekbone narrows on its own: the radius is held tight around the
   // cheekbone so the warp neither reaches the mid-line (eyes / nose / mouth stay
   // put) nor drifts down into the jaw, and it never spills into the background.
+  // The radius is small enough that it does not extend inward to the eyes — the
+  // peak displacement still sits on the silhouette point, so slimming is just as
+  // strong while the eyes are left untouched.
   if (s.face > 0) {
     const amt = s.face / 100;
-    const r = faceH * 0.22;
+    const r = faceH * 0.12;
     const push = faceH * 0.006 * amt;
     for (const i of [...IDX.cheekL, ...IDX.cheekR]) {
       const p = P(i);
@@ -178,11 +181,13 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
 
   // 턱 슬림 — pull the lower jaw inward and slightly up, plus lift the chin.
   // The coefficients give a clear V-line refinement, and the radius is held
-  // close to the jawline so only the jaw moves — the mouth, nose and eyes above
-  // it stay put, and the surrounding background is left untouched.
+  // close to the jawline so only the jaw moves — the mouth (its corners sit
+  // above the jaw points), nose and eyes stay put, and the surrounding
+  // background is left untouched. The chin-lift radius is likewise tightened so
+  // it does not reach up to the mouth.
   if (s.jaw > 0) {
     const amt = s.jaw / 100;
-    const r = faceH * 0.2;
+    const r = faceH * 0.13;
     const pushX = faceH * 0.0048 * amt;
     const lift = faceH * 0.0024 * amt;
     for (const i of [...IDX.jawL, ...IDX.jawR]) {
@@ -190,24 +195,28 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
       const dir = Math.sign(cx - p.x) || 1;
       trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: dir * pushX, ty: -lift });
     }
-    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.18) * (faceH * 0.18), tx: 0, ty: -faceH * 0.0032 * amt });
+    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.12) * (faceH * 0.12), tx: 0, ty: -faceH * 0.0032 * amt });
   }
 
-  // 눈 크게 — bulge (magnify) around each eye centre.
+  // 눈 크게 — bulge (magnify) around each eye centre. The radius is kept close
+  // to the eye itself so the magnification decays to zero before it reaches the
+  // cheekbone — only the eye grows, the cheek beside it stays its real size.
   if (s.eye > 0) {
     const k = (s.eye / 100) * 0.18;
     const le = avg(IDX.eyeL);
     const re = avg(IDX.eyeR);
     const eyeW = Math.max(1, dist(P(33), P(133)));
-    const r = eyeW * 2.3;
+    const r = eyeW * 1.45;
     bulges.push({ cx: le.x, cy: le.y, r, k });
     bulges.push({ cx: re.x, cy: re.y, r, k });
   }
 
-  // 코 슬림 — push the nose sides toward the nose centre.
+  // 코 슬림 — push the nose sides toward the nose centre. The radius is held
+  // tight around the nostril wings so the warp does not reach down to the
+  // philtrum or the mouth below — only the nose narrows.
   if (s.nose > 0) {
     const amt = s.nose / 100;
-    const r = faceH * 0.18;
+    const r = faceH * 0.1;
     const push = faceH * 0.02 * amt;
     const ln = P(IDX.noseL);
     const rn = P(IDX.noseR);
