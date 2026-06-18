@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, ShoppingBag, Check, Package, Plus, Clock } from 'lucide-react';
+import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, ShoppingBag, Check, Package, Plus, Clock, Users, X } from 'lucide-react';
 import LiveStreaming from './LiveStreaming';
 import MediaAuto from './MediaAuto';
 import { SellerVerification } from '../types';
@@ -38,6 +38,11 @@ interface BroadcastProduct {
 
 const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userName, onNavigateMembership, onNavigateBroadcastSettings }) => {
   const [showLiveStream, setShowLiveStream] = useState(false);
+  // 함께 방송 incoming invites, surfaced on the live commerce page so the invitee
+  // can accept before opening the broadcast screen. Accepting moves them into
+  // 방송 설정 (the broadcast overlay), where they press 참여하기 → 라이브 시작.
+  const [coInvites, setCoInvites] = useState<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]>([]);
+  const [coInviteBusy, setCoInviteBusy] = useState(false);
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'banner' | 'product' | 'image'>('banner');
@@ -210,6 +215,40 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
     });
   }, [broadcastProducts, productsLoaded]);
 
+  // Poll for incoming 함께 방송 invites. Accepting from here moves the invitee
+  // into 방송 설정 (the broadcast overlay); they then press 참여하기 → 라이브 시작.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const invites = await apiService.getCobroadcastInvites(userName);
+        if (!cancelled) setCoInvites(invites);
+      } catch { /* non-blocking */ }
+    };
+    poll();
+    const id = setInterval(poll, 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [userName]);
+
+  const acceptCoInvite = useCallback(async (inviteId: string) => {
+    if (coInviteBusy) return;
+    setCoInviteBusy(true);
+    try {
+      const ok = await apiService.respondCobroadcast('accept', inviteId, userName);
+      if (ok) {
+        setCoInvites(prev => prev.filter(i => i.id !== inviteId));
+        setShowLiveStream(true); // 방송 설정으로 이동
+      }
+    } finally {
+      setCoInviteBusy(false);
+    }
+  }, [userName, coInviteBusy]);
+
+  const declineCoInvite = useCallback(async (inviteId: string) => {
+    await apiService.respondCobroadcast('decline', inviteId, userName);
+    setCoInvites(prev => prev.filter(i => i.id !== inviteId));
+  }, [userName]);
+
   const toggleProductSelection = useCallback((productId: string) => {
     setSelectedProductIds(prev =>
       prev.includes(productId)
@@ -357,6 +396,46 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
           방송 설정
         </button>
       </header>
+
+      {/* 함께 방송 초대 도착 — accept moves the invitee into 방송 설정 (the broadcast
+          overlay), where they press 참여하기 → 라이브 시작 to start transmitting. */}
+      {coInvites.length > 0 && (
+        <div className="mb-6 md:mb-10 space-y-2">
+          {coInvites.map((inv) => (
+            <div
+              key={inv.id}
+              className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl px-4 py-3 shadow-sm"
+            >
+              <div className="w-10 h-10 rounded-full bg-violet-100 overflow-hidden shrink-0 flex items-center justify-center">
+                {inv.host_avatar_url
+                  ? <img src={inv.host_avatar_url} alt="" className="w-full h-full object-cover" />
+                  : <Users size={18} className="text-violet-500" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-slate-900 text-sm font-black truncate">{inv.host_display_name}</p>
+                <p className="text-slate-500 text-xs font-medium">함께 방송하자고 초대했어요</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => acceptCoInvite(inv.id)}
+                disabled={coInviteBusy}
+                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-black active:scale-95 transition-all shrink-0 disabled:opacity-50"
+              >
+                수락
+              </button>
+              <button
+                type="button"
+                onClick={() => declineCoInvite(inv.id)}
+                disabled={coInviteBusy}
+                className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-400 border border-slate-200 active:scale-95 transition-all shrink-0 disabled:opacity-50"
+                title="거절"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 mb-6 md:mb-10">
         {/* Camera Preview Card - Now Static until started */}
