@@ -49,7 +49,7 @@ interface MaterialItem {
 // distorted; the geometric warp is what most easily looks unnatural ("외계인").
 // The face/jaw 강도 scale is intentionally soft — even at full 100 the warp is
 // subtle — so a mid value (~40) is the natural, comfortable default.
-const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 40, jaw: 40, eye: 8, nose: 6 };
+const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 40, jaw: 40, eye: 8, nose: 6, midface: 0 };
 
 // Broadcast quality profile for mobile live commerce.
 //
@@ -2183,127 +2183,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied
-                on-device in the canvas draw loop. No SDK/token required. */}
-            {showFilterPanel && (
-              <div className="bg-black/60 backdrop-blur-xl border border-white/10 p-4 md:p-5 rounded-2xl md:rounded-[2rem] w-full max-w-lg animate-in slide-in-from-bottom-4 duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-white font-black text-xs md:text-sm uppercase tracking-widest flex items-center gap-2">
-                        <Sparkles size={16} className="text-pink-400" /> 얼굴 보정
-                      </h4>
-                      <button
-                        onClick={() => { setFaceShape(DEFAULT_FACE_SHAPE); }}
-                        className="text-white/40 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10"
-                      >
-                        초기화
-                      </button>
-                    </div>
-
-                    {/* Master on/off — off broadcasts the untouched camera. */}
-                    <div className="mb-4 p-3 rounded-2xl bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-400/20">
-                      <div className="flex items-center justify-between">
-                        <span className="text-white text-xs md:text-sm font-bold flex items-center gap-2">
-                          <Sparkles size={15} className="text-pink-400" /> 보정 사용
-                        </span>
-                        <button
-                          onClick={() => setBeautyEnabled(v => !v)}
-                          role="switch"
-                          aria-checked={beautyEnabled}
-                          title="얼굴 보정 켜기/끄기"
-                          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 ${beautyEnabled ? 'bg-pink-500' : 'bg-white/20'}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${beautyEnabled ? 'translate-x-5' : ''}`} />
-                        </button>
-                      </div>
-                      <p className="text-white/40 text-[10px] mt-2">
-                        얼굴형(축소·턱선·눈·코)을 자연스럽게 다듬어 줍니다.
-                      </p>
-                    </div>
-
-                    {/* 얼굴형 조정 — real geometric reshaping driven by on-device
-                        face landmarks (not a color filter). */}
-                    <div className={`mb-5 transition-opacity ${beautyEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <h5 className="text-white/80 text-[11px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                          <SwitchCamera size={14} className="text-purple-400" /> 얼굴형 조정
-                        </h5>
-                        {/* Live detection status so the broadcaster knows the
-                            geometric reshaping is actually tracking a face. */}
-                        <span
-                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                            !faceModelReady
-                              ? 'bg-white/10 text-white/40'
-                              : faceDetected
-                                ? 'bg-emerald-500/15 text-emerald-300'
-                                : 'bg-amber-500/15 text-amber-300'
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            !faceModelReady ? 'bg-white/40' : faceDetected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-                          }`} />
-                          {!faceModelReady ? '모델 로딩 중' : faceDetected ? '얼굴 인식됨' : '얼굴 찾는 중'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-4">
-                        {([
-                          { key: 'face' as const, label: '광대 슬림', dot: 'bg-purple-400', accent: 'accent-purple-400' },
-                          { key: 'jaw' as const, label: '턱 슬림', dot: 'bg-fuchsia-400', accent: 'accent-fuchsia-400' },
-                          { key: 'eye' as const, label: '눈 크게', dot: 'bg-indigo-400', accent: 'accent-indigo-400' },
-                          { key: 'nose' as const, label: '코 슬림', dot: 'bg-violet-400', accent: 'accent-violet-400' },
-                        ]).map(({ key, label, dot, accent }) => (
-                          <div key={key} className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${dot}`} /> {label}
-                              </label>
-                              <span className="text-white/40 text-[10px] font-mono">{faceShape[key]}</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={faceShape[key]}
-                              onChange={(e) => setFaceShape(s => ({ ...s, [key]: Number(e.target.value) }))}
-                              className={`w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer ${accent}`}
-                            />
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* 얼굴형 presets */}
-                      <div className="flex gap-2 mt-3 flex-wrap">
-                        <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape(FACE_SHAPE_OFF); }}
-                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 text-white/60 hover:text-white transition-all"
-                        >
-                          원본
-                        </button>
-                        <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 25, jaw: 22, eye: 18, nose: 12 }); }}
-                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all"
-                        >
-                          은은하게
-                        </button>
-                        <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape(DEFAULT_FACE_SHAPE); }}
-                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-fuchsia-500/20 text-fuchsia-300 hover:bg-fuchsia-500/30 transition-all"
-                        >
-                          V라인
-                        </button>
-                        <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 60, jaw: 55, eye: 55, nose: 35 }); }}
-                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-all"
-                        >
-                          또렷하게
-                        </button>
-                      </div>
-                      <p className="text-white/40 text-[10px] mt-2">
-                        광대·턱·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
-                      </p>
-                    </div>
-              </div>
-            )}
+            {/* 얼굴 보정 Panel is rendered inside the sidebar (채팅/상품/담기현황)
+                instead of here, so the controls never cover the broadcaster's
+                face — see the showFilterPanel overlay in the sidebar below. */}
 
             {/* Material Management Panel */}
             {showMaterialPanel && (
@@ -2485,7 +2367,142 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       </div>
 
       {/* Sidebar (Chat, Products & Cart Stats) */}
-      <div className="w-full md:w-[420px] bg-slate-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col h-[35vh] md:h-auto shrink-0">
+      <div className="relative w-full md:w-[420px] bg-slate-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col h-[35vh] md:h-auto shrink-0">
+        {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
+            in the canvas draw loop (no SDK/token). Rendered as an overlay over
+            the 채팅/상품/담기현황 sidebar so the broadcaster's face on the video
+            stays fully visible while the sliders are adjusted. */}
+        {showFilterPanel && (
+          <div className="absolute inset-0 z-30 bg-slate-900 flex flex-col animate-in slide-in-from-bottom-4 duration-300">
+            <div className="flex items-center justify-between p-4 md:p-5 border-b border-white/5 shrink-0">
+              <h4 className="text-white font-black text-xs md:text-sm uppercase tracking-widest flex items-center gap-2">
+                <Sparkles size={16} className="text-pink-400" /> 얼굴 보정
+              </h4>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setFaceShape(DEFAULT_FACE_SHAPE); }}
+                  className="text-white/40 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10"
+                >
+                  초기화
+                </button>
+                <button
+                  onClick={() => setShowFilterPanel(false)}
+                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all"
+                  title="닫기"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 md:p-5 scrollbar-hide">
+                    {/* Master on/off — off broadcasts the untouched camera. */}
+                    <div className="mb-4 p-3 rounded-2xl bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-400/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white text-xs md:text-sm font-bold flex items-center gap-2">
+                          <Sparkles size={15} className="text-pink-400" /> 보정 사용
+                        </span>
+                        <button
+                          onClick={() => setBeautyEnabled(v => !v)}
+                          role="switch"
+                          aria-checked={beautyEnabled}
+                          title="얼굴 보정 켜기/끄기"
+                          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 ${beautyEnabled ? 'bg-pink-500' : 'bg-white/20'}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${beautyEnabled ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </div>
+                      <p className="text-white/40 text-[10px] mt-2">
+                        얼굴형(축소·턱선·중안부·눈·코)을 자연스럽게 다듬어 줍니다.
+                      </p>
+                    </div>
+
+                    {/* 얼굴형 조정 — real geometric reshaping driven by on-device
+                        face landmarks (not a color filter). */}
+                    <div className={`transition-opacity ${beautyEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="text-white/80 text-[11px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <SwitchCamera size={14} className="text-purple-400" /> 얼굴형 조정
+                        </h5>
+                        {/* Live detection status so the broadcaster knows the
+                            geometric reshaping is actually tracking a face. */}
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                            !faceModelReady
+                              ? 'bg-white/10 text-white/40'
+                              : faceDetected
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            !faceModelReady ? 'bg-white/40' : faceDetected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                          }`} />
+                          {!faceModelReady ? '모델 로딩 중' : faceDetected ? '얼굴 인식됨' : '얼굴 찾는 중'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-4">
+                        {([
+                          { key: 'face' as const, label: '광대 슬림', dot: 'bg-purple-400', accent: 'accent-purple-400' },
+                          { key: 'jaw' as const, label: '턱 슬림', dot: 'bg-fuchsia-400', accent: 'accent-fuchsia-400' },
+                          { key: 'midface' as const, label: '중안부 줄이기', dot: 'bg-rose-400', accent: 'accent-rose-400' },
+                          { key: 'eye' as const, label: '눈 크게', dot: 'bg-indigo-400', accent: 'accent-indigo-400' },
+                          { key: 'nose' as const, label: '코 슬림', dot: 'bg-violet-400', accent: 'accent-violet-400' },
+                        ]).map(({ key, label, dot, accent }) => (
+                          <div key={key} className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-white/60 text-xs font-bold flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full ${dot}`} /> {label}
+                              </label>
+                              <span className="text-white/40 text-[10px] font-mono">{faceShape[key]}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={faceShape[key]}
+                              onChange={(e) => setFaceShape(s => ({ ...s, [key]: Number(e.target.value) }))}
+                              className={`w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer ${accent}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 얼굴형 presets */}
+                      <div className="flex gap-2 mt-3 flex-wrap">
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape(FACE_SHAPE_OFF); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 text-white/60 hover:text-white transition-all"
+                        >
+                          원본
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 25, jaw: 22, eye: 18, nose: 12, midface: 12 }); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all"
+                        >
+                          은은하게
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape(DEFAULT_FACE_SHAPE); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-fuchsia-500/20 text-fuchsia-300 hover:bg-fuchsia-500/30 transition-all"
+                        >
+                          V라인
+                        </button>
+                        <button
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 60, jaw: 55, eye: 55, nose: 35, midface: 30 }); }}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-all"
+                        >
+                          또렷하게
+                        </button>
+                      </div>
+                      <p className="text-white/40 text-[10px] mt-2">
+                        광대·턱·중안부·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
+                      </p>
+                    </div>
+            </div>
+          </div>
+        )}
         {/* Tab navigation */}
         <div className="flex border-b border-white/5">
           <button

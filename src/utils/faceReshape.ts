@@ -15,16 +15,17 @@
 
 // Per-control 강도, 0-100. All are 0 = no geometric change.
 export interface FaceShapeSettings {
-  face: number; // 광대 슬림 — narrow the cheek/cheekbone silhouette (cheeks in)
-  jaw: number;  // 턱 슬림   — sculpt the lower jaw toward a slim V-line chin
-  eye: number;  // 눈 크게  — enlarge both eyes
-  nose: number; // 코 슬림  — slim the width of the nose
+  face: number;    // 광대 슬림    — narrow the cheek/cheekbone silhouette (cheeks in)
+  jaw: number;     // 턱 슬림      — sculpt the lower jaw toward a slim V-line chin
+  eye: number;     // 눈 크게      — enlarge both eyes
+  nose: number;    // 코 슬림      — slim the width of the nose
+  midface: number; // 중안부 줄이기 — shorten the eye→nose distance (lift the nose region up)
 }
 
-export const FACE_SHAPE_OFF: FaceShapeSettings = { face: 0, jaw: 0, eye: 0, nose: 0 };
+export const FACE_SHAPE_OFF: FaceShapeSettings = { face: 0, jaw: 0, eye: 0, nose: 0, midface: 0 };
 
 export function hasFaceShape(s: FaceShapeSettings): boolean {
-  return s.face > 0 || s.jaw > 0 || s.eye > 0 || s.nose > 0;
+  return s.face > 0 || s.jaw > 0 || s.eye > 0 || s.nose > 0 || s.midface > 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -131,6 +132,11 @@ const IDX = {
   // outer nose-side points
   noseL: 129,
   noseR: 358,
+  // 중안부 (mid-face) anchors — the nose region only (tip, alar wings, alar
+  // base). Lifting these straight up shortens the eye→nose distance. The radius
+  // stays tight enough that the eyes (well above) and the mouth (below) are left
+  // untouched — only the middle third of the face compresses.
+  midface: [1, 129, 358, 98, 327],
 };
 
 type Pt = { x: number; y: number };
@@ -222,6 +228,22 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
     const rn = P(IDX.noseR);
     trans.push({ cx: ln.x, cy: ln.y, r2: r * r, tx: (Math.sign(nose.x - ln.x) || 1) * push, ty: 0 });
     trans.push({ cx: rn.x, cy: rn.y, r2: r * r, tx: (Math.sign(nose.x - rn.x) || 1) * push, ty: 0 });
+  }
+
+  // 중안부 줄이기 — shorten the mid-face (the eye→nose third) by lifting the nose
+  // region straight up. Pulling the nose toward the eye-line compresses the band
+  // between them, so the middle of the face reads shorter. Only an upward
+  // displacement is applied (tx = 0), and the radius is held tight around the
+  // nose so it decays before it reaches the eyes above or the mouth below — the
+  // jaw, eyes, mouth and background are all left exactly where they were.
+  if (s.midface > 0) {
+    const amt = s.midface / 100;
+    const r = faceH * 0.11;
+    const lift = faceH * 0.03 * amt;
+    for (const i of IDX.midface) {
+      const p = P(i);
+      trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: 0, ty: -lift });
+    }
   }
 
   return { trans, bulges };
