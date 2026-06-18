@@ -79,13 +79,18 @@ function notifyTurnFailure(info: { failedUrls: string[]; totalTurnUrls: number }
   }
 }
 
-// Broadcaster video bitrate cap. Applied uniformly to all senders. Lifted to
-// 6 Mbps to feed the 1080p portrait broadcast profile — enough to keep product
-// labels, fabric texture and cosmetics detail crisp for live commerce while
-// staying within typical mobile uplink. When bandwidth or the device can't keep
-// up, degradationPreference scales resolution down rather than dropping frames.
-const MAX_VIDEO_BITRATE_BPS = 6_000_000;
-const MAX_VIDEO_BITRATE_KBPS = Math.round(MAX_VIDEO_BITRATE_BPS / 1000);
+// Broadcaster video bitrate cap. Branched by the broadcaster's own device:
+// desktop uplinks are wide and stable, so they get 6 Mbps to feed the 1080p
+// broadcast profile with crisp product labels, fabric texture and cosmetics
+// detail. Mobile broadcasters run over cellular/CGNAT uplinks that often can't
+// sustain 6 Mbps, so they're capped at 4.5 Mbps to avoid congestion-driven
+// stalls. When bandwidth or the device still can't keep up, degradationPreference
+// scales resolution down rather than dropping frames.
+const MAX_VIDEO_BITRATE_DESKTOP_BPS = 6_000_000;
+const MAX_VIDEO_BITRATE_MOBILE_BPS = 4_500_000;
+const maxVideoBitrateBps = (): number =>
+  isMobileSender() ? MAX_VIDEO_BITRATE_MOBILE_BPS : MAX_VIDEO_BITRATE_DESKTOP_BPS;
+const maxVideoBitrateKbps = (): number => Math.round(maxVideoBitrateBps() / 1000);
 
 /**
  * Reorder the video transceiver's codec list so H.264 comes first when available.
@@ -878,7 +883,7 @@ export class BroadcasterSignaling {
           const params = sender.getParameters();
           if (!params.encodings) params.encodings = [{}];
           params.encodings.forEach((enc) => {
-            enc.maxBitrate = MAX_VIDEO_BITRATE_BPS; // 6 Mbps cap — 1080p portrait
+            enc.maxBitrate = maxVideoBitrateBps(); // 6 Mbps desktop / 4.5 Mbps mobile
             enc.maxFramerate = 30;
             enc.scaleResolutionDownBy = 1.0;
             // When bandwidth is tight, let the encoder drop resolution before
@@ -983,7 +988,7 @@ export class BroadcasterSignaling {
     // where the decoder never produces frames (readyState stays 0) — especially
     // on mobile devices where hardware encoders may not support High profile.
     if (offer.sdp) {
-      offer.sdp = boostSdpBitrate(offer.sdp, MAX_VIDEO_BITRATE_KBPS); // Mobile: 4500 kbps; desktop: 6000 kbps
+      offer.sdp = boostSdpBitrate(offer.sdp, maxVideoBitrateKbps()); // Mobile: 4500 kbps; desktop: 6000 kbps
     }
     await pc.setLocalDescription(offer);
 
