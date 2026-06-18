@@ -2047,8 +2047,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
                       <div className="space-y-4">
                         {([
-                          { key: 'face' as const, label: '얼굴 축소', dot: 'bg-purple-400', accent: 'accent-purple-400' },
-                          { key: 'jaw' as const, label: 'V라인 턱', dot: 'bg-fuchsia-400', accent: 'accent-fuchsia-400' },
+                          { key: 'face' as const, label: '광대 슬림', dot: 'bg-purple-400', accent: 'accent-purple-400' },
+                          { key: 'jaw' as const, label: '턱 슬림', dot: 'bg-fuchsia-400', accent: 'accent-fuchsia-400' },
                           { key: 'eye' as const, label: '눈 크게', dot: 'bg-indigo-400', accent: 'accent-indigo-400' },
                           { key: 'nose' as const, label: '코 슬림', dot: 'bg-violet-400', accent: 'accent-violet-400' },
                         ]).map(({ key, label, dot, accent }) => (
@@ -2099,7 +2099,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                         </button>
                       </div>
                       <p className="text-white/40 text-[10px] mt-2">
-                        얼굴·턱선·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
+                        광대·턱·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
                       </p>
                     </div>
               </div>
