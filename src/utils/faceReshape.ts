@@ -132,12 +132,22 @@ const IDX = {
   // outer nose-side points
   noseL: 129,
   noseR: 358,
-  // 중안부 (mid-face) anchors — the nose region only (tip, alar wings, alar
-  // base). Lifting these straight up shortens the eye→nose distance. The radius
-  // stays tight enough that the eyes (well above) and the mouth (below) are left
-  // untouched — only the middle third of the face compresses.
-  midface: [1, 129, 358, 98, 327],
+  // 중안부 (mid-face) band markers. The mid-face is the third of the face
+  // between the eyes and the nose base, so the band is measured from the lower
+  // eyelids (top) down to the alar base / subnasale (bottom). Everything from
+  // the nose base down rides up as one unit, which is what shortens the
+  // eye→nose distance without detaching the nose. Cheekbone points give the
+  // band's horizontal extent.
+  eyeLow: [145, 374],
+  noseBase: [2, 98, 327],
+  cheekWidest: [234, 454],
 };
+
+// Hermite smoothstep, clamped to 0..1 — used to ramp the mid-face lift in/out.
+function smooth(t: number): number {
+  const x = t < 0 ? 0 : t > 1 ? 1 : t;
+  return x * x * (3 - 2 * x);
+}
 
 type Pt = { x: number; y: number };
 
@@ -147,10 +157,26 @@ type Pt = { x: number; y: number };
 //   bulge       — magnifies content around `c` within radius r (eyes)
 interface TransOp { cx: number; cy: number; r2: number; tx: number; ty: number }
 interface BulgeOp { cx: number; cy: number; r: number; k: number }
+// A cohesive upward shift of the whole mid-face band. Unlike a radial trans op,
+// this lifts every point below the nose by the same amount (uniform `lift`),
+// ramping in from zero at the eye line and feathering out at the face sides and
+// the chin. That moves the nose, cheeks and mouth up together — the mid-face
+// compresses as one piece instead of the nose sliding up on its own.
+interface MidfaceOp {
+  cx: number;      // face mid-line
+  hw: number;      // horizontal half-width of the full-strength band
+  hfeather: number;// horizontal distance over which it fades to zero past hw
+  yEye: number;    // top of the band — no lift at or above this line
+  yNose: number;   // lift reaches full strength here (nose base)
+  yLow: number;    // full lift held down to here (just above the chin)
+  yBottom: number; // lift eased back to zero by here (chin / neck line)
+  lift: number;    // peak upward shift, in pixels
+}
 
 function buildOps(lm: Pt[], s: FaceShapeSettings) {
   const trans: TransOp[] = [];
   const bulges: BulgeOp[] = [];
+  const midOps: MidfaceOp[] = [];
 
   const P = (i: number) => lm[i];
   const avg = (idxs: number[]): Pt => {
@@ -230,28 +256,45 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
     trans.push({ cx: rn.x, cy: rn.y, r2: r * r, tx: (Math.sign(nose.x - rn.x) || 1) * push, ty: 0 });
   }
 
-  // 중안부 줄이기 — shorten the mid-face (the eye→nose third) by lifting the nose
-  // region straight up. Pulling the nose toward the eye-line compresses the band
-  // between them, so the middle of the face reads shorter. Only an upward
-  // displacement is applied (tx = 0), and the radius is held tight around the
-  // nose so it decays before it reaches the eyes above or the mouth below — the
-  // jaw, eyes, mouth and background are all left exactly where they were.
+  // 중안부 줄이기 — shorten the mid-face (the eye→nose third) by lifting the
+  // whole lower face up toward the eye line as one piece. The lift is zero at
+  // the eyes, ramps to full strength across the nose, then stays uniform for
+  // everything below the nose base (cheeks, nose, mouth, chin) so the lower
+  // face simply rides up together — the eye→nose gap closes while the lower
+  // third keeps its own proportions. This replaces the old nose-only lift,
+  // which detached the nose and looked like only the nose was shrinking.
   if (s.midface > 0) {
     const amt = s.midface / 100;
-    const r = faceH * 0.11;
-    const lift = faceH * 0.03 * amt;
-    for (const i of IDX.midface) {
-      const p = P(i);
-      trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: 0, ty: -lift });
+    const eyeLow = avg(IDX.eyeLow);
+    const noseBase = avg(IDX.noseBase);
+    const yEye = eyeLow.y + faceH * 0.02; // a hair below the lash line — eyes stay put
+    const yNose = noseBase.y;
+    const half = Math.max(
+      Math.abs(P(IDX.cheekWidest[0]).x - cx),
+      Math.abs(P(IDX.cheekWidest[1]).x - cx),
+      faceH * 0.3,
+    );
+    const lift = Math.max(0, yNose - yEye) * 0.22 * amt;
+    if (lift > 0) {
+      midOps.push({
+        cx,
+        hw: half * 0.95,
+        hfeather: half * 0.5,
+        yEye,
+        yNose,
+        yLow: chin.y - faceH * 0.06,
+        yBottom: chin.y + faceH * 0.04,
+        lift,
+      });
     }
   }
 
-  return { trans, bulges };
+  return { trans, bulges, midOps };
 }
 
 // Inverse map: for a destination point (px,py) on the output, return the
 // source point to sample from the original frame. Displacements accumulate.
-function inverseSample(px: number, py: number, trans: TransOp[], bulges: BulgeOp[]): Pt {
+function inverseSample(px: number, py: number, trans: TransOp[], bulges: BulgeOp[], midOps: MidfaceOp[]): Pt {
   let sx = px, sy = py;
   for (const o of trans) {
     const dx = px - o.cx, dy = py - o.cy;
@@ -274,6 +317,25 @@ function inverseSample(px: number, py: number, trans: TransOp[], bulges: BulgeOp
       sx += (f - 1) * dx;
       sy += (f - 1) * dy;
     }
+  }
+  // Mid-face lift: a smooth, cohesive upward shift of the band below the eyes.
+  // Sampling from further down (sy += weight·lift) pulls lower content up into
+  // place, so the whole mid-face moves up as one rather than warping locally.
+  for (const m of midOps) {
+    const adx = Math.abs(px - m.cx);
+    let wx: number;
+    if (adx <= m.hw) wx = 1;
+    else if (adx >= m.hw + m.hfeather) wx = 0;
+    else wx = 1 - smooth((adx - m.hw) / m.hfeather);
+    if (wx <= 0) continue;
+    let wy: number;
+    if (py <= m.yEye) wy = 0;
+    else if (py < m.yNose) wy = smooth((py - m.yEye) / (m.yNose - m.yEye));
+    else if (py <= m.yLow) wy = 1;
+    else if (py < m.yBottom) wy = 1 - smooth((py - m.yLow) / (m.yBottom - m.yLow));
+    else wy = 0;
+    if (wy <= 0) continue;
+    sy += wx * wy * m.lift;
   }
   return { x: sx, y: sy };
 }
@@ -332,8 +394,8 @@ export function warpFaceShape(
   settings: FaceShapeSettings,
 ): void {
   if (!hasFaceShape(settings)) return;
-  const { trans, bulges } = buildOps(landmarks, settings);
-  if (trans.length === 0 && bulges.length === 0) return;
+  const { trans, bulges, midOps } = buildOps(landmarks, settings);
+  if (trans.length === 0 && bulges.length === 0 && midOps.length === 0) return;
 
   // Face bounding box from the landmarks, padded just enough that every warp
   // radius decays to zero before the grid edge. The padding is kept modest so
@@ -367,7 +429,7 @@ export function warpFaceShape(
       const py = y0 + (bh * r) / rows;
       const i = r * (cols + 1) + c;
       dst[i] = { x: px, y: py };
-      srcPts[i] = inverseSample(px, py, trans, bulges);
+      srcPts[i] = inverseSample(px, py, trans, bulges, midOps);
     }
   }
 
