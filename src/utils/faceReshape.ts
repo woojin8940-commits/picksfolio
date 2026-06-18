@@ -157,11 +157,13 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   const faceH = Math.max(1, dist(top, chin));
   const cx = nose.x; // vertical mid-line of the face
 
-  // 얼굴 축소 — push cheek silhouette horizontally toward the mid-line.
+  // 얼굴 축소 — push cheek silhouette horizontally toward the mid-line. The
+  // displacement coefficient is kept very small so even at full 강도 the warp
+  // stays gentle and natural rather than visibly squeezing the face.
   if (s.face > 0) {
     const amt = s.face / 100;
     const r = faceH * 0.5;
-    const push = faceH * 0.05 * amt;
+    const push = faceH * 0.015 * amt;
     for (const i of [...IDX.cheekL, ...IDX.cheekR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
@@ -169,18 +171,20 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
     }
   }
 
-  // V라인 — pull the lower jaw inward and slightly up, plus lift the chin.
+  // V라인 — pull the lower jaw inward and slightly up, plus lift the chin. Like
+  // 얼굴 축소 above, the coefficients are intentionally tiny so the jaw is only
+  // subtly refined instead of dramatically reshaped.
   if (s.jaw > 0) {
     const amt = s.jaw / 100;
     const r = faceH * 0.42;
-    const pushX = faceH * 0.04 * amt;
-    const lift = faceH * 0.02 * amt;
+    const pushX = faceH * 0.012 * amt;
+    const lift = faceH * 0.006 * amt;
     for (const i of [...IDX.jawL, ...IDX.jawR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
       trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: dir * pushX, ty: -lift });
     }
-    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.32) * (faceH * 0.32), tx: 0, ty: -faceH * 0.028 * amt });
+    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.32) * (faceH * 0.32), tx: 0, ty: -faceH * 0.008 * amt });
   }
 
   // 눈 크게 — bulge (magnify) around each eye centre.
