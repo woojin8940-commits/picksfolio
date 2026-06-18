@@ -46,9 +46,10 @@ interface MaterialItem {
 
 // 얼굴형 조정 (face-shape reshaping) — physically warps the face using detected
 // landmarks (see utils/faceReshape). Kept very gentle so the face never looks
-// distorted; the geometric warp is what most easily looks unnatural ("외계인"),
-// so the defaults are deliberately small.
-const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 6, jaw: 6, eye: 8, nose: 6 };
+// distorted; the geometric warp is what most easily looks unnatural ("외계인").
+// The face/jaw 강도 scale is intentionally soft — even at full 100 the warp is
+// subtle — so a mid value (~40) is the natural, comfortable default.
+const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 40, jaw: 40, eye: 8, nose: 6 };
 
 // Broadcast quality profile for mobile live commerce.
 //
@@ -2079,7 +2080,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           원본
                         </button>
                         <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 8, jaw: 7, eye: 18, nose: 12 }); }}
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 25, jaw: 22, eye: 18, nose: 12 }); }}
                           className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all"
                         >
                           은은하게
@@ -2091,7 +2092,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           V라인
                         </button>
                         <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 22, jaw: 20, eye: 55, nose: 35 }); }}
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 60, jaw: 55, eye: 55, nose: 35 }); }}
                           className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-all"
                         >
                           또렷하게
