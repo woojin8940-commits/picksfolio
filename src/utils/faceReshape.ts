@@ -15,8 +15,8 @@
 
 // Per-control 강도, 0-100. All are 0 = no geometric change.
 export interface FaceShapeSettings {
-  face: number; // 얼굴 축소 — narrow the overall face width (cheeks in)
-  jaw: number;  // V라인   — sculpt the lower jaw toward a slim V-line chin
+  face: number; // 광대 슬림 — narrow the cheek/cheekbone silhouette (cheeks in)
+  jaw: number;  // 턱 슬림   — sculpt the lower jaw toward a slim V-line chin
   eye: number;  // 눈 크게  — enlarge both eyes
   nose: number; // 코 슬림  — slim the width of the nose
 }
@@ -116,9 +116,12 @@ const IDX = {
   noseTip: 1,
   chin: 152,
   foreheadTop: 10,
-  // cheek (upper silhouette) — one index set per side
-  cheekL: [234, 93, 132],
-  cheekR: [454, 323, 361],
+  // cheekbone (광대) silhouette only — the widest zygomatic point (234/454)
+  // plus the contour point just above it (127/356). The lower points toward
+  // the jaw angle (132/361) are intentionally excluded so cheekbone slim
+  // moves only the cheekbone, not the jaw.
+  cheekL: [127, 234],
+  cheekR: [356, 454],
   // lower jaw silhouette toward the chin
   jawL: [58, 172, 136, 150],
   jawR: [288, 397, 365, 379],
@@ -157,15 +160,15 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
   const faceH = Math.max(1, dist(top, chin));
   const cx = nose.x; // vertical mid-line of the face
 
-  // 얼굴 축소 — push cheek silhouette horizontally toward the mid-line. The
-  // displacement coefficient is kept very small so even at full 강도 the warp
-  // stays gentle and natural rather than visibly squeezing the face. The radius
-  // is also kept tight around the cheek so the warp does not reach out into the
-  // background (which otherwise ripples along with the face).
+  // 광대 슬림 — push the cheekbone silhouette horizontally toward the mid-line.
+  // Only the cheekbone-level contour points are driven (see IDX.cheekL/cheekR),
+  // so the cheekbone narrows on its own: the radius is held tight around the
+  // cheekbone so the warp neither reaches the mid-line (eyes / nose / mouth stay
+  // put) nor drifts down into the jaw, and it never spills into the background.
   if (s.face > 0) {
     const amt = s.face / 100;
-    const r = faceH * 0.34;
-    const push = faceH * 0.0015 * amt;
+    const r = faceH * 0.22;
+    const push = faceH * 0.006 * amt;
     for (const i of [...IDX.cheekL, ...IDX.cheekR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
@@ -173,21 +176,21 @@ function buildOps(lm: Pt[], s: FaceShapeSettings) {
     }
   }
 
-  // V라인 — pull the lower jaw inward and slightly up, plus lift the chin. Like
-  // 얼굴 축소 above, the coefficients are intentionally tiny so the jaw is only
-  // subtly refined instead of dramatically reshaped, and the radius is held
-  // close to the jaw so the surrounding background is left untouched.
+  // 턱 슬림 — pull the lower jaw inward and slightly up, plus lift the chin.
+  // The coefficients give a clear V-line refinement, and the radius is held
+  // close to the jawline so only the jaw moves — the mouth, nose and eyes above
+  // it stay put, and the surrounding background is left untouched.
   if (s.jaw > 0) {
     const amt = s.jaw / 100;
-    const r = faceH * 0.3;
-    const pushX = faceH * 0.0012 * amt;
-    const lift = faceH * 0.0006 * amt;
+    const r = faceH * 0.2;
+    const pushX = faceH * 0.0048 * amt;
+    const lift = faceH * 0.0024 * amt;
     for (const i of [...IDX.jawL, ...IDX.jawR]) {
       const p = P(i);
       const dir = Math.sign(cx - p.x) || 1;
       trans.push({ cx: p.x, cy: p.y, r2: r * r, tx: dir * pushX, ty: -lift });
     }
-    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.24) * (faceH * 0.24), tx: 0, ty: -faceH * 0.0008 * amt });
+    trans.push({ cx: chin.x, cy: chin.y, r2: (faceH * 0.18) * (faceH * 0.18), tx: 0, ty: -faceH * 0.0032 * amt });
   }
 
   // 눈 크게 — bulge (magnify) around each eye centre.
