@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Sun, Droplets, Eye, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
@@ -39,31 +39,16 @@ interface MaterialItem {
   opacity: number; // 0-100
 }
 
-// 얼굴 보정 (face beauty) — modeled on beauty-cam platforms (yycam 등) instead of
-// raw photo controls. Every parameter is 0-100 "강도" and is applied on-device in
-// the canvas draw loop (drawFrame), so the effect always works with no SDK/token:
-//   smooth  피부 보정  — soft-focus skin smoothing (blurred layer blended back)
-//   whiten  미백       — brighten + gently lift/desaturate the skin
-//   rosy    혈색       — warm rosy glow tint
-//   bright  밝기       — overall exposure lift
-interface BeautySettings {
-  smooth: number;
-  whiten: number;
-  rosy: number;
-  bright: number;
-}
+// 얼굴 보정 (face beauty) — modeled on beauty-cam platforms (yycam 등). The
+// remaining feature is geometric face-shape reshaping, applied on-device in the
+// canvas draw loop (drawFrame) with no SDK/token required. (The previous skin-
+// tone color controls — 피부 보정/미백/혈색/밝기 — have been removed.)
 
-// Very subtle defaults — beauty is OFF until the user enables it, and even when
-// enabled the effect should be barely perceptible rather than dramatic.
-const DEFAULT_BEAUTY: BeautySettings = { smooth: 18, whiten: 10, rosy: 8, bright: 6 };
-const BEAUTY_OFF: BeautySettings = { smooth: 0, whiten: 0, rosy: 0, bright: 0 };
-
-// 얼굴형 조정 (face-shape reshaping) — the *geometric* half of the beauty
-// system. Unlike the color controls above, these physically warp the face
-// using detected landmarks (see utils/faceReshape). Kept very gentle so the
-// face never looks distorted; the geometric warp is what most easily looks
-// unnatural ("외계인"), so the defaults are deliberately small.
-const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 10, jaw: 10, eye: 8, nose: 6 };
+// 얼굴형 조정 (face-shape reshaping) — physically warps the face using detected
+// landmarks (see utils/faceReshape). Kept very gentle so the face never looks
+// distorted; the geometric warp is what most easily looks unnatural ("외계인"),
+// so the defaults are deliberately small.
+const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 6, jaw: 6, eye: 8, nose: 6 };
 
 // Broadcast quality profile for mobile live commerce.
 //
@@ -235,11 +220,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Which physical camera to broadcast from: 'user' = front (셀카), 'environment'
   // = rear (후면). Switching re-acquires the stream with the new facingMode.
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [beauty, setBeauty] = useState<BeautySettings>(DEFAULT_BEAUTY);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
-  // 얼굴형 조정 (geometric face reshaping) — separate from the color beauty
-  // above. faceModelReady flips true once the on-device landmark model has
-  // loaded; faceDetected reflects whether a face is currently being tracked.
+  // 얼굴형 조정 (geometric face reshaping). faceModelReady flips true once the
+  // on-device landmark model has loaded; faceDetected reflects whether a face is
+  // currently being tracked.
   const [faceShape, setFaceShape] = useState<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
   const [faceModelReady, setFaceModelReady] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
@@ -297,12 +281,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isMirroredRef = useRef(true);
-  // 얼굴 보정 live values, mirrored into refs so the canvas draw loop reads them
-  // without re-creating the loop on every slider move.
-  const beautyRef = useRef<BeautySettings>(DEFAULT_BEAUTY);
+  // 얼굴 보정 master switch, mirrored into a ref so the canvas draw loop reads it
+  // without re-creating the loop on every toggle.
   const beautyEnabledRef = useRef(false);
-  // 얼굴형 조정 live values + offscreen processing canvas. The color beauty is
-  // rendered onto procCanvas first, then warped onto the broadcast canvas.
+  // 얼굴형 조정 live values + offscreen processing canvas. The (optionally
+  // mirrored) frame is rendered onto procCanvas first, then warped onto the
+  // broadcast canvas.
   const faceShapeRef = useRef<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
   const procCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const procCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -353,17 +337,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       ctx.imageSmoothingQuality = 'high';
     }
 
-    // 얼굴 보정 — beauty processing applied off-screen, then composited (and,
-    // for 얼굴형 조정, geometrically warped) onto the broadcast canvas. When the
-    // switch is off we fall back to the untouched camera frame.
+    // 얼굴 보정 — geometric face-shape reshaping. When the switch is off we fall
+    // back to the untouched camera frame.
     const beautyOn = beautyEnabledRef.current;
-    const b = beautyOn ? beautyRef.current : BEAUTY_OFF;
     const shape = beautyOn ? faceShapeRef.current : FACE_SHAPE_OFF;
     const mirror = isMirroredRef.current;
 
-    // The color beauty is drawn onto an offscreen "processing" canvas so it can
-    // serve as the texture source for the face-shape warp. (Warping in place on
-    // the canvas you're reading from is not possible.)
+    // The (optionally mirrored) frame is drawn onto an offscreen "processing"
+    // canvas so it can serve as the texture source for the face-shape warp.
+    // (Warping in place on the canvas you're reading from is not possible.)
     let proc = procCanvasRef.current;
     if (!proc) {
       proc = document.createElement('canvas');
@@ -379,60 +361,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       pctx.imageSmoothingQuality = 'high';
     }
 
-    // Color pass: brightness lifts overall exposure (밝기) plus a touch of the
-    // 미백 lift, while 미백 also gently desaturates toward a brighter skin tone.
-    const brightness = 1 + (b.bright / 100) * 0.3 + (b.whiten / 100) * 0.12;
-    const saturation = 1 - (b.whiten / 100) * 0.15;
-    const baseFilter = `brightness(${brightness.toFixed(3)}) saturate(${saturation.toFixed(3)})`;
-
-    // Draw the source (optionally mirrored) onto the proc canvas under a given
-    // CSS filter / opacity. Mirror is baked in here so landmark detection and
-    // warping operate in the same orientation the viewer sees.
-    const paint = (filter: string, alpha: number) => {
-      pctx.save();
-      pctx.filter = filter;
-      pctx.globalAlpha = alpha;
-      if (mirror) {
-        pctx.translate(vw, 0);
-        pctx.scale(-1, 1);
-      }
-      pctx.drawImage(sourceVideo, 0, 0, vw, vh);
-      pctx.restore();
-    };
-
-    // Clear first so nothing from a previous frame bleeds through on a resize.
+    // Draw the source (optionally mirrored) onto the proc canvas. Mirror is
+    // baked in here so landmark detection and warping operate in the same
+    // orientation the viewer sees.
+    pctx.save();
     pctx.filter = 'none';
     pctx.globalAlpha = 1;
     pctx.globalCompositeOperation = 'source-over';
-    pctx.fillStyle = '#000';
-    pctx.fillRect(0, 0, vw, vh);
-
-    // 1) Base, color-corrected frame.
-    paint(baseFilter, 1);
-
-    // 2) 피부 보정 (skin smoothing): blend a blurred copy back on top. Blending a
-    //    soft-focus layer at partial opacity evens skin tone while the base layer
-    //    underneath preserves enough edge detail to avoid an obvious "smear".
-    if (b.smooth > 0) {
-      const radius = Math.max(1, Math.round((Math.min(vw, vh) / 220) * (b.smooth / 100) * 3));
-      const alpha = (b.smooth / 100) * 0.6;
-      paint(`${baseFilter} blur(${radius}px)`, alpha);
+    if (mirror) {
+      pctx.translate(vw, 0);
+      pctx.scale(-1, 1);
     }
-
-    // 3) 혈색 (rosy glow): overlay a warm rosy tint with soft-light so it reads as
-    //    healthy color rather than a flat wash.
-    if (b.rosy > 0) {
-      pctx.save();
-      pctx.filter = 'none';
-      pctx.globalCompositeOperation = 'soft-light';
-      pctx.globalAlpha = (b.rosy / 100) * 0.35;
-      pctx.fillStyle = '#ff7a93';
-      pctx.fillRect(0, 0, vw, vh);
-      pctx.restore();
-    }
-    pctx.filter = 'none';
-    pctx.globalAlpha = 1;
-    pctx.globalCompositeOperation = 'source-over';
+    pctx.drawImage(sourceVideo, 0, 0, vw, vh);
+    pctx.restore();
 
     // Composite the processed frame onto the broadcast canvas. If 얼굴형 조정 is
     // active and a face is tracked, warp the face region; otherwise copy 1:1.
@@ -779,7 +720,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   }, [isLive, liveRemainingMinutes, lowTimeWarned]);
 
   // Sync refs for use in animation loop
-  useEffect(() => { beautyRef.current = beauty; }, [beauty]);
   useEffect(() => { beautyEnabledRef.current = beautyEnabled; }, [beautyEnabled]);
   useEffect(() => { faceShapeRef.current = faceShape; }, [faceShape]);
   useEffect(() => { isMirroredRef.current = isMirrored; }, [isMirrored]);
@@ -2036,7 +1976,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                         <Sparkles size={16} className="text-pink-400" /> 얼굴 보정
                       </h4>
                       <button
-                        onClick={() => { setBeauty(DEFAULT_BEAUTY); setFaceShape(DEFAULT_FACE_SHAPE); }}
+                        onClick={() => { setFaceShape(DEFAULT_FACE_SHAPE); }}
                         className="text-white/40 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10"
                       >
                         초기화
@@ -2060,7 +2000,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                         </button>
                       </div>
                       <p className="text-white/40 text-[10px] mt-2">
-                        피부결을 매끄럽게, 톤을 화사하게 다듬어 줍니다.
+                        얼굴형(축소·턱선·눈·코)을 자연스럽게 다듬어 줍니다.
                       </p>
                     </div>
 
@@ -2124,7 +2064,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           원본
                         </button>
                         <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 20, jaw: 18, eye: 18, nose: 12 }); }}
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 8, jaw: 7, eye: 18, nose: 12 }); }}
                           className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all"
                         >
                           은은하게
@@ -2136,7 +2076,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                           V라인
                         </button>
                         <button
-                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 55, jaw: 50, eye: 55, nose: 35 }); }}
+                          onClick={() => { setBeautyEnabled(true); setFaceShape({ face: 22, jaw: 20, eye: 55, nose: 35 }); }}
                           className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-all"
                         >
                           또렷하게
@@ -2145,69 +2085,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       <p className="text-white/40 text-[10px] mt-2">
                         얼굴·턱선·눈·코를 실제로 조정합니다. 정면을 바라볼 때 가장 자연스럽습니다.
                       </p>
-                    </div>
-
-                    <h5 className="text-white/80 text-[11px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2 mb-3">
-                      <Sparkles size={14} className="text-pink-400" /> 피부 톤
-                    </h5>
-                    <div className={`space-y-4 transition-opacity ${beautyEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
-                      {([
-                        { key: 'smooth' as const, label: '피부 보정', icon: <Eye size={14} className="text-pink-400" />, accent: 'accent-pink-400' },
-                        { key: 'whiten' as const, label: '미백', icon: <Sparkles size={14} className="text-sky-300" />, accent: 'accent-sky-300' },
-                        { key: 'rosy' as const, label: '혈색', icon: <Droplets size={14} className="text-rose-400" />, accent: 'accent-rose-400' },
-                        { key: 'bright' as const, label: '밝기', icon: <Sun size={14} className="text-yellow-400" />, accent: 'accent-yellow-400' },
-                      ]).map(({ key, label, icon, accent }) => (
-                        <div key={key} className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <label className="text-white/60 text-xs font-bold flex items-center gap-2">
-                              {icon} {label}
-                            </label>
-                            <span className="text-white/40 text-[10px] font-mono">{beauty[key]}</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={beauty[key]}
-                            onChange={(e) => setBeauty(b => ({ ...b, [key]: Number(e.target.value) }))}
-                            className={`w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer ${accent}`}
-                          />
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Beauty presets */}
-                    <div className="flex gap-2 mt-4 flex-wrap">
-                      <button
-                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 20, whiten: 10, rosy: 10, bright: 5 }); }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 text-white/60 hover:text-white transition-all"
-                      >
-                        내추럴
-                      </button>
-                      <button
-                        onClick={() => { setBeautyEnabled(true); setBeauty(DEFAULT_BEAUTY); }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-pink-500/20 text-pink-400 hover:bg-pink-500/30 transition-all"
-                      >
-                        자연 보정
-                      </button>
-                      <button
-                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 70, whiten: 45, rosy: 30, bright: 25 }); }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-all"
-                      >
-                        뽀샤시
-                      </button>
-                      <button
-                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 60, whiten: 65, rosy: 15, bright: 20 }); }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 transition-all"
-                      >
-                        우유빛
-                      </button>
-                      <button
-                        onClick={() => { setBeautyEnabled(true); setBeauty({ smooth: 40, whiten: 30, rosy: 40, bright: 30 }); }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-all"
-                      >
-                        화사
-                      </button>
                     </div>
               </div>
             )}
