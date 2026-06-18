@@ -1372,4 +1372,120 @@ export const apiService = {
       return { success: false, error: '네트워크 오류' };
     }
   },
+
+  // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
+
+  // List a creator's saved co-broadcast friends.
+  async listLiveFriends(owner: string): Promise<{ username: string; display_name: string; avatar_url: string }[]> {
+    try {
+      const res = await fetch(`/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json?.friends) ? json.friends : [];
+    } catch (e) {
+      console.error('[API] Failed to list live friends:', e);
+      return [];
+    }
+  },
+
+  // Add a friend by username. Usernames are unique, so the username is the
+  // identity — the server validates the account exists before saving.
+  async addLiveFriend(owner: string, friendUsername: string): Promise<{ success: boolean; friend?: { username: string; display_name: string; avatar_url: string }; error?: string }> {
+    try {
+      const res = await fetch('/api/live/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: owner.toLowerCase(), friendUsername: friendUsername.toLowerCase() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: json?.error || '친구 추가에 실패했습니다.' };
+      return { success: true, friend: json?.friend };
+    } catch (e) {
+      console.error('[API] Failed to add live friend:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  async removeLiveFriend(owner: string, friend: string): Promise<boolean> {
+    try {
+      const res = await fetch(
+        `/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}&friend=${encodeURIComponent(friend.toLowerCase())}`,
+        { method: 'DELETE' }
+      );
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to remove live friend:', e);
+      return false;
+    }
+  },
+
+  // ─── 함께 방송하기 (co-broadcast) — sessions ───────────────────────────────
+
+  // Host invites a guest (by username) to co-broadcast. Sends an in-app +
+  // push invite; returns the created/existing session id.
+  async inviteCobroadcast(host: string, guest: string): Promise<{ success: boolean; sessionId?: string; status?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/cobroadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'invite', host: host.toLowerCase(), guest: guest.toLowerCase() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: json?.error || '초대에 실패했습니다.' };
+      return { success: true, sessionId: json?.sessionId, status: json?.status };
+    } catch (e) {
+      console.error('[API] Failed to invite cobroadcast:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // Pending invites addressed to this user (invitee polls this).
+  async getCobroadcastInvites(username: string): Promise<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]> {
+    try {
+      const res = await fetch(`/api/cobroadcast?incoming=${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json?.invites) ? json.invites : [];
+    } catch {
+      return [];
+    }
+  },
+
+  // The user's own current accepted/live session (host or guest), if any.
+  async getActiveCobroadcast(username: string): Promise<{ id: string; status: string; role: 'host' | 'guest'; partner: string; partner_display_name: string; partner_avatar_url: string } | null> {
+    try {
+      const res = await fetch(`/api/cobroadcast?active=${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json?.session || null;
+    } catch {
+      return null;
+    }
+  },
+
+  // The live partner channel for a broadcaster (viewers use this for split view).
+  async getCobroadcastPartner(channel: string): Promise<{ partner: string; partner_display_name: string; partner_avatar_url: string; sessionId: string } | null> {
+    try {
+      const res = await fetch(`/api/cobroadcast?channel=${encodeURIComponent(channel.toLowerCase())}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json?.partner ? json : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async respondCobroadcast(action: 'accept' | 'decline' | 'live' | 'end', sessionId: string, user: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/cobroadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, sessionId, user: user.toLowerCase() }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error(`[API] Failed to ${action} cobroadcast:`, e);
+      return false;
+    }
+  },
 };

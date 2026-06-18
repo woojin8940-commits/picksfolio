@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap } from 'lucide-react';
+import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap, UserPlus, UserCheck } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
@@ -9,7 +9,7 @@ import {
   type ChargePayMethod,
 } from '../utils/liveCharge';
 import { isNativeApp } from '../utils/appEnv';
-import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
+import { BroadcasterSignaling, ViewerSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
 
 import MediaAuto from './MediaAuto';
@@ -282,6 +282,39 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [liveElapsedSec, setLiveElapsedSec] = useState(0);
   const [lowTimeWarned, setLowTimeWarned] = useState(false);
   const [showLowTimeBanner, setShowLowTimeBanner] = useState(false);
+
+  // 함께 방송하기 (co-broadcast, Method A). The host invites another creator by
+  // their (unique) username — or picks a saved friend — and once accepted both
+  // keep broadcasting on their own channels while viewers see a split screen.
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [friends, setFriends] = useState<{ username: string; display_name: string; avatar_url: string }[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [inviteUsername, setInviteUsername] = useState('');
+  // When inviting by username, also save them to the friend list by default so
+  // next time they can be invited from the list without retyping the username.
+  const [saveAsFriend, setSaveAsFriend] = useState(true);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  // The user's current co-broadcast session (host or guest side), incoming
+  // invites addressed to this user, and the partner's live preview stream.
+  const [coSession, setCoSession] = useState<{ id: string; status: string; role: 'host' | 'guest'; partner: string; partner_display_name: string; partner_avatar_url: string } | null>(null);
+  const [incomingInvites, setIncomingInvites] = useState<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]>([]);
+  const [partnerStreamReady, setPartnerStreamReady] = useState(false);
+  // 함께 방송 guest gate: a creator who accepted an invite lands here in
+  // 방송 설정 mode. They must explicitly press 참여하기 before 라이브 시작 will
+  // transmit, so co-broadcasting is never started by accident. Hosts and solo
+  // broadcasters are unaffected.
+  const [coJoined, setCoJoined] = useState(false);
+  const coJoinedRef = useRef(false);
+  useEffect(() => { coJoinedRef.current = coJoined; }, [coJoined]);
+  // Clear the joined flag when there is no active session (invite ended/declined)
+  // so the next co-broadcast starts from the 참여하기 step again.
+  useEffect(() => { if (!coSession) setCoJoined(false); }, [coSession]);
+  const partnerSignalingRef = useRef<ViewerSignaling | null>(null);
+  const partnerVideoRef = useRef<HTMLVideoElement>(null);
+  const coSessionRef = useRef<typeof coSession>(null);
+  useEffect(() => { coSessionRef.current = coSession; }, [coSession]);
   const isLiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -680,6 +713,156 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       setCharging(false);
     }
   }, [userName, chargeHours, chargePayMethod, charging, refreshLiveUsage]);
+
+  // ─── 함께 방송하기 (co-broadcast) ──────────────────────────────────────────
+
+  // Load saved friends when the invite modal opens.
+  useEffect(() => {
+    if (!showInviteModal) return;
+    setFriendsLoading(true);
+    apiService.listLiveFriends(userName)
+      .then(setFriends)
+      .finally(() => setFriendsLoading(false));
+  }, [showInviteModal, userName]);
+
+  // Poll for incoming invites (this creator is the invitee) and for the user's
+  // own active session. Lightweight enough to run for the whole live screen so
+  // an invite shows up even before going live.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const [invites, active] = await Promise.all([
+          apiService.getCobroadcastInvites(userName),
+          apiService.getActiveCobroadcast(userName),
+        ]);
+        if (cancelled) return;
+        setIncomingInvites(invites);
+        setCoSession(active);
+      } catch { /* non-blocking */ }
+    };
+    poll();
+    const id = setInterval(poll, 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [userName]);
+
+  // Subscribe to the partner's channel for a small live preview (PiP) once a
+  // session is accepted/live, so each host can see the other. Reuses the same
+  // ViewerSignaling pipeline as a normal viewer — no extra media infra.
+  const partnerChannel = coSession?.partner || '';
+  useEffect(() => {
+    if (!partnerChannel) {
+      if (partnerSignalingRef.current) {
+        partnerSignalingRef.current.disconnect();
+        partnerSignalingRef.current = null;
+      }
+      setPartnerStreamReady(false);
+      return;
+    }
+    const sig = new ViewerSignaling(partnerChannel);
+    partnerSignalingRef.current = sig;
+    sig.onStream((stream) => {
+      const v = partnerVideoRef.current;
+      if (v) {
+        v.srcObject = stream;
+        v.muted = true;
+        v.play().catch(() => {});
+      }
+      setPartnerStreamReady(true);
+    });
+    sig.connect();
+    return () => {
+      sig.disconnect();
+      if (partnerSignalingRef.current === sig) partnerSignalingRef.current = null;
+      setPartnerStreamReady(false);
+    };
+  }, [partnerChannel]);
+
+  // When this host is live and has an accepted session, promote it to 'live' so
+  // the partner channel becomes discoverable to viewers (split screen turns on).
+  useEffect(() => {
+    if (!isLive || !coSession) return;
+    if (coSession.status === 'accepted') {
+      apiService.respondCobroadcast('live', coSession.id, userName).catch(() => {});
+    }
+  }, [isLive, coSession, userName]);
+
+  // Send an invite to a specific username (from the friend list or the input).
+  const sendInvite = useCallback(async (target: string, alsoSaveFriend: boolean) => {
+    const guest = target.trim().toLowerCase();
+    if (!guest || inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    setInviteNotice(null);
+    try {
+      const res = await apiService.inviteCobroadcast(userName, guest);
+      if (!res.success) {
+        setInviteError(res.error || '초대에 실패했습니다.');
+        return;
+      }
+      if (alsoSaveFriend && !friends.some(f => f.username === guest)) {
+        const add = await apiService.addLiveFriend(userName, guest);
+        if (add.success && add.friend) setFriends(prev => [add.friend!, ...prev]);
+      }
+      setInviteNotice(`@${guest}님에게 초대를 보냈어요. 상대가 수락하면 함께 방송이 시작됩니다.`);
+      setInviteUsername('');
+    } catch {
+      setInviteError('초대 중 오류가 발생했습니다.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [userName, friends, inviteBusy]);
+
+  // Add a friend by username without sending an invite.
+  const addFriend = useCallback(async (target: string) => {
+    const friend = target.trim().toLowerCase();
+    if (!friend || inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    setInviteNotice(null);
+    try {
+      const res = await apiService.addLiveFriend(userName, friend);
+      if (!res.success) {
+        setInviteError(res.error || '친구 추가에 실패했습니다.');
+        return;
+      }
+      if (res.friend && !friends.some(f => f.username === res.friend!.username)) {
+        setFriends(prev => [res.friend!, ...prev]);
+      }
+      setInviteNotice(`@${friend}님을 친구 목록에 추가했어요.`);
+      setInviteUsername('');
+    } catch {
+      setInviteError('친구 추가 중 오류가 발생했습니다.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [userName, friends, inviteBusy]);
+
+  const removeFriend = useCallback(async (friend: string) => {
+    const ok = await apiService.removeLiveFriend(userName, friend);
+    if (ok) setFriends(prev => prev.filter(f => f.username !== friend));
+  }, [userName]);
+
+  const acceptInvite = useCallback(async (inviteId: string) => {
+    const ok = await apiService.respondCobroadcast('accept', inviteId, userName);
+    if (ok) {
+      setIncomingInvites(prev => prev.filter(i => i.id !== inviteId));
+      const active = await apiService.getActiveCobroadcast(userName);
+      setCoSession(active);
+    }
+  }, [userName]);
+
+  const declineInvite = useCallback(async (inviteId: string) => {
+    await apiService.respondCobroadcast('decline', inviteId, userName);
+    setIncomingInvites(prev => prev.filter(i => i.id !== inviteId));
+  }, [userName]);
+
+  const endCobroadcast = useCallback(async () => {
+    const cs = coSessionRef.current;
+    if (!cs) return;
+    await apiService.respondCobroadcast('end', cs.id, userName);
+    setCoSession(null);
+  }, [userName]);
 
   // Tick the elapsed broadcast time while live. The server only learns the used
   // minutes when the broadcast STOPS (the record is written then), so during a
@@ -1344,6 +1527,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
+      // 함께 방송으로 초대를 수락한 게스트는 '참여하기'를 먼저 눌러야 송출이
+      // 시작됩니다. (방송 설정 → 참여하기 → 라이브 시작) 호스트/단독 방송은 해당 없음.
+      const csGate = coSessionRef.current;
+      if (csGate && csGate.role === 'guest' && csGate.status === 'accepted' && !coJoinedRef.current) {
+        return;
+      }
       // Inside the PICKS Folio native app: hand the broadcast off to the native
       // Amazon IVS broadcast screen (hardware encoder) instead of running the
       // in-WebView getUserMedia pipeline. The native shell loads the stream key
@@ -1484,6 +1673,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     } else {
       setIsLive(newState);
       isLiveRef.current = newState;
+
+      // End any co-broadcast session tied to this host when the broadcast stops.
+      endCobroadcast().catch(() => {});
 
       // Save broadcast history before cleanup
       const endTime = new Date().toISOString();
@@ -1807,6 +1999,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                       <Plus size={12} /> 시간 충전
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => { setInviteError(null); setInviteNotice(null); setShowInviteModal(true); }}
+                    className={`backdrop-blur-md px-3 py-2 rounded-2xl border text-[10px] md:text-[11px] font-black flex items-center gap-1 transition-all active:scale-95 ${coSession ? 'border-violet-400/60 bg-violet-500/30 text-white' : 'border-violet-400/40 bg-violet-500/20 hover:bg-violet-500/30 text-violet-100'}`}
+                    title="다른 크리에이터를 초대해 함께 방송하기"
+                  >
+                    <UserPlus size={12} /> {coSession ? `함께: @${coSession.partner}` : '초대하기'}
+                  </button>
                 </div>
                 );
               })()}
@@ -2272,12 +2472,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
               <button
                 onClick={toggleLive}
-                disabled={!isLive && !!capBlock && capBlock.kind !== 'exhausted'}
-                title={capBlock ? capBlock.message : undefined}
-                className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                disabled={!isLive && (((!!capBlock && capBlock.kind !== 'exhausted')) || (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined))}
+                title={capBlock ? capBlock.message : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? "먼저 '참여하기'를 눌러주세요" : undefined}
+                className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? 'bg-slate-500 text-white/80 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
-                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : '라이브 시작'}
+                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? '참여 후 시작' : '라이브 시작'}
               </button>
             </div>
           </div>
@@ -2635,6 +2835,246 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               >
                 확인
               </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 함께 방송 중 — partner live preview (PiP). Each host sees the other. */}
+      {coSession?.partner && (
+        <div className="fixed bottom-24 left-3 z-[200] w-28 md:w-36 rounded-2xl overflow-hidden border border-violet-400/50 bg-black shadow-2xl">
+          <video
+            ref={partnerVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full aspect-[3/4] object-cover bg-slate-900"
+            style={{ objectFit: 'cover' }}
+          />
+          {!partnerStreamReady && (
+            <div className="absolute inset-0 flex items-center justify-center text-white/70 text-[10px] font-bold text-center px-2">
+              @{coSession.partner}<br />연결 중…
+            </div>
+          )}
+          <div className="absolute top-1 left-1 bg-violet-600/90 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1">
+            <Users size={9} /> 함께 방송
+          </div>
+          <button
+            type="button"
+            onClick={() => endCobroadcast()}
+            className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5"
+            title="함께 방송 종료"
+          >
+            <X size={12} />
+          </button>
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
+            <p className="text-white text-[10px] font-bold truncate">{coSession.partner_display_name}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 함께 방송 초대 도착 — incoming invite banner (this user is the invitee) */}
+      {!coSession && incomingInvites.length > 0 && (
+        <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
+          {incomingInvites.map((inv) => (
+            <div
+              key={inv.id}
+              className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-violet-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2"
+            >
+              <div className="w-9 h-9 rounded-full bg-violet-500/30 overflow-hidden shrink-0 flex items-center justify-center">
+                {inv.host_avatar_url
+                  ? <img src={inv.host_avatar_url} alt="" className="w-full h-full object-cover" />
+                  : <UserPlus size={16} className="text-violet-200" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-xs font-black truncate">{inv.host_display_name}</p>
+                <p className="text-white/50 text-[11px]">함께 방송하자고 초대했어요</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => acceptInvite(inv.id)}
+                className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black active:scale-95 transition-all shrink-0"
+              >
+                수락
+              </button>
+              <button
+                type="button"
+                onClick={() => declineInvite(inv.id)}
+                className="px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 text-[11px] font-bold active:scale-95 transition-all shrink-0"
+              >
+                거절
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 함께 방송 참여하기 — guest gate. After accepting an invite the guest lands
+          in 방송 설정; they finish setup, press 참여하기 here, then 라이브 시작 to
+          actually transmit. The go-live button stays locked until 참여하기. */}
+      {coSession && coSession.role === 'guest' && coSession.status === 'accepted' && !isLive && !coJoined && (
+        <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
+          <div className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-violet-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+            <div className="w-9 h-9 rounded-full bg-violet-500/30 overflow-hidden shrink-0 flex items-center justify-center">
+              {coSession.partner_avatar_url
+                ? <img src={coSession.partner_avatar_url} alt="" className="w-full h-full object-cover" />
+                : <Users size={16} className="text-violet-200" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-xs font-black truncate">@{coSession.partner}님과 함께 방송</p>
+              <p className="text-white/50 text-[11px]">설정을 마치고 참여하기를 누르세요</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCoJoined(true)}
+              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black active:scale-95 transition-all shrink-0"
+            >
+              참여하기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 참여 완료 안내 — once joined, prompt the guest to press 라이브 시작. */}
+      {coSession && coSession.role === 'guest' && coSession.status === 'accepted' && !isLive && coJoined && (
+        <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
+          <div className="pointer-events-auto w-full max-w-md bg-emerald-900/90 backdrop-blur-md border border-emerald-400/40 rounded-2xl px-4 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+            <Users size={14} className="text-emerald-300 shrink-0" />
+            <p className="text-white text-[11px] font-bold">참여했어요! '라이브 시작'을 누르면 함께 방송이 송출됩니다.</p>
+          </div>
+        </div>
+      )}
+
+      {/* 함께 방송하기 — invite + friends modal */}
+      {showInviteModal && (
+        <div
+          className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => { if (!inviteBusy) setShowInviteModal(false); }}
+        >
+          <div
+            className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-sm p-6 shadow-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-white text-lg font-black flex items-center gap-2">
+                <Users size={18} className="text-violet-400" /> 함께 방송하기
+              </h3>
+              <button
+                onClick={() => { if (!inviteBusy) setShowInviteModal(false); }}
+                className="text-white/40 hover:text-white p-1 rounded-full"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-white/50 text-xs mb-5">
+              다른 크리에이터를 초대하면 두 방송이 함께 진행되고, 시청자는 두 화면을 동시에 볼 수 있어요.
+            </p>
+
+            {coSession ? (
+              <div className="bg-violet-500/10 border border-violet-400/30 rounded-2xl px-4 py-4 mb-4 text-center">
+                <p className="text-white text-sm font-black mb-1">
+                  @{coSession.partner}님과 {coSession.status === 'live' ? '함께 방송 중' : '함께 방송 준비 중'}
+                </p>
+                <p className="text-white/50 text-[11px] mb-3">
+                  {coSession.role === 'host' ? '내가 초대했어요' : '초대를 수락했어요'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { endCobroadcast(); }}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold active:scale-95"
+                >
+                  함께 방송 종료
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* 유저네임으로 초대 */}
+                <label className="text-white/40 text-[11px] font-bold mb-2 block">유저네임으로 초대</label>
+                <div className="flex gap-2 mb-2">
+                  <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-xl px-3">
+                    <span className="text-white/30 text-sm font-bold">@</span>
+                    <input
+                      type="text"
+                      value={inviteUsername}
+                      onChange={(e) => setInviteUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
+                      onKeyDown={(e) => { if (e.key === 'Enter') sendInvite(inviteUsername, saveAsFriend); }}
+                      placeholder="유저네임"
+                      disabled={inviteBusy}
+                      className="flex-1 bg-transparent text-white text-sm py-2.5 px-1 outline-none placeholder:text-white/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => sendInvite(inviteUsername, saveAsFriend)}
+                    disabled={inviteBusy || inviteUsername.trim().length < 3}
+                    className="px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-black active:scale-95 disabled:opacity-40"
+                  >
+                    초대
+                  </button>
+                </div>
+                <label className="flex items-center gap-2 mb-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={saveAsFriend}
+                    onChange={(e) => setSaveAsFriend(e.target.checked)}
+                    className="accent-violet-500 w-4 h-4"
+                  />
+                  <span className="text-white/60 text-[11px]">초대하면서 친구 목록에 추가</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => addFriend(inviteUsername)}
+                  disabled={inviteBusy || inviteUsername.trim().length < 3}
+                  className="text-violet-300 hover:text-violet-200 text-[11px] font-bold mb-4 inline-flex items-center gap-1 disabled:opacity-40"
+                >
+                  <UserPlus size={12} /> 초대 없이 친구로만 추가
+                </button>
+
+                {inviteError && <p className="text-red-400 text-xs font-bold mb-3">{inviteError}</p>}
+                {inviteNotice && <p className="text-emerald-300 text-xs font-bold mb-3">{inviteNotice}</p>}
+
+                {/* 친구 목록 */}
+                <div className="border-t border-white/10 pt-4">
+                  <p className="text-white/40 text-[11px] font-bold mb-3">친구 목록에서 초대</p>
+                  {friendsLoading ? (
+                    <p className="text-white/30 text-xs py-4 text-center">불러오는 중…</p>
+                  ) : friends.length === 0 ? (
+                    <p className="text-white/30 text-xs py-4 text-center">아직 추가한 친구가 없어요. 유저네임으로 초대하면 자동으로 추가됩니다.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {friends.map((f) => (
+                        <div key={f.username} className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2">
+                          <div className="w-8 h-8 rounded-full bg-violet-500/30 overflow-hidden shrink-0 flex items-center justify-center">
+                            {f.avatar_url
+                              ? <img src={f.avatar_url} alt="" className="w-full h-full object-cover" />
+                              : <UserCheck size={14} className="text-violet-200" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-xs font-bold truncate">{f.display_name}</p>
+                            <p className="text-white/40 text-[10px] truncate">@{f.username}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => sendInvite(f.username, false)}
+                            disabled={inviteBusy}
+                            className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black active:scale-95 disabled:opacity-40 shrink-0"
+                          >
+                            초대
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeFriend(f.username)}
+                            className="text-white/30 hover:text-red-400 p-1 shrink-0"
+                            title="친구 삭제"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>

@@ -590,6 +590,15 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const signalingRef = useRef<ViewerSignaling | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // 함께 방송 (co-broadcast, Method A) — if the broadcaster this viewer is
+  // watching is co-broadcasting with a partner, subscribe to the partner's
+  // channel too and show both feeds side-by-side (split screen). The partner
+  // pipeline reuses the same ViewerSignaling class as the main feed.
+  const [coPartner, setCoPartner] = useState<{ partner: string; partner_display_name: string } | null>(null);
+  const [partnerStreamConnected, setPartnerStreamConnected] = useState(false);
+  const partnerVideoRef = useRef<HTMLVideoElement>(null);
+  const partnerSignalingRef = useRef<ViewerSignaling | null>(null);
+
   // Helper: reset the video element and re-assign the stream to unstick the decoder
   const resetVideoElement = useCallback(() => {
     const vid = videoRef.current;
@@ -664,7 +673,58 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     };
   }, [username]);
 
-  // Cellular / Data Saver warning. Mobile carriers charge by the GB, and live
+  // 함께 방송 (co-broadcast): discover whether this channel is broadcasting
+  // together with a partner. Polls so the split turns on/off when the
+  // co-broadcast starts or ends mid-session.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      const result = await apiService.getCobroadcastPartner(username);
+      if (cancelled) return;
+      setCoPartner((prev) => {
+        if (result?.partner) {
+          if (prev?.partner === result.partner) return prev;
+          return { partner: result.partner, partner_display_name: result.partner_display_name };
+        }
+        return prev ? null : prev;
+      });
+    };
+    check();
+    const interval = setInterval(check, 6000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [username]);
+
+  // Subscribe to the partner channel and pipe its stream into the second video.
+  // Partner audio is muted to avoid echo / mobile autoplay blocks — the primary
+  // channel the viewer opened carries the audio.
+  useEffect(() => {
+    const partner = coPartner?.partner;
+    if (!partner) {
+      if (partnerSignalingRef.current) {
+        partnerSignalingRef.current.disconnect();
+        partnerSignalingRef.current = null;
+      }
+      setPartnerStreamConnected(false);
+      return;
+    }
+    const sig = new ViewerSignaling(partner);
+    partnerSignalingRef.current = sig;
+    sig.onStream((stream) => {
+      const v = partnerVideoRef.current;
+      if (v) {
+        v.srcObject = stream;
+        v.muted = true;
+        v.play().catch(() => {});
+      }
+      setPartnerStreamConnected(true);
+    });
+    sig.connect();
+    return () => {
+      sig.disconnect();
+      if (partnerSignalingRef.current === sig) partnerSignalingRef.current = null;
+      setPartnerStreamConnected(false);
+    };
+  }, [coPartner?.partner]);
   // video over WebRTC can burn ~500 MB/hour. Give the viewer one explicit
   // heads-up before playback, so they can close the tab if they're not on
   // Wi-Fi. Dismissal is session-local.
@@ -2770,7 +2830,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           x5-playsinline=""
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
-          className={`absolute top-0 left-0 w-full h-full ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          className={`absolute top-0 left-0 h-full ${coPartner ? 'w-1/2' : 'w-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           // objectFit: 'contain' shows the entire broadcast frame at its true
           // aspect ratio, letterboxed against the black stage, instead of
           // center-cropping it to fill. The broadcaster encodes a portrait 9:16
@@ -2782,6 +2842,42 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           // explicit on the element.)
           style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
         />
+
+        {/* 함께 방송 split — partner feed fills the right half when this channel
+            is co-broadcasting. Each host's name labels its own half. */}
+        {coPartner && (
+          <>
+            <video
+              ref={partnerVideoRef}
+              autoPlay
+              playsInline
+              muted
+              preload="auto"
+              // @ts-ignore
+              webkit-playsinline=""
+              // @ts-ignore
+              x5-playsinline=""
+              // @ts-ignore
+              x5-video-player-type="h5-page"
+              className="absolute top-0 right-0 w-1/2 h-full z-[5] bg-black"
+              style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+            />
+            {/* Divider line between the two halves */}
+            <div className="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-violet-500/60 z-[6] pointer-events-none" />
+            {/* Per-half name labels */}
+            <div className="absolute top-2 left-1/4 -translate-x-1/2 z-[7] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+              @{username}
+            </div>
+            <div className="absolute top-2 left-3/4 -translate-x-1/2 z-[7] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+              <Users size={10} className="text-violet-300" /> @{coPartner.partner}
+            </div>
+            {!partnerStreamConnected && (
+              <div className="absolute top-0 right-0 w-1/2 h-full z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+                @{coPartner.partner} 연결 중…
+              </div>
+            )}
+          </>
+        )}
         {/* HLS Video.js fallback */}
         {hlsPlaybackUrl && (
           <div className={`absolute top-0 left-0 w-full h-full ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}>
