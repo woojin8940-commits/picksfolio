@@ -53,15 +53,17 @@ interface BeautySettings {
   bright: number;
 }
 
-// A natural "켜자마자 예쁜" default, like beauty cams ship with beauty on.
-const DEFAULT_BEAUTY: BeautySettings = { smooth: 45, whiten: 25, rosy: 20, bright: 15 };
+// Very subtle defaults — beauty is OFF until the user enables it, and even when
+// enabled the effect should be barely perceptible rather than dramatic.
+const DEFAULT_BEAUTY: BeautySettings = { smooth: 18, whiten: 10, rosy: 8, bright: 6 };
 const BEAUTY_OFF: BeautySettings = { smooth: 0, whiten: 0, rosy: 0, bright: 0 };
 
 // 얼굴형 조정 (face-shape reshaping) — the *geometric* half of the beauty
 // system. Unlike the color controls above, these physically warp the face
-// using detected landmarks (see utils/faceReshape). Gentle defaults so the
-// face is subtly sculpted out of the box, the way beauty cams ship.
-const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 30, jaw: 28, eye: 25, nose: 18 };
+// using detected landmarks (see utils/faceReshape). Kept very gentle so the
+// face never looks distorted; the geometric warp is what most easily looks
+// unnatural ("외계인"), so the defaults are deliberately small.
+const DEFAULT_FACE_SHAPE: FaceShapeSettings = { face: 10, jaw: 10, eye: 8, nose: 6 };
 
 // Broadcast quality profile for mobile live commerce.
 //
@@ -241,9 +243,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [faceShape, setFaceShape] = useState<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
   const [faceModelReady, setFaceModelReady] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
-  // 얼굴 보정 master switch. On by default so it visibly does something out of the
-  // box; flipping it off broadcasts the raw camera.
-  const [beautyEnabled, setBeautyEnabled] = useState(true);
+  // 얼굴 보정 master switch. Off by default so the broadcast starts with the raw
+  // camera; the user must turn beauty on for any correction to be applied.
+  const [beautyEnabled, setBeautyEnabled] = useState(false);
   const [actualResolution, setActualResolution] = useState<string>('');
 
   // AWS IVS Stream State
@@ -298,7 +300,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // 얼굴 보정 live values, mirrored into refs so the canvas draw loop reads them
   // without re-creating the loop on every slider move.
   const beautyRef = useRef<BeautySettings>(DEFAULT_BEAUTY);
-  const beautyEnabledRef = useRef(true);
+  const beautyEnabledRef = useRef(false);
   // 얼굴형 조정 live values + offscreen processing canvas. The color beauty is
   // rendered onto procCanvas first, then warped onto the broadcast canvas.
   const faceShapeRef = useRef<FaceShapeSettings>(DEFAULT_FACE_SHAPE);
