@@ -39,10 +39,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         options: {
           redirectTo: window.location.origin + '/login',
           scopes: 'openid profile_nickname account_email phone_number name',
-          queryParams: {
-            prompt: 'login',
-            auth_type: 'reauthenticate',
-          },
+          // No prompt=login / reauthenticate here: forcing re-authentication
+          // makes Kakao show the manual ID/password form and skip the app
+          // hand-off. Letting it default surfaces the "카카오톡으로 로그인" button so
+          // users with the KakaoTalk app installed sign in with a single tap
+          // (the in-app WebView delegates the kakaotalk:// scheme to the OS).
         },
       });
       if (error) {
