@@ -15,6 +15,9 @@ import {
 import { isNativeApp } from '../utils/appEnv';
 import type { SellerVerification } from '../types';
 
+// 업로드된 사업자등록증이 PDF 인지 판별한다(이미지가 아니면 미리보기 대신 PDF 카드로 노출).
+const isPdfUrl = (url: string) => /\.pdf(\?|$)/i.test(url);
+
 interface MembershipPlanProps {
   userName: string;
 }
@@ -187,12 +190,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setBizImageError('이미지 파일만 업로드할 수 있습니다.');
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    if (!isImage && !isPdf) {
+      setBizImageError('이미지 또는 PDF 파일만 업로드할 수 있습니다.');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setBizImageError('이미지 용량은 10MB 이하여야 합니다.');
+      setBizImageError('파일 용량은 10MB 이하여야 합니다.');
       return;
     }
     setBizImageError('');
@@ -214,7 +219,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const submitBusiness = async () => {
     setError(null);
     if (!biz.registration_image_url) {
-      setError('사업자등록증 이미지를 첨부해 주세요. 관리자가 직접 확인 후 수락합니다.');
+      setError('사업자등록증(이미지 또는 PDF)을 첨부해 주세요. 관리자가 직접 확인 후 수락합니다.');
       return;
     }
     setSaving(true);
@@ -696,28 +701,35 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               )}
               {/* 사업자등록증 이미지 업로드 */}
               <div>
-                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록증 이미지 *</label>
+                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록증 (이미지 또는 PDF) *</label>
                 {biz.registration_image_url ? (
                   <div className="space-y-2">
                     <a href={biz.registration_image_url} target="_blank" rel="noreferrer" className="block">
-                      <img
-                        src={biz.registration_image_url}
-                        alt="사업자등록증"
-                        className="w-full max-h-[320px] object-contain rounded-xl border border-slate-200 bg-slate-50"
-                      />
+                      {isPdfUrl(biz.registration_image_url) ? (
+                        <div className="flex items-center gap-3 w-full px-4 py-5 rounded-xl border border-slate-200 bg-slate-50">
+                          <span className="text-2xl">📄</span>
+                          <span className="text-sm font-bold text-slate-600">사업자등록증 PDF · 새 창에서 보기</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={biz.registration_image_url}
+                          alt="사업자등록증"
+                          className="w-full max-h-[320px] object-contain rounded-xl border border-slate-200 bg-slate-50"
+                        />
+                      )}
                     </a>
                     <label className="inline-block text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer">
-                      {bizImageUploading ? '업로드 중...' : '다른 이미지로 변경'}
-                      <input type="file" accept="image/*" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
+                      {bizImageUploading ? '업로드 중...' : '다른 파일로 변경'}
+                      <input type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
                     </label>
                   </div>
                 ) : (
                   <label className="flex flex-col items-center justify-center gap-1.5 w-full py-8 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
                     <span className="text-2xl">📎</span>
                     <span className="text-xs font-bold text-slate-500">
-                      {bizImageUploading ? '업로드 중...' : '사업자등록증 이미지 첨부 (JPG·PNG, 10MB 이하)'}
+                      {bizImageUploading ? '업로드 중...' : '사업자등록증 첨부 (JPG·PNG·PDF, 10MB 이하)'}
                     </span>
-                    <input type="file" accept="image/*" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
+                    <input type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
                   </label>
                 )}
                 {bizImageError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizImageError}</p>}
@@ -737,7 +749,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   type="button"
                   onClick={submitBusiness}
                   disabled={saving || bizImageUploading || !biz.registration_image_url}
-                  title={!biz.registration_image_url ? '사업자등록증 이미지를 먼저 첨부해 주세요.' : undefined}
+                  title={!biz.registration_image_url ? '사업자등록증(이미지 또는 PDF)을 먼저 첨부해 주세요.' : undefined}
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
                 >
                   {saving ? '제출 중...' : '제출하기'}
@@ -775,11 +787,18 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               )}
               {verification.business.registration_image_url && (
                 <a href={verification.business.registration_image_url} target="_blank" rel="noreferrer" className="block">
-                  <img
-                    src={verification.business.registration_image_url}
-                    alt="사업자등록증"
-                    className="w-full max-h-[280px] object-contain rounded-xl border border-slate-200 bg-slate-50"
-                  />
+                  {isPdfUrl(verification.business.registration_image_url) ? (
+                    <div className="flex items-center gap-3 w-full px-4 py-5 rounded-xl border border-slate-200 bg-slate-50">
+                      <span className="text-2xl">📄</span>
+                      <span className="text-sm font-bold text-slate-600">사업자등록증 PDF · 새 창에서 보기</span>
+                    </div>
+                  ) : (
+                    <img
+                      src={verification.business.registration_image_url}
+                      alt="사업자등록증"
+                      className="w-full max-h-[280px] object-contain rounded-xl border border-slate-200 bg-slate-50"
+                    />
+                  )}
                 </a>
               )}
               {businessReviewStatus === 'approved' && (
@@ -788,7 +807,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             </div>
           ) : (
             <p className="text-sm text-slate-500">
-              라이브 방송 송출을 위해 사업자등록증 이미지를 제출해 주세요. 관리자 확인 후 수락되면 라이브 송출이 가능합니다.
+              라이브 방송 송출을 위해 사업자등록증(이미지 또는 PDF)을 제출해 주세요. 관리자 확인 후 수락되면 라이브 송출이 가능합니다.
               <span className="block text-[11px] text-slate-400 font-bold mt-1">※ 심사에는 보통 1~2일 정도 소요됩니다.</span>
             </p>
           )}

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 
+// 제출된 사업자등록증이 PDF 인지 판별한다(이미지가 아니면 미리보기 대신 PDF 카드로 노출).
+const isPdfUrl = (url: string) => /\.pdf(\?|$)/i.test(url);
+
 interface SellerBusiness {
   company_name?: string;
   business_number?: string;
@@ -157,16 +160,23 @@ const AdminSellerVerifications: React.FC<AdminSellerVerificationsProps> = ({ tok
                       <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-2">사업자등록증</p>
                       {b.registration_image_url ? (
                         <a href={b.registration_image_url} target="_blank" rel="noreferrer" className="block">
-                          <img
-                            src={b.registration_image_url}
-                            alt="사업자등록증"
-                            className="w-full max-h-[420px] object-contain rounded-xl border border-slate-200 bg-slate-50"
-                          />
+                          {isPdfUrl(b.registration_image_url) ? (
+                            <div className="flex items-center gap-3 w-full px-4 py-6 rounded-xl border border-slate-200 bg-slate-50">
+                              <span className="text-3xl">📄</span>
+                              <span className="text-sm font-bold text-slate-600">사업자등록증 PDF</span>
+                            </div>
+                          ) : (
+                            <img
+                              src={b.registration_image_url}
+                              alt="사업자등록증"
+                              className="w-full max-h-[420px] object-contain rounded-xl border border-slate-200 bg-slate-50"
+                            />
+                          )}
                           <span className="text-[11px] text-blue-600 font-bold mt-1.5 inline-block">새 창에서 원본 보기 →</span>
                         </a>
                       ) : (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700 font-bold">
-                          사업자등록증 이미지가 첨부되지 않았습니다.
+                          사업자등록증이 첨부되지 않았습니다.
                         </div>
                       )}
                     </div>
