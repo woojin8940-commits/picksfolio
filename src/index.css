@@ -253,6 +253,15 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateZ(0);
 }
 
+/* 함께 방송 (co-broadcast) split — each host's feed occupies one half of the
+   stage. Without this, the rule above forces every <video> to `width: 100%`,
+   which stretched both halves to full width so they overlapped and only one
+   feed was visible behind the centre divider. The explicit class is more
+   specific than `.live-stream-container video`, so the half width wins. */
+.live-stream-container video.co-split-half {
+  width: 50% !important;
+}
+
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
    gradients and box-shadows with subpixel-rounding seams. On the green
    "정산 완료 처리" settlement bar this surfaced as thin, broken white lines

@@ -2830,7 +2830,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
           x5-playsinline=""
           // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
           x5-video-player-type="h5-page"
-          className={`absolute top-0 left-0 h-full ${coPartner ? 'w-1/2' : 'w-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          className={`absolute top-0 left-0 h-full ${coPartner ? 'w-1/2 co-split-half' : 'w-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           // objectFit: 'contain' shows the entire broadcast frame at its true
           // aspect ratio, letterboxed against the black stage, instead of
           // center-cropping it to fill. The broadcaster encodes a portrait 9:16
@@ -2859,7 +2859,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
               x5-playsinline=""
               // @ts-ignore
               x5-video-player-type="h5-page"
-              className="absolute top-0 right-0 w-1/2 h-full z-[5] bg-black"
+              className="absolute top-0 right-0 w-1/2 co-split-half h-full z-[5] bg-black"
               style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
             />
             {/* Divider line between the two halves */}
