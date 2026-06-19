@@ -1758,8 +1758,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     setNewMessage('');
   };
 
+  /* Always stack the broadcast stage on top and the chat/상품/담기현황 panel
+     below it — on the web too. Previously the panel sat on the right side
+     (md:flex-row); hosts asked for it under the video instead, matching the
+     phone layout. */
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
+    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
         {/* Viewer frame: the broadcast frame (built on a canvas sized to the
@@ -1767,21 +1771,29 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             sees the full, un-cropped camera framing — the same default ratio the
             stock camera app shows — letterboxed within the stage rather than
             zoom-cropped to fill it. */}
+        {/* Lock the broadcast frame to a portrait 9:16 column — the exact shape
+            and size a viewer sees — centered in the black stage so the space on
+            either side reads as clean black side margins (instead of the camera
+            stretching edge-to-edge on the web). The canvas below is 9:16, so it
+            fills this box exactly and fully hides the raw source <video> behind
+            it — no more two-frames-overlapping look. */}
         <div
-          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute top-0 left-0 w-1/2 h-full' : 'relative w-full h-full'}`}
+          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute top-0 left-0 w-1/2 h-full' : 'relative h-full aspect-[9/16] max-w-full mx-auto'}`}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
             and playing frames that feed the canvas. On desktop the opaque canvas
             on top covers it; if the canvas pipeline ever stalls on mobile, the
             broadcaster still sees their live camera through this layer instead of
-            a black screen. */}
+            a black screen. object-cover (center-crop to the portrait box) matches
+            the canvas's 9:16 crop so this layer never peeks out as a wider
+            landscape frame behind the canvas. */}
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="block w-full h-full object-contain pointer-events-none"
+          className="block w-full h-full object-cover pointer-events-none"
         />
         {/* Canvas shows filtered/mirrored output at the camera's native aspect
             ratio, displayed with object-contain so the whole frame is visible
@@ -2388,8 +2400,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       </div>
 
-      {/* Sidebar (Chat, Products & Cart Stats) */}
-      <div className="relative w-full md:w-[420px] bg-slate-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col h-[35vh] md:h-auto shrink-0">
+      {/* Sidebar (Chat, Products & Cart Stats) — full-width and docked at the
+          bottom on every screen size (web included), beneath the broadcast
+          stage, rather than as a right-hand column. */}
+      <div className="relative w-full bg-slate-900 border-t border-white/5 flex flex-col h-[35vh] md:h-[40vh] shrink-0">
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). Rendered as an overlay over
             the 채팅/상품/담기현황 sidebar so the broadcaster's face on the video
