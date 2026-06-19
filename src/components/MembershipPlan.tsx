@@ -776,7 +776,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </label>
                 )}
                 {bizImageError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizImageError}</p>}
-                <p className="text-[10px] text-slate-400 font-bold mt-1.5">제출하신 사업자등록증은 관리자가 직접 확인 후 수락합니다. 수락되면 라이브 송출이 가능합니다.</p>
+                <p className="text-[10px] text-slate-400 font-bold mt-1.5">제출하신 사업자등록증은 관리자가 직접 확인 후 수락합니다. 수락되면 라이브 송출이 가능합니다. 심사에는 보통 1~2일 정도 소요됩니다.</p>
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -803,7 +803,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <div className="space-y-3">
               {businessReviewStatus === 'pending' && (
                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-xs font-bold text-orange-700">
-                  ⏳ 관리자 확인 대기 중입니다. 사업자등록증 검토 후 수락되면 라이브 송출이 가능합니다.
+                  ⏳ 관리자 확인 대기 중입니다. 사업자등록증 검토 후 수락되면 라이브 송출이 가능합니다. 심사에는 보통 1~2일 정도 소요됩니다.
                 </div>
               )}
               {businessReviewStatus === 'rejected' && (
@@ -836,6 +836,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           ) : (
             <p className="text-sm text-slate-500">
               라이브 방송 송출을 위해 사업자등록증 이미지를 제출해 주세요. 관리자 확인 후 수락되면 라이브 송출이 가능합니다.
+              <span className="block text-[11px] text-slate-400 font-bold mt-1">※ 심사에는 보통 1~2일 정도 소요됩니다.</span>
             </p>
           )}
         </div>
