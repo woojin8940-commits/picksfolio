@@ -1763,7 +1763,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
      (md:flex-row); hosts asked for it under the video instead, matching the
      phone layout. */
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col">
+    <>
+    {/* Desktop letterbox backdrop — fills the whole screen black so nothing
+        behind the broadcaster console peeks out beside the centered mobile-width
+        column, and so the space on either side of the portrait frame reads as
+        clean black side margins. Hidden on phones, where the console already
+        fills the screen. */}
+    <div className="hidden md:block fixed inset-0 z-[199] bg-black" />
+    {/* The whole broadcaster console (stage + chat/상품/담기현황 panel) is locked
+        to a phone-width portrait column, centered with black margins on either
+        side, so it matches exactly what a viewer sees on their phone. The stage
+        stacks on top and the chat/상품/띄우기/담기현황 panel docks at the bottom of
+        that column. On phones it stays edge-to-edge. */}
+    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:max-w-[26.5rem] md:mx-auto">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
         {/* Viewer frame: the broadcast frame (built on a canvas sized to the
@@ -3100,6 +3112,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       )}
     </div>
+    </>
   );
 };
 
