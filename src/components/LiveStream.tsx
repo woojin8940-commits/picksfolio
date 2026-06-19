@@ -2673,8 +2673,18 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   };
 
   return (
+    <>
+    {/* Desktop letterbox backdrop — fills the whole screen black so the host's
+        page never peeks behind the centered mobile-width player, and so the
+        space on either side of the portrait frame reads as clean black side
+        margins. Hidden on phones, where the player already fills the screen. */}
+    <div className="hidden md:block fixed inset-0 z-[199] bg-black" />
     <div
-      className="fixed top-0 left-0 right-0 z-[200] bg-black overflow-hidden live-stream-container"
+      // On the web the viewer is locked to a phone-width portrait column,
+      // centered with black margins on either side, so it matches exactly what
+      // a real viewer sees on their phone (and the chat / 상품 담기 현황 bar sits
+      // at the bottom of that column). On phones it stays edge-to-edge.
+      className="fixed top-0 left-0 right-0 z-[200] bg-black overflow-hidden live-stream-container md:max-w-[26.5rem] md:mx-auto"
       style={{
         // Lock the player to the full-screen height captured while the keyboard
         // was closed so it never resizes or jumps when the keyboard opens for
@@ -3886,6 +3896,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
         }
       `}</style>
     </div>
+    </>
   );
 };
 
