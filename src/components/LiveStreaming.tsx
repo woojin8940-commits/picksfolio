@@ -250,6 +250,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [activeProductId, setActiveProductId] = useState<string | null>(null);
   const [showProductPanel, setShowProductPanel] = useState(false);
   const [showCartPanel, setShowCartPanel] = useState(false);
+  const [showBannerPanel, setShowBannerPanel] = useState(false);
   const [cartStats, setCartStats] = useState<{ totalViewers: number; totalItems: number; totalRevenue: number; productCounts: { productId: string; name: string; count: number; image?: string; link: string; price?: string; optionCounts: Record<string, Record<string, number>> }[] } | null>(null);
   const [cartCarts, setCartCarts] = useState<any[]>([]);
   const [cartError, setCartError] = useState(false);
@@ -768,11 +769,27 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   // When this host is live and has an accepted session, promote it to 'live' so
   // the partner channel becomes discoverable to viewers (split screen turns on).
+  // The promotion is the single switch that turns the viewers' 2-up split on, so
+  // it must not be left to a best-effort single POST: retry a few times until the
+  // server confirms, and optimistically reflect 'live' locally so a transient
+  // network blip doesn't leave the session stuck on 'accepted' (viewers would
+  // then never see the partner half even though both hosts are broadcasting).
   useEffect(() => {
-    if (!isLive || !coSession) return;
-    if (coSession.status === 'accepted') {
-      apiService.respondCobroadcast('live', coSession.id, userName).catch(() => {});
-    }
+    if (!isLive || !coSession || coSession.status !== 'accepted') return;
+    let cancelled = false;
+    const sessionId = coSession.id;
+    (async () => {
+      for (let attempt = 0; attempt < 4 && !cancelled; attempt++) {
+        const ok = await apiService.respondCobroadcast('live', sessionId, userName).catch(() => false);
+        if (cancelled) return;
+        if (ok) {
+          setCoSession(prev => (prev && prev.id === sessionId ? { ...prev, status: 'live' } : prev));
+          return;
+        }
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, [isLive, coSession, userName]);
 
   // Send an invite to a specific username (from the friend list or the input).
@@ -1306,6 +1323,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   }, []);
 
   const activeMaterial = materials.find(m => m.id === activeMaterialId);
+  // Banner-type materials, surfaced in the 배너 tab so they can be previewed and
+  // toggled from the panel instead of only via the floating 방송 자료 overlay.
+  const bannerMaterials = materials.filter(m => m.type === 'banner');
 
   // Preload all material images once loaded so activation renders instantly
   useEffect(() => {
@@ -1789,7 +1809,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             fills this box exactly and fully hides the raw source <video> behind
             it — no more two-frames-overlapping look. */}
         <div
-          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute top-0 left-0 w-1/2 h-full' : 'relative h-full aspect-[9/16] max-w-full mx-auto'}`}
+          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full aspect-[9/16] max-w-full mx-auto'}`}
+          style={coSession?.partner ? { top: '15%', bottom: '24%' } : undefined}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
@@ -1862,9 +1883,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
 
-        {/* Material Overlays */}
+        {/* Material Overlays — a pushed banner is routed to the co-broadcast
+            bottom info band (below) during a split so it never covers a face. */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          {activeMaterial && (
+          {activeMaterial && !(coSession?.partner && activeMaterial.type === 'banner') && (
             <div
               key={activeMaterial.id}
               style={{
@@ -1954,29 +1976,33 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* End viewer frame */}
 
         {/* 함께 방송 split — the partner's live feed fills the right half so the
-            broadcaster sees the same 2-up layout viewers see (not just a small
-            PiP). The host's own feed is confined to the left half above. */}
+            broadcaster sees the same 2-up layout viewers see. Both feeds are
+            confined to a centered middle band so they no longer stretch full
+            height and overlap; the top/bottom stay as clean black margins under
+            the existing control HUD (which shows 잔여시간 and the partner name). */}
         {coSession?.partner && (
           <>
             <PartnerFeed
               channel={coSession.partner}
-              className="absolute top-0 right-0 w-1/2 h-full bg-black"
+              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] bg-black"
               onConnectedChange={setPartnerStreamReady}
             />
-            {/* Divider line between the two halves */}
-            <div className="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-violet-500/60 pointer-events-none" />
-            {/* Per-half name labels (kept below the broadcaster HUD via DOM order) */}
-            <div className="absolute top-2 left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+            {/* Divider line between the two halves (middle band only) */}
+            <div className="absolute left-1/2 -translate-x-1/2 w-[2px] bg-violet-500/60 pointer-events-none" style={{ top: '15%', bottom: '24%' }} />
+            {/* Per-half name labels, pinned to the top of the middle band. */}
+            <div className="absolute left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none" style={{ top: 'calc(15% + 8px)' }}>
               @{userName} (나)
             </div>
-            <div className="absolute top-2 left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+            <div className="absolute left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1" style={{ top: 'calc(15% + 8px)' }}>
               <Users size={10} className="text-violet-300" /> @{coSession.partner}
             </div>
             {!partnerStreamReady && (
-              <div className="absolute top-0 right-0 w-1/2 h-full flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+              <div className="absolute right-0 w-1/2 flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none" style={{ top: '15%', bottom: '24%' }}>
                 @{coSession.partner} 연결 중…
               </div>
             )}
+            {/* A pushed banner is confirmed via the 배너 tab ("노출 중") rather than
+                floating over the split, so neither face is covered. */}
           </>
         )}
 
@@ -2553,16 +2579,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* Tab navigation */}
         <div className="flex border-b border-white/5">
           <button
-            onClick={() => { setShowProductPanel(false); setShowCartPanel(false); }}
-            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
-              !showProductPanel && !showCartPanel ? 'text-blue-400 border-b-2 border-blue-500' : 'text-white/40 hover:text-white/60'
+            onClick={() => { setShowProductPanel(false); setShowCartPanel(false); setShowBannerPanel(false); }}
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-widest transition-all ${
+              !showProductPanel && !showCartPanel && !showBannerPanel ? 'text-blue-400 border-b-2 border-blue-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
             <MessageCircle size={14} /> 채팅
           </button>
           <button
-            onClick={() => { setShowProductPanel(true); setShowCartPanel(false); }}
-            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
+            onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-widest transition-all ${
               showProductPanel ? 'text-green-400 border-b-2 border-green-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
@@ -2570,18 +2596,27 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1.5 rounded-full">{liveProducts.length}</span>}
           </button>
           <button
-            onClick={() => { setShowCartPanel(true); setShowProductPanel(false); }}
-            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
+            onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-widest transition-all ${
               showCartPanel ? 'text-orange-400 border-b-2 border-orange-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
             <BarChart3 size={14} /> 담기현황
             {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1.5 rounded-full">{cartStats.totalItems}</span>}
           </button>
+          <button
+            onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-widest transition-all ${
+              showBannerPanel ? 'text-violet-400 border-b-2 border-violet-500' : 'text-white/40 hover:text-white/60'
+            }`}
+          >
+            <Layout size={14} /> 배너
+            {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1.5 rounded-full">{bannerMaterials.length}</span>}
+          </button>
         </div>
 
         {/* Chat Panel */}
-        {!showProductPanel && !showCartPanel && (
+        {!showProductPanel && !showCartPanel && !showBannerPanel && (
           <>
             <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hide overscroll-contain">
               {messages.map(msg => (
@@ -2790,9 +2825,60 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             )}
           </div>
         )}
-      </div>
 
-      {/* 시간 충전하기 — prepaid live-time top-up modal */}
+        {/* Banner Panel — preview and toggle banner materials here instead of
+            having them permanently float over the live video. Toggling a banner
+            ON pushes it to viewers (shown in the co-broadcast info band, or as a
+            standard overlay in solo broadcasts); OFF removes it from the screen. */}
+        {showBannerPanel && (
+          <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-3 scrollbar-hide">
+            <p className="text-white/40 text-xs font-medium mb-1">
+              배너를 켜면 시청자 화면에 노출됩니다. 함께 방송 중에는 영상 위가 아니라 하단 정보 영역에 표시돼 얼굴을 가리지 않습니다.
+            </p>
+            {bannerMaterials.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-3">
+                  <Layout size={26} className="text-white/20" />
+                </div>
+                <p className="text-white/40 font-bold text-sm">등록된 배너가 없습니다</p>
+                <p className="text-white/20 text-xs mt-1">상단의 '방송 자료 관리'에서 배너 이미지를 업로드하세요</p>
+              </div>
+            ) : (
+              bannerMaterials.map(item => {
+                const isOn = activeMaterialId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className={`rounded-2xl border overflow-hidden transition-all ${
+                      isOn ? 'bg-violet-600/15 border-violet-500/40' : 'bg-white/5 border-white/5'
+                    }`}
+                  >
+                    {item.url && (
+                      <div className="w-full aspect-[16/9] bg-black/40 flex items-center justify-center overflow-hidden">
+                        <img src={item.url} alt={item.name || ''} className="w-full h-full object-contain" loading="lazy" />
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-xs font-bold truncate">{item.name || '배너'}</p>
+                        <p className="text-white/30 text-[10px]">{isOn ? '시청자 화면에 노출 중' : '꺼짐'}</p>
+                      </div>
+                      <button
+                        onClick={() => setActiveMaterialId(isOn ? null : item.id)}
+                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 ${
+                          isOn ? 'bg-violet-600 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                        }`}
+                      >
+                        {isOn ? '내리기' : '띄우기'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
       {showChargeModal && (
         <div
           className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"

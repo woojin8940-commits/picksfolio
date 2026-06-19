@@ -260,6 +260,10 @@ h1, h2, h3, h4, h5, h6 {
    specific than `.live-stream-container video`, so the half width wins. */
 .live-stream-container video.co-split-half {
   width: 50% !important;
+  /* The base rule forces `height: 100%`, which would push the contain-centered
+     frame down under the bottom info band. In the split the element is anchored
+     with explicit top/bottom insets (middle band), so let those define height. */
+  height: auto !important;
 }
 
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
