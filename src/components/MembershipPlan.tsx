@@ -67,20 +67,6 @@ const BANKS = [
   '제주은행',
 ];
 
-const formatBusinessNumber = (raw: string) => {
-  const digits = raw.replace(/[^0-9]/g, '').slice(0, 10);
-  if (digits.length < 4) return digits;
-  if (digits.length < 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
-};
-
-const formatPhone = (raw: string) => {
-  const digits = raw.replace(/[^0-9]/g, '').slice(0, 11);
-  if (digits.length < 4) return digits;
-  if (digits.length < 8) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-};
-
 const maskAccountNumber = (n: string) => {
   if (!n) return '';
   if (n.length <= 4) return n;
@@ -115,13 +101,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [bizImageError, setBizImageError] = useState('');
 
   const [biz, setBiz] = useState({
-    company_name: '',
-    business_number: '',
-    representative_name: '',
-    contact_phone: '',
-    business_type: '',
-    business_item: '',
-    business_address: '',
     registration_image_url: '',
   });
 
@@ -137,13 +116,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setVerification(data);
     if (data?.business) {
       setBiz({
-        company_name: data.business.company_name || '',
-        business_number: data.business.business_number || '',
-        representative_name: data.business.representative_name || '',
-        contact_phone: data.business.contact_phone || '',
-        business_type: data.business.business_type || '',
-        business_item: data.business.business_item || '',
-        business_address: data.business.business_address || '',
         registration_image_url: data.business.registration_image_url || '',
       });
     }
@@ -241,22 +213,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
   const submitBusiness = async () => {
     setError(null);
-    if (!biz.company_name.trim() || !biz.business_number.trim() || !biz.representative_name.trim() || !biz.contact_phone.trim()) {
-      setError('상호/사업자등록번호/대표자명/연락처는 필수입니다.');
-      return;
-    }
-    const digits = biz.business_number.replace(/[^0-9]/g, '');
-    if (digits.length !== 10) {
-      setError('사업자등록번호는 10자리 숫자여야 합니다.');
-      return;
-    }
     if (!biz.registration_image_url) {
       setError('사업자등록증 이미지를 첨부해 주세요. 관리자가 직접 확인 후 수락합니다.');
       return;
     }
     setSaving(true);
     const res = await apiService.saveSellerVerification(normalizedUserName, {
-      business: { ...biz },
+      business: { registration_image_url: biz.registration_image_url },
     });
     setSaving(false);
     if (!res.success) {
@@ -731,24 +694,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   {error}
                 </div>
               )}
-              <Field label="상호(사업자명) *" value={biz.company_name} onChange={(v) => setBiz({ ...biz, company_name: v })} placeholder="픽스폴리오" />
-              <div>
-                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록번호 *</label>
-                <input
-                  type="text"
-                  value={biz.business_number}
-                  onChange={(e) => setBiz({ ...biz, business_number: formatBusinessNumber(e.target.value) })}
-                  placeholder="000-00-00000"
-                  inputMode="numeric"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
-                />
-              </div>
-              <Field label="대표자명 *" value={biz.representative_name} onChange={(v) => setBiz({ ...biz, representative_name: v })} placeholder="홍길동" />
-              <Field label="연락처 *" value={biz.contact_phone} onChange={(v) => setBiz({ ...biz, contact_phone: formatPhone(v) })} placeholder="010-0000-0000" inputMode="tel" />
-              <Field label="업태" value={biz.business_type} onChange={(v) => setBiz({ ...biz, business_type: v })} placeholder="소매업" />
-              <Field label="종목" value={biz.business_item} onChange={(v) => setBiz({ ...biz, business_item: v })} placeholder="전자상거래" />
-              <Field label="사업장 주소" value={biz.business_address} onChange={(v) => setBiz({ ...biz, business_address: v })} placeholder="서울특별시 ..." />
-
               {/* 사업자등록증 이미지 업로드 */}
               <div>
                 <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록증 이미지 *</label>
@@ -811,15 +756,23 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   사업자 인증이 거절되었습니다{businessRejectReason ? ` · ${businessRejectReason}` : ''}. 정보를 수정해 다시 제출해 주세요.
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-                <div><span className="text-slate-400">상호</span> · {verification.business.company_name}</div>
-                <div><span className="text-slate-400">대표자</span> · {verification.business.representative_name}</div>
-                <div><span className="text-slate-400">등록번호</span> · {verification.business.business_number}</div>
-                <div><span className="text-slate-400">연락처</span> · {verification.business.contact_phone}</div>
-                {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
-                {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
-                {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
-              </div>
+              {(verification.business.company_name
+                || verification.business.representative_name
+                || verification.business.business_number
+                || verification.business.contact_phone
+                || verification.business.business_type
+                || verification.business.business_item
+                || verification.business.business_address) && (
+                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                  {verification.business.company_name && <div><span className="text-slate-400">상호</span> · {verification.business.company_name}</div>}
+                  {verification.business.representative_name && <div><span className="text-slate-400">대표자</span> · {verification.business.representative_name}</div>}
+                  {verification.business.business_number && <div><span className="text-slate-400">등록번호</span> · {verification.business.business_number}</div>}
+                  {verification.business.contact_phone && <div><span className="text-slate-400">연락처</span> · {verification.business.contact_phone}</div>}
+                  {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
+                  {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
+                  {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
+                </div>
+              )}
               {verification.business.registration_image_url && (
                 <a href={verification.business.registration_image_url} target="_blank" rel="noreferrer" className="block">
                   <img

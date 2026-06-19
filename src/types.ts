@@ -154,15 +154,16 @@ export interface BusinessAccount {
 }
 
 export interface SellerBusinessVerification {
-  company_name: string;
-  business_number: string;
-  representative_name: string;
-  contact_phone: string;
+  // 사업자등록증 이미지 (관리자 수동 심사용) — 제출 시 받는 핵심 항목
+  registration_image_url?: string;
+  // 아래 텍스트 항목은 더 이상 셀러가 직접 입력하지 않는다(관리자가 이미지로 확인). 과거 제출 기록 호환용.
+  company_name?: string;
+  business_number?: string;
+  representative_name?: string;
+  contact_phone?: string;
   business_type?: string;
   business_item?: string;
   business_address?: string;
-  // 사업자등록증 이미지 (관리자 수동 심사용)
-  registration_image_url?: string;
   // 국세청(NTS) 사업자등록정보 상태조회 결과 (구 자동 검증 방식 — 호환용)
   nts_verified?: boolean;
   nts_status?: string;
