@@ -9,10 +9,11 @@ import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
+import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'sellers';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -560,6 +561,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
             { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
+            { key: 'sellers' as OperatorTab, label: '사업자 인증' },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
             { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
@@ -929,6 +931,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
+        )}
+
+        {/* Seller Business Verification Tab */}
+        {activeTab === 'sellers' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="사업자 인증 심사 · 사업자등록증 수동 확인"
+                  body="셀러가 제출한 사업자등록증 이미지를 직접 확인하고 수락/거절합니다. 수락한 셀러만 라이브 커머스 송출이 가능합니다."
+                />
+                <AdminSellerVerifications token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 사업자 인증 심사가 표시됩니다." />
         )}
 
         {/* Influencer Tab */}

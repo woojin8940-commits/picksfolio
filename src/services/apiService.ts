@@ -1373,8 +1373,42 @@ export const apiService = {
     }
   },
 
-  // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
+  // ─── 셀러 사업자등록증 수동 심사 (관리자) ──────────────────────────────────
 
+  async getAdminSellerVerifications(token: string, status?: string): Promise<{ items: any[]; pendingCount: number }> {
+    try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const qs = status ? `?status=${status}` : '';
+      const res = await fetch(`/api/admin/seller-verifications${qs}`, { credentials: 'same-origin', headers });
+      if (!res.ok) return { items: [], pendingCount: 0 };
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to get admin seller verifications:', e);
+      return { items: [], pendingCount: 0 };
+    }
+  },
+
+  async adminSellerVerificationAction(token: string, username: string, action: 'approve' | 'reject', reason?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/seller-verifications', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({ username: username.toLowerCase(), action, reason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: json?.error };
+      return { success: true };
+    } catch (e) {
+      console.error('[API] Failed to perform admin seller verification action:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
   // List a creator's saved co-broadcast friends.
   async listLiveFriends(owner: string): Promise<{ username: string; display_name: string; avatar_url: string }[]> {
     try {
