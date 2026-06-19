@@ -1609,6 +1609,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       setIsLive(newState);
       isLiveRef.current = newState;
 
+      // 함께 방송: 라이브 시작 직후 세션 상태를 즉시 갱신한다. 8초 폴링을 기다리지
+      // 않고 곧바로 세션이 'live'로 승격되어(아래 승격 effect), 시청자 화면의 2분할이
+      // 바로 켜진다. (상대가 막 수락한 직후 송출을 시작한 경우의 지연을 없앤다.)
+      apiService.getActiveCobroadcast(normalizedUsername)
+        .then((s) => { if (s) setCoSession(s); })
+        .catch(() => {});
+
       // Start WebRTC signaling to broadcast canvas stream (with filters) to viewers
       // Try canvas stream first (has filters/mirror), then raw camera, with retry
       let broadcastStream = canvasStreamRef.current || streamRef.current;
@@ -1773,7 +1780,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             stock camera app shows — letterboxed within the stage rather than
             zoom-cropped to fill it. */}
         <div
-          className="relative w-full h-full overflow-hidden bg-black"
+          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute top-0 left-0 w-1/2 h-full' : 'relative w-full h-full'}`}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
@@ -1934,6 +1941,36 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         })()}
         </div>
         {/* End viewer frame */}
+
+        {/* 함께 방송 split — the partner's live feed fills the right half so the
+            broadcaster sees the same 2-up layout viewers see (not just a small
+            PiP). The host's own feed is confined to the left half above. */}
+        {coSession?.partner && (
+          <>
+            <video
+              ref={partnerVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute top-0 right-0 w-1/2 h-full bg-black"
+              style={{ objectFit: 'contain' }}
+            />
+            {/* Divider line between the two halves */}
+            <div className="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-violet-500/60 pointer-events-none" />
+            {/* Per-half name labels (kept below the broadcaster HUD via DOM order) */}
+            <div className="absolute top-2 left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+              @{userName} (나)
+            </div>
+            <div className="absolute top-2 left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+              <Users size={10} className="text-violet-300" /> @{coSession.partner}
+            </div>
+            {!partnerStreamReady && (
+              <div className="absolute top-0 right-0 w-1/2 h-full flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+                @{coSession.partner} 연결 중…
+              </div>
+            )}
+          </>
+        )}
 
         {/* Overlay UI */}
         <div className="absolute inset-0 p-3 md:p-8 flex flex-col justify-between pointer-events-none safe-area-pad">
@@ -2853,39 +2890,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 확인
               </button>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* 함께 방송 중 — partner live preview (PiP). Each host sees the other. */}
-      {coSession?.partner && (
-        <div className="fixed bottom-24 left-3 z-[200] w-28 md:w-36 rounded-2xl overflow-hidden border border-violet-400/50 bg-black shadow-2xl">
-          <video
-            ref={partnerVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full aspect-[3/4] object-cover bg-slate-900"
-            style={{ objectFit: 'cover' }}
-          />
-          {!partnerStreamReady && (
-            <div className="absolute inset-0 flex items-center justify-center text-white/70 text-[10px] font-bold text-center px-2">
-              @{coSession.partner}<br />연결 중…
-            </div>
-          )}
-          <div className="absolute top-1 left-1 bg-violet-600/90 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1">
-            <Users size={9} /> 함께 방송
-          </div>
-          <button
-            type="button"
-            onClick={() => endCobroadcast()}
-            className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5"
-            title="함께 방송 종료"
-          >
-            <X size={12} />
-          </button>
-          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
-            <p className="text-white text-[10px] font-bold truncate">{coSession.partner_display_name}</p>
           </div>
         </div>
       )}
