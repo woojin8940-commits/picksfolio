@@ -16,6 +16,8 @@ export type ComplimentaryTier = 'standard' | 'commerce'
 const COMPLIMENTARY: Record<string, ComplimentaryTier> = {
   dnwlsdnwls: 'commerce',
   dnwlsdnwls123: 'commerce',
+  // QA / test account — granted the top tier so every plan feature is available.
+  tester_711872: 'commerce',
 }
 
 export function getComplimentaryMembership(username: string | null | undefined): ComplimentaryTier | null {
