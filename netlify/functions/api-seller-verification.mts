@@ -27,8 +27,15 @@ export default async (req: Request, context: Context) => {
     if (body.business !== undefined) {
       merged.business = body.business;
       const b = body.business;
+      // 자동 승인하지 않는다. 사업자등록증 이미지를 받아 관리자가 수동으로 심사·수락한다.
+      // 제출이 들어오면 인증을 해제하고 심사 대기(pending) 상태로 둔다. 관리자가 수락해야
+      // business_verified 가 true 가 되어 라이브 송출이 가능해진다.
       if (b && b.company_name && b.business_number && b.representative_name && b.contact_phone) {
-        merged.business_verified = true;
+        merged.business_verified = false;
+        merged.business_review_status = "pending";
+        merged.business_review_reason = "";
+        merged.business_submitted_at = new Date().toISOString();
+        merged.business_reviewed_at = null;
       }
     }
 

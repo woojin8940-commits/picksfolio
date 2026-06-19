@@ -318,7 +318,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
   if (gateBlocked) {
     const steps: { label: string; done: boolean; desc: string }[] = [
-      { label: '사업자 인증', done: businessVerified, desc: '사업자등록번호와 대표자 정보를 등록합니다' },
+      { label: '사업자 인증', done: businessVerified, desc: '사업자등록증 이미지를 제출하고 관리자 수락을 받습니다' },
       { label: '정산 계좌 등록', done: settlementRegistered, desc: '판매 수익이 입금될 계좌 정보를 등록합니다' },
       { label: '커머스 멤버십 구독', done: commerceMembershipActive, desc: '월 13,900원 커머스 멤버십(라이브 커머스 송출)을 구독합니다' },
     ];

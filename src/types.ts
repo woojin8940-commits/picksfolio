@@ -161,7 +161,9 @@ export interface SellerBusinessVerification {
   business_type?: string;
   business_item?: string;
   business_address?: string;
-  // 국세청(NTS) 사업자등록정보 상태조회 결과
+  // 사업자등록증 이미지 (관리자 수동 심사용)
+  registration_image_url?: string;
+  // 국세청(NTS) 사업자등록정보 상태조회 결과 (구 자동 검증 방식 — 호환용)
   nts_verified?: boolean;
   nts_status?: string;
 }
@@ -176,6 +178,11 @@ export interface SellerVerification {
   business?: SellerBusinessVerification | null;
   settlement?: SellerSettlementAccount | null;
   business_verified?: boolean;
+  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 라이브 송출이 가능하다.
+  business_review_status?: 'pending' | 'approved' | 'rejected';
+  business_review_reason?: string;
+  business_submitted_at?: string | null;
+  business_reviewed_at?: string | null;
   settlement_registered?: boolean;
   membership_active?: boolean;
   membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'live' | null;

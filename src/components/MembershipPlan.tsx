@@ -110,11 +110,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [claudeActive, setClaudeActive] = useState(false);
   const [claudeBalance, setClaudeBalance] = useState<number | null>(null);
 
-  // 국세청 사업자등록번호 상태조회 — 조회에 성공해야 사업자 정보를 저장할 수 있다.
-  const [bizVerifying, setBizVerifying] = useState(false);
-  const [bizNtsVerified, setBizNtsVerified] = useState(false);
-  const [bizNtsMsg, setBizNtsMsg] = useState('');
-  const [bizNtsError, setBizNtsError] = useState('');
+  // 사업자등록증 이미지 업로드 — 관리자가 이미지를 직접 확인하고 수락해야 인증이 완료된다.
+  const [bizImageUploading, setBizImageUploading] = useState(false);
+  const [bizImageError, setBizImageError] = useState('');
 
   const [biz, setBiz] = useState({
     company_name: '',
@@ -124,6 +122,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     business_type: '',
     business_item: '',
     business_address: '',
+    registration_image_url: '',
   });
 
   const [acct, setAcct] = useState({
@@ -145,12 +144,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         business_type: data.business.business_type || '',
         business_item: data.business.business_item || '',
         business_address: data.business.business_address || '',
+        registration_image_url: data.business.registration_image_url || '',
       });
-      // 이미 인증된 사업자라면 국세청 조회 통과 상태로 간주한다.
-      if (data.business_verified || data.business.nts_verified) {
-        setBizNtsVerified(true);
-        setBizNtsMsg(`국세청 확인 완료 · ${data.business.nts_status || '계속사업자'}`);
-      }
     }
     if (data?.settlement) {
       setAcct({
@@ -202,6 +197,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   };
 
   const businessVerified = !!verification?.business_verified;
+  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 라이브 송출이 가능하다.
+  const businessReviewStatus: 'pending' | 'approved' | 'rejected' | null =
+    verification?.business_review_status
+    || (businessVerified ? 'approved' : (verification?.business ? 'pending' : null));
+  const businessRejectReason = verification?.business_review_reason || '';
   const settlementRegistered = !!verification?.settlement_registered;
   const membershipActive = !!verification?.membership_active;
 
@@ -210,42 +210,32 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     window.setTimeout(() => setSuccessMsg(null), 2500);
   };
 
-  // 사업자등록번호가 바뀌면 국세청 조회 상태를 초기화한다.
-  const handleBizNumberChange = (v: string) => {
-    setBiz({ ...biz, business_number: formatBusinessNumber(v) });
-    setBizNtsVerified(false);
-    setBizNtsMsg('');
-    setBizNtsError('');
-  };
-
-  // 국세청 사업자등록정보 상태조회. 조회에 성공(계속사업자)하면 등록이 가능해진다.
-  const verifyBusinessNts = async () => {
-    const digits = biz.business_number.replace(/[^0-9]/g, '');
-    if (digits.length !== 10) {
-      setBizNtsError('사업자등록번호 10자리를 정확히 입력해 주세요.');
+  // 사업자등록증 이미지 업로드. 업로드된 이미지는 관리자 심사 콘솔에 노출된다.
+  const handleBizImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setBizImageError('이미지 파일만 업로드할 수 있습니다.');
       return;
     }
-    setBizVerifying(true);
-    setBizNtsError('');
-    setBizNtsMsg('');
+    if (file.size > 10 * 1024 * 1024) {
+      setBizImageError('이미지 용량은 10MB 이하여야 합니다.');
+      return;
+    }
+    setBizImageError('');
+    setBizImageUploading(true);
     try {
-      const response = await fetch('/.netlify/functions/business-verify-nts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ business_number: digits }),
-      });
-      const result = await response.json();
-      if (result.verified) {
-        setBizNtsVerified(true);
-        setBizNtsMsg(`국세청 확인 완료 · ${result.status || '계속사업자'}`);
+      const url = await apiService.uploadImage(`biz-${normalizedUserName}`, file, file.name);
+      if (url) {
+        setBiz((prev) => ({ ...prev, registration_image_url: url }));
       } else {
-        setBizNtsVerified(false);
-        setBizNtsError(result.error || '국세청에 등록되지 않은 사업자등록번호입니다.');
+        setBizImageError('이미지 업로드에 실패했습니다. 다시 시도해 주세요.');
       }
     } catch {
-      setBizNtsError('국세청 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      setBizImageError('이미지 업로드 중 오류가 발생했습니다.');
     } finally {
-      setBizVerifying(false);
+      setBizImageUploading(false);
     }
   };
 
@@ -260,13 +250,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       setError('사업자등록번호는 10자리 숫자여야 합니다.');
       return;
     }
-    if (!bizNtsVerified) {
-      setError('국세청 사업자 조회를 먼저 완료해 주세요. 조회 결과 정상 영업 중인 사업자만 등록할 수 있습니다.');
+    if (!biz.registration_image_url) {
+      setError('사업자등록증 이미지를 첨부해 주세요. 관리자가 직접 확인 후 수락합니다.');
       return;
     }
     setSaving(true);
     const res = await apiService.saveSellerVerification(normalizedUserName, {
-      business: { ...biz, nts_verified: true, nts_status: (bizNtsMsg.split('·')[1] || '계속사업자').trim() },
+      business: { ...biz },
     });
     setSaving(false);
     if (!res.success) {
@@ -275,7 +265,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
     if (res.data) setVerification(res.data);
     setBizEditing(false);
-    flashSuccess('사업자 정보가 저장되었습니다.');
+    flashSuccess('사업자등록증이 제출되었습니다. 관리자 확인 후 수락되면 라이브 송출이 가능합니다.');
   };
 
   const submitSettlement = async () => {
@@ -712,8 +702,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg md:text-xl font-bold text-slate-800 flex items-center gap-2">
             <span className="text-xl">🧾</span> 사업자 인증
-            {businessVerified && (
+            {businessReviewStatus === 'approved' && (
               <span className="text-[10px] font-black text-green-700 bg-green-100 border border-green-200 px-2 py-0.5 rounded-full">인증됨</span>
+            )}
+            {businessReviewStatus === 'pending' && (
+              <span className="text-[10px] font-black text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded-full">심사 중</span>
+            )}
+            {businessReviewStatus === 'rejected' && (
+              <span className="text-[10px] font-black text-red-700 bg-red-100 border border-red-200 px-2 py-0.5 rounded-full">거절됨</span>
             )}
           </h3>
           {!bizEditing && (
@@ -722,7 +718,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               onClick={() => { setError(null); setBizEditing(true); }}
               className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50"
             >
-              {businessVerified ? '수정' : '등록하기'}
+              {verification?.business ? '수정' : '등록하기'}
             </button>
           )}
         </div>
@@ -738,36 +734,51 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <Field label="상호(사업자명) *" value={biz.company_name} onChange={(v) => setBiz({ ...biz, company_name: v })} placeholder="픽스폴리오" />
               <div>
                 <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록번호 *</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={biz.business_number}
-                    onChange={(e) => handleBizNumberChange(e.target.value)}
-                    placeholder="000-00-00000"
-                    inputMode="numeric"
-                    disabled={bizNtsVerified}
-                    className="flex-1 px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={verifyBusinessNts}
-                    disabled={bizVerifying || bizNtsVerified}
-                    className="px-4 rounded-lg text-xs font-black whitespace-nowrap border border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {bizVerifying ? '조회 중...' : bizNtsVerified ? '확인 완료' : '조회'}
-                  </button>
-                </div>
-                {bizNtsMsg && <p className="text-[11px] text-emerald-600 font-bold mt-1.5">✓ {bizNtsMsg}</p>}
-                {bizNtsError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizNtsError}</p>}
-                {!bizNtsVerified && !bizNtsMsg && (
-                  <p className="text-[10px] text-slate-400 font-bold mt-1.5">국세청에 등록된 사업자만 등록할 수 있습니다. 조회 후 저장이 활성화됩니다.</p>
-                )}
+                <input
+                  type="text"
+                  value={biz.business_number}
+                  onChange={(e) => setBiz({ ...biz, business_number: formatBusinessNumber(e.target.value) })}
+                  placeholder="000-00-00000"
+                  inputMode="numeric"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
+                />
               </div>
               <Field label="대표자명 *" value={biz.representative_name} onChange={(v) => setBiz({ ...biz, representative_name: v })} placeholder="홍길동" />
               <Field label="연락처 *" value={biz.contact_phone} onChange={(v) => setBiz({ ...biz, contact_phone: formatPhone(v) })} placeholder="010-0000-0000" inputMode="tel" />
               <Field label="업태" value={biz.business_type} onChange={(v) => setBiz({ ...biz, business_type: v })} placeholder="소매업" />
               <Field label="종목" value={biz.business_item} onChange={(v) => setBiz({ ...biz, business_item: v })} placeholder="전자상거래" />
               <Field label="사업장 주소" value={biz.business_address} onChange={(v) => setBiz({ ...biz, business_address: v })} placeholder="서울특별시 ..." />
+
+              {/* 사업자등록증 이미지 업로드 */}
+              <div>
+                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록증 이미지 *</label>
+                {biz.registration_image_url ? (
+                  <div className="space-y-2">
+                    <a href={biz.registration_image_url} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={biz.registration_image_url}
+                        alt="사업자등록증"
+                        className="w-full max-h-[320px] object-contain rounded-xl border border-slate-200 bg-slate-50"
+                      />
+                    </a>
+                    <label className="inline-block text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer">
+                      {bizImageUploading ? '업로드 중...' : '다른 이미지로 변경'}
+                      <input type="file" accept="image/*" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center gap-1.5 w-full py-8 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+                    <span className="text-2xl">📎</span>
+                    <span className="text-xs font-bold text-slate-500">
+                      {bizImageUploading ? '업로드 중...' : '사업자등록증 이미지 첨부 (JPG·PNG, 10MB 이하)'}
+                    </span>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
+                  </label>
+                )}
+                {bizImageError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizImageError}</p>}
+                <p className="text-[10px] text-slate-400 font-bold mt-1.5">제출하신 사업자등록증은 관리자가 직접 확인 후 수락합니다. 수락되면 라이브 송출이 가능합니다. 심사에는 보통 1~2일 정도 소요됩니다.</p>
+              </div>
+
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
@@ -780,30 +791,52 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 <button
                   type="button"
                   onClick={submitBusiness}
-                  disabled={saving || !bizNtsVerified}
-                  title={!bizNtsVerified ? '국세청 사업자 조회를 먼저 완료해 주세요.' : undefined}
+                  disabled={saving || bizImageUploading || !biz.registration_image_url}
+                  title={!biz.registration_image_url ? '사업자등록증 이미지를 먼저 첨부해 주세요.' : undefined}
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
                 >
-                  {saving ? '저장 중...' : '저장'}
+                  {saving ? '제출 중...' : '제출하기'}
                 </button>
               </div>
             </div>
-          ) : businessVerified && verification?.business ? (
-            <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-              <div><span className="text-slate-400">상호</span> · {verification.business.company_name}</div>
-              <div><span className="text-slate-400">대표자</span> · {verification.business.representative_name}</div>
-              <div><span className="text-slate-400">등록번호</span> · {verification.business.business_number}</div>
-              <div><span className="text-slate-400">연락처</span> · {verification.business.contact_phone}</div>
-              {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
-              {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
-              {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
-              {(verification.business.nts_verified || businessVerified) && (
-                <div className="col-span-2 mt-1"><span className="text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">✓ 국세청 확인 · {verification.business.nts_status || '계속사업자'}</span></div>
+          ) : verification?.business ? (
+            <div className="space-y-3">
+              {businessReviewStatus === 'pending' && (
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-xs font-bold text-orange-700">
+                  ⏳ 관리자 확인 대기 중입니다. 사업자등록증 검토 후 수락되면 라이브 송출이 가능합니다. 심사에는 보통 1~2일 정도 소요됩니다.
+                </div>
+              )}
+              {businessReviewStatus === 'rejected' && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs font-bold text-red-700">
+                  사업자 인증이 거절되었습니다{businessRejectReason ? ` · ${businessRejectReason}` : ''}. 정보를 수정해 다시 제출해 주세요.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                <div><span className="text-slate-400">상호</span> · {verification.business.company_name}</div>
+                <div><span className="text-slate-400">대표자</span> · {verification.business.representative_name}</div>
+                <div><span className="text-slate-400">등록번호</span> · {verification.business.business_number}</div>
+                <div><span className="text-slate-400">연락처</span> · {verification.business.contact_phone}</div>
+                {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
+                {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
+                {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
+              </div>
+              {verification.business.registration_image_url && (
+                <a href={verification.business.registration_image_url} target="_blank" rel="noreferrer" className="block">
+                  <img
+                    src={verification.business.registration_image_url}
+                    alt="사업자등록증"
+                    className="w-full max-h-[280px] object-contain rounded-xl border border-slate-200 bg-slate-50"
+                  />
+                </a>
+              )}
+              {businessReviewStatus === 'approved' && (
+                <div><span className="text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">✓ 관리자 확인 완료 · 인증됨</span></div>
               )}
             </div>
           ) : (
             <p className="text-sm text-slate-500">
-              라이브 방송 송출을 위해 사업자등록증 기반의 사업자 정보를 등록해 주세요.
+              라이브 방송 송출을 위해 사업자등록증 이미지를 제출해 주세요. 관리자 확인 후 수락되면 라이브 송출이 가능합니다.
+              <span className="block text-[11px] text-slate-400 font-bold mt-1">※ 심사에는 보통 1~2일 정도 소요됩니다.</span>
             </p>
           )}
         </div>

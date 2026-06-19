@@ -9,10 +9,11 @@ import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
+import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'sellers';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -81,6 +82,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [settlements, setSettlements] = useState<SettlementRow[]>([]);
   const [settlementSummary, setSettlementSummary] = useState<SettlementSummary | null>(null);
+  // 라이브 승인 대기(사업자등록증 심사 대기) 건수 — 탭 배지로 노출한다.
+  const [sellerPendingCount, setSellerPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<OperatorTab>('overview');
@@ -160,6 +163,14 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       const notifData = await apiService.getAdminNotifications(token);
       setNotifications(notifData.notifications || []);
       setUnreadCount(notifData.unreadCount || 0);
+
+      // 라이브 승인 대기 건수를 받아 탭 배지로 표시한다.
+      try {
+        const sellerData = await apiService.getAdminSellerVerifications(token, 'pending');
+        setSellerPendingCount(sellerData.pendingCount || 0);
+      } catch {
+        setSellerPendingCount(0);
+      }
 
       // Pull settlement data so the calendar deadlines and the overview revenue
       // summary share the same source as the 정산·매출 tab.
@@ -560,6 +571,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
             { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
+            { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
             { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
@@ -929,6 +941,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
+        )}
+
+        {/* Seller Business Verification Tab */}
+        {activeTab === 'sellers' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="라이브 승인 심사 · 사업자등록증 수동 확인"
+                  body="셀러가 제출한 사업자등록증 이미지를 직접 확인하고 라이브 송출을 승인/거절합니다. 승인한 셀러만 라이브 커머스 송출이 가능합니다."
+                />
+                <AdminSellerVerifications token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 승인 심사가 표시됩니다." />
         )}
 
         {/* Influencer Tab */}
