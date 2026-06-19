@@ -1758,24 +1758,23 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     setNewMessage('');
   };
 
-  /* Always stack the broadcast stage on top and the chat/상품/담기현황 panel
-     below it — on the web too. Previously the panel sat on the right side
-     (md:flex-row); hosts asked for it under the video instead, matching the
-     phone layout. */
+  /* On the web, the chat/상품/담기현황 panel sits in a right-hand column
+     (md:flex-row) so the broadcast stage can take the full viewport height —
+     the largest possible mobile 9:16 preview. On phones the panel docks at the
+     bottom beneath the stage, matching what a viewer sees. */
   return (
     <>
-    {/* Desktop letterbox backdrop — fills the whole screen black so nothing
-        behind the broadcaster console peeks out beside the centered mobile-width
-        column, and so the space on either side of the portrait frame reads as
-        clean black side margins. Hidden on phones, where the console already
-        fills the screen. */}
+    {/* Full-screen black backdrop behind the console, so any space on either
+        side of the centered portrait 9:16 stage reads as clean black side
+        margins. Hidden on phones, where the console already fills the screen. */}
     <div className="hidden md:block fixed inset-0 z-[199] bg-black" />
-    {/* The whole broadcaster console (stage + chat/상품/담기현황 panel) is locked
-        to a phone-width portrait column, centered with black margins on either
-        side, so it matches exactly what a viewer sees on their phone. The stage
-        stacks on top and the chat/상품/띄우기/담기현황 panel docks at the bottom of
-        that column. On phones it stays edge-to-edge. */}
-    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:max-w-[26.5rem] md:mx-auto">
+    {/* The broadcaster console = the broadcast stage + the chat/상품/담기현황 panel.
+        On phones they stack vertically (stage on top, panel docked at the bottom)
+        so it matches what a viewer sees on their phone. On the web the panel moves
+        to a right-hand column (md:flex-row) and the stage fills the full viewport
+        height, so the portrait 9:16 preview is as large as the screen allows while
+        keeping the exact mobile viewing proportions. */}
+    <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col md:flex-row">
       {/* Main Stream Area */}
       <div className="flex-1 min-h-0 relative bg-black overflow-hidden flex items-center justify-center">
         {/* Viewer frame: the broadcast frame (built on a canvas sized to the
@@ -2412,10 +2411,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       </div>
 
-      {/* Sidebar (Chat, Products & Cart Stats) — full-width and docked at the
-          bottom on every screen size (web included), beneath the broadcast
-          stage, rather than as a right-hand column. */}
-      <div className="relative w-full bg-slate-900 border-t border-white/5 flex flex-col h-[35vh] md:h-[40vh] shrink-0">
+      {/* Sidebar (Chat, Products & Cart Stats) — docked at the bottom on phones
+          (full width), and moved to a fixed right-hand column on the web (md) so
+          the broadcast stage beside it can use the full viewport height. */}
+      <div className="relative w-full md:w-[22rem] bg-slate-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col h-[30vh] md:h-full shrink-0">
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). Rendered as an overlay over
             the 채팅/상품/담기현황 sidebar so the broadcaster's face on the video
@@ -2555,7 +2554,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         <div className="flex border-b border-white/5">
           <button
             onClick={() => { setShowProductPanel(false); setShowCartPanel(false); }}
-            className={`flex-1 p-3 md:p-4 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
               !showProductPanel && !showCartPanel ? 'text-blue-400 border-b-2 border-blue-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
@@ -2563,7 +2562,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </button>
           <button
             onClick={() => { setShowProductPanel(true); setShowCartPanel(false); }}
-            className={`flex-1 p-3 md:p-4 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
               showProductPanel ? 'text-green-400 border-b-2 border-green-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
@@ -2572,7 +2571,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </button>
           <button
             onClick={() => { setShowCartPanel(true); setShowProductPanel(false); }}
-            className={`flex-1 p-3 md:p-4 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
+            className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${
               showCartPanel ? 'text-orange-400 border-b-2 border-orange-500' : 'text-white/40 hover:text-white/60'
             }`}
           >
