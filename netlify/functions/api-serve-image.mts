@@ -9,6 +9,7 @@ const CONTENT_TYPES: Record<string, string> = {
   webp: "image/webp",
   svg: "image/svg+xml",
   avif: "image/avif",
+  pdf: "application/pdf",
 };
 
 export default async (req: Request, context: Context) => {
