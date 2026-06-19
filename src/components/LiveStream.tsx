@@ -9,6 +9,7 @@ import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
 import { apiService, type ShippingProfile } from '../services/apiService';
+import { PartnerFeed } from './PartnerFeed';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
@@ -254,7 +255,7 @@ const getPlaybackUrl = (): string => {
     import.meta.env.VITE_IVS_PLAYBACK_URL || '';
 };
 
-const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activeMaterial, viewerCount, onClose, preConnectedSignaling }) => {
+const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: currentProductProp, activeMaterial, viewerCount, onClose, preConnectedSignaling }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [likes, setLikes] = useState<number[]>([]);
@@ -591,13 +592,20 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // 함께 방송 (co-broadcast, Method A) — if the broadcaster this viewer is
-  // watching is co-broadcasting with a partner, subscribe to the partner's
-  // channel too and show both feeds side-by-side (split screen). The partner
-  // pipeline reuses the same ViewerSignaling class as the main feed.
+  // watching is co-broadcasting with a partner, show both feeds side-by-side
+  // (split screen). The partner half is rendered by <PartnerFeed/>, which
+  // handles a web partner (WebRTC) and a mobile partner (HLS) alike.
   const [coPartner, setCoPartner] = useState<{ partner: string; partner_display_name: string } | null>(null);
   const [partnerStreamConnected, setPartnerStreamConnected] = useState(false);
-  const partnerVideoRef = useRef<HTMLVideoElement>(null);
-  const partnerSignalingRef = useRef<ViewerSignaling | null>(null);
+  // During a co-broadcast, the partner host may pin their own product. Viewers
+  // open the main host's page and only receive the main host's live state, so
+  // the partner's pinned product is surfaced here and merged below so 상품 띄우기
+  // works no matter which co-host triggers it.
+  const [partnerProduct, setPartnerProduct] = useState<any>(null);
+
+  // The product shown to the viewer: the main host's pick takes precedence; if
+  // the main host has nothing pinned, fall back to the co-broadcast partner's.
+  const currentProduct = currentProductProp || partnerProduct;
 
   // Helper: reset the video element and re-assign the stream to unstick the decoder
   const resetVideoElement = useCallback(() => {
@@ -694,36 +702,25 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
     return () => { cancelled = true; clearInterval(interval); };
   }, [username]);
 
-  // Subscribe to the partner channel and pipe its stream into the second video.
-  // Partner audio is muted to avoid echo / mobile autoplay blocks — the primary
-  // channel the viewer opened carries the audio.
+  // Subscribe to the partner channel for the split feed via <PartnerFeed/>,
+  // which handles both WebRTC (web partner) and HLS (mobile partner). Here we
+  // only poll the partner's live state so the partner's pinned product reaches
+  // the viewer too.
   useEffect(() => {
     const partner = coPartner?.partner;
     if (!partner) {
-      if (partnerSignalingRef.current) {
-        partnerSignalingRef.current.disconnect();
-        partnerSignalingRef.current = null;
-      }
-      setPartnerStreamConnected(false);
+      setPartnerProduct(null);
       return;
     }
-    const sig = new ViewerSignaling(partner);
-    partnerSignalingRef.current = sig;
-    sig.onStream((stream) => {
-      const v = partnerVideoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        v.muted = true;
-        v.play().catch(() => {});
-      }
-      setPartnerStreamConnected(true);
-    });
-    sig.connect();
-    return () => {
-      sig.disconnect();
-      if (partnerSignalingRef.current === sig) partnerSignalingRef.current = null;
-      setPartnerStreamConnected(false);
+    let cancelled = false;
+    const check = async () => {
+      const state = await apiService.getLiveState(partner);
+      if (cancelled) return;
+      setPartnerProduct(state?.isLive ? (state.currentProduct || null) : null);
     };
+    check();
+    const interval = setInterval(check, 3000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [coPartner?.partner]);
   // video over WebRTC can burn ~500 MB/hour. Give the viewer one explicit
   // heads-up before playback, so they can close the tab if they're not on
@@ -2847,20 +2844,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct, activ
             is co-broadcasting. Each host's name labels its own half. */}
         {coPartner && (
           <>
-            <video
-              ref={partnerVideoRef}
-              autoPlay
-              playsInline
-              muted
-              preload="auto"
-              // @ts-ignore
-              webkit-playsinline=""
-              // @ts-ignore
-              x5-playsinline=""
-              // @ts-ignore
-              x5-video-player-type="h5-page"
-              className="absolute top-0 right-0 w-1/2 co-split-half h-full z-[5] bg-black"
-              style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+            <PartnerFeed
+              channel={coPartner.partner}
+              className="absolute top-0 right-0 w-1/2 h-full z-[5] bg-black"
+              onConnectedChange={setPartnerStreamConnected}
             />
             {/* Divider line between the two halves */}
             <div className="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-violet-500/60 z-[6] pointer-events-none" />

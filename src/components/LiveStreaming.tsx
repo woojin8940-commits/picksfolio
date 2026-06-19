@@ -9,10 +9,11 @@ import {
   type ChargePayMethod,
 } from '../utils/liveCharge';
 import { isNativeApp } from '../utils/appEnv';
-import { BroadcasterSignaling, ViewerSignaling, ChatMessage } from '../services/webrtcSignaling';
+import { BroadcasterSignaling, ChatMessage } from '../services/webrtcSignaling';
 import { IVSBroadcaster } from '../services/ivsBroadcaster';
 
 import MediaAuto from './MediaAuto';
+import { PartnerFeed } from './PartnerFeed';
 import {
   type FaceShapeSettings,
   FACE_SHAPE_OFF,
@@ -311,8 +312,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // Clear the joined flag when there is no active session (invite ended/declined)
   // so the next co-broadcast starts from the 참여하기 step again.
   useEffect(() => { if (!coSession) setCoJoined(false); }, [coSession]);
-  const partnerSignalingRef = useRef<ViewerSignaling | null>(null);
-  const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const coSessionRef = useRef<typeof coSession>(null);
   useEffect(() => { coSessionRef.current = coSession; }, [coSession]);
   const isLiveRef = useRef(false);
@@ -359,17 +358,30 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     if (now - lastDrawTimeRef.current < FRAME_INTERVAL) return;
     lastDrawTimeRef.current = now;
 
-    // The canvas IS the broadcast frame (captureStream reads from it). Size it to
-    // the camera's NATIVE resolution and draw the frame 1:1 — no forced 9:16 crop.
-    // Pinning a portrait canvas and cover-cropping the source is what previously
-    // made the feed look zoomed in; keeping the camera's own width/height/aspect
-    // preserves its default framing and full field of view. The preview and the
-    // viewer display the frame with object-contain, so the whole image is shown.
+    // The canvas IS the broadcast frame (captureStream reads from it). Normalize
+    // it to a portrait 9:16 frame so a web broadcaster (whose camera is usually
+    // landscape) produces the SAME shape/size a mobile broadcaster does, instead
+    // of a short letterboxed landscape strip inside the viewer's portrait stage.
+    // The source is center-cropped to 9:16 (cover) — the same framing the phone
+    // app sends — rather than squashed.
     const vw = sourceVideo.videoWidth;
     const vh = sourceVideo.videoHeight;
-    if (canvas.width !== vw || canvas.height !== vh) {
-      canvas.width = vw;
-      canvas.height = vh;
+    const TARGET_AR = 9 / 16; // portrait, width / height
+    let sx = 0, sy = 0, sw = vw, sh = vh;
+    if (vw / vh > TARGET_AR) {
+      // Wider than 9:16 (landscape webcam) → crop the sides.
+      sw = Math.round(vh * TARGET_AR);
+      sx = Math.round((vw - sw) / 2);
+    } else {
+      // Taller than 9:16 → crop top/bottom.
+      sh = Math.round(vw / TARGET_AR);
+      sy = Math.round((vh - sh) / 2);
+    }
+    const cw = sw; // broadcast frame dimensions (the cropped 9:16 region)
+    const ch = sh;
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
       // Re-apply after resize (canvas state resets on dimension change)
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
@@ -392,25 +404,25 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     }
     const pctx = procCtxRef.current;
     if (!pctx) return;
-    if (proc.width !== vw || proc.height !== vh) {
-      proc.width = vw;
-      proc.height = vh;
+    if (proc.width !== cw || proc.height !== ch) {
+      proc.width = cw;
+      proc.height = ch;
       pctx.imageSmoothingEnabled = true;
       pctx.imageSmoothingQuality = 'high';
     }
 
     // Draw the source (optionally mirrored) onto the proc canvas. Mirror is
     // baked in here so landmark detection and warping operate in the same
-    // orientation the viewer sees.
+    // orientation the viewer sees. The source is center-cropped to 9:16 here.
     pctx.save();
     pctx.filter = 'none';
     pctx.globalAlpha = 1;
     pctx.globalCompositeOperation = 'source-over';
     if (mirror) {
-      pctx.translate(vw, 0);
+      pctx.translate(cw, 0);
       pctx.scale(-1, 1);
     }
-    pctx.drawImage(sourceVideo, 0, 0, vw, vh);
+    pctx.drawImage(sourceVideo, sx, sy, sw, sh, 0, 0, cw, ch);
     pctx.restore();
 
     // Composite the processed frame onto the broadcast canvas. If 얼굴형 조정 is
@@ -422,10 +434,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
     let detected = false;
     if (beautyOn && hasFaceShape(shape)) {
-      const landmarks = detectFaceLandmarks(proc, now, vw, vh);
+      const landmarks = detectFaceLandmarks(proc, now, cw, ch);
       if (landmarks) {
         detected = true;
-        warpFaceShape(ctx, proc, landmarks, vw, vh, shape);
+        warpFaceShape(ctx, proc, landmarks, cw, ch, shape);
       }
     }
     if (detected !== faceDetectedRef.current) {
@@ -746,36 +758,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     return () => { cancelled = true; clearInterval(id); };
   }, [userName]);
 
-  // Subscribe to the partner's channel for a small live preview (PiP) once a
-  // session is accepted/live, so each host can see the other. Reuses the same
-  // ViewerSignaling pipeline as a normal viewer — no extra media infra.
+  // Subscribe to the partner's channel for a live preview once a session is
+  // accepted/live, so each host can see the other. <PartnerFeed/> handles both
+  // a web partner (WebRTC) and a mobile partner (HLS) — no extra media infra.
   const partnerChannel = coSession?.partner || '';
   useEffect(() => {
-    if (!partnerChannel) {
-      if (partnerSignalingRef.current) {
-        partnerSignalingRef.current.disconnect();
-        partnerSignalingRef.current = null;
-      }
-      setPartnerStreamReady(false);
-      return;
-    }
-    const sig = new ViewerSignaling(partnerChannel);
-    partnerSignalingRef.current = sig;
-    sig.onStream((stream) => {
-      const v = partnerVideoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        v.muted = true;
-        v.play().catch(() => {});
-      }
-      setPartnerStreamReady(true);
-    });
-    sig.connect();
-    return () => {
-      sig.disconnect();
-      if (partnerSignalingRef.current === sig) partnerSignalingRef.current = null;
-      setPartnerStreamReady(false);
-    };
+    if (!partnerChannel) setPartnerStreamReady(false);
   }, [partnerChannel]);
 
   // When this host is live and has an accepted session, promote it to 'live' so
@@ -1947,13 +1935,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             PiP). The host's own feed is confined to the left half above. */}
         {coSession?.partner && (
           <>
-            <video
-              ref={partnerVideoRef}
-              autoPlay
-              playsInline
-              muted
+            <PartnerFeed
+              channel={coSession.partner}
               className="absolute top-0 right-0 w-1/2 h-full bg-black"
-              style={{ objectFit: 'contain' }}
+              onConnectedChange={setPartnerStreamReady}
             />
             {/* Divider line between the two halves */}
             <div className="absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-violet-500/60 pointer-events-none" />
