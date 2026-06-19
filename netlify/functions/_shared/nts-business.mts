@@ -16,8 +16,15 @@ export function cleanBizNo(raw: string): string {
   return (raw || "").replace(/\D/g, "");
 }
 
+// data.go.kr은 "Encoding"(이미 URL 인코딩, %2B·%2F 등 포함)과 "Decoding"(원본) 두 가지 형태의 키를 제공한다.
+// 이미 인코딩된 키를 다시 인코딩하면 인증이 깨져 모든 조회가 실패하므로, 형태를 감지해 한 번만 인코딩한다.
+function buildServiceKeyParam(serviceKey: string): string {
+  const looksEncoded = /%[0-9A-Fa-f]{2}/.test(serviceKey);
+  return looksEncoded ? serviceKey : encodeURIComponent(serviceKey);
+}
+
 async function callNts(path: string, serviceKey: string, payload: unknown) {
-  const url = `${NTS_BASE}/${path}?serviceKey=${encodeURIComponent(serviceKey)}`;
+  const url = `${NTS_BASE}/${path}?serviceKey=${buildServiceKeyParam(serviceKey)}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -50,24 +57,33 @@ export async function verifyBusinessStatus(rawBizNo: string): Promise<NtsVerifyR
     return { verified: false, error: "국세청 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." };
   }
 
-  const entry = statusRes.json?.data?.[0] || {};
-  const matched = Number(statusRes.json?.match_cnt ?? 0);
+  const entry = statusRes.json?.data?.[0];
+  if (!entry) {
+    return { verified: false, error: "국세청 조회 결과를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요." };
+  }
 
-  if (!matched || !entry.b_stt_cd) {
+  const taxType: string = entry.tax_type || "";
+  const sttCd: string = entry.b_stt_cd || "";
+
+  // 국세청은 "미등록"인 경우에만 tax_type에 안내 문구를 넣어 응답한다.
+  // match_cnt가 누락되거나 b_stt_cd가 비어 있어도(신규 등록 등) 등록된 사업자일 수 있으므로,
+  // 명시적 미등록 응답일 때만 미등록으로 처리한다.
+  if (taxType.includes("등록되지 않은")) {
     return { verified: false, status: entry.b_stt || "", error: "국세청에 등록되지 않은 사업자등록번호입니다." };
   }
-  if (entry.b_stt_cd === "03") {
+  if (sttCd === "03") {
     return { verified: false, status: entry.b_stt || "폐업자", end_dt: entry.end_dt || "", error: "폐업된 사업자등록번호입니다." };
   }
-  if (entry.b_stt_cd === "02") {
+  if (sttCd === "02") {
     return { verified: false, status: entry.b_stt || "휴업자", error: "휴업 중인 사업자등록번호입니다." };
   }
 
+  // 계속사업자(01)이거나, 상태코드는 비어 있지만 미등록 안내가 없는 등록 사업자는 모두 통과시킨다.
   return {
     verified: true,
     b_no: entry.b_no || bNo,
     status: entry.b_stt || "계속사업자",
-    status_code: entry.b_stt_cd,
-    tax_type: entry.tax_type || "",
+    status_code: sttCd || "01",
+    tax_type: taxType,
   };
 }
