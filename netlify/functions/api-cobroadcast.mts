@@ -21,8 +21,13 @@ import { sendPushToUser } from "./_shared/push.mts";
  *   POST { action, ... }      → invite | accept | decline | live | end
  */
 
+// Normalize a username before it touches the DB. Besides lowercasing/trimming
+// and dropping a leading "biz/", we also strip any leading "@" the user typed or
+// pasted — otherwise "@friend" never matches the stored username "friend", and
+// the invite fails with "유저네임을 찾을 수 없습니다", which reads to the host as
+// "the invite/notification just doesn't work".
 const norm = (v: unknown) =>
-  String(v ?? "").trim().toLowerCase().replace(/^biz\//, "");
+  String(v ?? "").trim().replace(/^@+/, "").toLowerCase().replace(/^biz\//, "");
 
 async function profilesFor(db: ReturnType<typeof getDatabase>, usernames: string[]) {
   const uniq = [...new Set(usernames.filter(Boolean))];
