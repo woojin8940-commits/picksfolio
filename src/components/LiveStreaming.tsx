@@ -1893,53 +1893,39 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
 
-        {/* Material Overlays — a pushed banner is routed to the co-broadcast
-            bottom info band (below) during a split so it never covers a face. */}
+        {/* Material Overlays — only 상품/이미지 자료 float over the broadcaster's
+            own preview. Banner-type materials are managed and previewed entirely
+            in the 배너 탭 ("배너 관리"); they no longer float as a bar over the host's
+            live video here. Viewers still see a toggled banner via their own
+            renderer (LiveStream), so removing the host-side float only declutters
+            the broadcaster's screen — it does not hide banners from viewers. */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          {activeMaterial && !(coSession?.partner && activeMaterial.type === 'banner') && (
+          {activeMaterial && activeMaterial.type !== 'banner' && (
             <div
               key={activeMaterial.id}
               style={{
                 width: `${activeMaterial.width}%`,
-                height: activeMaterial.type === 'banner' ? `${activeMaterial.width}%` : 'auto',
+                height: 'auto',
                 opacity: activeMaterial.opacity / 100,
                 position: 'absolute',
-                ...(activeMaterial.type === 'banner'
-                  ? { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
-                  : activeMaterial.type === 'product'
+                ...(activeMaterial.type === 'product'
                   ? { right: '12px', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }
                   : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }),
               }}
             >
-              {activeMaterial.type === 'banner' ? (
-                <div className="w-full h-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
-                  <img
-                    src={activeMaterial.url}
-                    alt={activeMaterial.name}
-                    className="w-full flex-1 object-cover min-h-0"
-                    loading="eager"
-                    decoding="sync"
-                    fetchPriority="high"
-                  />
-                  <div className="p-3 bg-black/60 flex-shrink-0">
-                    <p className="text-white font-black text-center uppercase tracking-widest text-sm">{activeMaterial.name}</p>
-                  </div>
+              <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
+                <img
+                  src={activeMaterial.url}
+                  alt={activeMaterial.name}
+                  className="w-full h-auto object-cover"
+                  loading="eager"
+                  decoding="sync"
+                  fetchPriority="high"
+                />
+                <div className="p-2 bg-black/60 backdrop-blur-md">
+                  <p className="text-white text-xs font-black text-center">{activeMaterial.name}</p>
                 </div>
-              ) : (
-                <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
-                  <img
-                    src={activeMaterial.url}
-                    alt={activeMaterial.name}
-                    className="w-full h-auto object-cover"
-                    loading="eager"
-                    decoding="sync"
-                    fetchPriority="high"
-                  />
-                  <div className="p-2 bg-black/60 backdrop-blur-md">
-                    <p className="text-white text-xs font-black text-center">{activeMaterial.name}</p>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
         </div>

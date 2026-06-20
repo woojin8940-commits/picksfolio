@@ -6,6 +6,7 @@ import TemplateShowcase from './components/TemplateShowcase';
 import DataBoardSection from './components/DataBoardSection';
 import ErrorBoundary, { clearChunkReloadFlag } from './components/ErrorBoundary';
 import Footer from './components/Footer';
+import CoBroadcastInviteNotice from './components/CoBroadcastInviteNotice';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 
 // Wrap React.lazy so a failed dynamic import() (the usual cause of the
@@ -1370,6 +1371,9 @@ const App: React.FC = () => {
 
     return (
       <>
+        {/* 함께 방송 초대 알림 — 크리에이터 대시보드의 어느 서브뷰에 있든 초대가
+            도착하면 상단에 떠서, 라이브/방송 설정 화면을 열고 있지 않아도 알 수 있다. */}
+        <CoBroadcastInviteNotice username={userName} onGoLive={() => setSubView('live')} />
         <Suspense fallback={<LazyFallback />}>
         <AdminDashboard
         userName={userName}

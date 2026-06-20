@@ -212,6 +212,20 @@ export default async (req: Request) => {
           SET status = 'accepted', accepted_at = now(), updated_at = now()
           WHERE id = ${sessionId} AND status = 'pending'
         `;
+
+        // Make the friendship mutual. The host already saves the guest when
+        // inviting; here the guest gets the host saved on accept too, so next
+        // time either creator can re-invite the other straight from their saved
+        // friend list instead of retyping the username. Best-effort — a failure
+        // here must not block the accept.
+        if (partner) {
+          await db.sql`
+            INSERT INTO live_friends (owner_username, friend_username)
+            VALUES (${user}, ${partner}), (${partner}, ${user})
+            ON CONFLICT (owner_username, friend_username) DO NOTHING
+          `.catch((e: any) => console.error("[api-cobroadcast] reciprocal friend add failed:", e));
+        }
+
         const info = await profilesFor(db, [user]);
         sendPushToUser(sess.host_username, {
           title: "함께 방송 수락",
