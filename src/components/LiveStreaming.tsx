@@ -1812,14 +1812,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             sees the full, un-cropped camera framing — the same default ratio the
             stock camera app shows — letterboxed within the stage rather than
             zoom-cropped to fill it. */}
-        {/* Lock the broadcast frame to a portrait 9:16 column — the exact shape
-            and size a viewer sees — centered in the black stage so the space on
-            either side reads as clean black side margins (instead of the camera
-            stretching edge-to-edge on the web). The canvas below is 9:16, so it
-            fills this box exactly and fully hides the raw source <video> behind
-            it — no more two-frames-overlapping look. */}
+        {/* On phones the stage fills the screen edge-to-edge (w-full) so the
+            broadcast preview has NO black side margins — the immersive, full-bleed
+            look a mobile broadcaster expects. On the web (md) it falls back to a
+            centered portrait 9:16 column (md:w-auto md:aspect-[9/16]) so the camera
+            doesn't stretch across a wide desktop; the space on either side reads as
+            clean black side margins there. */}
         <div
-          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full aspect-[9/16] max-w-full mx-auto'}`}
+          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:aspect-[9/16] md:max-w-full md:mx-auto'}`}
           style={coSession?.partner ? { top: '15%', bottom: '24%' } : undefined}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
@@ -1837,15 +1837,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           playsInline
           className="block w-full h-full object-cover pointer-events-none"
         />
-        {/* Canvas shows filtered/mirrored output at the camera's native aspect
-            ratio, displayed with object-contain so the whole frame is visible
-            (no zoom crop). It is layered on top of the source video; if the
-            canvas pipeline stalls on mobile the broadcaster still sees the live
-            camera underneath. */}
+        {/* Canvas shows the filtered/mirrored 9:16 broadcast frame. On phones it
+            fills the full-bleed stage with object-cover (the frame is slightly
+            wider than a tall phone, so the sides are gently cropped — no black
+            bars). On the web the stage IS a 9:16 box, so object-contain shows the
+            whole frame with no crop. */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-contain"
-          style={{ objectFit: 'contain' }}
+          className="absolute inset-0 w-full h-full object-cover md:object-contain"
         />
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
@@ -2002,31 +2001,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </>
         )}
 
-        {/* Overlay UI — top/bottom padding so the PREVIEW/잔여시간 badges and the
-            bottom controls (라이브 시작 등) don't sit flush against the screen edges.
-            justify-between pins them to the top/bottom, so this vertical padding is
-            what gives them breathing room.
-
-            IMPORTANT: the padding is applied INLINE (not via Tailwind py-* + the
-            .safe-area-pad helper) on purpose. .safe-area-pad sets padding-* to
-            env(safe-area-inset-*), and because it is declared after Tailwind in the
-            cascade it was overriding py-6/py-10 down to 0px on every device without
-            notch insets (all desktops, most Android) — which is exactly why the
-            buttons kept appearing glued to the edges no matter how much py-* was
-            added. Inline styles win the cascade, and calc() folds the safe-area
-            inset INTO the base gap so notched devices still clear the notch. */}
-        <div
-          className="absolute inset-0 flex flex-col justify-between pointer-events-none"
-          style={{
-            paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1.75rem)',
-            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.75rem)',
-            paddingLeft: 'calc(env(safe-area-inset-left, 0px) + 0.875rem)',
-            paddingRight: 'calc(env(safe-area-inset-right, 0px) + 0.875rem)',
-          }}
-        >
+        {/* Overlay UI — the top controls pin to the top edge and the bottom
+            controls to the bottom edge (justify-between), with the edge gap set by
+            .live-overlay-pad: a tight gap on phones so the buttons hug the edges
+            and keep the center of the frame clear, and a roomier gap on the web.
+            See .live-overlay-pad in index.css for why the padding lives in CSS
+            (so it beats the generic .safe-area-pad helper on every device). */}
+        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none live-overlay-pad">
           <div className="flex justify-between items-start pointer-events-auto">
             <div className="flex items-center gap-2 md:gap-4 flex-wrap">
-              <div className="bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 flex items-center gap-2 md:gap-3">
+              {/* On phones the PREVIEW badge is hidden to declutter the setup
+                  screen — only the live LIVE/viewer badge shows. On the web it's
+                  always visible. */}
+              <div className={`bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 items-center gap-2 md:gap-3 ${isLive ? 'flex' : 'hidden md:flex'}`}>
                 <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
                 <span className="text-white text-xs font-black uppercase tracking-widest">
                   {isLive ? 'LIVE' : 'PREVIEW'}
@@ -2050,8 +2037,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 const lowRunning = isLive && shownRemaining <= 30;
                 return (
                 <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* 잔여시간 badge — hidden on phones to declutter the broadcast
+                      screen (the broadcaster asked not to surface it there); the
+                      low-time warning banner still appears while live. Always
+                      shown on the web. */}
                   <div
-                    className={`backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border text-white text-[10px] md:text-[11px] font-bold flex items-center gap-2 ${liveUsage.exhausted || shownRemaining <= 0 ? 'bg-red-600/40 border-red-400/40' : lowRunning ? 'bg-amber-600/40 border-amber-400/40' : 'bg-black/40 border-white/10'}`}
+                    className={`backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border text-white text-[10px] md:text-[11px] font-bold hidden md:flex items-center gap-2 ${liveUsage.exhausted || shownRemaining <= 0 ? 'bg-red-600/40 border-red-400/40' : lowRunning ? 'bg-amber-600/40 border-amber-400/40' : 'bg-black/40 border-white/10'}`}
                     title="이번 달 라이브 잔여시간 (포함 3시간 + 충전 시간) · 후불 누적 (시간당 8,900원) · 매출 수수료 8.5%(PG 포함)"
                   >
                     <span className="text-white/40 uppercase tracking-widest text-[9px]">잔여</span>
@@ -2080,7 +2071,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     <button
                       type="button"
                       onClick={() => { setChargeError(null); setShowChargeModal(true); }}
-                      className="backdrop-blur-md px-3 py-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 text-[10px] md:text-[11px] font-black flex items-center gap-1 transition-all active:scale-95"
+                      className="backdrop-blur-md px-3 py-2 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 text-[10px] md:text-[11px] font-black hidden md:flex items-center gap-1 transition-all active:scale-95"
                       title="라이브 시간 충전하기 (시간당 8,900원)"
                     >
                       <Plus size={12} /> 시간 충전
@@ -2152,19 +2143,21 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               >
                 <Radio size={18} />
               </button>
-              {/* Mirror toggle */}
+              {/* Mirror toggle — hidden on phones (duplicated in the bottom bar)
+                  to thin out the top controls. */}
               <button
                 onClick={() => setIsMirrored(!isMirrored)}
-                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${isMirrored ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'}`}
+                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all hidden md:inline-flex ${isMirrored ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'}`}
                 title="거울 모드"
               >
                 <FlipHorizontal2 size={20} />
               </button>
-              {/* Front/rear camera switch */}
+              {/* Front/rear camera switch — hidden on phones (duplicated in the
+                  bottom bar). */}
               <button
                 onClick={switchCamera}
                 disabled={!isCameraOn}
-                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all ${facingMode === 'environment' ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'} disabled:opacity-40`}
+                className={`p-2 md:p-3 backdrop-blur-md rounded-full text-white transition-all hidden md:inline-flex ${facingMode === 'environment' ? 'bg-blue-600' : 'bg-black/40 hover:bg-black/60'} disabled:opacity-40`}
                 title={facingMode === 'user' ? '후면 카메라로 전환' : '전면 카메라로 전환'}
               >
                 <SwitchCamera size={20} />
@@ -2387,9 +2380,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            {/* Quick material toggle bar */}
+            {/* Quick material toggle bar — hidden on phones (it read as a stray
+                "배너바" floating over the broadcast). Materials/banners are managed
+                from the 배너/자료 tabs in the side panel instead; the bar stays on
+                the web where there's room for it. */}
             {materials.length > 0 && (
-              <div className="bg-black/40 backdrop-blur-md p-2 rounded-2xl border border-white/10 flex gap-2 flex-wrap">
+              <div className="bg-black/40 backdrop-blur-md p-2 rounded-2xl border border-white/10 hidden md:flex gap-2 flex-wrap">
                 {materials.map(item => (
                   <button
                     key={item.id}

@@ -226,6 +226,27 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Live broadcast overlay padding. On phones the top/bottom controls hug the
+   screen edges (small gap) so they clear the center of the frame as much as
+   possible — the broadcaster asked for minimal obstruction. On the web (≥768px)
+   they get more breathing room so they don't sit flush against the stage edges.
+   Declared here (not via Tailwind py-* utilities) so it reliably wins over the
+   generic .safe-area-pad helper, and folds the notch inset into the base gap. */
+.live-overlay-pad {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 0.625rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 0.625rem);
+}
+@media (min-width: 768px) {
+  .live-overlay-pad {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 1.75rem);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.75rem);
+    padding-left: calc(env(safe-area-inset-left, 0px) + 0.875rem);
+    padding-right: calc(env(safe-area-inset-right, 0px) + 0.875rem);
+  }
+}
+
 /* Modal/drawer scroll containers: prevent scroll chaining to the underlying page,
    keep iOS momentum scrolling. Apply with className="overscroll-contain". */
 .overscroll-contain {
