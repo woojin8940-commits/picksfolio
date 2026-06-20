@@ -798,7 +798,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   // Send an invite to a specific username (from the friend list or the input).
   const sendInvite = useCallback(async (target: string, alsoSaveFriend: boolean) => {
-    const guest = target.trim().toLowerCase();
+    const guest = target.trim().replace(/^@+/, '').toLowerCase();
     if (!guest || inviteBusy) return;
     setInviteBusy(true);
     setInviteError(null);
@@ -824,7 +824,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   // Add a friend by username without sending an invite.
   const addFriend = useCallback(async (target: string) => {
-    const friend = target.trim().toLowerCase();
+    const friend = target.trim().replace(/^@+/, '').toLowerCase();
     if (!friend || inviteBusy) return;
     setInviteBusy(true);
     setInviteError(null);
@@ -2002,11 +2002,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </>
         )}
 
-        {/* Overlay UI — extra top/bottom padding so the PREVIEW/잔여시간 badges and
-            the bottom controls (라이브 시작 등) don't sit flush against the screen
-            edges. justify-between pins them to the top/bottom, so the vertical
-            padding here is what gives them breathing room from the edges. */}
-        <div className="absolute inset-0 px-3 py-6 md:px-8 md:py-10 flex flex-col justify-between pointer-events-none safe-area-pad">
+        {/* Overlay UI — top/bottom padding so the PREVIEW/잔여시간 badges and the
+            bottom controls (라이브 시작 등) don't sit flush against the screen edges.
+            justify-between pins them to the top/bottom, so this vertical padding is
+            what gives them breathing room.
+
+            IMPORTANT: the padding is applied INLINE (not via Tailwind py-* + the
+            .safe-area-pad helper) on purpose. .safe-area-pad sets padding-* to
+            env(safe-area-inset-*), and because it is declared after Tailwind in the
+            cascade it was overriding py-6/py-10 down to 0px on every device without
+            notch insets (all desktops, most Android) — which is exactly why the
+            buttons kept appearing glued to the edges no matter how much py-* was
+            added. Inline styles win the cascade, and calc() folds the safe-area
+            inset INTO the base gap so notched devices still clear the notch. */}
+        <div
+          className="absolute inset-0 flex flex-col justify-between pointer-events-none"
+          style={{
+            paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1.75rem)',
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.75rem)',
+            paddingLeft: 'calc(env(safe-area-inset-left, 0px) + 0.875rem)',
+            paddingRight: 'calc(env(safe-area-inset-right, 0px) + 0.875rem)',
+          }}
+        >
           <div className="flex justify-between items-start pointer-events-auto">
             <div className="flex items-center gap-2 md:gap-4 flex-wrap">
               <div className="bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 flex items-center gap-2 md:gap-3">
@@ -3112,7 +3129,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     <input
                       type="text"
                       value={inviteUsername}
-                      onChange={(e) => setInviteUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
+                      onChange={(e) => setInviteUsername(e.target.value.replace(/\s/g, '').replace(/^@+/, '').toLowerCase())}
                       onKeyDown={(e) => { if (e.key === 'Enter') sendInvite(inviteUsername, saveAsFriend); }}
                       placeholder="유저네임"
                       disabled={inviteBusy}
