@@ -105,9 +105,13 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
   useEffect(() => {
     if (webrtcConnected) { setHlsActive(false); return; }
     if (!hlsUrl) return;
+    // Keep this grace window short: a mobile partner only ever arrives over
+    // HLS, so waiting too long left viewers staring at a "연결 중…" half while
+    // the other feed was already playing. 3s is enough for a web partner's
+    // WebRTC to win when it's going to.
     const t = setTimeout(() => {
       if (!webrtcConnectedRef.current) setHlsActive(true);
-    }, 6000);
+    }, 3000);
     return () => clearTimeout(t);
   }, [webrtcConnected, hlsUrl, channel]);
 

@@ -755,7 +755,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       } catch { /* non-blocking */ }
     };
     poll();
-    const id = setInterval(poll, 8000);
+    // Poll promptly so the 2-up split turns on for each host almost as soon as
+    // the partner accepts / goes live, instead of lagging several seconds behind.
+    const id = setInterval(poll, 4000);
     return () => { cancelled = true; clearInterval(id); };
   }, [userName]);
 
@@ -1790,8 +1792,15 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   /* On the web, the chat/상품/담기현황 panel sits in a right-hand column
      (md:flex-row) so the broadcast stage can take the full viewport height —
-     the largest possible mobile 9:16 preview. On phones the panel docks at the
-     bottom beneath the stage, matching what a viewer sees. */
+     the largest possible mobile 9:16 preview. On phones the panel no longer
+     docks as a solid block beneath the stage; instead the stage fills the whole
+     screen and the chat floats over it as a transparent overlay, with the
+     상품/담기현황/배너 panels opening as bottom sheets on demand. */
+  // A 상품/담기현황/배너 sheet is open (mobile) — used to swap the floating chat
+  // overlay for a solid full-height panel. showFilterPanel also needs the solid,
+  // full-height treatment so its sliders sit on an opaque surface.
+  const sheetOpen = showProductPanel || showCartPanel || showBannerPanel;
+  const panelExpanded = sheetOpen || showFilterPanel;
   return (
     <>
     {/* Full-screen black backdrop behind the console, so any space on either
@@ -1819,7 +1828,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             doesn't stretch across a wide desktop; the space on either side reads as
             clean black side margins there. */}
         <div
-          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:aspect-[9/16] md:max-w-full md:mx-auto'}`}
+          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:aspect-[9/16] md:max-w-[26.5rem] md:mx-auto'}`}
           style={coSession?.partner ? { top: '15%', bottom: '24%' } : undefined}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
@@ -1827,24 +1836,24 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             and playing frames that feed the canvas. On desktop the opaque canvas
             on top covers it; if the canvas pipeline ever stalls on mobile, the
             broadcaster still sees their live camera through this layer instead of
-            a black screen. object-cover (center-crop to the portrait box) matches
-            the canvas's 9:16 crop so this layer never peeks out as a wider
-            landscape frame behind the canvas. */}
+            a black screen. object-contain matches the canvas below so this layer
+            never peeks out behind the letterboxed frame. */}
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          className="block w-full h-full object-cover pointer-events-none"
+          className="block w-full h-full object-contain pointer-events-none"
         />
-        {/* Canvas shows the filtered/mirrored 9:16 broadcast frame. On phones it
-            fills the full-bleed stage with object-cover (the frame is slightly
-            wider than a tall phone, so the sides are gently cropped — no black
-            bars). On the web the stage IS a 9:16 box, so object-contain shows the
-            whole frame with no crop. */}
+        {/* Canvas shows the filtered/mirrored 9:16 broadcast frame. It is shown
+            with object-contain on EVERY device — phone and web alike — so the
+            host's preview is the exact same un-cropped framing the viewer sees in
+            LiveStream (which also uses contain). Previously the phone preview used
+            object-cover, so the broadcaster saw a zoom-cropped image that did not
+            match what was actually exposed to viewers. */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-cover md:object-contain"
+          className="absolute inset-0 w-full h-full object-contain"
         />
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
@@ -2449,10 +2458,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       </div>
 
-      {/* Sidebar (Chat, Products & Cart Stats) — docked at the bottom on phones
-          (full width), and moved to a fixed right-hand column on the web (md) so
-          the broadcast stage beside it can use the full viewport height. */}
-      <div className="relative w-full md:w-[22rem] bg-slate-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col h-[30vh] md:h-full shrink-0">
+      {/* Sidebar (Chat, Products & Cart Stats).
+          On the web (md) this is a fixed right-hand column so the broadcast
+          stage beside it can use the full viewport height.
+          On phones it is NOT a solid docked block anymore — the stage fills the
+          whole screen and this floats over it: in chat mode it's a transparent
+          overlay anchored just above the broadcaster controls (so the bigger,
+          uncovered video reads behind the chat); when a 상품/담기현황/배너 sheet
+          (or 얼굴 보정) is open it expands to a solid full-height panel. */}
+      <div className={`z-20 flex flex-col shrink-0 md:relative md:inset-auto md:bottom-auto md:w-[22rem] md:h-full md:bg-slate-900 md:backdrop-blur-none md:pointer-events-auto md:border-l md:border-t-0 md:border-white/5 ${
+        panelExpanded
+          ? 'absolute inset-0 bg-slate-900/95 backdrop-blur-md'
+          : 'absolute inset-x-0 bottom-28 h-[36vh] bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none'
+      }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). Rendered as an overlay over
             the 채팅/상품/담기현황 sidebar so the broadcaster's face on the video
@@ -2588,8 +2606,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             </div>
           </div>
         )}
-        {/* Tab navigation */}
-        <div className="flex border-b border-white/5">
+        {/* Mobile sheet header — on phones the 상품/담기현황/배너 panels open as a
+            full-height sheet over the video; this names the open panel and lets
+            the broadcaster close it back to the transparent chat overlay. The web
+            uses the tab bar below instead. */}
+        {sheetOpen && (
+          <div className="flex md:hidden items-center justify-between px-4 py-3.5 border-b border-white/10 shrink-0">
+            <h4 className="text-white font-black text-sm flex items-center gap-2">
+              {showProductPanel && <><ShoppingBag size={16} className="text-green-400" /> 상품</>}
+              {showCartPanel && <><BarChart3 size={16} className="text-orange-400" /> 담기현황</>}
+              {showBannerPanel && <><Layout size={16} className="text-violet-400" /> 배너</>}
+            </h4>
+            <button
+              onClick={() => { setShowProductPanel(false); setShowCartPanel(false); setShowBannerPanel(false); }}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+              title="닫기"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+        {/* Tab navigation (web) */}
+        <div className="hidden md:flex border-b border-white/5">
           <button
             onClick={() => { setShowProductPanel(false); setShowCartPanel(false); setShowBannerPanel(false); }}
             className={`flex-1 py-2.5 md:py-3 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-widest transition-all ${
@@ -2633,20 +2671,20 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hide overscroll-contain">
               {messages.map(msg => (
                 <div key={msg.id} className="animate-in slide-in-from-bottom-2 duration-200">
-                  <span className="text-blue-400 text-xs font-black uppercase tracking-wide block mb-1">{msg.user}</span>
-                  <div className="bg-white/5 border border-white/5 p-3 rounded-2xl rounded-tl-none text-white text-[15px] leading-snug">
+                  <span className="text-blue-300 md:text-blue-400 text-xs font-black uppercase tracking-wide block mb-1 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)] md:[text-shadow:none]">{msg.user}</span>
+                  <div className="bg-black/45 backdrop-blur-sm md:bg-white/5 md:backdrop-blur-none border border-white/10 md:border-white/5 p-3 rounded-2xl rounded-tl-none text-white text-[15px] leading-snug">
                     {msg.text}
                   </div>
                 </div>
               ))}
               <div ref={chatEndRef} />
             </div>
-            <div className="p-4 bg-slate-950/50">
+            <div className="p-4 bg-transparent md:bg-slate-950/50 pointer-events-auto">
               <div className="relative">
                 <input
                   type="text"
                   placeholder="메시지를 입력하세요..."
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 px-5 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/30"
+                  className="w-full bg-black/40 backdrop-blur-md md:bg-white/5 border border-white/15 md:border-white/10 rounded-2xl py-3.5 px-5 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/40 md:placeholder:text-white/30"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -2660,6 +2698,36 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             </div>
           </>
+        )}
+
+        {/* Mobile action bar — on phones the 상품/담기현황/배너 tabs are reduced to a
+            slim bar pinned at the bottom of the chat overlay (just above the
+            broadcaster controls); tapping one opens its panel as a full-height
+            sheet. Hidden on the web, which keeps the top tab navigation. */}
+        {!sheetOpen && (
+          <div className="flex md:hidden items-stretch gap-2 px-3 pb-2 pt-1 pointer-events-auto">
+            <button
+              onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+            >
+              <ShoppingBag size={14} className="text-green-400" /> 상품
+              {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1.5 rounded-full">{liveProducts.length}</span>}
+            </button>
+            <button
+              onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+            >
+              <BarChart3 size={14} className="text-orange-400" /> 담기현황
+              {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1.5 rounded-full">{cartStats.totalItems}</span>}
+            </button>
+            <button
+              onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+            >
+              <Layout size={14} className="text-violet-400" /> 배너
+              {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1.5 rounded-full">{bannerMaterials.length}</span>}
+            </button>
+          </div>
         )}
 
         {/* Product Push Panel */}
