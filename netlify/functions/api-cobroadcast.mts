@@ -75,14 +75,21 @@ export default async (req: Request) => {
         });
       }
 
-      // The user's own current accepted/live session (host or guest side).
+      // The user's own current accepted/live session (host or guest side). An
+      // 'accepted' session is always surfaced (the pair has agreed but may not be
+      // broadcasting yet); a 'live' session is only surfaced while still fresh, so
+      // a dead session left 'live' by a crashed previous broadcast doesn't keep
+      // re-arming this host's co-broadcast (which would re-light the viewers' split).
       const active = norm(url.searchParams.get("active"));
       if (active) {
         const rows = (await db.sql`
           SELECT id, host_username, guest_username, status, invite_token, started_at
           FROM cobroadcast_sessions
           WHERE (host_username = ${active} OR guest_username = ${active})
-            AND status IN ('accepted', 'live')
+            AND (
+              status = 'accepted'
+              OR (status = 'live' AND updated_at > now() - interval '45 seconds')
+            )
           ORDER BY updated_at DESC
           LIMIT 1
         `) as any[];
@@ -103,8 +110,13 @@ export default async (req: Request) => {
       }
 
       // Partner channel for a broadcaster (viewers use this for split view). Only
-      // surfaces a partner once the session is actually live, so viewers don't
-      // try to subscribe to a channel that isn't broadcasting yet.
+      // surfaces a partner once the session is actually live AND still fresh: each
+      // co-broadcasting host re-asserts 'live' (bumping updated_at) every ~15s
+      // while broadcasting, so a session whose updated_at has gone stale means a
+      // host stopped broadcasting (ended cleanly, crashed, or closed the app). A
+      // stale 'live' row left behind by a previous broadcast is exactly what made
+      // the split screen appear for viewers even though nobody is co-broadcasting
+      // now — the freshness window keeps those phantom splits from showing.
       const channel = norm(url.searchParams.get("channel"));
       if (channel) {
         const rows = (await db.sql`
@@ -112,6 +124,7 @@ export default async (req: Request) => {
           FROM cobroadcast_sessions
           WHERE (host_username = ${channel} OR guest_username = ${channel})
             AND status = 'live'
+            AND updated_at > now() - interval '45 seconds'
           ORDER BY updated_at DESC
           LIMIT 1
         `) as any[];

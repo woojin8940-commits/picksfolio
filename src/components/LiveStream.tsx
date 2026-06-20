@@ -2921,9 +2921,16 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             </div>
           </>
         )}
-        {/* HLS Video.js fallback */}
+        {/* HLS Video.js fallback. In a 함께 방송 split this MUST occupy the same
+            left-half middle band as the WebRTC video — otherwise the full-screen
+            HLS surface renders on top of (and behind) the partner's right half,
+            which is the "뒤에 방송 화면이 겹쳐서 보이는" overlap viewers reported. When
+            solo it fills the whole stage as before. */}
         {hlsPlaybackUrl && (
-          <div className={`absolute top-0 left-0 w-full h-full ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}>
+          <div
+            className={`absolute ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+            style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
+          >
             <video
               ref={hlsVideoRef}
               className="video-js vjs-big-play-centered vjs-fluid"
