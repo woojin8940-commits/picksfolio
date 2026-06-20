@@ -275,17 +275,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* 함께 방송 (co-broadcast) split — each host's feed occupies one half of the
-   stage. Without this, the rule above forces every <video> to `width: 100%`,
-   which stretched both halves to full width so they overlapped and only one
-   feed was visible behind the centre divider. The explicit class is more
-   specific than `.live-stream-container video`, so the half width wins. */
-.live-stream-container video.co-split-half {
-  width: 50% !important;
-  /* The base rule forces `height: 100%`, which would push the contain-centered
-     frame down under the bottom info band. In the split the element is anchored
-     with explicit top/bottom insets (middle band), so let those define height. */
-  height: auto !important;
-}
+   stage. Every feed (the host's WebRTC video, the host's HLS fallback and the
+   partner feed) is wrapped in its OWN positioned <div> that carries the half
+   width and the shared top/bottom band, and the base rule above makes the inner
+   <video> fill that box. Because all three wrappers use the identical geometry,
+   the two halves are always the same size and never overlap — so no per-element
+   width override is needed here anymore. */
 
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
    gradients and box-shadows with subpixel-rounding seams. On the green

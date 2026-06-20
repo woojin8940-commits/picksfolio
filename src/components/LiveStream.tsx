@@ -709,7 +709,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       });
     };
     check();
-    const interval = setInterval(check, 6000);
+    // Poll fairly often so the split turns on almost as soon as the partner
+    // goes live — viewers reported that when a co-broadcast started only one
+    // feed showed for several seconds before the second appeared.
+    const interval = setInterval(check, 3000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [username]);
 
@@ -2835,31 +2838,44 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             overlaid controls and chat legible. */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/45 z-10 pointer-events-none" />
 
-        {/* WebRTC Video - always render and keep visible when connected */}
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          preload="auto"
-          // @ts-ignore - webkit-playsinline needed for older iOS Safari
-          webkit-playsinline=""
-          // @ts-ignore - x5-playsinline needed for Tencent/QQ/WeChat/Kakao WebViews on Android
-          x5-playsinline=""
-          // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
-          x5-video-player-type="h5-page"
-          className={`absolute left-0 ${coPartner ? 'w-1/2 co-split-half' : 'top-0 h-full w-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          // objectFit: 'contain' shows the entire broadcast frame at its true
-          // aspect ratio, letterboxed against the black stage, instead of
-          // center-cropping it to fill. The broadcaster encodes a portrait 9:16
-          // feed; with 'cover' that frame was zoom-cropped to whatever stage it
-          // landed on, which viewers reported as the picture being "확대"(zoomed)
-          // and cut off. 'contain' guarantees nothing is ever magnified or
-          // clipped — the viewer sees exactly what the host sees. (The CSS in
-          // index.css enforces the same with !important; this keeps the intent
-          // explicit on the element.)
-          style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)', ...(coPartner ? { top: '15%', bottom: '24%' } : null) }}
-        />
+        {/* WebRTC Video - always render and keep visible when connected.
+            The video lives inside a positioned wrapper rather than carrying the
+            split geometry itself. In a 함께 방송 split the wrapper takes the SAME
+            box as the partner feed and the HLS surface — `left-0 w-1/2` with the
+            identical top/bottom band — so the two halves are guaranteed to be the
+            exact same size and can never overlap. (A bare <video> with width set
+            directly fought the `width:100% !important` base rule and ended up a
+            different height than the partner half, which is what made the two
+            screens look mismatched and stacked on top of each other.) */}
+        <div
+          className={`absolute ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
+        >
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            preload="auto"
+            // @ts-ignore - webkit-playsinline needed for older iOS Safari
+            webkit-playsinline=""
+            // @ts-ignore - x5-playsinline needed for Tencent/QQ/WeChat/Kakao WebViews on Android
+            x5-playsinline=""
+            // @ts-ignore - x5-video-player-type inline keeps video in flow on Android in-app browsers
+            x5-video-player-type="h5-page"
+            className="w-full h-full"
+            // objectFit: 'contain' shows the entire broadcast frame at its true
+            // aspect ratio, letterboxed against the black stage, instead of
+            // center-cropping it to fill. The broadcaster encodes a portrait 9:16
+            // feed; with 'cover' that frame was zoom-cropped to whatever stage it
+            // landed on, which viewers reported as the picture being "확대"(zoomed)
+            // and cut off. 'contain' guarantees nothing is ever magnified or
+            // clipped — the viewer sees exactly what the host sees. (The CSS in
+            // index.css enforces the same with !important; this keeps the intent
+            // explicit on the element.)
+            style={{ objectFit: 'contain', WebkitTransform: 'translateZ(0)', transform: 'translateZ(0)' }}
+          />
+        </div>
 
         {/* 함께 방송 split — partner feed fills the right half. The two portrait
             feeds sit in a centered middle band; the top/bottom margins are turned
