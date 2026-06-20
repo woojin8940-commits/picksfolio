@@ -49,7 +49,7 @@ const CoBroadcastInviteNotice: React.FC<Props> = ({ username, onGoLive }) => {
       } catch { /* non-blocking */ }
     };
     poll();
-    const id = setInterval(poll, 8000);
+    const id = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [username]);
 

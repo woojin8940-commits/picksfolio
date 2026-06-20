@@ -2002,8 +2002,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </>
         )}
 
-        {/* Overlay UI */}
-        <div className="absolute inset-0 p-3 md:p-8 flex flex-col justify-between pointer-events-none safe-area-pad">
+        {/* Overlay UI — extra top/bottom padding so the PREVIEW/잔여시간 badges and
+            the bottom controls (라이브 시작 등) don't sit flush against the screen
+            edges. justify-between pins them to the top/bottom, so the vertical
+            padding here is what gives them breathing room from the edges. */}
+        <div className="absolute inset-0 px-3 py-6 md:px-8 md:py-10 flex flex-col justify-between pointer-events-none safe-area-pad">
           <div className="flex justify-between items-start pointer-events-auto">
             <div className="flex items-center gap-2 md:gap-4 flex-wrap">
               <div className="bg-black/40 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-white/10 flex items-center gap-2 md:gap-3">
