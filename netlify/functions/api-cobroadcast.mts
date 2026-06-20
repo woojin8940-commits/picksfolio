@@ -81,10 +81,13 @@ export default async (req: Request) => {
       }
 
       // The user's own current accepted/live session (host or guest side). An
-      // 'accepted' session is always surfaced (the pair has agreed but may not be
-      // broadcasting yet); a 'live' session is only surfaced while still fresh, so
-      // a dead session left 'live' by a crashed previous broadcast doesn't keep
-      // re-arming this host's co-broadcast (which would re-light the viewers' split).
+      // 'accepted' session is surfaced only while still fresh (the pair just
+      // agreed and is about to go live); a 'live' session is surfaced while its
+      // heartbeat is fresh. Both windows matter: a stale 'accepted' row left over
+      // from an earlier test never expires on its own, and because the guest's
+      // 라이브 시작 button is disabled ("참여 후 시작") whenever an accepted co-session
+      // is present, that phantom row would otherwise permanently block the guest
+      // from broadcasting at all. The freshness window lets it self-clear.
       const active = norm(url.searchParams.get("active"));
       if (active) {
         const rows = (await db.sql`
@@ -92,7 +95,7 @@ export default async (req: Request) => {
           FROM cobroadcast_sessions
           WHERE (host_username = ${active} OR guest_username = ${active})
             AND (
-              status = 'accepted'
+              (status = 'accepted' AND updated_at > now() - interval '30 minutes')
               OR (status = 'live' AND updated_at > now() - interval '45 seconds')
             )
           ORDER BY updated_at DESC
@@ -170,17 +173,36 @@ export default async (req: Request) => {
           );
         }
 
-        // Reuse an existing open invite/session between these two instead of
-        // stacking duplicates if the host taps invite twice.
-        const existing = (await db.sql`
+        // Only short-circuit on a *fresh* pending invite — i.e. the host
+        // double-tapped within a few seconds. Any other state must yield a NEW
+        // pending invite, otherwise the guest is never (re-)notified:
+        //   • accepted/live  → an old session from a previous test never expires,
+        //                       so reusing it returns 'accepted' and the guest's
+        //                       pending-invite poll (status='pending' only) shows
+        //                       nothing — the host sees "초대를 보냈어요" but the
+        //                       invite never arrives.
+        //   • a stale pending the guest already dismissed (client-side X) → the
+        //                       guest suppresses that exact id, so reusing it stays
+        //                       hidden forever. A fresh row has a new id and pops
+        //                       back up.
+        // So: debounce genuine double-taps (20s), and supersede any older pending
+        // from this host so the guest sees exactly one actionable invite.
+        const fresh = (await db.sql`
           SELECT id, status FROM cobroadcast_sessions
           WHERE host_username = ${host} AND guest_username = ${guest}
-            AND status IN ('pending', 'accepted', 'live')
+            AND status = 'pending'
+            AND created_at > now() - interval '20 seconds'
           ORDER BY created_at DESC LIMIT 1
         `) as any[];
-        if (existing.length > 0) {
-          return Response.json({ success: true, sessionId: existing[0].id, status: existing[0].status });
+        if (fresh.length > 0) {
+          return Response.json({ success: true, sessionId: fresh[0].id, status: fresh[0].status });
         }
+
+        await db.sql`
+          UPDATE cobroadcast_sessions
+          SET status = 'ended', updated_at = now()
+          WHERE host_username = ${host} AND guest_username = ${guest} AND status = 'pending'
+        `;
 
         const id = crypto.randomUUID();
         const token = crypto.randomUUID().replace(/-/g, "");
