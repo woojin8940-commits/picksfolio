@@ -767,30 +767,34 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     if (!partnerChannel) setPartnerStreamReady(false);
   }, [partnerChannel]);
 
-  // When this host is live and has an accepted session, promote it to 'live' so
-  // the partner channel becomes discoverable to viewers (split screen turns on).
-  // The promotion is the single switch that turns the viewers' 2-up split on, so
-  // it must not be left to a best-effort single POST: retry a few times until the
-  // server confirms, and optimistically reflect 'live' locally so a transient
-  // network blip doesn't leave the session stuck on 'accepted' (viewers would
-  // then never see the partner half even though both hosts are broadcasting).
+  // When this host is live and has an accepted/live session, keep it promoted to
+  // 'live' AND heartbeat it so the partner channel stays discoverable to viewers
+  // (the 2-up split). The server only surfaces a 'live' session to viewers while
+  // its updated_at is fresh (~45s), so a single best-effort POST isn't enough:
+  // we re-assert 'live' every 15s. This is also what makes "방송종료하면 협업방송도
+  // 종료" reliable — the moment this host stops broadcasting the heartbeat stops,
+  // and the viewers' split turns itself off within seconds even if the explicit
+  // end call was missed (crash/app close). The initial promotion retries quickly
+  // so the split turns on without waiting for the next heartbeat tick.
   useEffect(() => {
-    if (!isLive || !coSession || coSession.status !== 'accepted') return;
+    if (!isLive || !coSession) return;
+    const status = coSession.status;
+    if (status !== 'accepted' && status !== 'live') return;
     let cancelled = false;
     const sessionId = coSession.id;
-    (async () => {
-      for (let attempt = 0; attempt < 4 && !cancelled; attempt++) {
-        const ok = await apiService.respondCobroadcast('live', sessionId, userName).catch(() => false);
-        if (cancelled) return;
-        if (ok) {
-          setCoSession(prev => (prev && prev.id === sessionId ? { ...prev, status: 'live' } : prev));
-          return;
-        }
-        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    const beat = async (retries = 0) => {
+      const ok = await apiService.respondCobroadcast('live', sessionId, userName).catch(() => false);
+      if (cancelled) return;
+      if (ok) {
+        setCoSession(prev => (prev && prev.id === sessionId && prev.status !== 'live' ? { ...prev, status: 'live' } : prev));
+      } else if (retries < 3) {
+        setTimeout(() => { if (!cancelled) beat(retries + 1); }, 1500 * (retries + 1));
       }
-    })();
-    return () => { cancelled = true; };
-  }, [isLive, coSession, userName]);
+    };
+    beat();
+    const id = setInterval(() => beat(), 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [isLive, coSession?.id, coSession?.status, userName]);
 
   // Send an invite to a specific username (from the friend list or the input).
   const sendInvite = useCallback(async (target: string, alsoSaveFriend: boolean) => {
@@ -1001,7 +1005,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       isLive: true,
       viewerCount,
       currentProduct: activeProduct,
-      activeMaterial: material
+      activeMaterial: material,
+      heartbeatAt: Date.now(),
     });
   }, [activeProductId, activeMaterialId, isLive, userName, viewerCount, liveProducts, materials]);
 
@@ -1023,6 +1028,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         viewerCount,
         currentProduct: activeProduct,
         activeMaterial: material,
+        // Freshness stamp: api-live treats an isLive=true record with a stale
+        // heartbeatAt as offline, so a crashed/force-quit broadcast self-heals
+        // instead of pinning "방송중" forever.
+        heartbeatAt: Date.now(),
       }).catch(() => {});
     };
     const interval = setInterval(sendHeartbeat, 8000);
@@ -1678,6 +1687,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         activeMaterial: initialActiveMaterial,
         broadcastTitle: savedBroadcastTitle,
         startedAt: broadcastStartTimeRef.current,
+        heartbeatAt: Date.now(),
       };
 
       // Update LocalStorage for immediate local sync

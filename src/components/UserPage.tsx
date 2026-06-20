@@ -288,8 +288,16 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       if (savedLive) {
         try {
           const parsed = JSON.parse(savedLive);
+          // Guard against a stale cached "방송중": if the cached record claims live
+          // but its heartbeat is old (broadcast crashed or ended without the
+          // off-write landing), don't optimistically show the live banner — wait
+          // for the API poll to confirm. Mirrors the staleness check in api-live.
+          const cachedStale =
+            parsed.isLive &&
+            typeof parsed.heartbeatAt === 'number' &&
+            Date.now() - parsed.heartbeatAt > 40_000;
           setLiveState({
-            isLive: parsed.isLive,
+            isLive: cachedStale ? false : parsed.isLive,
             currentProduct: parsed.currentProduct,
             viewerCount: parsed.viewerCount || 0,
             activeMaterial: parsed.activeMaterial

@@ -185,7 +185,7 @@ export const apiService = {
     }
   },
 
-  async saveLiveState(username: string, state: { isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any; broadcastTitle?: string; startedAt?: string }): Promise<boolean> {
+  async saveLiveState(username: string, state: { isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any; broadcastTitle?: string; startedAt?: string; heartbeatAt?: number }): Promise<boolean> {
     try {
       const res = await fetch(`/api/live/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
