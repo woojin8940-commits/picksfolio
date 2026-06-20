@@ -1404,6 +1404,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background selection:bg-blue-primary/30 flex flex-col">
+      {/* 함께 방송 초대 알림 — 대시보드(admin) 밖의 화면(홈·내 페이지 등)에 있어도
+          로그인한 크리에이터라면 초대가 도착하는 즉시 상단에 떠야 하므로, 여기서도
+          한 번 더 마운트해 앱 어디서나 초대가 보이도록 한다. */}
+      {isLoggedIn && userName && (
+        <CoBroadcastInviteNotice username={userName} onGoLive={() => { setSubView('live'); navigate('admin'); }} />
+      )}
       <SiteHeader
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}
