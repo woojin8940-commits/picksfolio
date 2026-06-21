@@ -653,7 +653,7 @@ export const apiService = {
   },
 
   // Prepaid live-time top-up ("시간 충전하기"). After the seller completes a
-  // one-time PortOne payment (토스페이먼츠/토스페이/카카오페이) for `hours` of
+  // one-time PortOne payment (나이스정보통신/토스페이/카카오페이) for `hours` of
   // broadcast time at the per-hour rate, the verified `paymentId` is posted here
   // so the server can confirm the payment and add the time. Returns the refreshed
   // usage so the caller can immediately reflect the new remaining time.

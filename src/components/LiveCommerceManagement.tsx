@@ -880,7 +880,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
               </button>
             </div>
 
-            {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+            {/* 결제 수단 — 나이스정보통신(카드) / 토스페이 / 카카오페이 (1회 결제) */}
             <div className="mb-4">
               <p className="text-slate-400 text-[11px] font-bold mb-2">결제 수단</p>
               <div className="grid grid-cols-3 gap-2">

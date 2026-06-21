@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { payClaudePlan, CLAUDE_PAY_METHODS, type ClaudePayMethod } from '../utils/claudeCharge';
-import { startTossCardBilling } from '../utils/tossPayments';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
   clearPortOneIntent,
@@ -24,8 +24,8 @@ interface MembershipPlanProps {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
-// 토스페이먼츠(카드)는 PortOne 을 거치지 않고 토스페이먼츠와 직접 연동한다(startTossCardBilling).
-// PortOne 은 토스페이 / 카카오페이 간편결제 빌링키 발급에만 사용한다(리다이렉트 방식).
+// 카드(나이스정보통신) / 토스페이 / 카카오페이 멤버십 빌링키 발급을 모두 PortOne V2
+// 리다이렉트 방식으로 처리한다.
 
 type MembershipTier = 'standard' | 'standard_ai' | 'commerce';
 const STANDARD_PRICE = 4900;
@@ -310,27 +310,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     const tierLabel = TIER_LABEL[selectedTier];
     const tierAmount = TIER_PRICE[selectedTier];
 
-    // 토스페이먼츠(카드) — PortOne 을 거치지 않고 토스페이먼츠 빌링 인증창으로 리다이렉트한다.
-    // 돌아온 뒤 /toss/return 페이지가 빌링키 발급·첫 달 결제·멤버십 활성화를 마무리한다.
-    if (payMethod === 'CARD') {
-      setSaving(true);
-      const out = await startTossCardBilling({
-        type: 'membership',
-        username: normalizedUserName,
-        tier: selectedTier,
-        amountKrw: tierAmount,
-        orderName: `픽스폴리오 ${tierLabel} 정기결제`,
-        payMethod: 'CARD',
-        returnPath: window.location.pathname + window.location.search,
-      });
-      // 정상 흐름이면 위에서 페이지가 떠난다. 시작 전 오류만 여기서 처리한다.
-      if (!out.success) {
-        setError(out.error || '결제 요청을 시작하지 못했습니다. 다시 시도해 주세요.');
-        setSaving(false);
-      }
-      return;
-    }
-
     if (typeof window === 'undefined' || !window.PortOne) {
       setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
       return;
@@ -340,10 +319,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
       const issueId = genPortOneId('billing', normalizedUserName);
-      // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
-      const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+      // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 빌링키를 발급한다.
+      const ppMethod = payMethod;
 
-      // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
+      // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
       // 돌아온 /portone/return 페이지가 발급된 billingKey 로 첫 달 결제·멤버십 활성화를
       // 마무리한다. intent 를 미리 저장한다. (PC 팝업으로 promise 가 resolve 되면 아래 인라인
       // 처리도 동작한다.)
@@ -359,7 +338,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       const response = await window.PortOne.requestIssueBillingKey({
         storeId: PORTONE_STORE_ID,
         channelKey: channelKeyFor(ppMethod),
-        billingKeyMethod: 'EASY_PAY',
+        billingKeyMethod: portoneBillingKeyMethod(ppMethod),
         issueId,
         issueName: `픽스폴리오 ${tierLabel} 정기결제`,
         displayAmount: tierAmount,
@@ -1032,7 +1011,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    토스페이먼츠 결제창을 통해 신용·체크카드로 결제됩니다.
+                    나이스정보통신 결제창을 통해 신용·체크카드로 결제됩니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (

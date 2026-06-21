@@ -695,7 +695,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   }, [refreshLiveUsage]);
 
   // Charge prepaid broadcast time by the hour (시간당 8,900원) via a one-time
-  // PortOne payment (토스페이먼츠/토스페이/카카오페이). On success the usage badge
+  // PortOne payment (나이스정보통신/토스페이/카카오페이). On success the usage badge
   // and the broadcast gate refresh immediately. Works while live so a seller can
   // top up mid-broadcast when time is running low.
   const handleChargeTime = useCallback(async () => {
@@ -3012,7 +3012,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   </button>
                 </div>
 
-                {/* 결제 수단 — 토스페이먼츠(카드) / 토스페이 / 카카오페이 (1회 결제) */}
+                {/* 결제 수단 — 나이스정보통신(카드) / 토스페이 / 카카오페이 (1회 결제) */}
                 <div className="mb-4">
                   <p className="text-white/40 text-[11px] font-bold mb-2">결제 수단</p>
                   <div className="grid grid-cols-3 gap-2">
