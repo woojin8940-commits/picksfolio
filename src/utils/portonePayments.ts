@@ -30,21 +30,20 @@ export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939
 // 카드 결제용 나이스정보통신(신모듈) 채널 키. 사용자에게는 '카드결제'로 노출하지만, 실제 PG 는
 // PortOne V2 의 나이스정보통신(신모듈) 채널이다.
 //
-// 테스트 연동(나이스정보통신 테스트, 계약 전 가능): PortOne 콘솔 →
-//   결제 연동 > 연동 정보 > 채널 관리 > + 채널 추가 에서
+// 현재 값은 나이스정보통신 **테스트 연동** 채널 키다. PortOne 콘솔 →
+//   결제 연동 > 연동 정보 > 채널 관리 > 채널 추가 에서
 //   · 연동 모드: 테스트 연동
 //   · 결제대행사: 나이스정보통신
 //   · 모듈: 신모듈 / PG상점아이디(MID): iamport00m (일반결제 결제창)  ← 테스트 키는 별도 발급 없이 자동 적용
-//   채널을 추가하면 발급되는 채널 키(channel-key-…, 브라우저 공개 식별자)를 아래 상수나
-//   VITE_PORTONE_NICE_CHANNEL_KEY 환경변수에 넣으면 테스트 결제가 동작한다.
+//   로 채널을 추가하면 발급되는 채널 키(channel-key-…, 브라우저 공개 식별자)다.
 //   (테스트 모드는 실제 출금되지만 매일 23:00~23:50 자동 취소되며, 전체취소만 가능하다.
 //    NH농협·KB국민 신용카드와 KT 휴대폰 소액결제는 테스트 환경에서 사용할 수 없다.)
 //
-// 운영(실연동) 전환 시에도 동일하게 운영 채널 키로 교체하면 된다. 토스페이·카카오페이 키처럼
-// 소스에 직접 박아도 되고, 환경변수로 주입해도 된다(환경변수가 우선).
+// 운영(실연동) 전환 시에는 운영 채널 키로 교체한다. 토스페이·카카오페이 키처럼 소스에 직접
+// 박아도 되고, VITE_PORTONE_NICE_CHANNEL_KEY 환경변수로 주입해도 된다(환경변수가 우선).
 export const PORTONE_NICE_CHANNEL_KEY =
   (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY as string | undefined) ||
-  'channel-key-REPLACE-WITH-NICE-CHANNEL-KEY';
+  'channel-key-1be85e63-512b-499e-a9df-b477d8590f06';
 
 // CARD = 나이스정보통신(신모듈) 카드 결제, TOSSPAY/KAKAOPAY = 간편결제.
 export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
