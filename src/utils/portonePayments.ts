@@ -27,9 +27,21 @@ import { toAsciiSafeId } from './formatters';
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
-// 카드 결제용 나이스정보통신(신모듈) 채널 키. PortOne 콘솔에서 나이스정보통신(신모듈) 채널을
-// 연결하면 발급되는 값으로, 운영 키는 VITE_PORTONE_NICE_CHANNEL_KEY 환경변수로 주입한다.
-// (미설정 시 아래 자리표시자로 동작하므로 결제가 실패한다 → 콘솔에서 발급한 실제 채널 키로 반드시 교체.)
+// 카드 결제용 나이스정보통신(신모듈) 채널 키. 사용자에게는 '카드결제'로 노출하지만, 실제 PG 는
+// PortOne V2 의 나이스정보통신(신모듈) 채널이다.
+//
+// 테스트 연동(나이스정보통신 테스트, 계약 전 가능): PortOne 콘솔 →
+//   결제 연동 > 연동 정보 > 채널 관리 > + 채널 추가 에서
+//   · 연동 모드: 테스트 연동
+//   · 결제대행사: 나이스정보통신
+//   · 모듈: 신모듈 / PG상점아이디(MID): iamport00m (일반결제 결제창)  ← 테스트 키는 별도 발급 없이 자동 적용
+//   채널을 추가하면 발급되는 채널 키(channel-key-…, 브라우저 공개 식별자)를 아래 상수나
+//   VITE_PORTONE_NICE_CHANNEL_KEY 환경변수에 넣으면 테스트 결제가 동작한다.
+//   (테스트 모드는 실제 출금되지만 매일 23:00~23:50 자동 취소되며, 전체취소만 가능하다.
+//    NH농협·KB국민 신용카드와 KT 휴대폰 소액결제는 테스트 환경에서 사용할 수 없다.)
+//
+// 운영(실연동) 전환 시에도 동일하게 운영 채널 키로 교체하면 된다. 토스페이·카카오페이 키처럼
+// 소스에 직접 박아도 되고, 환경변수로 주입해도 된다(환경변수가 우선).
 export const PORTONE_NICE_CHANNEL_KEY =
   (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY as string | undefined) ||
   'channel-key-REPLACE-WITH-NICE-CHANNEL-KEY';
@@ -85,6 +97,25 @@ export const easyPayParam = (m: PortOnePayMethod) =>
     : m === 'KAKAOPAY'
       ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
       : { easyPay: { easyPayProvider: 'TOSSPAY' } };
+
+// 나이스정보통신(신모듈) 카드 결제 파라미터. NICE V2 는 카드 결제 시 고정 할부 개월수를
+// 요구한다(미지정 시 결제창이 즉시 오류로 닫혀 "결제 처리 중 오류"로 보인다). 결제 금액이
+// 대부분 할부 가능 기준(보통 5만원) 미만이므로 일시불(fixedMonth: 0)로 호출한다.
+// 간편결제(토스페이/카카오페이)에는 카드 옵션을 넣지 않는다. — PortOne V2 NICE 문서 기준.
+export const cardParam = (m: PortOnePayMethod) =>
+  m === 'CARD' ? { card: { installment: { monthOption: { fixedMonth: 0 } } } } : {};
+
+// 나이스정보통신 채널 키가 실제 값으로 설정되었는지. 자리표시자(REPLACE) 상태면 결제가
+// 무조건 실패하므로, 카드 결제 호출 전에 이 값으로 사전 점검해 명확한 안내를 띄운다.
+// PortOne 콘솔에서 발급한 NICE(신모듈) 채널 키를 VITE_PORTONE_NICE_CHANNEL_KEY 로 주입하면
+// 활성화된다. (테스트 결제는 콘솔에서 해당 채널을 '테스트' 모드로 두면 된다.)
+export const isNiceCardConfigured = () =>
+  !!PORTONE_NICE_CHANNEL_KEY && !PORTONE_NICE_CHANNEL_KEY.includes('REPLACE');
+
+// 카드(나이스정보통신) 채널 미설정 시 사용자에게 보여줄 안내 메시지.
+// 사용자에게는 PG사명(나이스정보통신) 대신 '카드 결제'로만 노출한다.
+export const NICE_NOT_CONFIGURED_MESSAGE =
+  '카드 결제 채널이 아직 연결되지 않았습니다. 토스페이·카카오페이로 결제하거나 관리자에게 문의해 주세요.';
 
 const origin = () => window.location.origin;
 

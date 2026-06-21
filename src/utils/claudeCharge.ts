@@ -5,6 +5,9 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  cardParam,
+  isNiceCardConfigured,
+  NICE_NOT_CONFIGURED_MESSAGE,
   portonePayMethod,
   portoneBillingKeyMethod,
   portoneRedirectUrl,
@@ -34,7 +37,7 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 export type ClaudePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 export const CLAUDE_PAY_METHODS: { id: ClaudePayMethod; label: string }[] = [
-  { id: 'CARD', label: '나이스정보통신' },
+  { id: 'CARD', label: '카드결제' },
   { id: 'TOSSPAY', label: '토스페이' },
   { id: 'KAKAOPAY', label: '카카오페이' },
 ];
@@ -67,6 +70,12 @@ export async function payClaudePlan(
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
 
+  // 카드(나이스정보통신) 채널이 아직 연결되지 않았으면 PortOne 호출이 무조건 실패하므로,
+  // 일반 오류 대신 원인을 분명히 알려준다.
+  if (payMethod === 'CARD' && !isNiceCardConfigured()) {
+    return { success: false, error: NICE_NOT_CONFIGURED_MESSAGE };
+  }
+
   const paymentId = genPortOneId(`claude-${kind}`, username);
   // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
   const ppMethod = payMethod;
@@ -95,6 +104,7 @@ export async function payClaudePlan(
       payMethod: portonePayMethod(ppMethod),
       redirectUrl: portoneRedirectUrl(),
       ...easyPayParam(ppMethod),
+      ...cardParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
@@ -146,6 +156,10 @@ export async function issueClaudeBillingKey(
 
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
+  }
+
+  if (payMethod === 'CARD' && !isNiceCardConfigured()) {
+    return { success: false, error: NICE_NOT_CONFIGURED_MESSAGE };
   }
 
   const safeUserName = toAsciiSafeId(username);
