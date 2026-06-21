@@ -188,6 +188,24 @@ h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
+/* On the web, don't cap the viewer at phone width. Instead show a large,
+   centered portrait column whose width is derived from the locked full-screen
+   height at a 9:16 ratio — the exact proportions a phone shows, just scaled up
+   to the desktop's height. The element's height is set inline (locked viewport
+   height) and wins over the base rule above; with width:auto the aspect-ratio
+   computes the matching portrait width. !important so it beats the base
+   `width: 100%`. */
+@media (min-width: 768px) {
+  .live-stream-container {
+    width: auto !important;
+    max-width: 100vw;
+    aspect-ratio: 9 / 16;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%);
+  }
+}
+
 /* Ensure video fills container on mobile */
 @media (max-width: 768px) {
   .video-js {
