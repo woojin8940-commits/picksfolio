@@ -1,9 +1,14 @@
 /**
- * PortOne(포트원) V2 간편결제 — 토스페이 / 카카오페이.
+ * PortOne(포트원) V2 결제 — 카드(나이스정보통신) / 토스페이 / 카카오페이.
+ *
+ * 카드 결제는 PortOne V2 의 **나이스정보통신(신모듈)** 채널로 처리한다(payMethod: 'CARD').
+ * 예전에는 토스페이먼츠와 직접 연동했으나, 카드 PG 를 나이스정보통신으로 전환하면서 토스페이·
+ * 카카오페이 간편결제와 동일하게 PortOne V2 를 통해 결제·검증한다. (PortOne V2 NICE 연동 문서:
+ * https://developers.portone.io/opi/ko/integration/pg/v2/nice-v2)
  *
  * 토스페이는 PortOne 에서 **리다이렉트 전용** PG 다. 결제창을 promise 로만 호출하면(=
  * redirectUrl 없이) 모바일에서 결제창이 아예 뜨지 않거나, 떠도 결제 후 가맹점으로 돌아오지
- * 못해 "결제가 안 되는" 것처럼 보인다. 그래서 모든 PortOne 간편결제는 redirectUrl 을 넣어
+ * 못해 "결제가 안 되는" 것처럼 보인다. 그래서 모든 PortOne 결제는 redirectUrl 을 넣어
  * 리다이렉트 방식으로 호출하고, 돌아온 `/portone/return` 페이지가 서버 검증·적립을 마무리한다.
  *
  *   1. 결제/빌링 요청 직전에 "결제 후 무엇을 할지"(intent)를 sessionStorage 에 저장하고
@@ -22,8 +27,15 @@ import { toAsciiSafeId } from './formatters';
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
+// 카드 결제용 나이스정보통신(신모듈) 채널 키. PortOne 콘솔에서 나이스정보통신(신모듈) 채널을
+// 연결하면 발급되는 값으로, 운영 키는 VITE_PORTONE_NICE_CHANNEL_KEY 환경변수로 주입한다.
+// (미설정 시 아래 자리표시자로 동작하므로 결제가 실패한다 → 콘솔에서 발급한 실제 채널 키로 반드시 교체.)
+export const PORTONE_NICE_CHANNEL_KEY =
+  (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY as string | undefined) ||
+  'channel-key-REPLACE-WITH-NICE-CHANNEL-KEY';
 
-export type PortOnePayMethod = 'TOSSPAY' | 'KAKAOPAY';
+// CARD = 나이스정보통신(신모듈) 카드 결제, TOSSPAY/KAKAOPAY = 간편결제.
+export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 const INTENT_KEY = 'portone_pending_intent';
 
@@ -48,16 +60,31 @@ export interface PortOneIntent {
 }
 
 export const channelKeyFor = (m: PortOnePayMethod) =>
-  m === 'KAKAOPAY' ? PORTONE_KAKAOPAY_CHANNEL_KEY : PORTONE_TOSSPAY_CHANNEL_KEY;
+  m === 'KAKAOPAY'
+    ? PORTONE_KAKAOPAY_CHANNEL_KEY
+    : m === 'TOSSPAY'
+      ? PORTONE_TOSSPAY_CHANNEL_KEY
+      : PORTONE_NICE_CHANNEL_KEY; // CARD → 나이스정보통신(신모듈)
+
+// requestPayment 의 payMethod. 카드(나이스정보통신)는 'CARD', 간편결제는 'EASY_PAY'.
+export const portonePayMethod = (m: PortOnePayMethod): 'CARD' | 'EASY_PAY' =>
+  m === 'CARD' ? 'CARD' : 'EASY_PAY';
+
+// requestIssueBillingKey 의 billingKeyMethod. 카드(나이스정보통신)는 'CARD', 간편결제는 'EASY_PAY'.
+export const portoneBillingKeyMethod = (m: PortOnePayMethod): 'CARD' | 'EASY_PAY' =>
+  m === 'CARD' ? 'CARD' : 'EASY_PAY';
 
 // PortOne V2 간편결제(EASY_PAY)는 채널 키와 함께 호출할 간편결제 서비스를 easyPayProvider 로
 // 지정해야 한다. 토스페이(신모듈 tosspay_v2 포함)는 'TOSSPAY', 카카오페이는 'KAKAOPAY' 다.
 // (토스페이에서 easyPayProvider 를 비우면 채널만으로 PG 가 확정되지 않아 결제창이 뜨지 않거나
 //  결제가 시작되지 않는다 — PortOne V2 공식 문서 기준.)
+// 카드(나이스정보통신, payMethod 'CARD')는 간편결제가 아니므로 easyPay 파라미터를 넣지 않는다.
 export const easyPayParam = (m: PortOnePayMethod) =>
-  m === 'KAKAOPAY'
-    ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
-    : { easyPay: { easyPayProvider: 'TOSSPAY' } };
+  m === 'CARD'
+    ? {}
+    : m === 'KAKAOPAY'
+      ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
+      : { easyPay: { easyPayProvider: 'TOSSPAY' } };
 
 const origin = () => window.location.origin;
 

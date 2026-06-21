@@ -1,11 +1,12 @@
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
 import { isNativeApp } from './appEnv';
-import { startTossCardPayment, startTossCardBilling } from './tossPayments';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  portonePayMethod,
+  portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
   clearPortOneIntent,
@@ -28,11 +29,12 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 //     a payment window when the balance runs low.
 //
 // storeId and channelKey are public browser identifiers; the V2 API secret lives
-// server-side only. 토스페이 / 카카오페이는 리다이렉트 방식으로 호출한다(portonePayments).
+// server-side only. 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 리다이렉트
+// 방식으로 호출한다(portonePayments).
 export type ClaudePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 export const CLAUDE_PAY_METHODS: { id: ClaudePayMethod; label: string }[] = [
-  { id: 'CARD', label: '토스페이먼츠' },
+  { id: 'CARD', label: '나이스정보통신' },
   { id: 'TOSSPAY', label: '토스페이' },
   { id: 'KAKAOPAY', label: '카카오페이' },
 ];
@@ -61,29 +63,15 @@ export async function payClaudePlan(
 
   const orderName = kind === 'activation' ? '클로드 플랜 시작' : `클로드 크레딧 충전 ${amountKrw.toLocaleString()}원`;
 
-  // 토스페이먼츠(카드) — PortOne 을 거치지 않고 토스페이먼츠 결제창으로 리다이렉트한다.
-  // 돌아온 뒤 /toss/return 페이지가 크레딧 적립을 마무리한다.
-  if (payMethod === 'CARD') {
-    return startTossCardPayment({
-      type: 'claude',
-      username,
-      kind,
-      amountKrw,
-      orderName,
-      payMethod: 'CARD',
-      returnPath: window.location.pathname + window.location.search,
-    });
-  }
-
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
 
   const paymentId = genPortOneId(`claude-${kind}`, username);
-  // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
-  const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+  // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
+  const ppMethod = payMethod;
 
-  // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 결제창으로 페이지를 넘기고, 돌아온
+  // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 결제창으로 페이지를 넘기고, 돌아온
   // /portone/return 페이지가 paymentId 로 서버 검증·크레딧 적립을 마무리한다. (PC 팝업으로
   // promise 가 resolve 되면 아래 인라인 처리도 동작한다.)
   savePortOneIntent({
@@ -104,7 +92,7 @@ export async function payClaudePlan(
       orderName,
       totalAmount: amountKrw,
       currency: 'KRW',
-      payMethod: 'EASY_PAY',
+      payMethod: portonePayMethod(ppMethod),
       redirectUrl: portoneRedirectUrl(),
       ...easyPayParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
@@ -152,17 +140,9 @@ export async function issueClaudeBillingKey(
     return { success: false, error: NATIVE_BLOCK_MESSAGE };
   }
 
-  // 토스페이먼츠(카드) 자동충전 결제수단 등록 — 토스페이먼츠 빌링 인증창으로 리다이렉트한다.
-  // 돌아온 뒤 /toss/return 페이지가 빌링키 발급·자동충전 설정을 마무리한다.
-  if (payMethod === 'CARD') {
-    return startTossCardBilling({
-      type: 'claude-billing',
-      username,
-      orderName: '클로드 크레딧 자동충전 결제수단 등록',
-      payMethod: 'CARD',
-      returnPath: window.location.pathname + window.location.search,
-    });
-  }
+  // 카드(나이스정보통신) 자동충전 결제수단 등록 — 토스페이 / 카카오페이와 동일하게 PortOne
+  // V2 빌링키 발급창으로 리다이렉트한다. 돌아온 뒤 /portone/return 페이지가 자동충전 설정을
+  // 마무리한다.
 
   if (typeof window === 'undefined' || !window.PortOne) {
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
@@ -170,10 +150,10 @@ export async function issueClaudeBillingKey(
 
   const safeUserName = toAsciiSafeId(username);
   const issueId = genPortOneId('claudebilling', username);
-  // CARD 는 위에서 이미 분기했으므로 여기서는 TOSSPAY / KAKAOPAY 뿐이다.
-  const ppMethod = payMethod === 'KAKAOPAY' ? 'KAKAOPAY' : 'TOSSPAY';
+  // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
+  const ppMethod = payMethod;
 
-  // 토스페이는 리다이렉트 전용 PG 다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
+  // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
   // 돌아온 /portone/return 페이지가 발급된 billingKey 로 자동충전을 켠다. (PC 팝업으로
   // promise 가 resolve 되면 아래 인라인 처리로 호출부가 billingKey 를 받아 처리한다.)
   savePortOneIntent({
@@ -188,7 +168,7 @@ export async function issueClaudeBillingKey(
     const response = await window.PortOne.requestIssueBillingKey({
       storeId: PORTONE_STORE_ID,
       channelKey: channelKeyFor(ppMethod),
-      billingKeyMethod: 'EASY_PAY',
+      billingKeyMethod: portoneBillingKeyMethod(ppMethod),
       issueId,
       issueName: '클로드 크레딧 자동충전 결제수단 등록',
       currency: 'KRW',
