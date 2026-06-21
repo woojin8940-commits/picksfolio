@@ -38,11 +38,21 @@ interface BroadcastProduct {
 
 const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userName, onNavigateMembership, onNavigateBroadcastSettings }) => {
   const [showLiveStream, setShowLiveStream] = useState(false);
+  // Remembers co-broadcast session ids we've already auto-opened the broadcast
+  // overlay for, so accepting an invite opens 방송 설정 exactly once and the host
+  // can still close it without it springing back open on the next poll.
+  const autoOpenedCoRef = useRef<Set<string>>(new Set());
   // 함께 방송 incoming invites, surfaced on the live commerce page so the invitee
   // can accept before opening the broadcast screen. Accepting moves them into
-  // 방송 설정 (the broadcast overlay), where they press 참여하기 → 라이브 시작.
+  // 방송 설정 (the broadcast overlay) — it does NOT auto-start; they set up the
+  // broadcast and press 라이브 시작 themselves.
   const [coInvites, setCoInvites] = useState<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]>([]);
   const [coInviteBusy, setCoInviteBusy] = useState(false);
+  // True while this user has an accepted/live 함께 방송 session. An invited co-host
+  // is joining the host's broadcast — they must reach 방송 설정 even if they never
+  // set up their OWN commerce membership/verification, so this lets the seller
+  // verification gate below pass them straight through to the broadcast overlay.
+  const [coBroadcastActive, setCoBroadcastActive] = useState(false);
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'banner' | 'product' | 'image'>('banner');
@@ -216,17 +226,34 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   }, [broadcastProducts, productsLoaded]);
 
   // Poll for incoming 함께 방송 invites. Accepting from here moves the invitee
-  // into 방송 설정 (the broadcast overlay); they then press 참여하기 → 라이브 시작.
+  // into 방송 설정 (the broadcast overlay); broadcasting does NOT auto-start —
+  // they configure and press 라이브 시작 themselves.
+  // Also watch for an active accepted/live co-session: when an invite is accepted
+  // from the app-wide top banner (CoBroadcastInviteNotice), the user only lands
+  // on this page — nothing opened the broadcast overlay, so "수락해도 방송에 안
+  // 들어가지는" happened. Detecting the active session here opens 방송 설정 for them
+  // automatically (once per session id), so accepting always enters the broadcast.
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
-        const invites = await apiService.getCobroadcastInvites(userName);
-        if (!cancelled) setCoInvites(invites);
+        const [invites, active] = await Promise.all([
+          apiService.getCobroadcastInvites(userName),
+          apiService.getActiveCobroadcast(userName),
+        ]);
+        if (cancelled) return;
+        setCoInvites(invites);
+        // An accepted/live session means this user has joined a co-broadcast.
+        const joined = !!(active && (active.status === 'accepted' || active.status === 'live'));
+        setCoBroadcastActive(joined);
+        if (joined && !autoOpenedCoRef.current.has(active!.id)) {
+          autoOpenedCoRef.current.add(active!.id);
+          setShowLiveStream(true);
+        }
       } catch { /* non-blocking */ }
     };
     poll();
-    const id = setInterval(poll, 8000);
+    const id = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [userName]);
 
@@ -237,6 +264,10 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
       const ok = await apiService.respondCobroadcast('accept', inviteId, userName);
       if (ok) {
         setCoInvites(prev => prev.filter(i => i.id !== inviteId));
+        // The invite id is the co-session id; mark it so the active-session poll
+        // doesn't treat this as a fresh accept and re-open the overlay.
+        autoOpenedCoRef.current.add(inviteId);
+        setCoBroadcastActive(true); // joined a co-broadcast — bypass the commerce gate
         setShowLiveStream(true); // 방송 설정으로 이동
       }
     } finally {
@@ -314,7 +345,14 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
   // 'live' is the legacy plan label from prior installs; treat it as commerce.
   const commerceMembershipActive =
     !!verification?.membership_active && (membershipPlan === 'commerce' || membershipPlan === 'live');
-  const gateBlocked = verificationLoaded && !(businessVerified && settlementRegistered && commerceMembershipActive);
+  // An invited co-host (accepted 함께 방송) bypasses the commerce gate: the gate
+  // protects starting your OWN commerce sale, not joining a broadcast you were
+  // invited to. Without this, accepting an invite dropped a non-commerce creator
+  // on the "인증 필요" screen and the 방송 설정 화면 never appeared.
+  const gateBlocked =
+    verificationLoaded &&
+    !(businessVerified && settlementRegistered && commerceMembershipActive) &&
+    !coBroadcastActive;
 
   if (gateBlocked) {
     const steps: { label: string; done: boolean; desc: string }[] = [
@@ -398,7 +436,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
       </header>
 
       {/* 함께 방송 초대 도착 — accept moves the invitee into 방송 설정 (the broadcast
-          overlay), where they press 참여하기 → 라이브 시작 to start transmitting. */}
+          overlay); it does not auto-start, they press 라이브 시작 when ready. */}
       {coInvites.length > 0 && (
         <div className="mb-6 md:mb-10 space-y-2">
           {coInvites.map((inv) => (

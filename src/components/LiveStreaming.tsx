@@ -303,16 +303,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [coSession, setCoSession] = useState<{ id: string; status: string; role: 'host' | 'guest'; partner: string; partner_display_name: string; partner_avatar_url: string } | null>(null);
   const [incomingInvites, setIncomingInvites] = useState<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]>([]);
   const [partnerStreamReady, setPartnerStreamReady] = useState(false);
-  // 함께 방송 guest gate: a creator who accepted an invite lands here in
-  // 방송 설정 mode. They must explicitly press 참여하기 before 라이브 시작 will
-  // transmit, so co-broadcasting is never started by accident. Hosts and solo
-  // broadcasters are unaffected.
-  const [coJoined, setCoJoined] = useState(false);
-  const coJoinedRef = useRef(false);
-  useEffect(() => { coJoinedRef.current = coJoined; }, [coJoined]);
-  // Clear the joined flag when there is no active session (invite ended/declined)
-  // so the next co-broadcast starts from the 참여하기 step again.
-  useEffect(() => { if (!coSession) setCoJoined(false); }, [coSession]);
+  // 함께 방송 게스트: 초대를 수락한 크리에이터는 곧바로 방송이 시작되는 게 아니라
+  // 일반 방송과 똑같은 방송 설정 화면으로 들어온다. 카메라·보정·상품을 자유롭게
+  // 설정한 뒤 직접 '라이브 시작'을 눌러야 송출이 시작되므로, 수락만으로 방송이
+  // 켜지는 일은 없다. 호스트/단독 방송과 동일하게 동작한다.
   const coSessionRef = useRef<typeof coSession>(null);
   useEffect(() => { coSessionRef.current = coSession; }, [coSession]);
   const isLiveRef = useRef(false);
@@ -815,7 +809,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         const add = await apiService.addLiveFriend(userName, guest);
         if (add.success && add.friend) setFriends(prev => [add.friend!, ...prev]);
       }
-      setInviteNotice(`@${guest}님에게 초대를 보냈어요. 상대가 수락하면 함께 방송이 시작됩니다.`);
+      setInviteNotice(`@${guest}님에게 초대를 보냈어요. 상대가 수락하면 방송 설정 화면으로 들어가 함께 방송을 준비합니다.`);
       setInviteUsername('');
     } catch {
       setInviteError('초대 중 오류가 발생했습니다.');
@@ -1546,12 +1540,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     const normalizedUsername = userName.toLowerCase();
 
     if (newState) {
-      // 함께 방송으로 초대를 수락한 게스트는 '참여하기'를 먼저 눌러야 송출이
-      // 시작됩니다. (방송 설정 → 참여하기 → 라이브 시작) 호스트/단독 방송은 해당 없음.
-      const csGate = coSessionRef.current;
-      if (csGate && csGate.role === 'guest' && csGate.status === 'accepted' && !coJoinedRef.current) {
-        return;
-      }
       // Inside the PICKS Folio native app: hand the broadcast off to the native
       // Amazon IVS broadcast screen (hardware encoder) instead of running the
       // in-WebView getUserMedia pipeline. The native shell loads the stream key
@@ -1801,6 +1789,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // full-height treatment so its sliders sit on an opaque surface.
   const sheetOpen = showProductPanel || showCartPanel || showBannerPanel;
   const panelExpanded = sheetOpen || showFilterPanel;
+  // 함께 방송 2-up split is shown ONLY once the session is actually live — i.e.
+  // both creators are transmitting. While a session is merely 'accepted' (or a
+  // stale 'accepted' row lingers from an earlier test), the partner isn't
+  // broadcasting yet, so rendering their half here put an empty "연결 중…" feed
+  // beside the host's own preview that read as a second, overlapping broadcast
+  // screen. Gating on 'live' matches the viewer side (which only splits on a
+  // live + fresh partner) so the host and viewers turn the split on together.
+  const coLive = !!coSession && coSession.status === 'live';
   return (
     <>
     {/* Full-screen black backdrop behind the console, so any space on either
@@ -1828,8 +1824,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             doesn't stretch across a wide desktop; the space on either side reads as
             clean black side margins there. */}
         <div
-          className={`overflow-hidden bg-black ${coSession?.partner ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:aspect-[9/16] md:max-w-[26.5rem] md:mx-auto'}`}
-          style={coSession?.partner ? { top: '15%', bottom: '24%' } : undefined}
+          className={`overflow-hidden bg-black ${coLive ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:h-full md:aspect-[9/16] md:mx-auto'}`}
+          style={coLive ? { top: '15%', bottom: '24%' } : undefined}
         >
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
@@ -1984,11 +1980,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             confined to a centered middle band so they no longer stretch full
             height and overlap; the top/bottom stay as clean black margins under
             the existing control HUD (which shows 잔여시간 and the partner name). */}
-        {coSession?.partner && (
+        {coSession && coLive && (
           <>
             <PartnerFeed
               channel={coSession.partner}
-              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] bg-black"
+              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] bg-black overflow-hidden"
               onConnectedChange={setPartnerStreamReady}
             />
             {/* Divider line between the two halves (middle band only) */}
@@ -2446,12 +2442,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
               <button
                 onClick={toggleLive}
-                disabled={!isLive && (((!!capBlock && capBlock.kind !== 'exhausted')) || (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined))}
-                title={capBlock ? capBlock.message : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? "먼저 '참여하기'를 눌러주세요" : undefined}
-                className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? 'bg-slate-500 text-white/80 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                disabled={!isLive && (!!capBlock && capBlock.kind !== 'exhausted')}
+                title={capBlock ? capBlock.message : undefined}
+                className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
-                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : (coSession?.role === 'guest' && coSession.status === 'accepted' && !coJoined) ? '참여 후 시작' : '라이브 시작'}
+                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : '라이브 시작'}
               </button>
             </div>
           </div>
@@ -3106,10 +3102,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       )}
 
-      {/* 함께 방송 참여하기 — guest gate. After accepting an invite the guest lands
-          in 방송 설정; they finish setup, press 참여하기 here, then 라이브 시작 to
-          actually transmit. The go-live button stays locked until 참여하기. */}
-      {coSession && coSession.role === 'guest' && coSession.status === 'accepted' && !isLive && !coJoined && (
+      {/* 함께 방송 안내 — 초대를 수락한 게스트는 자동으로 방송이 시작되지 않고,
+          일반 방송과 똑같은 방송 설정 화면으로 들어온다. 카메라·보정·상품을 마친 뒤
+          직접 '라이브 시작'을 누르면 함께 방송 송출이 시작된다. */}
+      {coSession && coSession.role === 'guest' && (coSession.status === 'accepted' || coSession.status === 'live') && !isLive && (
         <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
           <div className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-violet-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
             <div className="w-9 h-9 rounded-full bg-violet-500/30 overflow-hidden shrink-0 flex items-center justify-center">
@@ -3119,25 +3115,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-white text-xs font-black truncate">@{coSession.partner}님과 함께 방송</p>
-              <p className="text-white/50 text-[11px]">설정을 마치고 참여하기를 누르세요</p>
+              <p className="text-white/50 text-[11px]">방송 설정을 마친 뒤 '라이브 시작'을 누르면 함께 방송이 시작됩니다</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setCoJoined(true)}
-              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black active:scale-95 transition-all shrink-0"
-            >
-              참여하기
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 참여 완료 안내 — once joined, prompt the guest to press 라이브 시작. */}
-      {coSession && coSession.role === 'guest' && coSession.status === 'accepted' && !isLive && coJoined && (
-        <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-md bg-emerald-900/90 backdrop-blur-md border border-emerald-400/40 rounded-2xl px-4 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <Users size={14} className="text-emerald-300 shrink-0" />
-            <p className="text-white text-[11px] font-bold">참여했어요! '라이브 시작'을 누르면 함께 방송이 송출됩니다.</p>
           </div>
         </div>
       )}

@@ -2694,11 +2694,13 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
         margins. Hidden on phones, where the player already fills the screen. */}
     <div className="hidden md:block fixed inset-0 z-[199] bg-black" />
     <div
-      // On the web the viewer is locked to a phone-width portrait column,
-      // centered with black margins on either side, so it matches exactly what
-      // a real viewer sees on their phone (and the chat / 상품 담기 현황 bar sits
-      // at the bottom of that column). On phones it stays edge-to-edge.
-      className="fixed top-0 left-0 right-0 z-[200] bg-black overflow-hidden live-stream-container md:max-w-[26.5rem] md:mx-auto"
+      // On the web the viewer is shown as a large, centered portrait column
+      // whose width tracks the screen height at the same 9:16 ratio the phone
+      // shows — so the exposed content matches a phone exactly, just bigger.
+      // (Desktop sizing/centering is handled in .live-stream-container's md
+      // media query in index.css so it reliably beats the base width rule.)
+      // On phones it stays edge-to-edge.
+      className="fixed top-0 left-0 right-0 z-[200] bg-black overflow-hidden live-stream-container"
       style={{
         // Lock the player to the full-screen height captured while the keyboard
         // was closed so it never resizes or jumps when the keyboard opens for
@@ -2848,7 +2850,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             different height than the partner half, which is what made the two
             screens look mismatched and stacked on top of each other.) */}
         <div
-          className={`absolute ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          className={`absolute overflow-hidden ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
         >
           <video
@@ -2885,7 +2887,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           <>
             <PartnerFeed
               channel={coPartner.partner}
-              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] z-[5] bg-black"
+              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] z-[5] bg-black overflow-hidden"
               onConnectedChange={setPartnerStreamConnected}
             />
             {/* Divider line between the two halves (middle band only) */}
@@ -2944,7 +2946,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             solo it fills the whole stage as before. */}
         {hlsPlaybackUrl && (
           <div
-            className={`absolute ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+            className={`absolute overflow-hidden ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
             style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
           >
             <video
