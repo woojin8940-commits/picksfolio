@@ -18,6 +18,10 @@ interface PartnerFeedProps {
   channel: string;
   /** Wrapper classes — the caller positions/sizes this half of the split. */
   className?: string;
+  /** How the partner video fills its half. The broadcaster's full-height
+      TikTok-style split wants 'cover'; the viewer's letterboxed middle band
+      keeps 'contain' so nothing is zoom-cropped. */
+  objectFit?: 'cover' | 'contain';
   /** Notified whenever the partner feed connects/disconnects, so the caller can
       hide its "연결 중…" placeholder. */
   onConnectedChange?: (connected: boolean) => void;
@@ -37,7 +41,7 @@ interface PartnerFeedProps {
  * playback URL. Whichever path produces frames wins; WebRTC is always preferred
  * if it connects.
  */
-export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, onConnectedChange }) => {
+export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, objectFit = 'contain', onConnectedChange }) => {
   const webrtcRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<HTMLVideoElement>(null);
   const sigRef = useRef<ViewerSignaling | null>(null);
@@ -46,12 +50,18 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
 
   const [webrtcConnected, setWebrtcConnected] = useState(false);
   const [hlsActive, setHlsActive] = useState(false);
+  const [hlsPlaying, setHlsPlaying] = useState(false);
   const [hlsUrl, setHlsUrl] = useState('');
 
-  // Bubble the combined connection state up to the caller.
+  // Bubble the combined connection state up to the caller. "Connected" means a
+  // feed is actually producing frames — WebRTC media arrived, or the HLS player
+  // reached real playback. Merely *attempting* HLS (hlsActive) is NOT enough:
+  // a partner who hasn't started pushing yet leaves the HLS playlist 404ing, and
+  // reporting that as connected hid the "연결 중…" placeholder while the player
+  // showed a raw "media could not be loaded" error instead.
   useEffect(() => {
-    onConnectedChange?.(webrtcConnected || hlsActive);
-  }, [webrtcConnected, hlsActive, onConnectedChange]);
+    onConnectedChange?.(webrtcConnected || hlsPlaying);
+  }, [webrtcConnected, hlsPlaying, onConnectedChange]);
 
   // ── WebRTC attempt ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -59,6 +69,7 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
     webrtcConnectedRef.current = false;
     setWebrtcConnected(false);
     setHlsActive(false);
+    setHlsPlaying(false);
 
     const sig = new ViewerSignaling(channel);
     sigRef.current = sig;
@@ -122,6 +133,9 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
       playerRef.current.dispose();
       playerRef.current = null;
     }
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
     const player = window.videojs(hlsRef.current, {
       autoplay: 'muted',
       muted: true,
@@ -129,6 +143,11 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
       preload: 'auto',
       fill: true,
       playsinline: true,
+      // Suppress Video.js's built-in error banner ("The media could not be
+      // loaded…"). A co-broadcast partner often hasn't started pushing yet, so
+      // the playlist 404s for a few seconds; we show our own "연결 중…" overlay
+      // and keep retrying instead of flashing a scary error over their half.
+      errorDisplay: false,
       html5: {
         vhs: {
           overrideNative: !(/iPad|iPhone|iPod/.test(navigator.userAgent)),
@@ -139,14 +158,37 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
       },
       liveui: true,
     });
-    player.src({ src: hlsUrl, type: 'application/x-mpegURL' });
+    const loadSource = () => {
+      if (disposed) return;
+      player.src({ src: hlsUrl, type: 'application/x-mpegURL' });
+      player.play?.().catch(() => {});
+    };
+    loadSource();
     playerRef.current = player;
 
+    // Real playback reached → tell the caller the partner half is live.
+    const markPlaying = () => { if (!disposed) setHlsPlaying(true); };
+    player.on('playing', markPlaying);
+    player.on('loadeddata', markPlaying);
+    // The live playlist may not exist yet (partner still warming up). Clear the
+    // error and retry on a short loop until frames arrive, keeping the parent's
+    // "연결 중…" placeholder visible meanwhile.
+    player.on('error', () => {
+      if (disposed) return;
+      setHlsPlaying(false);
+      player.error(null);
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(loadSource, 2500);
+    });
+
     return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       if (playerRef.current) {
         playerRef.current.dispose();
         playerRef.current = null;
       }
+      setHlsPlaying(false);
     };
   }, [hlsActive, hlsUrl]);
 
@@ -165,7 +207,7 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
         // @ts-ignore
         x5-playsinline=""
         className="absolute inset-0 w-full h-full bg-black"
-        style={{ objectFit: 'contain', display: showHls ? 'none' : 'block' }}
+        style={{ objectFit, display: showHls ? 'none' : 'block' }}
       />
       <div className="absolute inset-0 w-full h-full" style={{ display: showHls ? 'block' : 'none' }}>
         <video
@@ -177,7 +219,7 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, on
           preload="auto"
           // @ts-ignore
           webkit-playsinline=""
-          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          style={{ width: '100%', height: '100%', objectFit }}
         />
       </div>
     </div>

@@ -1823,10 +1823,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             centered portrait 9:16 column (md:w-auto md:aspect-[9/16]) so the camera
             doesn't stretch across a wide desktop; the space on either side reads as
             clean black side margins there. */}
-        <div
-          className={`overflow-hidden bg-black ${coLive ? 'absolute left-0 w-1/2' : 'relative h-full w-full md:w-auto md:h-full md:aspect-[9/16] md:mx-auto'}`}
-          style={coLive ? { top: '15%', bottom: '24%' } : undefined}
-        >
+        <div className="relative h-full w-full md:w-auto md:h-full md:aspect-[9/16] md:mx-auto overflow-hidden bg-black">
+        {/* Host's own feed. Normally fills the whole 9:16 stage; when a co-broadcast
+            is live it becomes the LEFT half at full height (top-to-bottom), so the
+            two creators sit side-by-side filling the portrait frame exactly like a
+            phone / TikTok 2-up — no more middle band with big black margins, and on
+            the web the split now lives inside the same centered portrait column
+            instead of spreading across the whole desktop viewport. */}
+        <div className={`absolute inset-y-0 left-0 overflow-hidden bg-black ${coLive ? 'w-1/2' : 'w-full'}`}>
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
             and playing frames that feed the canvas. On desktop the opaque canvas
@@ -1839,7 +1843,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           autoPlay
           muted
           playsInline
-          className="block w-full h-full object-contain pointer-events-none"
+          className={`block w-full h-full pointer-events-none ${coLive ? 'object-cover' : 'object-contain'}`}
         />
         {/* Canvas shows the filtered/mirrored 9:16 broadcast frame. It is shown
             with object-contain on EVERY device — phone and web alike — so the
@@ -1849,7 +1853,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             match what was actually exposed to viewers. */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-contain"
+          className={`absolute inset-0 w-full h-full ${coLive ? 'object-cover' : 'object-contain'}`}
         />
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
@@ -1973,31 +1977,34 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           );
         })()}
         </div>
-        {/* End viewer frame */}
+        {/* End host feed */}
 
-        {/* 함께 방송 split — the partner's live feed fills the right half so the
-            broadcaster sees the same 2-up layout viewers see. Both feeds are
-            confined to a centered middle band so they no longer stretch full
-            height and overlap; the top/bottom stay as clean black margins under
-            the existing control HUD (which shows 잔여시간 and the partner name). */}
+        {/* 함께 방송 2-up — the partner's live feed fills the RIGHT half at full
+            height (TikTok-style), inside the same centered portrait stage as the
+            host. Previously each half was confined to a 15%–76% middle band and
+            positioned against the full main area, so on the web the two feeds
+            spread across the whole desktop and read as two overlapping screens.
+            Now both halves are full-height columns within the 9:16 stage, exactly
+            matching the phone layout. */}
         {coSession && coLive && (
           <>
             <PartnerFeed
               channel={coSession.partner}
-              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] bg-black overflow-hidden"
+              className="absolute inset-y-0 right-0 w-1/2 bg-black overflow-hidden"
+              objectFit="cover"
               onConnectedChange={setPartnerStreamReady}
             />
-            {/* Divider line between the two halves (middle band only) */}
-            <div className="absolute left-1/2 -translate-x-1/2 w-[2px] bg-violet-500/60 pointer-events-none" style={{ top: '15%', bottom: '24%' }} />
-            {/* Per-half name labels, pinned to the top of the middle band. */}
-            <div className="absolute left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none" style={{ top: 'calc(15% + 8px)' }}>
+            {/* Divider line between the two halves */}
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[2px] bg-violet-500/60 pointer-events-none" />
+            {/* Per-half name labels, kept clear of the top control HUD. */}
+            <div className="absolute top-16 left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
               @{userName} (나)
             </div>
-            <div className="absolute left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1" style={{ top: 'calc(15% + 8px)' }}>
+            <div className="absolute top-16 left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
               <Users size={10} className="text-violet-300" /> @{coSession.partner}
             </div>
             {!partnerStreamReady && (
-              <div className="absolute right-0 w-1/2 flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none" style={{ top: '15%', bottom: '24%' }}>
+              <div className="absolute inset-y-0 right-0 w-1/2 flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coSession.partner} 연결 중…
               </div>
             )}
@@ -2005,6 +2012,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 floating over the split, so neither face is covered. */}
           </>
         )}
+        </div>
+        {/* End viewer frame */}
 
         {/* Overlay UI — the top controls pin to the top edge and the bottom
             controls to the bottom edge (justify-between), with the edge gap set by
@@ -2406,6 +2415,36 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
+            {/* 상품 / 담기현황 / 배너 — pinned to the very bottom of the stage,
+                directly above the broadcaster controls (phones only; the web keeps
+                its top tab bar). Moved here out of the floating chat overlay so the
+                bar sits at the bottom edge instead of mid-screen over the faces. */}
+            {!panelExpanded && (
+              <div className="flex md:hidden items-stretch gap-2">
+                <button
+                  onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+                >
+                  <ShoppingBag size={14} className="text-green-400" /> 상품
+                  {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1.5 rounded-full">{liveProducts.length}</span>}
+                </button>
+                <button
+                  onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+                >
+                  <BarChart3 size={14} className="text-orange-400" /> 담기현황
+                  {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1.5 rounded-full">{cartStats.totalItems}</span>}
+                </button>
+                <button
+                  onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
+                >
+                  <Layout size={14} className="text-violet-400" /> 배너
+                  {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1.5 rounded-full">{bannerMaterials.length}</span>}
+                </button>
+              </div>
+            )}
+
             <div className="flex justify-between items-end gap-2 flex-wrap">
               <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                 <button
@@ -2696,35 +2735,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </>
         )}
 
-        {/* Mobile action bar — on phones the 상품/담기현황/배너 tabs are reduced to a
-            slim bar pinned at the bottom of the chat overlay (just above the
-            broadcaster controls); tapping one opens its panel as a full-height
-            sheet. Hidden on the web, which keeps the top tab navigation. */}
-        {!sheetOpen && (
-          <div className="flex md:hidden items-stretch gap-2 px-3 pb-2 pt-1 pointer-events-auto">
-            <button
-              onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-            >
-              <ShoppingBag size={14} className="text-green-400" /> 상품
-              {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1.5 rounded-full">{liveProducts.length}</span>}
-            </button>
-            <button
-              onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-            >
-              <BarChart3 size={14} className="text-orange-400" /> 담기현황
-              {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1.5 rounded-full">{cartStats.totalItems}</span>}
-            </button>
-            <button
-              onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-            >
-              <Layout size={14} className="text-violet-400" /> 배너
-              {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1.5 rounded-full">{bannerMaterials.length}</span>}
-            </button>
-          </div>
-        )}
+        {/* 상품 / 담기현황 / 배너 bar moved out of this floating chat overlay to a
+            bottom bar pinned just above the broadcaster controls (see the stage
+            controls section), so it sits at the bottom edge instead of mid-screen. */}
 
         {/* Product Push Panel */}
         {showProductPanel && (
@@ -3102,24 +3115,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       )}
 
-      {/* 함께 방송 안내 — 초대를 수락한 게스트는 자동으로 방송이 시작되지 않고,
-          일반 방송과 똑같은 방송 설정 화면으로 들어온다. 카메라·보정·상품을 마친 뒤
-          직접 '라이브 시작'을 누르면 함께 방송 송출이 시작된다. */}
-      {coSession && coSession.role === 'guest' && (coSession.status === 'accepted' || coSession.status === 'live') && !isLive && (
-        <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-violet-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
-            <div className="w-9 h-9 rounded-full bg-violet-500/30 overflow-hidden shrink-0 flex items-center justify-center">
-              {coSession.partner_avatar_url
-                ? <img src={coSession.partner_avatar_url} alt="" className="w-full h-full object-cover" />
-                : <Users size={16} className="text-violet-200" />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-xs font-black truncate">@{coSession.partner}님과 함께 방송</p>
-              <p className="text-white/50 text-[11px]">방송 설정을 마친 뒤 '라이브 시작'을 누르면 함께 방송이 시작됩니다</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 함께 방송 안내 배너 제거 — 게스트가 방송 설정을 마칠 때까지 상단에 계속 떠 있어
+          화면을 가린다는 피드백에 따라 삭제했다. 함께 방송 상태는 '함께 방송하기' 모달과
+          방송 중 2분할 화면(상대 이름 라벨)에서 그대로 확인할 수 있다. */}
 
       {/* 함께 방송하기 — invite + friends modal */}
       {showInviteModal && (

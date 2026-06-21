@@ -5,6 +5,9 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  cardParam,
+  isNiceCardConfigured,
+  NICE_NOT_CONFIGURED_MESSAGE,
   portonePayMethod,
   portoneRedirectUrl,
   savePortOneIntent,
@@ -29,7 +32,7 @@ export type ChargePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 // Payment options shown in the charge modal, in display order.
 export const CHARGE_PAY_METHODS: { id: ChargePayMethod; label: string }[] = [
-  { id: 'CARD', label: '나이스정보통신' },
+  { id: 'CARD', label: '카드결제' },
   { id: 'TOSSPAY', label: '토스페이' },
   { id: 'KAKAOPAY', label: '카카오페이' },
 ];
@@ -62,6 +65,11 @@ export async function payAndChargeLiveTime(
     return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
   }
 
+  // 카드(나이스정보통신) 채널 미설정 시 명확한 안내를 띄운다(일반 오류로 보이지 않게).
+  if (payMethod === 'CARD' && !isNiceCardConfigured()) {
+    return { success: false, error: NICE_NOT_CONFIGURED_MESSAGE };
+  }
+
   const paymentId = genPortOneId('livecredit', username);
   // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
   const ppMethod = payMethod;
@@ -89,6 +97,7 @@ export async function payAndChargeLiveTime(
       payMethod: portonePayMethod(ppMethod),
       redirectUrl: portoneRedirectUrl(),
       ...easyPayParam(ppMethod),
+      ...cardParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
     });
 

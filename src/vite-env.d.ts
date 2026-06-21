@@ -32,6 +32,16 @@ declare global {
             | 'APPLEPAY'
             | string;
         };
+        // 카드 결제 옵션. 나이스정보통신(신모듈)은 카드 결제 시 고정 할부 개월수를
+        // 요구하므로 일시불(fixedMonth: 0)을 넣어 결제창이 오류 없이 뜨도록 한다.
+        card?: {
+          installment?: {
+            monthOption?: {
+              fixedMonth?: number;
+              availableMonthList?: number[];
+            };
+          };
+        };
         customer?: {
           customerId?: string;
           fullName?: string;

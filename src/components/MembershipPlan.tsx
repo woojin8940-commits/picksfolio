@@ -6,6 +6,8 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  isNiceCardConfigured,
+  NICE_NOT_CONFIGURED_MESSAGE,
   portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
@@ -312,6 +314,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
     if (typeof window === 'undefined' || !window.PortOne) {
       setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
+      return;
+    }
+
+    // 카드(나이스정보통신) 채널 미설정 시 빌링키 발급이 무조건 실패하므로 명확히 안내한다.
+    if (payMethod === 'CARD' && !isNiceCardConfigured()) {
+      setError(NICE_NOT_CONFIGURED_MESSAGE);
       return;
     }
 
@@ -1011,7 +1019,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    나이스정보통신 결제창을 통해 신용·체크카드로 결제됩니다.
+                    카드 결제창을 통해 신용·체크카드로 결제됩니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (
