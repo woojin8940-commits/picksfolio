@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, Bell, User, Eye } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, Bell, User, Eye } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -1584,7 +1584,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area */}
-      <div className="hidden lg:flex flex-col w-[440px] xl:w-[500px] 2xl:w-[560px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-center p-6 sticky top-0 h-screen flex-shrink-0 gap-4">
+      <div className="hidden lg:flex flex-col w-[560px] xl:w-[680px] 2xl:w-[820px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-center p-4 sticky top-0 h-screen flex-shrink-0 gap-3">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
@@ -1609,26 +1609,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               managedCategories={managedCategories}
             />
         </PhoneFrame>
-        {/* Save Button - next to phone preview */}
-        <div className="flex flex-col items-center gap-2">
-          <button
-            onClick={activeTab === 'posts' ? handleSaveBlocks : handleSaveDesign}
-            disabled={isSaving}
-            className="bg-blue-600 text-white px-6 py-2.5 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 disabled:opacity-50"
-          >
-            {isSaving ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Save className="w-5 h-5" />
-            )}
-            <span className="text-sm">저장하기</span>
-          </button>
-          {saveMessage && (
-            <span className={`${isSaved ? 'text-emerald-500' : 'text-red-500'} font-black text-[10px] text-center max-w-[80px] animate-in fade-in`}>
-              {saveMessage}
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Edit Modal */}
