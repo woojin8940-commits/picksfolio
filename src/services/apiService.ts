@@ -843,6 +843,33 @@ export const apiService = {
     }
   },
 
+  // 카드(신용카드) 단건 결제로 멤버십을 활성화한다. 빌링키 발급(본인인증 필요)을 거치지 않고,
+  // 클로드 플랜과 동일한 단건 결제창으로 첫 달을 즉시 결제한 뒤 paymentId 를 서버에서 검증해
+  // 멤버십을 켠다. (토스페이·카카오페이는 기존 빌링키 자동결제 경로를 그대로 사용한다.)
+  async activateMembershipOneTime(
+    username: string,
+    paymentId: string,
+    tier: 'standard' | 'standard_ai' | 'commerce',
+    payMethod: string = 'CARD',
+  ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
+    try {
+      const res = await fetch('/api/billing-issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.toLowerCase(), paymentId, tier, payMethod }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json?.error || '결제 처리 실패' };
+      }
+      if (json.data) writeVerificationCache(username, json.data);
+      return { success: true, data: json.data };
+    } catch (e) {
+      console.error('[API] Failed to activate one-time membership payment:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
   // ── Claude plan credit wallet ───────────────────────────────────────────
   // The premium Claude model in the collaboration AI is metered by a prepaid
   // credit wallet, sold separately from the memberships. These methods read the

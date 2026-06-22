@@ -326,8 +326,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setSaving(true);
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
+
       const issueId = genPortOneId('billing', normalizedUserName);
-      // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 빌링키를 발급한다.
+      // 카드(신용카드) / 토스페이 / 카카오페이 모두 PortOne V2 로 빌링키를 발급해 자동결제를
+      // 등록한다. 카드 빌링키 발급(requestIssueBillingKey)은 나이스정보통신이 휴대폰 본인인증
+      // (전화번호 인증)을 먼저 요구하므로 카드 결제 시 본인인증 화면이 뜬다 — 이는 현재 쓰는
+      // 빌링 MID 가 본인인증을 강제하기 때문이며, 추후 나이스의 비인증 정기결제 MID 로 교체되면
+      // 사라진다. 본인인증을 마치면 빌링키가 발급되고, 카드도 토스페이·카카오페이와 동일하게
+      // 매월 자동결제(정기결제)로 동작한다.
       const ppMethod = payMethod;
 
       // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
@@ -990,7 +996,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     }`}
                   >
                     <span>💳</span>
-                    <span className="whitespace-nowrap">카드</span>
+                    <span className="whitespace-nowrap">신용카드</span>
                   </button>
                   <button
                     type="button"
@@ -1019,7 +1025,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    카드 결제창을 통해 신용·체크카드로 결제됩니다.
+                    신용·체크카드로 매월 자동결제됩니다. 카드 등록 시 휴대폰 본인인증이 필요합니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (
