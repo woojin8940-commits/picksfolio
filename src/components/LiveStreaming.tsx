@@ -2510,7 +2510,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             'absolute inset-x-0 bottom-0 top-auto h-[58vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
           : showFilterPanel
             ? 'absolute inset-0 bg-slate-900/95 backdrop-blur-md'
-            : 'absolute inset-x-0 bottom-28 h-[36vh] bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none'
+            : 'absolute inset-x-0 bottom-[4.25rem] h-[34vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). Rendered as an overlay over
@@ -2716,24 +2716,34 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* Chat Panel */}
         {!showProductPanel && !showCartPanel && !showBannerPanel && (
           <>
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hide overscroll-contain">
+            <div className="flex-1 overflow-y-auto px-4 pt-3 pb-1.5 md:p-5 flex flex-col justify-end space-y-1 md:space-y-3 scrollbar-hide overscroll-contain">
               {messages.map(msg => (
-                <div key={msg.id} className="animate-in slide-in-from-bottom-2 duration-200">
-                  <span className="text-blue-300 md:text-blue-400 text-xs font-black uppercase tracking-wide block mb-1 [text-shadow:0_1px_2px_rgba(0,0,0,0.6)] md:[text-shadow:none]">{msg.user}</span>
-                  <div className="bg-black/45 backdrop-blur-sm md:bg-white/5 md:backdrop-blur-none border border-white/10 md:border-white/5 p-3 rounded-2xl rounded-tl-none text-white text-[15px] leading-snug">
-                    {msg.text}
+                <div key={msg.id} className="animate-in slide-in-from-bottom-2 duration-200 leading-snug">
+                  {/* Phones: TikTok-style — no bubble, fully transparent over the
+                      video, username + message on one wrapping line with a heavy
+                      text-shadow so it stays legible against any frame. The web
+                      keeps the chat-bubble layout in its solid side panel. */}
+                  <span className="md:hidden text-[13.5px] leading-snug [text-shadow:0_1px_3px_rgba(0,0,0,0.95)]">
+                    <span className="text-blue-300 font-black mr-1.5">{msg.user}</span>
+                    <span className="text-white font-medium">{msg.text}</span>
+                  </span>
+                  <div className="hidden md:block">
+                    <span className="text-blue-400 text-xs font-black uppercase tracking-wide block mb-1">{msg.user}</span>
+                    <div className="bg-white/5 border border-white/5 p-3 rounded-2xl rounded-tl-none text-white text-[15px] leading-snug">
+                      {msg.text}
+                    </div>
                   </div>
                 </div>
               ))}
               <div ref={chatEndRef} />
             </div>
-            <div className="p-4 bg-transparent md:bg-slate-950/50 pointer-events-auto">
-              <div className="flex items-center gap-2">
+            <div className="px-3 pt-1.5 pb-2 md:p-4 bg-transparent md:bg-slate-950/50 pointer-events-auto">
+              <div className="flex items-center gap-1.5 md:gap-2">
                 <div className="relative flex-1 min-w-0">
                   <input
                     type="text"
                     placeholder="메시지를 입력하세요..."
-                    className="w-full bg-black/40 backdrop-blur-md md:bg-white/5 border border-white/15 md:border-white/10 rounded-2xl py-3.5 px-5 pr-10 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/40 md:placeholder:text-white/30"
+                    className="w-full bg-black/40 backdrop-blur-md md:bg-white/5 border border-white/15 md:border-white/10 rounded-2xl py-3 md:py-3.5 px-4 md:px-5 pr-10 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/40 md:placeholder:text-white/30"
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -2746,32 +2756,32 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   </button>
                 </div>
                 {/* 상품 / 담기현황 / 배너 — phones only, sharing the row with the
-                    message box. Kept icon-only (with a count badge) so they take as
-                    little width as possible and leave the message input as wide as
-                    it can be. The web uses the top tab bar instead. */}
+                    message box. Kept compact icon-only buttons (with a count badge)
+                    so they take as little width as possible and leave the message
+                    input as wide as it can be. The web uses the top tab bar. */}
                 <div className="flex md:hidden items-stretch gap-1 shrink-0">
                   <button
                     onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
                     title="상품"
-                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
+                    className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <ShoppingBag size={18} className="text-green-400 shrink-0" />
+                    <ShoppingBag size={16} className="text-green-400 shrink-0" />
                     {liveProducts.length > 0 && <span className="absolute -top-1 -right-1 bg-green-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{liveProducts.length}</span>}
                   </button>
                   <button
                     onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
                     title="담기현황"
-                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
+                    className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <BarChart3 size={18} className="text-orange-400 shrink-0" />
+                    <BarChart3 size={16} className="text-orange-400 shrink-0" />
                     {cartStats && cartStats.totalItems > 0 && <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{cartStats.totalItems}</span>}
                   </button>
                   <button
                     onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
                     title="배너"
-                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
+                    className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <Layout size={18} className="text-violet-400 shrink-0" />
+                    <Layout size={16} className="text-violet-400 shrink-0" />
                     {bannerMaterials.length > 0 && <span className="absolute -top-1 -right-1 bg-violet-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{bannerMaterials.length}</span>}
                   </button>
                 </div>
