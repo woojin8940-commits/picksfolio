@@ -2842,14 +2842,15 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
 
         {/* WebRTC Video - always render and keep visible when connected.
             The video lives inside a positioned wrapper rather than carrying the
-            split geometry itself. In a 함께 방송 split the two feeds sit SIDE BY
-            SIDE in a top band — the host takes the LEFT half (`top-0 left-0 w-1/2`)
-            and the partner the right half. The band height (`h-[44%]`) makes each
-            half-width cell roughly 9:16, so each portrait feed fills its cell
-            cleanly (object-fit: cover) and the two hosts appear next to each other
-            at the top, exactly like the reference. */}
+            split geometry itself. In a 함께 방송 split each feed is a SCALED-DOWN
+            COPY of the original full-screen broadcast — it keeps the exact same
+            portrait aspect ratio (`aspect-[9/16]`), just smaller, so the two
+            windows sit side by side as two complete screens rather than the one
+            screen sliced into narrow halves. The host takes the LEFT window
+            (`left-[2%] w-[46%]`) and the partner the right; the whole frame shows
+            (object-fit: contain) so nothing is cropped, exactly like solo. */}
         <div
-          className={`absolute overflow-hidden ${coPartner ? 'co-split-feed top-0 left-0 w-1/2 h-[44%]' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[2%] top-[12%] w-[46%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
         >
           <video
             ref={videoRef}
@@ -2877,25 +2878,22 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           />
         </div>
 
-        {/* 함께 방송 split — feeds side by side in a top band. The host fills the
-            LEFT half (above) and the partner the RIGHT half here. Each cell is
-            half-width and `h-[44%]` tall, which is ~9:16, so each portrait feed
-            fills its cell without shrinking — the two hosts read as a side-by-side
-            pair at the top, not one screen sliced into narrow columns. Names and
-            the session info ride as compact overlay badges so they never steal
-            room from the two feeds. */}
+        {/* 함께 방송 split — two complete screens side by side. The host fills the
+            LEFT window (above) and the partner the RIGHT window here. Each window
+            keeps the original broadcast's portrait ratio (`aspect-[9/16]`), just
+            scaled down, so the pair reads as two whole screens — not one screen
+            sliced into narrow columns. Names and session info ride as compact
+            overlay badges so they never steal room from the two feeds. */}
         {coPartner && (
           <>
             <PartnerFeed
               channel={coPartner.partner}
-              className="co-split-feed absolute top-0 right-0 w-1/2 h-[44%] z-[5] bg-black overflow-hidden"
-              objectFit="cover"
+              className="co-split-feed absolute right-[2%] top-[12%] w-[46%] aspect-[9/16] z-[5] bg-black overflow-hidden rounded-sm"
+              objectFit="contain"
               onConnectedChange={setPartnerStreamConnected}
             />
-            {/* Divider line between the two side-by-side halves */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-[44%] bg-violet-500/60 z-[7] pointer-events-none" />
             {!partnerStreamConnected && (
-              <div className="absolute top-0 right-0 w-1/2 h-[44%] z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+              <div className="absolute right-[2%] top-[12%] w-[46%] aspect-[9/16] z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coPartner.partner} 연결 중…
               </div>
             )}
@@ -2907,28 +2905,28 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             </div>
 
             {/* Elapsed session time — centered just below the 함께 LIVE badge */}
-            <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[8] bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full text-white text-[10px] font-black tabular-nums pointer-events-none">
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-[8] bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full text-white text-[10px] font-black tabular-nums pointer-events-none">
               {String(Math.floor(coElapsedSec / 60)).padStart(2, '0')}:{String(coElapsedSec % 60).padStart(2, '0')}
             </div>
 
-            {/* Host name — top-left of the left (host) half */}
-            <div className="absolute top-3 left-3 z-[8] bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate pointer-events-none">
+            {/* Host name — overlaid on the top-left corner of the host window */}
+            <div className="absolute top-[13%] left-[3.5%] z-[8] bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate pointer-events-none">
               @{username}
             </div>
 
-            {/* Partner name — top-right of the right (partner) half */}
-            <div className="absolute top-3 right-3 z-[8] bg-violet-500/30 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate flex items-center gap-1 pointer-events-none">
+            {/* Partner name — overlaid on the top-right corner of the partner window */}
+            <div className="absolute top-[13%] right-[3.5%] z-[8] bg-violet-500/30 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate flex items-center gap-1 pointer-events-none">
               <Users size={10} className="text-violet-200 shrink-0" /> @{coPartner.partner}
             </div>
           </>
         )}
         {/* HLS Video.js fallback. In a 함께 방송 split this MUST occupy the same
-            left-half top band as the WebRTC video — otherwise the full-screen
-            HLS surface renders over the partner's right half. When solo it fills
-            the whole stage as before. */}
+            left-hand portrait window as the WebRTC video — otherwise the
+            full-screen HLS surface renders over the partner's window. When solo it
+            fills the whole stage as before. */}
         {hlsPlaybackUrl && (
           <div
-            className={`absolute overflow-hidden ${coPartner ? 'co-split-feed top-0 left-0 w-1/2 h-[44%]' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+            className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[2%] top-[12%] w-[46%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           >
             <video
               ref={hlsVideoRef}

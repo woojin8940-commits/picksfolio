@@ -1825,12 +1825,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             clean black side margins there. */}
         <div className="relative h-full w-full md:w-auto md:h-full md:aspect-[9/16] md:mx-auto overflow-hidden bg-black">
         {/* Host's own feed. Normally fills the whole 9:16 stage; when a co-broadcast
-            is live it becomes the LEFT half at full height (top-to-bottom), so the
-            two creators sit side-by-side filling the portrait frame exactly like a
-            phone / TikTok 2-up — no more middle band with big black margins, and on
-            the web the split now lives inside the same centered portrait column
-            instead of spreading across the whole desktop viewport. */}
-        <div className={`absolute inset-y-0 left-0 overflow-hidden bg-black ${coLive ? 'w-1/2' : 'w-full'}`}>
+            is live it becomes a SCALED-DOWN COPY of that full screen — a portrait
+            window that keeps the original ratio (`w-[46%] aspect-[9/16]`), centered
+            vertically as the LEFT of two side-by-side windows. The partner gets a
+            matching window on the right, so the two creators read as two complete
+            screens rather than one screen sliced into narrow full-height columns. */}
+        <div className={`absolute overflow-hidden bg-black ${coLive ? 'left-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] rounded-sm' : 'inset-y-0 left-0 w-full'}`}>
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
             and playing frames that feed the canvas. On desktop the opaque canvas
@@ -1843,7 +1843,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           autoPlay
           muted
           playsInline
-          className={`block w-full h-full pointer-events-none ${coLive ? 'object-cover' : 'object-contain'}`}
+          className="block w-full h-full pointer-events-none object-contain"
         />
         {/* Canvas shows the filtered/mirrored 9:16 broadcast frame. It is shown
             with object-contain on EVERY device — phone and web alike — so the
@@ -1853,7 +1853,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             match what was actually exposed to viewers. */}
         <canvas
           ref={canvasRef}
-          className={`absolute inset-0 w-full h-full ${coLive ? 'object-cover' : 'object-contain'}`}
+          className="absolute inset-0 w-full h-full object-contain"
         />
         {!isCameraOn && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
@@ -1944,7 +1944,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           if (!activeProduct) return null;
           return (
             <div
-              className="absolute right-3 md:right-4 w-[60vw] max-w-[240px] md:max-w-[280px] z-20 pointer-events-none"
+              className={`absolute right-3 md:right-4 ${coLive ? 'w-[78%]' : 'w-[60vw]'} max-w-[240px] md:max-w-[280px] z-20 pointer-events-none`}
               style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
             >
               <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-2.5 relative">
@@ -1979,32 +1979,28 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
         {/* End host feed */}
 
-        {/* 함께 방송 2-up — the partner's live feed fills the RIGHT half at full
-            height (TikTok-style), inside the same centered portrait stage as the
-            host. Previously each half was confined to a 15%–76% middle band and
-            positioned against the full main area, so on the web the two feeds
-            spread across the whole desktop and read as two overlapping screens.
-            Now both halves are full-height columns within the 9:16 stage, exactly
-            matching the phone layout. */}
+        {/* 함께 방송 2-up — two complete portrait windows side by side. The host
+            fills the LEFT window (above); the partner's live feed fills a matching
+            RIGHT window here. Each window keeps the original broadcast ratio
+            (`w-[46%] aspect-[9/16]`), just scaled down, so the pair reads as two
+            whole screens — not one screen sliced into narrow columns. */}
         {coSession && coLive && (
           <>
             <PartnerFeed
               channel={coSession.partner}
-              className="absolute inset-y-0 right-0 w-1/2 bg-black overflow-hidden"
-              objectFit="cover"
+              className="absolute right-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] bg-black overflow-hidden rounded-sm"
+              objectFit="contain"
               onConnectedChange={setPartnerStreamReady}
             />
-            {/* Divider line between the two halves */}
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[2px] bg-violet-500/60 pointer-events-none" />
-            {/* Per-half name labels, kept clear of the top control HUD. */}
-            <div className="absolute top-16 left-1/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+            {/* Per-window name labels, anchored near the top of each portrait window. */}
+            <div className="absolute top-[30%] left-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
               @{userName} (나)
             </div>
-            <div className="absolute top-16 left-3/4 -translate-x-1/2 bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+            <div className="absolute top-[30%] right-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
               <Users size={10} className="text-violet-300" /> @{coSession.partner}
             </div>
             {!partnerStreamReady && (
-              <div className="absolute inset-y-0 right-0 w-1/2 flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+              <div className="absolute right-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coSession.partner} 연결 중…
               </div>
             )}
