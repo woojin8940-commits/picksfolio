@@ -37,7 +37,7 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 export type ClaudePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 
 export const CLAUDE_PAY_METHODS: { id: ClaudePayMethod; label: string }[] = [
-  { id: 'CARD', label: '카드결제' },
+  { id: 'CARD', label: '신용카드' },
   { id: 'TOSSPAY', label: '토스페이' },
   { id: 'KAKAOPAY', label: '카카오페이' },
 ];

@@ -96,8 +96,22 @@
 
       const payMethod = intent.payMethod || "TOSSPAY";
 
-      // ── 빌링(자동결제) 등록 흐름 ── billingKey 로 돌아온다.
+      // ── 멤버십 ──
       if (intent.type === "membership") {
+        // 카드(신용카드) 단건 결제는 paymentId 로, 토스페이·카카오페이 빌링키 등록은 billingKey 로 돌아온다.
+        if (intent.oneTime) {
+          if (!paymentId) { fail("결제 정보가 올바르지 않습니다."); return; }
+          const r = await send("POST", "/api/billing-issue", {
+            username: intent.username,
+            tier: intent.tier,
+            paymentId: paymentId,
+            payMethod: intent.payMethod || "CARD",
+          });
+          if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
+          sessionStorage.removeItem(INTENT_KEY);
+          done(intent.returnPath);
+          return;
+        }
         if (!billingKey) { fail("빌링키를 받지 못했습니다. 다시 시도해 주세요."); return; }
         const r = await send("POST", "/api/billing-issue", {
           username: intent.username,

@@ -65,6 +65,10 @@ export interface PortOneIntent {
   kind?: 'activation' | 'recharge';
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce';
+  // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)
+  // 빌링키 발급은 본인인증(휴대폰 인증)을 강제하므로, 클로드 플랜과 동일하게 단건 결제로
+  // 첫 달을 즉시 결제해 본인인증 없이 카드만 입력하도록 한다.
+  oneTime?: boolean;
   // 라이브 커머스 시청자 주문 본문(paymentId 제외). 리다이렉트 전후로 주문 맥락(상품·배송지·
   // 시청자)을 보존해 돌아온 페이지가 그대로 서버에 전달한다.
   order?: Record<string, unknown>;

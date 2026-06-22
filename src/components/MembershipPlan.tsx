@@ -6,6 +6,8 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  cardParam,
+  portonePayMethod,
   isNiceCardConfigured,
   NICE_NOT_CONFIGURED_MESSAGE,
   portoneBillingKeyMethod,
@@ -326,8 +328,79 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setSaving(true);
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
+
+      // ── 카드(신용카드) — 단건 결제 (클로드 플랜과 동일한 결제창) ──
+      // 카드 빌링키 발급(requestIssueBillingKey)은 나이스정보통신에서 본인인증(휴대폰 인증)을
+      // 먼저 요구해 "전화번호 인증부터" 뜬다. 대신 클로드 플랜처럼 단건 결제(requestPayment)로
+      // 호출하면 본인인증 없이 카드 입력만으로 바로 결제된다. 첫 달을 즉시 결제해 멤버십을
+      // 활성화하고, 돌아온 paymentId 를 서버에서 검증한다. (토스페이·카카오페이는 아래 빌링키
+      // 자동결제 경로를 그대로 사용한다.)
+      if (payMethod === 'CARD') {
+        const paymentId = genPortOneId('membership', normalizedUserName);
+        savePortOneIntent({
+          type: 'membership',
+          username: normalizedUserName,
+          payMethod: 'CARD',
+          oneTime: true,
+          tier: selectedTier,
+          amountKrw: tierAmount,
+          orderName: `픽스폴리오 ${tierLabel} 결제`,
+          returnPath: window.location.pathname + window.location.search,
+        });
+
+        const response = await window.PortOne.requestPayment({
+          storeId: PORTONE_STORE_ID,
+          channelKey: channelKeyFor('CARD'),
+          paymentId,
+          orderName: `픽스폴리오 ${tierLabel} 결제`,
+          totalAmount: tierAmount,
+          currency: 'KRW',
+          payMethod: portonePayMethod('CARD'),
+          redirectUrl: portoneRedirectUrl(),
+          ...cardParam('CARD'),
+          customer: {
+            customerId: safeUserName,
+            fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
+            phoneNumber: verification?.business?.contact_phone || undefined,
+          },
+        });
+
+        if (!response || response.code) {
+          clearPortOneIntent();
+          if (response?.code) {
+            const detail = response.code === 'PORTONE_ERROR'
+              ? '결제 모듈 오류입니다. 채널 설정(결제모듈·PG상점아이디)을 확인해 주세요.'
+              : response.message || `결제 실패 (${response.code})`;
+            setError(detail);
+            console.error('[Membership] PortOne payment error:', response.code, response.message);
+          }
+          setSaving(false);
+          return;
+        }
+
+        const verifyRes = await apiService.activateMembershipOneTime(
+          normalizedUserName,
+          response.paymentId || paymentId,
+          selectedTier,
+          'CARD',
+        );
+        clearPortOneIntent();
+        if (!verifyRes.success) {
+          setError(verifyRes.error || '결제에 실패했습니다. 다시 시도해 주세요.');
+          setSaving(false);
+          return;
+        }
+        if (verifyRes.data) setVerification(verifyRes.data);
+        setConfirmOpen(false);
+        flashSuccess(
+          `신용카드로 ${TIER_PRICE[selectedTier].toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`,
+        );
+        setSaving(false);
+        return;
+      }
+
       const issueId = genPortOneId('billing', normalizedUserName);
-      // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 빌링키를 발급한다.
+      // 토스페이 / 카카오페이는 PortOne V2 로 빌링키를 발급해 자동결제를 등록한다.
       const ppMethod = payMethod;
 
       // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
@@ -990,7 +1063,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     }`}
                   >
                     <span>💳</span>
-                    <span className="whitespace-nowrap">카드</span>
+                    <span className="whitespace-nowrap">신용카드</span>
                   </button>
                   <button
                     type="button"
@@ -1019,7 +1092,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 </div>
                 {payMethod === 'CARD' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    카드 결제창을 통해 신용·체크카드로 결제됩니다.
+                    본인인증 없이 신용·체크카드 입력만으로 바로 결제됩니다.
                   </p>
                 )}
                 {payMethod === 'KAKAOPAY' && (
