@@ -292,13 +292,23 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateZ(0);
 }
 
-/* 함께 방송 (co-broadcast) split — each host's feed occupies one half of the
-   stage. Every feed (the host's WebRTC video, the host's HLS fallback and the
-   partner feed) is wrapped in its OWN positioned <div> that carries the half
-   width and the shared top/bottom band, and the base rule above makes the inner
-   <video> fill that box. Because all three wrappers use the identical geometry,
-   the two halves are always the same size and never overlap — so no per-element
-   width override is needed here anymore. */
+/* 함께 방송 (co-broadcast) split — the two feeds sit SIDE BY SIDE in a top band:
+   the host fills the LEFT half and the partner the RIGHT half. Each feed wrapper
+   is its own positioned <div> (`w-1/2 h-[44%]`, ≈9:16), and the base rule above
+   makes the inner <video> fill that box. Two side-by-side cells at the top is the
+   point — the hosts read as a pair, like the reference layout. */
+
+/* …but the solo base rule forces `object-fit: contain`, which is WRONG for a
+   split half. A portrait 9:16 feed contained inside a half-width box shrinks and
+   letterboxes — the "비율이 5인데 2.5/2.5로 보인다"(each feed renders at half scale)
+   report. Inside a split wrapper we override to `cover` so each portrait feed
+   fills its ≈9:16 cell (minimal cropping). The `!important` is required to beat
+   the base `contain !important` rule above. */
+.live-stream-container .co-split-feed video,
+.live-stream-container .co-split-feed .video-js,
+.live-stream-container .co-split-feed .video-js .vjs-tech {
+  object-fit: cover !important;
+}
 
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
    gradients and box-shadows with subpixel-rounding seams. On the green

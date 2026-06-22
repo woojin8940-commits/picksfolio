@@ -2842,16 +2842,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
 
         {/* WebRTC Video - always render and keep visible when connected.
             The video lives inside a positioned wrapper rather than carrying the
-            split geometry itself. In a 함께 방송 split the wrapper takes the SAME
-            box as the partner feed and the HLS surface — `left-0 w-1/2` with the
-            identical top/bottom band — so the two halves are guaranteed to be the
-            exact same size and can never overlap. (A bare <video> with width set
-            directly fought the `width:100% !important` base rule and ended up a
-            different height than the partner half, which is what made the two
-            screens look mismatched and stacked on top of each other.) */}
+            split geometry itself. In a 함께 방송 split the two feeds sit SIDE BY
+            SIDE in a top band — the host takes the LEFT half (`top-0 left-0 w-1/2`)
+            and the partner the right half. The band height (`h-[44%]`) makes each
+            half-width cell roughly 9:16, so each portrait feed fills its cell
+            cleanly (object-fit: cover) and the two hosts appear next to each other
+            at the top, exactly like the reference. */}
         <div
-          className={`absolute overflow-hidden ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-          style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
+          className={`absolute overflow-hidden ${coPartner ? 'co-split-feed top-0 left-0 w-1/2 h-[44%]' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
         >
           <video
             ref={videoRef}
@@ -2879,75 +2877,58 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           />
         </div>
 
-        {/* 함께 방송 split — partner feed fills the right half. The two portrait
-            feeds sit in a centered middle band; the top/bottom margins are turned
-            into deliberate, opaque bands (names + banner/info) so the empty space
-            reads as clean margin instead of two overlapping screens. */}
+        {/* 함께 방송 split — feeds side by side in a top band. The host fills the
+            LEFT half (above) and the partner the RIGHT half here. Each cell is
+            half-width and `h-[44%]` tall, which is ~9:16, so each portrait feed
+            fills its cell without shrinking — the two hosts read as a side-by-side
+            pair at the top, not one screen sliced into narrow columns. Names and
+            the session info ride as compact overlay badges so they never steal
+            room from the two feeds. */}
         {coPartner && (
           <>
             <PartnerFeed
               channel={coPartner.partner}
-              className="absolute right-0 w-1/2 top-[15%] bottom-[24%] z-[5] bg-black overflow-hidden"
+              className="co-split-feed absolute top-0 right-0 w-1/2 h-[44%] z-[5] bg-black overflow-hidden"
+              objectFit="cover"
               onConnectedChange={setPartnerStreamConnected}
             />
-            {/* Divider line between the two halves (middle band only) */}
-            <div className="absolute left-1/2 -translate-x-1/2 w-[2px] bg-violet-500/60 z-[6] pointer-events-none" style={{ top: '15%', bottom: '24%' }} />
+            {/* Divider line between the two side-by-side halves */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-[44%] bg-violet-500/60 z-[7] pointer-events-none" />
             {!partnerStreamConnected && (
-              <div className="absolute right-0 w-1/2 z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none" style={{ top: '15%', bottom: '24%' }}>
+              <div className="absolute top-0 right-0 w-1/2 h-[44%] z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coPartner.partner} 연결 중…
               </div>
             )}
 
-            {/* Top margin band — opaque, covers the upper letterbox so nothing
-                shows through. Carries both host names + a shared LIVE badge. */}
-            <div className="absolute top-0 inset-x-0 z-[8] bg-black flex items-end justify-between px-3 pb-2 pointer-events-none" style={{ height: '15%' }}>
-              <div className="bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[44%] truncate">
-                @{username}
-              </div>
-              <div className="flex items-center gap-1.5 bg-red-500/90 px-2.5 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                <span className="text-white text-[9px] font-black uppercase tracking-widest">함께 LIVE</span>
-              </div>
-              <div className="bg-violet-500/30 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[44%] truncate flex items-center gap-1">
-                <Users size={10} className="text-violet-200 shrink-0" /> @{coPartner.partner}
-              </div>
+            {/* 함께 LIVE badge — top center, shared by both feeds */}
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[8] flex items-center gap-1.5 bg-red-500/90 px-2.5 py-1 rounded-full pointer-events-none">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              <span className="text-white text-[9px] font-black uppercase tracking-widest">함께 LIVE</span>
             </div>
 
-            {/* Bottom margin band — opaque, covers the lower letterbox. Hosts the
-                pushed banner (when active) plus the co-broadcast info: who you're
-                watching together and how long the session has been running. */}
-            <div className="absolute bottom-0 inset-x-0 z-[8] bg-black flex items-center gap-3 px-3 pt-2" style={{ height: '24%', paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}>
-              {activeMaterial && activeMaterial.url && activeMaterial.type === 'banner' ? (
-                <div className="h-full flex-1 min-w-0 rounded-2xl overflow-hidden border border-white/15 bg-white/5 flex items-center">
-                  <img src={activeMaterial.url} alt={activeMaterial.name || ''} className="h-full w-full object-cover" loading="eager" decoding="async" />
-                </div>
-              ) : (
-                <div className="h-full flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/5 flex flex-col items-center justify-center text-center px-3">
-                  <p className="text-white text-[12px] font-black leading-tight truncate w-full">
-                    @{username} <span className="text-violet-300">×</span> @{coPartner.partner}
-                  </p>
-                  <p className="text-white/40 text-[10px] font-bold mt-0.5">함께 방송 중</p>
-                </div>
-              )}
-              <div className="shrink-0 flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-2xl bg-white/5 border border-white/10">
-                <span className="text-white/40 text-[8px] font-black uppercase tracking-widest">함께 방송</span>
-                <span className="text-white text-sm font-black tabular-nums">
-                  {String(Math.floor(coElapsedSec / 60)).padStart(2, '0')}:{String(coElapsedSec % 60).padStart(2, '0')}
-                </span>
-                <span className="text-violet-300 text-[9px] font-bold truncate max-w-[88px]">@{coPartner.partner}</span>
-              </div>
+            {/* Elapsed session time — centered just below the 함께 LIVE badge */}
+            <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[8] bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full text-white text-[10px] font-black tabular-nums pointer-events-none">
+              {String(Math.floor(coElapsedSec / 60)).padStart(2, '0')}:{String(coElapsedSec % 60).padStart(2, '0')}
+            </div>
+
+            {/* Host name — top-left of the left (host) half */}
+            <div className="absolute top-3 left-3 z-[8] bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate pointer-events-none">
+              @{username}
+            </div>
+
+            {/* Partner name — top-right of the right (partner) half */}
+            <div className="absolute top-3 right-3 z-[8] bg-violet-500/30 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black max-w-[40%] truncate flex items-center gap-1 pointer-events-none">
+              <Users size={10} className="text-violet-200 shrink-0" /> @{coPartner.partner}
             </div>
           </>
         )}
         {/* HLS Video.js fallback. In a 함께 방송 split this MUST occupy the same
-            left-half middle band as the WebRTC video — otherwise the full-screen
-            HLS surface renders on top of (and behind) the partner's right half,
-            which is the "뒤에 방송 화면이 겹쳐서 보이는" overlap viewers reported. When
-            solo it fills the whole stage as before. */}
+            left-half top band as the WebRTC video — otherwise the full-screen
+            HLS surface renders over the partner's right half. When solo it fills
+            the whole stage as before. */}
         {hlsPlaybackUrl && (
           <div
-            className={`absolute overflow-hidden ${coPartner ? 'left-0 w-1/2' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
-            style={coPartner ? { top: '15%', bottom: '24%' } : undefined}
+            className={`absolute overflow-hidden ${coPartner ? 'co-split-feed top-0 left-0 w-1/2 h-[44%]' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           >
             <video
               ref={hlsVideoRef}
@@ -3178,9 +3159,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
         </div>
 
         {/* Active Material Overlay - mirrors broadcaster's material display.
-            During a co-broadcast split a pushed banner is shown in the bottom
-            info band instead (so it never covers the two faces). */}
-        {activeMaterial && activeMaterial.url && !(coPartner && activeMaterial.type === 'banner') && (
+            Renders the same way during a co-broadcast: a pushed banner floats
+            centered on the stage, which sits just below the side-by-side feed
+            band. */}
+        {activeMaterial && activeMaterial.url && (
           <div className="absolute inset-0 pointer-events-none z-20">
             <div
               key={activeMaterial.id}
