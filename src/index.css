@@ -294,7 +294,7 @@ h1, h2, h3, h4, h5, h6 {
 
 /* 함께 방송 (co-broadcast) split — two complete screens side by side. Each feed
    is a scaled-down copy of the solo full-screen broadcast: its wrapper is a
-   portrait box that keeps the original ratio (`w-[46%] aspect-[9/16]`), and the
+   portrait box that keeps the original ratio (`w-[48%] aspect-[9/16]`), and the
    inner <video> fills that box. The two windows read as a pair of whole screens,
    not one screen sliced into narrow columns. */
 

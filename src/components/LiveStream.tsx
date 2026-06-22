@@ -2847,10 +2847,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             portrait aspect ratio (`aspect-[9/16]`), just smaller, so the two
             windows sit side by side as two complete screens rather than the one
             screen sliced into narrow halves. The host takes the LEFT window
-            (`left-[2%] w-[46%]`) and the partner the right; the whole frame shows
+            (`left-[1.5%] w-[48%]`) and the partner the right; the whole frame shows
             (object-fit: contain) so nothing is cropped, exactly like solo. */}
         <div
-          className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[2%] top-[12%] w-[46%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+          className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[1.5%] top-[12%] w-[48%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${(streamConnected || videoPlaying) && !useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
         >
           <video
             ref={videoRef}
@@ -2888,12 +2888,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           <>
             <PartnerFeed
               channel={coPartner.partner}
-              className="co-split-feed absolute right-[2%] top-[12%] w-[46%] aspect-[9/16] z-[5] bg-black overflow-hidden rounded-sm"
+              className="co-split-feed absolute right-[1.5%] top-[12%] w-[48%] aspect-[9/16] z-[5] bg-black overflow-hidden rounded-sm"
               objectFit="contain"
               onConnectedChange={setPartnerStreamConnected}
             />
             {!partnerStreamConnected && (
-              <div className="absolute right-[2%] top-[12%] w-[46%] aspect-[9/16] z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+              <div className="absolute right-[1.5%] top-[12%] w-[48%] aspect-[9/16] z-[6] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coPartner.partner} 연결 중…
               </div>
             )}
@@ -2926,7 +2926,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             fills the whole stage as before. */}
         {hlsPlaybackUrl && (
           <div
-            className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[2%] top-[12%] w-[46%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
+            className={`absolute overflow-hidden ${coPartner ? 'co-split-feed left-[1.5%] top-[12%] w-[48%] aspect-[9/16]' : 'top-0 left-0 w-full h-full'} ${useHls ? 'z-[5]' : 'z-[1] opacity-0 pointer-events-none'}`}
           >
             <video
               ref={hlsVideoRef}

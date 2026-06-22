@@ -1819,18 +1819,24 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             zoom-cropped to fill it. */}
         {/* On phones the stage fills the screen edge-to-edge (w-full) so the
             broadcast preview has NO black side margins — the immersive, full-bleed
-            look a mobile broadcaster expects. On the web (md) it falls back to a
-            centered portrait 9:16 column (md:w-auto md:aspect-[9/16]) so the camera
-            doesn't stretch across a wide desktop; the space on either side reads as
-            clean black side margins there. */}
-        <div className="relative h-full w-full md:w-auto md:h-full md:aspect-[9/16] md:mx-auto overflow-hidden bg-black">
+            look a mobile broadcaster expects. On the web (md) the stage is ALWAYS a
+            centered portrait 9:16 column (md:aspect-[9/16]), sized to the full
+            viewport height — the largest the original phone-shaped frame can be on a
+            desktop. This holds for a 함께 방송 (co-broadcast) too: the stage keeps its
+            portrait ratio rather than widening into a landscape box, and the two
+            side-by-side windows simply grow within it (see w-[48%] below). Keeping
+            the original ratio matches exactly what viewers see in LiveStream, which
+            is also a 9:16 column. */}
+        <div className="relative h-full w-full md:w-auto md:h-full md:mx-auto md:max-w-full overflow-hidden bg-black md:aspect-[9/16]">
         {/* Host's own feed. Normally fills the whole 9:16 stage; when a co-broadcast
             is live it becomes a SCALED-DOWN COPY of that full screen — a portrait
-            window that keeps the original ratio (`w-[46%] aspect-[9/16]`), centered
+            window that keeps the original ratio (`w-[48%] aspect-[9/16]`), centered
             vertically as the LEFT of two side-by-side windows. The partner gets a
             matching window on the right, so the two creators read as two complete
-            screens rather than one screen sliced into narrow full-height columns. */}
-        <div className={`absolute overflow-hidden bg-black ${coLive ? 'left-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] rounded-sm' : 'inset-y-0 left-0 w-full'}`}>
+            screens rather than one screen sliced into narrow full-height columns.
+            At 48% width each (with a thin center gap) the pair is as large as two
+            portrait windows can be inside the portrait stage. */}
+        <div className={`absolute overflow-hidden bg-black ${coLive ? 'left-[1.5%] top-[42%] md:top-1/2 -translate-y-1/2 w-[48%] aspect-[9/16] rounded-sm' : 'inset-y-0 left-0 w-full'}`}>
         {/* Source video: rendered as a full-size base layer (not a 1px hidden
             element) so mobile browsers — especially iOS Safari — keep decoding
             and playing frames that feed the canvas. On desktop the opaque canvas
@@ -1982,25 +1988,25 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* 함께 방송 2-up — two complete portrait windows side by side. The host
             fills the LEFT window (above); the partner's live feed fills a matching
             RIGHT window here. Each window keeps the original broadcast ratio
-            (`w-[46%] aspect-[9/16]`), just scaled down, so the pair reads as two
+            (`w-[48%] aspect-[9/16]`), just scaled down, so the pair reads as two
             whole screens — not one screen sliced into narrow columns. */}
         {coSession && coLive && (
           <>
             <PartnerFeed
               channel={coSession.partner}
-              className="absolute right-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] bg-black overflow-hidden rounded-sm"
+              className="absolute right-[1.5%] top-[42%] md:top-1/2 -translate-y-1/2 w-[48%] aspect-[9/16] bg-black overflow-hidden rounded-sm"
               objectFit="contain"
               onConnectedChange={setPartnerStreamReady}
             />
             {/* Per-window name labels, anchored near the top of each portrait window. */}
-            <div className="absolute top-[30%] left-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+            <div className="absolute top-[24%] md:top-[30%] left-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
               @{userName} (나)
             </div>
-            <div className="absolute top-[30%] right-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+            <div className="absolute top-[24%] md:top-[30%] right-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
               <Users size={10} className="text-violet-300" /> @{coSession.partner}
             </div>
             {!partnerStreamReady && (
-              <div className="absolute right-[2%] top-1/2 -translate-y-1/2 w-[46%] aspect-[9/16] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
+              <div className="absolute right-[1.5%] top-[42%] md:top-1/2 -translate-y-1/2 w-[48%] aspect-[9/16] flex items-center justify-center text-white/60 text-xs font-bold pointer-events-none">
                 @{coSession.partner} 연결 중…
               </div>
             )}
@@ -2411,35 +2417,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               </div>
             )}
 
-            {/* 상품 / 담기현황 / 배너 — pinned to the very bottom of the stage,
-                directly above the broadcaster controls (phones only; the web keeps
-                its top tab bar). Moved here out of the floating chat overlay so the
-                bar sits at the bottom edge instead of mid-screen over the faces. */}
-            {!panelExpanded && (
-              <div className="flex md:hidden items-stretch gap-2">
-                <button
-                  onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-                >
-                  <ShoppingBag size={14} className="text-green-400" /> 상품
-                  {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1.5 rounded-full">{liveProducts.length}</span>}
-                </button>
-                <button
-                  onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-                >
-                  <BarChart3 size={14} className="text-orange-400" /> 담기현황
-                  {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1.5 rounded-full">{cartStats.totalItems}</span>}
-                </button>
-                <button
-                  onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-xs font-black active:scale-95 transition-all"
-                >
-                  <Layout size={14} className="text-violet-400" /> 배너
-                  {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1.5 rounded-full">{bannerMaterials.length}</span>}
-                </button>
-              </div>
-            )}
+            {/* 상품 / 담기현황 / 배너 (phones) moved into the chat input row below so
+                it shares a single line with the (now narrower) message box, freeing
+                this bottom strip for just the broadcaster controls. The web keeps its
+                top tab bar instead. */}
 
             <div className="flex justify-between items-end gap-2 flex-wrap">
               <div className="flex items-center gap-2 md:gap-3 flex-wrap">
@@ -2711,21 +2692,48 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               <div ref={chatEndRef} />
             </div>
             <div className="p-4 bg-transparent md:bg-slate-950/50 pointer-events-auto">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="메시지를 입력하세요..."
-                  className="w-full bg-black/40 backdrop-blur-md md:bg-white/5 border border-white/15 md:border-white/10 rounded-2xl py-3.5 px-5 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/40 md:placeholder:text-white/30"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-blue-500 hover:text-blue-400"
-                >
-                  <Send size={18} />
-                </button>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    type="text"
+                    placeholder="메시지를 입력하세요..."
+                    className="w-full bg-black/40 backdrop-blur-md md:bg-white/5 border border-white/15 md:border-white/10 rounded-2xl py-3.5 px-5 pr-10 text-white text-[15px] outline-none focus:border-blue-500/50 transition-all placeholder:text-white/40 md:placeholder:text-white/30"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-blue-500 hover:text-blue-400"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+                {/* 상품 / 담기현황 / 배너 — phones only, sharing the row with the
+                    narrowed message box. The web uses the top tab bar instead. */}
+                <div className="flex md:hidden items-stretch gap-1.5 shrink-0">
+                  <button
+                    onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
+                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                  >
+                    <ShoppingBag size={14} className="text-green-400 shrink-0" /> 상품
+                    {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1 rounded-full">{liveProducts.length}</span>}
+                  </button>
+                  <button
+                    onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
+                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                  >
+                    <BarChart3 size={14} className="text-orange-400 shrink-0" /> 담기현황
+                    {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1 rounded-full">{cartStats.totalItems}</span>}
+                  </button>
+                  <button
+                    onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
+                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                  >
+                    <Layout size={14} className="text-violet-400 shrink-0" /> 배너
+                    {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1 rounded-full">{bannerMaterials.length}</span>}
+                  </button>
+                </div>
               </div>
             </div>
           </>
