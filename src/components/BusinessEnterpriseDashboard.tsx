@@ -5,7 +5,6 @@ import { isNativeApp } from '../utils/appEnv';
 const BusinessInbox = lazy(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
 const LinkManagement = lazy(() => import('./LinkManagement'));
-const PortfolioManagement = lazy(() => import('./PortfolioManagement'));
 const AITrendAnalysis = lazy(() => import('./AITrendAnalysis'));
 const LiveCommerceManagement = lazy(() => import('./LiveCommerceManagement'));
 const BroadcastSettings = lazy(() => import('./BroadcastSettings'));
@@ -20,7 +19,7 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'portfolio' | 'trend' | 'live' | 'broadcast-settings' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'live' | 'broadcast-settings' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
@@ -174,9 +173,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   switch (currentSubView) {
     case 'links':
       subComponent = <Suspense fallback={<BizLazyFallback />}><LinkManagement userName={businessUsername} /></Suspense>;
-      break;
-    case 'portfolio':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><PortfolioManagement userName={businessUsername} onNavigateMembership={() => setCurrentSubView('membership')} /></Suspense>;
       break;
     case 'trend':
       subComponent = <Suspense fallback={<BizLazyFallback />}><AITrendAnalysis userName={businessUsername} /></Suspense>;
@@ -388,7 +384,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <nav className="flex-1 space-y-1">
           <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
           <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
-          <NavItem icon="💼" label="포트폴리오 & 소개" active={currentSubView === 'portfolio'} onClick={() => setCurrentSubView('portfolio')} />
           <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
           <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
           <div className="my-3 border-t border-white/10" />
@@ -418,7 +413,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <div className="flex overflow-x-auto scrollbar-hide px-1 py-2 gap-0.5" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}>
           <MobileNavItem icon="🏠" label="홈" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
-          <MobileNavItem icon="💼" label="소개" active={currentSubView === 'portfolio'} onClick={() => setCurrentSubView('portfolio')} />
           <MobileNavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
           <MobileNavItem icon="📋" label="방송설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
@@ -443,7 +437,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             <nav className="flex-1 space-y-1 overflow-y-auto">
               <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { setCurrentSubView('dashboard'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => { setCurrentSubView('links'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💼" label="포트폴리오 & 소개" active={currentSubView === 'portfolio'} onClick={() => { setCurrentSubView('portfolio'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { setCurrentSubView('live'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { setCurrentSubView('broadcast-settings'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />

@@ -9,116 +9,10 @@ import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import MediaAuto, { isVideoSource } from './MediaAuto';
+import MediaAuto from './MediaAuto';
 import LiveStream from './LiveStream';
 import { renderPortfolioHtml } from './richText';
 
-type PortfolioSectionGroup =
-  | { kind: 'single'; section: any }
-  | { kind: 'imageGrid'; columns: number; sections: any[] };
-
-const groupPortfolioSections = (items: any[]): PortfolioSectionGroup[] => {
-  const groups: PortfolioSectionGroup[] = [];
-  for (const s of items) {
-    if (!s) continue;
-    if (s.type === 'image') {
-      const raw = Number(s.gridColumns) || 1;
-      const cols = Math.min(4, Math.max(1, raw));
-      const last = groups[groups.length - 1];
-      if (last && last.kind === 'imageGrid' && last.columns === cols) {
-        last.sections.push(s);
-      } else {
-        groups.push({ kind: 'imageGrid', columns: cols, sections: [s] });
-      }
-    } else {
-      groups.push({ kind: 'single', section: s });
-    }
-  }
-  return groups;
-};
-
-const legacyFontToPxUP = (size?: string): number => {
-  switch (size) {
-    case 'sm': return 13;
-    case 'lg': return 17;
-    case 'xl': return 20;
-    default: return 14;
-  }
-};
-
-const getSectionFontPx = (section: any): number => {
-  if (typeof section?.fontSizePx === 'number' && section.fontSizePx > 0) return section.fontSizePx;
-  return legacyFontToPxUP(section?.fontSize);
-};
-
-const getSectionTextDecoration = (section: any): string | undefined => {
-  const parts: string[] = [];
-  if (section?.underline) parts.push('underline');
-  if (section?.strikethrough) parts.push('line-through');
-  return parts.length ? parts.join(' ') : undefined;
-};
-
-const chunkSections = <T,>(arr: T[], size: number): T[][] => {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-};
-
-const getSectionImages = (section: any): string[] => {
-  const raw = Number(section?.gridColumns) || 1;
-  const cols = Math.min(4, Math.max(1, raw));
-  const source = Array.isArray(section?.images) && section.images.length > 0
-    ? section.images
-    : [section?.content || ''];
-  const arr = source.slice(0, cols);
-  while (arr.length < cols) arr.push('');
-  return arr;
-};
-
-const flattenSectionImages = (sections: any[]): { key: string; src: string; pos?: { x: number; y: number } }[] =>
-  sections.flatMap(s => getSectionImages(s).map((src, i) => ({ key: `${s.id}-${i}`, src, pos: s.imagePositions?.[i] })));
-
-const PORTFOLIO_ALL_LABEL = '전체';
-
-interface PortfolioCategoryDescriptor {
-  id: string;
-  name: string;
-  image?: string;
-  description?: string;
-}
-
-const collectPortfolioCategories = (items: any[]): PortfolioCategoryDescriptor[] => {
-  const out: PortfolioCategoryDescriptor[] = [];
-  const seen = new Set<string>();
-  for (const it of items || []) {
-    if (!it || it.type !== 'category') continue;
-    const name = (it.content || '').trim();
-    if (!name) continue;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    out.push({ id: it.id || name, name, image: it.categoryImage, description: it.categoryDescription });
-  }
-  return out;
-};
-
-const filterPortfolioByCategory = (items: any[], categoryName: string): any[] => {
-  const out: any[] = [];
-  let active: string | null = null;
-  const isAll = !categoryName || categoryName === PORTFOLIO_ALL_LABEL;
-  for (const it of items || []) {
-    if (!it) continue;
-    if (it.type === 'category') {
-      active = (it.content || '').trim();
-      continue;
-    }
-    if (isAll) {
-      if (active === null) out.push(it);
-    } else if (active === categoryName) {
-      out.push(it);
-    }
-  }
-  return out;
-};
 
 interface UserPageProps {
   username: string;
@@ -188,17 +82,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     return defaultDesign;
   });
 
-  const [portfolioSections, setPortfolioSections] = useState<any[]>(() => {
-    try {
-      if (!normalizedUsername) return [];
-      const saved = localStorage.getItem(`picks_portfolio_${normalizedUsername}`);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Error parsing portfolio:', e);
-    }
-    return [];
-  });
-
   const [socials, setSocials] = useState(() => {
     const defaultSocials = { instagram: '', youtube: '', tiktok: '', phone: '', kakao: '', naver: '', businessProposal: false, liveNotify: false };
     try {
@@ -256,7 +139,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   const [links, setLinks] = useState<LinkData[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('전체');
-  const [selectedPortfolioCategory, setSelectedPortfolioCategory] = useState<string>(PORTFOLIO_ALL_LABEL);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showLiveModal, setShowLiveModal] = useState(false);
   const [liveState, setLiveState] = useState<{ isLive: boolean; currentProduct?: any; viewerCount: number; activeMaterial?: any }>({
@@ -364,12 +246,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               setSocials((prev: any) => ({ ...prev, ...(apiData.socials as any) }));
               localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(apiData.socials));
             }
-            // Portfolio: always sync from cloud, even if empty array (content was cleared)
-            if (apiData.portfolio !== undefined && apiData.portfolio !== null) {
-              const portfolioArr = Array.isArray(apiData.portfolio) ? apiData.portfolio : [];
-              setPortfolioSections(portfolioArr);
-              localStorage.setItem(`picks_portfolio_${normalizedUsername}`, JSON.stringify(portfolioArr));
-            }
             if (apiData.productFolders) {
               setProductFolders(apiData.productFolders);
               localStorage.setItem(`picks_folders_${normalizedUsername}`, JSON.stringify(apiData.productFolders));
@@ -392,7 +268,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
           try {
             const savedBlocks = localStorage.getItem(`picks_blocks_${normalizedUsername}`);
             const savedDesign = localStorage.getItem(`picks_design_${normalizedUsername}`);
-            const savedPortfolio = localStorage.getItem(`picks_portfolio_${normalizedUsername}`);
             const savedSocials = localStorage.getItem(`picks_socials_${normalizedUsername}`);
             const savedProfile = localStorage.getItem(`picks_profile_${normalizedUsername}`);
 
@@ -401,10 +276,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               setBlocks(Array.isArray(parsed) ? parsed : []);
             }
             if (savedDesign) setDesign(prev => ({ ...prev, ...JSON.parse(savedDesign) }));
-            if (savedPortfolio) {
-              const parsed = JSON.parse(savedPortfolio);
-              setPortfolioSections(Array.isArray(parsed) ? parsed : []);
-            }
             if (savedSocials) setSocials(JSON.parse(savedSocials));
             if (savedProfile) {
               const parsed = JSON.parse(savedProfile);
@@ -1390,165 +1261,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 </div>
               )}
 
-              {/* Portfolio Sections - callout blocks */}
-              {portfolioSections.length > 0 && (() => {
-                const portfolioCategories = collectPortfolioCategories(portfolioSections);
-                const tabLabels = [PORTFOLIO_ALL_LABEL, ...portfolioCategories.map(c => c.name)];
-                const activeName = tabLabels.includes(selectedPortfolioCategory) ? selectedPortfolioCategory : PORTFOLIO_ALL_LABEL;
-                const visibleSections = filterPortfolioByCategory(portfolioSections, activeName);
-                return (
-                <div className="space-y-3 md:space-y-4">
-                  {portfolioCategories.length > 0 && (
-                    <div className="space-y-3 -mx-2">
-                      <div className="overflow-x-auto scrollbar-hide flex gap-3 px-2 pb-1">
-                        {tabLabels.map(label => (
-                          <button
-                            key={label}
-                            type="button"
-                            onClick={() => setSelectedPortfolioCategory(label)}
-                            className={`px-3 py-1.5 rounded-full text-[11px] font-black whitespace-nowrap border transition-all ${
-                              activeName === label
-                                ? 'text-white border-transparent'
-                                : isDark
-                                ? 'bg-white/10 border-white/20 text-white/50'
-                                : 'bg-white border-slate-200 text-slate-400'
-                            }`}
-                            style={activeName === label ? { backgroundColor: design.accentColor } : undefined}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {groupPortfolioSections(visibleSections).map((group, gi) => {
-                    if (group.kind === 'single') {
-                      const section = group.section;
-                      if (section.type === 'category') {
-                        return (
-                          <div key={section.id} className="pt-4 pb-1 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Hash size={16} className={isDark ? 'text-blue-300 shrink-0' : 'text-blue-500 shrink-0'} />
-                              <h4 className={`text-base md:text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {section.content || '카테고리'}
-                              </h4>
-                            </div>
-                          </div>
-                        );
-                      }
-                      const px = getSectionFontPx(section);
-                      const highlight = section.highlight && section.highlight !== 'transparent' ? section.highlight : null;
-                      return (
-                        <div key={section.id}>
-                          <div
-                            className={`rounded-2xl border px-5 py-5 md:px-6 md:py-6 transition-colors ${
-                              highlight
-                                ? 'border-transparent'
-                                : isDark
-                                ? 'bg-white/[0.04] border-white/10'
-                                : 'bg-slate-100 border-slate-200'
-                            }`}
-                            style={highlight ? { backgroundColor: highlight } : undefined}
-                          >
-                            <div
-                              className={`whitespace-pre-wrap ${section.bold ? 'font-bold' : 'font-medium'}`}
-                              style={{
-                                color: section.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                                fontSize: `${px}px`,
-                                lineHeight: 1.75,
-                                fontStyle: section.italic ? 'italic' : undefined,
-                                textDecoration: getSectionTextDecoration(section)
-                              }}
-                              dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(section.content || '') }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    const tileBorder = isDark ? 'border-white/10' : 'border-slate-200';
-                    const flatImgs = flattenSectionImages(group.sections);
-
-                    if (group.columns === 1) {
-                      return (
-                        <div key={`pgrid-${gi}`} className="space-y-3 md:space-y-4 -mx-4 md:-mx-8">
-                          {flatImgs.map(img => (
-                            <div key={img.key} className="relative">
-                              <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                {isVideoSource(img.src) && img.pos ? (
-                                  <div className="aspect-square">
-                                    <MediaAuto src={img.src} className="w-full h-full object-cover block" style={{ objectPosition: `${img.pos.x}% ${img.pos.y}%` }} />
-                                  </div>
-                                ) : (
-                                  <MediaAuto src={img.src} className="w-full h-auto block" style={{ maxWidth: '100%', ...(img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : {}) }} />
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }
-
-                    if (group.columns === 3) {
-                      const chunks = chunkSections(flatImgs, 3);
-                      return (
-                        <div key={`pgrid-${gi}`} className="space-y-2 md:space-y-3 -mx-4 md:-mx-8">
-                          {chunks.map((ck, ci) => (
-                            ck.length === 3 ? (
-                              <div key={`mg-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 aspect-[4/3]">
-                                <div className={`row-span-2 relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" style={ck[0].pos ? { objectPosition: `${ck[0].pos.x}% ${ck[0].pos.y}%` } : undefined} />
-                                </div>
-                                <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" style={ck[1].pos ? { objectPosition: `${ck[1].pos.x}% ${ck[1].pos.y}%` } : undefined} />
-                                </div>
-                                <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                  <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" style={ck[2].pos ? { objectPosition: `${ck[2].pos.x}% ${ck[2].pos.y}%` } : undefined} />
-                                </div>
-                              </div>
-                            ) : (
-                              <div key={`mg-${ci}`} className={`grid gap-2 md:gap-3 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                                {ck.map(img => (
-                                  <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                                    <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                                  </div>
-                                ))}
-                              </div>
-                            )
-                          ))}
-                        </div>
-                      );
-                    }
-
-                    if (group.columns === 4) {
-                      return (
-                        <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3 -mx-4 md:-mx-8">
-                          {flatImgs.map(img => (
-                            <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                              <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={`pgrid-${gi}`}
-                        className="grid gap-2 md:gap-3 -mx-4 md:-mx-8"
-                        style={{ gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))` }}
-                      >
-                        {flatImgs.map(img => (
-                          <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                            <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-                );
-              })()}
 
             </div>
 
@@ -1621,7 +1333,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                              return (
                                <div
                                  key={block.id}
-                                 className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
                                  style={{
                                    gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
@@ -2002,7 +1714,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                             return (
                               <div
                                 key={block.id}
-                                className={`relative overflow-hidden group transition-all shadow-sm flex flex-col justify-center p-4 md:p-6 border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                                className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
                                 style={{
                                   gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
@@ -2140,166 +1852,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
               )}
             </main>
 
-            {/* Portfolio Sections - callout blocks */}
-            {portfolioSections.length > 0 && (() => {
-              const portfolioCategories = collectPortfolioCategories(portfolioSections);
-              const tabLabels = [PORTFOLIO_ALL_LABEL, ...portfolioCategories.map(c => c.name)];
-              const activeName = tabLabels.includes(selectedPortfolioCategory) ? selectedPortfolioCategory : PORTFOLIO_ALL_LABEL;
-              const visibleSections = filterPortfolioByCategory(portfolioSections, activeName);
-              return (
-              <>
-                <div className="px-6 pt-8 pb-2 flex items-center gap-3">
-                  <div className="flex-1 h-[1px]" style={{ backgroundColor: design.accentColor, opacity: 0.3 }}></div>
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.3em]" style={{ color: design.accentColor }}>Portfolio</h4>
-                  <div className="flex-1 h-[1px]" style={{ backgroundColor: design.accentColor, opacity: 0.3 }}></div>
-                </div>
-                {portfolioCategories.length > 0 && (
-                  <div className="px-4 pt-2 space-y-3">
-                    <div className="overflow-x-auto scrollbar-hide flex gap-3 pb-1">
-                      {tabLabels.map(label => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => setSelectedPortfolioCategory(label)}
-                          className={`px-3 py-1.5 rounded-full text-[11px] font-black whitespace-nowrap border transition-all ${
-                            activeName === label
-                              ? 'text-white border-transparent'
-                              : isDark
-                              ? 'bg-white/10 border-white/20 text-white/50'
-                              : 'bg-white border-slate-200 text-slate-400'
-                          }`}
-                          style={activeName === label ? { backgroundColor: design.accentColor } : undefined}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="px-4 pt-2 pb-4 space-y-3 md:space-y-4">
-                {groupPortfolioSections(visibleSections).map((group, gi) => {
-                  if (group.kind === 'single') {
-                    const section = group.section;
-                    if (section.type === 'category') {
-                      return (
-                        <div key={section.id} className="pt-4 pb-1 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Hash size={16} className={isDark ? 'text-blue-300 shrink-0' : 'text-blue-500 shrink-0'} />
-                            <h4 className={`text-base md:text-lg font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {section.content || '카테고리'}
-                            </h4>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const px = getSectionFontPx(section);
-                    const highlight = section.highlight && section.highlight !== 'transparent' ? section.highlight : null;
-                    return (
-                      <div key={section.id}>
-                        <div
-                          className={`rounded-2xl border px-5 py-5 md:px-6 md:py-6 transition-colors ${
-                            highlight
-                              ? 'border-transparent'
-                              : isDark
-                              ? 'bg-white/[0.04] border-white/10'
-                              : 'bg-slate-100 border-slate-200'
-                          }`}
-                          style={highlight ? { backgroundColor: highlight } : undefined}
-                        >
-                          <div
-                            className={`whitespace-pre-wrap ${section.bold ? 'font-bold' : 'font-medium'}`}
-                            style={{
-                              color: section.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                              fontSize: `${px}px`,
-                              lineHeight: 1.75,
-                              fontStyle: section.italic ? 'italic' : undefined,
-                              textDecoration: getSectionTextDecoration(section)
-                            }}
-                            dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(section.content || '') }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const tileBorder = isDark ? 'border-white/10' : 'border-slate-200';
-                  const flatImgs = flattenSectionImages(group.sections);
-
-                  if (group.columns === 1) {
-                    return (
-                      <div key={`pgrid-${gi}`} className="space-y-3 md:space-y-4">
-                        {flatImgs.map(img => (
-                          <div key={img.key} className="relative">
-                            <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                              <MediaAuto src={img.src} className="w-full h-auto block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }
-
-                  if (group.columns === 3) {
-                    const chunks = chunkSections(flatImgs, 3);
-                    return (
-                      <div key={`pgrid-${gi}`} className="space-y-2 md:space-y-3">
-                        {chunks.map((ck, ci) => (
-                          ck.length === 3 ? (
-                            <div key={`mg-${ci}`} className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-3 aspect-[4/3]">
-                              <div className={`row-span-2 relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[0].src} className="w-full h-full object-cover block" style={ck[0].pos ? { objectPosition: `${ck[0].pos.x}% ${ck[0].pos.y}%` } : undefined} />
-                              </div>
-                              <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[1].src} className="w-full h-full object-cover block" style={ck[1].pos ? { objectPosition: `${ck[1].pos.x}% ${ck[1].pos.y}%` } : undefined} />
-                              </div>
-                              <div className={`relative overflow-hidden rounded-2xl border ${tileBorder}`}>
-                                <MediaAuto src={ck[2].src} className="w-full h-full object-cover block" style={ck[2].pos ? { objectPosition: `${ck[2].pos.x}% ${ck[2].pos.y}%` } : undefined} />
-                              </div>
-                            </div>
-                          ) : (
-                            <div key={`mg-${ci}`} className={`grid gap-2 md:gap-3 ${ck.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                              {ck.map(img => (
-                                <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                                  <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                                </div>
-                              ))}
-                            </div>
-                          )
-                        ))}
-                      </div>
-                    );
-                  }
-
-                  if (group.columns === 4) {
-                    return (
-                      <div key={`pgrid-${gi}`} className="grid grid-cols-2 gap-2 md:gap-3">
-                        {flatImgs.map(img => (
-                          <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                            <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={`pgrid-${gi}`}
-                      className="grid gap-2 md:gap-3"
-                      style={{ gridTemplateColumns: `repeat(${group.columns}, minmax(0, 1fr))` }}
-                    >
-                      {flatImgs.map(img => (
-                        <div key={img.key} className={`relative overflow-hidden rounded-2xl border aspect-square ${tileBorder}`}>
-                          <MediaAuto src={img.src} className="w-full h-full object-cover block" style={img.pos ? { objectPosition: `${img.pos.x}% ${img.pos.y}%` } : undefined} />
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-                </div>
-              </>
-              );
-            })()}
           </div>
         )}
 
