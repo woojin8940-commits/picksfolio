@@ -14,10 +14,9 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+  currentSubView: 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
-  onNavigatePortfolio: () => void;
   onNavigateLive: () => void;
   onNavigateBroadcastSettings: () => void;
   onNavigateBusiness: () => void;
@@ -55,7 +54,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Dashboard data counts
   const [previewBlocks, setPreviewBlocks] = useState<Block[]>([]);
-  const [previewPortfolio, setPreviewPortfolio] = useState<any[]>([]);
   const [previewSchedule, setPreviewSchedule] = useState<any[]>([]);
   const [previewMaterials, setPreviewMaterials] = useState<any[]>([]);
 
@@ -66,9 +64,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       const savedBlocks = localStorage.getItem(`picks_blocks_${u}`);
       if (savedBlocks) setPreviewBlocks(JSON.parse(savedBlocks));
-
-      const savedPortfolio = localStorage.getItem(`picks_portfolio_${u}`);
-      if (savedPortfolio) setPreviewPortfolio(JSON.parse(savedPortfolio));
 
       const savedSchedule = localStorage.getItem(`picks_schedule_${u}`);
       if (savedSchedule) setPreviewSchedule(JSON.parse(savedSchedule));
@@ -84,10 +79,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (Array.isArray(apiData.blocks)) {
         setPreviewBlocks(apiData.blocks);
         localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
-      }
-      if (apiData.portfolio) {
-        setPreviewPortfolio(apiData.portfolio);
-        localStorage.setItem(`picks_portfolio_${u}`, JSON.stringify(apiData.portfolio));
       }
       if (apiData.openSchedule) {
         setPreviewSchedule(apiData.openSchedule);
@@ -220,7 +211,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <NavItem
             icon="🔗"
             label="링크 관리"
-            active={currentSubView === 'links' || currentSubView === 'portfolio'}
+            active={currentSubView === 'links'}
             onClick={onNavigateLinks}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
@@ -300,7 +291,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <MobileNavItem
             icon="🔗"
             label="관리"
-            active={currentSubView === 'links' || currentSubView === 'portfolio'}
+            active={currentSubView === 'links'}
             onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
@@ -339,7 +330,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem
                 icon="🔗"
                 label="링크 관리"
-                active={currentSubView === 'links' || currentSubView === 'portfolio'}
+                active={currentSubView === 'links'}
                 onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
@@ -489,7 +480,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <h4 className="text-sm md:text-lg font-black text-slate-900 mb-3 md:mb-4">내 데이터 현황</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-4">
                 <DataCard icon="🔗" label="상품 블록" count={previewBlocks.length} onClick={onNavigateLinks} />
-                <DataCard icon="💼" label="포트폴리오" count={previewPortfolio.length} onClick={onNavigateLinks} />
                 <DataCard icon="🗓️" label="오픈 일정" count={previewSchedule.filter((s: any) => s.isActive).length} onClick={onNavigateOpenSchedule} />
                 <DataCard icon="🎥" label="방송 자료" count={previewMaterials.length} onClick={onNavigateLive} />
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 
-type PhoneFrameSize = 'sm' | 'md' | 'lg';
+type PhoneFrameSize = 'sm' | 'md' | 'lg' | 'xl';
 
 interface PhoneFrameProps {
   children: React.ReactNode;
@@ -14,6 +14,7 @@ const SIZE_CLASS: Record<PhoneFrameSize, string> = {
   sm: 'w-[220px] xl:w-[240px]',
   md: 'w-[260px] xl:w-[300px]',
   lg: 'w-[300px] xl:w-[340px]',
+  xl: 'w-[460px] xl:w-[600px] 2xl:w-[720px]',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({

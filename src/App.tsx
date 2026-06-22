@@ -53,7 +53,6 @@ const SignupPage = lazyWithRetry(() => import('./components/SignupPage'));
 const LoginPage = lazyWithRetry(() => import('./components/LoginPage'));
 const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
-const PortfolioManagement = lazyWithRetry(() => import('./components/PortfolioManagement'));
 const LiveCommerceManagement = lazyWithRetry(() => import('./components/LiveCommerceManagement'));
 const BroadcastSettings = lazyWithRetry(() => import('./components/BroadcastSettings'));
 const BroadcastHistory = lazyWithRetry(() => import('./components/BroadcastHistory'));
@@ -77,7 +76,7 @@ import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
-type SubView = 'dashboard' | 'links' | 'portfolio' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-[40vh]">
@@ -1328,9 +1327,6 @@ const App: React.FC = () => {
       case 'links':
         subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
         break;
-      case 'portfolio':
-        subComponent = <Suspense fallback={<LazyFallback />}><PortfolioManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
-        break;
       case 'live':
         subComponent = <Suspense fallback={<LazyFallback />}><LiveCommerceManagement userName={userName} onNavigateMembership={() => setSubView('membership')} onNavigateBroadcastSettings={() => setSubView('broadcast-settings')} /></Suspense>;
         break;
@@ -1381,7 +1377,6 @@ const App: React.FC = () => {
         currentSubView={subView}
         onNavigateDashboard={() => setSubView('dashboard')}
         onNavigateLinks={() => setSubView('links')}
-        onNavigatePortfolio={() => setSubView('portfolio')}
         onNavigateLive={() => setSubView('live')}
         onNavigateBroadcastSettings={() => setSubView('broadcast-settings')}
         onNavigateBusiness={() => setSubView('business')}

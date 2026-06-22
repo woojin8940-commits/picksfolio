@@ -191,9 +191,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
   });
 
-  // Portfolio blocks for combined preview
-  const [portfolioBlocks, setPortfolioBlocks] = useState<any[]>([]);
-
   // Social links for preview
   const [socials, setSocials] = useState<any>(() => {
     try {
@@ -526,9 +523,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           if (apiData.design) {
             applySettings({ userName, templateType: TemplateType.SHOPPABLE_GRID, blocks: apiData.blocks || [], design: apiData.design as any, profile: apiData.profile });
           }
-          if (Array.isArray(apiData.portfolio)) {
-            setPortfolioBlocks(apiData.portfolio);
-          }
           if (apiData.socials) {
             setSocials(apiData.socials);
             localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(apiData.socials));
@@ -574,9 +568,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
           if (settings) {
             applySettings(settings);
-            if (Array.isArray(settings.portfolio)) {
-              setPortfolioBlocks(settings.portfolio);
-            }
           }
         }
       } catch (error) {
@@ -1521,32 +1512,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               </section>
 
               <section className="space-y-3">
-                <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">홈 우선순위</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setHomePriority('curation')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'curation' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-lg flex-shrink-0">🛍️</div>
-                    <div className="text-left">
-                      <span className="font-black text-sm block">큐레이션 우선</span>
-                      <span className="text-xs text-slate-500 font-bold">상품 그리드 먼저</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setHomePriority('portfolio')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${homePriority === 'portfolio' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-lg flex-shrink-0">💼</div>
-                    <div className="text-left">
-                      <span className="font-black text-sm block">포트폴리오 우선</span>
-                      <span className="text-xs text-slate-500 font-bold">포트폴리오 먼저</span>
-                    </div>
-                  </button>
-                </div>
-              </section>
-
-              <section className="space-y-3">
                 <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">레이아웃</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -1619,9 +1584,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area */}
-      <div className="hidden lg:flex flex-col w-[340px] xl:w-[400px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-start p-4 xl:p-6 sticky top-0 h-screen flex-shrink-0 gap-4 pt-12">
+      <div className="hidden lg:flex flex-col w-[500px] xl:w-[640px] 2xl:w-[760px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-start p-4 xl:p-6 sticky top-0 h-screen flex-shrink-0 gap-4 pt-12">
         <PhoneFrame
-          size="lg"
+          size="xl"
           label="실시간 미리보기"
           liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
           contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
@@ -1641,7 +1606,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               homePriority={homePriority}
               layoutTemplate={layoutTemplate}
               curationBlocks={blocks}
-              portfolioBlocks={portfolioBlocks}
               managedCategories={managedCategories}
             />
         </PhoneFrame>
@@ -2044,7 +2008,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   homePriority={homePriority}
                   layoutTemplate={layoutTemplate}
                   curationBlocks={blocks}
-                  portfolioBlocks={portfolioBlocks}
                   managedCategories={managedCategories}
                 />
               </PhoneFrame>

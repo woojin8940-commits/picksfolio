@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Hash, ExternalLink, ChevronRight, Briefcase, Bell } from 'lucide-react';
+import { ExternalLink, ChevronRight, Briefcase, Bell } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
@@ -22,16 +22,14 @@ interface PagePreviewProps {
   layoutTemplate: LayoutTemplate;
   /** Curation / link-grid items. */
   curationBlocks: any[];
-  /** Portfolio section blocks. */
-  portfolioBlocks: any[];
   /** Explicit curation categories; derived from blocks when omitted. */
   managedCategories?: string[];
 }
 
 /**
- * Single source of truth for the right-side phone preview used by both the
- * Link Grid (LinkManagement) and Portfolio (PortfolioManagement) editors.
- * Mirrors the real public page so both editors render identically.
+ * Single source of truth for the right-side phone preview used by the
+ * Link Grid (LinkManagement) editor. Mirrors the real public page so the
+ * editor renders identically to what visitors see.
  */
 const PagePreview: React.FC<PagePreviewProps> = ({
   theme,
@@ -44,7 +42,6 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   homePriority,
   layoutTemplate,
   curationBlocks,
-  portfolioBlocks,
   managedCategories,
 }) => {
   const [showBottomSheet, setShowBottomSheet] = useState(false);
@@ -283,105 +280,6 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       )}
       </div>
 
-      {portfolioBlocks.length > 0 && (
-      <div style={{ order: homePriority === 'portfolio' ? 1 : 2 }} className="px-2 pt-3 pb-2">
-        <div className="flex items-center gap-1 mb-1.5 px-1">
-          <div className="flex-1 h-[0.5px]" style={{ backgroundColor: accentColor, opacity: 0.3 }}></div>
-          <h4 className="text-[5px] font-black uppercase tracking-[0.15em]" style={{ color: accentColor }}>Portfolio</h4>
-          <div className="flex-1 h-[0.5px]" style={{ backgroundColor: accentColor, opacity: 0.3 }}></div>
-        </div>
-        {/* Portfolio category tabs */}
-        {(() => {
-          const catBlocks = portfolioBlocks.filter(b => b && b.type === 'category');
-          if (catBlocks.length === 0) return null;
-          return (
-            <div className="px-1 pb-1.5 overflow-x-auto scrollbar-hide flex gap-1">
-              <span className={`px-1.5 py-0.5 text-[5px] font-black whitespace-nowrap rounded-full text-white border-transparent`} style={{ backgroundColor: accentColor }}>전체</span>
-              {catBlocks.map((c: any) => (
-                <span key={c.id} className={`px-1.5 py-0.5 text-[5px] font-black whitespace-nowrap rounded-full border ${themePreset === 'white' ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}>
-                  {(c.content || '').trim() || '카테고리'}
-                </span>
-              ))}
-            </div>
-          );
-        })()}
-        <div className="space-y-1">
-          {portfolioBlocks.filter(Boolean).map((block: any) => {
-            if (!block) return null;
-            if (block.type === 'category') {
-              return (
-                <div key={block.id} className="pt-1 pb-0.5 flex items-center gap-1">
-                  <Hash size={7} className="text-blue-500 shrink-0" />
-                  <span className={`text-[7px] font-black truncate ${themePreset === 'white' ? 'text-slate-900' : 'text-white'}`}>{block.content || '카테고리'}</span>
-                </div>
-              );
-            }
-            if (block.type === 'text') {
-              return (
-                <div key={block.id}>
-                  <div
-                    className={`rounded-lg border px-1.5 py-1 ${themePreset === 'white' ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
-                    style={(block.highlight && block.highlight !== 'transparent') ? { backgroundColor: block.highlight, borderColor: 'transparent' } : undefined}
-                  >
-                    <div
-                      className={`text-[6px] leading-relaxed whitespace-pre-wrap ${block.bold ? 'font-bold' : 'font-medium'}`}
-                      style={{
-                        color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)'),
-                        fontStyle: block.italic ? 'italic' : undefined,
-                        textDecoration: block.underline ? 'underline' : block.strikethrough ? 'line-through' : undefined
-                      }}
-                      dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.content || '') }}
-                    />
-                  </div>
-                </div>
-              );
-            }
-            if (block.type === 'image') {
-              const imgs = Array.isArray(block.images) && block.images.length > 0 ? block.images : [block.content || ''];
-              const cols = Math.min(4, Math.max(1, Number(block.gridColumns) || 1));
-              const displayImgs = imgs.slice(0, cols).filter(Boolean);
-              if (displayImgs.length === 0) return null;
-              if (cols === 1) {
-                return (
-                  <div key={block.id}>
-                    {displayImgs.map((src: string, i: number) => (
-                      <div key={i} className={`overflow-hidden rounded-lg border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                        <MediaAuto src={src} alt="" className="w-full h-auto block" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
-                      </div>
-                    ))}
-                  </div>
-                );
-              }
-              if (cols === 3 && displayImgs.length === 3) {
-                return (
-                  <div key={block.id} className="grid grid-cols-2 grid-rows-2 gap-0.5 aspect-[4/3]">
-                    <div className={`row-span-2 overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                      <MediaAuto src={displayImgs[0]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[0] ? { objectPosition: `${block.imagePositions[0].x}% ${block.imagePositions[0].y}%` } : undefined} />
-                    </div>
-                    <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                      <MediaAuto src={displayImgs[1]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[1] ? { objectPosition: `${block.imagePositions[1].x}% ${block.imagePositions[1].y}%` } : undefined} />
-                    </div>
-                    <div className={`overflow-hidden rounded-md border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                      <MediaAuto src={displayImgs[2]} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[2] ? { objectPosition: `${block.imagePositions[2].x}% ${block.imagePositions[2].y}%` } : undefined} />
-                    </div>
-                  </div>
-                );
-              }
-              return (
-                <div key={block.id} className={`grid gap-0.5 ${cols >= 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  {displayImgs.map((src: string, i: number) => (
-                    <div key={i} className={`overflow-hidden rounded-md aspect-square border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
-                      <MediaAuto src={src} alt="" className="w-full h-full object-cover" style={block.imagePositions?.[i] ? { objectPosition: `${block.imagePositions[i].x}% ${block.imagePositions[i].y}%` } : undefined} />
-                    </div>
-                  ))}
-                </div>
-              );
-            }
-            return null;
-          })}
-        </div>
-      </div>
-      )}
       </div>
 
       {showBottomSheet && previewSelectedBlock && (
