@@ -35,7 +35,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentSubView,
   onNavigateDashboard,
   onNavigateLinks,
-  onNavigatePortfolio,
   onNavigateLive,
   onNavigateBroadcastSettings,
   onNavigateBusiness,
@@ -218,18 +217,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             active={currentSubView === 'dashboard'} 
             onClick={onNavigateDashboard}
           />
-          <NavItem 
-            icon="🔗" 
-            label="링크 & 그리드 관리" 
-            active={currentSubView === 'links'} 
+          <NavItem
+            icon="🔗"
+            label="링크 관리"
+            active={currentSubView === 'links' || currentSubView === 'portfolio'}
             onClick={onNavigateLinks}
             onMouseEnter={() => prefetchLinkData(userName)}
-          />
-          <NavItem
-            icon="💼"
-            label="포트폴리오 & 소개"
-            active={currentSubView === 'portfolio'}
-            onClick={onNavigatePortfolio}
           />
           <NavItem
             icon="🎥"
@@ -307,7 +300,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <MobileNavItem
             icon="🔗"
             label="관리"
-            active={currentSubView === 'links'}
+            active={currentSubView === 'links' || currentSubView === 'portfolio'}
             onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
@@ -316,7 +309,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <MobileNavItem
             icon="⋯"
             label="더보기"
-            active={['portfolio','broadcast-settings','timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
+            active={['broadcast-settings','timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
             badge={timelineUnread}
           />
@@ -345,12 +338,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
               <NavItem
                 icon="🔗"
-                label="링크 & 그리드 관리"
-                active={currentSubView === 'links'}
+                label="링크 관리"
+                active={currentSubView === 'links' || currentSubView === 'portfolio'}
                 onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
-              <NavItem icon="💼" label="포트폴리오 & 소개" active={currentSubView === 'portfolio'} onClick={() => { onNavigatePortfolio(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { onNavigateBroadcastSettings(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
@@ -486,7 +478,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-              <QuickCard icon="💼" label="포트폴리오" onClick={onNavigatePortfolio} />
+              <QuickCard icon="🔗" label="링크 관리" onClick={onNavigateLinks} />
               <QuickCard icon="🎥" label="라이브 커머스" onClick={onNavigateLive} />
               <QuickCard icon="📨" label="비즈니스 수신함" onClick={onNavigateBusiness} />
               <QuickCard icon="📅" label="협업 현황" onClick={onNavigateCalendar} />
@@ -497,7 +489,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <h4 className="text-sm md:text-lg font-black text-slate-900 mb-3 md:mb-4">내 데이터 현황</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-4">
                 <DataCard icon="🔗" label="상품 블록" count={previewBlocks.length} onClick={onNavigateLinks} />
-                <DataCard icon="💼" label="포트폴리오" count={previewPortfolio.length} onClick={onNavigatePortfolio} />
+                <DataCard icon="💼" label="포트폴리오" count={previewPortfolio.length} onClick={onNavigateLinks} />
                 <DataCard icon="🗓️" label="오픈 일정" count={previewSchedule.filter((s: any) => s.isActive).length} onClick={onNavigateOpenSchedule} />
                 <DataCard icon="🎥" label="방송 자료" count={previewMaterials.length} onClick={onNavigateLive} />
               </div>

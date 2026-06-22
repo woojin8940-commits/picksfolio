@@ -1801,8 +1801,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
      screen and the chat floats over it as a transparent overlay, with the
      상품/담기현황/배너 panels opening as bottom sheets on demand. */
   // A 상품/담기현황/배너 sheet is open (mobile) — used to swap the floating chat
-  // overlay for a solid full-height panel. showFilterPanel also needs the solid,
-  // full-height treatment so its sliders sit on an opaque surface.
+  // overlay for a solid bottom-sheet panel. 얼굴 보정 (showFilterPanel) opens as
+  // its own bottom sheet too (see the container below) so the live preview above
+  // it stays visible while the sliders are dragged.
   const sheetOpen = showProductPanel || showCartPanel || showBannerPanel;
   // 함께 방송 2-up split is shown ONLY once the session is actually live — i.e.
   // both creators are transmitting. While a session is merely 'accepted' (or a
@@ -2509,16 +2510,30 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                up — instead of a full-screen panel that hid the whole broadcast. */
             'absolute inset-x-0 bottom-0 top-auto h-[58vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
           : showFilterPanel
-            ? 'absolute inset-0 bg-slate-900/95 backdrop-blur-md'
+            ? /* 얼굴 보정 (phones) opens as a BOTTOM SHEET like the 상품/담기현황
+                 sheets — it covers only the lower part of the screen so the live
+                 broadcast preview (and the broadcaster's face) above it stays
+                 visible while the sliders are dragged, instead of a full-screen
+                 panel that hid the whole feed. The web keeps the right-hand
+                 sidebar overlay via the md: classes above. */
+              'absolute inset-x-0 bottom-0 top-auto h-[56vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
             : 'absolute inset-x-0 bottom-[4.25rem] h-[34vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
-            in the canvas draw loop (no SDK/token). Rendered as an overlay over
-            the 채팅/상품/담기현황 sidebar so the broadcaster's face on the video
-            stays fully visible while the sliders are adjusted. */}
+            in the canvas draw loop (no SDK/token). On phones it sits in a BOTTOM
+            SHEET (container above) and on the web it overlays the right-hand
+            채팅/상품/담기현황 sidebar — either way the broadcaster's face on the
+            video stays visible so they can see the reshaping update live while
+            dragging the sliders. */}
         {showFilterPanel && (
-          <div className="absolute inset-0 z-30 bg-slate-900 flex flex-col animate-in slide-in-from-bottom-4 duration-300">
-            <div className="flex items-center justify-between p-4 md:p-5 border-b border-white/5 shrink-0">
+          <div className="absolute inset-0 z-30 bg-slate-900 flex flex-col animate-in slide-in-from-bottom-4 duration-300 rounded-t-3xl md:rounded-none overflow-hidden">
+            {/* Grab handle — phones only; signals the 보정 sheet can be dragged/
+                tapped closed and visually caps it at the bottom of the screen,
+                matching the 상품/담기현황 sheets. */}
+            <div className="md:hidden flex justify-center pt-2.5 pb-0.5 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-white/25" />
+            </div>
+            <div className="flex items-center justify-between px-4 pb-3 pt-1 md:p-5 border-b border-white/5 shrink-0">
               <h4 className="text-white font-black text-xs md:text-sm uppercase tracking-widest flex items-center gap-2">
                 <Sparkles size={16} className="text-pink-400" /> 얼굴 보정
               </h4>
