@@ -17,7 +17,8 @@ const SIZE_CLASS: Record<PhoneFrameSize, string> = {
   // 데스크톱 미리보기는 너비가 아닌 화면 높이를 기준으로 크기를 잡아
   // 폰 전체 + 라벨/링크/저장 버튼이 한 화면 안에 들어오도록 한다.
   // (너비는 9/19.5 비율로 자동 계산)
-  xl: 'h-[54vh] xl:h-[58vh] max-h-[620px] w-auto',
+  // 폰 미리보기로 바로 확인할 수 있도록 화면 높이를 거의 꽉 채워 크게 키운다.
+  xl: 'h-[82vh] xl:h-[88vh] max-h-[1000px] w-auto',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({
