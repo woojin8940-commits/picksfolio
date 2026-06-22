@@ -279,6 +279,22 @@ export default async (req: Request) => {
               updated_at = now()
           WHERE id = ${sessionId} AND status IN ('accepted', 'live')
         `;
+
+        // Auto-friend once they have actually broadcast together. Accepting an
+        // invite already makes the pair mutual friends, but a session can reach
+        // 'live' through other paths (e.g. a re-asserted 'live' heartbeat on a
+        // row that never went through this exact accept), so we re-assert the
+        // mutual friendship here too: "방송을 한 번이라도 같이 했으면" both creators
+        // keep each other in their saved-friends list and can re-invite straight
+        // from it next time. Best-effort — never block going live on this.
+        if (partner) {
+          await db.sql`
+            INSERT INTO live_friends (owner_username, friend_username)
+            VALUES (${user}, ${partner}), (${partner}, ${user})
+            ON CONFLICT (owner_username, friend_username) DO NOTHING
+          `.catch((e: any) => console.error("[api-cobroadcast] live friend add failed:", e));
+        }
+
         return Response.json({ success: true, status: "live" });
       }
 
