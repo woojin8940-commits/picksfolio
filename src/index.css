@@ -292,22 +292,22 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateZ(0);
 }
 
-/* 함께 방송 (co-broadcast) split — the two feeds sit SIDE BY SIDE in a top band:
-   the host fills the LEFT half and the partner the RIGHT half. Each feed wrapper
-   is its own positioned <div> (`w-1/2 h-[44%]`, ≈9:16), and the base rule above
-   makes the inner <video> fill that box. Two side-by-side cells at the top is the
-   point — the hosts read as a pair, like the reference layout. */
+/* 함께 방송 (co-broadcast) split — two complete screens side by side. Each feed
+   is a scaled-down copy of the solo full-screen broadcast: its wrapper is a
+   portrait box that keeps the original ratio (`w-[46%] aspect-[9/16]`), and the
+   inner <video> fills that box. The two windows read as a pair of whole screens,
+   not one screen sliced into narrow columns. */
 
-/* …but the solo base rule forces `object-fit: contain`, which is WRONG for a
-   split half. A portrait 9:16 feed contained inside a half-width box shrinks and
-   letterboxes — the "비율이 5인데 2.5/2.5로 보인다"(each feed renders at half scale)
-   report. Inside a split wrapper we override to `cover` so each portrait feed
-   fills its ≈9:16 cell (minimal cropping). The `!important` is required to beat
-   the base `contain !important` rule above. */
+/* Keep the solo `object-fit: contain` here too: each split window already has
+   the broadcast's own portrait ratio, so `contain` shows the WHOLE frame at its
+   true ratio inside its window — exactly what a single broadcast looks like,
+   just smaller. (Previously this forced `cover`, which zoom-cropped each feed to
+   fill a non-portrait half-cell — the "원래 화면을 절반으로 잘라 방송한다" report.)
+   The `!important` matches the base rule's specificity. */
 .live-stream-container .co-split-feed video,
 .live-stream-container .co-split-feed .video-js,
 .live-stream-container .co-split-feed .video-js .vjs-tech {
-  object-fit: cover !important;
+  object-fit: contain !important;
 }
 
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS
