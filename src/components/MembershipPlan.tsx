@@ -596,8 +596,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 포함</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>라이브 송출 월 3시간 포함</strong> · 초과분 시간당 8,900원 후불</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>라이브 매출 수수료 8.5%</strong> (PG 결제 수수료 포함)</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>실시간 채팅 &amp; 상품 연동</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>방송 기록 &amp; 분석 리포트 · 라이브 시작 알림톡</li>
             </ul>
 
             {loading ? (
