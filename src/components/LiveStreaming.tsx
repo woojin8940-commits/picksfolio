@@ -723,14 +723,25 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
 
   // ─── 함께 방송하기 (co-broadcast) ──────────────────────────────────────────
 
+  // Reload the saved-friends list from the server (the authoritative source).
+  // Reused both when the invite modal opens and right after a friend is added,
+  // so a newly-saved friend is always reflected even if an optimistic update was
+  // missed or raced with the initial load.
+  const loadFriends = useCallback(async () => {
+    setFriendsLoading(true);
+    try {
+      const list = await apiService.listLiveFriends(userName);
+      setFriends(list);
+    } finally {
+      setFriendsLoading(false);
+    }
+  }, [userName]);
+
   // Load saved friends when the invite modal opens.
   useEffect(() => {
     if (!showInviteModal) return;
-    setFriendsLoading(true);
-    apiService.listLiveFriends(userName)
-      .then(setFriends)
-      .finally(() => setFriendsLoading(false));
-  }, [showInviteModal, userName]);
+    loadFriends();
+  }, [showInviteModal, loadFriends]);
 
   // Poll for incoming invites (this creator is the invitee) and for the user's
   // own active session. Lightweight enough to run for the whole live screen so
@@ -807,7 +818,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       }
       if (alsoSaveFriend && !friends.some(f => f.username === guest)) {
         const add = await apiService.addLiveFriend(userName, guest);
+        // Optimistic add for instant feedback, then reconcile with the server so
+        // the saved friend is guaranteed to show (and persist) in the list.
         if (add.success && add.friend) setFriends(prev => [add.friend!, ...prev]);
+        loadFriends();
       }
       setInviteNotice(`@${guest}님에게 초대를 보냈어요. 상대가 수락하면 방송 설정 화면으로 들어가 함께 방송을 준비합니다.`);
       setInviteUsername('');
@@ -816,7 +830,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     } finally {
       setInviteBusy(false);
     }
-  }, [userName, friends, inviteBusy]);
+  }, [userName, friends, inviteBusy, loadFriends]);
 
   // Add a friend by username without sending an invite.
   const addFriend = useCallback(async (target: string) => {
@@ -834,6 +848,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       if (res.friend && !friends.some(f => f.username === res.friend!.username)) {
         setFriends(prev => [res.friend!, ...prev]);
       }
+      // Reconcile with the server so the list reliably reflects the saved friend.
+      loadFriends();
       setInviteNotice(`@${friend}님을 친구 목록에 추가했어요.`);
       setInviteUsername('');
     } catch {
@@ -841,7 +857,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     } finally {
       setInviteBusy(false);
     }
-  }, [userName, friends, inviteBusy]);
+  }, [userName, friends, inviteBusy, loadFriends]);
 
   const removeFriend = useCallback(async (friend: string) => {
     const ok = await apiService.removeLiveFriend(userName, friend);
@@ -1788,7 +1804,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // overlay for a solid full-height panel. showFilterPanel also needs the solid,
   // full-height treatment so its sliders sit on an opaque surface.
   const sheetOpen = showProductPanel || showCartPanel || showBannerPanel;
-  const panelExpanded = sheetOpen || showFilterPanel;
   // 함께 방송 2-up split is shown ONLY once the session is actually live — i.e.
   // both creators are transmitting. While a session is merely 'accepted' (or a
   // stale 'accepted' row lingers from an earlier test), the partner isn't
@@ -1827,7 +1842,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             side-by-side windows simply grow within it (see w-[48%] below). Keeping
             the original ratio matches exactly what viewers see in LiveStream, which
             is also a 9:16 column. */}
-        <div className="relative h-full w-full md:w-auto md:h-full md:mx-auto md:max-w-full overflow-hidden bg-black md:aspect-[9/16]">
+        {/* On the web the stage is normally a 9:16 portrait column. During a live
+            함께 방송, however, two 9:16 windows sit side by side, so a portrait stage
+            squeezes each window down to ~half height. For the co-broadcast we widen
+            the stage to ~1.17:1 — the exact ratio at which two `w-[48%] aspect-[9/16]`
+            windows grow to the FULL stage height — so each creator's window is as
+            large as it can be while keeping its 9:16 ratio. */}
+        <div className={`relative h-full w-full md:w-auto md:h-full md:mx-auto md:max-w-full overflow-hidden bg-black ${coLive ? 'md:aspect-[117/100]' : 'md:aspect-[9/16]'}`}>
         {/* Host's own feed. Normally fills the whole 9:16 stage; when a co-broadcast
             is live it becomes a SCALED-DOWN COPY of that full screen — a portrait
             window that keeps the original ratio (`w-[48%] aspect-[9/16]`), centered
@@ -1998,11 +2019,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               objectFit="contain"
               onConnectedChange={setPartnerStreamReady}
             />
-            {/* Per-window name labels, anchored near the top of each portrait window. */}
-            <div className="absolute top-[24%] md:top-[30%] left-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
+            {/* Per-window name labels, anchored near the top of each portrait window
+                (the windows fill the full stage height on the web). */}
+            <div className="absolute top-[24%] md:top-[3%] left-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none">
               @{userName} (나)
             </div>
-            <div className="absolute top-[24%] md:top-[30%] right-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
+            <div className="absolute top-[24%] md:top-[3%] right-[4%] bg-black/55 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-black pointer-events-none flex items-center gap-1">
               <Users size={10} className="text-violet-300" /> @{coSession.partner}
             </div>
             {!partnerStreamReady && (
@@ -2476,12 +2498,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           On phones it is NOT a solid docked block anymore — the stage fills the
           whole screen and this floats over it: in chat mode it's a transparent
           overlay anchored just above the broadcaster controls (so the bigger,
-          uncovered video reads behind the chat); when a 상품/담기현황/배너 sheet
-          (or 얼굴 보정) is open it expands to a solid full-height panel. */}
-      <div className={`z-20 flex flex-col shrink-0 md:relative md:inset-auto md:bottom-auto md:w-[22rem] md:h-full md:bg-slate-900 md:backdrop-blur-none md:pointer-events-auto md:border-l md:border-t-0 md:border-white/5 ${
-        panelExpanded
-          ? 'absolute inset-0 bg-slate-900/95 backdrop-blur-md'
-          : 'absolute inset-x-0 bottom-28 h-[36vh] bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none'
+          uncovered video reads behind the chat); when a 상품/담기현황/배너 sheet is
+          open it slides up as a BOTTOM SHEET that leaves the broadcast preview
+          above it visible, and 얼굴 보정 still expands to a solid full-height panel. */}
+      <div className={`z-20 flex flex-col shrink-0 md:relative md:inset-auto md:bottom-auto md:w-[22rem] md:h-full md:rounded-none md:bg-slate-900 md:backdrop-blur-none md:pointer-events-auto md:border-l md:border-t-0 md:border-white/5 ${
+        sheetOpen
+          ? /* 상품/담기현황/배너 (phones) open as a BOTTOM SHEET that covers only the
+               lower part of the screen, so the broadcast preview above stays visible
+               and the broadcaster can keep an eye on their feed while setting things
+               up — instead of a full-screen panel that hid the whole broadcast. */
+            'absolute inset-x-0 bottom-0 top-auto h-[58vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
+          : showFilterPanel
+            ? 'absolute inset-0 bg-slate-900/95 backdrop-blur-md'
+            : 'absolute inset-x-0 bottom-28 h-[36vh] bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). Rendered as an overlay over
@@ -2623,7 +2652,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             the broadcaster close it back to the transparent chat overlay. The web
             uses the tab bar below instead. */}
         {sheetOpen && (
-          <div className="flex md:hidden items-center justify-between px-4 py-3.5 border-b border-white/10 shrink-0">
+          <>
+          {/* Grab handle — signals the bottom sheet can be dismissed, and visually
+              caps the sheet at the bottom of the screen. */}
+          <div className="md:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-white/25" />
+          </div>
+          <div className="flex md:hidden items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
             <h4 className="text-white font-black text-sm flex items-center gap-2">
               {showProductPanel && <><ShoppingBag size={16} className="text-green-400" /> 상품</>}
               {showCartPanel && <><BarChart3 size={16} className="text-orange-400" /> 담기현황</>}
@@ -2637,6 +2672,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               <X size={18} />
             </button>
           </div>
+          </>
         )}
         {/* Tab navigation (web) */}
         <div className="hidden md:flex border-b border-white/5">
@@ -2710,28 +2746,33 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   </button>
                 </div>
                 {/* 상품 / 담기현황 / 배너 — phones only, sharing the row with the
-                    narrowed message box. The web uses the top tab bar instead. */}
-                <div className="flex md:hidden items-stretch gap-1.5 shrink-0">
+                    message box. Kept icon-only (with a count badge) so they take as
+                    little width as possible and leave the message input as wide as
+                    it can be. The web uses the top tab bar instead. */}
+                <div className="flex md:hidden items-stretch gap-1 shrink-0">
                   <button
                     onClick={() => { setShowProductPanel(true); setShowCartPanel(false); setShowBannerPanel(false); }}
-                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                    title="상품"
+                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <ShoppingBag size={14} className="text-green-400 shrink-0" /> 상품
-                    {liveProducts.length > 0 && <span className="bg-green-600 text-white text-[9px] px-1 rounded-full">{liveProducts.length}</span>}
+                    <ShoppingBag size={18} className="text-green-400 shrink-0" />
+                    {liveProducts.length > 0 && <span className="absolute -top-1 -right-1 bg-green-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{liveProducts.length}</span>}
                   </button>
                   <button
                     onClick={() => { setShowCartPanel(true); setShowProductPanel(false); setShowBannerPanel(false); }}
-                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                    title="담기현황"
+                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <BarChart3 size={14} className="text-orange-400 shrink-0" /> 담기현황
-                    {cartStats && cartStats.totalItems > 0 && <span className="bg-orange-600 text-white text-[9px] px-1 rounded-full">{cartStats.totalItems}</span>}
+                    <BarChart3 size={18} className="text-orange-400 shrink-0" />
+                    {cartStats && cartStats.totalItems > 0 && <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{cartStats.totalItems}</span>}
                   </button>
                   <button
                     onClick={() => { setShowBannerPanel(true); setShowProductPanel(false); setShowCartPanel(false); }}
-                    className="flex items-center gap-1 px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white text-[11px] font-black active:scale-95 transition-all"
+                    title="배너"
+                    className="relative flex items-center justify-center px-2.5 py-2.5 rounded-2xl bg-black/45 backdrop-blur-md border border-white/10 text-white active:scale-95 transition-all"
                   >
-                    <Layout size={14} className="text-violet-400 shrink-0" /> 배너
-                    {bannerMaterials.length > 0 && <span className="bg-violet-600 text-white text-[9px] px-1 rounded-full">{bannerMaterials.length}</span>}
+                    <Layout size={18} className="text-violet-400 shrink-0" />
+                    {bannerMaterials.length > 0 && <span className="absolute -top-1 -right-1 bg-violet-600 text-white text-[9px] leading-none px-1 py-0.5 rounded-full">{bannerMaterials.length}</span>}
                   </button>
                 </div>
               </div>
