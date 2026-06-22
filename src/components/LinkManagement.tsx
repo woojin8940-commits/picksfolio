@@ -1584,7 +1584,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area */}
-      <div className="hidden lg:flex flex-col w-[500px] xl:w-[640px] 2xl:w-[760px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-start p-4 xl:p-6 sticky top-0 h-screen flex-shrink-0 gap-4 pt-12">
+      <div className="hidden lg:flex flex-col w-[420px] xl:w-[500px] 2xl:w-[560px] bg-[#EEF2F6] border-l border-[#E2E8F0] items-center justify-center p-4 xl:p-6 sticky top-0 h-screen flex-shrink-0 gap-3">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
