@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Save, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, Bell, User, Eye } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -217,7 +217,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [categoryEditValue, setCategoryEditValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textEditorRef = useRef<HTMLDivElement>(null);
-  const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<{ type: 'block' } | { type: 'product', productId: string } | { type: 'cover' } | null>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
   const fullDesignRef = useRef<Record<string, any>>((() => {
@@ -226,6 +226,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       return saved ? JSON.parse(saved) : {};
     } catch { return {}; }
   })());
+
+  // 상단 커버 (개인페이지 맨 위 이미지/영상) — design.portfolioHeaderImage 에 저장된다.
+  // 별도 메뉴(포트폴리오)로 분리돼 있던 커버/이름/버튼 편집을 이 화면으로 통합했다.
+  const [coverImage, setCoverImage] = useState<string | undefined>(() => fullDesignRef.current.portfolioHeaderImage);
+  const [coverPosition, setCoverPosition] = useState<string | undefined>(() => fullDesignRef.current.portfolioHeaderImagePosition);
+  // 모바일에서 실제 개인페이지를 실시간으로 확인할 수 있는 미리보기 시트.
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
 
   // 이미지를 Base64 데이터 URL로 변환하는 헬퍼
   const blobToDataUrl = (blob: Blob): Promise<string> => {
@@ -242,6 +249,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     if (!target) return;
     if (target.type === 'block') {
       setEditForm(prev => ({ ...prev, coverMedia: url }));
+    } else if (target.type === 'cover') {
+      setCoverImage(url);
+      fullDesignRef.current = { ...fullDesignRef.current, portfolioHeaderImage: url };
     } else if (target.type === 'product') {
       setEditForm(prev => ({
         ...prev,
@@ -478,7 +488,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     return () => window.removeEventListener('pointerup', up);
   }, [coverPosDragging]);
 
-  const triggerFileUpload = (target: { type: 'block' } | { type: 'product', productId: string }) => {
+  const triggerFileUpload = (target: { type: 'block' } | { type: 'product', productId: string } | { type: 'cover' }) => {
     setUploadTarget(target);
     fileInputRef.current?.click();
   };
@@ -586,6 +596,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#3B82F6'));
         setCustomGradient(settings.design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)');
         setPortfolioFontSize(settings.design.portfolioFontSize || 'medium');
+        if (settings.design.portfolioHeaderImage !== undefined) setCoverImage(settings.design.portfolioHeaderImage);
+        if (settings.design.portfolioHeaderImagePosition !== undefined) setCoverPosition(settings.design.portfolioHeaderImagePosition);
       }
       if (settings.profile) {
         setProfile(settings.profile);
@@ -636,19 +648,29 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       customGradient: customGradient,
       profileLayout: 'center',
       homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
-      portfolioFontSize: portfolioFontSize
+      portfolioFontSize: portfolioFontSize,
+      portfolioHeaderImage: coverImage,
+      portfolioHeaderImagePosition: coverPosition,
+    };
+
+    // 버튼(커스텀 버튼 + 비즈니스 제안/라이브 알림)은 socials 에 저장된다. 빈 버튼은 제외.
+    const cleanedSocials = {
+      ...socials,
+      customButtons: (socials.customButtons || []).filter((b: any) => (b.label || '').trim() && (b.url || '').trim()),
     };
 
     // 즉시 로컬 저장
     fullDesignRef.current = designUpdate as Record<string, any>;
     localStorage.setItem(`picks_profile_${userName.toLowerCase()}`, JSON.stringify(profile));
     localStorage.setItem(`picks_design_${userName.toLowerCase()}`, JSON.stringify(designUpdate));
+    localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(cleanedSocials));
+    setSocials(cleanedSocials);
 
     // 클라우드 동기화 완료 후 결과 표시
     try {
-      const apiOk = await apiService.saveSiteData(userName, { design: designUpdate as any, profile });
+      const apiOk = await apiService.saveSiteData(userName, { design: designUpdate as any, profile, socials: cleanedSocials });
       if (apiOk) {
-        showSuccessFeedback('디자인이 저장되었습니다!');
+        showSuccessFeedback('저장되었습니다!');
       } else {
         setSaveMessage('로컬에 저장됨 (클라우드 동기화 실패)');
         setToastType('warning');
@@ -656,7 +678,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         setTimeout(() => setShowToast(false), 3000);
       }
       // Supabase 동기화 (백그라운드)
-      updateSiteSettings(userName, { design: designUpdate as any, profile })
+      updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials })
         .catch(err => console.warn('[SaveDesign] Supabase 동기화 실패:', err));
     } catch (error) {
       console.error('[SaveDesign] 클라우드 동기화 실패:', error);
@@ -1099,7 +1121,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           src={cropperSrc}
           onCrop={handleCropConfirm}
           onCancel={handleCropCancel}
-          aspectRatio={1}
+          aspectRatio={uploadTarget?.type === 'cover' ? 4 / 5 : 1}
         />
       )}
       
@@ -1108,13 +1130,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           <header className="mb-6 md:mb-10">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
-              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">매니지먼트 데스크</h1>
-              <p className="text-[#64748B] font-medium text-xs md:text-base">포스트를 클릭하면 언제든 상품 정보를 수정할 수 있으며, 데이터는 자동 저장됩니다.</p>
+              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">링크 관리</h1>
+              <p className="text-[#64748B] font-medium text-xs md:text-base">상품·이미지·영상·텍스트와 프로필·커버·버튼을 한 곳에서 관리하고, 개인페이지에 보이는 그대로 미리볼 수 있어요.</p>
             </div>
             
             <div className="flex bg-white p-1 rounded-2xl border border-[#E2E8F0] self-start md:self-auto">
               <button onClick={() => setActiveTab('posts')} className={`px-7 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'posts' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>포스트 관리</button>
-              <button onClick={() => setActiveTab('design')} className={`px-7 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>디자인 설정</button>
+              <button onClick={() => setActiveTab('design')} className={`px-7 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>프로필 · 디자인</button>
             </div>
           </div>
         </header>
@@ -1145,8 +1167,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-blue-300">
                     <Plus size={14} /> 카테고리 관리
                   </button>
-                  <button onClick={handleAddBlock} className="text-blue-600 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all">
-                    <Plus size={14} /> 새 포스트 추가
+                  <button onClick={handleAddBlock} className="text-white bg-blue-600 font-black text-xs md:text-sm flex items-center gap-1 hover:bg-blue-700 transition-all px-3.5 py-1.5 rounded-full shadow-sm">
+                    <Plus size={14} /> 콘텐츠 추가
                   </button>
                 </div>
               </div>
@@ -1316,6 +1338,188 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <SaveButton onClick={handleSaveDesign} disabled={false} label="저장하기" />
               </div>
 
+              {/* 프로필 — 개인페이지에 노출되는 이름/소개. 링크 주소(@아이디)는 그대로 유지된다. */}
+              <section className="space-y-4 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">프로필</h3>
+                  <User size={18} className="text-blue-600" />
+                </div>
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+                  <Lock size={13} className="text-blue-500 shrink-0" />
+                  <p className="text-[11px] font-bold text-blue-700">
+                    내 링크 주소는 <span className="font-black">@{userName}</span> 로 항상 고정돼요. 아래 이름을 바꿔도 주소는 변하지 않습니다.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">표시 이름</label>
+                  <input
+                    type="text"
+                    value={profile.name || ''}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 font-black text-base focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
+                    placeholder="개인페이지에 보일 이름"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">소개</label>
+                  <textarea
+                    value={profile.bio || ''}
+                    onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
+                    placeholder="한 줄 소개를 입력하세요"
+                    rows={2}
+                  />
+                </div>
+              </section>
+
+              {/* 상단 커버 — 개인페이지 맨 위에 노출되는 이미지/영상. */}
+              <section className="space-y-4 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">상단 커버</h3>
+                  <ImageIcon size={18} className="text-blue-600" />
+                </div>
+                <div className="flex items-start gap-3">
+                  <div
+                    onClick={() => !coverImage && !isUploading && triggerFileUpload({ type: 'cover' })}
+                    className="w-32 aspect-[4/5] rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative shrink-0"
+                  >
+                    {isUploading && uploadTarget?.type === 'cover' && (
+                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
+                        <div className="w-7 h-7 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+                      </div>
+                    )}
+                    {coverImage ? (
+                      <MediaAuto
+                        src={coverImage}
+                        className="w-full h-full object-cover rounded-2xl"
+                        style={coverPosition ? { objectPosition: `center ${coverPosition}%` } : undefined}
+                      />
+                    ) : (
+                      <>
+                        <ImageIcon size={28} className="text-slate-300 mb-1.5" />
+                        <span className="text-[11px] font-black text-slate-400">커버 업로드</span>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <button
+                      onClick={() => triggerFileUpload({ type: 'cover' })}
+                      disabled={isUploading}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-all font-black text-xs disabled:opacity-50"
+                    >
+                      <Camera size={15} /> {coverImage ? '커버 변경' : '커버 업로드'}
+                    </button>
+                    {!membershipActive && (
+                      <p className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                        <Lock size={10} /> 영상 커버는 멤버십에서 이용할 수 있어요
+                      </p>
+                    )}
+                    {coverImage && (
+                      <button
+                        onClick={() => { setCoverImage(undefined); setCoverPosition(undefined); fullDesignRef.current = { ...fullDesignRef.current, portfolioHeaderImage: undefined, portfolioHeaderImagePosition: undefined }; }}
+                        className="flex items-center gap-1 text-[11px] font-black text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 size={12} /> 커버 삭제
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 라이브 알림 / 커스텀 버튼. */}
+              <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">버튼</h3>
+                  <Globe size={18} className="text-blue-600" />
+                </div>
+
+                {socials.businessProposal && (
+                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3">
+                    <Briefcase size={16} className="text-blue-600 shrink-0" />
+                    <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼</span>
+                    <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+                  </div>
+                )}
+                {socials.liveNotify && (
+                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3">
+                    <Bell size={16} className="text-blue-600 shrink-0" />
+                    <span className="flex-1 font-bold text-sm text-blue-700">라이브 알림 버튼</span>
+                    <button onClick={() => setSocials({ ...socials, liveNotify: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+                  </div>
+                )}
+
+                {(socials.customButtons || []).map((btn: any, idx: number) => (
+                  <div key={btn.id || idx} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full shrink-0 border border-slate-200" style={{ backgroundColor: btn.color || '#2563EB' }} />
+                      <input
+                        type="text"
+                        value={btn.label || ''}
+                        onChange={(e) => {
+                          const updated = [...(socials.customButtons || [])];
+                          updated[idx] = { ...updated[idx], label: e.target.value };
+                          setSocials({ ...socials, customButtons: updated });
+                        }}
+                        className="flex-1 bg-transparent border-none font-bold text-sm focus:outline-none"
+                        placeholder="버튼 이름"
+                      />
+                      <button
+                        onClick={() => setSocials({ ...socials, customButtons: (socials.customButtons || []).filter((_: any, i: number) => i !== idx) })}
+                        className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className="text-slate-400 shrink-0" />
+                      <input
+                        type="url"
+                        value={btn.url || ''}
+                        onChange={(e) => {
+                          const updated = [...(socials.customButtons || [])];
+                          updated[idx] = { ...updated[idx], url: e.target.value };
+                          setSocials({ ...socials, customButtons: updated });
+                        }}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        placeholder="https://example.com"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-slate-400">색상</span>
+                      <ColorPicker
+                        value={btn.color || '#2563EB'}
+                        onChange={(c) => {
+                          const updated = [...(socials.customButtons || [])];
+                          updated[idx] = { ...updated[idx], color: c };
+                          setSocials({ ...socials, customButtons: updated });
+                        }}
+                        triggerClassName="w-7 h-7 rounded-full"
+                        aria-label="버튼 색상 선택"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {!socials.businessProposal && (
+                    <button onClick={() => setSocials({ ...socials, businessProposal: true })} className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[11px] font-bold hover:bg-blue-50 transition-all">
+                      <Plus size={12} /> <Briefcase size={12} /> 비즈니스 제안
+                    </button>
+                  )}
+                  {!socials.liveNotify && (
+                    <button onClick={() => setSocials({ ...socials, liveNotify: true })} className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[11px] font-bold hover:bg-blue-50 transition-all">
+                      <Plus size={12} /> <Bell size={12} /> 라이브 알림
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSocials({ ...socials, customButtons: [...(socials.customButtons || []), { id: Date.now().toString(), label: '', url: '', color: '#2563EB' }] })}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[11px] font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
+                  >
+                    <Plus size={12} /> <Globe size={12} /> 버튼 추가
+                  </button>
+                </div>
+              </section>
+
               <section className="space-y-3">
                 <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">홈 우선순위</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -1427,8 +1631,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               accentColor={accentColor}
               header={{
                 color: fullDesignRef.current.portfolioHeaderColor,
-                image: fullDesignRef.current.portfolioHeaderImage,
-                imagePosition: fullDesignRef.current.portfolioHeaderImagePosition,
+                image: coverImage,
+                imagePosition: coverPosition,
               }}
               profile={profile}
               userName={userName}
@@ -1803,13 +2007,59 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         </div>
       )}
 
+      {/* Mobile live-preview — the desktop sidebar preview is hidden on phones,
+          so a floating button opens the real personal page in a bottom sheet,
+          letting mobile users edit "as it shows on the phone". */}
+      <button
+        onClick={() => setShowMobilePreview(true)}
+        className="lg:hidden fixed bottom-24 right-4 z-[150] flex items-center gap-2 px-4 py-3 bg-[#1E1E2E] text-white rounded-full shadow-2xl font-black text-xs active:scale-95 transition-all"
+      >
+        <Eye size={16} /> 미리보기
+      </button>
+
+      {showMobilePreview && (
+        <div className="lg:hidden fixed inset-0 z-[320] flex flex-col">
+          <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setShowMobilePreview(false)} />
+          <div className="relative z-10 mt-auto bg-[#EEF2F6] rounded-t-[2rem] p-4 pb-6 max-h-[94vh] flex flex-col items-center gap-3 animate-in slide-in-from-bottom duration-300">
+            <div className="w-10 h-1 rounded-full bg-slate-300" />
+            <div className="flex items-center justify-between w-full px-1">
+              <h3 className="font-black text-sm text-[#1E1E2E]">실시간 미리보기</h3>
+              <button onClick={() => setShowMobilePreview(false)} className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
+            </div>
+            <div className="overflow-y-auto w-full flex justify-center pb-2">
+              <PhoneFrame
+                size="lg"
+                label="실시간 미리보기"
+                liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
+                contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
+              >
+                <PagePreview
+                  theme={themePreset}
+                  accentColor={accentColor}
+                  header={{ color: fullDesignRef.current.portfolioHeaderColor, image: coverImage, imagePosition: coverPosition }}
+                  profile={profile}
+                  userName={userName}
+                  portfolioFontSize={portfolioFontSize}
+                  socials={socials}
+                  homePriority={homePriority}
+                  layoutTemplate={layoutTemplate}
+                  curationBlocks={blocks}
+                  portfolioBlocks={portfolioBlocks}
+                  managedCategories={managedCategories}
+                />
+              </PhoneFrame>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Block Type Selection Modal */}
       {showBlockTypeModal && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBlockTypeModal(false)}></div>
           <div className="bg-white w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-6 sm:p-8 pb-4 flex justify-between items-center">
-              <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">블록 추가</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">콘텐츠 추가</h3>
               <button onClick={() => setShowBlockTypeModal(false)} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
@@ -1825,7 +2075,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       {[1,2,3,4].map(i => <div key={i} className="bg-slate-300 rounded-sm"></div>)}
                     </div>
                     <span className="font-black text-xs">그리드</span>
-                    <span className="text-[10px] text-slate-400 font-bold">이미지 중심</span>
+                    <span className="text-[10px] text-slate-400 font-bold">상품·이미지·영상</span>
                   </button>
                   <button
                     onClick={() => setNewBlockDisplayType('minimal')}

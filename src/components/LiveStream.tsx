@@ -291,6 +291,14 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   const [lockedHeight, setLockedHeight] = useState<number>(() =>
     typeof window !== 'undefined' ? window.innerHeight : 0
   );
+  // Height (px) of the black letterbox bar above the portrait broadcast on phones.
+  // The stream is a portrait frame shown object-contain inside the full-screen
+  // stage, so on taller phones a black margin sits above (and below) the picture.
+  // We surface the host's @name inside that top margin rather than over the video,
+  // so the live picture is never covered. Stays 0 on the web (the player is a
+  // centered 9:16 column, so there is no top margin) and on phones where the bar
+  // is too short to comfortably hold the header (then it falls back to an overlay).
+  const [topLetterbox, setTopLetterbox] = useState(0);
   // Set when the host ends the broadcast (via the signaling broadcast-end event
   // or the live-state poll). Shows a brief notice, then the stream auto-closes.
   const [streamEnded, setStreamEnded] = useState(false);
@@ -2063,6 +2071,51 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
     };
   }, []);
 
+  // Measure the black letterbox bar above the portrait video so the host's name
+  // can sit inside it (see topLetterbox above). The broadcast frame is shown
+  // object-contain, so on a stage taller than the video's aspect ratio a black
+  // margin appears top & bottom; topLetterbox is the height of that top margin.
+  // Disabled on the web (≥768px), where the player is already a centered 9:16
+  // column with no top margin, and during a 함께 방송 split (two small windows
+  // anchored near the top, which carry their own name badges).
+  useEffect(() => {
+    const measure = () => {
+      // Web column has no top margin; co-broadcast uses its own per-window badges.
+      if (typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches || coPartner) {
+        setTopLetterbox(0);
+        return;
+      }
+      const W = window.innerWidth;
+      const H = lockedHeight || window.innerHeight;
+      if (!W || !H) { setTopLetterbox(0); return; }
+      // Use the live video's real aspect ratio when known; otherwise assume the
+      // 9:16 portrait the broadcaster encodes.
+      let ratio = 9 / 16; // width / height
+      const v = videoRef.current;
+      const hv = hlsVideoRef.current;
+      if (v?.videoWidth && v?.videoHeight) ratio = v.videoWidth / v.videoHeight;
+      else if (hv?.videoWidth && hv?.videoHeight) ratio = hv.videoWidth / hv.videoHeight;
+      // contain: fit by width when the stage is taller than the content ratio,
+      // which leaves the spare height as equal top & bottom black bars.
+      const contentH = W / ratio <= H ? W / ratio : H;
+      const bar = Math.max(0, (H - contentH) / 2);
+      setTopLetterbox(bar);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    const v = videoRef.current;
+    const hv = hlsVideoRef.current;
+    v?.addEventListener('loadedmetadata', measure);
+    hv?.addEventListener('loadedmetadata', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+      v?.removeEventListener('loadedmetadata', measure);
+      hv?.removeEventListener('loadedmetadata', measure);
+    };
+  }, [lockedHeight, coPartner, streamConnected, videoPlaying, hlsReady, useHls]);
+
   // Initialize Kakao SDK (for share/send features)
   useEffect(() => {
     const initKakao = () => {
@@ -3091,8 +3144,17 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           </div>
         )}
 
-        {/* Top Overlay */}
-        <div className="absolute top-0 left-0 right-0 z-20 flex justify-between items-start gap-2" style={{ padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}>
+        {/* Top Overlay — host name + viewer controls. On phones with a black
+            letterbox bar above the portrait video, this sits INSIDE that top
+            margin (topLetterbox) so the host's @name and the controls never
+            cover the live picture; otherwise (web column / very short bar) it
+            overlays the top of the video as before. */}
+        <div
+          className={`absolute top-0 left-0 right-0 z-20 flex justify-between gap-2 ${topLetterbox >= 56 ? 'items-center' : 'items-start'}`}
+          style={topLetterbox >= 56
+            ? { height: `${topLetterbox}px`, paddingTop: 'env(safe-area-inset-top, 0px)', paddingLeft: 'max(1rem, env(safe-area-inset-left, 1rem))', paddingRight: 'max(1rem, env(safe-area-inset-right, 1rem))' }
+            : { padding: 'max(1rem, env(safe-area-inset-top, 1rem)) max(1rem, env(safe-area-inset-right, 1rem)) 0 max(1rem, env(safe-area-inset-left, 1rem))' }}
+        >
           <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
             <div className="w-10 h-10 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800 flex-shrink-0">
               <SafeImage src={DEFAULT_AVATAR} className="w-full h-full object-cover" />
