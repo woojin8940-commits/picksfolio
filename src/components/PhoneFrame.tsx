@@ -18,7 +18,9 @@ const SIZE_CLASS: Record<PhoneFrameSize, string> = {
   // 폰 전체 + 라벨/링크/저장 버튼이 한 화면 안에 들어오도록 한다.
   // (너비는 9/19.5 비율로 자동 계산)
   // 폰 미리보기로 바로 확인할 수 있도록 화면 높이를 거의 꽉 채워 크게 키운다.
-  xl: 'h-[82vh] xl:h-[88vh] max-h-[1000px] w-auto',
+  // 단, 라벨/링크/저장 버튼이 차지하는 공간(약 9rem)을 빼서 폰 전체가
+  // 화면 안에 들어오도록(잘리지 않도록) 높이를 제한한다.
+  xl: 'h-[90vh] max-h-[calc(100vh-9rem)] w-auto',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({
