@@ -15,11 +15,11 @@ const SIZE_CLASS: Record<PhoneFrameSize, string> = {
   md: 'w-[260px] xl:w-[300px]',
   lg: 'w-[300px] xl:w-[340px]',
   // 데스크톱 미리보기(인포크링크 스타일): 폰 전체가 한 화면 안에 "한눈에" 들어와야
-  // 한다. 폰 아래에는 라벨·"실제 페이지 확인하기" 링크가 함께 쌓이므로, 화면 높이에서
-  // 그 주변 UI(여백·라벨·링크)가 차지하는 공간(~7rem)을 미리 빼고 남는 높이에 맞춰
-  // 폰을 최대한 크게 키운다. 너비는 9/19.5 비율로 자동 계산되며, 어떤 화면에서도
-  // 기기 전체가 잘리지 않고 중앙에 균형 있게, 그리고 훨씬 크게 보인다.
-  xl: 'h-[min(1040px,calc(100vh_-_7rem))] w-auto',
+  // 한다. 폰 아래에는 라벨·"실제 페이지 확인하기" 링크가 함께 쌓이는데, 아래 라벨/링크의
+  // 여백을 최대한 줄여 그 묶음이 차지하는 높이를 ~5rem까지 압축했다. 그만큼 화면 높이에서
+  // 빼는 값도 줄여 남는 공간을 전부 폰에 내어줄 수 있어, 기기를 더 크게 키우면서도 위/아래가
+  // 절대 잘리지 않는다. 너비는 9/19.5 비율로 자동 계산되며 중앙에 균형 있게 보인다.
+  xl: 'h-[min(1180px,calc(100vh_-_5rem))] w-auto',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({
@@ -52,7 +52,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
         {/* Bottom Notch */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-20 h-1 bg-slate-200 rounded-full" />
       </div>
-      <p className="text-center mt-4 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+      <p className="text-center mt-2 text-slate-400 text-[10px] font-black uppercase tracking-widest">
         {label}
       </p>
       {liveUrl && (
@@ -60,7 +60,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
           href={liveUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-all shadow-md"
+          className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-all shadow-md"
         >
           실제 페이지 확인하기
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
