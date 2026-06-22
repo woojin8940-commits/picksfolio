@@ -14,12 +14,8 @@ const SIZE_CLASS: Record<PhoneFrameSize, string> = {
   sm: 'w-[220px] xl:w-[240px]',
   md: 'w-[260px] xl:w-[300px]',
   lg: 'w-[300px] xl:w-[340px]',
-  // 데스크톱 미리보기(인포크링크 스타일): 폰 전체가 한 화면 안에 "한눈에" 들어와야
-  // 한다. 폰 아래에는 라벨·"실제 페이지 확인하기" 링크가 함께 쌓이는데, 아래 라벨/링크의
-  // 여백을 최대한 줄여 그 묶음이 차지하는 높이를 ~5rem까지 압축했다. 그만큼 화면 높이에서
-  // 빼는 값도 줄여 남는 공간을 전부 폰에 내어줄 수 있어, 기기를 더 크게 키우면서도 위/아래가
-  // 절대 잘리지 않는다. 너비는 9/19.5 비율로 자동 계산되며 중앙에 균형 있게 보인다.
-  xl: 'h-[min(1180px,calc(100vh_-_5rem))] w-auto',
+  // xl(데스크톱 미리보기)은 아래 flex-fill 로직으로 별도 처리한다.
+  xl: '',
 };
 
 const PhoneFrame: React.FC<PhoneFrameProps> = ({
@@ -29,10 +25,15 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
+  // xl(데스크톱)은 미리보기 칼럼 높이를 꽉 채우도록 flex 로 늘린다. 기기는 flex-1 로
+  // 남는 세로 공간을 모두 차지하고(9/19.5 비율로 너비 자동 계산), 라벨/링크는 자연 높이만
+  // 차지하므로 — 화면이 아무리 낮아도 기기+라벨+링크 묶음이 칼럼 높이를 넘지 않아 절대
+  // 잘리지 않으면서, 동시에 화면 안에서 가능한 가장 크게 보인다.
+  const isXl = size === 'xl';
   return (
-    <div className="flex flex-col items-center">
+    <div className={`flex flex-col items-center ${isXl ? 'h-full w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 ${SIZE_CLASS[size]} overflow-hidden`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'flex-1 min-h-0 max-w-full' : SIZE_CLASS[size]}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
@@ -52,7 +53,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
         {/* Bottom Notch */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-20 h-1 bg-slate-200 rounded-full" />
       </div>
-      <p className="text-center mt-2 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+      <p className="text-center mt-1.5 text-slate-400 text-[10px] font-black uppercase tracking-widest">
         {label}
       </p>
       {liveUrl && (
@@ -60,7 +61,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
           href={liveUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-all shadow-md"
+          className="mt-1 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-lg bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-all shadow-md"
         >
           실제 페이지 확인하기
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
