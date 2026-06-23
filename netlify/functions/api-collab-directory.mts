@@ -93,10 +93,23 @@ export default async (req: Request) => {
         const youtube_url = (b.youtube_url || "").toString().trim();
         const naver_blog_url = (b.naver_blog_url || "").toString().trim();
 
-        // 수기 입력 팔로워 수
-        const manualFollowers = Math.max(0, parseInt(b.follower_count, 10) || 0);
+        // 채널별 수기 입력 팔로워 수
+        const instagram_followers = Math.max(0, parseInt(b.instagram_followers, 10) || 0);
+        const youtube_followers = Math.max(0, parseInt(b.youtube_followers, 10) || 0);
+        const tiktok_followers = Math.max(0, parseInt(b.tiktok_followers, 10) || 0);
+        // 구간 분류/정렬용 대표 팔로워 수는 채널별 입력값 중 최대값을 사용한다.
+        const manualFollowers = Math.max(instagram_followers, youtube_followers, tiktok_followers);
 
-        // 인스타 → 틱톡 순으로 크롤링 시도, 실패하면 수기 입력값 사용
+        // 콘텐츠 유형별 단가
+        const post_price = (b.post_price || "").toString().trim();
+        const short_price = (b.short_price || "").toString().trim();
+        // 관리자 화면 호환을 위해 단일 ad_price 텍스트를 파생 표기로 채운다.
+        const ad_price = [
+          post_price && `게시물 ${post_price}`,
+          short_price && `숏폼 ${short_price}`,
+        ].filter(Boolean).join(" / ") || (b.ad_price || "").toString().trim();
+
+        // 인스타 → 틱톡 순으로 크롤링 시도, 실패하면 수기 입력값(채널 최대) 사용
         let crawled: number | null = null;
         if (instagram_url) crawled = await crawlFollowers(instagram_url);
         if (crawled == null && tiktok_url) crawled = await crawlFollowers(tiktok_url);
@@ -108,11 +121,14 @@ export default async (req: Request) => {
           INSERT INTO collab_directory_applications
             (id, role, applicant_username, name, contact,
              instagram_url, youtube_url, tiktok_url, naver_blog_url,
-             ad_price, category, follower_count, follower_source, note)
+             instagram_followers, youtube_followers, tiktok_followers,
+             ad_price, post_price, short_price, category,
+             follower_count, follower_source, note)
           VALUES
             (${id}, 'influencer', ${(b.applicant_username || "").toString()}, ${name}, ${contact},
              ${instagram_url}, ${youtube_url}, ${tiktok_url}, ${naver_blog_url},
-             ${(b.ad_price || "").toString()}, ${(b.category || "").toString()},
+             ${instagram_followers}, ${youtube_followers}, ${tiktok_followers},
+             ${ad_price}, ${post_price}, ${short_price}, ${(b.category || "").toString()},
              ${follower_count}, ${follower_source}, ${(b.note || "").toString()})
         `;
         return Response.json({ success: true, id, follower_count, follower_source });
