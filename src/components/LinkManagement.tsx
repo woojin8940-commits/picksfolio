@@ -1233,7 +1233,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                                   <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
                                 )}
                               </div>
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                                   <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
                                     {block.colSpan || 1}칸 · {block.displayType === 'minimal' ? '미니멀' : block.displayType === 'text' ? '텍스트' : '그리드'}
@@ -1297,7 +1297,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         <MediaAuto src={block.coverMedia} alt="" className="w-full h-full object-cover" />
                       )}
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="inline-block bg-[#F1F5F9] text-[#64748B] text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">{block.category}</span>
                         <span className="inline-block bg-blue-50 text-blue-600 text-[9px] md:text-xs font-black px-2 py-0.5 rounded-md">
@@ -1584,7 +1584,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area — 리스트 바로 옆, 기기를 칼럼에 꽉 채운다 */}
-      <div className="hidden lg:flex flex-col w-[45vh] max-w-[600px] bg-[#F8FAFC] items-center justify-center px-0.5 py-1 sticky top-0 h-screen flex-shrink-0">
+      <div className="hidden lg:flex flex-col w-[52vh] max-w-[680px] bg-[#F8FAFC] items-center justify-center px-0.5 py-1 sticky top-0 h-screen flex-shrink-0">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
