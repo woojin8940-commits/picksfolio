@@ -32,11 +32,11 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl overflow-hidden ${isXl ? 'w-[min(540px,max(380px,calc((100vh_-_6rem)*9/19.5)))] h-auto max-w-full border-0' : `border-[8px] border-slate-800 ${SIZE_CLASS[size]}`}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl overflow-hidden flex flex-col ${isXl ? 'w-[min(540px,max(380px,calc((100vh_-_6rem)*9/19.5)))] h-auto max-w-full border-0' : `border-[8px] border-slate-800 ${SIZE_CLASS[size]}`}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
-        <div className="h-5 flex justify-between items-center px-5 mb-2">
+        <div className="h-5 flex justify-between items-center px-5 mb-2 flex-shrink-0">
           <span className="text-[9px] font-black text-white/40">9:41</span>
           <div className="flex gap-1">
             <div className="w-2.5 h-2.5 rounded-full bg-white/20" />
@@ -44,13 +44,14 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
           </div>
         </div>
 
-        {/* Phone Content */}
-        <div className={`h-[calc(100%-2rem)] overflow-y-auto rounded-[2rem] pb-16 ${contentClassName}`}>
+        {/* Phone Content — flex-1 + min-h-0 으로 남은 공간을 정확히 채워 하단이 잘리지 않게 한다.
+            하단 홈 인디케이터에 가리지 않도록 pb 로 여유만 둔다. */}
+        <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`}>
           {children}
         </div>
 
-        {/* Bottom Notch */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-20 h-1 bg-slate-200 rounded-full" />
+        {/* Bottom Notch — 콘텐츠 위에 살짝 떠 있는 홈 인디케이터. 경계선처럼 보이지 않도록 반투명 처리. */}
+        <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 w-20 h-1 bg-white/25 rounded-full" />
       </div>
       <p className="text-center mt-1 text-slate-400 text-[9px] font-black uppercase tracking-widest leading-none">
         {label}
