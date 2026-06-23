@@ -1583,9 +1583,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         </div>
       </div>
 
-      {/* Mobile Preview Area — 리스트 바로 옆 고정 너비 칼럼. 기기를 화면 높이에 맞춰 세로 가운데로 정렬한다 */}
-      <div className="hidden xl:flex flex-none w-[600px] bg-[#F8FAFC] px-6 sticky top-0 h-screen items-center justify-center">
-        <div className="w-full flex items-center justify-center">
+      {/* Mobile Preview Area — 리스트 바로 옆 고정 너비 칼럼. 기기를 세로 가운데로 정렬하되, 화면보다
+          크면 칼럼이 스크롤되어 잘리지 않는다 */}
+      <div className="hidden xl:block flex-none w-[600px] bg-[#F8FAFC] sticky top-0 h-screen overflow-y-auto">
+        <div className="min-h-full flex items-center justify-center px-6 py-8">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
