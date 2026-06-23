@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
+import CollabMatchRegister from './CollabMatchRegister';
 
 interface Campaign {
   id: string;
@@ -60,55 +61,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [acceptedCampaigns, setAcceptedCampaigns] = useState<Map<string, string>>(new Map());
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
-
-  // 캠페인 리스트 등록(인플루언서/브랜드 지원) 모달
-  const [showRegister, setShowRegister] = useState(false);
-  const [registerRole, setRegisterRole] = useState<'influencer' | 'brand'>('influencer');
-  const [registering, setRegistering] = useState(false);
-  const [infForm, setInfForm] = useState({
-    name: '', contact: '', instagram_url: '', youtube_url: '', tiktok_url: '',
-    naver_blog_url: '', ad_price: '', category: '', follower_count: '',
-  });
-  const [brandForm, setBrandForm] = useState({
-    name: '', contact: '', brand_homepage: '', brand_instagram: '', desired_count: '',
-    desired_followers: '', budget_text: '', desired_schedule: '', desired_category: '', note: '',
-  });
-
-  const resetRegister = () => {
-    setInfForm({ name: '', contact: '', instagram_url: '', youtube_url: '', tiktok_url: '', naver_blog_url: '', ad_price: '', category: '', follower_count: '' });
-    setBrandForm({ name: '', contact: '', brand_homepage: '', brand_instagram: '', desired_count: '', desired_followers: '', budget_text: '', desired_schedule: '', desired_category: '', note: '' });
-  };
-
-  const handleRegisterSubmit = async () => {
-    setRegistering(true);
-    try {
-      const payload = registerRole === 'influencer'
-        ? { role: 'influencer', applicant_username: userName, ...infForm }
-        : { role: 'brand', applicant_username: userName, ...brandForm, budget: brandForm.budget_text };
-      if (!payload.name?.trim()) {
-        alert('이름(담당자)을 입력해 주세요.');
-        setRegistering(false);
-        return;
-      }
-      const res = await fetch('/api/collab-directory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        setShowRegister(false);
-        resetRegister();
-        alert('지원이 접수되었습니다. 운영자 검토 후 연락드립니다!');
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || '등록에 실패했습니다.');
-      }
-    } catch {
-      alert('서버 오류가 발생했습니다.');
-    } finally {
-      setRegistering(false);
-    }
-  };
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
@@ -661,14 +613,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{filteredCampaigns.length}개</span>
         </div>
 
-        {/* 캠페인 리스트 등록 — 인플루언서/브랜드 지원 */}
-        <button
-          onClick={() => { setShowRegister(true); }}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_8px_20px_-6px_rgba(37,99,235,0.5)] hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] transition-all"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-          캠페인 리스트 등록
-        </button>
+        {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정) */}
+        <CollabMatchRegister variant="influencer" applicantUsername={userName} />
       </div>
 
       {/* Campaign Cards */}
@@ -764,126 +710,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
-      {/* 캠페인 리스트 등록 모달 */}
-      {showRegister && (
-        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={() => !registering && setShowRegister(false)}>
-          <div
-            className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom md:fade-in duration-300"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between z-10">
-              <h3 className="text-base font-black text-slate-900">캠페인 리스트 등록</h3>
-              <button onClick={() => !registering && setShowRegister(false)} className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center">
-                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-
-            <div className="p-5">
-              {/* 역할 선택 */}
-              <p className="text-xs font-bold text-slate-400 mb-2">지원 유형</p>
-              <div className="grid grid-cols-2 gap-2 mb-5">
-                {([
-                  { key: 'influencer', label: '인플루언서', desc: '내 채널로 협업 지원' },
-                  { key: 'brand', label: '브랜드(광고주)', desc: '캠페인 진행 의뢰' },
-                ] as const).map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => setRegisterRole(opt.key)}
-                    className={`text-left rounded-2xl border-2 px-4 py-3 transition-all ${
-                      registerRole === opt.key
-                        ? 'border-blue-500 bg-blue-50/60'
-                        : 'border-slate-150 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <span className={`block text-sm font-black ${registerRole === opt.key ? 'text-blue-600' : 'text-slate-700'}`}>{opt.label}</span>
-                    <span className="block text-[11px] text-slate-400 font-medium mt-0.5">{opt.desc}</span>
-                  </button>
-                ))}
-              </div>
-
-              {registerRole === 'influencer' ? (
-                <div className="space-y-3">
-                  <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
-                  <Field label="연락처" value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
-                  <div className="pt-1">
-                    <p className="text-xs font-black text-slate-500 mb-2">내 채널</p>
-                    <div className="space-y-2.5">
-                      <Field label="인스타그램" value={infForm.instagram_url} onChange={v => setInfForm(f => ({ ...f, instagram_url: v }))} placeholder="https://instagram.com/..." />
-                      <Field label="유튜브" value={infForm.youtube_url} onChange={v => setInfForm(f => ({ ...f, youtube_url: v }))} placeholder="https://youtube.com/@..." />
-                      <Field label="틱톡" value={infForm.tiktok_url} onChange={v => setInfForm(f => ({ ...f, tiktok_url: v }))} placeholder="https://tiktok.com/@..." />
-                      <Field label="네이버 블로그" value={infForm.naver_blog_url} onChange={v => setInfForm(f => ({ ...f, naver_blog_url: v }))} placeholder="https://blog.naver.com/..." />
-                    </div>
-                  </div>
-                  <Field label="광고 단가" value={infForm.ad_price} onChange={v => setInfForm(f => ({ ...f, ad_price: v }))} placeholder="예: 게시물당 30만원" />
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="카테고리" value={infForm.category} onChange={v => setInfForm(f => ({ ...f, category: v }))} placeholder="뷰티, 패션 등" />
-                    <Field label="팔로워 수" type="number" value={infForm.follower_count} onChange={v => setInfForm(f => ({ ...f, follower_count: v }))} placeholder="자동 확인 실패 시 입력" />
-                  </div>
-                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-                    팔로워 수는 인스타/틱톡 링크에서 자동 확인을 시도하며, 확인이 어려운 경우 입력하신 값으로 분류됩니다.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <Field label="담당자 이름 / 브랜드명" required value={brandForm.name} onChange={v => setBrandForm(f => ({ ...f, name: v }))} placeholder="브랜드명 또는 담당자" />
-                  <Field label="연락처" value={brandForm.contact} onChange={v => setBrandForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
-                  <Field label="브랜드 홈페이지" value={brandForm.brand_homepage} onChange={v => setBrandForm(f => ({ ...f, brand_homepage: v }))} placeholder="https://..." />
-                  <Field label="브랜드 인스타 링크" value={brandForm.brand_instagram} onChange={v => setBrandForm(f => ({ ...f, brand_instagram: v }))} placeholder="https://instagram.com/..." />
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="희망 인원" value={brandForm.desired_count} onChange={v => setBrandForm(f => ({ ...f, desired_count: v }))} placeholder="예: 5명" />
-                    <Field label="원하는 팔로워" value={brandForm.desired_followers} onChange={v => setBrandForm(f => ({ ...f, desired_followers: v }))} placeholder="예: 1만~5만" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="예산" value={brandForm.budget_text} onChange={v => setBrandForm(f => ({ ...f, budget_text: v }))} placeholder="예: 500만원" />
-                    <Field label="원하는 일정" type="date" value={brandForm.desired_schedule} onChange={v => setBrandForm(f => ({ ...f, desired_schedule: v }))} />
-                  </div>
-                  <Field label="원하는 인플루언서 카테고리" value={brandForm.desired_category} onChange={v => setBrandForm(f => ({ ...f, desired_category: v }))} placeholder="뷰티, 패션, 푸드 등" />
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5">추가 메모</label>
-                    <textarea
-                      value={brandForm.note}
-                      onChange={e => setBrandForm(f => ({ ...f, note: e.target.value }))}
-                      rows={3}
-                      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none"
-                      placeholder="캠페인 상세, 요청 사항 등"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={handleRegisterSubmit}
-                disabled={registering}
-                className="w-full mt-5 rounded-xl bg-blue-600 text-white font-black text-sm py-3.5 hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-60"
-              >
-                {registering ? '접수 중...' : '지원하기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
-
-// 등록 모달 입력 필드
-const Field: React.FC<{
-  label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; type?: string; required?: boolean;
-}> = ({ label, value, onChange, placeholder, type = 'text', required }) => (
-  <div>
-    <label className="block text-xs font-bold text-slate-500 mb-1.5">
-      {label}{required && <span className="text-rose-500 ml-0.5">*</span>}
-    </label>
-    <input
-      type={type}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
-    />
-  </div>
-);
 
 export default UserCampaignBrowse;
