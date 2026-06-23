@@ -172,7 +172,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div
                     key={block.id}
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className="relative overflow-hidden cursor-pointer group flex flex-col justify-center px-2 py-1"
+                    className="relative overflow-hidden cursor-pointer group flex flex-col justify-center px-2 py-1 min-w-0"
                     style={{
                       gridColumn: `span ${gridSpan}`,
                       minHeight: '30px',
@@ -181,7 +181,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   >
                     {block.textContent ? (
                       <div
-                        className="text-[7px] leading-relaxed whitespace-pre-wrap overflow-hidden"
+                        className="text-[7px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden"
                         style={{
                           fontSize: `${Math.max(5, Math.min(10, (block.fontSizePx || 14) * 0.5))}px`,
                           fontWeight: block.bold ? 'bold' : undefined,

@@ -1333,7 +1333,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                              return (
                                <div
                                  key={block.id}
-                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
+                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6 min-w-0"
                                  style={{
                                    gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
@@ -1343,7 +1343,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                >
                                  {block.textContent ? (
                                    <div
-                                     className="leading-relaxed whitespace-pre-wrap"
+                                     className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full"
                                      style={{
                                        fontSize: `${block.fontSizePx || 14}px`,
                                        fontWeight: block.bold ? 'bold' : undefined,
@@ -1724,7 +1724,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                               >
                                 {block.textContent ? (
                                   <div
-                                    className="leading-relaxed whitespace-pre-wrap"
+                                    className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full"
                                     style={{
                                       fontSize: `${block.fontSizePx || 14}px`,
                                       fontWeight: block.bold ? 'bold' : undefined,
