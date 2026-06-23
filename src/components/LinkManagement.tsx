@@ -1116,18 +1116,18 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         />
       )}
       
-      <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-10">
-        <div className="max-w-[620px] mx-auto w-full">
+      <div className="flex-1 lg:flex-none lg:w-[700px] min-w-0 overflow-y-auto p-4 md:p-10">
+        <div className="max-w-[620px] mx-auto lg:mx-0 w-full">
           <header className="mb-6 md:mb-10">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+          <div className="flex flex-col gap-4 mb-6">
             <div>
               <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">링크 관리</h1>
               <p className="text-[#64748B] font-medium text-xs md:text-base">상품·이미지·영상·텍스트와 프로필·커버·버튼을 한 곳에서 관리하고, 개인페이지에 보이는 그대로 미리볼 수 있어요.</p>
             </div>
-            
-            <div className="flex bg-white p-1 rounded-2xl border border-[#E2E8F0] self-start md:self-auto">
-              <button onClick={() => setActiveTab('posts')} className={`px-7 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'posts' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>포스트 관리</button>
-              <button onClick={() => setActiveTab('design')} className={`px-7 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>프로필 · 디자인</button>
+
+            <div className="flex w-full bg-white p-1 rounded-2xl border border-[#E2E8F0]">
+              <button onClick={() => setActiveTab('posts')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'posts' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>포스트 관리</button>
+              <button onClick={() => setActiveTab('design')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>프로필 · 디자인</button>
             </div>
           </div>
         </header>
@@ -1584,7 +1584,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area — 리스트 옆 넓은 칼럼에서 기기를 세로 가운데로 정렬한다 */}
-      <div className="hidden lg:flex flex-col w-[50vh] max-w-[600px] bg-[#F8FAFC] items-center justify-center px-3 py-2 sticky top-0 h-screen flex-shrink-0">
+      <div className="hidden lg:flex flex-col flex-1 min-w-0 bg-[#F8FAFC] items-center justify-center px-3 py-2 sticky top-0 h-screen">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
