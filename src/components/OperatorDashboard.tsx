@@ -11,9 +11,10 @@ import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
 import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
+import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'sellers';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'sellers' | 'directory';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -571,6 +572,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
             { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
+            { key: 'directory' as OperatorTab, label: '리스트 등록' },
             { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
@@ -941,6 +943,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
+        )}
+
+        {/* 캠페인 리스트 등록(인플루언서/브랜드 지원) Tab */}
+        {activeTab === 'directory' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="리스트 등록 · 인플루언서/브랜드 지원 관리"
+                  body="캠페인 협업 메뉴에서 접수된 지원을 인플루언서(팔로워 구간별)와 브랜드(일정·예산 정렬)로 나눠 확인합니다. 인플루언서 팔로워 수는 인스타/틱톡 링크에서 자동 확인을 시도하며, 실패 시 지원자가 입력한 값으로 분류되고 운영자가 직접 수정할 수 있습니다."
+                />
+                <AdminCollabDirectory token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
         )}
 
         {/* Seller Business Verification Tab */}
