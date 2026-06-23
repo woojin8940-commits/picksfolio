@@ -25,7 +25,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
-  // xl(데스크톱)은 기기 높이를 뷰포트 기준(86vh)으로 크게 잡되 상한(940px)을 둔다. 너비는
+  // xl(데스크톱)은 기기 높이를 뷰포트 기준(92vh)으로 크게 잡되 상한(1100px)을 둔다. 너비는
   // 9/19.5 비율로 자동 계산되고, 칼럼이 justify-center 로 세로 가운데 정렬하므로 — 기기가
   // 상단에 붙지 않고 화면 가운데쯤 위치하며, 위아래로 여백이 남아 리스트 경계를 건드리거나
   // 잘리지 않으면서도 가능한 한 크게 보인다.
@@ -33,7 +33,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[86vh] max-h-[940px] max-w-full' : SIZE_CLASS[size]}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[92vh] max-h-[1100px] max-w-full' : SIZE_CLASS[size]}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
