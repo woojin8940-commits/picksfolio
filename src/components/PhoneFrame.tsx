@@ -25,15 +25,15 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
-  // xl(데스크톱)은 기기 높이를 뷰포트 기준(90vh)으로 잡되 상한(1080px)을 둔다. 너비는
-  // 9/19.5 비율로 자동 계산되고, 칼럼이 justify-center 로 세로 가운데 정렬하므로 — 기기가
-  // 상단에 붙지 않고 화면 가운데쯤 위치한다. 리스트 옆 미리보기 칼럼의 여백을 거의 꽉
-  // 채우도록 키운 값이라 위아래로는 최소한의 여백만 남는다.
+  // xl(데스크톱)은 기기 높이를 뷰포트 기준(93vh)으로 최대한 키워 미리보기 칼럼의 상·하단에
+  // 거의 닿게 한다(라벨/링크 자리만큼만 여백). 너비는 9/19.5 비율로 자동 계산되고, 칼럼 폭을
+  // 기기 너비에 맞춰 좁혀 두었기 때문에 좌·우 여백도 거의 남지 않는다. 칼럼이 justify-center 로
+  // 세로 가운데 정렬하므로 기기가 칼럼 한가운데에 꽉 차게 위치한다.
   const isXl = size === 'xl';
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[90vh] max-h-[1080px] max-w-full' : SIZE_CLASS[size]}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[93vh] max-h-[1240px] max-w-full' : SIZE_CLASS[size]}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
