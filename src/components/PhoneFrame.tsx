@@ -25,14 +25,15 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
-  // xl(데스크톱 미리보기)은 너비를 기준으로 크기가 정해진다. 높이에만 맞추면 화면이 낮은(작은)
-  // 모니터에서 기기가 지나치게 작아지므로, 너비를 최소 380px 보장하고(작은 화면에서도 크게 보임)
-  // 화면이 클수록 높이에 맞춰 최대 540px까지 커진다. 화면 높이에 맞춰 항상 한눈에 들어온다.
+  // xl(데스크톱 미리보기)은 세로 가용 공간을 기준으로 크기가 정해진다. 화면 높이에서 라벨/링크 등
+  // 주변 여백(약 5.5rem)을 뺀 만큼 높이를 채우고, 그에 맞춰 너비(9/19.5 비율)가 정해진다. 단, 너비는
+  // 부모 칼럼 폭(max-w-full)을 넘지 않는다. 이렇게 하면 세로 여백이 남을 땐 기기가 그만큼 더 커지고,
+  // 화면이 낮아도 잘리지 않고 통째로 보인다.
   const isXl = size === 'xl';
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl overflow-hidden flex flex-col ${isXl ? 'w-[min(540px,max(380px,calc((100vh_-_6rem)*9/19.5)))] h-auto max-w-full border-0' : `border-[8px] border-slate-800 ${SIZE_CLASS[size]}`}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl overflow-hidden flex flex-col ${isXl ? 'w-[min(100%,calc((100vh_-_5.5rem)*9/19.5))] h-auto max-w-full border-0' : `border-[8px] border-slate-800 ${SIZE_CLASS[size]}`}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
