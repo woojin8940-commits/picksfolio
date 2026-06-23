@@ -25,15 +25,15 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
-  // xl(데스크톱)은 기기 높이를 뷰포트 기준(93vh)으로 최대한 키워 미리보기 칼럼의 상·하단에
-  // 거의 닿게 한다(라벨/링크 자리만큼만 여백). 너비는 9/19.5 비율로 자동 계산되고, 칼럼 폭을
-  // 기기 너비에 맞춰 좁혀 두었기 때문에 좌·우 여백도 거의 남지 않는다. 칼럼이 justify-center 로
-  // 세로 가운데 정렬하므로 기기가 칼럼 한가운데에 꽉 차게 위치한다.
+  // xl(데스크톱)은 기기 높이를 뷰포트 높이에서 라벨/링크 자리(2.5rem)만 뺀 값으로 잡아 미리보기
+  // 칼럼의 상·하단에 거의 닿게 한다. 너비는 9/19.5 비율로 자동 계산되며, 칼럼 폭을 기기 너비에
+  // 바짝 맞춰 두었기 때문에 좌·우 여백도 거의 남지 않는다. 칼럼이 justify-center 로 세로 가운데
+  // 정렬하므로 기기가 칼럼을 위아래로 꽉 채운다.
   const isXl = size === 'xl';
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[93vh] max-h-[1240px] max-w-full' : SIZE_CLASS[size]}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[calc(100vh-2.5rem)] max-h-[1500px] max-w-full' : SIZE_CLASS[size]}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}
@@ -53,7 +53,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
         {/* Bottom Notch */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-20 h-1 bg-slate-200 rounded-full" />
       </div>
-      <p className="text-center mt-1.5 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+      <p className="text-center mt-1 text-slate-400 text-[9px] font-black uppercase tracking-widest leading-none">
         {label}
       </p>
       {liveUrl && (
@@ -61,7 +61,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
           href={liveUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-lg bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-all shadow-md"
+          className="mt-0.5 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-lg bg-slate-900 text-white text-[9px] font-black hover:bg-slate-800 transition-all shadow-md"
         >
           실제 페이지 확인하기
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

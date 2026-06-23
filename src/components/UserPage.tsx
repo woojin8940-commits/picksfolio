@@ -1343,7 +1343,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                >
                                  {block.textContent ? (
                                    <div
-                                     className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full"
+                                     className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:[overflow-wrap:anywhere]"
                                      style={{
                                        fontSize: `${block.fontSizePx || 14}px`,
                                        fontWeight: block.bold ? 'bold' : undefined,
@@ -1724,7 +1724,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                               >
                                 {block.textContent ? (
                                   <div
-                                    className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full"
+                                    className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:[overflow-wrap:anywhere]"
                                     style={{
                                       fontSize: `${block.fontSizePx || 14}px`,
                                       fontWeight: block.bold ? 'bold' : undefined,
