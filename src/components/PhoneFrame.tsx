@@ -25,14 +25,13 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   contentClassName = '',
   liveUrl,
 }) => {
-  // xl(데스크톱)은 기기 높이를 뷰포트 높이에서 라벨/링크 자리와 약간의 위·아래 여백(4rem)만
-  // 뺀 값으로 잡는다. 칼럼이 justify-center 로 세로 가운데 정렬하므로, 기기가 잘리지 않고
-  // 칼럼 안에서 위·아래로 균등한 여백을 두고 가운데에 놓인다. 너비는 9/19.5 비율로 자동 계산된다.
+  // xl(데스크톱 미리보기)은 고정 너비를 사용한다. 뷰포트 높이에 따라 크기가 달라지지 않으므로
+  // 어떤 모니터에서도 항상 똑같은 크기로 보인다. 높이는 9/19.5 비율로 자동 계산된다.
   const isXl = size === 'xl';
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
       <div
-        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'h-[calc(100vh-6rem)] max-h-[1400px] max-w-full' : SIZE_CLASS[size]}`}
+        className={`relative bg-slate-900 rounded-[3rem] p-3 shadow-2xl border-[8px] border-slate-800 overflow-hidden ${isXl ? 'w-[360px] max-w-full' : SIZE_CLASS[size]}`}
         style={{ aspectRatio: '9/19.5' }}
       >
         {/* Status Bar */}

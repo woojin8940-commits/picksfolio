@@ -1105,7 +1105,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   );
 
   return (
-    <div className="flex h-full bg-[#F8FAFC]">
+    <div className="flex h-full bg-[#F8FAFC] justify-center">
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,video/mp4,video/webm,video/ogg,video/quicktime" />
       {cropperSrc && (
         <ImageCropper
@@ -1116,8 +1116,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         />
       )}
       
-      <div className="flex-1 lg:flex-none lg:w-[700px] min-w-0 overflow-y-auto p-4 md:p-10">
-        <div className="max-w-[620px] mx-auto lg:mx-0 w-full">
+      <div className="flex-1 xl:flex-none xl:w-[760px] min-w-0 overflow-y-auto p-4 md:p-10">
+        <div className="max-w-[680px] mx-auto w-full">
           <header className="mb-6 md:mb-10">
           <div className="flex flex-col gap-4 mb-6">
             <div>
@@ -1583,8 +1583,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         </div>
       </div>
 
-      {/* Mobile Preview Area — 리스트 옆 넓은 칼럼에서 기기를 세로 가운데로 정렬한다 */}
-      <div className="hidden lg:flex flex-col flex-1 min-w-0 bg-[#F8FAFC] items-center justify-center px-3 py-2 sticky top-0 h-screen">
+      {/* Mobile Preview Area — 리스트 바로 옆 고정 너비 칼럼. 기기를 세로 가운데로 정렬한다 */}
+      <div className="hidden xl:flex flex-col flex-none w-[420px] bg-[#F8FAFC] items-center justify-center px-6 py-6 sticky top-0 h-screen overflow-y-auto">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
