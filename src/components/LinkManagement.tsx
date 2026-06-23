@@ -1584,7 +1584,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </div>
 
       {/* Mobile Preview Area — 리스트 바로 옆 고정 너비 칼럼. 기기를 세로 가운데로 정렬한다 */}
-      <div className="hidden xl:flex flex-col flex-none w-[420px] bg-[#F8FAFC] items-center justify-center px-6 py-6 sticky top-0 h-screen overflow-y-auto">
+      <div className="hidden xl:flex justify-center flex-none w-[600px] bg-[#F8FAFC] px-6 sticky top-0 h-screen overflow-y-auto scrollbar-hide">
+        <div className="my-auto py-6 w-full flex justify-center">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
@@ -1609,6 +1610,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               managedCategories={managedCategories}
             />
         </PhoneFrame>
+        </div>
       </div>
 
       {/* Edit Modal */}
