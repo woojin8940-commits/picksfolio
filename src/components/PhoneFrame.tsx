@@ -27,7 +27,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
 }) => {
   // xl(데스크톱 미리보기)은 너비를 기준으로 크기가 정해진다. 높이에만 맞추면 화면이 낮은(작은)
   // 모니터에서 기기가 지나치게 작아지므로, 너비를 최소 380px 보장하고(작은 화면에서도 크게 보임)
-  // 화면이 클수록 높이에 맞춰 최대 540px까지 커진다. 기기가 화면보다 높으면 칼럼이 세로 스크롤된다.
+  // 화면이 클수록 높이에 맞춰 최대 540px까지 커진다. 화면 높이에 맞춰 항상 한눈에 들어온다.
   const isXl = size === 'xl';
   return (
     <div className={`flex flex-col items-center ${isXl ? 'w-full' : ''}`}>
@@ -44,14 +44,10 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
           </div>
         </div>
 
-        {/* Phone Content — flex-1 + min-h-0 으로 남은 공간을 정확히 채워 하단이 잘리지 않게 한다.
-            하단 홈 인디케이터에 가리지 않도록 pb 로 여유만 둔다. */}
+        {/* Phone Content — flex-1 + min-h-0 으로 남은 공간을 정확히 채워 하단이 잘리지 않게 한다. */}
         <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`}>
           {children}
         </div>
-
-        {/* Bottom Notch — 콘텐츠 위에 살짝 떠 있는 홈 인디케이터. 경계선처럼 보이지 않도록 반투명 처리. */}
-        <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 w-20 h-1 bg-white/25 rounded-full" />
       </div>
       <p className="text-center mt-1 text-slate-400 text-[9px] font-black uppercase tracking-widest leading-none">
         {label}
