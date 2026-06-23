@@ -1583,8 +1583,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         </div>
       </div>
 
-      {/* Mobile Preview Area */}
-      <div className="hidden lg:flex flex-col w-[46vh] max-w-[600px] bg-[#F8FAFC] items-center justify-center px-1 py-1 sticky top-0 h-screen flex-shrink-0">
+      {/* Mobile Preview Area — 리스트 바로 옆, 기기를 칼럼에 꽉 채운다 */}
+      <div className="hidden lg:flex flex-col w-[45vh] max-w-[600px] bg-[#F8FAFC] items-center justify-center px-0.5 py-1 sticky top-0 h-screen flex-shrink-0">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
