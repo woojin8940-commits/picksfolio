@@ -1587,7 +1587,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           항상 한눈에 들어온다. 큰 화면에서는 칼럼을 넓혀 기기가 세로 여백까지 더 크게 채운다.
           별도의 세로 스크롤은 두지 않는다 */}
       <div className="hidden xl:block flex-none w-[600px] 2xl:w-[720px] bg-[#F8FAFC] sticky top-0 h-screen overflow-hidden">
-        <div className="min-h-full flex items-center justify-center px-6 py-6">
+        <div className="min-h-full flex items-center justify-center px-4 py-2">
         <PhoneFrame
           size="xl"
           label="실시간 미리보기"
