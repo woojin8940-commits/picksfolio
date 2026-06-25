@@ -32,14 +32,11 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 //     a payment window when the balance runs low.
 //
 // storeId and channelKey are public browser identifiers; the V2 API secret lives
-// server-side only. 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 리다이렉트
-// 방식으로 호출한다(portonePayments).
-export type ClaudePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
+// server-side only. PG 심사 요건상 클로드 플랜은 간편결제 없이 카드 결제만 허용한다.
+export type ClaudePayMethod = 'CARD';
 
 export const CLAUDE_PAY_METHODS: { id: ClaudePayMethod; label: string }[] = [
   { id: 'CARD', label: '신용카드' },
-  { id: 'TOSSPAY', label: '토스페이' },
-  { id: 'KAKAOPAY', label: '카카오페이' },
 ];
 
 export interface ClaudePayOutcome {
@@ -145,6 +142,7 @@ export async function payClaudePlan(
 export async function issueClaudeBillingKey(
   username: string,
   payMethod: ClaudePayMethod,
+  options?: { activatePlan?: boolean },
 ): Promise<{ success: boolean; billingKey?: string; error?: string }> {
   if (isNativeApp()) {
     return { success: false, error: NATIVE_BLOCK_MESSAGE };
@@ -175,6 +173,7 @@ export async function issueClaudeBillingKey(
     username,
     payMethod: ppMethod,
     orderName: '클로드 크레딧 자동충전 결제수단 등록',
+    activatePlan: !!options?.activatePlan,
     returnPath: window.location.pathname + window.location.search,
   });
 

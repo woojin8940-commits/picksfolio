@@ -129,6 +129,7 @@
         const r = await send("PATCH", "/api/claude-credits/" + enc(intent.username), {
           autoRecharge: true,
           billingKey: billingKey,
+          activatePlan: !!intent.activatePlan,
         });
         if (!r.ok || !r.data.success) { fail(r.data.error || "결제수단 등록에 실패했습니다."); return; }
         sessionStorage.removeItem(INTENT_KEY);

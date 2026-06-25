@@ -8,6 +8,7 @@ import {
   MARGIN_MULTIPLIER,
   RECHARGE_PACKS_KRW,
   creditsForKrw,
+  chargeBillingKey,
   readClaudeCredits,
   writeClaudeCredits,
   publicCredits,
@@ -113,6 +114,12 @@ export default async (req: Request, context: Context) => {
       const orderId = String((body as any)?.orderId || '').trim()
       const paymentId = isToss ? paymentKey : String((body as any)?.paymentId || '').trim()
 
+      if (payMethod !== 'CARD') {
+        return Response.json(
+          { error: '클로드 플랜은 신용/체크카드 결제만 가능합니다. 간편결제는 지원하지 않습니다.' },
+          { status: 400 },
+        )
+      }
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
       }
@@ -231,6 +238,42 @@ export default async (req: Request, context: Context) => {
           { error: '자동충전을 사용하려면 결제 수단(빌링키)을 먼저 등록해야 합니다.' },
           { status: 400 },
         )
+      }
+
+      if ((body as any)?.activatePlan && !credits.planActive) {
+        if (!credits.billingKey) {
+          return Response.json(
+            { error: '클로드 플랜 첫 결제를 위해 카드 자동결제 수단을 먼저 등록해야 합니다.' },
+            { status: 400 },
+          )
+        }
+        const charged = await chargeBillingKey(username, credits.billingKey, ACTIVATION_PRICE_KRW, {
+          provider: credits.billingProvider,
+          customerKey: credits.billingCustomerKey,
+        })
+        if (!charged.success) {
+          return Response.json(
+            { error: charged.error || '클로드 플랜 첫 결제에 실패했습니다. 카드를 확인해 주세요.' },
+            { status: 400 },
+          )
+        }
+
+        credits.planActive = true
+        credits.planActivatedAt = new Date().toISOString()
+        credits.balanceCredits += ACTIVATION_GRANT_CREDITS
+        credits.lifetimeChargedKrw += ACTIVATION_PRICE_KRW
+        credits.autoRecharge = true
+        credits.grants = [
+          {
+            at: new Date().toISOString(),
+            amountKrw: ACTIVATION_PRICE_KRW,
+            credits: ACTIVATION_GRANT_CREDITS,
+            kind: 'activation',
+            paymentId: charged.paymentId,
+            payMethod: 'CARD',
+          },
+          ...credits.grants,
+        ].slice(0, 100)
       }
 
       await writeClaudeCredits(username, credits)
