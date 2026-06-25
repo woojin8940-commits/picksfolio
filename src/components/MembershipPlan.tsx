@@ -6,8 +6,10 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
+  cardParam,
   isNiceCardConfigured,
   NICE_NOT_CONFIGURED_MESSAGE,
+  portonePayMethod,
   portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
@@ -328,15 +330,77 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setSaving(true);
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
+      const ppMethod = payMethod;
+
+      // ── 카드(신용카드): 단건 결제로 즉시 활성화 ──
+      // 카드 결제는 나이스정보통신(신모듈) 일반결제(단건) 채널을 쓴다. 이 채널은 빌링키
+      // 발급(requestIssueBillingKey)이 본인인증을 강제하거나 발급 자체가 실패하므로 — 그래서
+      // "신용카드 결제가 안 되던" 것이다 — 클로드 플랜과 동일하게 단건 결제(requestPayment)로
+      // 첫 달을 즉시 결제하고, 돌아온 paymentId 를 서버(/api/billing-issue)에서 검증해 멤버십을
+      // 활성화한다(카드는 자동 정기결제 대상이 아니다). 토스페이·카카오페이는 아래 빌링키
+      // 자동결제 경로를 그대로 사용한다.
+      if (ppMethod === 'CARD') {
+        const paymentId = genPortOneId('membership', normalizedUserName);
+        savePortOneIntent({
+          type: 'membership',
+          username: normalizedUserName,
+          payMethod: ppMethod,
+          tier: selectedTier,
+          oneTime: true,
+          orderName: `픽스폴리오 ${tierLabel}`,
+          returnPath: window.location.pathname + window.location.search,
+        });
+
+        const response = await window.PortOne.requestPayment({
+          storeId: PORTONE_STORE_ID,
+          channelKey: channelKeyFor(ppMethod),
+          paymentId,
+          orderName: `픽스폴리오 ${tierLabel}`,
+          totalAmount: tierAmount,
+          currency: 'KRW',
+          payMethod: portonePayMethod(ppMethod),
+          redirectUrl: portoneRedirectUrl(),
+          ...cardParam(ppMethod),
+          customer: {
+            customerId: safeUserName,
+            fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
+            phoneNumber: verification?.business?.contact_phone || undefined,
+          },
+        });
+
+        if (!response || response.code) {
+          clearPortOneIntent();
+          if (response?.code) {
+            const detail = response.code === 'PORTONE_ERROR'
+              ? '결제 모듈 오류입니다. 채널 설정(결제모듈·PG상점아이디)을 확인해 주세요.'
+              : response.message || `카드 결제 실패 (${response.code})`;
+            setError(detail);
+            console.error('[Membership] PortOne card payment error:', response.code, response.message);
+          }
+          setSaving(false);
+          return;
+        }
+
+        const verifyRes = await apiService.activateMembershipOneTime(
+          normalizedUserName,
+          response.paymentId || paymentId,
+          selectedTier,
+          'CARD',
+        );
+        clearPortOneIntent();
+        if (!verifyRes.success) {
+          setError(verifyRes.error || '멤버십 결제에 실패했습니다. 고객센터로 문의해 주세요.');
+          setSaving(false);
+          return;
+        }
+        if (verifyRes.data) setVerification(verifyRes.data);
+        setConfirmOpen(false);
+        flashSuccess(`카드로 ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`);
+        return;
+      }
 
       const issueId = genPortOneId('billing', normalizedUserName);
-      // 카드(신용카드) / 토스페이 / 카카오페이 모두 PortOne V2 로 빌링키를 발급해 자동결제를
-      // 등록한다. 카드 빌링키 발급(requestIssueBillingKey)은 나이스정보통신이 휴대폰 본인인증
-      // (전화번호 인증)을 먼저 요구하므로 카드 결제 시 본인인증 화면이 뜬다 — 이는 현재 쓰는
-      // 빌링 MID 가 본인인증을 강제하기 때문이며, 추후 나이스의 비인증 정기결제 MID 로 교체되면
-      // 사라진다. 본인인증을 마치면 빌링키가 발급되고, 카드도 토스페이·카카오페이와 동일하게
-      // 매월 자동결제(정기결제)로 동작한다.
-      const ppMethod = payMethod;
+      // 토스페이·카카오페이는 PortOne V2 빌링키를 발급해 매월 자동결제(정기결제)로 동작한다.
 
       // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
       // 돌아온 /portone/return 페이지가 발급된 billingKey 로 첫 달 결제·멤버십 활성화를
@@ -592,7 +656,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <span className="text-3xl md:text-4xl font-black text-slate-900">13,900</span>
               <span className="text-slate-500 text-sm mb-1">원 / 월</span>
             </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">라이브 커머스 + 스탠다드 전체</h4>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">라이브 커머스 + 협업 AI</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 포함</li>
