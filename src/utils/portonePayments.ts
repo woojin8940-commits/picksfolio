@@ -63,6 +63,9 @@ export interface PortOneIntent {
   amountKrw?: number;
   // claude credit grant kind
   kind?: 'activation' | 'recharge';
+  // Claude billing-key registration can also trigger the first card charge and
+  // plan activation after the redirect returns.
+  activatePlan?: boolean;
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce';
   // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)

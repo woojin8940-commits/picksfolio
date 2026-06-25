@@ -913,7 +913,7 @@ export const apiService = {
 
   async setClaudeAutoRecharge(
     username: string,
-    settings: { autoRecharge?: boolean; autoRechargeAmountKrw?: number; billingKey?: string },
+    settings: { autoRecharge?: boolean; autoRechargeAmountKrw?: number; billingKey?: string; activatePlan?: boolean },
   ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {

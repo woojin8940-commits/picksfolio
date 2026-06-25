@@ -5,8 +5,6 @@ import type { ClaudeCreditsResponse } from '../services/apiService';
 import {
   payClaudePlan,
   issueClaudeBillingKey,
-  CLAUDE_PAY_METHODS,
-  type ClaudePayMethod,
 } from '../utils/claudeCharge';
 import { isNativeApp } from '../utils/appEnv';
 import { AiMarkdown } from './AiMarkdown';
@@ -1606,7 +1604,6 @@ const ClaudePlanModal: React.FC<{
   onClose: () => void;
   onUpdated: (d: ClaudeCreditsResponse) => void;
 }> = ({ username, data, onClose, onUpdated }) => {
-  const [payMethod, setPayMethod] = useState<ClaudePayMethod>('CARD');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1616,16 +1613,26 @@ const ClaudePlanModal: React.FC<{
 
   const handleActivate = async () => {
     setError(null); setNotice(null); setBusy(true);
-    const out = await payClaudePlan(username, 'activation', data.activationPriceKrw, payMethod);
+    const issued = await issueClaudeBillingKey(username, 'CARD', { activatePlan: true });
+    if (!issued.success || !issued.billingKey) {
+      setBusy(false);
+      setError(issued.error || '자동결제 카드 등록에 실패했습니다.');
+      return;
+    }
+    const out = await apiService.setClaudeAutoRecharge(username, {
+      autoRecharge: true,
+      billingKey: issued.billingKey,
+      activatePlan: true,
+    });
     setBusy(false);
-    if (!out.success || !out.result) { setError(out.error || '결제에 실패했습니다.'); return; }
-    onUpdated(out.result);
-    setNotice(`클로드 플랜이 시작되었어요. 기본 ${creditStr(data.activationGrantCredits)}이 지급되었습니다.`);
+    if (!out.success) { setError(out.error || '결제에 실패했습니다.'); return; }
+    onUpdated(out as ClaudeCreditsResponse);
+    setNotice(`클로드 플랜이 시작되었어요. 기본 ${creditStr(data.activationGrantCredits)}이 지급되고 자동결제가 등록되었습니다.`);
   };
 
   const handleRecharge = async (amountKrw: number) => {
     setError(null); setNotice(null); setBusy(true);
-    const out = await payClaudePlan(username, 'recharge', amountKrw, payMethod);
+    const out = await payClaudePlan(username, 'recharge', amountKrw, 'CARD');
     setBusy(false);
     if (!out.success || !out.result) { setError(out.error || '충전에 실패했습니다.'); return; }
     onUpdated(out.result);
@@ -1642,7 +1649,7 @@ const ClaudePlanModal: React.FC<{
         setNotice('자동충전을 껐어요.');
       } else {
         // Enabling needs a billing key so the server can charge without a window.
-        const issued = await issueClaudeBillingKey(username, payMethod);
+        const issued = await issueClaudeBillingKey(username, 'CARD');
         if (!issued.success || !issued.billingKey) { setError(issued.error || '결제수단 등록에 실패했습니다.'); return; }
         const res = await apiService.setClaudeAutoRecharge(username, {
           autoRecharge: true,
@@ -1678,20 +1685,13 @@ const ClaudePlanModal: React.FC<{
           {/* Payment method */}
           <div>
             <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-            <div className="grid grid-cols-3 gap-2">
-              {CLAUDE_PAY_METHODS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setPayMethod(m.id)}
-                  className={`py-2.5 px-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                    payMethod === m.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
+            <div className="rounded-xl border-2 border-orange-500 bg-orange-50 px-4 py-3 text-sm font-black text-orange-700 flex items-center justify-center gap-2">
+              <span>💳</span>
+              <span>신용/체크카드 전용</span>
             </div>
+            <p className="text-[11px] text-slate-400 font-medium mt-2">
+              클로드 플랜과 크레딧 충전은 네이버페이, 페이코, 토스페이, 카카오페이 등 간편결제를 지원하지 않습니다.
+            </p>
           </div>
 
           {!active ? (
@@ -1703,7 +1703,8 @@ const ClaudePlanModal: React.FC<{
                 <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (깊은 분석·문서 검토에 강함)</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
-                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>크레딧 소진 시 재충전 또는 자동충전 선택</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>첫 결제 후 자동결제가 등록되어 크레딧 소진 시 카드로 자동충전</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>충전 경로: 이 클로드 관리 화면 · 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
                 </ul>
               </div>
@@ -1716,7 +1717,7 @@ const ClaudePlanModal: React.FC<{
                 {busy ? '처리 중...' : `${krw(data.activationPriceKrw)}으로 클로드 플랜 시작`}
               </button>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 결제 시점에 표시 금액만 결제되며, 자동충전을 켜기 전에는 자동으로 결제되지 않습니다.
+                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 첫 결제 후 자동결제가 등록되며, 크레딧을 모두 사용하면 등록된 카드로 자동충전됩니다.
               </p>
             </>
           ) : (
@@ -1765,7 +1766,7 @@ const ClaudePlanModal: React.FC<{
                 </button>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                자동충전을 켜면 결제 수단(빌링키)을 등록하고, 잔액이 부족할 때 등록된 수단으로 자동 결제됩니다. 하루 자동충전 횟수에는 안전 상한이 있습니다. 언제든 끌 수 있어요.
+                자동충전을 켜면 카드 결제 수단을 등록하고, 잔액이 부족할 때 등록된 카드로 자동 결제됩니다. 하루 자동충전 횟수에는 안전 상한이 있습니다. 언제든 끌 수 있어요.
               </p>
             </>
           )}
