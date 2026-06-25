@@ -1,9 +1,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ShoppingBag, Check, Plus, X, Package, History as HistoryIcon, Trash2, Camera, Edit3, Search } from 'lucide-react';
+import { ShoppingBag, Check, Plus, X, Package, History as HistoryIcon, Trash2, Camera, Edit3, Search, ReceiptText, CalendarDays, ArrowDownUp, UserRound } from 'lucide-react';
 import MediaAuto from './MediaAuto';
 import ImageCropper from './ImageCropper';
-import { apiService } from '../services/apiService';
+import { apiService, LiveOrderInfo } from '../services/apiService';
 import { LiveProductOption, LiveProductOptionValue } from '../types';
 import BroadcastHistory from './BroadcastHistory';
 import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
@@ -49,8 +49,15 @@ const normaliseOptions = (raw: unknown): LiveProductOption[] => {
 };
 
 const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavigateLive }) => {
-  const [activeTab, setActiveTab] = useState<'products' | 'history'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'history'>('products');
   const [liveProducts, setLiveProducts] = useState<LiveProduct[]>([]);
+  const [orders, setOrders] = useState<LiveOrderInfo[]>([]);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [orderPeriod, setOrderPeriod] = useState<'all' | 'today' | '7d' | '30d' | 'custom'>('30d');
+  const [orderSort, setOrderSort] = useState<'latest' | 'amount-desc' | 'amount-asc' | 'orderer'>('latest');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [orderSearch, setOrderSearch] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,6 +86,17 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
     });
     return () => { cancelled = true; };
   }, [userName]);
+
+  useEffect(() => {
+    if (activeTab !== 'orders' || ordersLoaded) return;
+    let cancelled = false;
+    apiService.getLiveOrders(userName).then((list) => {
+      if (cancelled) return;
+      setOrders(Array.isArray(list) ? list : []);
+      setOrdersLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [activeTab, ordersLoaded, userName]);
 
   const persist = useCallback(async (next: LiveProduct[]) => {
     const ok = await apiService.saveLiveProducts(userName, next);
@@ -231,6 +249,205 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
     setCropperSrc(null);
     pendingFileRef.current = null;
   };
+
+  const formatCurrency = (amount: number) => `${formatNumberWithCommas(Math.round(amount || 0))}원`;
+  const formatDateTime = (value: string) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return new Intl.DateTimeFormat('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  };
+  const getOrdererName = (order: LiveOrderInfo) =>
+    order.shipping?.ordererName || order.viewer.nickname || order.viewer.viewerId || '고객정보 없음';
+  const getOrdererPhone = (order: LiveOrderInfo) => order.shipping?.ordererPhone || order.shipping?.recipientPhone || '';
+  const getOptionsText = (order: LiveOrderInfo) =>
+    Object.entries(order.product.selectedOptions || {})
+      .filter(([, value]) => value)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(' · ');
+  const getPeriodRange = () => {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    if (orderPeriod === 'today') {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+    if (orderPeriod === '7d' || orderPeriod === '30d') {
+      const start = new Date(now);
+      start.setDate(start.getDate() - (orderPeriod === '7d' ? 6 : 29));
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+    if (orderPeriod === 'custom') {
+      const start = customStart ? new Date(`${customStart}T00:00:00`) : null;
+      const customEndDate = customEnd ? new Date(`${customEnd}T23:59:59`) : null;
+      return { start, end: customEndDate };
+    }
+    return { start: null, end: null };
+  };
+
+  const visibleOrders = (() => {
+    const { start, end } = getPeriodRange();
+    const query = orderSearch.trim().toLowerCase();
+    return orders
+      .filter((order) => {
+        const paidAt = new Date(order.paidAt);
+        if (start && (!order.paidAt || paidAt < start)) return false;
+        if (end && (!order.paidAt || paidAt > end)) return false;
+        if (!query) return true;
+        return [
+          order.product.name,
+          getOrdererName(order),
+          getOrdererPhone(order),
+          order.paymentId,
+          getOptionsText(order),
+        ].some((value) => value.toLowerCase().includes(query));
+      })
+      .sort((a, b) => {
+        if (orderSort === 'amount-desc') return b.amount - a.amount;
+        if (orderSort === 'amount-asc') return a.amount - b.amount;
+        if (orderSort === 'orderer') return getOrdererName(a).localeCompare(getOrdererName(b), 'ko-KR');
+        return new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime();
+      });
+  })();
+
+  const orderTotal = visibleOrders.reduce((sum, order) => sum + order.amount, 0);
+
+  const renderOrders = () => (
+    <section className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-100 shadow-sm">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5 md:mb-7">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+            <ReceiptText className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="text-base md:text-xl font-black text-slate-900">주문정보</h3>
+            <p className="text-[10px] md:text-xs text-slate-500 font-medium">결제 완료된 방송 상품 주문을 기간과 기준별로 확인합니다.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+            <p className="text-[9px] font-black text-slate-400">주문</p>
+            <p className="text-sm font-black text-slate-900">{visibleOrders.length}건</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+            <p className="text-[9px] font-black text-slate-400">금액</p>
+            <p className="text-sm font-black text-blue-700">{formatCurrency(orderTotal)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-2 mb-4">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={orderSearch}
+            onChange={(e) => setOrderSearch(e.target.value)}
+            placeholder="상품명, 주문자, 연락처로 검색"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-bold focus:outline-none focus:border-blue-500 focus:bg-white"
+          />
+        </div>
+        <label className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+          <CalendarDays size={15} className="text-slate-400" />
+          <select
+            value={orderPeriod}
+            onChange={(e) => setOrderPeriod(e.target.value as typeof orderPeriod)}
+            className="bg-transparent text-sm font-black text-slate-700 focus:outline-none"
+          >
+            <option value="today">오늘</option>
+            <option value="7d">최근 7일</option>
+            <option value="30d">최근 30일</option>
+            <option value="all">전체 기간</option>
+            <option value="custom">직접 선택</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+          <ArrowDownUp size={15} className="text-slate-400" />
+          <select
+            value={orderSort}
+            onChange={(e) => setOrderSort(e.target.value as typeof orderSort)}
+            className="bg-transparent text-sm font-black text-slate-700 focus:outline-none"
+          >
+            <option value="latest">최신순</option>
+            <option value="amount-desc">금액 높은순</option>
+            <option value="amount-asc">금액 낮은순</option>
+            <option value="orderer">주문자별</option>
+          </select>
+        </label>
+      </div>
+
+      {orderPeriod === 'custom' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-blue-500" />
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-blue-500" />
+        </div>
+      )}
+
+      {!ordersLoaded ? (
+        <div className="py-12 text-center">
+          <div className="w-8 h-8 border-2 border-slate-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-xs font-bold text-slate-400">주문정보를 불러오는 중입니다</p>
+        </div>
+      ) : visibleOrders.length === 0 ? (
+        <div className="text-center py-10 md:py-12 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+          <ReceiptText size={28} className="text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-500 font-bold text-sm">표시할 주문정보가 없습니다</p>
+          <p className="text-slate-400 text-xs mt-1">기간이나 검색어를 변경해 확인하세요</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {visibleOrders.map((order) => {
+            const optionsText = getOptionsText(order);
+            const phone = getOrdererPhone(order);
+            return (
+              <article key={order.paymentId} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 md:p-5">
+                <div className="flex flex-col md:flex-row md:items-center gap-4">
+                  {order.product.image ? (
+                    <MediaAuto src={order.product.image} className="w-16 h-16 rounded-xl object-cover border border-slate-200 flex-shrink-0" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl bg-white border border-slate-200 flex items-center justify-center flex-shrink-0">
+                      <Package size={22} className="text-slate-300" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-slate-900 text-sm md:text-base truncate">{order.product.name}</p>
+                    {optionsText && <p className="text-[11px] font-bold text-slate-500 mt-1 truncate">{optionsText}</p>}
+                    <div className="flex flex-wrap items-center gap-2 mt-2 text-[10px] font-bold text-slate-400">
+                      <span>{formatDateTime(order.paidAt)}</span>
+                      {order.batchPaymentId && <span className="text-blue-500">묶음결제</span>}
+                    </div>
+                  </div>
+                  <div className="md:text-right">
+                    <p className="text-lg font-black text-blue-700">{formatCurrency(order.amount)}</p>
+                    <div className="flex md:justify-end items-center gap-1 mt-1 text-xs font-bold text-slate-600">
+                      <UserRound size={13} className="text-slate-400" />
+                      <span>{getOrdererName(order)}</span>
+                    </div>
+                    {phone && <p className="text-[10px] font-bold text-slate-400 mt-1">{phone}</p>}
+                  </div>
+                </div>
+                {(order.shipping?.recipientName || order.shipping?.address1) && (
+                  <div className="mt-3 pt-3 border-t border-slate-200/70 text-[11px] font-bold text-slate-500">
+                    고객정보: {order.shipping.recipientName || getOrdererName(order)}
+                    {order.shipping.address1 && ` · ${order.shipping.address1} ${order.shipping.address2 || ''}`}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 
   const renderEditor = () => {
     if (!editForm) return null;
@@ -497,6 +714,15 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('orders')}
+          className={`flex-1 md:flex-none px-5 md:px-8 py-2.5 rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'orders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <ReceiptText size={14} /> 주문정보
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('history')}
           className={`flex-1 md:flex-none px-5 md:px-8 py-2.5 rounded-xl text-xs md:text-sm font-black transition-all flex items-center justify-center gap-2 ${
             activeTab === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -625,6 +851,8 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
             <Plus size={16} /> 방송 상품 추가
           </button>
         </section>
+      ) : activeTab === 'orders' ? (
+        renderOrders()
       ) : (
         <BroadcastHistory userName={userName} embedded />
       )}

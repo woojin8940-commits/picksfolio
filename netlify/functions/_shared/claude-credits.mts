@@ -156,6 +156,8 @@ export interface ClaudeCredits {
 
 const STORE = 'claude-credits'
 const creditsKey = (username: string) => `credits_${username}`
+const COMPLIMENTARY_CLAUDE_BALANCE_CREDITS = 300000
+const COMPLIMENTARY_CLAUDE_USERS = new Set(['dnwlsdnwls'])
 
 const blank = (): ClaudeCredits => ({
   planActive: false,
@@ -174,6 +176,17 @@ const blank = (): ClaudeCredits => ({
   lifetimeSpentCredits: 0,
 })
 
+const applyComplimentaryClaudePlan = (username: string, credits: ClaudeCredits): ClaudeCredits => {
+  const clean = username.toLowerCase().replace(/^biz\//, '')
+  if (!COMPLIMENTARY_CLAUDE_USERS.has(clean)) return credits
+  return {
+    ...credits,
+    planActive: true,
+    planActivatedAt: credits.planActivatedAt || new Date().toISOString(),
+    balanceCredits: Math.max(credits.balanceCredits, COMPLIMENTARY_CLAUDE_BALANCE_CREDITS),
+  }
+}
+
 export const readClaudeCredits = async (username: string): Promise<ClaudeCredits> => {
   const store = getStore(STORE)
   const stored = (await store
@@ -183,7 +196,7 @@ export const readClaudeCredits = async (username: string): Promise<ClaudeCredits
     balanceKrw?: number
     lifetimeSpentKrw?: number
   }) | null
-  if (!stored) return blank()
+  if (!stored) return applyComplimentaryClaudePlan(username, blank())
   const base = blank()
   // Migrate wallets written before the ₩→credit switch: their balance was held in
   // ₩, so convert at the activation rate (9,900원 → 3,000 credits).
@@ -195,7 +208,7 @@ export const readClaudeCredits = async (username: string): Promise<ClaudeCredits
     stored.lifetimeSpentCredits != null
       ? Math.max(0, Math.floor(Number(stored.lifetimeSpentCredits) || 0))
       : creditsForKrw(Number(stored.lifetimeSpentKrw) || 0)
-  return {
+  return applyComplimentaryClaudePlan(username, {
     ...base,
     ...stored,
     balanceCredits,
@@ -204,7 +217,7 @@ export const readClaudeCredits = async (username: string): Promise<ClaudeCredits
       Math.floor(Number(stored.autoRechargeAmountKrw) || 0) || AUTO_RECHARGE_DEFAULT_KRW,
     grants: Array.isArray(stored.grants) ? stored.grants : [],
     usage: Array.isArray(stored.usage) ? stored.usage : [],
-  }
+  })
 }
 
 export const writeClaudeCredits = async (

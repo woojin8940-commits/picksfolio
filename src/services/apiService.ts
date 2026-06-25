@@ -65,6 +65,28 @@ export interface ShippingProfile {
   memo?: string;
 }
 
+export interface LiveOrderInfo {
+  paymentId: string;
+  amount: number;
+  paidAt: string;
+  status: string;
+  orderName?: string;
+  batchPaymentId?: string;
+  product: {
+    id: string;
+    name: string;
+    link?: string;
+    image?: string;
+    selectedOptions?: Record<string, string>;
+  };
+  viewer: {
+    viewerId: string;
+    nickname?: string;
+    profileImage?: string;
+  };
+  shipping?: Partial<ShippingProfile>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Client-side caches. Site data and seller verification are fetched on every
 // dashboard navigation; without caching each menu switch re-hits the network
@@ -384,6 +406,18 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to save live products:', e);
       return false;
+    }
+  },
+
+  async getLiveOrders(username: string): Promise<LiveOrderInfo[]> {
+    try {
+      const res = await fetch(`/api/live-orders/${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.orders) ? data.orders : [];
+    } catch (e) {
+      console.error('[API] Failed to get live orders:', e);
+      return [];
     }
   },
 
