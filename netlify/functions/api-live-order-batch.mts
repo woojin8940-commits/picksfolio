@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricing.mts'
+import { persistLiveOrdersToDatabase } from './_shared/live-order-persistence.mts'
 
 /**
  * Batch checkout for all items a viewer has added to their live cart.
@@ -289,6 +290,25 @@ export default async (req: Request, _context: Context) => {
   for (const r of records) existing.orders.unshift(r)
   existing.updatedAt = now
   await ordersStore.setJSON(username, existing)
+  await persistLiveOrdersToDatabase(
+    records.map((record) => ({
+      id: record.paymentId,
+      username,
+      paymentId: record.paymentId,
+      amount: record.amount,
+      paidAt: record.paidAt,
+      status: record.status,
+      orderName: record.orderName,
+      batchPaymentId: record.batchPaymentId,
+      batchTotal: record.batchTotal,
+      commissionRate: record.commissionRate,
+      commissionAmount: record.commissionAmount,
+      sellerNetAmount: record.sellerNetAmount,
+      product: record.product,
+      viewer: record.viewer,
+      shipping: record.shipping,
+    })),
+  )
 
   // Remove just the paid items from this viewer's cart so the seller's
   // live-cart view updates but any unpriceable leftover items remain visible.

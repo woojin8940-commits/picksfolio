@@ -156,7 +156,7 @@ export interface ClaudeCredits {
 
 const STORE = 'claude-credits'
 const creditsKey = (username: string) => `credits_${username}`
-const COMPLIMENTARY_CLAUDE_BALANCE_CREDITS = 300000
+const COMPLIMENTARY_CLAUDE_BALANCE_CREDITS = ACTIVATION_GRANT_CREDITS
 const COMPLIMENTARY_CLAUDE_USERS = new Set(['dnwlsdnwls'])
 
 const blank = (): ClaudeCredits => ({

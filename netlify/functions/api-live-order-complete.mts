@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricing.mts'
+import { persistLiveOrderToDatabase } from './_shared/live-order-persistence.mts'
 
 /**
  * Live-commerce product purchase completion — verifies a PortOne V2 payment
@@ -245,6 +246,21 @@ export default async (req: Request, _context: Context) => {
   existing.orders.unshift(order)
   existing.updatedAt = now
   await store.setJSON(username, existing)
+  await persistLiveOrderToDatabase({
+    id: paymentId,
+    username,
+    paymentId,
+    amount: paidAmount,
+    paidAt: order.paidAt,
+    status: order.status,
+    orderName: order.orderName,
+    commissionRate: order.commissionRate,
+    commissionAmount: order.commissionAmount,
+    sellerNetAmount: order.sellerNetAmount,
+    product: order.product,
+    viewer: order.viewer,
+    shipping: order.shipping,
+  })
 
   return Response.json({ success: true, order })
 }
