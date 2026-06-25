@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
-import { issueClaudeBillingKey } from '../utils/claudeCharge';
+import { payClaudePlan } from '../utils/claudeCharge';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
@@ -185,26 +185,17 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setClaudeError(null);
     setClaudePaying(true);
     try {
-      const billing = await issueClaudeBillingKey(normalizedUserName, 'CARD', { activatePlan: true });
-      if (!billing.success || !billing.billingKey) {
-        setClaudeError(billing.error || '자동결제 카드 등록에 실패했습니다. 다시 시도해 주세요.');
-        return;
-      }
-      const result = await apiService.setClaudeAutoRecharge(normalizedUserName, {
-        autoRecharge: true,
-        billingKey: billing.billingKey,
-        activatePlan: true,
-      });
-      if (!result.success) {
+      const result = await payClaudePlan(normalizedUserName, 'activation', ACTIVATION_PRICE_KRW, 'CARD');
+      if (!result.success || !result.result) {
         setClaudeError(result.error || '결제에 실패했습니다. 다시 시도해 주세요.');
         return;
       }
-      const granted = result.credits;
+      const granted = result.result.credits;
       setClaudeActive(true);
       setClaudeBalance(granted?.balanceCredits ?? ACTIVATION_GRANT_CREDITS);
       setClaudeAutoRecharge(!!granted?.autoRecharge);
       setClaudeOpen(false);
-      flashSuccess(`클로드 플랜이 시작되었습니다. 기본 ${ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전되고 자동결제가 등록되었습니다.`);
+      flashSuccess(`클로드 플랜이 시작되었습니다. 기본 ${ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전되었습니다.`);
     } catch {
       setClaudeError('결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
     } finally {
@@ -1137,7 +1128,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 결제 즉시 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전됩니다.</p>
                 <p>✓ 협업 타임라인 AI에서 Claude를 선택해 사용할 수 있습니다.</p>
-                <p>✓ 첫 결제와 함께 자동결제 카드가 등록되며, 크레딧을 모두 사용하면 등록된 카드로 자동충전됩니다.</p>
+                <p>✓ 자동충전은 플랜 시작 후 협업 타임라인의 클로드 관리 화면에서 별도로 등록할 수 있습니다.</p>
                 <p>✓ 남은 크레딧은 멤버십 플랜 화면과 협업 타임라인 AI 입력창에서 확인할 수 있습니다.</p>
               </div>
             </div>

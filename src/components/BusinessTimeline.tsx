@@ -1613,21 +1613,11 @@ const ClaudePlanModal: React.FC<{
 
   const handleActivate = async () => {
     setError(null); setNotice(null); setBusy(true);
-    const issued = await issueClaudeBillingKey(username, 'CARD', { activatePlan: true });
-    if (!issued.success || !issued.billingKey) {
-      setBusy(false);
-      setError(issued.error || '자동결제 카드 등록에 실패했습니다.');
-      return;
-    }
-    const out = await apiService.setClaudeAutoRecharge(username, {
-      autoRecharge: true,
-      billingKey: issued.billingKey,
-      activatePlan: true,
-    });
+    const paid = await payClaudePlan(username, 'activation', data.activationPriceKrw, 'CARD');
     setBusy(false);
-    if (!out.success) { setError(out.error || '결제에 실패했습니다.'); return; }
-    onUpdated(out as ClaudeCreditsResponse);
-    setNotice(`클로드 플랜이 시작되었어요. 기본 ${creditStr(data.activationGrantCredits)}이 지급되고 자동결제가 등록되었습니다.`);
+    if (!paid.success || !paid.result) { setError(paid.error || '결제에 실패했습니다.'); return; }
+    onUpdated(paid.result as ClaudeCreditsResponse);
+    setNotice(`클로드 플랜이 시작되었어요. 기본 ${creditStr(data.activationGrantCredits)}이 지급되었습니다.`);
   };
 
   const handleRecharge = async (amountKrw: number) => {
@@ -1703,7 +1693,7 @@ const ClaudePlanModal: React.FC<{
                 <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (깊은 분석·문서 검토에 강함)</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
-                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>첫 결제 후 자동결제가 등록되어 크레딧 소진 시 카드로 자동충전</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>자동충전은 플랜 시작 후 이 화면에서 별도 등록</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>충전 경로: 이 클로드 관리 화면 · 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
                 </ul>
@@ -1717,7 +1707,7 @@ const ClaudePlanModal: React.FC<{
                 {busy ? '처리 중...' : `${krw(data.activationPriceKrw)}으로 클로드 플랜 시작`}
               </button>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 첫 결제 후 자동결제가 등록되며, 크레딧을 모두 사용하면 등록된 카드로 자동충전됩니다.
+                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 크레딧을 모두 사용하면 수동으로 충전하거나 자동충전을 별도로 등록할 수 있습니다.
               </p>
             </>
           ) : (
