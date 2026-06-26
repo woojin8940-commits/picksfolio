@@ -9,7 +9,6 @@ import {
   isNiceCardConfigured,
   NICE_NOT_CONFIGURED_MESSAGE,
   portonePayMethod,
-  portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
   clearPortOneIntent,
@@ -23,13 +22,11 @@ import {
 const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.';
 
 
-// Claude plan payments. Two flavours, both through PortOne V2:
-//   • One-time payment (requestPayment) — used to ACTIVATE the Claude plan and to
-//     manually RECHARGE the credit wallet. Verified server-side before credits
-//     are granted (identical guarantee to the live-time top-up flow).
-//   • Billing-key issue (requestIssueBillingKey) — used to register a payment
-//     method for AUTO-RECHARGE, so the server can top the wallet back up without
-//     a payment window when the balance runs low.
+// Claude plan payments. A single one-time payment (requestPayment) through PortOne
+// V2 is used to ACTIVATE the Claude plan and to manually RECHARGE the credit wallet.
+// It is verified server-side before credits are granted (identical guarantee to the
+// live-time top-up flow). The Claude plan is single-payment only — there is no
+// auto/recurring billing (that is reserved for the membership tiers).
 //
 // storeId and channelKey are public browser identifiers; the V2 API secret lives
 // server-side only. PG 심사 요건상 클로드 플랜은 간편결제 없이 카드 결제만 허용한다.
@@ -47,15 +44,13 @@ export interface ClaudePayOutcome {
 
 /**
  * Run a one-time PortOne payment for `amountKrw` (activation or recharge) and, on
- * success, confirm it server-side so the credits are granted. When `billingKey`
- * is supplied (captured separately), it is registered to enable auto-recharge.
+ * success, confirm it server-side so the credits are granted.
  */
 export async function payClaudePlan(
   username: string,
   kind: 'activation' | 'recharge',
   amountKrw: number,
   payMethod: ClaudePayMethod,
-  billingKey?: string,
 ): Promise<ClaudePayOutcome> {
   if (isNativeApp()) {
     return { success: false, error: NATIVE_BLOCK_MESSAGE };
@@ -120,7 +115,6 @@ export async function payClaudePlan(
       amountKrw,
       paymentId: response.paymentId || paymentId,
       payMethod,
-      billingKey,
     });
     clearPortOneIntent();
     if (!result.success) {
@@ -131,79 +125,5 @@ export async function payClaudePlan(
     clearPortOneIntent();
     console.error('[ClaudeCharge] payment error:', e);
     return { success: false, error: '결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.' };
-  }
-}
-
-/**
- * Capture a PortOne billing key for auto-recharge. Returns the key string; the
- * caller passes it to the server (via payClaudePlan or setClaudeAutoRecharge) so
- * the wallet can be topped up automatically later.
- */
-export async function issueClaudeBillingKey(
-  username: string,
-  payMethod: ClaudePayMethod,
-  options?: { activatePlan?: boolean },
-): Promise<{ success: boolean; billingKey?: string; error?: string }> {
-  if (isNativeApp()) {
-    return { success: false, error: NATIVE_BLOCK_MESSAGE };
-  }
-
-  // 카드(나이스정보통신) 자동충전 결제수단 등록 — 토스페이 / 카카오페이와 동일하게 PortOne
-  // V2 빌링키 발급창으로 리다이렉트한다. 돌아온 뒤 /portone/return 페이지가 자동충전 설정을
-  // 마무리한다.
-
-  if (typeof window === 'undefined' || !window.PortOne) {
-    return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
-  }
-
-  if (payMethod === 'CARD' && !isNiceCardConfigured()) {
-    return { success: false, error: NICE_NOT_CONFIGURED_MESSAGE };
-  }
-
-  const safeUserName = toAsciiSafeId(username);
-  const issueId = genPortOneId('claudebilling', username);
-  // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
-  const ppMethod = payMethod;
-
-  // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
-  // 돌아온 /portone/return 페이지가 발급된 billingKey 로 자동충전을 켠다. (PC 팝업으로
-  // promise 가 resolve 되면 아래 인라인 처리로 호출부가 billingKey 를 받아 처리한다.)
-  savePortOneIntent({
-    type: 'claude-billing',
-    username,
-    payMethod: ppMethod,
-    orderName: '클로드 크레딧 자동충전 결제수단 등록',
-    activatePlan: !!options?.activatePlan,
-    returnPath: window.location.pathname + window.location.search,
-  });
-
-  try {
-    const response = await window.PortOne.requestIssueBillingKey({
-      storeId: PORTONE_STORE_ID,
-      channelKey: channelKeyFor(ppMethod),
-      billingKeyMethod: portoneBillingKeyMethod(ppMethod),
-      issueId,
-      issueName: '클로드 크레딧 자동충전 결제수단 등록',
-      currency: 'KRW',
-      redirectUrl: portoneRedirectUrl(),
-      ...easyPayParam(ppMethod),
-      customer: { customerId: safeUserName },
-    });
-
-    if (!response || response.code || !response.billingKey) {
-      clearPortOneIntent();
-      return {
-        success: false,
-        error:
-          response?.message ||
-          (response?.code ? `결제수단 등록 실패 (${response.code})` : '결제수단 등록이 취소되었습니다.'),
-      };
-    }
-    clearPortOneIntent();
-    return { success: true, billingKey: response.billingKey };
-  } catch (e) {
-    clearPortOneIntent();
-    console.error('[ClaudeCharge] billing key error:', e);
-    return { success: false, error: '결제수단 등록 중 오류가 발생했습니다. 다시 시도해 주세요.' };
   }
 }

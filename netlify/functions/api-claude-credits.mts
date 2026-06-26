@@ -1,14 +1,12 @@
 import type { Config, Context } from '@netlify/functions'
-import { confirmTossPayment, issueTossBillingKey } from './_shared/toss-payments.mts'
+import { confirmTossPayment } from './_shared/toss-payments.mts'
 import {
   ACTIVATION_GRANT_CREDITS,
   ACTIVATION_PRICE_KRW,
-  AUTO_RECHARGE_DEFAULT_KRW,
   CREDITS_PER_KRW,
   MARGIN_MULTIPLIER,
   RECHARGE_PACKS_KRW,
   creditsForKrw,
-  chargeBillingKey,
   readClaudeCredits,
   writeClaudeCredits,
   publicCredits,
@@ -21,18 +19,14 @@ import {
 //         → { credits, activationPriceKrw, activationGrantCredits, rechargePacksKrw, creditsPerKrw }
 //
 //   POST  /api/claude-credits/:username
-//         body { kind: 'activation' | 'recharge', amountKrw, paymentId, payMethod, billingKey? }
+//         body { kind: 'activation' | 'recharge', amountKrw, paymentId, payMethod }
 //         Verifies a ONE-TIME PortOne payment server-side (status PAID, KRW, amount
 //         matches) before granting credits — identical guarantee to live-time top-up.
 //         The member pays in ₩; the wallet is credited in CREDITS at CREDITS_PER_KRW.
 //         'activation' marks the plan active and grants the base 3,000 credits;
 //         'recharge' tops up an already-active wallet with credits proportional to the
-//         ₩ pack paid. A billingKey may be supplied to enable auto-recharge in the
-//         same step.
-//
-//   PATCH /api/claude-credits/:username
-//         body { autoRecharge?, autoRechargeAmountKrw?, billingKey? }
-//         Updates auto-recharge settings / stored billing key.
+//         ₩ pack paid. The Claude plan is single-payment only — there is no recurring
+//         or auto billing (recurring billing is reserved for the membership tiers).
 //
 // The Claude plan is independent of the membership tiers: activating it grants
 // Claude access on its own, regardless of which (if any) membership the account holds.
@@ -105,7 +99,6 @@ export default async (req: Request, context: Context) => {
       const kind: 'activation' | 'recharge' =
         (body as any)?.kind === 'recharge' ? 'recharge' : 'activation'
       const payMethod = String((body as any)?.payMethod || '').trim()
-      const billingKey = String((body as any)?.billingKey || '').trim()
       const requestedAmount = Math.floor(Number((body as any)?.amountKrw) || 0)
       const provider = String((body as any)?.provider || '').trim().toLowerCase()
       const isToss = provider === 'toss'
@@ -170,15 +163,6 @@ export default async (req: Request, context: Context) => {
         credits.planActive = true
         if (!credits.planActivatedAt) credits.planActivatedAt = new Date().toISOString()
       }
-      if (billingKey) {
-        // A billing key supplied alongside a one-time payment is always a PortOne
-        // (토스페이/카카오페이) key — TossPayments card billing is registered via the
-        // PATCH/authKey path, never here.
-        credits.billingKey = billingKey
-        credits.billingProvider = 'portone'
-        credits.billingCustomerKey = null
-        credits.autoRecharge = true
-      }
       credits.grants = [
         {
           at: new Date().toISOString(),
@@ -193,91 +177,6 @@ export default async (req: Request, context: Context) => {
 
       await writeClaudeCredits(username, credits)
       return respond(credits, { granted: { credits: grantCredits, amountKrw, kind } })
-    }
-
-    if (req.method === 'PATCH') {
-      const body = await req.json().catch(() => ({}))
-      const credits = await readClaudeCredits(username)
-
-      if (typeof (body as any)?.autoRecharge === 'boolean') {
-        credits.autoRecharge = (body as any).autoRecharge
-      }
-      const amt = Math.floor(Number((body as any)?.autoRechargeAmountKrw) || 0)
-      if (amt && RECHARGE_PACKS_KRW.includes(amt)) {
-        credits.autoRechargeAmountKrw = amt
-      }
-
-      const provider = String((body as any)?.provider || '').trim().toLowerCase()
-      if (provider === 'toss') {
-        // 토스페이먼츠(카드) 자동충전 — requestBillingAuth 후 받은 authKey·customerKey 를
-        // 서버에서 빌링키로 교환해 저장한다. (토스페이/카카오페이는 PortOne billingKey 사용.)
-        const authKey = String((body as any)?.authKey || '').trim()
-        const customerKey = String((body as any)?.customerKey || '').trim()
-        if (!authKey || !customerKey) {
-          return Response.json({ error: '결제수단 등록 정보(authKey)가 필요합니다.' }, { status: 400 })
-        }
-        const issued = await issueTossBillingKey(authKey, customerKey)
-        if (!issued.ok || !issued.billingKey) {
-          return Response.json({ error: issued.error || '토스페이먼츠 결제수단 등록에 실패했습니다.' }, { status: 400 })
-        }
-        credits.billingKey = issued.billingKey
-        credits.billingProvider = 'toss'
-        credits.billingCustomerKey = customerKey
-      } else {
-        const billingKey = String((body as any)?.billingKey || '').trim()
-        if (billingKey) {
-          credits.billingKey = billingKey
-          credits.billingProvider = 'portone'
-          credits.billingCustomerKey = null
-        }
-      }
-      // Turning auto-recharge on without a billing key is meaningless — reject it
-      // so the client knows it must capture a billing key first.
-      if (credits.autoRecharge && !credits.billingKey) {
-        return Response.json(
-          { error: '자동충전을 사용하려면 결제 수단(빌링키)을 먼저 등록해야 합니다.' },
-          { status: 400 },
-        )
-      }
-
-      if ((body as any)?.activatePlan && !credits.planActive) {
-        if (!credits.billingKey) {
-          return Response.json(
-            { error: '클로드 플랜 첫 결제를 위해 카드 자동결제 수단을 먼저 등록해야 합니다.' },
-            { status: 400 },
-          )
-        }
-        const charged = await chargeBillingKey(username, credits.billingKey, ACTIVATION_PRICE_KRW, {
-          provider: credits.billingProvider,
-          customerKey: credits.billingCustomerKey,
-        })
-        if (!charged.success) {
-          return Response.json(
-            { error: charged.error || '클로드 플랜 첫 결제에 실패했습니다. 카드를 확인해 주세요.' },
-            { status: 400 },
-          )
-        }
-
-        credits.planActive = true
-        credits.planActivatedAt = new Date().toISOString()
-        credits.balanceCredits += ACTIVATION_GRANT_CREDITS
-        credits.lifetimeChargedKrw += ACTIVATION_PRICE_KRW
-        credits.autoRecharge = true
-        credits.grants = [
-          {
-            at: new Date().toISOString(),
-            amountKrw: ACTIVATION_PRICE_KRW,
-            credits: ACTIVATION_GRANT_CREDITS,
-            kind: 'activation',
-            paymentId: charged.paymentId,
-            payMethod: 'CARD',
-          },
-          ...credits.grants,
-        ].slice(0, 100)
-      }
-
-      await writeClaudeCredits(username, credits)
-      return respond(credits)
     }
 
     return Response.json({ error: 'Method not allowed' }, { status: 405 })

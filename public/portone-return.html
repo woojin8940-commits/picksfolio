@@ -124,19 +124,6 @@
         return;
       }
 
-      if (intent.type === "claude-billing") {
-        if (!billingKey) { fail("빌링키를 받지 못했습니다. 다시 시도해 주세요."); return; }
-        const r = await send("PATCH", "/api/claude-credits/" + enc(intent.username), {
-          autoRecharge: true,
-          billingKey: billingKey,
-          activatePlan: !!intent.activatePlan,
-        });
-        if (!r.ok || !r.data.success) { fail(r.data.error || "결제수단 등록에 실패했습니다."); return; }
-        sessionStorage.removeItem(INTENT_KEY);
-        done(intent.returnPath);
-        return;
-      }
-
       // ── 단건 결제 흐름 ── paymentId 로 돌아온다.
       if (!paymentId) { fail("결제 정보가 올바르지 않습니다."); return; }
 

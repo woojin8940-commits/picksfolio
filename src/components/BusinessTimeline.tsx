@@ -4,7 +4,6 @@ import { apiService } from '../services/apiService';
 import type { ClaudeCreditsResponse } from '../services/apiService';
 import {
   payClaudePlan,
-  issueClaudeBillingKey,
 } from '../utils/claudeCharge';
 import { isNativeApp } from '../utils/appEnv';
 import { AiMarkdown } from './AiMarkdown';
@@ -1511,7 +1510,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
                       🤖 클로드 · 남은 크레딧 <span className="text-orange-600">{(claudeData.credits.balanceCredits || 0).toLocaleString()} 크레딧</span>
                       {lastClaudeCost != null && <span className="text-gray-400 font-medium"> · 직전 답변 {lastClaudeCost.toLocaleString()} 크레딧</span>}
-                      {claudeData.credits.autoRecharge && <span className="text-gray-400 font-medium"> · 자동충전 켜짐</span>}
                     </p>
                   ) : (
                     <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
@@ -1632,31 +1630,6 @@ const ClaudePlanModal: React.FC<{
     setNotice(`${krw(amountKrw)} 결제로 ${creditStr(Math.round(amountKrw * data.creditsPerKrw))}이 충전되었습니다.`);
   };
 
-  const handleAutoToggle = async () => {
-    setError(null); setNotice(null); setBusy(true);
-    try {
-      if (credits.autoRecharge) {
-        const res = await apiService.setClaudeAutoRecharge(username, { autoRecharge: false });
-        if (!res.success) { setError(res.error || '설정 변경에 실패했습니다.'); return; }
-        onUpdated(res as ClaudeCreditsResponse);
-        setNotice('자동충전을 껐어요.');
-      } else {
-        // Enabling needs a billing key so the server can charge without a window.
-        const issued = await issueClaudeBillingKey(username, 'CARD');
-        if (!issued.success || !issued.billingKey) { setError(issued.error || '결제수단 등록에 실패했습니다.'); return; }
-        const res = await apiService.setClaudeAutoRecharge(username, {
-          autoRecharge: true,
-          billingKey: issued.billingKey,
-        });
-        if (!res.success) { setError(res.error || '설정 저장에 실패했습니다.'); return; }
-        onUpdated(res as ClaudeCreditsResponse);
-        setNotice(`크레딧이 부족해지면 ${krw(credits.autoRechargeAmountKrw)}을 결제해 자동으로 충전됩니다.`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col">
@@ -1696,7 +1669,6 @@ const ClaudePlanModal: React.FC<{
                 <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (깊은 분석·문서 검토에 강함)</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
-                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>자동충전은 플랜 시작 후 이 화면에서 별도 등록</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>충전 경로: 이 클로드 관리 화면 · 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
                 </ul>
@@ -1710,7 +1682,7 @@ const ClaudePlanModal: React.FC<{
                 {busy ? '처리 중...' : `${krw(data.activationPriceKrw)}으로 클로드 플랜 시작`}
               </button>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 크레딧을 모두 사용하면 수동으로 충전하거나 자동충전을 별도로 등록할 수 있습니다.
+                클로드 플랜은 멤버십과 별도로 결제되는 선불 크레딧입니다. 크레딧을 모두 사용하면 이 화면에서 수동으로 충전할 수 있습니다.
               </p>
             </>
           ) : (
@@ -1740,27 +1712,6 @@ const ClaudePlanModal: React.FC<{
                   ))}
                 </div>
               </div>
-
-              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-800">자동충전</p>
-                  <p className="text-[11px] text-slate-500 leading-snug mt-0.5">
-                    크레딧이 부족해지면 {krw(credits.autoRechargeAmountKrw)}을 결제해 {creditStr(Math.round(credits.autoRechargeAmountKrw * data.creditsPerKrw))}을 자동으로 충전합니다.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAutoToggle}
-                  disabled={busy}
-                  className={`shrink-0 relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${credits.autoRecharge ? 'bg-orange-500' : 'bg-slate-300'}`}
-                  aria-pressed={credits.autoRecharge}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${credits.autoRecharge ? 'translate-x-5' : ''}`} />
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                자동충전을 켜면 카드 결제 수단을 등록하고, 잔액이 부족할 때 등록된 카드로 자동 결제됩니다. 하루 자동충전 횟수에는 안전 상한이 있습니다. 언제든 끌 수 있어요.
-              </p>
             </>
           )}
         </div>

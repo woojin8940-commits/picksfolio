@@ -39,9 +39,6 @@ export interface ClaudeCreditsResponse {
     planActivatedAt: string | null;
     // Wallet balance in credits (the unit shown to the member), not ₩.
     balanceCredits: number;
-    autoRecharge: boolean;
-    autoRechargeAmountKrw: number;
-    hasBillingKey: boolean;
     recentUsage: ClaudeCreditUsage[];
   };
   activationPriceKrw: number;
@@ -907,8 +904,9 @@ export const apiService = {
   // ── Claude plan credit wallet ───────────────────────────────────────────
   // The premium Claude model in the collaboration AI is metered by a prepaid
   // credit wallet, sold separately from the memberships. These methods read the
-  // wallet, grant credits after a verified PortOne payment, and toggle
-  // auto-recharge. The public credit shape mirrors `publicCredits` server-side.
+  // wallet and grant credits after a verified PortOne payment. The Claude plan is
+  // single-payment only (no recurring/auto billing). The public credit shape
+  // mirrors `publicCredits` server-side.
   async getClaudeCredits(username: string): Promise<ClaudeCreditsResponse | null> {
     try {
       const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`);
@@ -927,7 +925,6 @@ export const apiService = {
       amountKrw: number;
       paymentId: string;
       payMethod?: string;
-      billingKey?: string;
     },
   ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
     try {
@@ -942,25 +939,6 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to pay Claude credits:', e);
       return { success: false, error: '네트워크 오류로 처리에 실패했습니다.' } as any;
-    }
-  },
-
-  async setClaudeAutoRecharge(
-    username: string,
-    settings: { autoRecharge?: boolean; autoRechargeAmountKrw?: number; billingKey?: string; activatePlan?: boolean },
-  ): Promise<ClaudeCreditsResponse & { success: boolean; error?: string }> {
-    try {
-      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { success: false, error: data?.error || '설정 저장에 실패했습니다.' } as any;
-      return data;
-    } catch (e) {
-      console.error('[API] Failed to set Claude auto-recharge:', e);
-      return { success: false, error: '네트워크 오류로 저장에 실패했습니다.' } as any;
     }
   },
 

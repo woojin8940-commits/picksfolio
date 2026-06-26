@@ -51,7 +51,7 @@ export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 const INTENT_KEY = 'portone_pending_intent';
 
 export interface PortOneIntent {
-  type: 'live' | 'claude' | 'membership' | 'claude-billing' | 'live-order' | 'live-order-batch';
+  type: 'live' | 'claude' | 'membership' | 'live-order' | 'live-order-batch';
   username: string;
   payMethod: PortOnePayMethod;
   // Where to send the user back inside the SPA after the server finalises.
@@ -63,9 +63,6 @@ export interface PortOneIntent {
   amountKrw?: number;
   // claude credit grant kind
   kind?: 'activation' | 'recharge';
-  // Claude billing-key registration can also trigger the first card charge and
-  // plan activation after the redirect returns.
-  activatePlan?: boolean;
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce';
   // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)

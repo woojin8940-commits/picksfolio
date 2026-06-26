@@ -3,10 +3,6 @@ import type { Config } from "@netlify/functions";
 import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
 import {
   CLAUDE_MODEL,
-  AUTO_RECHARGE_THRESHOLD_CREDITS,
-  AUTO_RECHARGE_DAILY_CAP,
-  chargeBillingKey,
-  creditsForKrw,
   deductionCredits,
   rawCostKrw,
   readClaudeCredits,
@@ -225,50 +221,6 @@ async function buildWorkspaceContext(
   return overview + body + activeBlock;
 }
 
-// Top up the Claude wallet via the stored billing key when the balance has fallen
-// below the auto-recharge threshold and the member opted in. Enforces a per-day cap
-// so a runaway loop can never run unbounded charges. Fails soft: on any problem the
-// wallet is returned unchanged and the member is steered to manual recharge instead.
-async function maybeAutoRecharge(
-  username: string,
-  credits: ClaudeCredits,
-): Promise<{ credits: ClaudeCredits; recharged: boolean }> {
-  if (!credits.autoRecharge || !credits.billingKey) return { credits, recharged: false };
-  if (credits.balanceCredits >= AUTO_RECHARGE_THRESHOLD_CREDITS) return { credits, recharged: false };
-
-  const today = new Date().toISOString().slice(0, 10);
-  const countToday = credits.autoRechargeDay === today ? credits.autoRechargeCountToday : 0;
-  if (countToday >= AUTO_RECHARGE_DAILY_CAP) return { credits, recharged: false };
-
-  const amount = credits.autoRechargeAmountKrw;
-  const charge = await chargeBillingKey(username, credits.billingKey, amount, {
-    provider: credits.billingProvider,
-    customerKey: credits.billingCustomerKey,
-  });
-  if (!charge.success) {
-    console.error("[collab-ai] auto-recharge failed", charge.error);
-    return { credits, recharged: false };
-  }
-
-  // The member is charged `amount` ₩; the wallet gains the equivalent credits.
-  const grantedCredits = creditsForKrw(amount);
-  credits.balanceCredits += grantedCredits;
-  credits.lifetimeChargedKrw += amount;
-  credits.autoRechargeDay = today;
-  credits.autoRechargeCountToday = countToday + 1;
-  credits.grants = [
-    {
-      at: new Date().toISOString(),
-      amountKrw: amount,
-      credits: grantedCredits,
-      kind: "auto" as const,
-      paymentId: charge.paymentId,
-    },
-    ...credits.grants,
-  ].slice(0, 100);
-  return { credits, recharged: true };
-}
-
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -324,12 +276,6 @@ export default async (req: Request) => {
         },
         { status: 403 },
       );
-    }
-    // A depleted wallet can be revived by auto-recharge before the request runs.
-    if (claudeCredits.balanceCredits <= 0) {
-      const r = await maybeAutoRecharge(username, claudeCredits);
-      claudeCredits = r.credits;
-      if (r.recharged) await writeClaudeCredits(username, claudeCredits);
     }
     if (claudeCredits.balanceCredits <= 0) {
       return Response.json(
@@ -523,15 +469,13 @@ export default async (req: Request) => {
         ...credits.usage,
       ].slice(0, 50);
 
-      const after = await maybeAutoRecharge(username, credits);
-      await writeClaudeCredits(username, after.credits);
+      await writeClaudeCredits(username, credits);
 
       return Response.json({
         reply,
         model: "claude",
         creditsUsed: charged,
-        balanceCredits: after.credits.balanceCredits,
-        autoRecharged: after.recharged,
+        balanceCredits: credits.balanceCredits,
       });
     } catch (e) {
       console.error("[collab-ai] claude request failed", e);
