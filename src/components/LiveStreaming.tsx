@@ -327,13 +327,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const broadcastIdRef = useRef<string>('');
   const peakViewerCountRef = useRef(0);
 
-  // Local recording: capture the same canvas stream that gets broadcast, plus
-  // the live audio track. The full recording is uploaded to Netlify Blobs on
-  // broadcast stop so an admin can replay it later in the admin dashboard.
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recorderChunksRef = useRef<Blob[]>([]);
-  const recorderMimeRef = useRef<string>('video/webm');
-
   // Background tab streaming: WebAudio timing loop keeps canvas alive when tab is hidden
   const audioContextRef = useRef<AudioContext | null>(null);
   const bgTimerNodeRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
@@ -1359,121 +1352,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   }, [materials]);
 
   /** Validate stream and start WebRTC broadcast — reused by toggleLive and auto-retry */
-  const startLocalRecorder = (stream: MediaStream) => {
-    if (recorderRef.current) return;
-    if (typeof MediaRecorder === 'undefined') {
-      console.warn('[Recording] MediaRecorder not supported in this browser; replay will be unavailable.');
-      return;
-    }
-
-    // Build a recorder stream that combines the broadcast canvas (with filters
-    // already baked in) with the live mic audio from the raw camera stream.
-    const tracks: MediaStreamTrack[] = [];
-    const videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) tracks.push(videoTrack);
-    const cameraAudio = streamRef.current?.getAudioTracks()[0];
-    const fallbackAudio = stream.getAudioTracks()[0];
-    const audioTrack = cameraAudio || fallbackAudio;
-    if (audioTrack) tracks.push(audioTrack);
-    if (tracks.length === 0) return;
-
-    const recorderStream = new MediaStream(tracks);
-
-    const candidates = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4',
-    ];
-    const mimeType = candidates.find(t => {
-      try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
-    }) || '';
-    recorderMimeRef.current = mimeType || 'video/webm';
-
-    let recorder: MediaRecorder;
-    try {
-      recorder = mimeType
-        ? new MediaRecorder(recorderStream, { mimeType, videoBitsPerSecond: 1_500_000 })
-        : new MediaRecorder(recorderStream, { videoBitsPerSecond: 1_500_000 });
-    } catch (e) {
-      console.warn('[Recording] MediaRecorder init failed:', e);
-      return;
-    }
-
-    recorderChunksRef.current = [];
-    recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) recorderChunksRef.current.push(ev.data);
-    };
-    recorder.onerror = (ev) => console.warn('[Recording] recorder error:', ev);
-    try {
-      // 5-second slice keeps memory growth bounded and lets us recover most of
-      // the recording if the tab is closed without a clean stop.
-      recorder.start(5000);
-      recorderRef.current = recorder;
-      console.log('[Recording] started', mimeType);
-    } catch (e) {
-      console.warn('[Recording] recorder.start failed:', e);
-    }
-  };
-
-  const stopAndUploadLocalRecorder = async (broadcastId: string, durationSeconds: number) => {
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    if (!recorder) return;
-
-    const chunks = recorderChunksRef.current;
-    recorderChunksRef.current = [];
-
-    // Wait for the recorder to flush its final chunk.
-    await new Promise<void>(resolve => {
-      const finalize = () => resolve();
-      recorder.addEventListener('stop', finalize, { once: true });
-      try {
-        if (recorder.state !== 'inactive') recorder.stop();
-        else finalize();
-      } catch {
-        finalize();
-      }
-      // Hard timeout in case 'stop' never fires.
-      setTimeout(finalize, 4000);
-    });
-
-    if (chunks.length === 0) {
-      console.warn('[Recording] no chunks captured; skipping upload.');
-      return;
-    }
-
-    const mime = recorderMimeRef.current || 'video/webm';
-    const blob = new Blob(chunks, { type: mime });
-    if (blob.size === 0) return;
-
-    try {
-      const url = `/api/broadcast-recording/${encodeURIComponent(userName.toLowerCase())}/${encodeURIComponent(broadcastId)}`;
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': mime,
-          'x-recording-duration-seconds': String(Math.max(0, Math.round(durationSeconds))),
-          'x-recording-size-bytes': String(blob.size),
-        },
-        body: blob,
-      });
-      if (!res.ok) {
-        console.warn('[Recording] upload failed:', res.status, await res.text().catch(() => ''));
-      } else {
-        console.log('[Recording] upload complete', blob.size, 'bytes');
-      }
-    } catch (e) {
-      console.warn('[Recording] upload threw:', e);
-    }
-  };
-
   const startBroadcastWithStream = (stream: MediaStream) => {
     if (!signalingRef.current) return;
-
-    // Start the local MediaRecorder once we know the broadcast stream is good.
-    // The recorder writes to memory; the final blob is uploaded on stop.
-    startLocalRecorder(stream);
 
     const videoTracks = stream.getVideoTracks().filter(t => t.readyState === 'live');
     const audioTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
@@ -1611,9 +1491,8 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       const vCount = 0;
       setViewerCount(vCount);
       broadcastStartTimeRef.current = new Date().toISOString();
-      // Keep id strictly URL-safe so it round-trips through the recording
-      // upload route (`:broadcastId`) and the admin replay route without
-      // any encoding surprises.
+      // Keep id strictly URL-safe so it round-trips through the broadcast
+      // history routes (`:id`) without any encoding surprises.
       broadcastIdRef.current = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       peakViewerCountRef.current = 0;
       // Re-arm the 30분 잔여 알림 for this new session.
@@ -1725,8 +1604,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         if (finalCartData?.stats) finalCartStats = finalCartData.stats;
       } catch (e) { console.warn('[Live] getLiveCartStats failed:', e); }
 
-      // Save broadcast record (non-blocking). Once the row is inserted, kick
-      // off the recording upload so the back-fill UPDATE finds an existing row.
+      // Save broadcast record (non-blocking).
       const broadcastId = broadcastIdRef.current || Date.now().toString();
       apiService.saveBroadcastRecord(userName, {
         id: broadcastId,
@@ -1739,8 +1617,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         totalMessages: messages.length,
       })
         .then(() => refreshLiveUsage())
-        .then(() => stopAndUploadLocalRecorder(broadcastId, durationMs / 1000))
-        .catch(e => console.warn('[Live] saveBroadcastRecord/upload failed (non-blocking):', e));
+        .catch(e => console.warn('[Live] saveBroadcastRecord failed (non-blocking):', e));
 
       setViewerCount(0);
       setIsCameraOn(false);

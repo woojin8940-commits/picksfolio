@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { History, Clock, Users, ShoppingBag, MessageCircle, ChevronDown, ChevronUp, Trash2, Package, TrendingUp, Play, X } from 'lucide-react';
+import { History, Clock, Users, ShoppingBag, MessageCircle, ChevronDown, ChevronUp, Trash2, Package, TrendingUp } from 'lucide-react';
 import { formatKRW } from '../utils/formatters';
 import { apiService } from '../services/apiService';
 import MediaAuto from './MediaAuto';
@@ -34,9 +34,6 @@ interface BroadcastRecord {
   };
   peakViewers: number;
   totalMessages: number;
-  hasRecording?: boolean;
-  recordingMime?: string | null;
-  recordingDurationSeconds?: number | null;
 }
 
 interface BroadcastHistoryProps {
@@ -48,11 +45,6 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
   const [records, setRecords] = useState<BroadcastRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [replayId, setReplayId] = useState<string | null>(null);
-  const [replayUrl, setReplayUrl] = useState<string | null>(null);
-  const [replayMime, setReplayMime] = useState<string | null>(null);
-  const [replayLoading, setReplayLoading] = useState(false);
-  const [replayError, setReplayError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -70,34 +62,6 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
     if (ok) {
       setRecords(prev => prev.filter(r => r.id !== recordId));
     }
-  };
-
-  const openReplay = async (recordId: string) => {
-    setReplayId(recordId);
-    setReplayUrl(null);
-    setReplayMime(null);
-    setReplayError(null);
-    setReplayLoading(true);
-    const payload = await apiService.getBroadcastReplay(userName, recordId);
-    setReplayLoading(false);
-    if (!payload) {
-      setReplayError('녹화 영상을 불러오지 못했습니다.');
-      return;
-    }
-    if (!payload.hasRecording || !payload.videoUrl) {
-      setReplayError('이 방송은 녹화 영상이 저장되지 않았습니다.');
-      return;
-    }
-    setReplayUrl(payload.videoUrl);
-    setReplayMime(payload.recordingMime || null);
-  };
-
-  const closeReplay = () => {
-    setReplayId(null);
-    setReplayUrl(null);
-    setReplayMime(null);
-    setReplayError(null);
-    setReplayLoading(false);
   };
 
   const formatDate = (iso: string) => {
@@ -355,14 +319,6 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
 
                     {/* Action Buttons */}
                     <div className="flex justify-end items-center gap-2 pt-2">
-                      {record.hasRecording && (
-                        <button
-                          onClick={() => openReplay(record.id)}
-                          className="flex items-center gap-1.5 text-indigo-600 hover:text-white text-xs font-bold px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-600 transition-all"
-                        >
-                          <Play size={14} /> 다시보기
-                        </button>
-                      )}
                       <button
                         onClick={() => handleDelete(record.id)}
                         className="flex items-center gap-1.5 text-red-400 hover:text-red-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-red-50 transition-all"
@@ -378,56 +334,6 @@ const BroadcastHistory: React.FC<BroadcastHistoryProps> = ({ userName, embedded 
         </div>
       )}
     </div>
-
-    {replayId && (
-      <div
-        className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-4"
-        onClick={closeReplay}
-      >
-        <div
-          className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden"
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <div>
-              <h3 className="font-black text-slate-900">방송 다시보기</h3>
-              <p className="text-[10px] font-bold text-slate-400 mt-0.5">@{userName}</p>
-            </div>
-            <button
-              onClick={closeReplay}
-              className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600"
-              aria-label="닫기"
-            >
-              <X size={16} />
-            </button>
-          </div>
-          <div className="p-5">
-            <div className="bg-black rounded-xl overflow-hidden aspect-video flex items-center justify-center">
-              {replayLoading ? (
-                <div className="text-center text-slate-300">
-                  <div className="w-8 h-8 border-2 border-slate-300 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                  <p className="font-bold text-sm">녹화 영상 불러오는 중...</p>
-                </div>
-              ) : replayError ? (
-                <div className="text-center text-slate-300 px-6 py-12">
-                  <p className="font-black text-sm mb-1">{replayError}</p>
-                  <p className="text-xs text-slate-400">방송 시작 직후 또는 브라우저 호환성 문제로 녹화가 누락될 수 있습니다.</p>
-                </div>
-              ) : replayUrl ? (
-                <video
-                  src={replayUrl}
-                  controls
-                  autoPlay
-                  preload="metadata"
-                  className="w-full h-full"
-                  {...(replayMime ? { 'data-mime': replayMime } : {})}
-                />
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
     </div>
   );
 };

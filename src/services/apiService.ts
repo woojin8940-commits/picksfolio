@@ -570,7 +570,7 @@ export const apiService = {
   },
 
   // Broadcast History API
-  async getBroadcastHistory(username: string): Promise<{ id: string; startedAt: string; endedAt: string; durationMinutes: number; products: any[]; cartStats: any; peakViewers: number; totalMessages: number; hasRecording?: boolean; recordingMime?: string | null; recordingDurationSeconds?: number | null }[]> {
+  async getBroadcastHistory(username: string): Promise<{ id: string; startedAt: string; endedAt: string; durationMinutes: number; products: any[]; cartStats: any; peakViewers: number; totalMessages: number }[]> {
     try {
       const res = await fetch(`/api/broadcast-history/${encodeURIComponent(username.toLowerCase())}`);
       if (!res.ok) return [];
@@ -579,33 +579,6 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to get broadcast history:', e);
       return [];
-    }
-  },
-
-  // Seller-facing broadcast replay metadata. Returns a short-lived signed
-  // URL the <video> element can stream without an Authorization header.
-  async getBroadcastReplay(username: string, broadcastId: string): Promise<{
-    id: string;
-    username: string;
-    startedAt: string;
-    endedAt: string;
-    durationMinutes: number;
-    hasRecording: boolean;
-    recordingMime: string | null;
-    recordingSizeBytes: number | null;
-    recordingDurationSeconds: number;
-    videoUrl: string | null;
-  } | null> {
-    try {
-      const res = await fetch(
-        `/api/broadcast-replay/${encodeURIComponent(username.toLowerCase())}/${encodeURIComponent(broadcastId)}`,
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.broadcast || null;
-    } catch (e) {
-      console.error('[API] Failed to get broadcast replay:', e);
-      return null;
     }
   },
 
@@ -1282,53 +1255,6 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Chat moderation action failed:', e);
       return false;
-    }
-  },
-
-  // Admin: full broadcast replay metadata + payment-density timeline.
-  // The video is streamed from a short-lived signed URL returned in the
-  // response (`broadcast.videoUrl`) so the <video> element can play it
-  // without sending an Authorization header.
-  async getAdminBroadcastReplay(token: string, broadcastId: string): Promise<{
-    broadcast: {
-      id: string;
-      username: string;
-      startedAt: string;
-      endedAt: string;
-      durationMinutes: number;
-      peakViewers: number;
-      totalMessages: number;
-      revenue: number;
-      products: any[];
-      cartStats: any;
-      hasRecording: boolean;
-      recordingMime: string | null;
-      recordingSizeBytes: number | null;
-      recordingDurationSeconds: number;
-      videoUrl: string | null;
-    };
-    timeline: {
-      bucketSeconds: number;
-      totalSeconds: number;
-      buckets: Array<{ bucketIndex: number; startOffsetSeconds: number; endOffsetSeconds: number; count: number; amount: number }>;
-      peakBucketIndex: number;
-      peakBucket: { bucketIndex: number; startOffsetSeconds: number; endOffsetSeconds: number; count: number; amount: number } | null;
-      orderCount: number;
-      totalAmount: number;
-    };
-  } | null> {
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/admin/broadcast-replay/${encodeURIComponent(broadcastId)}`, {
-        credentials: 'same-origin',
-        headers,
-      });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) {
-      console.error('[API] Failed to get admin broadcast replay:', e);
-      return null;
     }
   },
 
