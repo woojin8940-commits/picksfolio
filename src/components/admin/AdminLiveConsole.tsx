@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKRW } from '../../utils/formatters';
-import AdminBroadcastReplay from './AdminBroadcastReplay';
 
 interface Ongoing {
   username: string;
@@ -95,7 +94,6 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newWord, setNewWord] = useState('');
   const [newSeverity, setNewSeverity] = useState<'flag' | 'block'>('flag');
-  const [replayTarget, setReplayTarget] = useState<{ id: string; username: string } | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -281,7 +279,7 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
           <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3 flex-wrap">
             <div>
               <h3 className="font-black text-slate-900">방송 사후 리포트</h3>
-              <p className="text-[10px] font-bold text-slate-400 mt-0.5">피크 시청자, 메시지, 하이라이트 클립 보관 · 다시보기</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">피크 시청자, 메시지, 하이라이트 클립 보관</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
@@ -323,16 +321,9 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
                     {h.highlight && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-black rounded">★ 하이라이트</span>}
                     {h.force_end_reason && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-black rounded">강제 종료</span>}
                     <button
-                      onClick={() => setReplayTarget({ id: h.id, username: h.username })}
-                      className="ml-auto px-2.5 py-1 rounded-lg text-[10px] font-black bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                      title="방송 다시보기 + 결제 피크 구간"
-                    >
-                      ▶ 다시보기
-                    </button>
-                    <button
                       onClick={() => toggleHighlight(h)}
                       disabled={busyId === h.id}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
+                      className={`ml-auto px-2.5 py-1 rounded-lg text-[10px] font-black ${
                         h.highlight ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       } disabled:opacity-50`}
                     >
@@ -572,15 +563,6 @@ const AdminLiveConsole: React.FC<Props> = ({ token }) => {
             </div>
           </div>
         </div>
-      )}
-
-      {replayTarget && (
-        <AdminBroadcastReplay
-          token={token}
-          broadcastId={replayTarget.id}
-          username={replayTarget.username}
-          onClose={() => setReplayTarget(null)}
-        />
       )}
     </div>
   );
