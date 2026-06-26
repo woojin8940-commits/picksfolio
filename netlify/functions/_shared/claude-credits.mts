@@ -1,5 +1,4 @@
 import { getStore } from '@netlify/blobs'
-import { chargeTossBillingKey } from './toss-payments.mts'
 
 /**
  * Claude (Anthropic) credit wallet for the collaboration AI assistant.
@@ -15,9 +14,10 @@ import { chargeTossBillingKey } from './toss-payments.mts'
  *   2. Each Claude request deducts credits based on the actual tokens it consumed,
  *      with an operator margin baked into the deduction rate — so the credit price
  *      always exceeds the raw inference cost and the feature can never run at a loss.
- *   3. When the balance runs low the member either recharges manually (another
- *      one-time ₩ payment, converted to credits at the same rate) or, if they opted
- *      in, the server auto-recharges via a stored PortOne billing key.
+ *   3. When the balance runs low the member recharges manually with another one-time
+ *      ₩ payment, converted to credits at the same rate. The Claude plan is single-
+ *      payment only — there is no recurring/auto billing (that is reserved for the
+ *      membership tiers).
  *
  * Money vs. credits: amounts the member actually PAYS stay in ₩ (activation price,
  * recharge packs, auto-recharge amount, lifetime charged). The wallet BALANCE and
@@ -66,13 +66,6 @@ export const CREDITS_PER_KRW = ACTIVATION_GRANT_CREDITS / ACTIVATION_PRICE_KRW
 export const creditsForKrw = (amountKrw: number): number =>
   Math.max(0, Math.round((Number(amountKrw) || 0) * CREDITS_PER_KRW))
 export const RECHARGE_PACKS_KRW = [4900, 9900, 19900]
-export const AUTO_RECHARGE_DEFAULT_KRW = 9900
-// When the credit balance falls below this after a request, auto-recharge (if
-// enabled) tops the wallet back up using the stored billing key.
-export const AUTO_RECHARGE_THRESHOLD_CREDITS = 300
-// Safety cap: never auto-recharge more than this many times per calendar day, so
-// a runaway loop or abuse cannot rack up unbounded billing-key charges.
-export const AUTO_RECHARGE_DAILY_CAP = 5
 
 export interface ClaudeTokenUsage {
   input_tokens?: number
@@ -132,21 +125,6 @@ export interface ClaudeCredits {
   planActivatedAt: string | null
   // Wallet balance in CREDITS (the unit shown to the member), not ₩.
   balanceCredits: number
-  autoRecharge: boolean
-  // Auto-recharge tops up by PAYING this many ₩ (a recharge pack); the resulting
-  // credits are granted at CREDITS_PER_KRW.
-  autoRechargeAmountKrw: number
-  // Stored billing key used for auto-recharge. Held in the wallet (not the
-  // membership record) so the Claude plan stays independent of the membership.
-  billingKey: string | null
-  // Which provider issued the billing key: 'portone' (토스페이/카카오페이) or 'toss'
-  // (토스페이먼츠 카드, 토스페이먼츠 직접 연동). Defaults to 'portone' for legacy keys.
-  billingProvider?: 'portone' | 'toss'
-  // TossPayments billing requires the customerKey used at issue time on every charge.
-  billingCustomerKey?: string | null
-  // Per-day count of automatic recharges, used to enforce AUTO_RECHARGE_DAILY_CAP.
-  autoRechargeDay: string | null
-  autoRechargeCountToday: number
   grants: ClaudeGrant[]
   usage: ClaudeUsageEntry[]
   // Lifetime ₩ actually paid (real money) and lifetime credits spent.
@@ -163,13 +141,6 @@ const blank = (): ClaudeCredits => ({
   planActive: false,
   planActivatedAt: null,
   balanceCredits: 0,
-  autoRecharge: false,
-  autoRechargeAmountKrw: AUTO_RECHARGE_DEFAULT_KRW,
-  billingKey: null,
-  billingProvider: 'portone',
-  billingCustomerKey: null,
-  autoRechargeDay: null,
-  autoRechargeCountToday: 0,
   grants: [],
   usage: [],
   lifetimeChargedKrw: 0,
@@ -213,8 +184,6 @@ export const readClaudeCredits = async (username: string): Promise<ClaudeCredits
     ...stored,
     balanceCredits,
     lifetimeSpentCredits,
-    autoRechargeAmountKrw:
-      Math.floor(Number(stored.autoRechargeAmountKrw) || 0) || AUTO_RECHARGE_DEFAULT_KRW,
     grants: Array.isArray(stored.grants) ? stored.grants : [],
     usage: Array.isArray(stored.usage) ? stored.usage : [],
   })
@@ -228,83 +197,10 @@ export const writeClaudeCredits = async (
   await store.setJSON(creditsKey(username), credits)
 }
 
-/** Public-facing summary (omits the billing key; exposes only whether one exists). */
+/** Public-facing summary. */
 export const publicCredits = (c: ClaudeCredits) => ({
   planActive: c.planActive,
   planActivatedAt: c.planActivatedAt,
   balanceCredits: c.balanceCredits,
-  autoRecharge: c.autoRecharge,
-  autoRechargeAmountKrw: c.autoRechargeAmountKrw,
-  hasBillingKey: !!c.billingKey,
   recentUsage: c.usage.slice(0, 10),
 })
-
-// ── PortOne billing-key charge (auto-recharge) ────────────────────────────────
-// storeId is a public PortOne V2 identifier (same one the browser SDK uses for
-// one-time payments); the API secret is server-only.
-const PORTONE_API_BASE = 'https://api.portone.io'
-const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5'
-
-const asciiSafe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'
-
-/**
- * Charge `amountKrw` against a stored billing key (used for auto-recharge, which has
- * no interactive payment window). Branches by provider: 'toss' uses the TossPayments
- * billing API (토스페이먼츠 카드), anything else uses PortOne (토스페이/카카오페이).
- * Returns the verified payment id on success. Fails softly — the caller skips the
- * top-up and asks the member to recharge manually rather than blocking their request.
- */
-export const chargeBillingKey = async (
-  username: string,
-  billingKey: string,
-  amountKrw: number,
-  opts?: { provider?: 'portone' | 'toss'; customerKey?: string | null },
-): Promise<{ success: boolean; paymentId?: string; error?: string }> => {
-  const paymentId = `claudeauto-${asciiSafe(username)}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`
-
-  if (opts?.provider === 'toss') {
-    if (!opts.customerKey) return { success: false, error: '토스페이먼츠 customerKey 누락' }
-    const charge = await chargeTossBillingKey(
-      billingKey,
-      opts.customerKey,
-      amountKrw,
-      paymentId,
-      `클로드 크레딧 자동충전 ${amountKrw.toLocaleString()}원`,
-    )
-    if (!charge.ok) return { success: false, error: charge.error }
-    return { success: true, paymentId: charge.paymentKey || paymentId }
-  }
-
-  const apiSecret = process.env.PORTONE_V2_API_SECRET
-  if (!apiSecret) return { success: false, error: 'PORTONE_V2_API_SECRET 미설정' }
-
-  try {
-    const res = await fetch(
-      `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}/billing-key`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `PortOne ${apiSecret}`,
-        },
-        body: JSON.stringify({
-          billingKey,
-          storeId: PORTONE_STORE_ID,
-          orderName: `클로드 크레딧 자동충전 ${amountKrw.toLocaleString()}원`,
-          customer: { customerId: asciiSafe(username) },
-          amount: { total: amountKrw },
-          currency: 'KRW',
-        }),
-      },
-    )
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      return { success: false, error: `PortOne ${res.status}: ${detail.slice(0, 200)}` }
-    }
-    return { success: true, paymentId }
-  } catch (e: any) {
-    return { success: false, error: e?.message || 'PortOne 자동충전 요청 실패' }
-  }
-}

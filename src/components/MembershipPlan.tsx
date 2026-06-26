@@ -115,7 +115,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [claudeActive, setClaudeActive] = useState(false);
   const [claudeBalance, setClaudeBalance] = useState<number | null>(null);
-  const [claudeAutoRecharge, setClaudeAutoRecharge] = useState(false);
 
   // 사업자등록증 이미지 업로드 — 관리자가 이미지를 직접 확인하고 수락해야 인증이 완료된다.
   const [bizImageUploading, setBizImageUploading] = useState(false);
@@ -173,7 +172,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     if (data?.credits) {
       setClaudeActive(!!data.credits.planActive);
       setClaudeBalance(data.credits.balanceCredits ?? 0);
-      setClaudeAutoRecharge(!!data.credits.autoRecharge);
     }
   }, [normalizedUserName]);
 
@@ -195,7 +193,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       const granted = result.result.credits;
       setClaudeActive(true);
       setClaudeBalance(granted?.balanceCredits ?? ACTIVATION_GRANT_CREDITS);
-      setClaudeAutoRecharge(!!granted?.autoRecharge);
       setClaudeOpen(false);
       flashSuccess(`클로드 플랜이 시작되었습니다. 기본 ${ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전되었습니다.`);
     } catch {
@@ -720,17 +717,16 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           </div>
           <div className="md:flex md:items-center md:justify-between gap-6 mt-2">
             <div className="flex-1">
-              <h4 className="font-bold text-slate-800 text-lg mb-2">협업 AI를 Claude로 — 월 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</h4>
+              <h4 className="font-bold text-slate-800 text-lg mb-2">협업 AI를 Claude로 — {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</h4>
               <p className="text-sm text-slate-600 leading-relaxed mb-3">
                 협업 타임라인 AI는 기본적으로 제미나이(무료, AI 멤버십 포함)로 동작합니다. 깊은 분석이나 문서·계약서 검토처럼 더 강력한 답변이 필요할 때는 <strong>Claude</strong>를 선택할 수 있어요. 클로드 플랜은 멤버십과 <strong>별도로 결제</strong>하며, 결제하면 바로 크레딧이 충전됩니다.
               </p>
               <ul className="space-y-1.5 text-sm text-slate-600">
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원 · <strong>월 1회 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</strong> 충전</li>
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원 단건 결제 · <strong>{ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</strong> 충전</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>사용한 토큰만큼만 차감 · 남은 크레딧은 이월</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>결제수단은 <strong>신용/체크카드만 가능</strong> · 네이버페이, 페이코, 토스페이, 카카오페이 등 간편결제 제외</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 충전 경로: 이 플랜 화면에서 첫 결제 후 협업 타임라인 AI의 클로드 관리 화면에서 추가 충전</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문 시 답변별 사용량만큼 차감</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>첫 결제 후 자동결제가 등록되며, 크레딧을 모두 사용하면 등록된 카드로 자동 충전됩니다.</li>
               </ul>
             </div>
             <div className="shrink-0 mt-4 md:mt-0">
@@ -744,7 +740,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest">남은 포인트</p>
                       <p className="text-2xl font-black text-orange-700">{claudeBalance.toLocaleString()}<span className="text-xs font-bold ml-1">크레딧</span></p>
                       <p className="text-[11px] text-slate-500 font-bold mt-1">
-                        {claudeAutoRecharge ? '자동결제 등록됨 · 소진 시 카드 자동충전' : '자동결제 미등록 · 클로드 관리 화면에서 등록 필요'}
+                        크레딧 소진 시 클로드 관리 화면에서 추가 충전
                       </p>
                     </div>
                   )}
@@ -758,7 +754,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   >
                     {ACTIVATION_PRICE_KRW.toLocaleString()}원으로 클로드 플랜 시작
                   </button>
-                  <p className="text-[11px] text-slate-400 font-medium mt-2 text-center md:text-right">카드 결제 전용 · 첫 결제 후 자동결제 등록</p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-2 text-center md:text-right">신용/체크카드 단건 결제</p>
                 </>
               )}
             </div>
@@ -1176,7 +1172,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
                 <p className="text-xs font-black text-orange-500 uppercase tracking-widest mb-1">결제 금액</p>
                 <p className="text-3xl font-black text-orange-700">{ACTIVATION_PRICE_KRW.toLocaleString()}<span className="text-sm font-bold ml-1">원</span></p>
-                <p className="text-xs font-bold text-orange-500 mt-2">월 1회 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧 충전 · 소진 시 등록 카드로 자동충전</p>
+                <p className="text-xs font-bold text-orange-500 mt-2">결제 즉시 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧 충전 · 단건 결제</p>
               </div>
 
               <div>
@@ -1192,7 +1188,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 결제 즉시 {ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧이 충전됩니다.</p>
                 <p>✓ 협업 타임라인 AI에서 Claude를 선택해 사용할 수 있습니다.</p>
-                <p>✓ 자동충전은 플랜 시작 후 협업 타임라인의 클로드 관리 화면에서 별도로 등록할 수 있습니다.</p>
+                <p>✓ 크레딧이 부족하면 협업 타임라인의 클로드 관리 화면에서 추가 충전할 수 있습니다.</p>
                 <p>✓ 남은 크레딧은 멤버십 플랜 화면과 협업 타임라인 AI 입력창에서 확인할 수 있습니다.</p>
               </div>
             </div>
