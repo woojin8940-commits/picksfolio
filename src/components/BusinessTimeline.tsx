@@ -732,10 +732,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         </div>
       </div>
 
-      {/* Pinned AI assistant — fixed at the very top of the message list.
-          Only shown when the account's plan includes AI (스탠다드 AI 6,900 / 커머스 13,900). */}
-      {aiEnabled === true && (
-        <div className="shrink-0 px-2 pb-2">
+      {/* Pinned AI assistant — fixed at the very top of the message list. Always
+          shown so the assistant stays reachable even before any collaboration
+          conversation exists; plan/membership gating happens inside the chat. */}
+      <div className="shrink-0 px-2 pb-2">
           <button
             onClick={openAiAssistant}
             className={`w-full text-left px-3 py-3 rounded-xl transition-all group border ${
@@ -761,7 +761,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </div>
           </button>
         </div>
-      )}
 
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide">
@@ -1328,7 +1327,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {/* Model selector — Gemini (free, membership) vs Claude (premium credits).
                 Switching keeps the same conversation; neither model forgets the other. */}
             <div className="shrink-0 flex items-center gap-1.5">
-              {aiModel === 'claude' && claudeData?.credits.planActive && (
+              {/* Show the wallet balance whenever Claude is selected — even with no
+                  active plan it reads 0 크레딧, so the member can always see where
+                  they stand (and tap to start the plan / recharge on the web). */}
+              {aiModel === 'claude' && claudeData && (
                 isNativeApp() ? (
                   // In-app: show remaining credits as read-only info (no purchase modal).
                   <span
@@ -1513,9 +1515,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     </p>
                   ) : (
                     <p className="text-[10px] md:text-[11px] text-gray-500 font-bold truncate">
-                      🤖 {isNativeApp()
-                        ? '클로드 플랜은 웹사이트에서 시작할 수 있어요. 웹에서 시작하면 앱에서도 그대로 사용됩니다.'
-                        : '클로드는 클로드 플랜 전용이에요. 시작하면 기본 크레딧이 지급됩니다.'}
+                      🤖 클로드 · 남은 크레딧 <span className="text-orange-600">{(claudeData?.credits.balanceCredits || 0).toLocaleString()} 크레딧</span>
+                      <span className="text-gray-400 font-medium"> · {isNativeApp()
+                        ? '플랜은 웹사이트에서 시작할 수 있어요'
+                        : '플랜을 시작하면 크레딧이 지급됩니다'}</span>
                     </p>
                   )}
                   {/* Purchase/recharge is web-only (digital-goods policy). In the app
