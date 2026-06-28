@@ -185,7 +185,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
         <div className="max-w-3xl mx-auto">
           {/* Hero Image */}
-          <div className="w-full aspect-[4/3] md:aspect-[16/9] bg-slate-100 overflow-hidden relative">
+          <div className="w-full aspect-square bg-slate-100 overflow-hidden relative">
             {selectedCampaign.thumbnail_url ? (
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             ) : (
