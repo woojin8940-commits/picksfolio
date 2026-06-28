@@ -30,6 +30,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const statsCacheKey = `picks_biz_stats_${cleanUsername}`;
   const trendCacheKey = `picks_biz_trend`;
+  const settlementCacheKey = `picks_biz_settlement_${cleanUsername}`;
 
   const cachedStats = (() => {
     try {
@@ -41,11 +42,18 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     try { return localStorage.getItem(trendCacheKey) || '분석 중...'; }
     catch { return '분석 중...'; }
   })();
+  const cachedSettlement = (() => {
+    try {
+      const raw = localStorage.getItem(settlementCacheKey);
+      return raw ? Number(raw) || 0 : 0;
+    } catch { return 0; }
+  })();
 
   // Phone preview removed — the business home now matches the regular user
   // dashboard's single-column layout.
   const [topTrend, setTopTrend] = useState<string>(cachedTrend);
   const [proposalStats, setProposalStats] = useState(cachedStats);
+  const [monthlySettlement, setMonthlySettlement] = useState<number>(cachedSettlement);
 
   const fetchTopTrend = async () => {
     try {
@@ -81,10 +89,33 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     }
   };
 
+  // Sum the current calendar month's settlements for this business so the
+  // "이번 달 정산" KPI reflects real data instead of a hardcoded 0.
+  const fetchMonthlySettlement = async () => {
+    try {
+      const res = await fetch(`/api/settlements/${encodeURIComponent(cleanUsername)}?role=business`);
+      if (res.ok) {
+        const data = await res.json();
+        const settlements = data.settlements || [];
+        const now = new Date();
+        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const sum = settlements.reduce((acc: number, s: any) => {
+          const dateStr = String(s.scheduled_date || s.created_at || '');
+          return dateStr.slice(0, 7) === ym ? acc + (Number(s.amount) || 0) : acc;
+        }, 0);
+        setMonthlySettlement(sum);
+        try { localStorage.setItem(settlementCacheKey, String(sum)); } catch {}
+      }
+    } catch (e) {
+      console.error('Error fetching monthly settlement:', e);
+    }
+  };
+
   useEffect(() => {
     if (currentSubView === 'dashboard') {
       fetchTopTrend();
       fetchProposalStats();
+      fetchMonthlySettlement();
     }
   }, [currentSubView]);
 
@@ -262,7 +293,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             </div>
             <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">이번 달 정산</p>
-              <p className="text-lg md:text-2xl font-black text-slate-900">0<span className="text-sm font-bold">원</span></p>
+              <p className="text-lg md:text-2xl font-black text-slate-900">{monthlySettlement.toLocaleString()}<span className="text-sm font-bold">원</span></p>
             </div>
           </div>
 

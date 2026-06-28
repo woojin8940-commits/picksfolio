@@ -32,8 +32,8 @@ export default async (req: Request, context: Context) => {
       store.get(`proposals_${username}`, { type: "json" }).catch(() => null),
     ]);
 
-    if (sqlResult && Array.isArray(sqlResult.rows)) {
-      for (const row of sqlResult.rows) {
+    if (Array.isArray(sqlResult)) {
+      for (const row of sqlResult) {
         seenIds.add(row.id);
         allProposals.push({
           id: row.id,

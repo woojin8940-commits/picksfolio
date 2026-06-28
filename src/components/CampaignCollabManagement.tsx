@@ -70,6 +70,10 @@ const CATEGORIES = [
 
 const categoryLabel = (val: string) => CATEGORIES.find(c => c.value === val)?.label || val || '-';
 
+// Normalize a username for ownership comparison (strip biz/ prefix, lowercase),
+// mirroring how the backend matches business_username.
+const normalizeUser = (u: string) => (u || '').replace(/^biz\//, '').toLowerCase();
+
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName }) => {
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
@@ -88,6 +92,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [activeTypeFilter, setActiveTypeFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'mine' | 'all'>('mine');
+  const [allCampaigns, setAllCampaigns] = useState<Campaign[]>([]);
+  const [allLoading, setAllLoading] = useState(false);
   const [thumbnailPreview, setThumbnailPreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +135,23 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     fetchCampaigns();
   }, [fetchCampaigns]);
 
+  const fetchAllCampaigns = useCallback(async () => {
+    setAllLoading(true);
+    try {
+      const res = await fetch('/api/campaigns?status=active');
+      const data = await res.json();
+      setAllCampaigns(data.campaigns || []);
+    } catch {
+      console.error('Failed to fetch all campaigns');
+    } finally {
+      setAllLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === 'all') fetchAllCampaigns();
+  }, [viewMode, fetchAllCampaigns]);
+
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);
     try {
@@ -143,7 +167,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   const handleSelectCampaign = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
-    fetchApplicants(campaign.id);
+    if (normalizeUser(campaign.business_username) === normalizeUser(businessUsername)) {
+      setApplicants([]);
+      fetchApplicants(campaign.id);
+    } else {
+      setApplicants([]);
+    }
   };
 
 
@@ -361,12 +390,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     return `D-${diff}`;
   };
 
+  const sourceCampaigns = viewMode === 'all' ? allCampaigns : campaigns;
+  const listLoading = viewMode === 'all' ? allLoading : loading;
   const filteredCampaigns = activeTypeFilter
-    ? campaigns.filter(c => c.type === activeTypeFilter)
-    : campaigns;
+    ? sourceCampaigns.filter(c => c.type === activeTypeFilter)
+    : sourceCampaigns;
 
   // --- Campaign Detail View ---
   if (selectedCampaign) {
+    const isOwner = normalizeUser(selectedCampaign.business_username) === normalizeUser(businessUsername);
     return (
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
         <button onClick={() => setSelectedCampaign(null)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
@@ -390,16 +422,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 <h2 className="text-xl md:text-2xl font-black text-slate-900">{selectedCampaign.title}</h2>
                 {selectedCampaign.brand_name && <p className="text-sm text-slate-500 font-bold mt-1">{selectedCampaign.brand_name}</p>}
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => handleEdit(selectedCampaign)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-black text-slate-600 transition-colors">
-                  수정
-                </button>
-                {selectedCampaign.status !== 'pending_approval' && selectedCampaign.status !== 'admin_rejected' && (
-                  <button onClick={() => handleToggleStatus(selectedCampaign)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-black text-slate-600 transition-colors">
-                    {selectedCampaign.status === 'active' ? '마감' : '재개'}
+              {isOwner && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleEdit(selectedCampaign)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-black text-slate-600 transition-colors">
+                    수정
                   </button>
-                )}
-              </div>
+                  {selectedCampaign.status !== 'pending_approval' && selectedCampaign.status !== 'admin_rejected' && (
+                    <button onClick={() => handleToggleStatus(selectedCampaign)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-black text-slate-600 transition-colors">
+                      {selectedCampaign.status === 'active' ? '마감' : '재개'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {selectedCampaign.description && <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap mb-5 leading-relaxed">{selectedCampaign.description}</p>}
@@ -451,7 +485,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           </div>
         </div>
 
-        {/* Applicants */}
+        {/* Applicants — only the owning business can view the applicant list */}
+        {isOwner ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
           <h3 className="text-lg font-black text-slate-900 mb-4">지원자 목록 ({applicants.length}명)</h3>
           {applicantsLoading ? (
@@ -536,6 +571,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             </div>
           )}
         </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm text-center">
+            <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </div>
+            <p className="text-sm text-slate-500 font-bold">다른 브랜드의 캠페인입니다</p>
+            <p className="text-xs text-slate-400 font-medium mt-1">지원자 목록은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
+          </div>
+        )}
       </main>
     );
   }
@@ -774,7 +818,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>
-          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">캠페인을 등록하고 크리에이터의 지원을 받으세요</p>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
+            {viewMode === 'mine'
+              ? '내가 등록한 캠페인을 관리하고 지원자를 확인하세요'
+              : '플랫폼에 등록된 모든 캠페인을 둘러보세요'}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="w-auto">
@@ -794,6 +842,26 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           </button>
         </div>
       </header>
+
+      {/* View Mode Toggle: 내 캠페인 / 전체 캠페인 */}
+      <div className="inline-flex items-center bg-slate-100 rounded-xl p-1 mb-4">
+        <button
+          onClick={() => setViewMode('mine')}
+          className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${
+            viewMode === 'mine' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          내 캠페인
+        </button>
+        <button
+          onClick={() => setViewMode('all')}
+          className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${
+            viewMode === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          전체 캠페인
+        </button>
+      </div>
 
       {/* Type Filter Tabs */}
       <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1 scrollbar-hide">
@@ -815,7 +883,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       </div>
 
-      {loading ? (
+      {listLoading ? (
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-sm text-slate-400 font-bold">캠페인 불러오는 중...</p>
@@ -828,13 +896,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             </svg>
           </div>
           <h3 className="text-lg font-black text-slate-900 mb-2">등록된 캠페인이 없습니다</h3>
-          <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
-          >
-            첫 캠페인 등록하기
-          </button>
+          {viewMode === 'mine' ? (
+            <>
+              <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
+              >
+                첫 캠페인 등록하기
+              </button>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500 font-medium mb-6">현재 모집중인 캠페인이 없습니다</p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
@@ -860,13 +934,17 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   {/* Badges overlay */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     {statusBadge(campaign.status)}
+                    {viewMode === 'all' && normalizeUser(campaign.business_username) === normalizeUser(businessUsername) && (
+                      <span className="bg-blue-600 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">내 캠페인</span>
+                    )}
                     {days && (
                       <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
                         {days}
                       </span>
                     )}
                   </div>
-                  {/* Edit/Delete overlay */}
+                  {/* Edit/Delete overlay — only on own campaigns */}
+                  {normalizeUser(campaign.business_username) === normalizeUser(businessUsername) && (
                   <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                     <button onClick={() => handleEdit(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-white rounded-lg transition-colors shadow-sm" title="수정">
                       <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -875,6 +953,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       <svg className="w-3.5 h-3.5 text-slate-500 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
+                  )}
                 </div>
 
                 {/* Content */}

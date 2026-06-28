@@ -19,8 +19,8 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
     const loadSettings = async () => {
       const settings = await getSiteSettings(userName);
       if (settings) {
-        setTitle(settings.profile?.title || settings.design?.title || `${userName}의 페이지`);
-        setDescription(settings.profile?.description || settings.design?.description || '패션과 뷰티를 사랑하는 크리에이터입니다.');
+        setTitle(settings.profile?.name || settings.profile?.title || settings.design?.title || `${userName}의 페이지`);
+        setDescription(settings.profile?.bio || settings.profile?.description || settings.design?.description || '패션과 뷰티를 사랑하는 크리에이터입니다.');
       }
       setIsLoading(false);
     };
@@ -36,15 +36,18 @@ const ProfileSettings: React.FC<ProfileSettingsProps> = ({ userName }) => {
       setShowToast(true);
       setIsSaving(false); // Release button immediately for instant feel
 
-      // We update both profile and design for compatibility
+      // Save the page title/description into `design`, and persist the standard
+      // profile fields (name/bio) under `profile`. A partial profile write must
+      // not clobber sibling profile keys (e.g. avatar_url) — api-site now deep
+      // merges nested objects, so only name/bio are updated here.
       await updateSiteSettings(userName, {
         design: {
           title,
           description
         } as any,
         profile: {
-          title,
-          description
+          name: title,
+          bio: description
         }
       });
     } catch (error) {
