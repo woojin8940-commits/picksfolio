@@ -39,6 +39,42 @@ function isDestructiveUpdate(existing: Record<string, any>, incoming: Record<str
   return false;
 }
 
+// Recursively merge `source` into `target`. Nested plain objects are merged key
+// by key; arrays and scalars replace the target value. This prevents a partial
+// write of a nested object (e.g. profile: { name }) from wiping sibling keys
+// (bio / avatar_url) — a shallow jsonb `||` merge would have replaced the whole
+// `profile` object.
+function deepMerge(target: any, source: any): any {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    return source;
+  }
+  const base = target && typeof target === "object" && !Array.isArray(target) ? { ...target } : {};
+  for (const key of Object.keys(source)) {
+    const sv = source[key];
+    if (sv && typeof sv === "object" && !Array.isArray(sv)) {
+      base[key] = deepMerge(base[key], sv);
+    } else {
+      base[key] = sv;
+    }
+  }
+  return base;
+}
+
+// Mirror Postgres `jsonb_strip_nulls`: drop object keys whose value is null,
+// recursing through nested objects and array elements.
+function stripNulls(value: any): any {
+  if (Array.isArray(value)) return value.map(stripNulls);
+  if (value && typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === null) continue;
+      out[k] = stripNulls(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -214,9 +250,10 @@ export default async (req: Request, context: Context) => {
       const bodyJson = JSON.stringify(body);
 
       if (existing.length > 0) {
+        const mergedData = stripNulls(deepMerge(existingData, body));
         await db.sql`
           UPDATE site_data
-          SET data = jsonb_strip_nulls(COALESCE(data, '{}'::jsonb) || ${bodyJson}::jsonb),
+          SET data = ${JSON.stringify(mergedData)}::jsonb,
               updated_at = NOW()
           WHERE username = ${username}
         `;
