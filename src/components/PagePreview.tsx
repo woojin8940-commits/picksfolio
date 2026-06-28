@@ -221,9 +221,6 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                     )}
                     <div className="w-full min-w-0 text-center px-7">
                       <div className="text-[7px] font-black truncate">{block.title}</div>
-                      {block.category && (
-                        <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: accentColor }}>{block.category}</div>
-                      )}
                     </div>
                   </div>
                 );

@@ -3,7 +3,7 @@ import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Lo
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
-import { getCachedLinkData } from '../services/prefetchService';
+import { getCachedLinkData, clearLinkCache } from '../services/prefetchService';
 import { apiService } from '../services/apiService';
 import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification } from '../types';
 import MediaAuto from './MediaAuto';
@@ -661,6 +661,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     try {
       const apiOk = await apiService.saveSiteData(userName, { design: designUpdate as any, profile, socials: cleanedSocials });
       if (apiOk) {
+        clearLinkCache(userName);
         showSuccessFeedback('저장되었습니다!');
       } else {
         setSaveMessage('로컬에 저장됨 (클라우드 동기화 실패)');
@@ -687,6 +688,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const saveBlocksToCloud = async (blocksToSave: Block[]): Promise<boolean> => {
     try {
       const apiOk = await apiService.saveSiteData(userName, { blocks: blocksToSave });
+      // 저장이 성공하면 프리페치 캐시를 비워, 편집 화면을 다시 열어도
+      // 방금 저장한 내용이 즉시 반영되도록 한다(오래된 캐시가 덮어쓰지 않게).
+      if (apiOk) clearLinkCache(userName);
       // Supabase 동기화도 시도 (백그라운드)
       Promise.all([
         updateLinkGridItems(blocksToSave),
