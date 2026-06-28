@@ -1368,27 +1368,29 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                    setSelectedBlockId(block.id);
                                    trackClick(username, block.id);
                                  }}
-                                 className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
                                  style={{
                                    gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                  }}
                                >
                                  {block.coverMedia && (
-                                   <div className="aspect-[16/10] overflow-hidden">
+                                   <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} ${isDark ? 'border border-white/10' : 'border border-slate-200'}`}>
                                      <MediaAuto
                                        src={block.coverMedia || FALLBACK_IMAGE}
-                                       className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                       className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
                                        style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
                                      />
                                    </div>
                                  )}
-                                 <div className="p-3 md:p-4">
-                                   <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
-                                   <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                                 <div className="w-full min-w-0 text-center px-14">
+                                   <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
+                                   {block.category && (
+                                     <div className="text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: design.accentColor }}>{block.category}</div>
+                                   )}
                                  </div>
                                  {(block.products?.length || 0) > 0 && (
-                                   <div className="absolute top-3 right-3">
+                                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
                                      <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
                                    </div>
                                  )}
@@ -1749,27 +1751,29 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                   setSelectedBlockId(block.id);
                                   trackClick(username, block.id);
                                 }}
-                                className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
                                 style={{
                                   gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                 }}
                               >
                                 {block.coverMedia && (
-                                  <div className="aspect-[16/10] overflow-hidden">
+                                  <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} ${isDark ? 'border border-white/10' : 'border border-slate-200'}`}>
                                     <MediaAuto
                                       src={block.coverMedia || FALLBACK_IMAGE}
-                                      className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105"
+                                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
                                       style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
                                     />
                                   </div>
                                 )}
-                                <div className="p-3 md:p-4">
-                                  <div className="text-xs font-black truncate uppercase tracking-tight">{block.title}</div>
-                                  <div className="text-[9px] font-bold uppercase tracking-widest mt-0.5" style={{ color: design.accentColor }}>{block.category}</div>
+                                <div className="w-full min-w-0 text-center px-14">
+                                  <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
+                                  {block.category && (
+                                    <div className="text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: design.accentColor }}>{block.category}</div>
+                                  )}
                                 </div>
                                 {(block.products?.length || 0) > 0 && (
-                                  <div className="absolute top-3 right-3">
+                                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
                                     <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
                                   </div>
                                 )}

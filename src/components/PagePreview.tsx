@@ -203,25 +203,27 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div
                     key={block.id}
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className={`relative overflow-hidden cursor-pointer group shadow-sm ${themePreset === 'white' ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}
+                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group shadow-sm ${themePreset === 'white' ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}
                     style={{
                       gridColumn: `span ${gridSpan}`,
                       borderRadius: '0.75rem',
                     }}
                   >
                     {block.coverMedia && (
-                      <div className="aspect-[16/10] overflow-hidden">
+                      <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg overflow-hidden shrink-0 ${themePreset === 'white' ? 'border border-slate-200' : 'border border-white/10'}`}>
                         <MediaAuto
                           src={block.coverMedia}
                           alt=""
-                          className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
+                          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
                         />
                       </div>
                     )}
-                    <div className="p-1.5">
-                      <div className="text-[7px] font-black truncate uppercase tracking-tight">{block.title}</div>
-                      <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5" style={{ color: accentColor }}>{block.category}</div>
+                    <div className="w-full min-w-0 text-center px-7">
+                      <div className="text-[7px] font-black truncate">{block.title}</div>
+                      {block.category && (
+                        <div className="text-[6px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: accentColor }}>{block.category}</div>
+                      )}
                     </div>
                   </div>
                 );
