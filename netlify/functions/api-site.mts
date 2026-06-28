@@ -98,7 +98,10 @@ export default async (req: Request, context: Context) => {
           return new Response(JSON.stringify(dbData), {
             headers: {
               "Content-Type": "application/json",
-              "Cache-Control": "public, s-maxage=5, stale-while-revalidate=30",
+              // Keep the public-page response fresh so edits appear right after
+              // saving. A short s-maxage with must-revalidate avoids serving
+              // stale content for up to 30s after an update.
+              "Cache-Control": "public, max-age=0, s-maxage=2, must-revalidate",
             },
           });
         }

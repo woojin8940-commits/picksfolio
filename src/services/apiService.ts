@@ -152,12 +152,12 @@ export const apiService = {
       });
       if (res.ok) {
         // Keep the cache in sync with what we just persisted so a subsequent
-        // navigation doesn't briefly render pre-save data.
+        // navigation doesn't briefly render pre-save data. Create the entry even
+        // when nothing was cached yet, so the very next read is immediately fresh.
         const key = username.toLowerCase();
         const cached = siteDataCache[key];
-        if (cached) {
-          siteDataCache[key] = { data: { ...cached.data, ...data }, ts: Date.now() };
-        }
+        const base = (cached?.data || {}) as SiteData;
+        siteDataCache[key] = { data: { ...base, ...data }, ts: Date.now() };
       }
       return res.ok;
     } catch (e) {

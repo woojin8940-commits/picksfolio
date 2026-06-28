@@ -1385,9 +1385,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                  )}
                                  <div className="w-full min-w-0 text-center px-14">
                                    <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
-                                   {block.category && (
-                                     <div className="text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: design.accentColor }}>{block.category}</div>
-                                   )}
                                  </div>
                                  {(block.products?.length || 0) > 0 && (
                                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
@@ -1768,9 +1765,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                 )}
                                 <div className="w-full min-w-0 text-center px-14">
                                   <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
-                                  {block.category && (
-                                    <div className="text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate" style={{ color: design.accentColor }}>{block.category}</div>
-                                  )}
                                 </div>
                                 {(block.products?.length || 0) > 0 && (
                                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
