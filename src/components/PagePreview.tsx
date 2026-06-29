@@ -63,7 +63,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       {/* Cover Header - matching personal page */}
       <div
         className="relative aspect-[4/5] flex-shrink-0"
-        style={{ background: header.color || (themePreset === 'white' ? 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)' : 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)') }}
+        style={{ background: header.color || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)' }}
       >
         {header.image && (
           <SafeImage

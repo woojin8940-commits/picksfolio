@@ -64,7 +64,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   // business account could press "정산 완료"; now either side can finalize it and
   // the change is mirrored to the business via the shared settlements API.
   const handleComplete = async (settlementId: string) => {
-    if (!confirm('정산을 완료 처리하시겠습니까? 비즈니스 계정에도 완료로 표시됩니다.')) return;
+    if (!confirm('정산을 완료 처리하시겠습니까?')) return;
     setUpdatingId(settlementId);
     try {
       const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {

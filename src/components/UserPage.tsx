@@ -58,7 +58,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   const [design, setDesign] = useState<DesignSettings>(() => {
     const defaultDesign: DesignSettings = {
       templateType: TemplateType.SHOPPABLE_GRID,
-      theme: 'midnight',
+      theme: 'white',
       accentColor: '#2563EB',
       borderRadius: 'full',
       gridGap: 1,
@@ -68,6 +68,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       buttonStyle: 'solid',
       backgroundType: 'solid',
       customGradient: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+      portfolioHeaderColor: 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)',
       profileLayout: 'center',
       homePriority: 'curation'
     };
@@ -1384,7 +1385,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                    </div>
                                  )}
                                  <div className="w-full min-w-0 text-center px-14">
-                                   <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
+                                   <div className={`text-[13px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
                                  </div>
                                  {(block.products?.length || 0) > 0 && (
                                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
@@ -1764,7 +1765,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                   </div>
                                 )}
                                 <div className="w-full min-w-0 text-center px-14">
-                                  <div className={`text-sm font-black truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
+                                  <div className={`text-[13px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
                                 </div>
                                 {(block.products?.length || 0) > 0 && (
                                   <div className="absolute right-4 top-1/2 -translate-y-1/2">

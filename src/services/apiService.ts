@@ -1,4 +1,4 @@
-import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification } from '../types';
+import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 
 export interface SiteData {
   blocks?: Block[];
@@ -427,6 +427,20 @@ export const apiService = {
       return data.records || [];
     } catch (e) {
       console.error('[API] Failed to get collab records:', e);
+      return [];
+    }
+  },
+
+  // Settlements created from accepted proposals. The influencer view of the
+  // 협업 현황 page reads these so completed settlements also surface in 협업 내역.
+  async getSettlements(username: string): Promise<Settlement[]> {
+    try {
+      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=influencer`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.settlements || [];
+    } catch (e) {
+      console.error('[API] Failed to get settlements:', e);
       return [];
     }
   },
