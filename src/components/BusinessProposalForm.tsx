@@ -40,7 +40,6 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
   const [title, setTitle] = useState(savedDraft?.title || '');
   const [content, setContent] = useState(savedDraft?.content || '');
   const [startDate, setStartDate] = useState(savedDraft?.start_date || '');
-  const [endDate, setEndDate] = useState(savedDraft?.end_date || '');
   const [fee, setFee] = useState(savedDraft?.fee || '');
   const [feeDisplay, setFeeDisplay] = useState(savedDraft?.fee ? formatNumberWithCommas(savedDraft.fee) : '');
   const [revenueShare, setRevenueShare] = useState(savedDraft?.revenue_share || '');
@@ -100,13 +99,12 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
         title,
         content,
         start_date: startDate,
-        end_date: endDate,
         fee,
         revenue_share: revenueShare,
         attachments,
       }));
     } catch {}
-  }, [category, companyName, contactPerson, contactEmail, contactPhone, title, content, startDate, endDate, fee, revenueShare, attachments, draftKey]);
+  }, [category, companyName, contactPerson, contactEmail, contactPhone, title, content, startDate, fee, revenueShare, attachments, draftKey]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -163,7 +161,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
       title,
       content,
       start_date: startDate,
-      end_date: endDate,
+      end_date: '',
       fee: parseInt(fee) || 0,
       revenue_share: revenueShare ? parseFloat(revenueShare) : undefined,
       reference_links: [],
@@ -403,29 +401,17 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
         <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">일정 및 예산</label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-bold text-slate-600 mb-1.5">시작 희망일 <span className="text-red-500">*</span></label>
               <input
                 type="date"
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full min-w-0 box-border appearance-none px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">마감일 <span className="text-red-500">*</span></label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-bold text-slate-600 mb-1.5">
                 {category === '광고' ? '제시 원고료 (원)' : '고정 수수료 (원)'}
                 <span className="text-red-500"> *</span>
@@ -437,11 +423,13 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                 onChange={handleFeeChange}
                 required
                 placeholder="0"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full min-w-0 box-border px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
-            {category === '커머스' && (
-              <div>
+          </div>
+          {category === '커머스' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="min-w-0">
                 <label className="block text-xs font-bold text-slate-600 mb-1.5">수익 배분율 (%)</label>
                 <input
                   type="number"
@@ -450,11 +438,11 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                   min="0"
                   max="100"
                   placeholder="예: 15"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
+                  className="w-full min-w-0 box-border px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
                 />
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Submit Button */}

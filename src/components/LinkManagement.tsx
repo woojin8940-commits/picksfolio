@@ -138,12 +138,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
       if (saved) {
         const design = JSON.parse(saved);
-        return design.theme === 'white' ? 'white' : 'midnight';
+        return design.theme === 'midnight' ? 'midnight' : 'white';
       }
     } catch (e) {
       console.error('Error parsing design:', e);
     }
-    return 'midnight';
+    return 'white';
   });
   const [accentColor, setAccentColor] = useState(() => {
     try {

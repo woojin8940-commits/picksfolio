@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { BusinessProposal, CollabRecord } from '../types';
+import type { BusinessProposal, CollabRecord, Settlement } from '../types';
 import { apiService } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatters';
 import UserSettlement from './UserSettlement';
@@ -7,6 +7,10 @@ import UserSettlement from './UserSettlement';
 interface BusinessCalendarProps {
   userName: string;
 }
+
+// A collab-history row may be a real, editable collab record or a read-only
+// entry derived from a completed settlement.
+type CollabListItem = CollabRecord & { _fromSettlement?: boolean };
 
 const COLLAB_CATEGORIES = ['광고', '커머스', '기타'] as const;
 const COLLAB_STATUSES = [
@@ -19,6 +23,7 @@ const COLLAB_STATUSES = [
 const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const [proposals, setProposals] = useState<BusinessProposal[]>([]);
   const [collabRecords, setCollabRecords] = useState<CollabRecord[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -54,12 +59,14 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const [proposalData, collabData] = await Promise.all([
+      const [proposalData, collabData, settlementData] = await Promise.all([
         apiService.getProposals(userName),
         apiService.getCollabRecords(userName),
+        apiService.getSettlements(userName),
       ]);
       setProposals(proposalData);
       setCollabRecords(collabData);
+      setSettlements(settlementData);
       setLoading(false);
     };
     fetchData();
@@ -348,10 +355,44 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return `D-${diff}`;
   };
 
-  // All collabs sorted for history view
-  const allCollabsSorted = useMemo(() => {
-    return [...collabRecords].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [collabRecords]);
+  // All collabs sorted for history view. Completed settlements (auto-created
+  // when a business proposal is accepted, then finalized in the 정산금 tab) are
+  // folded in as read-only collab entries so they also surface in 협업 내역.
+  // They carry `_fromSettlement` so the list hides the edit/delete controls that
+  // only apply to manually-logged collab records.
+  const settlementCollabs = useMemo<CollabListItem[]>(() => {
+    // Skip a settlement when a manually-logged collab already covers the same
+    // deal (same title + company), to avoid showing it twice.
+    const normalize = (v?: string) => (v || '').trim().toLowerCase();
+    const existingKeys = new Set(
+      collabRecords.map(c => `${normalize(c.title)}|${normalize(c.company_name)}`)
+    );
+    return settlements
+      .filter(s => s.status === 'completed')
+      .filter(s => !existingKeys.has(`${normalize(s.title)}|${normalize(s.company_name)}`))
+      .map(s => {
+        const date = (s.completed_at || s.scheduled_date || s.created_at || '').split('T')[0];
+        return {
+          id: `stl_collab_${s.id}`,
+          title: s.title || '협업 프로젝트',
+          company_name: s.company_name || '',
+          category: '기타',
+          date,
+          fee: s.amount || 0,
+          status: 'completed',
+          memo: s.memo || '',
+          created_at: s.created_at || date,
+          updated_at: s.updated_at,
+          _fromSettlement: true,
+        };
+      });
+  }, [settlements, collabRecords]);
+
+  const allCollabsSorted = useMemo<CollabListItem[]>(() => {
+    return [...collabRecords, ...settlementCollabs].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }, [collabRecords, settlementCollabs]);
 
   // --- Period (월별 / 기간 지정) filtering ---------------------------------
   const ymd = (d: Date) =>
@@ -1041,6 +1082,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     <span className={`text-xs font-black shrink-0 ${getCollabStatusTextColor(effectiveCollabStatus(c))}`}>
                       {getCollabStatusLabel(effectiveCollabStatus(c))}
                     </span>
+                    {c._fromSettlement ? (
+                      <span className="text-[10px] font-black text-slate-300 shrink-0 px-2" title="정산금에서 자동 반영된 내역입니다">
+                        정산
+                      </span>
+                    ) : (
                     <div className="flex gap-1 shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); openEditForm(c); }}
@@ -1061,6 +1107,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         </svg>
                       </button>
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
