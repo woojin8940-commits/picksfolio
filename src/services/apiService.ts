@@ -862,29 +862,35 @@ export const apiService = {
     }
   },
 
-  // 카드(신용카드) 단건 결제로 멤버십을 활성화한다. 빌링키 발급(본인인증 필요)을 거치지 않고,
-  // 클로드 플랜과 동일한 단건 결제창으로 첫 달을 즉시 결제한 뒤 paymentId 를 서버에서 검증해
-  // 멤버십을 켠다. (토스페이·카카오페이는 기존 빌링키 자동결제 경로를 그대로 사용한다.)
-  async activateMembershipOneTime(
+  // 카드(신용카드) 정기결제 등록. NICE V2 는 브라우저 SDK 로 카드 빌링키를 발급할 수 없어
+  // (간편결제만 지원), 카드 정보를 서버로 보내 수기(키인) 방식으로 빌링키를 발급받고 첫 달을
+  // 즉시 결제한다. 이후에는 발급된 빌링키로 매월 자동결제된다. 카드 정보는 저장하지 않고
+  // PortOne 으로만 전달된다. (토스페이·카카오페이는 기존 SDK 빌링키 경로를 그대로 사용한다.)
+  async subscribeMembershipCard(
     username: string,
-    paymentId: string,
     tier: 'standard' | 'standard_ai' | 'commerce',
-    payMethod: string = 'CARD',
+    card: {
+      number: string;
+      expiryMonth: string;
+      expiryYear: string;
+      birthOrBusinessRegistrationNumber: string;
+      passwordTwoDigits: string;
+    },
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/billing-issue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.toLowerCase(), paymentId, tier, payMethod }),
+        body: JSON.stringify({ username: username.toLowerCase(), tier, card }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
-        return { success: false, error: json?.error || '결제 처리 실패' };
+        return { success: false, error: json?.error || '카드 정기결제 등록 실패' };
       }
       if (json.data) writeVerificationCache(username, json.data);
       return { success: true, data: json.data };
     } catch (e) {
-      console.error('[API] Failed to activate one-time membership payment:', e);
+      console.error('[API] Failed to subscribe membership with card:', e);
       return { success: false, error: '네트워크 오류' };
     }
   },

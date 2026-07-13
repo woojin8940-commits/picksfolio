@@ -129,6 +129,76 @@ export const chargeMembershipBillingKey = async (
   }
 }
 
+// ── 카드(나이스정보통신) 정기결제 빌링키 발급 (수기/키인) ─────────────────────────
+// NICE V2 는 브라우저 SDK(requestIssueBillingKey)로 카드 빌링키를 발급할 수 없고
+// (간편결제만 지원), 카드 정기결제는 REST API `POST /billing-keys` 수기(키인) 방식만
+// 지원한다 — PortOne V2 NICE 문서 기준. 카드 정보를 서버에서 PortOne 으로 전달해
+// 빌링키를 발급받고, 이후에는 발급된 빌링키로 매월 자동결제한다(카드 정보는 저장하지 않음).
+//
+// 카드 정기결제 채널(정기결제 전용 MID)은 일반결제(단건) 채널과 다르다. PortOne 실연동 승인으로
+// 발급된 나이스정보통신 정기결제(수기/키인) 전용 채널(MID IM0029309m)의 채널 키를 사용한다.
+// 채널 키는 브라우저에도 공개되는 식별자이며(시크릿 아님 — 서버 전용 값은 PORTONE_V2_API_SECRET),
+// 환경변수 PORTONE_NICE_BILLING_CHANNEL_KEY 로 재정의할 수 있다.
+const PORTONE_NICE_BILLING_CHANNEL_KEY =
+  process.env.PORTONE_NICE_BILLING_CHANNEL_KEY?.trim() ||
+  'channel-key-e5f534a5-d7a5-46de-8c92-2528d5e49e02'
+
+export const isNiceCardBillingConfigured = () => !!PORTONE_NICE_BILLING_CHANNEL_KEY
+
+export interface NiceCardCredential {
+  number: string // 카드번호 (숫자만)
+  expiryYear: string // 'YY'
+  expiryMonth: string // 'MM'
+  birthOrBusinessRegistrationNumber: string // 생년월일 6자리(개인) 또는 사업자등록번호 10자리
+  passwordTwoDigits: string // 카드 비밀번호 앞 2자리
+}
+
+export const issueNiceCardBillingKey = async (
+  username: string,
+  card: NiceCardCredential,
+): Promise<{ ok: true; billingKey: string } | { ok: false; error: string }> => {
+  const apiSecret = process.env.PORTONE_V2_API_SECRET
+  const channelKey = PORTONE_NICE_BILLING_CHANNEL_KEY
+  if (!apiSecret) return { ok: false, error: '결제 설정이 완료되지 않았습니다.' }
+  if (!channelKey)
+    return {
+      ok: false,
+      error: '카드 정기결제(빌링) 채널이 아직 연결되지 않았습니다. 관리자에게 문의해 주세요.',
+    }
+
+  try {
+    const res = await fetch(`${PORTONE_API_BASE}/billing-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `PortOne ${apiSecret}` },
+      body: JSON.stringify({
+        storeId: PORTONE_STORE_ID,
+        channelKey,
+        customer: { id: asciiSafe(username) },
+        method: {
+          card: {
+            credential: {
+              number: card.number,
+              expiryYear: card.expiryYear,
+              expiryMonth: card.expiryMonth,
+              birthOrBusinessRegistrationNumber: card.birthOrBusinessRegistrationNumber,
+              passwordTwoDigits: card.passwordTwoDigits,
+            },
+          },
+        },
+      }),
+    })
+    const data = (await res.json().catch(() => ({}))) as any
+    if (!res.ok) {
+      return { ok: false, error: data?.message || `카드 등록 실패 (${res.status})` }
+    }
+    const billingKey: string | undefined = data?.billingKeyInfo?.billingKey || data?.billingKey
+    if (!billingKey) return { ok: false, error: '빌링키를 발급받지 못했습니다.' }
+    return { ok: true, billingKey }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '카드 등록 요청에 실패했습니다.' }
+  }
+}
+
 /**
  * Charge one month of a membership against a stored TossPayments billing key
  * (토스페이먼츠 카드, 토스페이먼츠 직접 연동). Mirrors `chargeMembershipBillingKey`
