@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.8",
-    "@netlify/database": "^1.0.0",
     "@netlify/functions": "^5.2.1",
     "@netlify/identity": "^1.2.0",
     "@supabase/supabase-js": "^2.97.0",
@@ -27,6 +26,9 @@
     "solapi": "^5.5.4",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0"
+  },
+  "optionalDependencies": {
+    "@picks/netlify-database": "npm:@netlify/database@1.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",

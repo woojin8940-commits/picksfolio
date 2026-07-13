@@ -54,7 +54,7 @@ export default async (req: Request, _context: Context) => {
     // derivable from the SQL join, mirroring api-business-proposals).
     let proposalRows: any[] = []
     try {
-      const { getDatabase } = await import('@netlify/database')
+      const { getDatabase } = await import('@picks/netlify-database')
       const db = getDatabase()
       const [sqlProposals, campaignRows] = await Promise.all([
         (async () => {

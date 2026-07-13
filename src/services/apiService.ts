@@ -819,12 +819,13 @@ export const apiService = {
   async completePortOnePayment(
     username: string,
     paymentId: string,
+    payMethod?: string,
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/portone-complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.toLowerCase(), paymentId }),
+        body: JSON.stringify({ username: username.toLowerCase(), paymentId, payMethod }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) {

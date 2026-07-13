@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { createUniqueProfileCode, generateProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
 

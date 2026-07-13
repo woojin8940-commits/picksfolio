@@ -35,7 +35,7 @@ export default async (req: Request, context: Context) => {
 
       // Update SQL read_by as well
       try {
-        const { getDatabase } = await import("@netlify/database");
+        const { getDatabase } = await import("@picks/netlify-database");
         const db = getDatabase();
         await db.sql`
           UPDATE timeline_messages

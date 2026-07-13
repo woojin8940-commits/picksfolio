@@ -16,7 +16,7 @@ export default async (req: Request, context: Context) => {
 
     let dbInstance: any = null;
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       dbInstance = getDatabase();
     } catch {}
 

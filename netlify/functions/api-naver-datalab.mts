@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 
 export default async (req: Request) => {
   if (req.method !== "GET") {

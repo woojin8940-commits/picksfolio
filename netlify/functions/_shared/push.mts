@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 
 /**
  * Native push notifications for the PICKS Folio mobile app.

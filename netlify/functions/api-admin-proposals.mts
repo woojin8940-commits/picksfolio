@@ -57,7 +57,7 @@ export default async (req: Request, context: Context) => {
     // an empty list rather than a 500 so other admin tabs still render.
     let allProposals: any[] = []
     try {
-      const { getDatabase } = await import('@netlify/database')
+      const { getDatabase } = await import('@picks/netlify-database')
       const db = getDatabase()
       const [sqlProposals, campaignRows] = await Promise.all([
         (async () => {

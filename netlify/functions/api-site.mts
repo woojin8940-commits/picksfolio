@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import { getStore } from "@netlify/blobs";
 import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";

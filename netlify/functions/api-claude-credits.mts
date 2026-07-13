@@ -1,5 +1,6 @@
 import type { Config, Context } from '@netlify/functions'
 import { confirmTossPayment } from './_shared/toss-payments.mts'
+import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
 import {
   ACTIVATION_GRANT_CREDITS,
   ACTIVATION_PRICE_KRW,
@@ -30,44 +31,13 @@ import {
 //
 // The Claude plan is independent of the membership tiers: activating it grants
 // Claude access on its own, regardless of which (if any) membership the account holds.
-const PORTONE_API_BASE = 'https://api.portone.io'
-
 const verifyPortOnePayment = async (
   paymentId: string,
   expectedKrw: number,
+  payMethod: string,
 ): Promise<{ ok: boolean; error?: string }> => {
-  const apiSecret = process.env.PORTONE_V2_API_SECRET
-  if (!apiSecret) return { ok: false, error: 'PORTONE_V2_API_SECRET 환경 변수가 설정되지 않았습니다.' }
-
-  let res: Response
-  try {
-    res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`, {
-      method: 'GET',
-      headers: { Authorization: `PortOne ${apiSecret}` },
-    })
-  } catch {
-    return { ok: false, error: 'PortOne 결제 조회에 실패했습니다.' }
-  }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    return { ok: false, error: `PortOne 결제 조회 실패 (${res.status}): ${detail.slice(0, 200)}` }
-  }
-  const payment = (await res.json()) as {
-    status?: string
-    amount?: { total?: number; paid?: number }
-    currency?: string
-  }
-  if (payment.status !== 'PAID') {
-    return { ok: false, error: `결제가 완료되지 않았습니다. (상태: ${payment.status || 'UNKNOWN'})` }
-  }
-  const paid = payment.amount?.total ?? payment.amount?.paid ?? 0
-  if (paid !== expectedKrw) {
-    return { ok: false, error: `결제 금액이 일치하지 않습니다. (기대: ${expectedKrw}, 실제: ${paid})` }
-  }
-  if (payment.currency && payment.currency !== 'KRW') {
-    return { ok: false, error: `통화가 일치하지 않습니다. (${payment.currency})` }
-  }
-  return { ok: true }
+  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw, payMethod })
+  return verified.ok ? { ok: true } : { ok: false, error: verified.error }
 }
 
 const respond = (credits: ClaudeCredits, extra: Record<string, unknown> = {}) =>
@@ -116,6 +86,9 @@ export default async (req: Request, context: Context) => {
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
       }
+      if (!isToss && !['CARD', 'TOSSPAY', 'KAKAOPAY'].includes(payMethod)) {
+        return Response.json({ error: '유효한 결제 수단이 필요합니다.' }, { status: 400 })
+      }
       if (isToss && !orderId) {
         return Response.json({ error: '결제 정보(orderId)가 필요합니다.' }, { status: 400 })
       }
@@ -146,7 +119,7 @@ export default async (req: Request, context: Context) => {
           )
         }
       } else {
-        const verified = await verifyPortOnePayment(paymentId, amountKrw)
+        const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod)
         if (!verified.ok) {
           return Response.json({ error: verified.error }, { status: 400 })
         }
