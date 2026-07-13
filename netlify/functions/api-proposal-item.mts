@@ -39,7 +39,7 @@ export default async (req: Request, context: Context) => {
 
     // Update SQL database
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       // Persist the rejection reason too — it feeds the admin "거절 사유 통계".
       const rejectionReason = body.rejection_reason ?? updatedProposal.rejection_reason ?? null;
@@ -129,7 +129,7 @@ export default async (req: Request, context: Context) => {
 
           // Persist timeline to SQL
           try {
-            const { getDatabase } = await import("@netlify/database");
+            const { getDatabase } = await import("@picks/netlify-database");
             const db = getDatabase();
             await db.sql`
               INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
@@ -262,7 +262,7 @@ export default async (req: Request, context: Context) => {
 
     // Delete from SQL
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       await db.sql`DELETE FROM proposals WHERE id = ${proposalId}`;
     } catch (dbErr) {

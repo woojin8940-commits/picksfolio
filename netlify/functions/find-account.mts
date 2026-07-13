@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";

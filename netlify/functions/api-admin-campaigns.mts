@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import { getUser } from "@netlify/identity";
 import type { Config, Context } from "@netlify/functions";
 

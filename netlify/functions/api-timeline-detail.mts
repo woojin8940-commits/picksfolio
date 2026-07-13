@@ -17,7 +17,7 @@ export default async (req: Request, context: Context) => {
     }
 
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
 
       const [rows, msgRows] = await Promise.all([

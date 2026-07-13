@@ -16,7 +16,7 @@ export default async (req: Request, context: Context) => {
     const [sqlResult, blobData] = await Promise.all([
       (async () => {
         try {
-          const { getDatabase } = await import("@netlify/database");
+          const { getDatabase } = await import("@picks/netlify-database");
           const db = getDatabase();
           return await db.sql`
             SELECT * FROM proposals
@@ -108,7 +108,7 @@ export default async (req: Request, context: Context) => {
 
     // Persist to SQL database
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       await db.sql`
         INSERT INTO proposals (id, username, influencer_username, business_username, title, company_name, description, content, category, fee, start_date, end_date, status, contact_email, contact_person, contact_phone, created_at, updated_at)
@@ -176,7 +176,7 @@ export default async (req: Request, context: Context) => {
 
     // Update in SQL
     try {
-      const { getDatabase } = await import("@netlify/database");
+      const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       await db.sql`
         UPDATE proposals SET status = ${body.status}, updated_at = now()

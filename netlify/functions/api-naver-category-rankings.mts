@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import { getStore } from "@netlify/blobs";
 
 const EXPECTED_CATEGORIES = [

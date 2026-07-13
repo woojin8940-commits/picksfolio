@@ -8,8 +8,7 @@ import {
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
 import { issueTossBillingKey } from "./_shared/toss-payments.mts";
-
-const PORTONE_API_BASE = "https://api.portone.io";
+import { verifyLivePortOnePayment } from "./_shared/portone-live-payment.mts";
 
 // 카드(신용카드) 단건 결제를 서버에서 검증한다. 빌링키 발급(본인인증 필요) 대신, 클로드 플랜과
 // 동일한 단건 결제(requestPayment)로 받은 paymentId 가 실제로 결제 완료(PAID)됐고 금액·통화가
@@ -17,39 +16,10 @@ const PORTONE_API_BASE = "https://api.portone.io";
 async function verifyPortOneOneTime(
   paymentId: string,
   expectedKrw: number,
+  payMethod: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const apiSecret = process.env.PORTONE_V2_API_SECRET;
-  if (!apiSecret) return { ok: false, error: "PORTONE_V2_API_SECRET 환경 변수가 설정되지 않았습니다." };
-
-  let res: Response;
-  try {
-    res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`, {
-      method: "GET",
-      headers: { Authorization: `PortOne ${apiSecret}` },
-    });
-  } catch {
-    return { ok: false, error: "PortOne 결제 조회에 실패했습니다." };
-  }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    return { ok: false, error: `PortOne 결제 조회 실패 (${res.status}): ${detail.slice(0, 200)}` };
-  }
-  const payment = (await res.json()) as {
-    status?: string;
-    amount?: { total?: number; paid?: number };
-    currency?: string;
-  };
-  if (payment.status !== "PAID") {
-    return { ok: false, error: `결제가 완료되지 않았습니다. (상태: ${payment.status || "UNKNOWN"})` };
-  }
-  const paid = payment.amount?.total ?? payment.amount?.paid ?? 0;
-  if (paid !== expectedKrw) {
-    return { ok: false, error: `결제 금액이 일치하지 않습니다. (기대: ${expectedKrw}, 실제: ${paid})` };
-  }
-  if (payment.currency && payment.currency !== "KRW") {
-    return { ok: false, error: `통화가 일치하지 않습니다. (${payment.currency})` };
-  }
-  return { ok: true };
+  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw, payMethod });
+  return verified.ok ? { ok: true } : { ok: false, error: verified.error };
 }
 
 export default async (req: Request) => {
@@ -89,7 +59,11 @@ export default async (req: Request) => {
     const oneTimePaymentId = !isToss && !body?.billingKey ? String(body?.paymentId || "").trim() : "";
     if (oneTimePaymentId) {
       const expectedKrw = TIER_PRICE_KRW[normalizedTier];
-      const verified = await verifyPortOneOneTime(oneTimePaymentId, expectedKrw);
+      const verified = await verifyPortOneOneTime(
+        oneTimePaymentId,
+        expectedKrw,
+        String(body?.payMethod || "CARD"),
+      );
       if (!verified.ok) {
         return Response.json(
           { success: false, error: verified.error || "결제 검증에 실패했습니다." },

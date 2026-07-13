@@ -2,6 +2,7 @@ import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricing.mts'
 import { persistLiveOrdersToDatabase } from './_shared/live-order-persistence.mts'
+import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
 
 /**
  * Batch checkout for all items a viewer has added to their live cart.
@@ -12,8 +13,6 @@ import { persistLiveOrdersToDatabase } from './_shared/live-order-persistence.mt
  * POST /api/live-order-batch
  *   { paymentId, username, expectedAmount, viewer, items: [...] }
  */
-
-const PORTONE_API_BASE = 'https://api.portone.io'
 
 interface ShippingInfo {
   ordererName?: string
@@ -127,14 +126,6 @@ export default async (req: Request, _context: Context) => {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const apiSecret = process.env.PORTONE_V2_API_SECRET
-  if (!apiSecret) {
-    return Response.json(
-      { success: false, error: 'PORTONE_V2_API_SECRET 환경 변수가 설정되지 않았습니다.' },
-      { status: 500 },
-    )
-  }
-
   let body: BatchBody
   try {
     body = (await req.json()) as BatchBody
@@ -176,67 +167,14 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  let portoneRes: Response
-  try {
-    portoneRes = await fetch(
-      `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`,
-      { method: 'GET', headers: { Authorization: `PortOne ${apiSecret}` } },
-    )
-  } catch {
+  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw: expectedAmount })
+  if (!verified.ok) {
     return Response.json(
-      { success: false, error: 'PortOne API 호출에 실패했습니다.' },
-      { status: 502 },
+      { success: false, error: verified.error },
+      { status: verified.status },
     )
   }
-
-  if (!portoneRes.ok) {
-    const errText = await portoneRes.text().catch(() => '')
-    return Response.json(
-      {
-        success: false,
-        error: `PortOne 결제 조회 실패 (${portoneRes.status}): ${errText.slice(0, 200)}`,
-      },
-      { status: 502 },
-    )
-  }
-
-  const payment = (await portoneRes.json()) as {
-    id?: string
-    status?: string
-    orderName?: string
-    amount?: { total?: number; paid?: number }
-    currency?: string
-    paidAt?: string
-    pgTxId?: string
-  }
-
-  if (payment.status !== 'PAID') {
-    return Response.json(
-      {
-        success: false,
-        error: `결제가 완료되지 않았습니다. (상태: ${payment.status || 'UNKNOWN'})`,
-      },
-      { status: 400 },
-    )
-  }
-
-  const paidAmount = payment.amount?.total ?? payment.amount?.paid ?? 0
-  if (paidAmount !== expectedAmount) {
-    return Response.json(
-      {
-        success: false,
-        error: `결제 금액이 일치하지 않습니다. (기대: ${expectedAmount}, 실제: ${paidAmount})`,
-      },
-      { status: 400 },
-    )
-  }
-
-  if (payment.currency && payment.currency !== 'KRW') {
-    return Response.json(
-      { success: false, error: `통화가 일치하지 않습니다. (${payment.currency})` },
-      { status: 400 },
-    )
-  }
+  const { payment, paidAmount } = verified
 
   const ordersStore = getStore({ name: 'live-orders', consistency: 'strong' })
   const now = new Date().toISOString()

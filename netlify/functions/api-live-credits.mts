@@ -11,6 +11,7 @@ import {
 } from './_shared/live-pricing.mts'
 import type { Config, Context } from '@netlify/functions'
 import { confirmTossPayment } from './_shared/toss-payments.mts'
+import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
 
 // Prepaid live-time top-up ("시간 충전하기").
 //   GET  /api/live-credits/:username                          → current month balance + usage
@@ -28,8 +29,6 @@ import { confirmTossPayment } from './_shared/toss-payments.mts'
 // the monthly broadcast allowance so a seller can keep streaming after the included
 // 3 hours are spent. Time is monthly-scoped and resets with the calendar month,
 // matching the included allowance.
-const PORTONE_API_BASE = 'https://api.portone.io'
-
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase()
   if (!username) {
@@ -71,6 +70,9 @@ export default async (req: Request, context: Context) => {
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
       }
+      if (!isToss && !['CARD', 'TOSSPAY', 'KAKAOPAY'].includes(payMethod)) {
+        return Response.json({ error: '유효한 결제 수단이 필요합니다.' }, { status: 400 })
+      }
       if (isToss && !orderId) {
         return Response.json({ error: '결제 정보(orderId)가 필요합니다.' }, { status: 400 })
       }
@@ -111,54 +113,13 @@ export default async (req: Request, context: Context) => {
           )
         }
       } else {
-        const apiSecret = process.env.PORTONE_V2_API_SECRET
-        if (!apiSecret) {
-          return Response.json(
-            { error: 'PORTONE_V2_API_SECRET 환경 변수가 설정되지 않았습니다.' },
-            { status: 500 },
-          )
-        }
-
-        let portoneRes: Response
-        try {
-          portoneRes = await fetch(
-            `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`,
-            { method: 'GET', headers: { Authorization: `PortOne ${apiSecret}` } },
-          )
-        } catch {
-          return Response.json({ error: 'PortOne 결제 조회에 실패했습니다.' }, { status: 502 })
-        }
-        if (!portoneRes.ok) {
-          const errText = await portoneRes.text().catch(() => '')
-          return Response.json(
-            { error: `PortOne 결제 조회 실패 (${portoneRes.status}): ${errText.slice(0, 200)}` },
-            { status: 502 },
-          )
-        }
-
-        const payment = (await portoneRes.json()) as {
-          status?: string
-          amount?: { total?: number; paid?: number }
-          currency?: string
-        }
-        if (payment.status !== 'PAID') {
-          return Response.json(
-            { error: `결제가 완료되지 않았습니다. (상태: ${payment.status || 'UNKNOWN'})` },
-            { status: 400 },
-          )
-        }
-        const paidAmount = payment.amount?.total ?? payment.amount?.paid ?? 0
-        if (paidAmount !== amountKrw) {
-          return Response.json(
-            { error: `결제 금액이 일치하지 않습니다. (기대: ${amountKrw}, 실제: ${paidAmount})` },
-            { status: 400 },
-          )
-        }
-        if (payment.currency && payment.currency !== 'KRW') {
-          return Response.json(
-            { error: `통화가 일치하지 않습니다. (${payment.currency})` },
-            { status: 400 },
-          )
+        const verified = await verifyLivePortOnePayment({
+          paymentId,
+          expectedKrw: amountKrw,
+          payMethod,
+        })
+        if (!verified.ok) {
+          return Response.json({ error: verified.error }, { status: verified.status })
         }
       }
 

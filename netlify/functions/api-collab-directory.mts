@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@picks/netlify-database";
 import { requireAdmin } from "./_shared/admin-auth.mts";
 import type { Config } from "@netlify/functions";
 
