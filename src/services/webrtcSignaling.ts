@@ -690,11 +690,14 @@ export class BroadcasterSignaling {
 
   private schedulePoll() {
     if (!this.running) return;
-    // Use faster polling (250ms) when there are pending connections, slower (900ms) when stable
+    // Use faster polling (250ms) when there are pending connections, and keep a
+    // brisk cadence (350ms) even once stable so viewer chat and cart actions the
+    // broadcaster relays reach the audience almost instantly instead of lagging
+    // up to ~1s behind on the old 900ms stable interval.
     const hasUnconnected = Array.from(this.peerConnections.values()).some(
       pc => pc.connectionState !== 'connected'
     );
-    const interval = hasUnconnected || this.peerConnections.size === 0 ? 250 : 900;
+    const interval = hasUnconnected || this.peerConnections.size === 0 ? 250 : 350;
     this.pollTimer = setTimeout(() => {
       this.poll().then(() => this.schedulePoll());
     }, interval);
@@ -1406,9 +1409,12 @@ export class ViewerSignaling {
   private schedulePoll() {
     if (!this.running) return;
     // Use aggressive polling (150ms) for the first 5s during connection to catch the offer ASAP,
-    // then 300ms during ongoing connection, and 800ms once connected
+    // then 300ms during ongoing connection, and 350ms once connected. Keeping the
+    // connected cadence brisk (was 800ms) means incoming chat and the host's
+    // broadcast-end signal surface within a few hundred ms instead of nearly a
+    // second — so live chat feels real-time and the "ended" screen appears promptly.
     const elapsed = Date.now() - this.connectingLockTime;
-    const interval = this.connected ? 800 : (elapsed < 5000 ? 150 : 300);
+    const interval = this.connected ? 350 : (elapsed < 5000 ? 150 : 300);
     this.pollTimer = setTimeout(() => {
       this.poll().then(() => this.schedulePoll());
     }, interval);

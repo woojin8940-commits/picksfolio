@@ -193,7 +193,7 @@ export const apiService = {
   },
 
   // Live State API
-  async getLiveState(username: string): Promise<{ isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any } | null> {
+  async getLiveState(username: string): Promise<{ isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any; ended?: boolean; endedAt?: number } | null> {
     try {
       const res = await fetch(`/api/live/${encodeURIComponent(username.toLowerCase())}`);
       if (!res.ok) return null;
@@ -204,7 +204,7 @@ export const apiService = {
     }
   },
 
-  async saveLiveState(username: string, state: { isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any; broadcastTitle?: string; startedAt?: string; heartbeatAt?: number }): Promise<boolean> {
+  async saveLiveState(username: string, state: { isLive: boolean; viewerCount: number; currentProduct?: any; activeMaterial?: any; broadcastTitle?: string; startedAt?: string; heartbeatAt?: number; ended?: boolean; endedAt?: number }): Promise<boolean> {
     try {
       const res = await fetch(`/api/live/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',

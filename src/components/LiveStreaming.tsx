@@ -997,7 +997,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       }
     };
     fetchCartStats();
-    const interval = setInterval(fetchCartStats, 3000);
+    // Poll every 1.2s so the broadcaster sees what viewers have added to their
+    // carts almost in real time (was 3s, which felt like the numbers were stuck).
+    const interval = setInterval(fetchCartStats, 1200);
     return () => { cancelled = true; clearInterval(interval); };
   }, [isLive, userName]);
 
@@ -1294,17 +1296,46 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     // then upload to blob storage and swap in the hosted URL. The hosted URL
     // keeps the live-state payload small so viewers render the banner
     // immediately instead of waiting for a huge base64 string to arrive.
-    const dataUrl: string = await new Promise<string>((resolve, reject) => {
+    //
+    // We downscale the inline data URL to at most 1280px (JPEG q0.82) before it
+    // ever enters live-state: a raw phone photo is several MB of base64, and a
+    // live-state document that large can fail to POST / be slow for every viewer
+    // to poll — which showed up as "배너를 띄워도 안 나온다". The downscaled copy is
+    // only the fallback; the hosted URL still swaps in once the upload lands.
+    const rawDataUrl: string = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (ev) => resolve((ev.target?.result as string) || '');
       reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsDataURL(file);
     }).catch(() => '');
 
-    if (!dataUrl) {
+    if (!rawDataUrl) {
       setNewMaterialName('');
       return;
     }
+
+    const dataUrl: string = await new Promise<string>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1280;
+        const scale = Math.min(1, MAX / Math.max(img.width || MAX, img.height || MAX));
+        const w = Math.max(1, Math.round((img.width || MAX) * scale));
+        const h = Math.max(1, Math.round((img.height || MAX) * scale));
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(rawDataUrl);
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        } catch {
+          resolve(rawDataUrl);
+        }
+      };
+      img.onerror = () => resolve(rawDataUrl);
+      img.src = rawDataUrl;
+    });
 
     const item: MaterialItem = { id, name, type, url: dataUrl, width, opacity: 100 };
     setMaterials(prev => [...prev, item]);
@@ -1573,6 +1604,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         broadcastTitle: savedBroadcastTitle,
         startedAt: broadcastStartTimeRef.current,
         heartbeatAt: Date.now(),
+        ended: false,
       };
 
       // Update LocalStorage for immediate local sync
@@ -1637,7 +1669,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         setIvsBroadcasting(false);
       }
 
-      const liveData = { isLive: false, viewerCount: 0, currentProduct: null, activeMaterial: null };
+      // Mark the broadcast as explicitly ended. `ended: true` distinguishes a
+      // deliberate end (host tapped 방송 종료) from a transient isLive=false blip
+      // (mobile pagehide, product-switch race). Viewers trust this flag to show
+      // the "방송이 종료되었습니다" screen immediately instead of freezing on the
+      // last frame — critical for HLS viewers, who never receive the WebRTC
+      // broadcast-end signal.
+      const liveData = { isLive: false, viewerCount: 0, currentProduct: null, activeMaterial: null, ended: true, endedAt: Date.now() };
 
       // Update LocalStorage
       localStorage.setItem(`picks_live_${normalizedUsername}`, JSON.stringify(liveData));
@@ -1806,13 +1844,42 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
 
-        {/* Material Overlays — only 상품/이미지 자료 float over the broadcaster's
-            own preview. Banner-type materials are managed and previewed entirely
-            in the 배너 탭 ("배너 관리"); they no longer float as a bar over the host's
-            live video here. Viewers still see a toggled banner via their own
-            renderer (LiveStream), so removing the host-side float only declutters
-            the broadcaster's screen — it does not hide banners from viewers. */}
+        {/* Material Overlays — 상품/이미지 자료 and a toggled 배너 float over the
+            broadcaster's own preview so the host sees exactly what viewers see the
+            moment they tap 띄우기 (without this preview the host had no on-screen
+            confirmation the banner was live). A banner is centered like the viewer
+            renderer; the host can tap 내리기 in the 배너 탭 to clear it. */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+          {activeMaterial && activeMaterial.url && activeMaterial.type === 'banner' && (
+            <div
+              key={activeMaterial.id}
+              style={{
+                width: `${activeMaterial.width || 90}%`,
+                height: 'auto',
+                opacity: (activeMaterial.opacity ?? 100) / 100,
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+              }}
+            >
+              <div className="w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl">
+                <img
+                  src={activeMaterial.url}
+                  alt={activeMaterial.name}
+                  className="w-full h-auto object-contain"
+                  loading="eager"
+                  decoding="sync"
+                  fetchPriority="high"
+                />
+                {activeMaterial.name && (
+                  <div className="p-3 bg-black/60">
+                    <p className="text-white font-black text-center uppercase tracking-widest text-sm">{activeMaterial.name}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {activeMaterial && activeMaterial.type !== 'banner' && (
             <div
               key={activeMaterial.id}
@@ -2388,12 +2455,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             'absolute inset-x-0 bottom-0 top-auto h-[58vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
           : showFilterPanel
             ? /* 얼굴 보정 (phones) opens as a BOTTOM SHEET like the 상품/담기현황
-                 sheets — it covers only the lower part of the screen so the live
-                 broadcast preview (and the broadcaster's face) above it stays
-                 visible while the sliders are dragged, instead of a full-screen
-                 panel that hid the whole feed. The web keeps the right-hand
-                 sidebar overlay via the md: classes above. */
-              'absolute inset-x-0 bottom-0 top-auto h-[56vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
+                 sheets, but shorter (42vh) than those. The correction sliders
+                 only need a compact strip, and keeping the sheet low leaves the
+                 top ~58% of the screen — where the broadcaster's face sits —
+                 uncovered so they can watch the reshaping update live while
+                 dragging. The web keeps the right-hand sidebar overlay via the
+                 md: classes above. */
+              'absolute inset-x-0 bottom-0 top-auto h-[42vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
             : 'absolute inset-x-0 bottom-[4.25rem] h-[34vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device

@@ -447,12 +447,15 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
       try {
         const apiLive = await apiService.getLiveState(normalizedUsername);
         if (!active || !apiLive) return; // null = fetch failed; keep current state
+        // A deliberate end (host tapped 방송 종료) sets `ended` — trust it at once
+        // instead of waiting out the transient-blip suppression below.
+        const deliberatelyEnded = !!apiLive.ended;
         if (apiLive.isLive) {
           consecutiveOff = 0;
         } else {
           consecutiveOff += 1;
         }
-        const suppressOff = !apiLive.isLive && consecutiveOff < 3;
+        const suppressOff = !deliberatelyEnded && !apiLive.isLive && consecutiveOff < 3;
         setLiveState((prev) => {
           // Broadcast briefly read as ended — hold the banner until confirmed.
           if (suppressOff && prev.isLive) return prev;

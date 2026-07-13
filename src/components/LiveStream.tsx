@@ -2381,22 +2381,35 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   useEffect(() => {
     let consecutiveEnded = 0;
     let closed = false;
+    const finish = () => {
+      if (closed) return;
+      closed = true;
+      setStreamEnded(true);
+      setTimeout(() => { onClose(); }, 1500);
+    };
     const checkEnded = async () => {
       if (closed) return;
       const state = await apiService.getLiveState(username);
       if (!state) return; // fetch failed — don't count toward ending
+      // The host tapped 방송 종료: this is a deliberate, trustworthy end signal
+      // (unlike a transient isLive=false blip), so close immediately. This is the
+      // path that matters for HLS viewers, who never get the WebRTC broadcast-end
+      // signal and would otherwise stare at a frozen last frame for ~15s.
+      if (state.ended) {
+        finish();
+        return;
+      }
       if (state.isLive) {
         consecutiveEnded = 0;
         return;
       }
       consecutiveEnded += 1;
       if (consecutiveEnded >= 3) {
-        closed = true;
-        setStreamEnded(true);
-        setTimeout(() => { onClose(); }, 1500);
+        finish();
       }
     };
-    const interval = setInterval(checkEnded, 5000);
+    // Poll every 2s (was 5s) so an ended broadcast is caught quickly.
+    const interval = setInterval(checkEnded, 2000);
     return () => clearInterval(interval);
   }, [username, onClose]);
 
@@ -3228,7 +3241,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
               key={activeMaterial.id}
               style={{
                 width: `${activeMaterial.width || 50}%`,
-                height: activeMaterial.type === 'banner' ? `${activeMaterial.width || 50}%` : 'auto',
+                height: 'auto',
                 opacity: (activeMaterial.opacity ?? 100) / 100,
                 position: 'absolute',
                 ...(activeMaterial.type === 'banner'
@@ -3239,17 +3252,17 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
               }}
             >
               {activeMaterial.type === 'banner' ? (
-                <div className="w-full h-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+                <div className="w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl">
                   <img
                     src={activeMaterial.url}
                     alt={activeMaterial.name}
-                    className="w-full flex-1 object-cover min-h-0"
+                    className="w-full h-auto object-contain"
                     loading="eager"
                     decoding="sync"
                     fetchPriority="high"
                   />
                   {activeMaterial.name && (
-                    <div className="p-3 bg-black/60 flex-shrink-0">
+                    <div className="p-3 bg-black/60">
                       <p className="text-white font-black text-center uppercase tracking-widest text-sm">{activeMaterial.name}</p>
                     </div>
                   )}

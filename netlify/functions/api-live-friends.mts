@@ -36,14 +36,6 @@ async function profilesFor(db: ReturnType<typeof getDatabase>, usernames: string
   return map;
 }
 
-/** True when a creator account exists for this username. */
-async function userExists(db: ReturnType<typeof getDatabase>, username: string): Promise<boolean> {
-  const rows = (await db.sql`
-    SELECT 1 FROM site_data WHERE username = ${username} LIMIT 1
-  `) as unknown[];
-  return rows.length > 0;
-}
-
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
@@ -84,10 +76,17 @@ export default async (req: Request) => {
       if (owner === friend) {
         return Response.json({ error: "자기 자신은 친구로 추가할 수 없습니다." }, { status: 400 });
       }
-      if (!(await userExists(db, friend))) {
+      // A basic sanity check on the username shape (usernames are the app's unique
+      // identity). We intentionally do NOT hard-reject when the target has no
+      // site_data row: signup writes that row inside a best-effort try/catch, so a
+      // legitimate creator can be missing it — and rejecting here was the reason
+      // "친구 추가가 안 된다". If the account genuinely doesn't exist the follow-up
+      // invite step surfaces that; saving the friend by username is harmless and
+      // the host can remove a typo from the list.
+      if (friend.length < 3 || !/^[a-z0-9._-]+$/.test(friend)) {
         return Response.json(
-          { error: "해당 유저네임을 찾을 수 없습니다. 정확한 유저네임인지 확인해 주세요." },
-          { status: 404 }
+          { error: "올바른 유저네임을 입력해 주세요." },
+          { status: 400 }
         );
       }
 

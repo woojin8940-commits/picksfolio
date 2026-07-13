@@ -536,9 +536,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">콘텐츠 풀 액세스</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 상단 커버 <strong>영상 업로드</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>상품·포트폴리오 <strong>영상 업로드</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 <strong>콘텐츠 구성</strong>(텍스트·이미지 블록) 편집</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>내 페이지 상단 커버 <strong>영상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>상품·콘텐츠 <strong>영상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>내 페이지 <strong>콘텐츠 구성</strong>(텍스트·이미지 블록) 편집</li>
             </ul>
 
             {loading ? (
@@ -999,7 +999,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
             <li>스탠다드 멤버십은 월 4,900원, 스탠다드 AI 멤버십은 월 6,900원, 커머스 멤버십은 월 13,900원이며, 언제든 해지할 수 있습니다.</li>
-            <li>스탠다드 멤버십 구독 시 포트폴리오 상단 커버 영상 업로드 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
+            <li>스탠다드 멤버십 구독 시 내 페이지 상단 커버 영상 업로드 · 상품/콘텐츠 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
             <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 스탠다드 AI 멤버십(6,900원)과 커머스 멤버십(13,900원)에 포함됩니다. 스탠다드 멤버십(4,900원)에는 포함되지 않습니다.</li>
             <li>커머스 멤버십은 스탠다드 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
             <li>라이브 매출 수수료는 결제액의 8.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
@@ -1144,10 +1144,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {selectedTier === 'commerce'
-                  ? '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트가 즉시 활성화되고, 라이브 커머스 송출까지 이용할 수 있습니다.'
+                  ? '구독을 시작하면 내 페이지 영상 커버 · 상품/콘텐츠 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트가 즉시 활성화되고, 라이브 커머스 송출까지 이용할 수 있습니다.'
                   : selectedTier === 'standard_ai'
-                    ? '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트가 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'
-                    : '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트는 스탠다드 AI 멤버십, 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
+                    ? '구독을 시작하면 내 페이지 영상 커버 · 상품/콘텐츠 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트가 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'
+                    : '구독을 시작하면 내 페이지 영상 커버 · 상품/콘텐츠 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트는 스탠다드 AI 멤버십, 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
               </p>
             </div>
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
