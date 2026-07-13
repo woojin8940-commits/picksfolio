@@ -6,7 +6,6 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
-  cardParam,
   isNiceCardConfigured,
   NICE_NOT_CONFIGURED_MESSAGE,
   portonePayMethod,
@@ -357,7 +356,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           currency: 'KRW',
           payMethod: portonePayMethod(ppMethod),
           redirectUrl: portoneRedirectUrl(),
-          ...cardParam(ppMethod),
           customer: {
             customerId: safeUserName,
             fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,

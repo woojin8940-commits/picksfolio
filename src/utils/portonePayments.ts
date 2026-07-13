@@ -93,13 +93,6 @@ export const easyPayParam = (m: PortOnePayMethod) =>
       ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
       : { easyPay: { easyPayProvider: 'TOSSPAY' } };
 
-// 나이스정보통신(신모듈) 카드 결제 파라미터. NICE V2 는 카드 결제 시 고정 할부 개월수를
-// 요구한다(미지정 시 결제창이 즉시 오류로 닫혀 "결제 처리 중 오류"로 보인다). 결제 금액이
-// 대부분 할부 가능 기준(보통 5만원) 미만이므로 일시불(fixedMonth: 0)로 호출한다.
-// 간편결제(토스페이/카카오페이)에는 카드 옵션을 넣지 않는다. — PortOne V2 NICE 문서 기준.
-export const cardParam = (m: PortOnePayMethod) =>
-  m === 'CARD' ? { card: { installment: { monthOption: { fixedMonth: 0 } } } } : {};
-
 // 운영 채널 키가 올바른 공개 식별자 형식으로 설정되었는지 결제 호출 전에 확인한다.
 export const isNiceCardConfigured = () =>
   /^channel-key-[0-9a-f-]+$/i.test(PORTONE_NICE_CHANNEL_KEY);
