@@ -5,7 +5,6 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
-  cardParam,
   isNiceCardConfigured,
   NICE_NOT_CONFIGURED_MESSAGE,
   portonePayMethod,
@@ -97,7 +96,6 @@ export async function payAndChargeLiveTime(
       payMethod: portonePayMethod(ppMethod),
       redirectUrl: portoneRedirectUrl(),
       ...easyPayParam(ppMethod),
-      ...cardParam(ppMethod),
       customer: { customerId: toAsciiSafeId(username) },
     });
 
