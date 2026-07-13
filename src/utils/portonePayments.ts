@@ -27,15 +27,15 @@ import { toAsciiSafeId } from './formatters';
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
-// 카드 결제용 나이스정보통신(신모듈) 운영 채널 키. 브라우저에 공개되는 식별자이며,
-// PortOne 콘솔에서 "실 연동"으로 만든 NICE 채널의 키를 Netlify production 환경변수
-// VITE_PORTONE_NICE_CHANNEL_KEY 로 주입한다. 현재 운영 콘솔에 MID 별 변수명으로 등록된
-// VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m 도 동일한 운영 카드 채널로 인식한다.
-// 테스트 채널로 조용히 되돌아가 실제 결제로 오인하는 사고를 막기 위해 소스 기본값은 두지 않는다.
+// 카드 단건결제용 나이스정보통신(신모듈) 일반결제 채널 키(MID IM0029308m). 브라우저에 공개되는
+// 식별자이며(시크릿 아님), 클로드·라이브 단건결제에서 쓴다. PortOne 실연동 승인으로 확정된
+// 채널 키를 소스 기본값으로 두고, 필요 시 환경변수(VITE_PORTONE_NICE_CHANNEL_KEY 또는 MID별
+// 변수명 VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m)로 재정의할 수 있게 한다.
+// (카드 정기결제는 별도 정기결제 채널 MID IM0029309m 를 서버에서 사용한다 — membership-billing.mts)
 export const PORTONE_NICE_CHANNEL_KEY =
   (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY as string | undefined)?.trim() ||
   (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m as string | undefined)?.trim() ||
-  '';
+  'channel-key-c8047336-ba81-47fd-b684-0c8d280ee30c';
 
 // CARD = 나이스정보통신(신모듈) 카드 결제, TOSSPAY/KAKAOPAY = 간편결제.
 export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';

@@ -4,23 +4,10 @@ import {
   chargeMembershipMonthly,
   addOneMonth,
   normalizeTier,
-  TIER_PRICE_KRW,
+  issueNiceCardBillingKey,
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
 import { issueTossBillingKey } from "./_shared/toss-payments.mts";
-import { verifyLivePortOnePayment } from "./_shared/portone-live-payment.mts";
-
-// 카드(신용카드) 단건 결제를 서버에서 검증한다. 빌링키 발급(본인인증 필요) 대신, 클로드 플랜과
-// 동일한 단건 결제(requestPayment)로 받은 paymentId 가 실제로 결제 완료(PAID)됐고 금액·통화가
-// 멤버십 가격과 일치하는지 PortOne V2 결제 조회로 확인한다. (V2 API 시크릿은 서버 전용)
-async function verifyPortOneOneTime(
-  paymentId: string,
-  expectedKrw: number,
-  payMethod: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw, payMethod });
-  return verified.ok ? { ok: true } : { ok: false, error: verified.error };
-}
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -51,66 +38,33 @@ export default async (req: Request) => {
     const store = getStore("seller-verification");
     const key = `seller_${username.toLowerCase()}`;
 
-    // ── 카드(신용카드) 단건 결제 경로 ──
-    // billingKey 없이 paymentId 로 들어오면(=토스 제외) 빌링키 정기결제가 아니라 단건 결제다.
-    // 본인인증을 강제하는 카드 빌링키 발급 대신, 클로드 플랜과 같은 단건 결제로 첫 달을 즉시
-    // 결제한 것이다. 결제를 검증한 뒤 빌링키 없이 멤버십을 활성화한다. 카드 단건은 자동 정기결제
-    // 대상이 아니므로(스케줄러는 billing_key 없는 레코드를 건너뛴다) next_billing_date 를 비운다.
-    const oneTimePaymentId = !isToss && !body?.billingKey ? String(body?.paymentId || "").trim() : "";
-    if (oneTimePaymentId) {
-      const expectedKrw = TIER_PRICE_KRW[normalizedTier];
-      const verified = await verifyPortOneOneTime(
-        oneTimePaymentId,
-        expectedKrw,
-        String(body?.payMethod || "CARD"),
-      );
-      if (!verified.ok) {
-        return Response.json(
-          { success: false, error: verified.error || "결제 검증에 실패했습니다." },
-          { status: 402 },
-        );
-      }
-
-      const existing = (await store.get(key, { type: "json" })) as Record<string, any> | null;
-      const now = new Date().toISOString();
-      const billingEntry: MembershipBillingEntry = {
-        at: now,
-        tier: normalizedTier,
-        amountKrw: expectedKrw,
-        kind: "initial",
-        success: true,
-        paymentId: oneTimePaymentId,
-      };
-      const history = Array.isArray(existing?.billing_history) ? existing!.billing_history : [];
-
-      const updated = {
-        ...(existing || {}),
-        membership_active: true,
-        membership_plan: normalizedTier,
-        membership_started_at: existing?.membership_started_at || now,
-        // 단건 결제이므로 빌링키를 저장하지 않는다 → 자동 정기결제 스케줄러가 건너뛴다.
-        billing_key: null,
-        billing_provider: "portone-onetime",
-        membership_amount_krw: expectedKrw,
-        membership_payment_method: "card",
-        last_billing_at: now,
-        next_billing_date: null,
-        billing_failures: 0,
-        billing_history: [billingEntry, ...history].slice(0, 50),
-        updated_at: now,
-      };
-
-      await store.setJSON(key, updated);
-      return Response.json({ success: true, data: updated });
-    }
-
-    // ── 빌링키(정기결제) 경로 ── 토스페이먼츠(카드) / 토스페이 / 카카오페이 ──
-    // Resolve the billing key. 토스페이먼츠(카드)는 requestBillingAuth 후 받은
-    // authKey·customerKey 를 서버에서 빌링키로 교환한다. 토스페이/카카오페이는 PortOne
-    // 브라우저 SDK 가 발급한 billingKey 를 그대로 받는다.
+    // ── 빌링키(정기결제) 발급 경로 ──
+    // 멤버십은 모두 정기결제(매월 자동결제)로 동작한다. 결제수단별로 빌링키를 확보한다:
+    //   • 카드(나이스정보통신): 브라우저 SDK 로는 카드 빌링키를 발급할 수 없어(NICE V2 는
+    //     간편결제만 SDK 지원) 카드 정보를 받아 서버에서 수기(키인) `POST /billing-keys` 로
+    //     빌링키를 발급한다. 카드 정보는 저장하지 않고 PortOne 으로만 전달한다.
+    //   • 토스페이먼츠(카드): authKey·customerKey 를 서버에서 빌링키로 교환한다.
+    //   • 토스페이 / 카카오페이: 브라우저 SDK 가 발급한 billingKey 를 그대로 받는다.
     let billingKey = String(body?.billingKey || "").trim();
     const tossCustomerKey = String(body?.customerKey || "").trim();
-    if (isToss) {
+    const cardCredential =
+      !isToss && !billingKey && body?.card && typeof body.card === "object" ? body.card : null;
+
+    if (cardCredential) {
+      const issued = await issueNiceCardBillingKey(username, {
+        number: String(cardCredential.number || "").replace(/[\s-]/g, ""),
+        expiryYear: String(cardCredential.expiryYear || "").trim(),
+        expiryMonth: String(cardCredential.expiryMonth || "").trim(),
+        birthOrBusinessRegistrationNumber: String(
+          cardCredential.birthOrBusinessRegistrationNumber || "",
+        ).trim(),
+        passwordTwoDigits: String(cardCredential.passwordTwoDigits || "").trim(),
+      });
+      if (!issued.ok) {
+        return Response.json({ success: false, error: issued.error }, { status: 402 });
+      }
+      billingKey = issued.billingKey;
+    } else if (isToss) {
       const authKey = String(body?.authKey || "").trim();
       if (!authKey || !tossCustomerKey) {
         return Response.json(

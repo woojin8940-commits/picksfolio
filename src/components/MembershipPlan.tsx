@@ -6,10 +6,6 @@ import {
   PORTONE_STORE_ID,
   channelKeyFor,
   easyPayParam,
-  cardParam,
-  isNiceCardConfigured,
-  NICE_NOT_CONFIGURED_MESSAGE,
-  portonePayMethod,
   portoneBillingKeyMethod,
   portoneRedirectUrl,
   savePortOneIntent,
@@ -106,6 +102,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
+  // 카드(신용카드) 정기결제 등록용 카드 정보. NICE V2 는 카드 빌링키를 수기(키인) 방식으로만
+  // 발급하므로 카드 정보를 직접 입력받아 서버로 전달한다(저장하지 않음).
+  const [cardForm, setCardForm] = useState({ number: '', expiry: '', birth: '', pw2: '' });
 
   // Claude plan (prepaid AI add-on, billed separately from the memberships above).
   // Activating it opens a PortOne payment window right here; the base monthly grant
@@ -313,14 +312,69 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     const tierLabel = TIER_LABEL[selectedTier];
     const tierAmount = TIER_PRICE[selectedTier];
 
-    if (typeof window === 'undefined' || !window.PortOne) {
-      setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
+    // ── 카드(신용카드): NICE 키인 방식으로 카드 빌링키를 발급해 정기결제로 등록 ──
+    // NICE V2 는 브라우저 SDK(requestIssueBillingKey)로 카드 빌링키를 발급할 수 없어(간편결제만
+    // 지원) 카드 정보를 서버로 보내 수기(키인) `POST /billing-keys` 로 빌링키를 발급받고, 첫 달을
+    // 즉시 결제한 뒤 가입일 기준 매월 자동결제한다. 카드 정보는 저장하지 않고 PortOne 으로만
+    // 전달된다. 토스페이·카카오페이는 아래 SDK 빌링키 경로를 그대로 사용한다.
+    if (payMethod === 'CARD') {
+      const number = cardForm.number.replace(/\D/g, '');
+      const exp = cardForm.expiry.replace(/\D/g, ''); // MMYY
+      const birth = cardForm.birth.replace(/\D/g, '');
+      const pw2 = cardForm.pw2.replace(/\D/g, '');
+      if (number.length < 13 || number.length > 16) {
+        setError('카드 번호를 정확히 입력해 주세요.');
+        return;
+      }
+      if (exp.length !== 4 || Number(exp.slice(0, 2)) < 1 || Number(exp.slice(0, 2)) > 12) {
+        setError('카드 유효기간을 MM/YY 형식으로 입력해 주세요.');
+        return;
+      }
+      if (birth.length !== 6 && birth.length !== 10) {
+        setError('생년월일 6자리(개인) 또는 사업자등록번호 10자리를 입력해 주세요.');
+        return;
+      }
+      if (pw2.length !== 2) {
+        setError('카드 비밀번호 앞 2자리를 입력해 주세요.');
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const res = await apiService.subscribeMembershipCard(normalizedUserName, selectedTier, {
+          number,
+          expiryMonth: exp.slice(0, 2),
+          expiryYear: exp.slice(2, 4),
+          birthOrBusinessRegistrationNumber: birth,
+          passwordTwoDigits: pw2,
+        });
+        if (!res.success) {
+          setError(res.error || '카드 정기결제 등록에 실패했습니다. 카드 정보를 확인해 주세요.');
+          setSaving(false);
+          return;
+        }
+        if (res.data) setVerification(res.data);
+        setConfirmOpen(false);
+        setCardForm({ number: '', expiry: '', birth: '', pw2: '' });
+        const nextDate = res.data?.next_billing_date
+          ? new Date(res.data.next_billing_date).toLocaleDateString('ko-KR')
+          : null;
+        flashSuccess(
+          `카드로 ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`
+            + (nextDate ? ` 다음 결제일은 ${nextDate}이며, 가입일 기준 매월 자동결제됩니다.` : ' 가입일 기준 매월 자동결제됩니다.'),
+        );
+      } catch (e) {
+        console.error('[Membership] card billing error:', e);
+        setError('카드 정기결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
-    // 카드(나이스정보통신) 채널 미설정 시 빌링키 발급이 무조건 실패하므로 명확히 안내한다.
-    if (payMethod === 'CARD' && !isNiceCardConfigured()) {
-      setError(NICE_NOT_CONFIGURED_MESSAGE);
+    // ── 간편결제(토스페이 / 카카오페이): PortOne 빌링키로 정기결제 등록 ──
+    if (typeof window === 'undefined' || !window.PortOne) {
+      setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
       return;
     }
 
@@ -328,73 +382,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     try {
       const safeUserName = toAsciiSafeId(normalizedUserName);
       const ppMethod = payMethod;
-
-      // ── 카드(신용카드): 단건 결제로 즉시 활성화 ──
-      // 카드 결제는 나이스정보통신(신모듈) 일반결제(단건) 채널을 쓴다. 이 채널은 빌링키
-      // 발급(requestIssueBillingKey)이 본인인증을 강제하거나 발급 자체가 실패하므로 — 그래서
-      // "신용카드 결제가 안 되던" 것이다 — 클로드 플랜과 동일하게 단건 결제(requestPayment)로
-      // 첫 달을 즉시 결제하고, 돌아온 paymentId 를 서버(/api/billing-issue)에서 검증해 멤버십을
-      // 활성화한다(카드는 자동 정기결제 대상이 아니다). 토스페이·카카오페이는 아래 빌링키
-      // 자동결제 경로를 그대로 사용한다.
-      if (ppMethod === 'CARD') {
-        const paymentId = genPortOneId('membership', normalizedUserName);
-        savePortOneIntent({
-          type: 'membership',
-          username: normalizedUserName,
-          payMethod: ppMethod,
-          tier: selectedTier,
-          oneTime: true,
-          orderName: `픽스폴리오 ${tierLabel}`,
-          returnPath: window.location.pathname + window.location.search,
-        });
-
-        const response = await window.PortOne.requestPayment({
-          storeId: PORTONE_STORE_ID,
-          channelKey: channelKeyFor(ppMethod),
-          paymentId,
-          orderName: `픽스폴리오 ${tierLabel}`,
-          totalAmount: tierAmount,
-          currency: 'KRW',
-          payMethod: portonePayMethod(ppMethod),
-          redirectUrl: portoneRedirectUrl(),
-          ...cardParam(ppMethod),
-          customer: {
-            customerId: safeUserName,
-            fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
-            phoneNumber: verification?.business?.contact_phone || undefined,
-          },
-        });
-
-        if (!response || response.code) {
-          clearPortOneIntent();
-          if (response?.code) {
-            const detail = response.code === 'PORTONE_ERROR'
-              ? '결제 모듈 오류입니다. 채널 설정(결제모듈·PG상점아이디)을 확인해 주세요.'
-              : response.message || `카드 결제 실패 (${response.code})`;
-            setError(detail);
-            console.error('[Membership] PortOne card payment error:', response.code, response.message);
-          }
-          setSaving(false);
-          return;
-        }
-
-        const verifyRes = await apiService.activateMembershipOneTime(
-          normalizedUserName,
-          response.paymentId || paymentId,
-          selectedTier,
-          'CARD',
-        );
-        clearPortOneIntent();
-        if (!verifyRes.success) {
-          setError(verifyRes.error || '멤버십 결제에 실패했습니다. 고객센터로 문의해 주세요.');
-          setSaving(false);
-          return;
-        }
-        if (verifyRes.data) setVerification(verifyRes.data);
-        setConfirmOpen(false);
-        flashSuccess(`카드로 ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`);
-        return;
-      }
 
       const issueId = genPortOneId('billing', normalizedUserName);
       // 토스페이·카카오페이는 PortOne V2 빌링키를 발급해 매월 자동결제(정기결제)로 동작한다.
@@ -1031,7 +1018,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </div>
               <button
                 type="button"
-                onClick={() => { setConfirmOpen(false); setError(null); }}
+                onClick={() => { setConfirmOpen(false); setError(null); setCardForm({ number: '', expiry: '', birth: '', pw2: '' }); }}
                 className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl"
                 aria-label="닫기"
               >
@@ -1091,9 +1078,55 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   </button>
                 </div>
                 {payMethod === 'CARD' && (
-                  <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    신용·체크카드로 매월 자동결제됩니다. 카드 등록 시 휴대폰 본인인증이 필요합니다.
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="cc-number"
+                      value={cardForm.number}
+                      onChange={(e) =>
+                        setCardForm((f) => ({ ...f, number: e.target.value.replace(/[^\d\s-]/g, '').slice(0, 19) }))
+                      }
+                      placeholder="카드 번호 (숫자만)"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="cc-exp"
+                        value={cardForm.expiry}
+                        onChange={(e) =>
+                          setCardForm((f) => ({ ...f, expiry: e.target.value.replace(/[^\d/]/g, '').slice(0, 5) }))
+                        }
+                        placeholder="유효기간 MM/YY"
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                      />
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={cardForm.pw2}
+                        onChange={(e) =>
+                          setCardForm((f) => ({ ...f, pw2: e.target.value.replace(/\D/g, '').slice(0, 2) }))
+                        }
+                        placeholder="비밀번호 앞 2자리"
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                      />
+                    </div>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      value={cardForm.birth}
+                      onChange={(e) =>
+                        setCardForm((f) => ({ ...f, birth: e.target.value.replace(/\D/g, '').slice(0, 10) }))
+                      }
+                      placeholder="생년월일 6자리(YYMMDD) 또는 사업자번호 10자리"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                    />
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      신용·체크카드로 첫 달을 결제하고 가입일 기준 매월 자동결제됩니다. 카드 정보는 저장되지 않고 결제사(나이스정보통신)로만 전달됩니다.
+                    </p>
+                  </div>
                 )}
                 {payMethod === 'KAKAOPAY' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
@@ -1120,7 +1153,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
               <button
                 type="button"
-                onClick={() => { setConfirmOpen(false); setError(null); }}
+                onClick={() => { setConfirmOpen(false); setError(null); setCardForm({ number: '', expiry: '', birth: '', pw2: '' }); }}
                 disabled={saving}
                 className="px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
