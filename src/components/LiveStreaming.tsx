@@ -261,6 +261,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const canvasStreamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const signalingRef = useRef<BroadcasterSignaling | null>(null);
+  // Holds the latest cart-stats fetcher so the once-registered signaling
+  // onCartUpdate handler can trigger an immediate refetch (see the cart poll).
+  const fetchCartStatsRef = useRef<(() => void) | null>(null);
   const ivsBroadcasterRef = useRef<IVSBroadcaster | null>(null);
   const [ivsBroadcasting, setIvsBroadcasting] = useState(false);
   const [liveUsage, setLiveUsage] = useState<{
@@ -290,6 +293,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   // keep broadcasting on their own channels while viewers see a split screen.
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [friends, setFriends] = useState<{ username: string; display_name: string; avatar_url: string }[]>([]);
+  // Friend requests: `friendRequests` are people asking to be THIS user's friend
+  // (they show an accept/decline prompt); `outgoingRequests` are people this user
+  // asked, still awaiting their acceptance (shown as "요청 보냄" in the list).
+  const [friendRequests, setFriendRequests] = useState<{ username: string; display_name: string; avatar_url: string }[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<{ username: string; display_name: string; avatar_url: string }[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [inviteUsername, setInviteUsername] = useState('');
   // When inviting by username, also save them to the friend list by default so
@@ -586,6 +594,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       });
     });
 
+    // Refetch cart stats the instant a viewer changes their cart, so 담기현황
+    // reflects "상품 담기" taps in real time rather than on the next 3s tick.
+    signaling.onCartUpdate(() => {
+      fetchCartStatsRef.current?.();
+    });
+
     return () => {
       signaling.stop();
       signalingRef.current = null;
@@ -723,8 +737,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const loadFriends = useCallback(async () => {
     setFriendsLoading(true);
     try {
-      const list = await apiService.listLiveFriends(userName);
+      const { friends: list, incoming, outgoing } = await apiService.listLiveFriends(userName);
       setFriends(list);
+      setFriendRequests(incoming);
+      setOutgoingRequests(outgoing);
     } finally {
       setFriendsLoading(false);
     }
@@ -743,13 +759,19 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     let cancelled = false;
     const poll = async () => {
       try {
-        const [invites, active] = await Promise.all([
+        const [invites, active, friendData] = await Promise.all([
           apiService.getCobroadcastInvites(userName),
           apiService.getActiveCobroadcast(userName),
+          apiService.listLiveFriends(userName),
         ]);
         if (cancelled) return;
         setIncomingInvites(invites);
         setCoSession(active);
+        // Keep the friend list + incoming friend requests fresh so the recipient
+        // sees a 친구 요청 accept prompt even before opening the invite modal.
+        setFriends(friendData.friends);
+        setFriendRequests(friendData.incoming);
+        setOutgoingRequests(friendData.outgoing);
       } catch { /* non-blocking */ }
     };
     poll();
@@ -810,10 +832,10 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         return;
       }
       if (alsoSaveFriend && !friends.some(f => f.username === guest)) {
-        const add = await apiService.addLiveFriend(userName, guest);
-        // Optimistic add for instant feedback, then reconcile with the server so
-        // the saved friend is guaranteed to show (and persist) in the list.
-        if (add.success && add.friend) setFriends(prev => [add.friend!, ...prev]);
+        // Sends a friend REQUEST (not an instant save) — the guest becomes a
+        // saved friend only after they accept, so reconcile from the server
+        // rather than optimistically adding them to the accepted list.
+        await apiService.addLiveFriend(userName, guest);
         loadFriends();
       }
       setInviteNotice(`@${guest}님에게 초대를 보냈어요. 상대가 수락하면 방송 설정 화면으로 들어가 함께 방송을 준비합니다.`);
@@ -825,7 +847,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     }
   }, [userName, friends, inviteBusy, loadFriends]);
 
-  // Add a friend by username without sending an invite.
+  // Send a friend request by username. The friendship only appears in both
+  // lists once the other person accepts (see the accept prompt banner). If they
+  // had already requested this user, the server auto-accepts and we're friends.
   const addFriend = useCallback(async (target: string) => {
     const friend = target.trim().replace(/^@+/, '').toLowerCase();
     if (!friend || inviteBusy) return;
@@ -835,26 +859,49 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     try {
       const res = await apiService.addLiveFriend(userName, friend);
       if (!res.success) {
-        setInviteError(res.error || '친구 추가에 실패했습니다.');
+        setInviteError(res.error || '친구 요청에 실패했습니다.');
         return;
       }
-      if (res.friend && !friends.some(f => f.username === res.friend!.username)) {
-        setFriends(prev => [res.friend!, ...prev]);
-      }
-      // Reconcile with the server so the list reliably reflects the saved friend.
+      // Reconcile with the server so the list/requests reliably reflect state.
       loadFriends();
-      setInviteNotice(`@${friend}님을 친구 목록에 추가했어요.`);
+      if (res.alreadyFriends) {
+        setInviteNotice(`@${friend}님과는 이미 친구예요.`);
+      } else if (res.accepted) {
+        setInviteNotice(`@${friend}님과 친구가 되었어요.`);
+      } else {
+        setInviteNotice(`@${friend}님에게 친구 요청을 보냈어요. 상대가 수락하면 친구 목록에 추가됩니다.`);
+      }
       setInviteUsername('');
     } catch {
-      setInviteError('친구 추가 중 오류가 발생했습니다.');
+      setInviteError('친구 요청 중 오류가 발생했습니다.');
     } finally {
       setInviteBusy(false);
     }
-  }, [userName, friends, inviteBusy, loadFriends]);
+  }, [userName, inviteBusy, loadFriends]);
+
+  // Accept an incoming friend request — the requester becomes a mutual friend.
+  const acceptFriendRequest = useCallback(async (requester: string) => {
+    setFriendRequests(prev => prev.filter(r => r.username !== requester));
+    const res = await apiService.acceptFriendRequest(userName, requester);
+    if (res.success && res.friend && !friends.some(f => f.username === res.friend!.username)) {
+      setFriends(prev => [res.friend!, ...prev]);
+    }
+    loadFriends();
+  }, [userName, friends, loadFriends]);
+
+  // Decline an incoming friend request — drop it silently.
+  const declineFriendRequest = useCallback(async (requester: string) => {
+    setFriendRequests(prev => prev.filter(r => r.username !== requester));
+    await apiService.declineFriendRequest(userName, requester);
+    loadFriends();
+  }, [userName, loadFriends]);
 
   const removeFriend = useCallback(async (friend: string) => {
     const ok = await apiService.removeLiveFriend(userName, friend);
-    if (ok) setFriends(prev => prev.filter(f => f.username !== friend));
+    if (ok) {
+      setFriends(prev => prev.filter(f => f.username !== friend));
+      setOutgoingRequests(prev => prev.filter(f => f.username !== friend));
+    }
   }, [userName]);
 
   const acceptInvite = useCallback(async (inviteId: string) => {
@@ -997,8 +1044,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       }
     };
     fetchCartStats();
+    // Expose the fetcher so a viewer's cart-update signal can trigger an
+    // immediate refresh between polling ticks (near-instant 담기현황 updates).
+    fetchCartStatsRef.current = fetchCartStats;
     const interval = setInterval(fetchCartStats, 3000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { cancelled = true; clearInterval(interval); fetchCartStatsRef.current = null; };
   }, [isLive, userName]);
 
   // Push active product + active material to live state so viewers can see them
@@ -2398,9 +2448,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                  sheets — it covers only the lower part of the screen so the live
                  broadcast preview (and the broadcaster's face) above it stays
                  visible while the sliders are dragged, instead of a full-screen
-                 panel that hid the whole feed. The web keeps the right-hand
-                 sidebar overlay via the md: classes above. */
-              'absolute inset-x-0 bottom-0 top-auto h-[56vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
+                 panel that hid the whole feed. Kept SHORT (42vh) so the sheet
+                 rises just under the mid-line, leaving the broadcaster's face
+                 clearly in view to judge the reshaping in real time — the earlier
+                 56vh pushed the face off the top of the screen. Its slider list
+                 scrolls inside, so the shorter sheet loses no controls. The web
+                 keeps the right-hand sidebar overlay via the md: classes above. */
+              'absolute inset-x-0 bottom-0 top-auto h-[42vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
             : 'absolute inset-x-0 bottom-[4.25rem] h-[34vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
@@ -3033,10 +3087,12 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         </div>
       )}
 
-      {/* 함께 방송 초대 도착 — incoming invite banner (this user is the invitee) */}
-      {!coSession && incomingInvites.length > 0 && (
+      {/* 상단 알림 — 함께 방송 초대 & 친구 요청 (this user is the recipient).
+          Both stack in one fixed column so they never overlap. */}
+      {((!coSession && incomingInvites.length > 0) || friendRequests.length > 0) && (
         <div className="fixed top-3 inset-x-0 z-[260] flex flex-col items-center gap-2 px-3 pointer-events-none">
-          {incomingInvites.map((inv) => (
+          {/* 함께 방송 초대 도착 */}
+          {!coSession && incomingInvites.map((inv) => (
             <div
               key={inv.id}
               className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-violet-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2"
@@ -3060,6 +3116,39 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               <button
                 type="button"
                 onClick={() => declineInvite(inv.id)}
+                className="px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 text-[11px] font-bold active:scale-95 transition-all shrink-0"
+              >
+                거절
+              </button>
+            </div>
+          ))}
+
+          {/* 친구 요청 도착 — someone asked to add THIS user as a friend. Accepting
+              puts each in the other's friend list. */}
+          {friendRequests.map((rq) => (
+            <div
+              key={`fr-${rq.username}`}
+              className="pointer-events-auto w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-emerald-400/40 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2"
+            >
+              <div className="w-9 h-9 rounded-full bg-emerald-500/25 overflow-hidden shrink-0 flex items-center justify-center">
+                {rq.avatar_url
+                  ? <img src={rq.avatar_url} alt="" className="w-full h-full object-cover" />
+                  : <UserPlus size={16} className="text-emerald-200" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-xs font-black truncate">{rq.display_name}</p>
+                <p className="text-white/50 text-[11px]">친구 요청을 보냈어요</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => acceptFriendRequest(rq.username)}
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black active:scale-95 transition-all shrink-0"
+              >
+                수락
+              </button>
+              <button
+                type="button"
+                onClick={() => declineFriendRequest(rq.username)}
                 className="px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/70 text-[11px] font-bold active:scale-95 transition-all shrink-0"
               >
                 거절
@@ -3147,7 +3236,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     onChange={(e) => setSaveAsFriend(e.target.checked)}
                     className="accent-violet-500 w-4 h-4"
                   />
-                  <span className="text-white/60 text-[11px]">초대하면서 친구 목록에 추가</span>
+                  <span className="text-white/60 text-[11px]">초대하면서 친구 요청 보내기</span>
                 </label>
                 <button
                   type="button"
@@ -3155,11 +3244,47 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   disabled={inviteBusy || inviteUsername.trim().length < 3}
                   className="text-violet-300 hover:text-violet-200 text-[11px] font-bold mb-4 inline-flex items-center gap-1 disabled:opacity-40"
                 >
-                  <UserPlus size={12} /> 초대 없이 친구로만 추가
+                  <UserPlus size={12} /> 초대 없이 친구 요청만 보내기
                 </button>
 
                 {inviteError && <p className="text-red-400 text-xs font-bold mb-3">{inviteError}</p>}
                 {inviteNotice && <p className="text-emerald-300 text-xs font-bold mb-3">{inviteNotice}</p>}
+
+                {/* 받은 친구 요청 — accept to add them to both friend lists. */}
+                {friendRequests.length > 0 && (
+                  <div className="border-t border-white/10 pt-4 mb-1">
+                    <p className="text-emerald-300/80 text-[11px] font-bold mb-3">받은 친구 요청</p>
+                    <div className="space-y-2 mb-2">
+                      {friendRequests.map((rq) => (
+                        <div key={`req-${rq.username}`} className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-400/20 rounded-xl px-3 py-2">
+                          <div className="w-8 h-8 rounded-full bg-emerald-500/25 overflow-hidden shrink-0 flex items-center justify-center">
+                            {rq.avatar_url
+                              ? <img src={rq.avatar_url} alt="" className="w-full h-full object-cover" />
+                              : <UserPlus size={14} className="text-emerald-200" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-xs font-bold truncate">{rq.display_name}</p>
+                            <p className="text-white/40 text-[10px] truncate">@{rq.username}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => acceptFriendRequest(rq.username)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black active:scale-95 shrink-0"
+                          >
+                            수락
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => declineFriendRequest(rq.username)}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-[11px] font-bold active:scale-95 shrink-0"
+                          >
+                            거절
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* 친구 목록 */}
                 <div className="border-t border-white/10 pt-4">
@@ -3167,7 +3292,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                   {friendsLoading ? (
                     <p className="text-white/30 text-xs py-4 text-center">불러오는 중…</p>
                   ) : friends.length === 0 ? (
-                    <p className="text-white/30 text-xs py-4 text-center">아직 추가한 친구가 없어요. 유저네임으로 초대하면 자동으로 추가됩니다.</p>
+                    <p className="text-white/30 text-xs py-4 text-center">아직 친구가 없어요. 유저네임으로 친구 요청을 보내고 상대가 수락하면 목록에 추가됩니다.</p>
                   ) : (
                     <div className="space-y-2">
                       {friends.map((f) => (
@@ -3202,6 +3327,37 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     </div>
                   )}
                 </div>
+
+                {/* 보낸 친구 요청 — awaiting the other person's acceptance. */}
+                {outgoingRequests.length > 0 && (
+                  <div className="border-t border-white/10 pt-4 mt-1">
+                    <p className="text-white/40 text-[11px] font-bold mb-3">보낸 친구 요청</p>
+                    <div className="space-y-2">
+                      {outgoingRequests.map((rq) => (
+                        <div key={`out-${rq.username}`} className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2">
+                          <div className="w-8 h-8 rounded-full bg-white/10 overflow-hidden shrink-0 flex items-center justify-center">
+                            {rq.avatar_url
+                              ? <img src={rq.avatar_url} alt="" className="w-full h-full object-cover" />
+                              : <UserPlus size={14} className="text-white/40" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-xs font-bold truncate">{rq.display_name}</p>
+                            <p className="text-white/40 text-[10px] truncate">@{rq.username}</p>
+                          </div>
+                          <span className="text-white/40 text-[11px] font-bold shrink-0">수락 대기 중</span>
+                          <button
+                            type="button"
+                            onClick={() => removeFriend(rq.username)}
+                            className="text-white/30 hover:text-red-400 p-1 shrink-0"
+                            title="요청 취소"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

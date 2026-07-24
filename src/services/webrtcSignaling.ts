@@ -415,7 +415,7 @@ function logIceServerHealthOnce() {
 
 type SignalMessage = {
   id: string; // Unique ID to prevent processing duplicates
-  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat' | 'broadcast-end' | 'live-update';
+  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat' | 'broadcast-end' | 'live-update' | 'cart-update';
   senderId: string;
   targetId?: string;
   payload?: any;
@@ -666,6 +666,7 @@ export class BroadcasterSignaling {
   private running = false;
   private processedIds = new Set<string>();
   private onChatCallback: ((msg: ChatMessage) => void) | null = null;
+  private onCartUpdateCallback: (() => void) | null = null;
   readonly broadcasterId = generateId();
 
   constructor(username: string) {
@@ -675,6 +676,13 @@ export class BroadcasterSignaling {
 
   onChat(callback: (msg: ChatMessage) => void) {
     this.onChatCallback = callback;
+  }
+
+  // Fires whenever a viewer adds/removes an item from their live cart. The host
+  // console uses this to refetch the 담기현황 stats the moment a viewer taps
+  // "상품 담기", instead of waiting up to ~3s for its next polling tick.
+  onCartUpdate(callback: () => void) {
+    this.onCartUpdateCallback = callback;
   }
 
   sendChat(msg: ChatMessage) {
@@ -776,6 +784,10 @@ export class BroadcasterSignaling {
         if (this.onChatCallback && msg.payload) {
           this.onChatCallback(msg.payload as ChatMessage);
         }
+        break;
+      case 'cart-update':
+        // A viewer changed their cart — nudge the host to refetch stats now.
+        this.onCartUpdateCallback?.();
         break;
     }
   }
@@ -1287,6 +1299,16 @@ export class ViewerSignaling {
       type: 'chat',
       senderId: this.viewerId,
       payload: msg,
+    });
+  }
+
+  // Notify the broadcaster that this viewer just changed their live cart, so the
+  // host's 담기현황 refreshes almost instantly instead of on its next ~3s poll.
+  sendCartUpdate() {
+    postSignal(this.channelName, {
+      id: generateId(),
+      type: 'cart-update',
+      senderId: this.viewerId,
     });
   }
 
