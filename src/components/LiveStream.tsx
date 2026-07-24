@@ -2354,6 +2354,9 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
     }).finally(() => {
       startTransition(() => setCartAdding(false));
     });
+    // Nudge the broadcaster to refresh 담기현황 immediately instead of waiting
+    // for their next ~3s poll, so the host sees the add in real time.
+    signalingRef.current?.sendCartUpdate();
   }, [kakaoUser, currentProduct, cartAdding, cartItems, username]);
 
   // Confirm option selection and add to cart (or open checkout in "checkout" mode)
@@ -2603,6 +2606,8 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       productId,
       selectedOptions,
     }).catch(err => console.error('[Cart] Failed to remove:', err));
+    // Keep the broadcaster's 담기현황 in sync in real time.
+    signalingRef.current?.sendCartUpdate();
   }, [username]);
 
   // Sum of priceable items in the cart (KRW). Items with an unparseable
@@ -2789,7 +2794,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       {/* Shown when the host ends the live stream; viewers see this briefly */}
       {/* before being returned to the host's personal page automatically.   */}
       {streamEnded && (
-        <div className="absolute inset-0 z-[320] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm px-8 text-center">
+        /* Fully opaque black — NOT bg-black/80 — so the frozen last video frame
+           is completely hidden behind it. Viewers should see a clean black screen
+           with the "방송이 종료되었습니다" notice, not the paused final frame. */
+        <div className="absolute inset-0 z-[320] flex flex-col items-center justify-center bg-black px-8 text-center">
           <div className="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center mb-4">
             <Radio size={26} className="text-white/70" strokeWidth={2.5} />
           </div>

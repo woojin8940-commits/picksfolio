@@ -1395,22 +1395,34 @@ export const apiService = {
   },
 
   // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
-  // List a creator's saved co-broadcast friends.
-  async listLiveFriends(owner: string): Promise<{ username: string; display_name: string; avatar_url: string }[]> {
+  // List a creator's accepted co-broadcast friends plus pending friend requests
+  // (incoming = others want to be my friend, outgoing = I'm awaiting acceptance).
+  async listLiveFriends(owner: string): Promise<{
+    friends: { username: string; display_name: string; avatar_url: string }[];
+    incoming: { username: string; display_name: string; avatar_url: string }[];
+    outgoing: { username: string; display_name: string; avatar_url: string }[];
+  }> {
     try {
       const res = await fetch(`/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}`);
-      if (!res.ok) return [];
+      if (!res.ok) return { friends: [], incoming: [], outgoing: [] };
       const json = await res.json();
-      return Array.isArray(json?.friends) ? json.friends : [];
+      return {
+        friends: Array.isArray(json?.friends) ? json.friends : [],
+        incoming: Array.isArray(json?.incoming) ? json.incoming : [],
+        outgoing: Array.isArray(json?.outgoing) ? json.outgoing : [],
+      };
     } catch (e) {
       console.error('[API] Failed to list live friends:', e);
-      return [];
+      return { friends: [], incoming: [], outgoing: [] };
     }
   },
 
-  // Add a friend by username. Usernames are unique, so the username is the
-  // identity — the server validates the account exists before saving.
-  async addLiveFriend(owner: string, friendUsername: string): Promise<{ success: boolean; friend?: { username: string; display_name: string; avatar_url: string }; error?: string }> {
+  // Send a friend request. Usernames are unique, so the username is the identity
+  // — the server validates the account exists before creating the request. The
+  // recipient must accept before the friendship shows in either list. Flags in
+  // the response distinguish a fresh request from an auto-accept (when the other
+  // person had already requested us) or an already-existing friendship.
+  async addLiveFriend(owner: string, friendUsername: string): Promise<{ success: boolean; requested?: boolean; accepted?: boolean; alreadyFriends?: boolean; friend?: { username: string; display_name: string; avatar_url: string }; error?: string }> {
     try {
       const res = await fetch('/api/live/friends', {
         method: 'POST',
@@ -1418,11 +1430,43 @@ export const apiService = {
         body: JSON.stringify({ owner: owner.toLowerCase(), friendUsername: friendUsername.toLowerCase() }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { success: false, error: json?.error || '친구 추가에 실패했습니다.' };
-      return { success: true, friend: json?.friend };
+      if (!res.ok) return { success: false, error: json?.error || '친구 요청에 실패했습니다.' };
+      return { success: true, requested: json?.requested, accepted: json?.accepted, alreadyFriends: json?.alreadyFriends, friend: json?.friend };
     } catch (e) {
       console.error('[API] Failed to add live friend:', e);
       return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // Accept a friend request that `requester` sent to `me`.
+  async acceptFriendRequest(me: string, requester: string): Promise<{ success: boolean; friend?: { username: string; display_name: string; avatar_url: string }; error?: string }> {
+    try {
+      const res = await fetch('/api/live/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: me.toLowerCase(), friendUsername: requester.toLowerCase(), action: 'accept' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: json?.error || '수락에 실패했습니다.' };
+      return { success: true, friend: json?.friend };
+    } catch (e) {
+      console.error('[API] Failed to accept friend request:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // Decline a friend request that `requester` sent to `me`.
+  async declineFriendRequest(me: string, requester: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/live/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: me.toLowerCase(), friendUsername: requester.toLowerCase(), action: 'decline' }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to decline friend request:', e);
+      return false;
     }
   },
 
