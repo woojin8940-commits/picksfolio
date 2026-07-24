@@ -20,6 +20,38 @@ export interface SiteData {
   linkGridCategories?: string[];
 }
 
+// 인스타그램 DM 자동화 규칙 및 설정.
+export type DmTrigger = 'welcome' | 'new_follower' | 'comment_keyword' | 'story_reply' | 'new_order';
+
+export interface DmRule {
+  id: string;
+  trigger: DmTrigger;
+  keyword?: string;
+  message: string;
+  enabled: boolean;
+}
+
+export interface DmAutomationLog {
+  status: 'sent' | 'failed' | 'skipped';
+  recipientId?: string;
+  ruleId?: string;
+  messageId?: string;
+  error?: string;
+  reason?: string;
+  test?: boolean;
+  at: string;
+}
+
+export interface DmAutomationSettings {
+  enabled: boolean;
+  igAccountId: string;
+  igUsername: string;
+  hasAccessToken: boolean;
+  rules: DmRule[];
+  logs?: DmAutomationLog[];
+  updatedAt?: string;
+}
+
 // Claude plan credit wallet — public shape returned by /api/claude-credits.
 export interface ClaudeCreditUsage {
   at: string;
@@ -1550,6 +1582,46 @@ export const apiService = {
     } catch (e) {
       console.error(`[API] Failed to ${action} cobroadcast:`, e);
       return false;
+    }
+  },
+
+  // ---- Instagram DM 자동화 ----
+  async getDmAutomation(username: string): Promise<DmAutomationSettings> {
+    try {
+      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to get DM automation:', e);
+      return { enabled: false, igAccountId: '', igUsername: '', hasAccessToken: false, rules: [], logs: [] };
+    }
+  },
+
+  async saveDmAutomation(username: string, settings: Partial<DmAutomationSettings> & { accessToken?: string }): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to save DM automation:', e);
+      return false;
+    }
+  },
+
+  async sendInstagramDm(payload: { username: string; recipientId: string; message: string; ruleId?: string; test?: boolean }): Promise<{ success: boolean; connected?: boolean; message?: string }> {
+    try {
+      const res = await fetch('/api/send-instagram-dm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, username: payload.username.toLowerCase() }),
+      });
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to send Instagram DM:', e);
+      return { success: false, message: '네트워크 오류로 발송에 실패했습니다.' };
     }
   },
 };
