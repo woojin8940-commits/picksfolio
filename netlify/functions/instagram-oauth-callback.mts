@@ -33,8 +33,10 @@ export default async (req: Request, _context: Context) => {
   const errorParam = url.searchParams.get("error");
   const stateRaw = url.searchParams.get("state") || "";
 
+  // 연동 결과는 관리자 페이지의 DM 자동화 탭으로 복귀시킨다.
+  // (/admin 경로 → admin 뷰, ?ig_connected/?ig_error → dm-automation 서브뷰 선택)
   const fail = (reason: string) =>
-    Response.redirect(`${origin}/?ig_error=${encodeURIComponent(reason)}`, 302);
+    Response.redirect(`${origin}/admin?ig_error=${encodeURIComponent(reason)}`, 302);
 
   // 사용자가 동의를 취소한 경우
   if (errorParam) return fail(errorParam);
@@ -140,7 +142,7 @@ export default async (req: Request, _context: Context) => {
       console.warn("[ig-oauth] index write failed:", e);
     }
 
-    return Response.redirect(`${origin}/?ig_connected=1`, 302);
+    return Response.redirect(`${origin}/admin?ig_connected=1`, 302);
   } catch (e: any) {
     console.error("[ig-oauth] callback error:", e);
     return fail("unexpected_error");
