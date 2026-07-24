@@ -1013,6 +1013,13 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       activeMaterial: material,
       heartbeatAt: Date.now(),
     });
+    // Also push the change straight down the signaling channel so already-connected
+    // viewers render a toggled banner / pinned product almost instantly, instead of
+    // waiting up to ~3s for their next live-state poll to notice it.
+    signalingRef.current?.sendLiveUpdate({
+      currentProduct: activeProduct,
+      activeMaterial: material,
+    });
   }, [activeProductId, activeMaterialId, isLive, userName, viewerCount, liveProducts, materials]);
 
   // Live-state heartbeat: while broadcasting, re-assert isLive=true every few
