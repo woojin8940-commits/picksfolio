@@ -2,15 +2,20 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Instagram, Check, Plus, Trash2, Send, Loader2, MessageSquare, MessageCircle,
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
-  CornerDownRight, Hash, Reply, Eye, MousePointerClick,
+  CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
+  LayoutGrid, AlignLeft, GalleryHorizontalEnd,
 } from 'lucide-react';
-import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton } from '../services/apiService';
+import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, InstagramMedia } from '../services/apiService';
 
 interface DmAutomationProps {
   userName: string;
 }
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+const blankCard = (): DmCarouselCard => ({
+  id: genId('card'), title: '', subtitle: '', imageUrl: '', buttonLabel: '', buttonUrl: '',
+});
 
 const blankAutomation = (): DmAutomationItem => ({
   id: genId('auto'),
@@ -21,9 +26,25 @@ const blankAutomation = (): DmAutomationItem => ({
   replyEnabled: false,
   replies: [],
   followFilter: 'all',
+  mediaScope: 'all',
+  mediaIds: [],
+  messageType: 'text',
   message: '안녕하세요! 관심 가져주셔서 감사합니다 😊 아래 링크에서 더 많은 정보를 확인해보세요.',
   buttons: [{ id: genId('btn'), label: '링크 바로가기', url: '' }],
+  cards: [],
   createdAt: new Date().toISOString(),
+});
+
+// 이전에 저장된(신규 필드가 없는) 자동화도 안전하게 다룰 수 있도록 기본값을 채운다.
+const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
+  ...a,
+  keywords: Array.isArray(a.keywords) ? a.keywords : [],
+  replies: Array.isArray(a.replies) ? a.replies : [],
+  buttons: Array.isArray(a.buttons) ? a.buttons : [],
+  cards: Array.isArray(a.cards) ? a.cards : [],
+  mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds : [],
+  mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
+  messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
 });
 
 const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
@@ -33,49 +54,82 @@ const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
 };
 
 /* ────────────────────────── DM 미리보기 버블 ────────────────────────── */
-const DmPreview: React.FC<{ igUsername: string; message: string; buttons: DmMessageButton[] }> = ({
-  igUsername, message, buttons,
-}) => (
-  <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
-    <div className="flex items-center gap-2 mb-3 text-slate-400">
-      <Instagram size={13} />
-      <span className="text-[11px] font-black">DM 미리보기</span>
-    </div>
-    <div className="flex items-end gap-2">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
-        <Instagram size={15} />
+const DmPreview: React.FC<{
+  igUsername: string;
+  messageType: DmAutomationItem['messageType'];
+  message: string;
+  buttons: DmMessageButton[];
+  cards: DmCarouselCard[];
+}> = ({ igUsername, messageType, message, buttons, cards }) => {
+  const validCards = cards.filter((c) => c.title || c.imageUrl || c.buttonUrl);
+  const isCarousel = messageType === 'carousel' && validCards.length > 0;
+  return (
+    <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
+      <div className="flex items-center gap-2 mb-3 text-slate-400">
+        <Instagram size={13} />
+        <span className="text-[11px] font-black">DM 미리보기</span>
       </div>
-      <div className="max-w-[85%]">
-        <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-          <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-            {message || '보낼 메시지를 입력하면 여기에 표시됩니다.'}
-          </p>
-          {buttons.filter((b) => b.label).length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {buttons.filter((b) => b.label).map((b) => (
-                <div
-                  key={b.id}
-                  className="w-full text-center bg-slate-50 border border-slate-200 rounded-xl py-2 text-[12px] font-bold text-pink-600"
-                >
-                  {b.label}
+      <div className="flex items-end gap-2">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 shrink-0 flex items-center justify-center text-white">
+          <Instagram size={15} />
+        </div>
+        <div className="max-w-[85%] min-w-0">
+          {isCarousel ? (
+            <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
+              {validCards.map((c) => (
+                <div key={c.id} className="w-40 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="w-full aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+                    {c.imageUrl
+                      ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
+                      : <ImageIcon size={22} className="text-slate-300" />}
+                  </div>
+                  <div className="p-2.5">
+                    <p className="text-[12px] font-black text-slate-800 truncate">{c.title || '카드 제목'}</p>
+                    {c.subtitle && <p className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
+                    {c.buttonLabel && (
+                      <div className="mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
+                        {c.buttonLabel}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+              <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                {message || '보낼 메시지를 입력하면 여기에 표시됩니다.'}
+              </p>
+              {buttons.filter((b) => b.label).length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {buttons.filter((b) => b.label).map((b) => (
+                    <div
+                      key={b.id}
+                      className="w-full text-center bg-slate-50 border border-slate-200 rounded-xl py-2 text-[12px] font-bold text-pink-600"
+                    >
+                      {b.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
+          {igUsername && <span className="text-[10px] text-slate-400 font-bold ml-2 mt-1 inline-block">@{igUsername}</span>}
         </div>
-        {igUsername && <span className="text-[10px] text-slate-400 font-bold ml-2 mt-1 inline-block">@{igUsername}</span>}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* ────────────────────────── 자동화 생성/편집 모달 ────────────────────────── */
 const AutomationEditor: React.FC<{
   initial: DmAutomationItem;
   igUsername: string;
+  media: InstagramMedia[];
+  mediaLoading: boolean;
   onClose: () => void;
   onSave: (a: DmAutomationItem) => void;
-}> = ({ initial, igUsername, onClose, onSave }) => {
+}> = ({ initial, igUsername, media, mediaLoading, onClose, onSave }) => {
   const [draft, setDraft] = useState<DmAutomationItem>(initial);
   const [keywordInput, setKeywordInput] = useState('');
 
@@ -95,7 +149,24 @@ const AutomationEditor: React.FC<{
   const removeButton = (id: string) =>
     patch({ buttons: draft.buttons.filter((b) => b.id !== id) });
 
-  const canSave = draft.message.trim().length > 0 &&
+  const updateCard = (id: string, p: Partial<DmCarouselCard>) =>
+    patch({ cards: draft.cards.map((c) => (c.id === id ? { ...c, ...p } : c)) });
+  const addCard = () => patch({ cards: [...draft.cards, blankCard()] });
+  const removeCard = (id: string) => patch({ cards: draft.cards.filter((c) => c.id !== id) });
+
+  const toggleMedia = (id: string) => {
+    const has = draft.mediaIds.includes(id);
+    patch({ mediaIds: has ? draft.mediaIds.filter((m) => m !== id) : [...draft.mediaIds, id] });
+  };
+
+  const validCards = draft.cards.filter((c) => c.title || c.imageUrl || c.buttonUrl);
+  const messageValid = draft.messageType === 'carousel'
+    ? validCards.length > 0
+    : draft.message.trim().length > 0;
+  const mediaValid = draft.mediaScope === 'all' || draft.mediaIds.length > 0;
+
+  const canSave = messageValid &&
+    mediaValid &&
     (draft.commentMatch === 'all' || draft.keywords.length > 0);
 
   const handleSave = () => {
@@ -133,10 +204,78 @@ const AutomationEditor: React.FC<{
               />
             </div>
 
-            {/* 1. 어떤 댓글 */}
+            {/* 1. 어떤 게시물 */}
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">1</span>
+                <h4 className="text-sm md:text-base font-black text-slate-900">어떤 게시물에 적용할까요?</h4>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {(['all', 'selected'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => patch({ mediaScope: m })}
+                    className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                      draft.mediaScope === m ? 'border-pink-500 bg-pink-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="block text-sm font-black text-slate-900">{m === 'all' ? '모든 게시물' : '특정 게시물'}</span>
+                    <span className="block text-[11px] text-slate-500 font-medium mt-0.5">
+                      {m === 'all' ? '모든 게시물의 댓글에 반응' : '선택한 게시물에만 반응'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {draft.mediaScope === 'selected' && (
+                mediaLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                    <Loader2 size={16} className="animate-spin" /> <span className="text-xs font-bold">게시물을 불러오는 중…</span>
+                  </div>
+                ) : media.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+                    <ImageIcon size={26} className="text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-500">불러올 게시물이 없어요</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">인스타그램에 게시물이 있는지 확인해주세요.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-slate-500 font-bold mb-2">{draft.mediaIds.length}개 선택됨</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1">
+                      {media.map((m) => {
+                        const selected = draft.mediaIds.includes(m.id);
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => toggleMedia(m.id)}
+                            className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all group ${
+                              selected ? 'border-pink-500 ring-2 ring-pink-200' : 'border-transparent hover:border-slate-300'
+                            }`}
+                          >
+                            {m.mediaUrl
+                              ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
+                              : <div className="w-full h-full bg-slate-100 flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
+                            {selected && (
+                              <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center shadow">
+                                <Check size={12} />
+                              </span>
+                            )}
+                            {!selected && <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )
+              )}
+            </div>
+
+            {/* 2. 어떤 댓글 */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">2</span>
                 <h4 className="text-sm md:text-base font-black text-slate-900">어떤 댓글에 DM을 보낼까요?</h4>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -188,10 +327,10 @@ const AutomationEditor: React.FC<{
               )}
             </div>
 
-            {/* 2. 팔로우 여부 */}
+            {/* 3. 팔로우 여부 */}
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">2</span>
+                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">3</span>
                 <h4 className="text-sm md:text-base font-black text-slate-900">누구에게 보낼까요?</h4>
               </div>
               <div className="grid grid-cols-3 gap-2">
@@ -210,11 +349,11 @@ const AutomationEditor: React.FC<{
               </div>
             </div>
 
-            {/* 3. 댓글 답글 */}
+            {/* 4. 댓글 답글 */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">3</span>
+                  <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">4</span>
                   <h4 className="text-sm md:text-base font-black text-slate-900">댓글에 답글도 남길까요?</h4>
                 </div>
                 <Toggle on={draft.replyEnabled} onClick={() => patch({ replyEnabled: !draft.replyEnabled })} />
@@ -242,69 +381,164 @@ const AutomationEditor: React.FC<{
               )}
             </div>
 
-            {/* 4. 메시지 */}
+            {/* 5. 메시지 */}
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">4</span>
+                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">5</span>
                 <h4 className="text-sm md:text-base font-black text-slate-900">보낼 DM 메시지</h4>
               </div>
-              <textarea
-                value={draft.message}
-                onChange={(e) => patch({ message: e.target.value })}
-                rows={4}
-                maxLength={1000}
-                placeholder="자동으로 보낼 메시지를 입력하세요."
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
-              />
-              <p className="text-right text-[10px] text-slate-400 font-bold mt-1">{draft.message.length}/1000</p>
 
-              {/* 링크 버튼 */}
-              <div className="mt-2 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-black text-slate-500">
-                  <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(최대 3개)</span>
-                </div>
-                {draft.buttons.map((b) => (
-                  <div key={b.id} className="flex gap-2 items-center bg-slate-50 border border-slate-100 rounded-xl p-2">
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        value={b.label}
-                        onChange={(e) => updateButton(b.id, { label: e.target.value })}
-                        placeholder="버튼 이름 (예: 구매하기)"
-                        maxLength={20}
-                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-                      />
-                      <input
-                        value={b.url}
-                        onChange={(e) => updateButton(b.id, { url: e.target.value })}
-                        placeholder="https://..."
-                        className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-                      />
-                    </div>
-                    <button type="button" onClick={() => removeButton(b.id)} className="w-8 h-8 shrink-0 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-                {draft.buttons.length < 3 && (
-                  <button type="button" onClick={addButton} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
-                    + 버튼 추가
+              {/* 메시지 형식 선택 */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {([
+                  { t: 'text' as const, icon: <AlignLeft size={15} />, label: '텍스트', desc: '메시지 + 링크 버튼' },
+                  { t: 'carousel' as const, icon: <GalleryHorizontalEnd size={15} />, label: '캐러셀', desc: '이미지 카드 여러 장' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.t}
+                    type="button"
+                    onClick={() => patch({ messageType: opt.t })}
+                    className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                      draft.messageType === opt.t ? 'border-pink-500 bg-pink-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-black text-slate-900">{opt.icon}{opt.label}</span>
+                    <span className="block text-[11px] text-slate-500 font-medium mt-0.5">{opt.desc}</span>
                   </button>
-                )}
+                ))}
               </div>
+
+              {draft.messageType === 'text' ? (
+                <>
+                  <textarea
+                    value={draft.message}
+                    onChange={(e) => patch({ message: e.target.value })}
+                    rows={4}
+                    maxLength={1000}
+                    placeholder="자동으로 보낼 메시지를 입력하세요."
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                  />
+                  <p className="text-right text-[10px] text-slate-400 font-bold mt-1">{draft.message.length}/1000</p>
+
+                  {/* 링크 버튼 */}
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-black text-slate-500">
+                      <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(최대 3개)</span>
+                    </div>
+                    {draft.buttons.map((b) => (
+                      <div key={b.id} className="flex gap-2 items-center bg-slate-50 border border-slate-100 rounded-xl p-2">
+                        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            value={b.label}
+                            onChange={(e) => updateButton(b.id, { label: e.target.value })}
+                            placeholder="버튼 이름 (예: 구매하기)"
+                            maxLength={20}
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                          />
+                          <input
+                            value={b.url}
+                            onChange={(e) => updateButton(b.id, { url: e.target.value })}
+                            placeholder="https://..."
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                          />
+                        </div>
+                        <button type="button" onClick={() => removeButton(b.id)} className="w-8 h-8 shrink-0 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    {draft.buttons.length < 3 && (
+                      <button type="button" onClick={addButton} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
+                        + 버튼 추가
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                /* 캐러셀 카드 빌더 */
+                <div className="space-y-3">
+                  <p className="text-[11px] text-slate-500 font-medium">이미지 카드를 좌우로 넘겨보는 캐러셀 메시지예요. 카드는 최대 10장까지 추가할 수 있어요.</p>
+                  {draft.cards.length === 0 && (
+                    <div className="text-center py-6 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+                      <LayoutGrid size={24} className="text-slate-300 mx-auto mb-2" />
+                      <p className="text-xs font-bold text-slate-500">카드를 추가해 캐러셀을 만들어보세요</p>
+                    </div>
+                  )}
+                  {draft.cards.map((c, i) => (
+                    <div key={c.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-slate-500">카드 {i + 1}</span>
+                        <button type="button" onClick={() => removeCard(c.id)} className="w-7 h-7 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
+                          {c.imageUrl
+                            ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
+                            : <ImageIcon size={18} className="text-slate-300" />}
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <input
+                            value={c.imageUrl}
+                            onChange={(e) => updateCard(c.id, { imageUrl: e.target.value })}
+                            placeholder="이미지 URL (https://...)"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                          />
+                          <input
+                            value={c.title}
+                            onChange={(e) => updateCard(c.id, { title: e.target.value })}
+                            placeholder="제목"
+                            maxLength={80}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                          />
+                        </div>
+                      </div>
+                      <input
+                        value={c.subtitle}
+                        onChange={(e) => updateCard(c.id, { subtitle: e.target.value })}
+                        placeholder="설명 (선택)"
+                        maxLength={80}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium focus:outline-none focus:border-pink-500"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          value={c.buttonLabel}
+                          onChange={(e) => updateCard(c.id, { buttonLabel: e.target.value })}
+                          placeholder="버튼 이름 (예: 보기)"
+                          maxLength={20}
+                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                        />
+                        <input
+                          value={c.buttonUrl}
+                          onChange={(e) => updateCard(c.id, { buttonUrl: e.target.value })}
+                          placeholder="버튼 링크 (https://...)"
+                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {draft.cards.length < 10 && (
+                    <button type="button" onClick={addCard} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
+                      + 카드 추가
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {/* 우: 미리보기 (데스크톱 고정) */}
           <div className="hidden lg:block bg-slate-50/60 border-l border-slate-100 p-6">
             <div className="sticky top-0">
-              <DmPreview igUsername={igUsername} message={draft.message} buttons={draft.buttons} />
+              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
             </div>
           </div>
         </div>
 
         {/* 모바일 미리보기 */}
         <div className="lg:hidden px-5 pb-2">
-          <DmPreview igUsername={igUsername} message={draft.message} buttons={draft.buttons} />
+          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
         </div>
 
         {/* 푸터 */}
@@ -354,14 +588,25 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
+  const [media, setMedia] = useState<InstagramMedia[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+
+  const loadMedia = () => {
+    setMediaLoading(true);
+    apiService.getInstagramMedia(userName)
+      .then((m) => setMedia(m))
+      .finally(() => setMediaLoading(false));
+  };
+
   const load = () => {
     apiService.getDmAutomation(userName).then((s) => {
       setEnabled(s.enabled);
       setConnected(Boolean(s.connected));
       setIgUsername(s.igUsername || '');
-      setAutomations(Array.isArray(s.automations) ? s.automations : []);
+      setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
       setLogs(s.logs || []);
       setLoaded(true);
+      if (s.connected) loadMedia();
     });
   };
 
@@ -372,6 +617,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('ig_connected')) {
       setBanner({ type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' });
+      // 연동 직후 바로 연동된 화면을 보여주고, 최신 정보를 다시 불러온다.
+      setConnected(true);
+      load();
       params.delete('ig_connected');
     } else if (params.get('ig_error')) {
       setBanner({ type: 'err', text: '연동에 실패했어요. 잠시 후 다시 시도해주세요.' });
@@ -381,6 +629,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     const t = setTimeout(() => setBanner(null), 5000);
     return () => clearTimeout(t);
+    /* eslint-disable-next-line */
   }, []);
 
   const persist = async (next: Partial<DmAutomationSettings>) => {
@@ -403,7 +652,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     setDisconnecting(true);
     const ok = await apiService.disconnectInstagram(userName);
     setDisconnecting(false);
-    if (ok) { setConnected(false); setEnabled(false); setIgUsername(''); setBanner({ type: 'ok', text: '연동이 해제되었습니다.' }); }
+    if (ok) { setConnected(false); setEnabled(false); setIgUsername(''); setMedia([]); setBanner({ type: 'ok', text: '연동이 해제되었습니다.' }); }
   };
 
   const toggleMaster = () => { const v = !enabled; setEnabled(v); persist({ enabled: v }); };
@@ -535,6 +784,55 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         </section>
       )}
 
+      {/* 연동 계정 피드 게시물 */}
+      {connected && (
+        <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
+              <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물
+            </h3>
+            <span className="text-xs font-black text-slate-400">{media.length}개</span>
+          </div>
+          {mediaLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
+              <Loader2 size={18} className="animate-spin" /> <span className="text-sm font-bold">게시물을 불러오는 중…</span>
+            </div>
+          ) : media.length === 0 ? (
+            <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+              <ImageIcon size={28} className="text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-500">불러올 게시물이 없어요</p>
+              <p className="text-xs text-slate-400 mt-1">인스타그램에 게시물을 올린 뒤 다시 확인해주세요.</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-[12px] text-slate-500 font-medium mb-3">
+                게시물을 눌러 해당 게시물에 자동 DM을 설정하세요. 선택한 게시물의 댓글에만 자동으로 반응해요.
+              </p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                {media.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setEditing({ ...blankAutomation(), mediaScope: 'selected', mediaIds: [m.id] })}
+                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100"
+                    title="이 게시물로 자동화 만들기"
+                  >
+                    {m.mediaUrl
+                      ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
+                      : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
+                    <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/40 transition-colors flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow">
+                        <Plus size={12} /> 자동화
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       {/* 자동화 목록 */}
       <section>
         <div className="flex items-center justify-between mb-4">
@@ -587,18 +885,27 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                 {/* 조건 요약 칩 */}
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
+                    <LayoutGrid size={11} />
+                    {a.mediaScope === 'selected' ? `게시물 ${a.mediaIds?.length || 0}개` : '모든 게시물'}
+                  </span>
+                  <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                     <MessageSquare size={11} />
                     {a.commentMatch === 'all' ? '모든 댓글' : `키워드 ${a.keywords.length}개`}
                   </span>
                   <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                     <Users size={11} /> {FOLLOW_LABEL[a.followFilter]}
                   </span>
+                  {a.messageType === 'carousel' && (
+                    <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-600 rounded-lg px-2 py-1 text-[11px] font-bold">
+                      <GalleryHorizontalEnd size={11} /> 캐러셀 {a.cards?.filter((c) => c.title || c.imageUrl).length || 0}장
+                    </span>
+                  )}
                   {a.replyEnabled && (
                     <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <Reply size={11} /> 답글 {a.replies.filter(Boolean).length}개
                     </span>
                   )}
-                  {a.buttons.filter((b) => b.label).length > 0 && (
+                  {a.messageType !== 'carousel' && a.buttons.filter((b) => b.label).length > 0 && (
                     <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <Link2 size={11} /> 버튼 {a.buttons.filter((b) => b.label).length}개
                     </span>
@@ -607,7 +914,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
                 <div className="flex items-start gap-1.5 text-[12px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2.5 mb-3">
                   <CornerDownRight size={13} className="mt-0.5 shrink-0 text-slate-400" />
-                  <span className="line-clamp-2">{a.message}</span>
+                  <span className="line-clamp-2">
+                    {a.messageType === 'carousel'
+                      ? (a.cards?.find((c) => c.title)?.title || '이미지 카드 캐러셀 메시지')
+                      : a.message}
+                  </span>
                 </div>
 
                 <div className="flex gap-2">
@@ -679,6 +990,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         <AutomationEditor
           initial={editing}
           igUsername={igUsername}
+          media={media}
+          mediaLoading={mediaLoading}
           onClose={() => setEditing(null)}
           onSave={saveAutomation}
         />

@@ -62,6 +62,16 @@ export interface DmMessageButton {
   url: string;
 }
 
+// 캐러셀(제네릭 템플릿) 카드 — 이미지 + 제목/설명 + 버튼.
+export interface DmCarouselCard {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}
+
 export interface DmAutomationItem {
   id: string;
   name: string;
@@ -71,9 +81,26 @@ export interface DmAutomationItem {
   replyEnabled: boolean;
   replies: string[];
   followFilter: 'all' | 'followers' | 'non_followers';
+  // 적용 대상 게시물 — 'all' 이면 모든 게시물, 'selected' 이면 mediaIds 목록만.
+  mediaScope: 'all' | 'selected';
+  mediaIds: string[];
+  // 메시지 형식 — 'text'(텍스트+버튼) 또는 'carousel'(캐러셀 카드).
+  messageType: 'text' | 'carousel';
   message: string;
   buttons: DmMessageButton[];
+  cards: DmCarouselCard[];
   createdAt: string;
+}
+
+// 연동된 인스타그램 계정의 피드 게시물.
+export interface InstagramMedia {
+  id: string;
+  caption: string;
+  mediaType: string;
+  mediaUrl: string;
+  thumbnailUrl: string;
+  permalink: string;
+  timestamp: string;
 }
 
 // Claude plan credit wallet — public shape returned by /api/claude-credits.
@@ -1612,12 +1639,25 @@ export const apiService = {
   // ---- Instagram DM 자동화 ----
   async getDmAutomation(username: string): Promise<DmAutomationSettings> {
     try {
-      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
       return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], logs: [] };
+    }
+  },
+
+  // 연동된 인스타그램 계정의 피드 게시물 목록.
+  async getInstagramMedia(username: string): Promise<InstagramMedia[]> {
+    try {
+      const res = await fetch(`/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data?.media) ? data.media : [];
+    } catch (e) {
+      console.error('[API] Failed to get Instagram media:', e);
+      return [];
     }
   },
 

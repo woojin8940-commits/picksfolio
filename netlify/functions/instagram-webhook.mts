@@ -15,6 +15,14 @@ import type { Config, Context } from "@netlify/functions";
 const GRAPH_VERSION = "v21.0";
 
 interface DmMessageButton { id?: string; label: string; url: string; }
+interface DmCarouselCard {
+  id?: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}
 interface DmAutomationItem {
   id: string;
   name: string;
@@ -24,8 +32,12 @@ interface DmAutomationItem {
   replyEnabled: boolean;
   replies: string[];
   followFilter: "all" | "followers" | "non_followers";
+  mediaScope?: "all" | "selected";
+  mediaIds?: string[];
+  messageType?: "text" | "carousel";
   message: string;
   buttons: DmMessageButton[];
+  cards?: DmCarouselCard[];
 }
 interface DmSettings {
   enabled: boolean;
@@ -41,6 +53,32 @@ function graphHost(settings: DmSettings) {
 }
 
 function buildMessagePayload(a: DmAutomationItem) {
+  // 캐러셀 형식 — 이미지 카드(제네릭 템플릿).
+  if (a.messageType === "carousel") {
+    const elements = (a.cards || [])
+      .filter((c) => c && (c.title || c.imageUrl))
+      .slice(0, 10)
+      .map((c) => {
+        const el: any = { title: (c.title || " ").slice(0, 80) };
+        if (c.subtitle) el.subtitle = c.subtitle.slice(0, 80);
+        if (c.imageUrl) el.image_url = c.imageUrl;
+        if (c.buttonUrl && c.buttonLabel) {
+          el.default_action = { type: "web_url", url: c.buttonUrl };
+          el.buttons = [{ type: "web_url", url: c.buttonUrl, title: c.buttonLabel.slice(0, 20) }];
+        }
+        return el;
+      });
+    if (elements.length > 0) {
+      return {
+        attachment: {
+          type: "template",
+          payload: { template_type: "generic", elements },
+        },
+      };
+    }
+    // 카드가 비어 있으면 텍스트로 폴백.
+  }
+
   const buttons = (a.buttons || [])
     .filter((b) => b && b.url && b.label)
     .slice(0, 3)
@@ -68,8 +106,19 @@ async function appendLog(username: string, entry: Record<string, unknown>) {
   }
 }
 
-function matchAutomation(a: DmAutomationItem, text: string): boolean {
-  if (!a.enabled || !a.message?.trim()) return false;
+function hasContent(a: DmAutomationItem): boolean {
+  if (a.messageType === "carousel") {
+    return (a.cards || []).some((c) => c && (c.title?.trim() || c.imageUrl?.trim()));
+  }
+  return Boolean(a.message?.trim());
+}
+
+function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): boolean {
+  if (!a.enabled || !hasContent(a)) return false;
+  // 특정 게시물에만 적용하도록 설정된 경우 댓글이 달린 게시물이 목록에 있어야 한다.
+  if (a.mediaScope === "selected") {
+    if (!mediaId || !(a.mediaIds || []).includes(mediaId)) return false;
+  }
   if (a.commentMatch === "all") return true;
   const lower = text.toLowerCase();
   return (a.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
@@ -123,10 +172,12 @@ export default async (req: Request, _context: Context) => {
         const commentId = String(value?.id || "");
         const commentText = String(value?.text || "");
         const fromId = String(value?.from?.id || "");
+        // 댓글이 달린 게시물(미디어) ID — 특정 게시물 대상 자동화 매칭에 사용.
+        const mediaId = String(value?.media?.id || value?.media_id || "");
         // 자기 자신(계정 소유자)의 댓글은 무시
         if (!commentId || fromId === igId) continue;
 
-        const automation = (settings.automations || []).find((a) => matchAutomation(a, commentText));
+        const automation = (settings.automations || []).find((a) => matchAutomation(a, commentText, mediaId));
         if (!automation) continue;
 
         // 1) 선택 시 공개 답글 (랜덤)
