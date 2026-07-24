@@ -415,7 +415,7 @@ function logIceServerHealthOnce() {
 
 type SignalMessage = {
   id: string; // Unique ID to prevent processing duplicates
-  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat' | 'broadcast-end';
+  type: 'viewer-join' | 'offer' | 'answer' | 'ice-candidates' | 'chat' | 'broadcast-end' | 'live-update';
   senderId: string;
   targetId?: string;
   payload?: any;
@@ -510,6 +510,16 @@ export type ChatMessage = {
   text: string;
   profileImage?: string;
   timestamp: number;
+};
+
+// A near-instant push of the broadcaster's on-screen state (pushed banner /
+// pinned product) sent over the signaling channel. Viewers otherwise only pick
+// up these changes on the ~3s live-state poll, which makes a "배너 띄우기" tap
+// visibly lag; delivering it as a signal renders it almost immediately while
+// the poll remains the source of truth for late joiners and reconnects.
+export type LiveUpdate = {
+  activeMaterial?: any;
+  currentProduct?: any;
 };
 
 function generateId() {
@@ -676,6 +686,18 @@ export class BroadcasterSignaling {
     });
   }
 
+  // Push the current on-screen state (pushed banner / pinned product) to every
+  // viewer immediately, instead of making them wait for the next ~3s live-state
+  // poll. Broadcast (no targetId) so all connected viewers receive it.
+  sendLiveUpdate(update: LiveUpdate) {
+    postSignal(this.channelName, {
+      id: generateId(),
+      type: 'live-update',
+      senderId: this.broadcasterId,
+      payload: update,
+    });
+  }
+
   start(stream: MediaStream) {
     this.localStream = stream;
     this.running = true;
@@ -690,11 +712,15 @@ export class BroadcasterSignaling {
 
   private schedulePoll() {
     if (!this.running) return;
-    // Use faster polling (250ms) when there are pending connections, slower (900ms) when stable
+    // Poll fast (250ms) while any connection is still being set up. Once every
+    // viewer is connected the only inbound traffic is chat, so we keep polling
+    // briskly (350ms) rather than backing off — a laggy chat feed reads as
+    // "broken" to a host running live commerce who needs to see viewer comments
+    // the moment they land.
     const hasUnconnected = Array.from(this.peerConnections.values()).some(
       pc => pc.connectionState !== 'connected'
     );
-    const interval = hasUnconnected || this.peerConnections.size === 0 ? 250 : 900;
+    const interval = hasUnconnected || this.peerConnections.size === 0 ? 250 : 350;
     this.pollTimer = setTimeout(() => {
       this.poll().then(() => this.schedulePoll());
     }, interval);
@@ -1191,6 +1217,7 @@ export class ViewerSignaling {
   private onStreamCallback: ((stream: MediaStream) => void) | null = null;
   private onConnectionStateCallback: ((state: RTCPeerConnectionState) => void) | null = null;
   private onChatCallback: ((msg: ChatMessage) => void) | null = null;
+  private onLiveUpdateCallback: ((update: LiveUpdate) => void) | null = null;
   private onBroadcastEndCallback: (() => void) | null = null;
   private broadcastEnded = false;
   private hasReceivedOffer = false;
@@ -1198,6 +1225,9 @@ export class ViewerSignaling {
   private bufferedStream: MediaStream | null = null;
   private bufferedConnectionState: RTCPeerConnectionState | null = null;
   private bufferedChatMessages: ChatMessage[] = [];
+  // Latest live-update received before onLiveUpdate was registered (pre-connection
+  // mode). Only the most recent matters — it reflects the current on-screen state.
+  private bufferedLiveUpdate: LiveUpdate | null = null;
 
   constructor(username: string) {
     this.channelName = username.toLowerCase();
@@ -1229,6 +1259,15 @@ export class ViewerSignaling {
       callback(msg);
     }
     this.bufferedChatMessages = [];
+  }
+
+  onLiveUpdate(callback: (update: LiveUpdate) => void) {
+    this.onLiveUpdateCallback = callback;
+    // Flush the last live-update received before this callback was registered.
+    if (this.bufferedLiveUpdate) {
+      callback(this.bufferedLiveUpdate);
+      this.bufferedLiveUpdate = null;
+    }
   }
 
   // Fires once when the broadcaster signals that the live stream has ended, so
@@ -1406,9 +1445,11 @@ export class ViewerSignaling {
   private schedulePoll() {
     if (!this.running) return;
     // Use aggressive polling (150ms) for the first 5s during connection to catch the offer ASAP,
-    // then 300ms during ongoing connection, and 800ms once connected
+    // then 300ms during ongoing connection, and 350ms once connected. We stay brisk even when
+    // connected because chat and pushed banners/products ride this poll — backing off further
+    // made viewer comments and "배너 띄우기" visibly lag behind the host.
     const elapsed = Date.now() - this.connectingLockTime;
-    const interval = this.connected ? 800 : (elapsed < 5000 ? 150 : 300);
+    const interval = this.connected ? 350 : (elapsed < 5000 ? 150 : 300);
     this.pollTimer = setTimeout(() => {
       this.poll().then(() => this.schedulePoll());
     }, interval);
@@ -1473,6 +1514,16 @@ export class ViewerSignaling {
             this.onChatCallback(msg.payload as ChatMessage);
           } else {
             this.bufferedChatMessages.push(msg.payload as ChatMessage);
+          }
+        }
+        break;
+      case 'live-update':
+        if (msg.payload) {
+          if (this.onLiveUpdateCallback) {
+            this.onLiveUpdateCallback(msg.payload as LiveUpdate);
+          } else {
+            // Keep only the latest — it always reflects the current screen state.
+            this.bufferedLiveUpdate = msg.payload as LiveUpdate;
           }
         }
         break;

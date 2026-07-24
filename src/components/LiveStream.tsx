@@ -626,6 +626,16 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   // the main host has nothing pinned, fall back to the co-broadcast partner's.
   const currentProduct = currentProductProp || partnerProduct;
 
+  // The banner/material currently on screen. Seeded from the live-state poll
+  // (the `activeMaterial` prop) but also updated the instant a `live-update`
+  // signal arrives, so tapping "배너 띄우기" on the host shows up here right away
+  // instead of after the next ~3s poll. The prop remains the source of truth
+  // for late joiners and reconnects.
+  const [liveMaterial, setLiveMaterial] = useState<any>(activeMaterial ?? null);
+  useEffect(() => {
+    setLiveMaterial(activeMaterial ?? null);
+  }, [activeMaterial?.id, activeMaterial?.url]);
+
   // Helper: reset the video element and re-assign the stream to unstick the decoder
   const resetVideoElement = useCallback(() => {
     const vid = videoRef.current;
@@ -1266,6 +1276,12 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
         if (prev.some(m => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+    });
+
+    // Apply pushed banner/product changes the moment they arrive over signaling,
+    // rather than waiting for the parent's live-state poll to refresh the prop.
+    signaling.onLiveUpdate((update) => {
+      setLiveMaterial(update?.activeMaterial ?? null);
     });
 
     // When the host ends the broadcast, the broadcaster pushes a broadcast-end
@@ -3222,51 +3238,51 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
             Renders the same way during a co-broadcast: a pushed banner floats
             centered on the stage, which sits just below the side-by-side feed
             band. */}
-        {activeMaterial && activeMaterial.url && (
+        {liveMaterial && liveMaterial.url && (
           <div className="absolute inset-0 pointer-events-none z-20">
             <div
-              key={activeMaterial.id}
+              key={liveMaterial.id}
               style={{
-                width: `${activeMaterial.width || 50}%`,
-                height: activeMaterial.type === 'banner' ? `${activeMaterial.width || 50}%` : 'auto',
-                opacity: (activeMaterial.opacity ?? 100) / 100,
+                width: `${liveMaterial.width || 50}%`,
+                height: liveMaterial.type === 'banner' ? `${liveMaterial.width || 50}%` : 'auto',
+                opacity: (liveMaterial.opacity ?? 100) / 100,
                 position: 'absolute',
-                ...(activeMaterial.type === 'banner'
+                ...(liveMaterial.type === 'banner'
                   ? { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
-                  : activeMaterial.type === 'product'
+                  : liveMaterial.type === 'product'
                   ? { right: '12px', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }
                   : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }),
               }}
             >
-              {activeMaterial.type === 'banner' ? (
+              {liveMaterial.type === 'banner' ? (
                 <div className="w-full h-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
                   <img
-                    src={activeMaterial.url}
-                    alt={activeMaterial.name}
+                    src={liveMaterial.url}
+                    alt={liveMaterial.name}
                     className="w-full flex-1 object-cover min-h-0"
                     loading="eager"
                     decoding="sync"
                     fetchPriority="high"
                   />
-                  {activeMaterial.name && (
+                  {liveMaterial.name && (
                     <div className="p-3 bg-black/60 flex-shrink-0">
-                      <p className="text-white font-black text-center uppercase tracking-widest text-sm">{activeMaterial.name}</p>
+                      <p className="text-white font-black text-center uppercase tracking-widest text-sm">{liveMaterial.name}</p>
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
                   <img
-                    src={activeMaterial.url}
-                    alt={activeMaterial.name}
+                    src={liveMaterial.url}
+                    alt={liveMaterial.name}
                     className="w-full h-auto object-cover"
                     loading="eager"
                     decoding="sync"
                     fetchPriority="high"
                   />
-                  {activeMaterial.name && (
+                  {liveMaterial.name && (
                     <div className="p-2 bg-black/60 backdrop-blur-md">
-                      <p className="text-white text-xs font-black text-center">{activeMaterial.name}</p>
+                      <p className="text-white text-xs font-black text-center">{liveMaterial.name}</p>
                     </div>
                   )}
                 </div>
