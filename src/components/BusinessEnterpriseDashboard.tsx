@@ -8,6 +8,7 @@ const LinkManagement = lazy(() => import('./LinkManagement'));
 const AITrendAnalysis = lazy(() => import('./AITrendAnalysis'));
 const LiveCommerceManagement = lazy(() => import('./LiveCommerceManagement'));
 const BroadcastSettings = lazy(() => import('./BroadcastSettings'));
+const DmAutomation = lazy(() => import('./DmAutomation'));
 const OpenScheduleManagement = lazy(() => import('./OpenScheduleManagement'));
 const MembershipPlan = lazy(() => import('./MembershipPlan'));
 const BusinessTimeline = lazy(() => import('./BusinessTimeline'));
@@ -19,7 +20,7 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'live' | 'broadcast-settings' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'live' | 'broadcast-settings' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
@@ -213,6 +214,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       break;
     case 'broadcast-settings':
       subComponent = <Suspense fallback={<BizLazyFallback />}><BroadcastSettings userName={businessUsername} onNavigateLive={() => setCurrentSubView('live')} /></Suspense>;
+      break;
+    case 'dm-automation':
+      subComponent = <Suspense fallback={<BizLazyFallback />}><DmAutomation userName={businessUsername} /></Suspense>;
       break;
     case 'open-schedule':
       subComponent = <Suspense fallback={<BizLazyFallback />}><OpenScheduleManagement userName={businessUsername} /></Suspense>;
@@ -417,6 +421,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
           <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
           <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
+          <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <div className="my-3 border-t border-white/10" />
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
@@ -446,6 +451,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
           <MobileNavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
           <MobileNavItem icon="📋" label="방송설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
+          <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
@@ -470,6 +476,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => { setCurrentSubView('links'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { setCurrentSubView('live'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { setCurrentSubView('broadcast-settings'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { setCurrentSubView('dm-automation'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
