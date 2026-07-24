@@ -44,12 +44,36 @@ export interface DmAutomationLog {
 
 export interface DmAutomationSettings {
   enabled: boolean;
+  connected: boolean;
+  igUserId: string;
   igAccountId: string;
   igUsername: string;
   hasAccessToken: boolean;
-  rules: DmRule[];
+  automations: DmAutomationItem[];
+  rules?: DmRule[];
   logs?: DmAutomationLog[];
   updatedAt?: string;
+}
+
+// 인포크 링크식 "댓글 → DM" 자동화 항목.
+export interface DmMessageButton {
+  id: string;
+  label: string;
+  url: string;
+}
+
+export interface DmAutomationItem {
+  id: string;
+  name: string;
+  enabled: boolean;
+  commentMatch: 'all' | 'keyword';
+  keywords: string[];
+  replyEnabled: boolean;
+  replies: string[];
+  followFilter: 'all' | 'followers' | 'non_followers';
+  message: string;
+  buttons: DmMessageButton[];
+  createdAt: string;
 }
 
 // Claude plan credit wallet — public shape returned by /api/claude-credits.
@@ -1593,11 +1617,11 @@ export const apiService = {
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
-      return { enabled: false, igAccountId: '', igUsername: '', hasAccessToken: false, rules: [], logs: [] };
+      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], logs: [] };
     }
   },
 
-  async saveDmAutomation(username: string, settings: Partial<DmAutomationSettings> & { accessToken?: string }): Promise<boolean> {
+  async saveDmAutomation(username: string, settings: Partial<DmAutomationSettings>): Promise<boolean> {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
@@ -1611,7 +1635,27 @@ export const apiService = {
     }
   },
 
-  async sendInstagramDm(payload: { username: string; recipientId: string; message: string; ruleId?: string; test?: boolean }): Promise<{ success: boolean; connected?: boolean; message?: string }> {
+  // 인스타그램 계정 연동 시작 — 서버 함수가 OAuth authorize 로 리다이렉트한다.
+  instagramConnectUrl(username: string): string {
+    return `/api/instagram/oauth/start?username=${encodeURIComponent(username.toLowerCase())}`;
+  },
+
+  // 인스타그램 계정 연동 해제.
+  async disconnectInstagram(username: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect' }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to disconnect Instagram:', e);
+      return false;
+    }
+  },
+
+  async sendInstagramDm(payload: { username: string; recipientId: string; message: string; buttons?: DmMessageButton[]; ruleId?: string; test?: boolean }): Promise<{ success: boolean; connected?: boolean; message?: string }> {
     try {
       const res = await fetch('/api/send-instagram-dm', {
         method: 'POST',

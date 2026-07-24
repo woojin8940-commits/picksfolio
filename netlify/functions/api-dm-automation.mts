@@ -5,34 +5,102 @@ import type { Config, Context } from "@netlify/functions";
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
  * - Netlify Blobs 에 사용자별 JSON 설정을 보관한다.
  * - 액세스 토큰은 민감정보라 GET 응답에서는 원문을 내려주지 않고
- *   `hasAccessToken` 플래그로만 노출한다.
- * - 저장(POST) 시 토큰 필드가 비어 있으면 기존 토큰을 유지한다
- *   (마스킹된 값이 다시 저장되며 토큰이 지워지는 것을 방지).
+ *   `hasAccessToken` / `connected` 플래그로만 노출한다.
+ * - 계정 연동은 OAuth 콜백(instagram-oauth-callback)이 담당하며, 이 함수는
+ *   자동화(automations) 목록과 연동 해제(disconnect)만 처리한다.
+ *
+ * automations: 인포크 링크식 "댓글 → DM" 자동화 목록.
+ *   - commentMatch: 'all' | 'keyword'  (모든 댓글 / 특정 키워드)
+ *   - replyEnabled + replies: 댓글에 공개 답글도 남길지 (랜덤)
+ *   - followFilter: 'all' | 'followers' | 'non_followers'
+ *   - message + buttons: 실제로 보낼 DM (텍스트 + 링크 버튼)
+ *
+ * rules: 구버전 트리거 규칙(welcome/new_follower 등) — 하위호환 위해 보존한다.
  */
 
-interface DmRule {
+interface DmMessageButton {
   id: string;
-  trigger: "welcome" | "new_follower" | "comment_keyword" | "story_reply" | "new_order";
-  keyword?: string;
-  message: string;
+  label: string;
+  url: string;
+}
+
+interface DmAutomationItem {
+  id: string;
+  name: string;
   enabled: boolean;
+  commentMatch: "all" | "keyword";
+  keywords: string[];
+  replyEnabled: boolean;
+  replies: string[];
+  followFilter: "all" | "followers" | "non_followers";
+  message: string;
+  buttons: DmMessageButton[];
+  createdAt: string;
 }
 
 interface DmSettings {
   enabled: boolean;
+  connected: boolean;
+  igUserId: string;
   igAccountId: string;
   igUsername: string;
   accessToken?: string;
-  rules: DmRule[];
+  tokenSource?: string;
+  tokenExpiresAt?: string;
+  automations: DmAutomationItem[];
+  rules: unknown[];
   updatedAt?: string;
 }
 
 const DEFAULT_SETTINGS: DmSettings = {
   enabled: false,
+  connected: false,
+  igUserId: "",
   igAccountId: "",
   igUsername: "",
+  automations: [],
   rules: [],
 };
+
+const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+function sanitizeAutomation(a: any): DmAutomationItem {
+  const buttons: DmMessageButton[] = Array.isArray(a?.buttons)
+    ? a.buttons
+        .slice(0, 3)
+        .map((b: any) => ({
+          id: String(b?.id || genId("btn")),
+          label: String(b?.label || "").slice(0, 30),
+          url: String(b?.url || "").slice(0, 500),
+        }))
+        .filter((b: DmMessageButton) => b.label || b.url)
+    : [];
+
+  const keywords: string[] = Array.isArray(a?.keywords)
+    ? a.keywords.map((k: any) => String(k).trim()).filter(Boolean).slice(0, 20)
+    : [];
+
+  const replies: string[] = Array.isArray(a?.replies)
+    ? a.replies.map((r: any) => String(r).slice(0, 300)).filter(Boolean).slice(0, 10)
+    : [];
+
+  return {
+    id: String(a?.id || genId("auto")),
+    name: String(a?.name || "새 자동화").slice(0, 60),
+    enabled: a?.enabled !== false,
+    commentMatch: a?.commentMatch === "keyword" ? "keyword" : "all",
+    keywords,
+    replyEnabled: Boolean(a?.replyEnabled),
+    replies,
+    followFilter:
+      a?.followFilter === "followers" || a?.followFilter === "non_followers"
+        ? a.followFilter
+        : "all",
+    message: String(a?.message || "").slice(0, 1000),
+    buttons,
+    createdAt: String(a?.createdAt || new Date().toISOString()),
+  };
+}
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -51,40 +119,57 @@ export default async (req: Request, context: Context) => {
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
+      automations: Array.isArray(data.automations) ? data.automations : [],
+      connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
       logs: logs.slice(0, 20),
     });
   }
 
   if (req.method === "POST") {
-    const body = (await req.json()) as Partial<DmSettings>;
+    const body = (await req.json()) as any;
     const existing = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
 
-    // 토큰이 새로 전달되지 않으면(빈 값) 기존 토큰을 유지한다.
-    const nextToken =
-      typeof body.accessToken === "string" && body.accessToken.trim().length > 0
-        ? body.accessToken.trim()
-        : existing.accessToken || "";
+    // 연동 해제
+    if (body?.action === "disconnect") {
+      const next: DmSettings = {
+        ...DEFAULT_SETTINGS,
+        ...existing,
+        enabled: false,
+        connected: false,
+        igUserId: "",
+        igAccountId: "",
+        igUsername: "",
+        accessToken: "",
+        tokenSource: undefined,
+        tokenExpiresAt: undefined,
+        automations: Array.isArray(existing.automations) ? existing.automations : [],
+        rules: Array.isArray(existing.rules) ? existing.rules : [],
+        updatedAt: new Date().toISOString(),
+      };
+      await store.setJSON(key, next);
+      return Response.json({ success: true, connected: false });
+    }
 
     const next: DmSettings = {
-      enabled: Boolean(body.enabled),
-      igAccountId: (body.igAccountId ?? existing.igAccountId ?? "").trim(),
-      igUsername: (body.igUsername ?? existing.igUsername ?? "").replace(/^@/, "").trim(),
-      accessToken: nextToken,
-      rules: Array.isArray(body.rules)
-        ? body.rules.map((r) => ({
-            id: String(r.id || `rule_${Math.random().toString(36).slice(2, 9)}`),
-            trigger: r.trigger || "welcome",
-            keyword: r.keyword ? String(r.keyword).trim() : undefined,
-            message: String(r.message || "").slice(0, 1000),
-            enabled: r.enabled !== false,
-          }))
-        : existing.rules || [],
+      ...DEFAULT_SETTINGS,
+      ...existing,
+      enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
+      automations: Array.isArray(body.automations)
+        ? body.automations.map(sanitizeAutomation)
+        : Array.isArray(existing.automations)
+        ? existing.automations
+        : [],
+      // 구버전 rules 는 전달되면 갱신, 아니면 유지
+      rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
       updatedAt: new Date().toISOString(),
     };
 
     await store.setJSON(key, next);
-    return Response.json({ success: true, hasAccessToken: Boolean(next.accessToken) });
+    return Response.json({
+      success: true,
+      connected: Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),
+    });
   }
 
   return Response.json({ error: "Method not allowed" }, { status: 405 });

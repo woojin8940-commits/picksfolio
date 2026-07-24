@@ -1008,6 +1008,15 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // 인스타그램 DM 연동 콜백 복귀 — DM 자동화 화면으로 이동한다.
+  // (DmAutomation 컴포넌트가 ?ig_connected/?ig_error 를 읽어 배너 표시 후 URL 을 정리한다.)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ig_connected') || params.get('ig_error')) {
+      setSubView('dm-automation');
+    }
+  }, []);
+
   // Handle magic link timeline tokens — auto-login and navigate to timeline
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
   useEffect(() => {
