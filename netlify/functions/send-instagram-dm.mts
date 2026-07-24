@@ -19,15 +19,23 @@ const GRAPH_VERSION = "v21.0";
 interface DmSettings {
   enabled: boolean;
   igAccountId: string;
+  igUserId?: string;
   igUsername: string;
   accessToken?: string;
-  rules: { id: string; trigger: string; keyword?: string; message: string; enabled: boolean }[];
+  tokenSource?: string;
+  rules?: unknown[];
+}
+
+interface SendButton {
+  label: string;
+  url: string;
 }
 
 interface SendBody {
   username: string;
   recipientId: string;
   message: string;
+  buttons?: SendButton[];
   ruleId?: string;
   test?: boolean;
 }
@@ -78,7 +86,8 @@ export default async (req: Request, context: Context) => {
   const store = getStore("dm-automation");
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
 
-  if (!settings || !settings.igAccountId || !settings.accessToken) {
+  const igId = settings?.igUserId || settings?.igAccountId;
+  if (!settings || !igId || !settings.accessToken) {
     await appendLog(username, {
       status: "skipped",
       reason: "not_connected",
@@ -90,7 +99,7 @@ export default async (req: Request, context: Context) => {
         success: false,
         connected: false,
         message:
-          "인스타그램 계정이 아직 연결되지 않았습니다. DM 자동화 설정에서 계정 ID와 액세스 토큰을 저장한 뒤 다시 시도하세요.",
+          "인스타그램 계정이 아직 연동되지 않았습니다. DM 자동화 화면에서 계정을 연동한 뒤 다시 시도하세요.",
       },
       { status: 200 },
     );
@@ -103,10 +112,32 @@ export default async (req: Request, context: Context) => {
     );
   }
 
+  // Instagram Login(신) 토큰은 graph.instagram.com, 구 페이지 토큰은 graph.facebook.com 사용.
+  const graphHost =
+    settings.tokenSource === "instagram_login"
+      ? "graph.instagram.com"
+      : "graph.facebook.com";
+
+  // 링크 버튼이 있으면 버튼 템플릿, 없으면 일반 텍스트로 발송한다.
+  const buttons = Array.isArray(body.buttons)
+    ? body.buttons
+        .filter((b) => b && b.url && b.label)
+        .slice(0, 3)
+        .map((b) => ({ type: "web_url", url: b.url, title: b.label.slice(0, 20) }))
+    : [];
+
+  const messagePayload =
+    buttons.length > 0
+      ? {
+          attachment: {
+            type: "template",
+            payload: { template_type: "button", text: message.slice(0, 640), buttons },
+          },
+        }
+      : { text: message };
+
   try {
-    const url = `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(
-      settings.igAccountId,
-    )}/messages`;
+    const url = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(igId)}/messages`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -115,7 +146,7 @@ export default async (req: Request, context: Context) => {
       },
       body: JSON.stringify({
         recipient: { id: recipientId },
-        message: { text: message },
+        message: messagePayload,
       }),
     });
 
