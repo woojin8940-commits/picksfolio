@@ -14,11 +14,12 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+  currentSubView: 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
   onNavigateLive: () => void;
   onNavigateBroadcastSettings: () => void;
+  onNavigateDmAutomation: () => void;
   onNavigateBusiness: () => void;
   onNavigateCalendar: () => void;
   onNavigateMembership: () => void;
@@ -36,6 +37,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateLinks,
   onNavigateLive,
   onNavigateBroadcastSettings,
+  onNavigateDmAutomation,
   onNavigateBusiness,
   onNavigateCalendar,
   onNavigateMembership,
@@ -227,6 +229,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             active={currentSubView === 'broadcast-settings'}
             onClick={onNavigateBroadcastSettings}
           />
+          <NavItem
+            icon="📩"
+            label="DM 자동화"
+            active={currentSubView === 'dm-automation'}
+            onClick={onNavigateDmAutomation}
+          />
           <div className="my-3 border-t border-white/10" />
           <NavItem
             icon="📢"
@@ -336,6 +344,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               />
               <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { onNavigateBroadcastSettings(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />

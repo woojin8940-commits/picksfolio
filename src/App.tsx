@@ -55,6 +55,7 @@ const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard')
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
 const LiveCommerceManagement = lazyWithRetry(() => import('./components/LiveCommerceManagement'));
 const BroadcastSettings = lazyWithRetry(() => import('./components/BroadcastSettings'));
+const DmAutomation = lazyWithRetry(() => import('./components/DmAutomation'));
 const BroadcastHistory = lazyWithRetry(() => import('./components/BroadcastHistory'));
 const BusinessProposalForm = lazyWithRetry(() => import('./components/BusinessProposalForm'));
 const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashboard'));
@@ -76,7 +77,7 @@ import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
-type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-[40vh]">
@@ -1333,6 +1334,9 @@ const App: React.FC = () => {
       case 'broadcast-settings':
         subComponent = <Suspense fallback={<LazyFallback />}><BroadcastSettings userName={userName} onNavigateLive={() => setSubView('live')} /></Suspense>;
         break;
+      case 'dm-automation':
+        subComponent = <Suspense fallback={<LazyFallback />}><DmAutomation userName={userName} /></Suspense>;
+        break;
       case 'broadcast-history':
         subComponent = <Suspense fallback={<LazyFallback />}><BroadcastHistory userName={userName} /></Suspense>;
         break;
@@ -1379,6 +1383,7 @@ const App: React.FC = () => {
         onNavigateLinks={() => setSubView('links')}
         onNavigateLive={() => setSubView('live')}
         onNavigateBroadcastSettings={() => setSubView('broadcast-settings')}
+        onNavigateDmAutomation={() => setSubView('dm-automation')}
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
         onNavigateOpenSchedule={() => setSubView('open-schedule')}
