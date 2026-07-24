@@ -31,11 +31,21 @@ interface SendButton {
   url: string;
 }
 
+interface SendCard {
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}
+
 interface SendBody {
   username: string;
   recipientId: string;
   message: string;
   buttons?: SendButton[];
+  messageType?: "text" | "carousel";
+  cards?: SendCard[];
   ruleId?: string;
   test?: boolean;
 }
@@ -118,7 +128,24 @@ export default async (req: Request, context: Context) => {
       ? "graph.instagram.com"
       : "graph.facebook.com";
 
-  // 링크 버튼이 있으면 버튼 템플릿, 없으면 일반 텍스트로 발송한다.
+  // 캐러셀 카드가 있으면 제네릭 템플릿, 링크 버튼이 있으면 버튼 템플릿,
+  // 둘 다 없으면 일반 텍스트로 발송한다.
+  const cards = Array.isArray(body.cards)
+    ? body.cards
+        .filter((c) => c && (c.title || c.imageUrl))
+        .slice(0, 10)
+        .map((c) => {
+          const el: any = { title: (c.title || " ").slice(0, 80) };
+          if (c.subtitle) el.subtitle = c.subtitle.slice(0, 80);
+          if (c.imageUrl) el.image_url = c.imageUrl;
+          if (c.buttonUrl && c.buttonLabel) {
+            el.default_action = { type: "web_url", url: c.buttonUrl };
+            el.buttons = [{ type: "web_url", url: c.buttonUrl, title: c.buttonLabel.slice(0, 20) }];
+          }
+          return el;
+        })
+    : [];
+
   const buttons = Array.isArray(body.buttons)
     ? body.buttons
         .filter((b) => b && b.url && b.label)
@@ -127,7 +154,14 @@ export default async (req: Request, context: Context) => {
     : [];
 
   const messagePayload =
-    buttons.length > 0
+    body.messageType === "carousel" && cards.length > 0
+      ? {
+          attachment: {
+            type: "template",
+            payload: { template_type: "generic", elements: cards },
+          },
+        }
+      : buttons.length > 0
       ? {
           attachment: {
             type: "template",

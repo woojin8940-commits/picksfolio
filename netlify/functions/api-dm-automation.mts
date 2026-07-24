@@ -24,6 +24,15 @@ interface DmMessageButton {
   url: string;
 }
 
+interface DmCarouselCard {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}
+
 interface DmAutomationItem {
   id: string;
   name: string;
@@ -33,8 +42,12 @@ interface DmAutomationItem {
   replyEnabled: boolean;
   replies: string[];
   followFilter: "all" | "followers" | "non_followers";
+  mediaScope: "all" | "selected";
+  mediaIds: string[];
+  messageType: "text" | "carousel";
   message: string;
   buttons: DmMessageButton[];
+  cards: DmCarouselCard[];
   createdAt: string;
 }
 
@@ -84,6 +97,27 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     ? a.replies.map((r: any) => String(r).slice(0, 300)).filter(Boolean).slice(0, 10)
     : [];
 
+  const mediaIds: string[] = Array.isArray(a?.mediaIds)
+    ? a.mediaIds.map((m: any) => String(m).trim()).filter(Boolean).slice(0, 50)
+    : [];
+
+  const cards: DmCarouselCard[] = Array.isArray(a?.cards)
+    ? a.cards
+        .slice(0, 10)
+        .map((c: any) => ({
+          id: String(c?.id || genId("card")),
+          title: String(c?.title || "").slice(0, 80),
+          subtitle: String(c?.subtitle || "").slice(0, 80),
+          imageUrl: String(c?.imageUrl || "").slice(0, 1000),
+          buttonLabel: String(c?.buttonLabel || "").slice(0, 20),
+          buttonUrl: String(c?.buttonUrl || "").slice(0, 1000),
+        }))
+        .filter((c: DmCarouselCard) => c.title || c.imageUrl || c.buttonUrl)
+    : [];
+
+  const mediaScope = a?.mediaScope === "selected" && mediaIds.length > 0 ? "selected" : "all";
+  const messageType = a?.messageType === "carousel" ? "carousel" : "text";
+
   return {
     id: String(a?.id || genId("auto")),
     name: String(a?.name || "새 자동화").slice(0, 60),
@@ -96,8 +130,12 @@ function sanitizeAutomation(a: any): DmAutomationItem {
       a?.followFilter === "followers" || a?.followFilter === "non_followers"
         ? a.followFilter
         : "all",
+    mediaScope,
+    mediaIds,
+    messageType,
     message: String(a?.message || "").slice(0, 1000),
     buttons,
+    cards,
     createdAt: String(a?.createdAt || new Date().toISOString()),
   };
 }
