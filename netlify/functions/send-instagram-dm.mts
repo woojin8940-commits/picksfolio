@@ -1,5 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
+import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
 
 /**
  * 인스타그램 DM 발송.
@@ -26,26 +28,13 @@ interface DmSettings {
   rules?: unknown[];
 }
 
-interface SendButton {
-  label: string;
-  url: string;
-}
-
-interface SendCard {
-  title: string;
-  subtitle: string;
-  imageUrl: string;
-  buttonLabel: string;
-  buttonUrl: string;
-}
-
 interface SendBody {
   username: string;
   recipientId: string;
   message: string;
-  buttons?: SendButton[];
+  buttons?: DmButton[];
   messageType?: "text" | "carousel";
-  cards?: SendCard[];
+  cards?: DmCard[];
   ruleId?: string;
   test?: boolean;
 }
@@ -128,84 +117,47 @@ export default async (req: Request, context: Context) => {
       ? "graph.instagram.com"
       : "graph.facebook.com";
 
-  // 캐러셀 카드가 있으면 제네릭 템플릿, 링크 버튼이 있으면 버튼 템플릿,
-  // 둘 다 없으면 일반 텍스트로 발송한다.
-  const cards = Array.isArray(body.cards)
-    ? body.cards
-        .filter((c) => c && (c.title || c.imageUrl))
-        .slice(0, 10)
-        .map((c) => {
-          const el: any = { title: (c.title || " ").slice(0, 80) };
-          if (c.subtitle) el.subtitle = c.subtitle.slice(0, 80);
-          if (c.imageUrl) el.image_url = c.imageUrl;
-          if (c.buttonUrl && c.buttonLabel) {
-            el.default_action = { type: "web_url", url: c.buttonUrl };
-            el.buttons = [{ type: "web_url", url: c.buttonUrl, title: c.buttonLabel.slice(0, 20) }];
-          }
-          return el;
-        })
-    : [];
-
-  const buttons = Array.isArray(body.buttons)
-    ? body.buttons
-        .filter((b) => b && b.url && b.label)
-        .slice(0, 3)
-        .map((b) => ({ type: "web_url", url: b.url, title: b.label.slice(0, 20) }))
-    : [];
-
-  const messagePayload =
-    body.messageType === "carousel" && cards.length > 0
-      ? {
-          attachment: {
-            type: "template",
-            payload: { template_type: "generic", elements: cards },
-          },
-        }
-      : buttons.length > 0
-      ? {
-          attachment: {
-            type: "template",
-            payload: { template_type: "button", text: message.slice(0, 640), buttons },
-          },
-        }
-      : { text: message };
+  // 캐러셀/링크 버튼은 제네릭 템플릿, 버튼이 없으면 일반 텍스트로 발송한다.
+  // (인스타그램은 버튼 템플릿을 지원하지 않는다 — _shared/instagram-dm.mts 참고)
+  const messages = buildDmMessages({
+    messageType: body.messageType,
+    message,
+    buttons: body.buttons,
+    cards: body.cards,
+  });
 
   try {
-    const url = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(igId)}/messages`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.accessToken}`,
-      },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: messagePayload,
-      }),
+    const result = await sendDmMessages({
+      graphHost,
+      graphVersion: GRAPH_VERSION,
+      igId,
+      accessToken: settings.accessToken,
+      recipient: { id: recipientId },
+      messages,
     });
 
-    const result = (await res.json().catch(() => ({}))) as any;
-
-    if (!res.ok) {
-      const errMsg = result?.error?.message || `Graph API 오류 (HTTP ${res.status})`;
+    if (!result.ok) {
       await appendLog(username, {
         status: "failed",
         recipientId,
         ruleId: body.ruleId,
-        error: errMsg,
+        error: result.error,
       });
-      return Response.json({ success: false, connected: true, message: errMsg }, { status: 200 });
+      return Response.json(
+        { success: false, connected: true, message: result.error },
+        { status: 200 },
+      );
     }
 
     await appendLog(username, {
       status: "sent",
       recipientId,
       ruleId: body.ruleId,
-      messageId: result?.message_id,
+      messageId: result.messageId,
       test: Boolean(body.test),
     });
 
-    return Response.json({ success: true, connected: true, messageId: result?.message_id });
+    return Response.json({ success: true, connected: true, messageId: result.messageId });
   } catch (e: any) {
     const errMsg = e?.message || "발송 중 알 수 없는 오류가 발생했습니다.";
     await appendLog(username, { status: "failed", recipientId, ruleId: body.ruleId, error: errMsg });
