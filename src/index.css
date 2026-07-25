@@ -249,10 +249,17 @@ h1, h2, h3, h4, h5, h6 {
    possible — the broadcaster asked for minimal obstruction. On the web (≥768px)
    they get more breathing room so they don't sit flush against the stage edges.
    Declared here (not via Tailwind py-* utilities) so it reliably wins over the
-   generic .safe-area-pad helper, and folds the notch inset into the base gap. */
+   generic .safe-area-pad helper, and folds the notch inset into the base gap.
+
+   On phones the 메시지 입력칸 row now owns the very bottom edge of the broadcast
+   screen and the 카메라/마이크/거울/카메라전환/라이브 시작 strip sits directly ABOVE
+   it (the two rows were swapped at the broadcaster's request). The extra 4.25rem
+   in the bottom gap reserves the height of that chat input row so the controls
+   land just on top of it instead of behind it. The web (≥768px) is unaffected:
+   there the chat lives in the right-hand sidebar, not over the stage. */
 .live-overlay-pad {
   padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem + 4.25rem);
   padding-left: calc(env(safe-area-inset-left, 0px) + 0.625rem);
   padding-right: calc(env(safe-area-inset-right, 0px) + 0.625rem);
 }
@@ -262,6 +269,19 @@ h1, h2, h3, h4, h5, h6 {
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.75rem);
     padding-left: calc(env(safe-area-inset-left, 0px) + 0.875rem);
     padding-right: calc(env(safe-area-inset-right, 0px) + 0.875rem);
+  }
+}
+
+/* The chat input row is the last element on the phone broadcast screen, so it
+   now has to clear the home indicator itself (it used to sit above the
+   broadcaster controls, which carried that inset). On the web it keeps the
+   md:p-4 padding of its sidebar footer. */
+.live-chat-input-pad {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+@media (min-width: 768px) {
+  .live-chat-input-pad {
+    padding-bottom: 1rem;
   }
 }
 
