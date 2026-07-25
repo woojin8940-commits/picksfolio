@@ -34,6 +34,8 @@ export interface DmRule {
 
 export interface DmAutomationLog {
   status: 'sent' | 'failed' | 'skipped';
+  /** 'dm' = 자동 DM, 'reply' = 댓글 공개 답글. 구버전 로그에는 없다(DM 으로 간주). */
+  kind?: 'dm' | 'reply';
   recipientId?: string;
   ruleId?: string;
   messageId?: string;

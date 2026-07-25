@@ -1126,6 +1126,13 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                 }`}>
                   {log.status === 'sent' ? '전송' : log.status === 'failed' ? '실패' : '건너뜀'}
                 </span>
+                {/* DM 과 공개 답글을 구분해 보여준다. 답글 실패도 기록되므로 여기서
+                    "댓글 답글이 실제로 달렸는지"를 바로 확인할 수 있다. */}
+                <span className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${
+                  log.kind === 'reply' ? 'bg-pink-100 text-pink-600' : 'bg-purple-100 text-purple-600'
+                }`}>
+                  {log.kind === 'reply' ? '댓글 답글' : 'DM'}
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-slate-700 truncate">
                     {log.recipientId ? `→ ${log.recipientId}` : '수신자 미지정'}

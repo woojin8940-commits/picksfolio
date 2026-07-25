@@ -5,6 +5,7 @@ import {
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
+import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -68,6 +69,8 @@ interface DmSettings {
   automations: DmAutomationItem[];
   rules: unknown[];
   updatedAt?: string;
+  /** 계정별 웹훅(`subscribed_apps`) 구독을 마친 시각. */
+  webhookSubscribedAt?: string;
 }
 
 const DEFAULT_SETTINGS: DmSettings = {
@@ -189,6 +192,8 @@ export default async (req: Request, context: Context) => {
         accessToken: "",
         tokenSource: undefined,
         tokenExpiresAt: undefined,
+        // 재연동 시 웹훅 구독을 다시 걸도록 플래그도 비운다.
+        webhookSubscribedAt: undefined,
         automations: Array.isArray(existing.automations) ? existing.automations : [],
         rules: Array.isArray(existing.rules) ? existing.rules : [],
         updatedAt: new Date().toISOString(),
@@ -225,6 +230,25 @@ export default async (req: Request, context: Context) => {
     };
 
     await store.setJSON(key, next);
+
+    // 이미 연동돼 있던 계정은 OAuth 콜백을 다시 거치지 않으므로, 자동화를 저장하는
+    // 시점에 한 번 계정별 웹훅 구독을 채워준다. 구독이 없으면 댓글 이벤트가 도착하지
+    // 않아 자동 DM·자동 답글이 트리거되지 않는다. 성공하면 시각을 기록해 매번
+    // 호출하지 않는다.
+    if (next.accessToken && !next.webhookSubscribedAt) {
+      const sub = await subscribeInstagramWebhooks({
+        accessToken: next.accessToken,
+        tokenSource: next.tokenSource,
+        igId: next.igUserId || next.igAccountId,
+      });
+      if (sub.ok) {
+        next.webhookSubscribedAt = new Date().toISOString();
+        await store.setJSON(key, next);
+      } else {
+        console.warn("[dm-automation] webhook subscribe failed:", sub.error);
+      }
+    }
+
     return Response.json({
       success: true,
       connected: Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),

@@ -1863,43 +1863,6 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
 
-        {/* Material Overlays — only 상품/이미지 자료 float over the broadcaster's
-            own preview. Banner-type materials are managed and previewed entirely
-            in the 배너 탭 ("배너 관리"); they no longer float as a bar over the host's
-            live video here. Viewers still see a toggled banner via their own
-            renderer (LiveStream), so removing the host-side float only declutters
-            the broadcaster's screen — it does not hide banners from viewers. */}
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          {activeMaterial && activeMaterial.type !== 'banner' && (
-            <div
-              key={activeMaterial.id}
-              style={{
-                width: `${activeMaterial.width}%`,
-                height: 'auto',
-                opacity: activeMaterial.opacity / 100,
-                position: 'absolute',
-                ...(activeMaterial.type === 'product'
-                  ? { right: '12px', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }
-                  : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }),
-              }}
-            >
-              <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
-                <img
-                  src={activeMaterial.url}
-                  alt={activeMaterial.name}
-                  className="w-full h-auto object-cover"
-                  loading="eager"
-                  decoding="sync"
-                  fetchPriority="high"
-                />
-                <div className="p-2 bg-black/60 backdrop-blur-md">
-                  <p className="text-white text-xs font-black text-center">{activeMaterial.name}</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Active Product Preview Overlay - shows seller what viewers see */}
         {activeProductId && (() => {
           const activeProduct = liveProducts.find(p => p.id === activeProductId);
@@ -1967,10 +1930,72 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 @{coSession.partner} 연결 중…
               </div>
             )}
-            {/* A pushed banner is confirmed via the 배너 tab ("노출 중") rather than
-                floating over the split, so neither face is covered. */}
+            {/* A pushed banner floats centered over the whole stage — exactly where
+                viewers see it — rather than inside either creator's window. */}
           </>
         )}
+
+        {/* Material Overlays — every pushed material (배너 / 상품 / 이미지) floats over the
+            broadcaster's own stage using the same geometry and styling as the viewer
+            renderer (LiveStream), so the host sees what the audience sees. Banners
+            were previously hidden from the host and only confirmable through the
+            배너 탭, which read as "the banner isn't working" even though it was live
+            for viewers. This sits at STAGE level (outside the host-feed window,
+            which is `overflow-hidden` and shrinks to 48% during a 함께 방송) so the
+            overlay is centered on the full stage and never clipped. No z-index: as
+            the stage's LAST child it already paints over both video windows, while
+            the broadcast controls (a later sibling of the stage) stay on top of it
+            so a banner never hides the 방송 종료 button. */}
+        <div className="absolute inset-0 pointer-events-none">
+          {activeMaterial && activeMaterial.url && (
+            <div
+              key={activeMaterial.id}
+              style={{
+                width: `${activeMaterial.width}%`,
+                height: activeMaterial.type === 'banner' ? `${activeMaterial.width}%` : 'auto',
+                opacity: activeMaterial.opacity / 100,
+                position: 'absolute',
+                ...(activeMaterial.type === 'product'
+                  ? { right: '12px', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }
+                  : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }),
+              }}
+            >
+              {activeMaterial.type === 'banner' ? (
+                <div className="w-full h-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+                  <img
+                    src={activeMaterial.url}
+                    alt={activeMaterial.name}
+                    className="w-full flex-1 object-cover min-h-0"
+                    loading="eager"
+                    decoding="sync"
+                    fetchPriority="high"
+                  />
+                  {activeMaterial.name && (
+                    <div className="p-3 bg-black/60 flex-shrink-0">
+                      <p className="text-white font-black text-center uppercase tracking-widest text-sm">{activeMaterial.name}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
+                  <img
+                    src={activeMaterial.url}
+                    alt={activeMaterial.name}
+                    className="w-full h-auto object-cover"
+                    loading="eager"
+                    decoding="sync"
+                    fetchPriority="high"
+                  />
+                  {activeMaterial.name && (
+                    <div className="p-2 bg-black/60 backdrop-blur-md">
+                      <p className="text-white text-xs font-black text-center">{activeMaterial.name}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         </div>
         {/* End viewer frame */}
 
@@ -2940,14 +2965,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           </div>
         )}
 
-        {/* Banner Panel — preview and toggle banner materials here instead of
-            having them permanently float over the live video. Toggling a banner
-            ON pushes it to viewers (shown in the co-broadcast info band, or as a
-            standard overlay in solo broadcasts); OFF removes it from the screen. */}
+        {/* Banner Panel — browse and toggle banner materials. Toggling a banner ON
+            pushes it to viewers AND floats it over the host's own stage, so the
+            broadcaster can confirm the banner is up without asking a viewer;
+            OFF removes it from both screens. */}
         {showBannerPanel && (
           <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-3 scrollbar-hide">
             <p className="text-white/40 text-xs font-medium mb-1">
-              배너를 켜면 시청자 화면에 노출됩니다. 함께 방송 중에는 영상 위가 아니라 하단 정보 영역에 표시돼 얼굴을 가리지 않습니다.
+              배너를 켜면 시청자 화면과 내 방송 화면에 함께 노출됩니다. 함께 방송 중에는 두 화면 사이 중앙에 표시됩니다.
             </p>
             {bannerMaterials.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -2975,7 +3000,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                     <div className="flex items-center gap-2 p-3">
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-xs font-bold truncate">{item.name || '배너'}</p>
-                        <p className="text-white/30 text-[10px]">{isOn ? '시청자 화면에 노출 중' : '꺼짐'}</p>
+                        <p className="text-white/30 text-[10px]">{isOn ? '내 화면 · 시청자 화면 노출 중' : '꺼짐'}</p>
                       </div>
                       <button
                         onClick={() => setActiveMaterialId(isOn ? null : item.id)}
