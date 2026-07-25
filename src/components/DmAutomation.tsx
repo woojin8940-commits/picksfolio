@@ -76,6 +76,12 @@ const isValidLinkUrl = (raw: string): boolean => {
 // 전체(all)는 실제로 전 피드에 적용되므로 최신 게시물 몇 개를 대표 이미지로 노출한다.
 const MAX_FEED_THUMBS = 4;
 
+// 썸네일이 44px 였을 때는 "어떤 피드인지" 알아볼 수 없다는 피드백이 있었다. 한 변을
+// 5rem(모바일)~6rem(데스크톱)으로 키워 게시물 사진이 한눈에 구분되게 한다. 여러 장이면
+// 카드 폭을 넘길 수 있으므로 줄바꿈을 허용하고, 설명 문구는 썸네일 옆이 아니라 아래로
+// 내려 이미지가 쓸 수 있는 폭을 최대한 확보한다.
+const THUMB_SIZE = 'w-20 h-20 md:w-24 md:h-24';
+
 const AutomationFeedThumbs: React.FC<{
   media: InstagramMedia[];
   loading: boolean;
@@ -89,10 +95,12 @@ const AutomationFeedThumbs: React.FC<{
 
   if (loading && shown.length === 0) {
     return (
-      <div className="flex items-center gap-2 mb-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="w-11 h-11 rounded-lg bg-slate-100 animate-pulse" />
-        ))}
+      <div className="mb-3">
+        <div className="flex items-center gap-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className={`${THUMB_SIZE} rounded-xl bg-slate-100 animate-pulse`} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -108,15 +116,15 @@ const AutomationFeedThumbs: React.FC<{
   }
 
   return (
-    <div className="flex items-center gap-2 mb-3">
-      <div className="flex items-center gap-1.5">
+    <div className="mb-3">
+      <div className="flex items-center gap-2 flex-wrap">
         {shown.map((id) => {
           const m = byId.get(id);
           const thumb = m?.mediaUrl || m?.thumbnailUrl || '';
           const label = m?.caption?.slice(0, 60) || '연동된 피드 게시물';
           const inner = thumb
             ? <img src={thumb} alt={label} className="w-full h-full object-cover" loading="lazy" />
-            : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={15} className="text-slate-300" /></div>;
+            : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={22} className="text-slate-300" /></div>;
           return m?.permalink ? (
             <a
               key={id}
@@ -124,7 +132,7 @@ const AutomationFeedThumbs: React.FC<{
               target="_blank"
               rel="noopener noreferrer"
               title={label}
-              className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hover:border-pink-300 transition-colors block"
+              className={`${THUMB_SIZE} rounded-xl overflow-hidden bg-slate-100 border border-slate-200 hover:border-pink-300 transition-colors block shrink-0`}
             >
               {inner}
             </a>
@@ -132,19 +140,19 @@ const AutomationFeedThumbs: React.FC<{
             <div
               key={id}
               title={label}
-              className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border border-slate-200"
+              className={`${THUMB_SIZE} rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0`}
             >
               {inner}
             </div>
           );
         })}
         {overflow > 0 && (
-          <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-[11px] font-black text-slate-500">
+          <div className={`${THUMB_SIZE} rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-black text-slate-500 shrink-0`}>
             +{overflow}
           </div>
         )}
       </div>
-      <p className="text-[11px] font-bold text-slate-400 leading-tight">
+      <p className="mt-2 text-[11px] font-bold text-slate-400 leading-tight">
         {scope === 'selected' ? '이 게시물 댓글에만 반응' : '모든 게시물 댓글에 반응'}
       </p>
     </div>

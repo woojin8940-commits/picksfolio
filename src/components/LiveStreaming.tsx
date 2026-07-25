@@ -1978,6 +1978,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
             controls to the bottom edge (justify-between), with the edge gap set by
             .live-overlay-pad: a tight gap on phones so the buttons hug the edges
             and keep the center of the frame clear, and a roomier gap on the web.
+            On phones that bottom gap also reserves the height of the 메시지 입력칸
+            row, which now sits BELOW this controls strip at the very bottom of the
+            screen (the two rows were swapped).
             See .live-overlay-pad in index.css for why the padding lives in CSS
             (so it beats the generic .safe-area-pad helper on every device). */}
         <div className="absolute inset-0 flex flex-col justify-between pointer-events-none live-overlay-pad">
@@ -2432,8 +2435,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
           stage beside it can use the full viewport height.
           On phones it is NOT a solid docked block anymore — the stage fills the
           whole screen and this floats over it: in chat mode it's a transparent
-          overlay anchored just above the broadcaster controls (so the bigger,
-          uncovered video reads behind the chat); when a 상품/담기현황/배너 sheet is
+          overlay anchored to the BOTTOM EDGE, so its 메시지 입력칸 row is the
+          last thing on the screen and the broadcaster controls sit above it
+          (see .live-overlay-pad); when a 상품/담기현황/배너 sheet is
           open it slides up as a BOTTOM SHEET that leaves the broadcast preview
           above it visible, and 얼굴 보정 still expands to a solid full-height panel. */}
       <div className={`z-20 flex flex-col shrink-0 md:relative md:inset-auto md:bottom-auto md:w-[22rem] md:h-full md:rounded-none md:bg-slate-900 md:backdrop-blur-none md:pointer-events-auto md:border-l md:border-t-0 md:border-white/5 ${
@@ -2455,7 +2459,16 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                  scrolls inside, so the shorter sheet loses no controls. The web
                  keeps the right-hand sidebar overlay via the md: classes above. */
               'absolute inset-x-0 bottom-0 top-auto h-[42vh] rounded-t-3xl bg-slate-900/95 backdrop-blur-md'
-            : 'absolute inset-x-0 bottom-[4.25rem] h-[34vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
+            : /* Chat overlay (phones): anchored to the BOTTOM EDGE so the 메시지
+                 입력칸 and its 상품/담기현황/배너 buttons are the last row on the
+                 screen, with the 카메라/마이크/거울/카메라전환/라이브 시작 controls
+                 sitting directly above them (the two rows were swapped — the
+                 controls strip used to own the bottom edge and the chat sat on
+                 top of it). The controls keep their place by way of the extra
+                 bottom gap in .live-overlay-pad, and the chat message list gets
+                 matching bottom padding so messages stack ABOVE the controls
+                 rather than behind them. */
+              'absolute inset-x-0 bottom-0 h-[42vh] bg-gradient-to-t from-black/70 via-black/15 to-transparent pointer-events-none'
       }`}>
         {/* 얼굴 보정 Panel — beauty-cam style controls (yycam 등) applied on-device
             in the canvas draw loop (no SDK/token). On phones it sits in a BOTTOM
@@ -2669,7 +2682,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
         {/* Chat Panel */}
         {!showProductPanel && !showCartPanel && !showBannerPanel && (
           <>
-            <div className="flex-1 overflow-y-auto px-4 pt-3 pb-1.5 md:p-5 flex flex-col justify-end space-y-1 md:space-y-3 scrollbar-hide overscroll-contain">
+            <div className="flex-1 overflow-y-auto px-4 pt-3 pb-[4.5rem] md:p-5 flex flex-col justify-end space-y-1 md:space-y-3 scrollbar-hide overscroll-contain">
               {messages.map(msg => (
                 <div key={msg.id} className="animate-in slide-in-from-bottom-2 duration-200 leading-snug">
                   {/* Phones: TikTok-style — no bubble, fully transparent over the
@@ -2690,7 +2703,11 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
               ))}
               <div ref={chatEndRef} />
             </div>
-            <div className="px-3 pt-1.5 pb-2 md:p-4 bg-transparent md:bg-slate-950/50 pointer-events-auto">
+            {/* Message input row — on phones this is the BOTTOM-MOST row of the
+                broadcast screen (swapped with the broadcaster controls strip, which
+                now sits just above it), so it carries the home-indicator inset
+                itself via .live-chat-input-pad. */}
+            <div className="px-3 pt-1.5 md:p-4 live-chat-input-pad bg-transparent md:bg-slate-950/50 pointer-events-auto">
               <div className="flex items-center gap-1.5 md:gap-2">
                 <div className="relative flex-1 min-w-0">
                   <input
