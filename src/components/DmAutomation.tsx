@@ -70,6 +70,87 @@ const isValidLinkUrl = (raw: string): boolean => {
   }
 };
 
+/* ─────────── 자동화 카드에 표시하는 대상 피드 썸네일 ─────────── */
+// 자동화 목록만 보고는 "어떤 게시물에 걸어둔 자동화인지" 알 수 없으므로, 카드마다 대상
+// 게시물의 피드 이미지를 함께 보여준다. 선택형(selected)은 지정한 게시물 그대로,
+// 전체(all)는 실제로 전 피드에 적용되므로 최신 게시물 몇 개를 대표 이미지로 노출한다.
+const MAX_FEED_THUMBS = 4;
+
+const AutomationFeedThumbs: React.FC<{
+  media: InstagramMedia[];
+  loading: boolean;
+  scope: DmAutomationItem['mediaScope'];
+  mediaIds: string[];
+}> = ({ media, loading, scope, mediaIds }) => {
+  const byId = useMemo(() => new Map(media.map((m) => [m.id, m])), [media]);
+  const targetIds = scope === 'selected' ? mediaIds : media.map((m) => m.id);
+  const shown = targetIds.slice(0, MAX_FEED_THUMBS);
+  const overflow = Math.max(0, targetIds.length - shown.length);
+
+  if (loading && shown.length === 0) {
+    return (
+      <div className="flex items-center gap-2 mb-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="w-11 h-11 rounded-lg bg-slate-100 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  // 선택형인데 대상이 없으면(또는 게시물이 삭제됨) 사용자가 알아챌 수 있게 안내한다.
+  if (shown.length === 0) {
+    if (scope !== 'selected') return null;
+    return (
+      <div className="flex items-center gap-1.5 mb-3 text-[11px] font-bold text-slate-400">
+        <ImageIcon size={13} /> 대상 게시물이 지정되지 않았어요
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-1.5">
+        {shown.map((id) => {
+          const m = byId.get(id);
+          const thumb = m?.mediaUrl || m?.thumbnailUrl || '';
+          const label = m?.caption?.slice(0, 60) || '연동된 피드 게시물';
+          const inner = thumb
+            ? <img src={thumb} alt={label} className="w-full h-full object-cover" loading="lazy" />
+            : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={15} className="text-slate-300" /></div>;
+          return m?.permalink ? (
+            <a
+              key={id}
+              href={m.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={label}
+              className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hover:border-pink-300 transition-colors block"
+            >
+              {inner}
+            </a>
+          ) : (
+            <div
+              key={id}
+              title={label}
+              className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border border-slate-200"
+            >
+              {inner}
+            </div>
+          );
+        })}
+        {overflow > 0 && (
+          <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-[11px] font-black text-slate-500">
+            +{overflow}
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] font-bold text-slate-400 leading-tight">
+        {scope === 'selected' ? '이 게시물 댓글에만 반응' : '모든 게시물 댓글에 반응'}
+      </p>
+    </div>
+  );
+};
+
 /* ────────────────────────── DM 미리보기 버블 ────────────────────────── */
 const DmPreview: React.FC<{
   igUsername: string;
@@ -641,6 +722,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [media, setMedia] = useState<InstagramMedia[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
 
+  // 디엠 자동화는 프로 플랜 전용 기능이다. 서버가 계정 자격(entitled)을 함께 내려주며,
+  // 자격이 없으면 저장·발송이 403 으로 막히므로 화면에서도 업그레이드 안내를 보여준다.
+  const [entitled, setEntitled] = useState(true);
+
   const loadMedia = () => {
     setMediaLoading(true);
     apiService.getInstagramMedia(userName)
@@ -655,6 +740,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setIgUsername(s.igUsername || '');
       setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
       setLogs(s.logs || []);
+      setEntitled(s.entitled !== false);
       setLoaded(true);
       if (s.connected) loadMedia();
     });
@@ -683,6 +769,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   }, []);
 
   const persist = async (next: Partial<DmAutomationSettings>) => {
+    if (!entitled) {
+      setBanner({ type: 'err', text: '디엠 자동화는 프로 플랜(월 18,700원) 전용 기능이에요. 멤버십에서 프로 플랜을 구독하면 바로 사용할 수 있어요.' });
+      return false;
+    }
     setSaving(true);
     const ok = await apiService.saveDmAutomation(userName, next);
     setSaving(false);
@@ -768,6 +858,22 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         </div>
       )}
 
+      {/* 프로 플랜 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다. */}
+      {!entitled && (
+        <section className="mb-6 rounded-3xl border-2 border-slate-900 bg-slate-900 text-white p-5 md:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-xl shrink-0">🚀</div>
+            <div className="min-w-0">
+              <h3 className="text-base md:text-lg font-black mb-1">디엠 자동화는 프로 플랜 전용이에요</h3>
+              <p className="text-white/70 text-xs md:text-sm font-medium leading-relaxed">
+                프로 플랜(월 18,700원)을 구독하면 모든 멤버십 플랜 혜택과 함께 인스타그램 디엠 자동화를 사용할 수 있어요.
+                구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 계정 연동 카드 */}
       {!connected ? (
         <section className="relative overflow-hidden bg-gradient-to-br from-purple-600 via-pink-600 to-orange-500 p-6 md:p-10 rounded-3xl md:rounded-[2.5rem] shadow-xl shadow-pink-500/20 mb-6 text-white">
@@ -830,7 +936,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               </p>
             </div>
           </div>
-          <Toggle on={enabled} onClick={toggleMaster} />
+          <Toggle on={enabled && entitled} onClick={toggleMaster} />
         </section>
       )}
 
@@ -864,8 +970,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                     key={m.id}
                     type="button"
                     onClick={() => setEditing({ ...blankAutomation(), mediaScope: 'selected', mediaIds: [m.id] })}
-                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100"
-                    title="이 게시물로 자동화 만들기"
+                    disabled={!entitled}
+                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100 disabled:cursor-not-allowed"
+                    title={entitled ? '이 게시물로 자동화 만들기' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
                   >
                     {m.mediaUrl
                       ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
@@ -893,7 +1000,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           {connected && (
             <button
               onClick={() => setEditing(blankAutomation())}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95"
+              disabled={!entitled}
+              title={entitled ? undefined : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
+              className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Plus size={16} /> 자동화 추가하기
             </button>
@@ -931,6 +1040,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   </div>
                   <Toggle on={a.enabled} onClick={() => toggleAutomation(a.id)} size="sm" />
                 </div>
+
+                {/* 어떤 피드 게시물에 걸린 자동화인지 이미지로 확인 */}
+                <AutomationFeedThumbs
+                  media={media}
+                  loading={mediaLoading}
+                  scope={a.mediaScope}
+                  mediaIds={a.mediaIds || []}
+                />
 
                 {/* 조건 요약 칩 */}
                 <div className="flex flex-wrap gap-1.5 mb-3">

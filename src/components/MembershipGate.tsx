@@ -92,7 +92,7 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
               {featureName}은(는) 멤버십 전용 기능입니다
             </h3>
             <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">
-              월 4,900원 스탠다드 멤버십을 구독하면 포트폴리오 영상 커버·콘텐츠 구성을 사용할 수 있습니다. 라이브 커머스 송출까지 원하시면 월 13,900원 커머스 멤버십을 선택하세요.
+              월 4,900원 스탠다드 멤버십을 구독하면 영상 업로드와 콘텐츠 업로드를 사용할 수 있습니다. 협업 AI 는 AI 협업 멤버십(6,900원), 라이브 커머스 송출은 커머스 멤버십(13,900원), 디엠 자동화까지 모두 쓰려면 프로 플랜(18,700원)을 선택하세요.
             </p>
           </div>
         </div>
@@ -101,7 +101,14 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-black text-slate-900">스탠다드 멤버십</p>
-              <p className="text-[11px] text-slate-500 font-medium">월 4,900원 · 콘텐츠 구성 · 영상 커버</p>
+              <p className="text-[11px] text-slate-500 font-medium">월 4,900원 · 영상 업로드 · 콘텐츠 7개 이상 업로드</p>
+            </div>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+            <div>
+              <p className="text-sm font-black text-slate-900">AI 협업 멤버십 ✨</p>
+              <p className="text-[11px] text-slate-500 font-medium">월 6,900원 · 스탠다드 + 협업 AI 포함</p>
             </div>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
           </div>
@@ -112,16 +119,23 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
             </div>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
           </div>
+          <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+            <div>
+              <p className="text-sm font-black text-slate-900">프로 플랜 🚀</p>
+              <p className="text-[11px] text-slate-500 font-medium">월 18,700원 · 모든 멤버십 + 디엠 자동화</p>
+            </div>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
+          </div>
         </div>
 
         <ul className="space-y-2 mb-6">
           <li className="flex items-center gap-2 text-xs md:text-sm text-slate-600 font-medium">
             <span className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[10px] font-black">✓</span>
-            포트폴리오 영상 커버 · 콘텐츠 구성 편집
+            영상 업로드 · 콘텐츠 7개 이상 업로드
           </li>
           <li className="flex items-center gap-2 text-xs md:text-sm text-slate-600 font-medium">
             <span className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[10px] font-black">✓</span>
-            라이브 커머스 송출은 커머스 멤버십에서 풀립니다
+            협업 AI 는 AI 협업 멤버십, 라이브 커머스 송출은 커머스 멤버십, 디엠 자동화는 프로 플랜에서 풀립니다
           </li>
           <li className="flex items-center gap-2 text-xs md:text-sm text-slate-600 font-medium">
             <span className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[10px] font-black">✓</span>

@@ -1,5 +1,5 @@
 /**
- * Recurring billing for the paid memberships (스탠다드 / 스탠다드 AI / 커머스).
+ * Recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로).
  *
  * Unlike the Claude plan — which is a prepaid credit wallet topped up by balance,
  * NOT by a calendar cycle, and is intentionally EXCLUDED from this module — the
@@ -17,27 +17,51 @@
  * Money lives in ₩ (the membership price); there are no credits here.
  */
 
-export type MembershipTier = 'standard' | 'standard_ai' | 'commerce'
+// 'pro' 는 모든 멤버십 기능 + 디엠 자동화까지 포함하는 최상위 티어다.
+export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro'
 
 // Keep these in sync with the prices shown in src/components/MembershipPlan.tsx.
 export const TIER_PRICE_KRW: Record<MembershipTier, number> = {
   standard: 4900,
   standard_ai: 6900,
   commerce: 13900,
+  pro: 18700,
 }
 
 export const TIER_LABEL: Record<MembershipTier, string> = {
   standard: '스탠다드 멤버십',
-  standard_ai: '스탠다드 AI 멤버십',
+  standard_ai: 'AI 협업 멤버십',
   commerce: '커머스 멤버십',
+  pro: '프로 플랜',
 }
 
 /** Normalise a stored plan value to a billable tier, or null if it isn't one.
  * Legacy 'live' installs map to the current 'commerce' tier. */
 export const normalizeTier = (plan: unknown): MembershipTier | null => {
-  if (plan === 'standard' || plan === 'standard_ai' || plan === 'commerce') return plan
+  if (plan === 'standard' || plan === 'standard_ai' || plan === 'commerce' || plan === 'pro') {
+    return plan
+  }
   if (plan === 'live') return 'commerce'
   return null
+}
+
+/**
+ * 티어 포함 관계. 상위 티어는 하위 티어의 기능을 모두 포함한다.
+ *   standard  ⊂ standard_ai(AI 협업) ⊂ commerce(커머스) ⊂ pro(프로)
+ * 프로 플랜만 디엠 자동화를 사용할 수 있다(featureTiers.dmAutomation).
+ */
+export const TIER_RANK: Record<MembershipTier, number> = {
+  standard: 1,
+  standard_ai: 2,
+  commerce: 3,
+  pro: 4,
+}
+
+/** `plan` 이 `required` 티어 이상인지(= 해당 기능을 쓸 수 있는지). */
+export const tierAtLeast = (plan: unknown, required: MembershipTier): boolean => {
+  const tier = normalizeTier(plan)
+  if (!tier) return false
+  return TIER_RANK[tier] >= TIER_RANK[required]
 }
 
 // After this many consecutive failed charge attempts the subscription is paused

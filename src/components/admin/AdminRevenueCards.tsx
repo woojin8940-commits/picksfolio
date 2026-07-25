@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKRW } from '../../utils/formatters';
+import { TIER_PRICE, normalizeTier, type MembershipTier } from '../../utils/membershipTiers';
 
-// Monthly membership prices (KRW). Mirrors MembershipPlan.tsx copy.
-const PLAN_PRICE: Record<string, number> = {
-  standard: 4900,
-  standard_ai: 6900,
-  commerce: 13900,
-};
+// 멤버십 월 구독료는 utils/membershipTiers 한 곳에서만 정의한다(서버와 동일한 값).
+const PLAN_PRICE = TIER_PRICE;
 
 // Live sales commission (PG fee included). Mirrors live-pricing.mts.
 const LIVE_COMMISSION_RATE = 0.085;
@@ -29,7 +26,7 @@ const won = (n: number) => formatKRW(n);
 
 const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
   const [membershipRevenue, setMembershipRevenue] = useState<number | null>(null);
-  const [membershipBreakdown, setMembershipBreakdown] = useState<{ standard: number; standard_ai: number; commerce: number }>({ standard: 0, standard_ai: 0, commerce: 0 });
+  const [membershipBreakdown, setMembershipBreakdown] = useState<Record<MembershipTier, number>>({ standard: 0, standard_ai: 0, commerce: 0, pro: 0 });
   const [liveOverage, setLiveOverage] = useState(0);
   const [liveCommission, setLiveCommission] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -45,16 +42,15 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
       if (cancelled) return;
 
       const rows = (influencers.influencers || []) as any[];
-      const counts = { standard: 0, standard_ai: 0, commerce: 0 };
+      const counts: Record<MembershipTier, number> = { standard: 0, standard_ai: 0, commerce: 0, pro: 0 };
       for (const r of rows) {
-        if (!r.membership_active || !r.membership_plan) continue;
-        if (r.membership_plan in counts) counts[r.membership_plan as keyof typeof counts]++;
+        if (!r.membership_active) continue;
+        const tier = normalizeTier(r.membership_plan);
+        if (tier) counts[tier]++;
       }
       setMembershipBreakdown(counts);
       setMembershipRevenue(
-        counts.standard * PLAN_PRICE.standard +
-        counts.standard_ai * PLAN_PRICE.standard_ai +
-        counts.commerce * PLAN_PRICE.commerce
+        (Object.keys(counts) as MembershipTier[]).reduce((sum, tier) => sum + counts[tier] * PLAN_PRICE[tier], 0),
       );
 
       const overage = (usage?.users || []).reduce((s, u) => s + (u.overageAmountKrw || 0), 0);
@@ -92,7 +88,7 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
           <p className="text-2xl font-black text-pink-600">{loaded && membershipRevenue != null ? won(membershipRevenue) : '—'}</p>
           {loaded && (
             <p className="text-[9px] font-bold text-pink-400/80 mt-1">
-              스탠다드 {membershipBreakdown.standard} · AI {membershipBreakdown.standard_ai} · 커머스 {membershipBreakdown.commerce}
+              스탠다드 {membershipBreakdown.standard} · AI 협업 {membershipBreakdown.standard_ai} · 커머스 {membershipBreakdown.commerce} · 프로 {membershipBreakdown.pro}
             </p>
           )}
         </div>

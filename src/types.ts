@@ -186,7 +186,7 @@ export interface SellerVerification {
   business_reviewed_at?: string | null;
   settlement_registered?: boolean;
   membership_active?: boolean;
-  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'live' | null;
+  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live' | null;
   membership_started_at?: string | null;
   billing_key?: string | null;
   billing_key_issued_at?: string | null;
@@ -203,7 +203,7 @@ export interface SellerVerification {
 
 export interface MembershipBillingHistoryEntry {
   at: string;
-  tier: 'standard' | 'standard_ai' | 'commerce';
+  tier: 'standard' | 'standard_ai' | 'commerce' | 'pro';
   amountKrw: number;
   kind: 'initial' | 'recurring';
   success: boolean;

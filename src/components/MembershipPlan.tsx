@@ -13,6 +13,18 @@ import {
   genPortOneId,
 } from '../utils/portonePayments';
 import { isNativeApp } from '../utils/appEnv';
+import {
+  COMMERCE_PRICE,
+  PRO_PRICE,
+  STANDARD_AI_PRICE,
+  STANDARD_PRICE,
+  TIER_LABEL,
+  TIER_PRICE,
+  TIER_RANK,
+  normalizeTier,
+  tierAtLeast,
+  type MembershipTier,
+} from '../utils/membershipTiers';
 import type { SellerVerification } from '../types';
 
 // 업로드된 사업자등록증이 PDF 인지 판별한다(이미지가 아니면 미리보기 대신 PDF 카드로 노출).
@@ -27,25 +39,11 @@ interface MembershipPlanProps {
 // 카드(나이스정보통신) / 토스페이 / 카카오페이 멤버십 빌링키 발급을 모두 PortOne V2
 // 리다이렉트 방식으로 처리한다.
 
-type MembershipTier = 'standard' | 'standard_ai' | 'commerce';
-const STANDARD_PRICE = 4900;
-const STANDARD_AI_PRICE = 6900;
-const COMMERCE_PRICE = 13900;
 // Claude plan (separate prepaid AI add-on) — activated by its own PortOne payment
 // window opened from this page. Keep these figures in sync with the server's
 // claude-credits pricing module.
 const ACTIVATION_PRICE_KRW = 9900;
 const ACTIVATION_GRANT_CREDITS = 3000;
-const TIER_PRICE: Record<MembershipTier, number> = {
-  standard: STANDARD_PRICE,
-  standard_ai: STANDARD_AI_PRICE,
-  commerce: COMMERCE_PRICE,
-};
-const TIER_LABEL: Record<MembershipTier, string> = {
-  standard: '스탠다드 멤버십',
-  standard_ai: '스탠다드 AI 멤버십',
-  commerce: '커머스 멤버십',
-};
 
 const BANKS = [
   'KB국민은행',
@@ -114,6 +112,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [claudeActive, setClaudeActive] = useState(false);
   const [claudeBalance, setClaudeBalance] = useState<number | null>(null);
+  // 환불(결제 취소)로 회수된 누적 크레딧. 0 보다 크면 잔액이 줄어든 이유를 함께 안내한다.
+  const [claudeRefunded, setClaudeRefunded] = useState(0);
+  const [claudeSyncing, setClaudeSyncing] = useState(false);
 
   // 사업자등록증 이미지 업로드 — 관리자가 이미지를 직접 확인하고 수락해야 인증이 완료된다.
   const [bizImageUploading, setBizImageUploading] = useState(false);
@@ -166,13 +167,25 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     loadVerification();
   }, [loadVerification]);
 
-  const loadClaude = useCallback(async () => {
-    const data = await apiService.getClaudeCredits(normalizedUserName);
+  // 잔액 조회. refresh 를 주면 서버가 결제 취소(환불) 여부를 PG 에 즉시 확인한 뒤 잔액을
+  // 돌려준다 — 환불한 만큼 포인트가 빠졌는지 사용자가 바로 확인할 수 있게 한다.
+  const loadClaude = useCallback(async (refresh = false) => {
+    const data = await apiService.getClaudeCredits(normalizedUserName, { refresh });
     if (data?.credits) {
       setClaudeActive(!!data.credits.planActive);
       setClaudeBalance(data.credits.balanceCredits ?? 0);
+      setClaudeRefunded(data.credits.refundedCredits ?? 0);
     }
   }, [normalizedUserName]);
+
+  const refreshClaude = async () => {
+    setClaudeSyncing(true);
+    try {
+      await loadClaude(true);
+    } finally {
+      setClaudeSyncing(false);
+    }
+  };
 
   useEffect(() => {
     loadClaude();
@@ -476,16 +489,16 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   };
 
   // Legacy installs may carry membership_plan === 'live' from the previous single-tier
-  // setup — treat it as the new 'commerce' tier so existing subscribers don't lose access.
-  const rawPlan = verification?.membership_plan || null;
-  const currentPlan: MembershipTier | null =
-    rawPlan === 'standard'
-      ? 'standard'
-      : rawPlan === 'standard_ai'
-        ? 'standard_ai'
-        : rawPlan === 'commerce' || rawPlan === 'live'
-          ? 'commerce'
-          : null;
+  // setup — normalizeTier maps it to the new 'commerce' tier so existing subscribers
+  // don't lose access.
+  const currentPlan: MembershipTier | null = normalizeTier(verification?.membership_plan);
+
+  // 상위 플랜은 하위 플랜의 기능을 모두 포함한다. 현재 구독이 tier 를 이미
+  // 포함하고 있으면(= 더 높은 등급) 카드에 "○○에 포함되어 있습니다"를 띄운다.
+  const includedInCurrentPlan = (tier: MembershipTier) =>
+    membershipActive && !!currentPlan && TIER_RANK[currentPlan] > TIER_RANK[tier];
+  // 라이브 방송 자격은 커머스 이상(= 커머스·프로) 이면 충족된다.
+  const commerceCovered = membershipActive && tierAtLeast(currentPlan, 'commerce');
 
   // Inside the native app, membership and Claude-plan purchases are not offered
   // — digital goods are sold on the website only. Show a neutral notice instead
@@ -510,7 +523,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       <header className="mb-8 md:mb-12">
         <h2 className="text-xl md:text-3xl font-black text-slate-900">멤버십 플랜</h2>
         <p className="text-slate-500 mt-2 text-sm md:text-base leading-relaxed max-w-3xl">
-          콘텐츠 기능이 필요하면 <strong className="text-slate-700">스탠다드</strong>, 협업 AI까지 더하려면 <strong className="text-slate-700">스탠다드 AI</strong>, 라이브 커머스까지 모두 이용하려면 <strong className="text-slate-700">커머스</strong> 멤버십을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있습니다.
+          콘텐츠 기능이 필요하면 <strong className="text-slate-700">스탠다드</strong>, 협업 AI까지 더하려면 <strong className="text-slate-700">AI 협업</strong>, 라이브 커머스까지 원하면 <strong className="text-slate-700">커머스</strong>, 디엠 자동화를 포함해 모든 기능을 쓰려면 <strong className="text-slate-700">프로</strong> 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있습니다.
         </p>
       </header>
 
@@ -522,7 +535,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       {/* Plan grid */}
       <section className="mb-12">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 max-w-6xl">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 max-w-7xl">
           {/* Standard Plan */}
           <div className="relative rounded-2xl border-2 border-blue-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
@@ -531,14 +544,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">4,900</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">{STANDARD_PRICE.toLocaleString()}</span>
               <span className="text-slate-500 text-sm mb-1">원 / 월</span>
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">콘텐츠 풀 액세스</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 상단 커버 <strong>영상 업로드</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>상품·포트폴리오 <strong>영상 업로드</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>포트폴리오 <strong>콘텐츠 구성</strong>(텍스트·이미지 블록) 편집</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>영상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 7개 이상 업로드</strong></li>
             </ul>
 
             {loading ? (
@@ -557,13 +569,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   해지하기
                 </button>
               </div>
-            ) : membershipActive && currentPlan === 'standard_ai' ? (
+            ) : includedInCurrentPlan('standard') ? (
               <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                스탠다드 AI 멤버십에 포함되어 있습니다
-              </div>
-            ) : membershipActive && currentPlan === 'commerce' ? (
-              <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                커머스 멤버십에 포함되어 있습니다
+                {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
               </div>
             ) : (
               <button
@@ -572,23 +580,23 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 disabled={saving}
                 className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
-                4,900원으로 구독 시작
+                {STANDARD_PRICE.toLocaleString()}원으로 구독 시작
               </button>
             )}
           </div>
 
-          {/* Standard + AI Plan */}
+          {/* AI 협업 멤버십 (standard + AI) */}
           <div className="relative rounded-2xl border-2 border-violet-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
               <span className="bg-gradient-to-r from-violet-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                스탠다드 AI 멤버십 · ✨ AI
+                AI 협업 멤버십 · ✨ AI
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">6,900</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">{STANDARD_AI_PRICE.toLocaleString()}</span>
               <span className="text-slate-500 text-sm mb-1">원 / 월</span>
             </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">스탠다드 전체 + 협업 AI</h4>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">스탠다드 + AI 사용할 수 있는 멤버십</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>
@@ -600,7 +608,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             ) : membershipActive && currentPlan === 'standard_ai' ? (
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                  ✓ 스탠다드 AI 멤버십 구독 중
+                  ✓ AI 협업 멤버십 구독 중
                 </div>
                 <button
                   type="button"
@@ -611,9 +619,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   해지하기
                 </button>
               </div>
-            ) : membershipActive && currentPlan === 'commerce' ? (
+            ) : includedInCurrentPlan('standard_ai') ? (
               <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                커머스 멤버십에 포함되어 있습니다
+                {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
               </div>
             ) : (
               <button
@@ -623,8 +631,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
                 {membershipActive && currentPlan === 'standard'
-                  ? '스탠다드 AI 멤버십으로 업그레이드'
-                  : '6,900원으로 구독 시작'}
+                  ? 'AI 협업 멤버십으로 업그레이드'
+                  : `${STANDARD_AI_PRICE.toLocaleString()}원으로 구독 시작`}
               </button>
             )}
           </div>
@@ -637,7 +645,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">13,900</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">{COMMERCE_PRICE.toLocaleString()}</span>
               <span className="text-slate-500 text-sm mb-1">원 / 월</span>
             </div>
             <h4 className="font-bold text-slate-800 text-lg mb-3">라이브 커머스 + 협업 AI</h4>
@@ -653,7 +661,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-5">
-                  <StatusPill label="멤버십 구독" done={membershipActive && currentPlan === 'commerce'} />
+                  <StatusPill label="멤버십 구독" done={commerceCovered} />
                   <StatusPill label="사업자 인증" done={businessVerified} subLabel="라이브 방송용" />
                   <StatusPill label="정산 계좌 등록" done={settlementRegistered} subLabel="라이브 방송용" />
                 </div>
@@ -674,6 +682,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       해지하기
                     </button>
                   </div>
+                ) : includedInCurrentPlan('commerce') ? (
+                  <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
+                    {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -683,10 +695,58 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   >
                     {membershipActive && (currentPlan === 'standard' || currentPlan === 'standard_ai')
                       ? '커머스 멤버십으로 업그레이드'
-                      : '13,900원으로 구독 시작'}
+                      : `${COMMERCE_PRICE.toLocaleString()}원으로 구독 시작`}
                   </button>
                 )}
               </>
+            )}
+          </div>
+
+          {/* Pro Plan — 모든 멤버십 기능 + 디엠 자동화 */}
+          <div className="relative rounded-2xl border-2 border-slate-900 bg-white p-6 md:p-8 shadow-lg">
+            <div className="absolute -top-3 left-6">
+              <span className="bg-gradient-to-r from-slate-900 to-slate-700 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+                프로 플랜 · 🚀 전체 기능
+              </span>
+            </div>
+            <div className="flex items-end gap-1 mb-4 mt-2">
+              <span className="text-3xl md:text-4xl font-black text-slate-900">{PRO_PRICE.toLocaleString()}</span>
+              <span className="text-slate-500 text-sm mb-1">원 / 월</span>
+            </div>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">모든 멤버십 + 디엠 자동화</h4>
+            <ul className="space-y-2 text-sm text-slate-600 mb-6">
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>모든 멤버십 플랜</strong>(스탠다드 · AI 협업 · 커머스) 혜택 포함</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>디엠 자동화</strong>(인스타그램 댓글 → 자동 DM) 이용</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>라이브 송출 월 3시간 · 협업 타임라인 AI 포함</li>
+            </ul>
+
+            {loading ? (
+              <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
+            ) : membershipActive && currentPlan === 'pro' ? (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
+                  ✓ 프로 플랜 구독 중
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancelSubscription}
+                  disabled={saving}
+                  className="px-4 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  해지하기
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleStartSubscribe('pro')}
+                disabled={saving}
+                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-slate-900 to-slate-700 hover:from-black hover:to-slate-800 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+              >
+                {membershipActive && currentPlan
+                  ? '프로 플랜으로 업그레이드'
+                  : `${PRO_PRICE.toLocaleString()}원으로 구독 시작`}
+              </button>
             )}
           </div>
         </div>
@@ -729,6 +789,19 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       <p className="text-[11px] text-slate-500 font-bold mt-1">
                         크레딧 소진 시 클로드 관리 화면에서 추가 충전
                       </p>
+                      {claudeRefunded > 0 && (
+                        <p className="text-[11px] text-slate-500 font-bold mt-1">
+                          환불 반영 −{claudeRefunded.toLocaleString()} 크레딧
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={refreshClaude}
+                        disabled={claudeSyncing}
+                        className="mt-2 text-[11px] font-bold text-orange-700 hover:text-orange-800 underline disabled:opacity-50"
+                      >
+                        {claudeSyncing ? '결제 내역 확인 중...' : '결제·환불 내역 새로고침'}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -998,10 +1071,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <span>ℹ️</span> 안내사항
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
-            <li>스탠다드 멤버십은 월 4,900원, 스탠다드 AI 멤버십은 월 6,900원, 커머스 멤버십은 월 13,900원이며, 언제든 해지할 수 있습니다.</li>
-            <li>스탠다드 멤버십 구독 시 포트폴리오 상단 커버 영상 업로드 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 편집을 이용할 수 있습니다.</li>
-            <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 스탠다드 AI 멤버십(6,900원)과 커머스 멤버십(13,900원)에 포함됩니다. 스탠다드 멤버십(4,900원)에는 포함되지 않습니다.</li>
-            <li>커머스 멤버십은 스탠다드 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
+            <li>스탠다드 멤버십은 월 {STANDARD_PRICE.toLocaleString()}원, AI 협업 멤버십은 월 {STANDARD_AI_PRICE.toLocaleString()}원, 커머스 멤버십은 월 {COMMERCE_PRICE.toLocaleString()}원, 프로 플랜은 월 {PRO_PRICE.toLocaleString()}원이며, 언제든 해지할 수 있습니다.</li>
+            <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
+            <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 AI 협업 멤버십({STANDARD_AI_PRICE.toLocaleString()}원) 이상에 포함됩니다. 스탠다드 멤버십({STANDARD_PRICE.toLocaleString()}원)에는 포함되지 않습니다.</li>
+            <li>커머스 멤버십은 스탠다드 · AI 협업 혜택을 모두 포함하며, 라이브 송출 월 3시간(180분)이 포함됩니다. 초과분은 시간당 8,900원(분당 약 148원)으로 후불 정산됩니다.</li>
+            <li>프로 플랜은 모든 멤버십 플랜(스탠다드 · AI 협업 · 커머스) 혜택을 포함하며, 인스타그램 디엠 자동화는 프로 플랜에서만 이용할 수 있습니다.</li>
             <li>라이브 매출 수수료는 결제액의 8.5%이며 PG 결제 수수료가 포함된 단일가입니다. 수수료를 차감한 금액이 등록된 정산 계좌로 입금됩니다.</li>
             <li>라이브 송출에는 사업자 인증과 정산 계좌 등록이 추가로 필요합니다. 등록된 정산 계좌로 라이브 판매 수익이 입금되며, 계좌 예금주명은 사업자 대표자와 일치해야 합니다.</li>
           </ul>
@@ -1143,11 +1217,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                {selectedTier === 'commerce'
-                  ? '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트가 즉시 활성화되고, 라이브 커머스 송출까지 이용할 수 있습니다.'
-                  : selectedTier === 'standard_ai'
-                    ? '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트가 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'
-                    : '구독을 시작하면 포트폴리오 영상 커버 · 상품/포트폴리오 영상 업로드 · 콘텐츠 구성 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트는 스탠다드 AI 멤버십, 라이브 커머스 송출은 커머스 멤버십에서 이용할 수 있습니다.'}
+                {selectedTier === 'pro'
+                  ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트, 라이브 커머스 송출, 인스타그램 디엠 자동화까지 모든 기능이 즉시 활성화됩니다.'
+                  : selectedTier === 'commerce'
+                    ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트가 즉시 활성화되고, 라이브 커머스 송출까지 이용할 수 있습니다. 인스타그램 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'
+                    : selectedTier === 'standard_ai'
+                      ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트가 즉시 활성화됩니다. 라이브 커머스 송출은 커머스 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'
+                      : '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트는 AI 협업 멤버십, 라이브 커머스 송출은 커머스 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'}
               </p>
             </div>
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">

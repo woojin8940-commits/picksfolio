@@ -9,9 +9,12 @@ import {
   RECHARGE_PACKS_KRW,
   creditsForKrw,
   readClaudeCredits,
+  readClaudeCreditsSynced,
+  syncClaudeRefunds,
   writeClaudeCredits,
   publicCredits,
   type ClaudeCredits,
+  type ClaudeGrant,
 } from './_shared/claude-credits.mts'
 
 // Claude plan credit wallet API.
@@ -60,8 +63,19 @@ export default async (req: Request, context: Context) => {
 
   try {
     if (req.method === 'GET') {
-      const credits = await readClaudeCredits(username)
-      return respond(credits)
+      // 잔액을 내려주기 전에 환불(결제 취소)된 충전분을 먼저 회수한다. 환불은 PG 콘솔에서
+      // 처리되어 우리 서버를 거치지 않으므로, 이 시점에 확인해야 "환불했는데 포인트가 그대로"
+      // 남는 상태가 생기지 않는다. `?refresh=1` 이면 조회 간격을 무시하고 즉시 확인한다.
+      const force = new URL(req.url).searchParams.get('refresh') === '1'
+      if (force) {
+        const { credits: synced } = await syncClaudeRefunds(
+          username,
+          await readClaudeCredits(username),
+          { force: true },
+        ).catch(async () => ({ credits: await readClaudeCredits(username), revokedCredits: 0 }))
+        return respond(synced)
+      }
+      return respond(await readClaudeCreditsSynced(username))
     }
 
     if (req.method === 'POST') {
@@ -136,17 +150,17 @@ export default async (req: Request, context: Context) => {
         credits.planActive = true
         if (!credits.planActivatedAt) credits.planActivatedAt = new Date().toISOString()
       }
-      credits.grants = [
-        {
-          at: new Date().toISOString(),
-          amountKrw,
-          credits: grantCredits,
-          kind,
-          paymentId,
-          payMethod,
-        },
-        ...credits.grants,
-      ].slice(0, 100)
+      const grant: ClaudeGrant = {
+        at: new Date().toISOString(),
+        amountKrw,
+        credits: grantCredits,
+        kind,
+        paymentId,
+        payMethod,
+        // 환불 조회를 어느 PG 에 해야 하는지 기록해 둔다(포트원 paymentId / 토스 paymentKey).
+        provider: isToss ? 'toss' : 'portone',
+      }
+      credits.grants = [grant, ...credits.grants].slice(0, 100)
 
       await writeClaudeCredits(username, credits)
       return respond(credits, { granted: { credits: grantCredits, amountKrw, kind } })

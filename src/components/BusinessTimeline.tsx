@@ -6,6 +6,7 @@ import {
   payClaudePlan,
 } from '../utils/claudeCharge';
 import { isNativeApp } from '../utils/appEnv';
+import { membershipCovers } from '../utils/membershipTiers';
 import { AiMarkdown } from './AiMarkdown';
 
 interface AiMessage {
@@ -110,8 +111,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [aiInput, setAiInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   // Whether the current account's plan includes the AI assistant. AI is bundled
-  // into the 스탠다드 AI 멤버십 (6,900) and 커머스 멤버십 (13,900) tiers only — the
-  // plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
+  // into the AI 협업 멤버십 (6,900) and every tier above it (커머스 13,900 · 프로 18,700)
+  // — the plain 스탠다드 (4,900) tier does not include it. Stays null until loaded.
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(() => {
     // Business (company) accounts always get the AI assistant — it is part of the
     // business collaboration workspace, not gated behind the influencer AI
@@ -119,11 +120,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     if (userType === 'business') return true;
     const cached = apiService.getCachedSellerVerification(normalizedUserName);
     if (!cached) return null;
-    const plan = cached.membership_plan;
-    return (
-      !!cached.membership_active &&
-      (plan === 'standard_ai' || plan === 'commerce' || plan === 'live')
-    );
+    return membershipCovers(cached, 'standard_ai');
   });
   const aiEndRef = useRef<HTMLDivElement>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
@@ -160,11 +157,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     let cancelled = false;
     apiService.getSellerVerification(normalizedUserName).then((data) => {
       if (cancelled) return;
-      const plan = data?.membership_plan;
-      setAiEnabled(
-        !!data?.membership_active &&
-          (plan === 'standard_ai' || plan === 'commerce' || plan === 'live'),
-      );
+      setAiEnabled(membershipCovers(data, 'standard_ai'));
     });
     return () => { cancelled = true; };
   }, [normalizedUserName, userType]);
@@ -203,7 +196,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       setAiMessages(prev => [
         ...prev,
         { role: 'user', content },
-        { role: 'assistant', content: 'AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.' },
+        { role: 'assistant', content: 'AI 어시스턴트는 AI 협업 멤버십(6,900원) 이상에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.' },
       ]);
       setAiInput('');
       return;
@@ -1393,7 +1386,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               ) : (
                 <>
                   <p className="text-xs text-gray-500 leading-relaxed mb-5">
-                    스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십(13,900원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
+                    AI 협업 멤버십(6,900원) 이상(커머스 13,900원 · 프로 18,700원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
                   </p>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
