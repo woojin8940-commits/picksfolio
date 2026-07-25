@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
 
 /**
  * 인스타그램 계정 연동 콜백.
@@ -24,6 +25,8 @@ interface DmSettings {
   automations?: unknown[];
   rules?: unknown[];
   updatedAt?: string;
+  /** 계정별 웹훅(`subscribed_apps`) 구독을 마친 시각. */
+  webhookSubscribedAt?: string;
 }
 
 export default async (req: Request, _context: Context) => {
@@ -140,6 +143,25 @@ export default async (req: Request, _context: Context) => {
       }
     } catch (e) {
       console.warn("[ig-oauth] index write failed:", e);
+    }
+
+    // 이 계정을 앱 웹훅에 구독시킨다. Meta 앱 대시보드에 콜백 URL 을 등록하는 것만으로는
+    // 개별 계정의 이벤트가 오지 않고, 계정별로 `subscribed_apps` 를 호출해야 comments /
+    // messages 이벤트가 실제로 전달된다. 이 호출이 빠지면 댓글 자동 DM·자동 답글이
+    // 트리거 자체를 받지 못한다. 연동 자체를 막지는 않도록 실패는 경고로만 남긴다.
+    const sub = await subscribeInstagramWebhooks({
+      accessToken: longToken,
+      tokenSource: "instagram_login",
+      igId: igUserId,
+    });
+    if (sub.ok) {
+      try {
+        await store.setJSON(key, { ...next, webhookSubscribedAt: new Date().toISOString() });
+      } catch (e) {
+        console.warn("[ig-oauth] subscribe flag write failed:", e);
+      }
+    } else {
+      console.warn("[ig-oauth] webhook subscribe failed:", sub.error);
     }
 
     return Response.redirect(`${origin}/admin?ig_connected=1`, 302);

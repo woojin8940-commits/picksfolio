@@ -184,8 +184,11 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
 
         <div className="max-w-3xl mx-auto">
-          {/* Hero Image */}
-          <div className="w-full aspect-square bg-slate-100 overflow-hidden relative">
+          {/* Hero Image — keeps its 1:1 ratio but is capped in width (and therefore
+              height) so it no longer fills the whole viewport. Without the cap the
+              square grew to the full 3xl container width, pushing the campaign
+              description and info cards entirely below the fold. */}
+          <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4 aspect-square bg-slate-100 overflow-hidden relative md:rounded-3xl">
             {selectedCampaign.thumbnail_url ? (
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             ) : (
