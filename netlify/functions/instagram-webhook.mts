@@ -1,5 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
+import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -14,15 +16,6 @@ import type { Config, Context } from "@netlify/functions";
 
 const GRAPH_VERSION = "v21.0";
 
-interface DmMessageButton { id?: string; label: string; url: string; }
-interface DmCarouselCard {
-  id?: string;
-  title: string;
-  subtitle: string;
-  imageUrl: string;
-  buttonLabel: string;
-  buttonUrl: string;
-}
 interface DmAutomationItem {
   id: string;
   name: string;
@@ -36,8 +29,8 @@ interface DmAutomationItem {
   mediaIds?: string[];
   messageType?: "text" | "carousel";
   message: string;
-  buttons: DmMessageButton[];
-  cards?: DmCarouselCard[];
+  buttons: DmButton[];
+  cards?: DmCard[];
 }
 interface DmSettings {
   enabled: boolean;
@@ -53,45 +46,14 @@ function graphHost(settings: DmSettings) {
 }
 
 function buildMessagePayload(a: DmAutomationItem) {
-  // 캐러셀 형식 — 이미지 카드(제네릭 템플릿).
-  if (a.messageType === "carousel") {
-    const elements = (a.cards || [])
-      .filter((c) => c && (c.title || c.imageUrl))
-      .slice(0, 10)
-      .map((c) => {
-        const el: any = { title: (c.title || " ").slice(0, 80) };
-        if (c.subtitle) el.subtitle = c.subtitle.slice(0, 80);
-        if (c.imageUrl) el.image_url = c.imageUrl;
-        if (c.buttonUrl && c.buttonLabel) {
-          el.default_action = { type: "web_url", url: c.buttonUrl };
-          el.buttons = [{ type: "web_url", url: c.buttonUrl, title: c.buttonLabel.slice(0, 20) }];
-        }
-        return el;
-      });
-    if (elements.length > 0) {
-      return {
-        attachment: {
-          type: "template",
-          payload: { template_type: "generic", elements },
-        },
-      };
-    }
-    // 카드가 비어 있으면 텍스트로 폴백.
-  }
-
-  const buttons = (a.buttons || [])
-    .filter((b) => b && b.url && b.label)
-    .slice(0, 3)
-    .map((b) => ({ type: "web_url", url: b.url, title: b.label.slice(0, 20) }));
-  if (buttons.length > 0) {
-    return {
-      attachment: {
-        type: "template",
-        payload: { template_type: "button", text: a.message.slice(0, 640), buttons },
-      },
-    };
-  }
-  return { text: a.message };
+  // 인스타그램은 버튼 템플릿을 지원하지 않으므로 링크 버튼도 제네릭 템플릿
+  // 카드로 감싸 보낸다. 자세한 내용은 _shared/instagram-dm.mts 참고.
+  return buildDmMessages({
+    messageType: a.messageType,
+    message: a.message,
+    buttons: a.buttons,
+    cards: a.cards,
+  });
 }
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
@@ -197,19 +159,18 @@ export default async (req: Request, _context: Context) => {
 
         // 2) 비공개 답장(DM) — recipient.comment_id 사용
         try {
-          const res = await fetch(`https://${graphHost(settings)}/${GRAPH_VERSION}/${encodeURIComponent(igId)}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${settings.accessToken}` },
-            body: JSON.stringify({
-              recipient: { comment_id: commentId },
-              message: buildMessagePayload(automation),
-            }),
+          const result = await sendDmMessages({
+            graphHost: graphHost(settings),
+            graphVersion: GRAPH_VERSION,
+            igId,
+            accessToken: settings.accessToken,
+            recipient: { comment_id: commentId },
+            messages: buildMessagePayload(automation),
           });
-          const result = (await res.json().catch(() => ({}))) as any;
-          if (res.ok) {
-            await appendLog(username, { status: "sent", recipientId: fromId, ruleId: automation.id, messageId: result?.message_id });
+          if (result.ok) {
+            await appendLog(username, { status: "sent", recipientId: fromId, ruleId: automation.id, messageId: result.messageId });
           } else {
-            await appendLog(username, { status: "failed", recipientId: fromId, ruleId: automation.id, error: result?.error?.message || `HTTP ${res.status}` });
+            await appendLog(username, { status: "failed", recipientId: fromId, ruleId: automation.id, error: result.error });
           }
         } catch (e: any) {
           await appendLog(username, { status: "failed", recipientId: fromId, ruleId: automation.id, error: e?.message || "send error" });

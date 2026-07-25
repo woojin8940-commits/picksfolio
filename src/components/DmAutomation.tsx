@@ -53,6 +53,23 @@ const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
   non_followers: '비팔로워에게만',
 };
 
+/**
+ * 인스타그램 제네릭 템플릿 카드의 제목 길이 제한. 본문이 이 길이를 넘으면
+ * 본문은 일반 텍스트 버블로 먼저 도착하고 링크 버튼은 별도 카드로 이어진다.
+ * (발송 로직: netlify/functions/_shared/instagram-dm.mts)
+ */
+const CARD_TEXT_MAX = 80;
+
+/** Graph API 는 http/https 절대 URL 만 링크 버튼으로 받는다. */
+const isValidLinkUrl = (raw: string): boolean => {
+  try {
+    const u = new URL((raw || '').trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 /* ────────────────────────── DM 미리보기 버블 ────────────────────────── */
 const DmPreview: React.FC<{
   igUsername: string;
@@ -63,6 +80,10 @@ const DmPreview: React.FC<{
 }> = ({ igUsername, messageType, message, buttons, cards }) => {
   const validCards = cards.filter((c) => c.title || c.imageUrl || c.buttonUrl);
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
+  // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
+  const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
+  // 본문이 카드 제목 한도를 넘으면 본문 텍스트와 버튼 카드가 두 개의 버블로 도착한다.
+  const splitBubbles = validButtons.length > 0 && message.trim().length > CARD_TEXT_MAX;
   return (
     <div className="bg-slate-50 border border-slate-100 rounded-3xl p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3 text-slate-400">
@@ -96,20 +117,30 @@ const DmPreview: React.FC<{
               ))}
             </div>
           ) : (
-            <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-              <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                {message || '보낼 메시지를 입력하면 여기에 표시됩니다.'}
-              </p>
-              {buttons.filter((b) => b.label).length > 0 && (
-                <div className="mt-3 space-y-1.5">
-                  {buttons.filter((b) => b.label).map((b) => (
-                    <div
-                      key={b.id}
-                      className="w-full text-center bg-slate-50 border border-slate-200 rounded-xl py-2 text-[12px] font-bold text-pink-600"
-                    >
-                      {b.label}
-                    </div>
-                  ))}
+            <div className="space-y-1.5">
+              {/* 버튼이 없거나 본문이 길면 본문은 별도의 텍스트 버블로 도착한다. */}
+              {(validButtons.length === 0 || splitBubbles) && (
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+                  <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                    {message || '보낼 메시지를 입력하면 여기에 표시됩니다.'}
+                  </p>
+                </div>
+              )}
+              {validButtons.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
+                  <p className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                    {splitBubbles ? '👇 아래 버튼을 눌러주세요' : message}
+                  </p>
+                  <div className="border-t border-slate-100">
+                    {validButtons.map((b) => (
+                      <div
+                        key={b.id}
+                        className="w-full text-center border-b border-slate-100 last:border-b-0 py-2.5 text-[12px] font-bold text-pink-600 truncate px-3"
+                      >
+                        {b.label}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -117,6 +148,11 @@ const DmPreview: React.FC<{
           {igUsername && <span className="text-[10px] text-slate-400 font-bold ml-2 mt-1 inline-block">@{igUsername}</span>}
         </div>
       </div>
+      {!isCarousel && validButtons.length > 0 && (
+        <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
+          링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+        </p>
+      )}
     </div>
   );
 };
@@ -425,8 +461,12 @@ const AutomationEditor: React.FC<{
                     <div className="flex items-center gap-1.5 text-xs font-black text-slate-500">
                       <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(최대 3개)</span>
                     </div>
-                    {draft.buttons.map((b) => (
-                      <div key={b.id} className="flex gap-2 items-center bg-slate-50 border border-slate-100 rounded-xl p-2">
+                    {draft.buttons.map((b) => {
+                      // URL 이 비어 있거나 http/https 가 아니면 발송 시 버튼이 빠진다.
+                      const urlInvalid = Boolean(b.label.trim()) && !isValidLinkUrl(b.url);
+                      return (
+                      <div key={b.id} className="bg-slate-50 border border-slate-100 rounded-xl p-2">
+                        <div className="flex gap-2 items-center">
                         <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <input
                             value={b.label}
@@ -439,14 +479,24 @@ const AutomationEditor: React.FC<{
                             value={b.url}
                             onChange={(e) => updateButton(b.id, { url: e.target.value })}
                             placeholder="https://..."
-                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                            className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                              urlInvalid ? 'border-red-300' : 'border-slate-200'
+                            }`}
                           />
                         </div>
                         <button type="button" onClick={() => removeButton(b.id)} className="w-8 h-8 shrink-0 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
                           <Trash2 size={14} />
                         </button>
+                        </div>
+                        {urlInvalid && (
+                          <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] font-bold text-red-500">
+                            <AlertCircle size={11} />
+                            https:// 로 시작하는 주소를 입력해야 버튼이 전송됩니다.
+                          </p>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                     {draft.buttons.length < 3 && (
                       <button type="button" onClick={addButton} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
                         + 버튼 추가
