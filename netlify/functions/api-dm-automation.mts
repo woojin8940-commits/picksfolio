@@ -1,5 +1,10 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import {
+  DM_AUTOMATION_REQUIRED_MESSAGE,
+  DM_AUTOMATION_TIER,
+  dmAutomationAllowed,
+} from "./_shared/dm-automation-access.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -161,6 +166,9 @@ export default async (req: Request, context: Context) => {
       connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
       logs: logs.slice(0, 20),
+      // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
+      entitled: await dmAutomationAllowed(username),
+      requiredTier: DM_AUTOMATION_TIER,
     });
   }
 
@@ -187,6 +195,19 @@ export default async (req: Request, context: Context) => {
       };
       await store.setJSON(key, next);
       return Response.json({ success: true, connected: false });
+    }
+
+    // 자동화 저장/켜기는 프로 플랜에서만 가능하다. (연동 해제는 위에서 이미 처리 — 플랜과
+    // 무관하게 언제든 계정을 끊을 수 있어야 한다.)
+    if (!(await dmAutomationAllowed(username))) {
+      return Response.json(
+        {
+          error: DM_AUTOMATION_REQUIRED_MESSAGE,
+          code: "DM_AUTOMATION_PLAN_REQUIRED",
+          requiredTier: DM_AUTOMATION_TIER,
+        },
+        { status: 403 },
+      );
     }
 
     const next: DmSettings = {

@@ -1,4 +1,5 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
+import type { MembershipTier } from '../utils/membershipTiers';
 
 export interface SiteData {
   blocks?: Block[];
@@ -53,6 +54,9 @@ export interface DmAutomationSettings {
   rules?: DmRule[];
   logs?: DmAutomationLog[];
   updatedAt?: string;
+  // 디엠 자동화는 프로 플랜 전용 — 서버가 계정 자격을 함께 내려준다.
+  entitled?: boolean;
+  requiredTier?: MembershipTier;
 }
 
 // 인포크 링크식 "댓글 → DM" 자동화 항목.
@@ -123,6 +127,9 @@ export interface ClaudeCreditsResponse {
     // Wallet balance in credits (the unit shown to the member), not ₩.
     balanceCredits: number;
     recentUsage: ClaudeCreditUsage[];
+    // 환불(결제 취소)로 회수된 누적 크레딧/금액. 잔액이 줄어든 이유를 안내하는 데 쓴다.
+    refundedCredits?: number;
+    refundedKrw?: number;
   };
   activationPriceKrw: number;
   activationGrantCredits: number;
@@ -925,7 +932,7 @@ export const apiService = {
   async issueBillingKeyPayment(
     username: string,
     billingKey: string,
-    tier: 'standard' | 'standard_ai' | 'commerce',
+    tier: 'standard' | 'standard_ai' | 'commerce' | 'pro',
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/billing-issue', {
@@ -951,7 +958,7 @@ export const apiService = {
   // PortOne 으로만 전달된다. (토스페이·카카오페이는 기존 SDK 빌링키 경로를 그대로 사용한다.)
   async subscribeMembershipCard(
     username: string,
-    tier: 'standard' | 'standard_ai' | 'commerce',
+    tier: 'standard' | 'standard_ai' | 'commerce' | 'pro',
     card: {
       number: string;
       expiryMonth: string;
@@ -984,9 +991,16 @@ export const apiService = {
   // wallet and grant credits after a verified PortOne payment. The Claude plan is
   // single-payment only (no recurring/auto billing). The public credit shape
   // mirrors `publicCredits` server-side.
-  async getClaudeCredits(username: string): Promise<ClaudeCreditsResponse | null> {
+  async getClaudeCredits(
+    username: string,
+    options: { refresh?: boolean } = {},
+  ): Promise<ClaudeCreditsResponse | null> {
     try {
-      const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`);
+      // refresh=1 은 조회 간격을 무시하고 결제 취소(환불) 여부를 즉시 PG 에 확인한다.
+      const query = options.refresh ? '?refresh=1' : '';
+      const res = await fetch(
+        `/api/claude-credits/${encodeURIComponent(username.toLowerCase())}${query}`,
+      );
       if (!res.ok) return null;
       return (await res.json()) as ClaudeCreditsResponse;
     } catch (e) {
@@ -1198,7 +1212,7 @@ export const apiService = {
   async updateAdminInfluencer(
     token: string,
     username: string,
-    body: { featured?: boolean; featured_note?: string; membership_plan?: 'standard' | 'standard_ai' | 'commerce' | null }
+    body: { featured?: boolean; featured_note?: string; membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null }
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1644,7 +1658,7 @@ export const apiService = {
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
-      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], logs: [] };
+      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], logs: [], entitled: false, requiredTier: 'pro' };
     }
   },
 

@@ -2,6 +2,10 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
+import {
+  DM_AUTOMATION_REQUIRED_MESSAGE,
+  dmAutomationAllowed,
+} from "./_shared/dm-automation-access.mts";
 
 /**
  * 인스타그램 DM 발송.
@@ -84,6 +88,24 @@ export default async (req: Request, context: Context) => {
 
   const store = getStore("dm-automation");
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
+
+  // 디엠 자동화(수동 테스트 발송 포함)는 프로 플랜 전용이다.
+  if (!(await dmAutomationAllowed(username))) {
+    await appendLog(username, {
+      status: "skipped",
+      reason: "plan_required",
+      recipientId,
+      ruleId: body.ruleId,
+    });
+    return Response.json(
+      {
+        success: false,
+        error: DM_AUTOMATION_REQUIRED_MESSAGE,
+        code: "DM_AUTOMATION_PLAN_REQUIRED",
+      },
+      { status: 403 },
+    );
+  }
 
   const igId = settings?.igUserId || settings?.igAccountId;
   if (!settings || !igId || !settings.accessToken) {

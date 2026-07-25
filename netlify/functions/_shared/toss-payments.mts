@@ -20,6 +20,9 @@ const TEST_SECRET_KEY = 'test_sk_docs_OaPz8L5KdmQXkzRz3y47BMw6'
 const secretKey = () => process.env.TOSS_SECRET_KEY || TEST_SECRET_KEY
 const authHeader = () => `Basic ${Buffer.from(`${secretKey()}:`).toString('base64')}`
 
+/** 토스 REST API 용 Basic 인증 헤더. 시크릿 키가 이 모듈 밖으로 새지 않도록 헤더만 노출한다. */
+export const tossAuthHeader = () => authHeader()
+
 export interface TossConfirmResult {
   ok: boolean
   amountKrw?: number

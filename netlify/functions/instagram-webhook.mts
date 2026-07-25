@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
+import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -126,6 +127,8 @@ export default async (req: Request, _context: Context) => {
 
       const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
       if (!settings || !settings.enabled || !settings.accessToken) continue;
+      // 디엠 자동화는 프로 플랜 전용 — 플랜이 없거나 만료된 계정은 발송하지 않는다.
+      if (!(await dmAutomationAllowed(username))) continue;
       const igId = settings.igUserId || settings.igAccountId || igAccountId;
 
       for (const change of entry?.changes || []) {

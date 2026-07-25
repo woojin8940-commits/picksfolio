@@ -11,13 +11,18 @@
  * everywhere else in the membership read/write paths.
  */
 
-export type ComplimentaryTier = 'standard' | 'commerce'
+import { TIER_RANK, normalizeTier, type MembershipTier } from './membership-billing.mts'
 
+export type ComplimentaryTier = MembershipTier
+
+// 'pro'(프로 플랜) 는 모든 멤버십 기능 + 디엠 자동화를 포함하는 최상위 티어다. 운영/QA 계정은
+// 기능 점검을 위해 전부 사용할 수 있어야 하므로 프로 플랜으로 부여한다.
 const COMPLIMENTARY: Record<string, ComplimentaryTier> = {
-  dnwlsdnwls: 'commerce',
-  dnwlsdnwls123: 'commerce',
-  // QA / test account — granted the top tier so every plan feature is available.
-  tester_508070: 'commerce',
+  dnwlsdnwls: 'pro',
+  dnwlsdnwls123: 'pro',
+  // QA / test accounts — granted the top tier so every plan feature is available.
+  tester_508070: 'pro',
+  tester_711872: 'pro',
 }
 
 export function getComplimentaryMembership(username: string | null | undefined): ComplimentaryTier | null {
@@ -28,7 +33,7 @@ export function getComplimentaryMembership(username: string | null | undefined):
 
 export interface MembershipOverlayInput {
   membership_active?: boolean
-  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'live' | null
+  membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live' | null
   membership_started_at?: string | null
   [key: string]: any
 }
@@ -50,10 +55,10 @@ export function applyComplimentaryMembership<T extends MembershipOverlayInput | 
   if (!tier) return record as any
 
   const base: MembershipOverlayInput = record ? { ...record } : {}
-  const currentTier = base.membership_plan === 'live' ? 'commerce' : base.membership_plan
+  // 'live' 등 과거 플랜 값도 현재 티어로 환산해 등급을 비교한다.
+  const currentTier = normalizeTier(base.membership_plan)
   const alreadyEqualOrHigher =
-    base.membership_active &&
-    (currentTier === 'commerce' || (currentTier === tier))
+    !!base.membership_active && !!currentTier && TIER_RANK[currentTier] >= TIER_RANK[tier]
 
   if (alreadyEqualOrHigher) return base as any
 

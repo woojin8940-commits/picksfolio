@@ -1,11 +1,12 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
+import { tierAtLeast } from "./_shared/membership-billing.mts";
 import {
   CLAUDE_MODEL,
   deductionCredits,
   rawCostKrw,
-  readClaudeCredits,
+  readClaudeCreditsSynced,
   writeClaudeCredits,
   type ClaudeCredits,
 } from "./_shared/claude-credits.mts";
@@ -266,7 +267,9 @@ export default async (req: Request) => {
   let used = 0;
 
   if (useClaude) {
-    claudeCredits = await readClaudeCredits(username);
+    // 환불된 충전분은 크레딧을 쓰기 전에 회수한다(결제 취소가 PG 콘솔에서 일어나므로
+    // 지갑을 실제로 사용하는 이 시점에 확인해야 환불분이 그대로 쓰이는 일이 없다).
+    claudeCredits = await readClaudeCreditsSynced(username);
     if (!claudeCredits.planActive) {
       return Response.json(
         {
@@ -295,8 +298,8 @@ export default async (req: Request) => {
     }
   } else {
     // Gemini membership gate. AI is included only in the AI-enabled tiers:
-    // standard_ai (6,900) and commerce (13,900). Legacy 'live' is treated as
-    // commerce. The plain standard (4,900) tier is excluded.
+    // AI 협업 멤버십 (standard_ai, 6,900), 커머스 (13,900), 프로 (18,700). Legacy
+    // 'live' is treated as commerce. The plain standard (4,900) tier is excluded.
     //
     // Business (company) accounts are exempt from this gate — the AI assistant is
     // part of their collaboration workspace, not an influencer membership add-on.
@@ -307,15 +310,14 @@ export default async (req: Request) => {
         username,
         (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
       );
-      const plan = record?.membership_plan;
+      // AI 협업 멤버십 이상(커머스·프로 포함)이면 사용할 수 있다.
       const aiEnabled =
-        !!record?.membership_active &&
-        (plan === "standard_ai" || plan === "commerce" || plan === "live");
+        !!record?.membership_active && tierAtLeast(record?.membership_plan, "standard_ai");
       if (!aiEnabled) {
         return Response.json(
           {
             error:
-              "AI 어시스턴트는 스탠다드 AI 멤버십(6,900원) 또는 커머스 멤버십에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
+              "AI 어시스턴트는 AI 협업 멤버십(6,900원) 이상에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.",
             code: "MEMBERSHIP_REQUIRED",
           },
           { status: 403 },

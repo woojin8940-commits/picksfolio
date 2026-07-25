@@ -12,6 +12,7 @@ import {
   type ChargePayMethod,
 } from '../utils/liveCharge';
 import { isNativeApp } from '../utils/appEnv';
+import { membershipCovers } from '../utils/membershipTiers';
 
 interface LiveCommerceManagementProps {
   userName: string;
@@ -339,12 +340,10 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
   const businessVerified = !!verification?.business_verified;
   const settlementRegistered = !!verification?.settlement_registered;
-  const membershipPlan = verification?.membership_plan || null;
-  // Live broadcasting requires the commerce tier specifically — the standard tier
-  // (4,900원) unlocks portfolio video cover + content composition only.
-  // 'live' is the legacy plan label from prior installs; treat it as commerce.
-  const commerceMembershipActive =
-    !!verification?.membership_active && (membershipPlan === 'commerce' || membershipPlan === 'live');
+  // Live broadcasting requires the commerce tier or higher — 스탠다드(4,900원)과
+  // AI 협업(6,900원)은 영상·콘텐츠 업로드와 협업 AI 까지만 포함하고, 프로 플랜(18,700원)은
+  // 커머스를 포함하므로 함께 통과시킨다. 레거시 'live' 라벨은 normalizeTier 가 커머스로 환산한다.
+  const commerceMembershipActive = membershipCovers(verification, 'commerce');
   // An invited co-host (accepted 함께 방송) bypasses the commerce gate: the gate
   // protects starting your OWN commerce sale, not joining a broadcast you were
   // invited to. Without this, accepting an invite dropped a non-commerce creator
@@ -358,7 +357,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
     const steps: { label: string; done: boolean; desc: string }[] = [
       { label: '사업자 인증', done: businessVerified, desc: '사업자등록증 이미지를 제출하고 관리자 수락을 받습니다' },
       { label: '정산 계좌 등록', done: settlementRegistered, desc: '판매 수익이 입금될 계좌 정보를 등록합니다' },
-      { label: '커머스 멤버십 구독', done: commerceMembershipActive, desc: '월 13,900원 커머스 멤버십(라이브 커머스 송출)을 구독합니다' },
+      { label: '커머스 멤버십 구독', done: commerceMembershipActive, desc: '월 13,900원 커머스 멤버십(또는 프로 플랜)을 구독하면 라이브 커머스를 송출할 수 있습니다' },
     ];
 
     return (
@@ -410,7 +409,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                 멤버십 플랜에서 인증 진행하기
               </button>
               <p className="text-[11px] text-slate-400 font-medium mt-3 text-center">
-                월 13,900원 · 언제든 해지 가능 · 구독 후 즉시 방송 가능
+                월 13,900원(프로 플랜 18,700원에도 포함) · 언제든 해지 가능 · 구독 후 즉시 방송 가능
               </p>
             </>
           )}
