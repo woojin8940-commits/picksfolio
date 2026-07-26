@@ -6,6 +6,8 @@ import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
+import { appendDmLog } from "./_shared/dm-automation-log.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * 인스타그램 DM 발송.
@@ -44,15 +46,7 @@ interface SendBody {
 }
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
-  try {
-    const logStore = getStore("dm-automation-log");
-    const key = `log_${username}`;
-    const existing = ((await logStore.get(key, { type: "json" })) as any[]) || [];
-    existing.unshift({ ...entry, at: new Date().toISOString() });
-    await logStore.setJSON(key, existing.slice(0, 50));
-  } catch (e) {
-    console.error("[send-instagram-dm] failed to write log:", e);
-  }
+  await appendDmLog(username, entry, "send-instagram-dm");
 }
 
 export default async (req: Request, context: Context) => {
@@ -85,6 +79,10 @@ export default async (req: Request, context: Context) => {
   if (!username || !message) {
     return Response.json({ error: "username 과 message 는 필수입니다." }, { status: 400 });
   }
+
+  // 본문의 username 을 그대로 믿으면 남의 계정으로 DM 을 쏠 수 있다. 토큰으로 확인한다.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   const store = getStore("dm-automation");
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;

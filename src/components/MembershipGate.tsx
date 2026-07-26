@@ -92,7 +92,7 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
               {featureName}은(는) 멤버십 전용 기능입니다
             </h3>
             <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">
-              월 4,900원 스탠다드 멤버십을 구독하면 영상 업로드와 콘텐츠 업로드를 사용할 수 있습니다. 협업 AI 는 AI 협업 멤버십(6,900원), 라이브 커머스 송출은 커머스 멤버십(13,900원), 디엠 자동화까지 모두 쓰려면 프로 플랜(18,700원)을 선택하세요.
+              월 4,900원 스탠다드 멤버십을 구독하면 영상 업로드와 콘텐츠 업로드를 사용할 수 있습니다. 협업 AI 는 AI 협업 멤버십(6,900원), 디엠 자동화까지 모두 쓰려면 프로 플랜(18,700원)을 선택하세요. 라이브 커머스 송출은 멤버십에 포함되지 않는 별도 구독(13,900원)입니다. 모든 금액은 부가세 포함입니다.
             </p>
           </div>
         </div>
@@ -114,15 +114,16 @@ const MembershipGate: React.FC<MembershipGateProps> = ({
           </div>
           <div className="flex items-center justify-between border-t border-slate-200 pt-2">
             <div>
-              <p className="text-sm font-black text-slate-900">커머스 멤버십 🎥</p>
-              <p className="text-[11px] text-slate-500 font-medium">월 13,900원 · 라이브 커머스 송출 포함</p>
+              <p className="text-sm font-black text-slate-900">프로 플랜 🚀</p>
+              <p className="text-[11px] text-slate-500 font-medium">월 18,700원 · 모든 멤버십 + 디엠 자동화</p>
             </div>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
           </div>
+          {/* 라이브 커머스는 멤버십 티어에 포함되지 않는 별도 구독이라 맨 끝에 둔다. */}
           <div className="flex items-center justify-between border-t border-slate-200 pt-2">
             <div>
-              <p className="text-sm font-black text-slate-900">프로 플랜 🚀</p>
-              <p className="text-[11px] text-slate-500 font-medium">월 18,700원 · 모든 멤버십 + 디엠 자동화</p>
+              <p className="text-sm font-black text-slate-900">라이브 커머스 멤버십 🎥</p>
+              <p className="text-[11px] text-slate-500 font-medium">월 13,900원 · 별도 결제 · 라이브 커머스 송출</p>
             </div>
             <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">미구독</span>
           </div>

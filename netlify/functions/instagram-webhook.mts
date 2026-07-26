@@ -1,8 +1,10 @@
 import { getStore } from "@netlify/blobs";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
 import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
+import { appendDmLog } from "./_shared/dm-automation-log.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -63,15 +65,7 @@ function buildMessagePayload(a: DmAutomationItem) {
 }
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
-  try {
-    const logStore = getStore("dm-automation-log");
-    const key = `log_${username}`;
-    const existing = ((await logStore.get(key, { type: "json" })) as any[]) || [];
-    existing.unshift({ ...entry, at: new Date().toISOString() });
-    await logStore.setJSON(key, existing.slice(0, 50));
-  } catch (e) {
-    console.error("[ig-webhook] log write failed:", e);
-  }
+  await appendDmLog(username, entry, "ig-webhook");
 }
 
 function hasContent(a: DmAutomationItem): boolean {
@@ -96,6 +90,59 @@ function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): bo
   if (a.commentMatch === "all") return true;
   const lower = text.toLowerCase();
   return (a.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
+}
+
+/**
+ * 댓글 작성자가 이 계정을 팔로우하는지 조회한다.
+ *
+ * 화면의 "누구에게 보낼까요?"(followFilter)를 실제로 적용하려면 필요한 정보인데,
+ * 인스타그램 유저 프로필 조회(`is_user_follow_business`)는 대화 이력이 있는 사용자
+ * 등 일부 경우에만 응답한다. 판정이 불가능하면 `null` 을 돌려주고, 호출부는 기존
+ * 동작대로 발송한다(필터 때문에 정상 발송이 막히는 쪽이 더 나쁘다).
+ */
+async function fetchFollowsBusiness(args: {
+  host: string;
+  igsid: string;
+  accessToken: string;
+}): Promise<boolean | null> {
+  const { host, igsid, accessToken } = args;
+  if (!igsid) return null;
+  try {
+    const res = await fetch(
+      `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(igsid)}` +
+        `?fields=is_user_follow_business`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok || data?.error || typeof data?.is_user_follow_business !== "boolean") {
+      return null;
+    }
+    return data.is_user_follow_business;
+  } catch {
+    return null;
+  }
+}
+
+/** 팔로우 조건을 통과하는지. 판정 불가(null)면 통과로 본다. */
+function passesFollowFilter(a: DmAutomationItem, follows: boolean | null): boolean {
+  if (a.followFilter !== "followers" && a.followFilter !== "non_followers") return true;
+  if (follows === null) return true;
+  return a.followFilter === "followers" ? follows : !follows;
+}
+
+/**
+ * Meta 웹훅 서명(`x-hub-signature-256`) 검증.
+ *
+ * 이 엔드포인트는 공개 URL 이라 서명을 확인하지 않으면 누구나 가짜 댓글 이벤트를
+ * 흘려 넣어 고객 계정으로 DM 을 보내게 만들 수 있다. 앱 시크릿이 설정돼 있으면
+ * 반드시 검증하고, 없으면(로컬/미설정 환경) 경고만 남기고 통과시킨다.
+ */
+function verifySignature(rawBody: string, header: string | null, appSecret: string): boolean {
+  if (!header) return false;
+  const expected = "sha256=" + createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex");
+  const got = Buffer.from(header);
+  const want = Buffer.from(expected);
+  return got.length === want.length && timingSafeEqual(got, want);
 }
 
 /**
@@ -157,9 +204,20 @@ export default async (req: Request, _context: Context) => {
   }
 
   // Meta 는 빠른 200 응답을 기대한다. 처리 중 오류가 나도 200 을 돌려준다.
+  const rawBody = await req.text().catch(() => "");
+  const appSecret = process.env.INSTAGRAM_APP_SECRET;
+  if (appSecret) {
+    if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret)) {
+      console.warn("[ig-webhook] rejected: invalid x-hub-signature-256");
+      return new Response("Forbidden", { status: 403 });
+    }
+  } else {
+    console.warn("[ig-webhook] INSTAGRAM_APP_SECRET not set — skipping signature check");
+  }
+
   let payload: any;
   try {
-    payload = await req.json();
+    payload = JSON.parse(rawBody);
   } catch {
     return new Response("EVENT_RECEIVED", { status: 200 });
   }
@@ -196,7 +254,27 @@ export default async (req: Request, _context: Context) => {
         // 자기 자신(계정 소유자)의 댓글은 무시
         if (!commentId || fromId === igId) continue;
 
-        const automation = (settings.automations || []).find((a) => matchAutomation(a, commentText, mediaId));
+        // 조건(게시물·키워드)에 맞는 자동화 후보를 모은 뒤, 팔로우 조건까지 통과하는
+        // 첫 자동화를 고른다. 같은 게시물에 "팔로워용 / 비팔로워용" 자동화를 나눠
+        // 걸어둔 경우에도 각각 의도대로 동작한다.
+        const candidates = (settings.automations || []).filter((a) =>
+          matchAutomation(a, commentText, mediaId),
+        );
+        if (candidates.length === 0) continue;
+
+        let follows: boolean | null = null;
+        if (candidates.some((a) => a.followFilter === "followers" || a.followFilter === "non_followers")) {
+          follows = await fetchFollowsBusiness({
+            host: graphHost(settings),
+            igsid: fromId,
+            accessToken: settings.accessToken,
+          });
+          if (follows === null) {
+            console.warn("[ig-webhook] follow state unknown — sending without follow filter");
+          }
+        }
+
+        const automation = candidates.find((a) => passesFollowFilter(a, follows));
         if (!automation) continue;
 
         // 1) 선택 시 공개 답글 (랜덤). 성공·실패 모두 로그에 남겨 화면의 활동

@@ -197,13 +197,21 @@ export interface SellerVerification {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingHistoryEntry[];
+  // 라이브 커머스 멤버십 — 위 멤버십 티어와 별개로 결제·구독하는 플랜이라
+  // 활성 여부와 청구 상태를 따로 들고 있다. 빌링키는 멤버십과 공유한다.
+  live_plan_active?: boolean;
+  live_plan_started_at?: string | null;
+  live_plan_amount_krw?: number | null;
+  live_plan_last_billing_at?: string | null;
+  live_plan_next_billing_date?: string | null;
+  live_plan_billing_failures?: number;
   verified_at?: string;
   updated_at?: string;
 }
 
 export interface MembershipBillingHistoryEntry {
   at: string;
-  tier: 'standard' | 'standard_ai' | 'commerce' | 'pro';
+  tier: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
   amountKrw: number;
   kind: 'initial' | 'recurring';
   success: boolean;

@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { sendPushToUser } from "./_shared/push.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * Co-broadcast sessions ("함께 방송하기") — the lightweight record that ties two
@@ -60,6 +61,9 @@ export default async (req: Request) => {
       // Pending invites addressed to a user (the invitee polls this).
       const incoming = norm(url.searchParams.get("incoming"));
       if (incoming) {
+        // 나에게 온 초대 목록 — 본인만 조회할 수 있다.
+        const auth = await requireAccountOwner(req, incoming);
+        if (!auth.ok) return auth.response;
         const rows = (await db.sql`
           SELECT id, host_username, guest_username, invite_token, status, created_at
           FROM cobroadcast_sessions
@@ -90,6 +94,9 @@ export default async (req: Request) => {
       // from broadcasting at all. The freshness window lets it self-clear.
       const active = norm(url.searchParams.get("active"));
       if (active) {
+        // 내 현재 세션 — 본인만 조회할 수 있다.
+        const auth = await requireAccountOwner(req, active);
+        if (!auth.ok) return auth.response;
         const rows = (await db.sql`
           SELECT id, host_username, guest_username, status, invite_token, started_at
           FROM cobroadcast_sessions
@@ -165,6 +172,10 @@ export default async (req: Request) => {
         const host = norm(body.host);
         const guest = norm(body.guest);
         if (!host || !guest) return Response.json({ error: "host and guest required" }, { status: 400 });
+        // 초대는 호스트 본인만 보낼 수 있다. 예전에는 body.host 를 그대로 믿어서
+        // 아무나 남의 이름으로 초대를 보내고 상대에게 푸시까지 날릴 수 있었다.
+        const auth = await requireAccountOwner(req, host);
+        if (!auth.ok) return auth.response;
         if (host === guest) return Response.json({ error: "자기 자신은 초대할 수 없습니다." }, { status: 400 });
         if (!(await userExists(db, guest))) {
           return Response.json(
@@ -225,12 +236,22 @@ export default async (req: Request) => {
       const sessionId = String(body.sessionId || "");
       const user = norm(body.user);
       if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+      if (!user) return Response.json({ error: "user required" }, { status: 400 });
+
+      // accept / decline / live / end 는 모두 세션 당사자 본인의 행위다.
+      const actorAuth = await requireAccountOwner(req, user);
+      if (!actorAuth.ok) return actorAuth.response;
 
       const rows = (await db.sql`
         SELECT id, host_username, guest_username, status FROM cobroadcast_sessions WHERE id = ${sessionId} LIMIT 1
       `) as any[];
       if (rows.length === 0) return Response.json({ error: "세션을 찾을 수 없습니다." }, { status: 404 });
       const sess = rows[0];
+      // 인증만으로는 부족하다 — 남의 세션 id 를 알아내 'ended' 로 끊어버릴 수 있으므로
+      // 이 세션의 호스트/게스트 당사자인지까지 확인한다.
+      if (sess.host_username !== user && sess.guest_username !== user && !actorAuth.isAdmin) {
+        return Response.json({ error: "이 세션의 참가자가 아닙니다." }, { status: 403 });
+      }
       const partner = sess.host_username === user ? sess.guest_username : sess.host_username;
 
       if (action === "accept") {

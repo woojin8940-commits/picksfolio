@@ -51,6 +51,12 @@ export default async (req: Request, context: Context) => {
       merged.membership_active = body.membership_active;
     }
 
+    // 라이브 커머스는 멤버십과 따로 결제하는 구독이라 해지도 따로 받는다.
+    // (구독 시작은 결제를 거쳐야 하므로 여기서는 해지 = false 만 허용한다.)
+    if (body.live_plan_active === false) {
+      merged.live_plan_active = false;
+    }
+
     merged.updatedAt = new Date().toISOString();
 
     await store.setJSON(key, merged);

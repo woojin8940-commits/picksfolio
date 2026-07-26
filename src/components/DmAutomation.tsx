@@ -70,6 +70,25 @@ const isValidLinkUrl = (raw: string): boolean => {
   }
 };
 
+/**
+ * 저장 직전에 링크를 정리한다. `example.com/abc` 처럼 스킴만 빠진 입력은 살려주고,
+ * 그래도 http/https 가 아니면 빈 문자열을 돌려준다(= 저장 불가).
+ * 서버 `_shared/instagram-dm.mts` 의 normalizeLinkUrl 과 규칙을 맞춰 둔다.
+ */
+const normalizeLinkUrl = (raw: string): string => {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return '';
+  if (isValidLinkUrl(trimmed)) return trimmed;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    const withScheme = `https://${trimmed}`;
+    if (isValidLinkUrl(withScheme)) return withScheme;
+  }
+  return '';
+};
+
+/** 입력값이 링크로 쓸 수 없는 상태인지(비어 있지 않은데 정규화도 안 되는 경우). */
+const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !normalizeLinkUrl(raw);
+
 /* ─────────── 자동화 카드에 표시하는 대상 피드 썸네일 ─────────── */
 // 자동화 목록만 보고는 "어떤 게시물에 걸어둔 자동화인지" 알 수 없으므로, 카드마다 대상
 // 게시물의 피드 이미지를 함께 보여준다. 선택형(selected)은 지정한 게시물 그대로,
@@ -290,13 +309,26 @@ const AutomationEditor: React.FC<{
     : draft.message.trim().length > 0;
   const mediaValid = draft.mediaScope === 'all' || draft.mediaIds.length > 0;
 
+  // 링크가 잘못돼 있으면 발송 시점에 그 버튼이 조용히 빠진다. 저장 자체를 막아
+  // "설정은 저장됐는데 버튼만 안 보이는" 상황을 없앤다.
+  const brokenLinks =
+    draft.buttons.some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
+    draft.cards.some((c) => linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim()));
+
   const canSave = messageValid &&
     mediaValid &&
+    !brokenLinks &&
     (draft.commentMatch === 'all' || draft.keywords.length > 0);
 
   const handleSave = () => {
     if (!canSave) return;
-    onSave({ ...draft, name: draft.name.trim() || (draft.commentMatch === 'keyword' ? `키워드 DM` : '댓글 DM') });
+    // 스킴이 빠진 주소(`example.com`)는 여기서 https:// 를 붙여 저장한다.
+    onSave({
+      ...draft,
+      name: draft.name.trim() || (draft.commentMatch === 'keyword' ? `키워드 DM` : '댓글 DM'),
+      buttons: draft.buttons.map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
+      cards: draft.cards.map((c) => ({ ...c, buttonUrl: normalizeLinkUrl(c.buttonUrl) })),
+    });
   };
 
   return (
@@ -551,8 +583,8 @@ const AutomationEditor: React.FC<{
                       <Link2 size={13} /> 링크 버튼 <span className="text-slate-300 font-bold">(최대 3개)</span>
                     </div>
                     {draft.buttons.map((b) => {
-                      // URL 이 비어 있거나 http/https 가 아니면 발송 시 버튼이 빠진다.
-                      const urlInvalid = Boolean(b.label.trim()) && !isValidLinkUrl(b.url);
+                      // URL 이 비어 있거나 http/https 로 고칠 수 없으면 저장을 막는다.
+                      const urlInvalid = linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim());
                       return (
                       <div key={b.id} className="bg-slate-50 border border-slate-100 rounded-xl p-2">
                         <div className="flex gap-2 items-center">
@@ -582,8 +614,7 @@ const AutomationEditor: React.FC<{
                             <AlertCircle size={11} />
                             https:// 로 시작하는 주소를 입력해야 버튼이 전송됩니다.
                           </p>
-                        )}
-                      </div>
+                        )}                      </div>
                       );
                     })}
                     {draft.buttons.length < 3 && (
@@ -603,7 +634,11 @@ const AutomationEditor: React.FC<{
                       <p className="text-xs font-bold text-slate-500">카드를 추가해 캐러셀을 만들어보세요</p>
                     </div>
                   )}
-                  {draft.cards.map((c, i) => (
+                  {draft.cards.map((c, i) => {
+                    // 카드 버튼도 링크가 잘못되면 발송 시 통째로 빠진다.
+                    const cardUrlInvalid =
+                      linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim());
+                    return (
                     <div key={c.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black text-slate-500">카드 {i + 1}</span>
@@ -652,11 +687,20 @@ const AutomationEditor: React.FC<{
                           value={c.buttonUrl}
                           onChange={(e) => updateCard(c.id, { buttonUrl: e.target.value })}
                           placeholder="버튼 링크 (https://...)"
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                          className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                            cardUrlInvalid ? 'border-red-300' : 'border-slate-200'
+                          }`}
                         />
                       </div>
+                      {cardUrlInvalid && (
+                        <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-red-500">
+                          <AlertCircle size={11} />
+                          https:// 로 시작하는 주소를 입력해야 카드 버튼이 전송됩니다.
+                        </p>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                   {draft.cards.length < 10 && (
                     <button type="button" onClick={addCard} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
                       + 카드 추가
@@ -697,13 +741,16 @@ const AutomationEditor: React.FC<{
 };
 
 /* ────────────────────────── 토글 ────────────────────────── */
-const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md' }> = ({ on, onClick, size = 'md' }) => {
+const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md'; disabled?: boolean }> = ({ on, onClick, size = 'md', disabled = false }) => {
   const s = size === 'sm' ? { w: 'w-10', h: 'h-6', k: 'w-4 h-4', on: 'left-5', off: 'left-1' } : { w: 'w-12', h: 'h-7', k: 'w-5 h-5', on: 'left-6', off: 'left-1' };
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`relative ${s.w} ${s.h} rounded-full transition-all shrink-0 ${on ? 'bg-pink-500' : 'bg-slate-300'}`}
+      disabled={disabled}
+      role="switch"
+      aria-checked={on}
+      className={`relative ${s.w} ${s.h} rounded-full transition-all shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${on ? 'bg-pink-500' : 'bg-slate-300'}`}
       aria-label="켜기/끄기"
     >
       <span className={`absolute top-1 ${s.k} bg-white rounded-full shadow transition-all ${on ? s.on : s.off}`} />
@@ -714,14 +761,18 @@ const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md' }>
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [loaded, setLoaded] = useState(false);
-  const [, setSaving] = useState(false);
+  // 저장이 진행 중인 동안에는 토글·삭제를 막는다. 두 번의 저장이 겹치면 나중에 끝난
+  // 요청이 앞선 변경을 덮어써 자동화가 되살아나거나 사라진 것처럼 보인다.
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const [enabled, setEnabled] = useState(false);
   const [connected, setConnected] = useState(false);
   const [igUsername, setIgUsername] = useState('');
+  // 인스타그램 장기 토큰은 60일이면 만료된다. 만료되면 "연결됨"으로 보이지만 발송은
+  // 전부 실패하므로, 남은 기간을 화면에서 알려 재연동을 유도한다.
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<string | undefined>(undefined);
   const [automations, setAutomations] = useState<DmAutomationItem[]>([]);
-  const [logs, setLogs] = useState<DmAutomationSettings['logs']>([]);
 
   const [editing, setEditing] = useState<DmAutomationItem | null>(null);
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -746,8 +797,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setEnabled(s.enabled);
       setConnected(Boolean(s.connected));
       setIgUsername(s.igUsername || '');
+      setTokenExpiresAt(s.tokenExpiresAt);
       setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
-      setLogs(s.logs || []);
       setEntitled(s.entitled !== false);
       setLoaded(true);
       if (s.connected) loadMedia();
@@ -782,49 +833,78 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       return false;
     }
     setSaving(true);
-    const ok = await apiService.saveDmAutomation(userName, next);
+    const result = await apiService.saveDmAutomation(userName, next);
     setSaving(false);
-    if (ok) {
+    if (result.ok) {
       setSavedAt(Date.now());
       setTimeout(() => setSavedAt(null), 2200);
     } else {
-      setBanner({ type: 'err', text: '저장에 실패했습니다. 다시 시도해주세요.' });
+      setBanner({ type: 'err', text: result.error || '저장에 실패했습니다. 다시 시도해주세요.' });
     }
-    return ok;
+    return result.ok;
   };
 
-  const connect = () => { window.location.href = apiService.instagramConnectUrl(userName); };
+  const connect = async () => {
+    const result = await apiService.instagramConnectUrl(userName);
+    if (!result.url) {
+      setBanner({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
+      return;
+    }
+    window.location.href = result.url;
+  };
 
   const disconnect = async () => {
     if (!window.confirm('인스타그램 계정 연동을 해제할까요? 자동화는 보관되지만 DM 발송이 중단됩니다.')) return;
     setDisconnecting(true);
     const ok = await apiService.disconnectInstagram(userName);
     setDisconnecting(false);
-    if (ok) { setConnected(false); setEnabled(false); setIgUsername(''); setMedia([]); setBanner({ type: 'ok', text: '연동이 해제되었습니다.' }); }
+    if (ok) { setConnected(false); setEnabled(false); setIgUsername(''); setTokenExpiresAt(undefined); setMedia([]); setBanner({ type: 'ok', text: '연동이 해제되었습니다.' }); }
   };
 
-  const toggleMaster = () => { const v = !enabled; setEnabled(v); persist({ enabled: v }); };
+  // 저장이 실패하면(플랜 없음 · 네트워크 오류) 화면만 바뀌고 서버는 그대로여서, 새로고침
+  // 하면 변경이 사라진 것처럼 보인다. 낙관적으로 먼저 반영하되 실패하면 직전 값으로
+  // 되돌려 화면과 서버 상태가 어긋나지 않게 한다.
+  const toggleMaster = async () => {
+    const prev = enabled;
+    const v = !enabled;
+    setEnabled(v);
+    const ok = await persist({ enabled: v });
+    if (!ok) setEnabled(prev);
+  };
+
+  const commitAutomations = async (next: DmAutomationItem[]) => {
+    const prev = automations;
+    setAutomations(next);
+    const ok = await persist({ automations: next });
+    if (!ok) setAutomations(prev);
+  };
 
   const saveAutomation = (a: DmAutomationItem) => {
     const exists = automations.some((x) => x.id === a.id);
     const next = exists ? automations.map((x) => (x.id === a.id ? a : x)) : [...automations, a];
-    setAutomations(next);
     setEditing(null);
-    persist({ automations: next });
+    void commitAutomations(next);
   };
   const toggleAutomation = (id: string) => {
-    const next = automations.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x));
-    setAutomations(next);
-    persist({ automations: next });
+    void commitAutomations(automations.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)));
   };
   const deleteAutomation = (id: string) => {
     if (!window.confirm('이 자동화를 삭제할까요?')) return;
-    const next = automations.filter((x) => x.id !== id);
-    setAutomations(next);
-    persist({ automations: next });
+    void commitAutomations(automations.filter((x) => x.id !== id));
   };
 
   const activeCount = useMemo(() => automations.filter((a) => a.enabled).length, [automations]);
+
+  // 만료됐거나 임박한 토큰만 알린다. 평소에는 배지를 띄우지 않는다(하루 한 번 도는
+  // scheduled-instagram-token-refresh 가 미리 갱신한다).
+  const tokenStatus = useMemo(() => {
+    if (!connected || !tokenExpiresAt) return null;
+    const ms = new Date(tokenExpiresAt).getTime() - Date.now();
+    if (!Number.isFinite(ms)) return null;
+    if (ms <= 0) return { expired: true, days: 0 };
+    const days = Math.ceil(ms / 86_400_000);
+    return days <= 7 ? { expired: false, days } : null;
+  }, [connected, tokenExpiresAt]);
 
   if (!loaded) {
     return (
@@ -909,7 +989,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           </div>
         </section>
       ) : (
-        <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-5 flex items-center justify-between gap-4">
+        <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-5">
+          <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 flex items-center justify-center text-white shrink-0">
               <Instagram size={22} />
@@ -917,7 +998,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-black text-slate-900 text-base md:text-lg truncate">@{igUsername || '연결된 계정'}</span>
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-100 text-green-700 shrink-0">● 연결됨</span>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+                  tokenStatus?.expired ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'
+                }`}>
+                  {tokenStatus?.expired ? '● 연결 만료' : '● 연결됨'}
+                </span>
               </div>
               <p className="text-[11px] md:text-xs text-slate-500 font-medium">인스타그램 비즈니스 계정 연동됨</p>
             </div>
@@ -929,6 +1014,27 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           >
             {disconnecting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />} 연동 해제
           </button>
+          </div>
+
+          {/* 토큰이 만료됐거나 임박하면 재연동을 안내한다. 만료 상태에서는 화면상
+              "연결됨"으로 보여도 DM 이 한 건도 나가지 않는다. */}
+          {tokenStatus && (
+            <div className={`mt-4 flex items-start gap-2 rounded-2xl px-4 py-3 text-xs font-bold ${
+              tokenStatus.expired ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-700 border border-amber-100'
+            }`}>
+              <AlertCircle size={15} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p>
+                  {tokenStatus.expired
+                    ? '인스타그램 연동이 만료되어 자동 DM 이 발송되지 않습니다.'
+                    : `인스타그램 연동이 ${tokenStatus.days}일 뒤 만료됩니다.`}
+                </p>
+                <button onClick={connect} className="mt-1 underline underline-offset-2">
+                  지금 다시 연동하기
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -944,7 +1050,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               </p>
             </div>
           </div>
-          <Toggle on={enabled && entitled} onClick={toggleMaster} />
+          <Toggle on={enabled && entitled} onClick={toggleMaster} disabled={saving} />
         </section>
       )}
 
@@ -1046,7 +1152,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                     </div>
                     <h4 className="font-black text-slate-900 text-sm md:text-base truncate">{a.name}</h4>
                   </div>
-                  <Toggle on={a.enabled} onClick={() => toggleAutomation(a.id)} size="sm" />
+                  <Toggle on={a.enabled} onClick={() => toggleAutomation(a.id)} size="sm" disabled={saving} />
                 </div>
 
                 {/* 어떤 피드 게시물에 걸린 자동화인지 이미지로 확인 */}
@@ -1100,7 +1206,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   <button onClick={() => setEditing(a)} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 text-xs font-black hover:bg-slate-200">
                     <Pencil size={13} /> 편집
                   </button>
-                  <button onClick={() => deleteAutomation(a.id)} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center">
+                  <button onClick={() => deleteAutomation(a.id)} disabled={saving} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -1109,47 +1215,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           </div>
         )}
       </section>
-
-      {/* 최근 발송 기록 */}
-      {logs && logs.length > 0 && (
-        <section className="bg-white p-5 md:p-7 rounded-3xl border border-slate-100 shadow-sm mt-6">
-          <h3 className="text-base md:text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
-            <Send size={16} className="text-slate-400" /> 최근 발송 기록
-          </h3>
-          <div className="space-y-2">
-            {logs.map((log, i) => (
-              <div key={i} className="flex items-center gap-3 bg-slate-50/70 border border-slate-100 rounded-xl px-4 py-2.5">
-                <span className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${
-                  log.status === 'sent' ? 'bg-green-100 text-green-700'
-                    : log.status === 'failed' ? 'bg-red-100 text-red-600'
-                    : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {log.status === 'sent' ? '전송' : log.status === 'failed' ? '실패' : '건너뜀'}
-                </span>
-                {/* DM 과 공개 답글을 구분해 보여준다. 답글 실패도 기록되므로 여기서
-                    "댓글 답글이 실제로 달렸는지"를 바로 확인할 수 있다. */}
-                <span className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${
-                  log.kind === 'reply' ? 'bg-pink-100 text-pink-600' : 'bg-purple-100 text-purple-600'
-                }`}>
-                  {log.kind === 'reply' ? '댓글 답글' : 'DM'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-slate-700 truncate">
-                    {log.recipientId ? `→ ${log.recipientId}` : '수신자 미지정'}
-                    {log.test && <span className="ml-1 text-blue-500">(테스트)</span>}
-                  </p>
-                  {(log.error || log.reason) && (
-                    <p className="text-[10px] text-red-400 font-medium truncate">{log.error || log.reason}</p>
-                  )}
-                </div>
-                <span className="text-[10px] text-slate-400 font-bold shrink-0">
-                  {new Date(log.at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* 성과 요약 (연결 시) */}
       {connected && automations.length > 0 && (

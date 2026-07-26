@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
+import { consumeSignedState } from "./_shared/oauth-state.mts";
 
 /**
  * 인스타그램 계정 연동 콜백.
@@ -46,12 +47,12 @@ export default async (req: Request, _context: Context) => {
   if (!code) return fail("missing_code");
 
   let username = "";
-  try {
-    const parsed = JSON.parse(Buffer.from(stateRaw, "base64url").toString("utf8"));
-    username = String(parsed?.u || "").toLowerCase().trim();
-  } catch {
-    /* ignore */
-  }
+  // state 는 인증된 발급 경로(instagram-oauth-start, POST)에서만 만들어진 HMAC 서명값이다.
+  // 서명·만료·1회용 nonce 를 모두 통과해야 어떤 계정에 저장할지 신뢰할 수 있다. 서명 없는
+  // state 를 받아주면 임의의 사용자명으로 연동을 강제하는 CSRF 가 다시 열린다.
+  const verified = await consumeSignedState(stateRaw);
+  if (!verified.ok) return fail(verified.error);
+  username = verified.payload.u;
   if (!username) return fail("bad_state");
 
   const appId = process.env.INSTAGRAM_APP_ID;

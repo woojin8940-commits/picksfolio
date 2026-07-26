@@ -5,7 +5,9 @@ import {
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
+import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -85,14 +87,32 @@ const DEFAULT_SETTINGS: DmSettings = {
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+/** 저장을 거절해야 하는 잘못된 링크를 모아 두는 예외. */
+class InvalidLinkError extends Error {}
+
+/** 링크를 정규화하고, 못 살리면 저장 자체를 실패시킨다. */
+function requireLink(raw: string, where: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const normalized = normalizeLinkUrl(value);
+  if (!normalized) {
+    throw new InvalidLinkError(
+      `${where}의 링크 주소가 올바르지 않습니다: "${value.slice(0, 80)}" — https:// 로 시작하는 주소를 입력해 주세요.`,
+    );
+  }
+  return normalized.slice(0, 1000);
+}
+
 function sanitizeAutomation(a: any): DmAutomationItem {
+  const name = String(a?.name || "새 자동화").slice(0, 60);
+
   const buttons: DmMessageButton[] = Array.isArray(a?.buttons)
     ? a.buttons
         .slice(0, 3)
         .map((b: any) => ({
           id: String(b?.id || genId("btn")),
           label: String(b?.label || "").slice(0, 30),
-          url: String(b?.url || "").slice(0, 500),
+          url: requireLink(b?.url, `'${name}' 버튼`).slice(0, 500),
         }))
         .filter((b: DmMessageButton) => b.label || b.url)
     : [];
@@ -118,7 +138,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
           subtitle: String(c?.subtitle || "").slice(0, 80),
           imageUrl: String(c?.imageUrl || "").slice(0, 1000),
           buttonLabel: String(c?.buttonLabel || "").slice(0, 20),
-          buttonUrl: String(c?.buttonUrl || "").slice(0, 1000),
+          buttonUrl: requireLink(c?.buttonUrl, `'${name}' 카드 버튼`),
         }))
         .filter((c: DmCarouselCard) => c.title || c.imageUrl || c.buttonUrl)
     : [];
@@ -128,7 +148,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
 
   return {
     id: String(a?.id || genId("auto")),
-    name: String(a?.name || "새 자동화").slice(0, 60),
+    name,
     enabled: a?.enabled !== false,
     commentMatch: a?.commentMatch === "keyword" ? "keyword" : "all",
     keywords,
@@ -154,21 +174,24 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
+  // 본인(또는 관리자)만 자기 자동화를 보고 고칠 수 있다.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
+
   const store = getStore("dm-automation");
   const key = `dm_${username}`;
 
   if (req.method === "GET") {
     const data = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
     const { accessToken, ...safe } = data;
-    const logStore = getStore("dm-automation-log");
-    const logs = ((await logStore.get(`log_${username}`, { type: "json" })) as any[]) || [];
+    // 발송 로그(dm-automation-log)는 화면에서 더 이상 보여주지 않으므로 응답에 싣지
+    // 않는다. 장애 조사용으로 블롭에는 계속 최근 50건이 쌓인다.
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
       automations: Array.isArray(data.automations) ? data.automations : [],
       connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
-      logs: logs.slice(0, 20),
       // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
       entitled: await dmAutomationAllowed(username),
       requiredTier: DM_AUTOMATION_TIER,
@@ -199,6 +222,16 @@ export default async (req: Request, context: Context) => {
         updatedAt: new Date().toISOString(),
       };
       await store.setJSON(key, next);
+      // 웹훅 역인덱스(ig_<계정ID> → 사용자명)도 함께 비운다. 남겨두면 연동을 끊은 뒤에도
+      // 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다.
+      const staleIgId = existing.igUserId || existing.igAccountId;
+      if (staleIgId) {
+        try {
+          await getStore("dm-automation-index").delete(`ig_${staleIgId}`);
+        } catch (e) {
+          console.warn("[dm-automation] index cleanup failed:", (e as Error)?.message);
+        }
+      }
       return Response.json({ success: true, connected: false });
     }
 
@@ -215,15 +248,29 @@ export default async (req: Request, context: Context) => {
       );
     }
 
+    let automations: DmAutomationItem[];
+    try {
+      automations = Array.isArray(body.automations)
+        ? body.automations.map(sanitizeAutomation)
+        : Array.isArray(existing.automations)
+        ? existing.automations
+        : [];
+    } catch (e) {
+      if (e instanceof InvalidLinkError) {
+        // 잘못된 링크는 발송 때 조용히 빠지므로, 저장 단계에서 되돌려준다.
+        return Response.json(
+          { error: e.message, code: "INVALID_BUTTON_URL" },
+          { status: 400 },
+        );
+      }
+      throw e;
+    }
+
     const next: DmSettings = {
       ...DEFAULT_SETTINGS,
       ...existing,
       enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
-      automations: Array.isArray(body.automations)
-        ? body.automations.map(sanitizeAutomation)
-        : Array.isArray(existing.automations)
-        ? existing.automations
-        : [],
+      automations,
       // 구버전 rules 는 전달되면 갱신, 아니면 유지
       rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
       updatedAt: new Date().toISOString(),
