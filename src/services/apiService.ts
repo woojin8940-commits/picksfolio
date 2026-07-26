@@ -9,7 +9,7 @@ import { supabase } from './supabase';
  * 주인인지 확인한다. 일반 회원은 Supabase 세션에서, 비즈니스 계정은 로그인할 때
  * 저장해 둔 토큰에서 가져온다.
  */
-async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+export async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...extra };
   let token = '';
   try {

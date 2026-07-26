@@ -6,6 +6,7 @@ import {
   LayoutGrid, AlignLeft, GalleryHorizontalEnd,
 } from 'lucide-react';
 import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, InstagramMedia } from '../services/apiService';
+import { isNativeApp } from '../utils/appEnv';
 
 interface DmAutomationProps {
   userName: string;
@@ -946,17 +947,37 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         </div>
       )}
 
-      {/* 프로 플랜 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다. */}
+      {/* 프로 플랜 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
+          다른 멤버십 안내(멤버십 게이트 · 타임라인 AI 게이트)와 같은 밝은 카드
+          형태로 맞춘다. 프로 플랜만 검은 카드로 튀면 다른 상품처럼 보인다. */}
       {!entitled && (
-        <section className="mb-6 rounded-3xl border-2 border-slate-900 bg-slate-900 text-white p-5 md:p-6">
+        <section className="mb-6 rounded-2xl border-2 border-emerald-200 bg-white p-6 md:p-8 shadow-sm">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-xl shrink-0">🚀</div>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-xl shrink-0 shadow-md">
+              🚀
+            </div>
             <div className="min-w-0">
-              <h3 className="text-base md:text-lg font-black mb-1">디엠 자동화는 프로 플랜 전용이에요</h3>
-              <p className="text-white/70 text-xs md:text-sm font-medium leading-relaxed">
-                프로 플랜(월 18,700원)을 구독하면 모든 멤버십 플랜 혜택과 함께 인스타그램 디엠 자동화를 사용할 수 있어요.
-                구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
-              </p>
+              <h3 className="text-base md:text-lg font-black text-slate-900">디엠 자동화는 프로 플랜 전용 기능입니다</h3>
+              {isNativeApp() ? (
+                <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                  프로 플랜에 가입하면 모든 멤버십 혜택과 함께 인스타그램 디엠 자동화를 사용할 수 있어요.
+                  가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 이용됩니다.
+                </p>
+              ) : (
+                <>
+                  <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                    프로 플랜(월 18,700원 · 부가세 포함)을 구독하면 모든 멤버십 플랜 혜택과 함께 인스타그램 디엠 자동화를
+                    사용할 수 있어요. 구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                    className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg"
+                  >
+                    멤버십 플랜 보기
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </section>
