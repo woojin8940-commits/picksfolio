@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
 import { formatKRW } from '../utils/formatters';
+import { isPastDeadline } from '../utils/campaignRecruit';
 
 interface BusinessDashboardProps {
   userName: string;
@@ -86,12 +87,25 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     setDeletingId(null);
   };
 
-  const filteredProposals = useMemo(() => {
-    let filtered = proposals.filter(p => p.category === activeTab);
+  // 진행 일정이 끝난 제안은 수신함에서 감춘다. 종료일이 지나면 지금 수락해도
+  // 진행할 수 없어 목록만 무겁게 만든다 — 캠페인 목록과 같은 기준(한국 시간,
+  // 종료일 당일까지는 유효)을 쓴다.
+  const openProposals = useMemo(
+    () => proposals.filter(p => !isPastDeadline(p.end_date)),
+    [proposals]
+  );
 
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(p => p.status === statusFilter);
-    }
+  // 거절한 제안은 '거절됨' 필터에서만 보여 준다. 전체 목록에는 아직 처리할 수
+  // 있는 제안(대기중 · 수락됨 · 완료)만 남긴다.
+  const statusScoped = useMemo(
+    () => statusFilter === 'all'
+      ? openProposals.filter(p => p.status !== 'rejected')
+      : openProposals.filter(p => p.status === statusFilter),
+    [openProposals, statusFilter]
+  );
+
+  const filteredProposals = useMemo(() => {
+    const filtered = statusScoped.filter(p => p.category === activeTab);
 
     switch (sortMode) {
       case 'deadline':
@@ -107,7 +121,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     }
 
     return filtered;
-  }, [proposals, activeTab, sortMode, statusFilter]);
+  }, [statusScoped, activeTab, sortMode]);
 
   // Group proposals by month for schedule view
   const groupedBySchedule = useMemo(() => {
@@ -134,11 +148,14 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     return { total, count: filteredProposals.length };
   }, [filteredProposals]);
 
-  const adCount = proposals.filter(p => p.category === '광고').length;
-  const commerceCount = proposals.filter(p => p.category === '커머스').length;
-  const pendingCount = proposals.filter(p => p.status === 'pending').length;
-  const acceptedCount = proposals.filter(p => p.status === 'accepted').length;
-  const rejectedCount = proposals.filter(p => p.status === 'rejected').length;
+  // 탭·카드 숫자는 실제로 목록에 뜨는 건수와 같아야 한다 — 일정이 끝난 제안과
+  // (전체 보기에서는) 거절한 제안을 뺀 기준으로 센다.
+  const adCount = statusScoped.filter(p => p.category === '광고').length;
+  const commerceCount = statusScoped.filter(p => p.category === '커머스').length;
+  const totalCount = openProposals.filter(p => p.status !== 'rejected').length;
+  const pendingCount = openProposals.filter(p => p.status === 'pending').length;
+  const acceptedCount = openProposals.filter(p => p.status === 'accepted').length;
+  const rejectedCount = openProposals.filter(p => p.status === 'rejected').length;
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -387,6 +404,9 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
               </span>
             )}
           </p>
+          <p className="text-slate-300 text-[10px] md:text-xs font-bold mt-1">
+            진행 일정이 끝난 제안은 자동으로 숨겨지고, 거절한 제안은 '거절됨'에서만 볼 수 있습니다
+          </p>
         </div>
         <button
           onClick={() => {
@@ -414,7 +434,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           }`}
         >
           <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">전체</p>
-          <p className="text-base md:text-2xl font-black text-slate-900">{proposals.length}<span className="text-xs md:text-sm font-bold">건</span></p>
+          <p className="text-base md:text-2xl font-black text-slate-900">{totalCount}<span className="text-xs md:text-sm font-bold">건</span></p>
         </button>
         <button
           onClick={() => setStatusFilter('pending')}

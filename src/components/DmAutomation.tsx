@@ -949,11 +949,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
       {/* 프로 플랜 안내 — 자격이 없으면 저장·발송이 막히므로 먼저 알려준다.
           다른 멤버십 안내(멤버십 게이트 · 타임라인 AI 게이트)와 같은 밝은 카드
-          형태로 맞춘다. 프로 플랜만 검은 카드로 튀면 다른 상품처럼 보인다. */}
+          형태로 맞추고, 색도 멤버십 화면의 프로 플랜 카드와 같은 계열로 쓴다. */}
       {!entitled && (
-        <section className="mb-6 rounded-2xl border-2 border-emerald-200 bg-white p-6 md:p-8 shadow-sm">
+        <section className="mb-6 rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-xl shrink-0 shadow-md">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-xl shrink-0 shadow-md">
               🚀
             </div>
             <div className="min-w-0">
@@ -972,7 +972,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   <button
                     type="button"
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
-                    className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg"
+                    className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg"
                   >
                     멤버십 플랜 보기
                   </button>
