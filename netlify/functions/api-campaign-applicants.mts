@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -12,6 +13,14 @@ export default async (req: Request) => {
       if (!campaign_id) {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
+
+      // 지원자 목록에는 연락처·SNS 링크가 들어 있다. 캠페인을 등록한 브랜드만 볼 수 있다.
+      const owner = await db.sql`SELECT business_username FROM campaigns WHERE id = ${campaign_id}`;
+      if (owner.length === 0) {
+        return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
+      }
+      const auth = await requireAccountOwner(req, String((owner[0] as any).business_username || ""));
+      if (!auth.ok) return auth.response;
 
       const result = await db.sql`
         SELECT * FROM campaign_applications
@@ -45,6 +54,14 @@ export default async (req: Request) => {
         WHERE ca.id = ${id}
       `;
       const appRow = (appRows as any[])?.[0];
+      if (!appRow) {
+        return Response.json({ error: "지원 내역을 찾을 수 없습니다." }, { status: 404 });
+      }
+
+      // 수락/거절은 캠페인을 등록한 브랜드만 할 수 있다. 수락은 타임라인·정산까지
+      // 만들어 내므로 남이 대신 눌러서는 안 된다.
+      const auth = await requireAccountOwner(req, String(appRow.business_username || ""));
+      if (!auth.ok) return auth.response;
 
       await db.sql`
         UPDATE campaign_applications

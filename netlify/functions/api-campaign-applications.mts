@@ -1,5 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
+import { isPastDeadline } from "./_shared/campaign-recruit.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -55,12 +57,15 @@ export default async (req: Request) => {
       }
 
       const camp = campaign[0] as Record<string, any>;
-      if (camp.max_applicants && Number(camp.max_applicants) > 0) {
-        const count = await db.sql`SELECT COUNT(*)::int as count FROM campaign_applications WHERE campaign_id = ${campaign_id}`;
-        if (Number((count[0] as any).count) >= Number(camp.max_applicants)) {
-          return Response.json({ error: "모집 인원이 마감되었습니다." }, { status: 400 });
-        }
+
+      // 모집 종료일이 지난 캠페인은 목록에 노출되지 않지만, 이전에 열어둔 화면이나
+      // 직접 호출로 지원이 들어올 수 있으므로 서버에서도 막는다.
+      if (isPastDeadline(camp.end_date)) {
+        return Response.json({ error: "모집이 마감된 캠페인입니다." }, { status: 400 });
       }
+
+      // 모집 인원(max_applicants)이 다 차도 지원은 계속 받는다.
+      // 지원자가 많을수록 브랜드가 더 나은 크리에이터를 고를 수 있기 때문이다.
 
       const dup = await db.sql`
         SELECT id FROM campaign_applications
@@ -91,6 +96,11 @@ export default async (req: Request) => {
       if (!id || !username) {
         return Response.json({ error: "Missing parameters" }, { status: 400 });
       }
+
+      // 예전에는 쿼리 파라미터의 username 만 믿어서, 아이디만 알면 남의 지원을
+      // 취소할 수 있었다. 본인(또는 관리자)인지 토큰으로 확인한다.
+      const auth = await requireAccountOwner(req, username);
+      if (!auth.ok) return auth.response;
 
       await db.sql`
         DELETE FROM campaign_applications

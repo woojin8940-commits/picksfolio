@@ -1,5 +1,18 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
+import { isRecruitClosed, todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+
+/**
+ * 조회 결과에 모집 마감 여부(recruit_closed)를 붙인다.
+ * 브랜드가 직접 마감하지 않았더라도 종료일이 지난 캠페인은 지원을 받을 수 없으므로,
+ * 화면에서 "마감"으로 표시할 수 있도록 계산해 준다.
+ * (모집 인원이 다 차는 것은 마감 사유가 아니다 — 정원을 넘겨도 계속 지원받는다.)
+ */
+const withRecruitState = (rows: any[]) => {
+  const today = todayInSeoul();
+  return rows.map((c) => ({ ...c, recruit_closed: isRecruitClosed(c, today) }));
+};
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -19,88 +32,46 @@ export default async (req: Request) => {
         if (result.length === 0) {
           return Response.json({ error: "Campaign not found" }, { status: 404 });
         }
-        return Response.json({ campaign: result[0] });
+        return Response.json({ campaign: withRecruitState(result)[0] });
       }
 
-      const type = url.searchParams.get("type");
-      const category = url.searchParams.get("category");
-      const status = url.searchParams.get("status") || "active";
-      const business = url.searchParams.get("business");
-      const search = url.searchParams.get("search");
+      const type = url.searchParams.get("type") || "";
+      const category = url.searchParams.get("category") || "";
+      const business = url.searchParams.get("business") || "";
+      const search = url.searchParams.get("search") || "";
+      // 브랜드 관리 화면은 승인 대기·마감 등 모든 상태를 봐야 하므로, business 조회에는
+      // status 조건을 걸지 않는다(명시로 넘긴 경우는 제외). 공개 목록은 기본 'active'.
+      const statusParam = url.searchParams.get("status") || "";
+      const status = business ? statusParam : statusParam || "active";
+      const pattern = search ? `%${search}%` : "";
 
-      let result;
-      if (business) {
-        if (type) {
-          result = await db.sql`
-            SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-            FROM campaigns c
-            LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-            WHERE c.business_username = ${business} AND c.type = ${type}
-            ORDER BY c.created_at DESC
-          `;
-        } else {
-          result = await db.sql`
-            SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-            FROM campaigns c
-            LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-            WHERE c.business_username = ${business}
-            ORDER BY c.created_at DESC
-          `;
-        }
-      } else if (search && type) {
-        const pattern = `%${search}%`;
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status} AND c.type = ${type} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
-          ORDER BY c.created_at DESC
-        `;
-      } else if (search && category) {
-        const pattern = `%${search}%`;
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status} AND c.category = ${category} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
-          ORDER BY c.created_at DESC
-        `;
-      } else if (category) {
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status} AND c.category = ${category}
-          ORDER BY c.created_at DESC
-        `;
-      } else if (type) {
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status} AND c.type = ${type}
-          ORDER BY c.created_at DESC
-        `;
-      } else if (search) {
-        const pattern = `%${search}%`;
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status} AND (c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
-          ORDER BY c.created_at DESC
-        `;
-      } else {
-        result = await db.sql`
-          SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
-          FROM campaigns c
-          LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-          WHERE c.status = ${status}
-          ORDER BY c.created_at DESC
-        `;
+      // 조건별로 쿼리를 복사하지 않고, 넘어오지 않은 조건은 빈 문자열로 비활성화한다.
+      // (조건 조합이 늘어날 때마다 분기를 추가하다 보면 category+type 처럼 빠지는
+      //  조합이 생긴다.)
+      const result = await db.sql`
+        SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
+        FROM campaigns c
+        LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
+        WHERE (${business} = '' OR c.business_username = ${business})
+          AND (${status} = '' OR c.status = ${status})
+          AND (${type} = '' OR c.type = ${type})
+          AND (${category} = '' OR c.category = ${category})
+          AND (${pattern} = '' OR c.title ILIKE ${pattern} OR c.brand_name ILIKE ${pattern} OR c.description ILIKE ${pattern})
+        ORDER BY c.created_at DESC
+      `;
+
+      const campaigns = withRecruitState(result as any[]);
+
+      // 공개 목록(브랜드 자신의 관리 화면이 아닌 경우)에서는 모집이 끝난 캠페인을
+      // 제외한다. 브랜드가 "마감"을 누르지 않았더라도 종료일이 지난 캠페인은
+      // 지원할 수 없어, 노출해 봐야 막다른 길이기 때문이다.
+      // 브랜드 관리 화면(business 파라미터)에서는 마감된 캠페인도 그대로 보여
+      // 준다 — 수정·재개·삭제해야 하므로.
+      if (!business) {
+        return Response.json({ campaigns: campaigns.filter((c) => !c.recruit_closed) });
       }
 
-      return Response.json({ campaigns: result });
+      return Response.json({ campaigns });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }
@@ -112,6 +83,11 @@ export default async (req: Request) => {
       if (!body.business_username || !body.type || !body.title) {
         return Response.json({ error: "필수 항목을 입력해 주세요." }, { status: 400 });
       }
+
+      // 남의 브랜드 이름으로 캠페인을 올릴 수 없도록 계정 주인인지 확인한다.
+      const auth = await requireAccountOwner(req, String(body.business_username));
+      if (!auth.ok) return auth.response;
+
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       await db.sql`
@@ -139,6 +115,11 @@ export default async (req: Request) => {
       }
 
       const c = existing[0] as Record<string, any>;
+
+      // 캠페인 ID 만 알면 남의 캠페인을 고칠 수 있었다. 등록한 브랜드(또는 관리자)만
+      // 수정할 수 있도록 확인한다.
+      const auth = await requireAccountOwner(req, String(c.business_username || ""));
+      if (!auth.ok) return auth.response;
 
       let newStatus = updates.status ?? c.status;
       if (c.status === 'pending_approval' || c.status === 'admin_rejected') {
@@ -173,7 +154,6 @@ export default async (req: Request) => {
   if (req.method === "DELETE") {
     try {
       const id = url.searchParams.get("id");
-      const business = url.searchParams.get("business");
       if (!id) {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
@@ -183,9 +163,10 @@ export default async (req: Request) => {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
 
-      if (business && existing[0].business_username !== business) {
-        return Response.json({ error: "삭제 권한이 없습니다." }, { status: 403 });
-      }
+      // 예전에는 business 쿼리 파라미터를 넘겼을 때만 소유자를 확인해서, 파라미터를
+      // 빼면 누구나 남의 캠페인을 지울 수 있었다. 이제 토큰으로 확인한다.
+      const auth = await requireAccountOwner(req, String((existing[0] as any).business_username || ""));
+      if (!auth.ok) return auth.response;
 
       await db.sql`DELETE FROM campaign_collabs WHERE campaign_id = ${id}`;
       await db.sql`DELETE FROM campaign_applications WHERE campaign_id = ${id}`;

@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { formatNumberWithCommas, formatKoreanWon } from '../utils/formatters';
+import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
+import { authHeaders } from '../services/apiService';
 import ImageCropper from './ImageCropper';
 import CollabMatchRegister from './CollabMatchRegister';
+import Toast from './Toast';
 
 interface Campaign {
   id: string;
@@ -23,6 +26,7 @@ interface Campaign {
   admin_rejected_reason?: string;
   admin_approved_at?: string;
   created_at: string;
+  recruit_closed?: boolean;
 }
 
 interface Applicant {
@@ -100,6 +104,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const pendingFileRef = useRef<File | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
   const [formData, setFormData] = useState({
     type: 'ad_collab',
@@ -155,7 +161,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);
     try {
-      const res = await fetch(`/api/campaign-applicants?campaign_id=${campaignId}`);
+      // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자인지 확인한다.
+      const res = await fetch(`/api/campaign-applicants?campaign_id=${campaignId}`, {
+        headers: await authHeaders(),
+      });
       const data = await res.json();
       setApplicants(data.applicants || []);
     } catch {
@@ -180,7 +189,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('이미지 크기는 5MB 이하만 가능합니다.');
+      notify('이미지 크기는 5MB 이하만 가능합니다.', 'error');
       return;
     }
     pendingFileRef.current = file;
@@ -208,11 +217,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       if (data.url) {
         setFormData(p => ({ ...p, thumbnail_url: data.url }));
       } else {
-        alert('이미지 업로드에 실패했습니다.');
+        notify('이미지 업로드에 실패했습니다.', 'error');
         setThumbnailPreview('');
       }
     } catch {
-      alert('이미지 업로드 중 오류가 발생했습니다.');
+      notify('이미지 업로드 중 오류가 발생했습니다.', 'error');
       setThumbnailPreview('');
     } finally {
       setUploadingImage(false);
@@ -228,39 +237,41 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) {
-      alert('캠페인 제목을 입력해 주세요.');
+      notify('캠페인 제목을 입력해 주세요.', 'error');
       return;
     }
     setSubmitting(true);
     try {
       if (editingCampaign) {
+        // 수정·삭제는 서버에서 계정 주인인지 확인하므로 인증 헤더를 함께 보낸다.
         const res = await fetch('/api/campaigns', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ id: editingCampaign.id, ...formData }),
         });
         if (!res.ok) {
-          const err = await res.json();
-          alert(err.error || '수정 실패');
+          const err = await res.json().catch(() => ({}));
+          notify(err.error || '수정 실패', 'error');
           return;
         }
+        notify('캠페인이 수정되었습니다.');
       } else {
         const res = await fetch('/api/campaigns', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ ...formData, business_username: businessUsername }),
         });
         if (!res.ok) {
-          const err = await res.json();
-          alert(err.error || '등록 실패');
+          const err = await res.json().catch(() => ({}));
+          notify(err.error || '등록 실패', 'error');
           return;
         }
-        alert('캠페인이 등록되었습니다. 관리자 승인 후 공개됩니다.');
+        notify('캠페인이 등록되었습니다. 관리자 승인 후 공개됩니다.');
       }
       resetForm();
       fetchCampaigns();
     } catch {
-      alert('서버 오류가 발생했습니다.');
+      notify('서버 오류가 발생했습니다.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -290,30 +301,43 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const handleToggleStatus = async (campaign: Campaign) => {
     const newStatus = campaign.status === 'active' ? 'inactive' : 'active';
     try {
-      await fetch('/api/campaigns', {
+      const res = await fetch('/api/campaigns', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id: campaign.id, status: newStatus }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        notify(err.error || '상태 변경에 실패했습니다.', 'error');
+        return;
+      }
+      notify(newStatus === 'active' ? '캠페인 모집을 재개했습니다.' : '캠페인을 마감했습니다.');
       fetchCampaigns();
+      if (selectedCampaign?.id === campaign.id) {
+        setSelectedCampaign({ ...selectedCampaign, status: newStatus });
+      }
     } catch {
-      alert('상태 변경에 실패했습니다.');
+      notify('상태 변경에 실패했습니다.', 'error');
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('정말 삭제하시겠습니까?')) return;
     try {
-      const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, { method: 'DELETE' });
-      const data = await res.json();
+      const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, {
+        method: 'DELETE',
+        headers: await authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        alert(data.error || '삭제에 실패했습니다.');
+        notify(data.error || '삭제에 실패했습니다.', 'error');
         return;
       }
+      notify('캠페인을 삭제했습니다.');
       await fetchCampaigns();
       if (selectedCampaign?.id === id) setSelectedCampaign(null);
     } catch {
-      alert('삭제에 실패했습니다.');
+      notify('삭제에 실패했습니다.', 'error');
     }
   };
 
@@ -321,20 +345,22 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     try {
       const res = await fetch('/api/campaign-applicants', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id: applicantId, status }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || '상태 변경에 실패했습니다.');
+        notify(err.error || '상태 변경에 실패했습니다.', 'error');
         return;
       }
       if (status === 'accepted') {
-        alert('지원자를 수락했습니다. 타임라인이 생성되어 채팅으로 협업을 진행할 수 있습니다.');
+        notify('지원자를 수락했습니다. 타임라인이 생성되어 채팅으로 협업을 진행할 수 있습니다.');
+      } else {
+        notify('지원자를 거절했습니다.');
       }
       if (selectedCampaign) fetchApplicants(selectedCampaign.id);
     } catch {
-      alert('상태 변경에 실패했습니다.');
+      notify('상태 변경에 실패했습니다.', 'error');
     }
   };
 
@@ -372,6 +398,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     return <span className={`${s.bg} ${s.text} px-2.5 py-1 rounded-full text-[11px] font-black`}>{s.label}</span>;
   };
 
+  // status가 'active'여도 종료일이 지난 캠페인은 크리에이터 화면에 더 이상 노출되지
+  // 않는다. 브랜드가 그 이유를 알 수 있도록 "모집중" 대신 '기간 종료'를 보여 준다.
+  // 모집 인원을 다 채운 것은 마감 사유가 아니다(정원이 차도 지원은 계속 받는다).
+  const campaignStatusBadge = (campaign: Campaign) => {
+    if (campaign.status === 'active' && isPastDeadline(campaign.end_date)) {
+      return <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-[11px] font-black">기간 종료</span>;
+    }
+    return statusBadge(campaign.status);
+  };
+
   const typeLabel = (type: string) => {
     const m: Record<string, string> = { ad_collab: '광고 협업', group_buy: '공동구매', other: '기타', collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
     return m[type] || type;
@@ -382,16 +418,27 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     return m[type] || type;
   };
 
-  const daysRemaining = (endDate: string) => {
-    if (!endDate) return null;
-    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return null;
-    if (diff === 0) return 'D-Day';
-    return `D-${diff}`;
+  /**
+   * 마감까지 남은 기간. 한국 시간 기준으로 계산하며, 3일 이내면 임박으로 본다.
+   * 종료일이 없거나(상시 모집) 이미 지났으면 null.
+   */
+  const deadlineInfo = (endDate: string) => {
+    const remaining = daysUntilDeadline(endDate);
+    if (remaining === null || remaining < 0) return null;
+    return { label: remaining === 0 ? 'D-Day' : `D-${remaining}`, urgent: remaining <= 3 };
   };
 
-  const sourceCampaigns = viewMode === 'all' ? allCampaigns : campaigns;
-  const listLoading = viewMode === 'all' ? allLoading : loading;
+  // 화면이 세 갈래(상세/폼/목록)로 나뉘어 있어 토스트를 각 갈래 끝에 함께 렌더한다.
+  const toastEl = (
+    <Toast
+      message={toast?.message || ''}
+      isVisible={!!toast}
+      onClose={() => setToast(null)}
+      type={toast?.type || 'success'}
+    />
+  );
+
+  const sourceCampaigns = viewMode === 'all' ? allCampaigns : campaigns;  const listLoading = viewMode === 'all' ? allLoading : loading;
   const filteredCampaigns = activeTypeFilter
     ? sourceCampaigns.filter(c => c.type === activeTypeFilter)
     : sourceCampaigns;
@@ -416,7 +463,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             <div className="flex items-start justify-between mb-4">
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  {statusBadge(selectedCampaign.status)}
+                  {campaignStatusBadge(selectedCampaign)}
                   <span className="text-[11px] text-slate-400 font-bold">{typeLabel(selectedCampaign.type)}</span>
                 </div>
                 <h2 className="text-xl md:text-2xl font-black text-slate-900">{selectedCampaign.title}</h2>
@@ -450,6 +497,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 {selectedCampaign.admin_rejected_reason && (
                   <p className="text-xs text-red-500 font-medium mt-1">사유: {selectedCampaign.admin_rejected_reason}</p>
                 )}
+              </div>
+            )}
+
+            {selectedCampaign.status === 'active' && isPastDeadline(selectedCampaign.end_date) && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-5">
+                <p className="text-sm font-black text-slate-600">모집 기간이 종료되었습니다</p>
+                <p className="text-xs text-slate-400 font-medium mt-1">
+                  크리에이터 캠페인 목록에 더 이상 노출되지 않습니다. 계속 모집하려면 수정에서 종료일을 연장해 주세요.
+                </p>
+              </div>
+            )}
+
+            {/* 정원을 채워도 지원은 계속 받는다 — 더 나은 지원자를 고를 수 있게 하기 위함. */}
+            {selectedCampaign.status === 'active' && !isPastDeadline(selectedCampaign.end_date) && isQuotaReached(selectedCampaign) && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-5">
+                <p className="text-sm font-black text-emerald-700">모집 인원을 모두 채웠습니다</p>
+                <p className="text-xs text-emerald-600 font-medium mt-1">
+                  모집 기간 동안에는 정원을 넘겨도 지원을 계속 받습니다. 더 많은 지원자 중에서 골라 보세요.
+                </p>
               </div>
             )}
 
@@ -580,6 +646,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             <p className="text-xs text-slate-400 font-medium mt-1">지원자 목록은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
           </div>
         )}
+        {toastEl}
       </main>
     );
   }
@@ -715,6 +782,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   min="0"
                 />
+                <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                  목표 인원입니다. 정원을 채워도 종료일까지는 지원을 계속 받아, 더 많은 지원자 중에서 고를 수 있습니다.
+                </p>
               </div>
             </div>
 
@@ -800,6 +870,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             </div>
           </form>
         </div>
+        {toastEl}
       </main>
     );
   }
@@ -913,7 +984,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
           {filteredCampaigns.map(campaign => {
-            const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
+            const deadline = deadlineInfo(campaign.end_date);
             return (
               <div
                 key={campaign.id}
@@ -933,13 +1004,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   )}
                   {/* Badges overlay */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                    {statusBadge(campaign.status)}
+                    {campaignStatusBadge(campaign)}
                     {viewMode === 'all' && normalizeUser(campaign.business_username) === normalizeUser(businessUsername) && (
                       <span className="bg-blue-600 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">내 캠페인</span>
                     )}
-                    {days && (
-                      <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                        {days}
+                    {deadline && campaign.status === 'active' && (
+                      <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
+                        {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
                       </span>
                     )}
                   </div>
@@ -988,6 +1059,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           })}
         </div>
       )}
+      {toastEl}
     </main>
   );
 };

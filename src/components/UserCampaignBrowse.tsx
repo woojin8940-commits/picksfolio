@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
+import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import CollabMatchRegister from './CollabMatchRegister';
+import Toast from './Toast';
 
 interface Campaign {
   id: string;
@@ -20,6 +22,7 @@ interface Campaign {
   status: string;
   application_count: number;
   created_at: string;
+  recruit_closed?: boolean;
 }
 
 interface UserCampaignBrowseProps {
@@ -61,6 +64,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [acceptedCampaigns, setAcceptedCampaigns] = useState<Map<string, string>>(new Map());
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
@@ -127,25 +131,31 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         setAppliedIds(prev => new Set(prev).add(selectedCampaign.id));
         setShowApplyForm(false);
         setApplyForm({ contact: '', instagram_url: '', youtube_naver_url: '' });
-        alert('지원이 완료되었습니다!');
+        setToast({ message: '지원이 완료되었습니다!', type: 'success' });
         fetchCampaigns();
       } else {
         const err = await res.json();
-        alert(err.error || '지원에 실패했습니다.');
+        setToast({ message: err.error || '지원에 실패했습니다.', type: 'error' });
       }
     } catch {
-      alert('서버 오류가 발생했습니다.');
+      setToast({ message: '서버 오류가 발생했습니다.', type: 'error' });
     } finally {
       setApplying(false);
     }
   };
 
-  const daysRemaining = (endDate: string) => {
-    if (!endDate) return null;
-    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return null;
-    if (diff === 0) return 'D-Day';
-    return `D-${diff}`;
+  /**
+   * 마감까지 남은 기간. 한국 시간 기준으로 계산해 D-표기와 임박 여부를 함께 돌려준다.
+   * 종료일이 없거나(상시 모집) 이미 지났으면 null.
+   */
+  const deadlineInfo = (endDate?: string) => {
+    const remaining = daysUntilDeadline(endDate);
+    if (remaining === null || remaining < 0) return null;
+    return {
+      label: remaining === 0 ? 'D-Day' : `D-${remaining}`,
+      // 3일 이내면 "마감 임박"으로 강조한다.
+      urgent: remaining <= 3,
+    };
   };
 
   const formatDate = (d: string) => {
@@ -154,16 +164,26 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
   };
 
-  const filteredCampaigns = campaigns.filter(c => c.business_username !== userName);
+  // 마감된 캠페인은 목록에서 제외한다. 서버에서도 걸러 주지만, 상세 화면을 열어둔
+  // 사이에 마감되는 경우가 있어 화면에서도 같은 기준으로 한 번 더 확인한다.
+  const filteredCampaigns = campaigns.filter(
+    c => c.business_username !== userName && !isCampaignClosed(c)
+  );
 
   // --- Campaign Detail View ---
   if (selectedCampaign) {
     const isApplied = appliedIds.has(selectedCampaign.id);
-    const days = selectedCampaign.end_date ? daysRemaining(selectedCampaign.end_date) : null;
+    const isClosed = isCampaignClosed(selectedCampaign);
+    const closedReason = isPastDeadline(selectedCampaign.end_date)
+      ? '모집 기간이 종료되었습니다'
+      : '브랜드가 모집을 마감했습니다';
+    const deadline = deadlineInfo(selectedCampaign.end_date);
+    const days = deadline?.label ?? null;
     const applicantPercent = selectedCampaign.max_applicants > 0
       ? Math.min(100, Math.round((selectedCampaign.application_count / selectedCampaign.max_applicants) * 100))
       : 0;
-    const isAlmostFull = selectedCampaign.max_applicants > 0 && applicantPercent >= 80;
+    // 정원이 차도 모집은 계속된다. 경쟁률이 높다는 정보로만 쓴다.
+    const quotaReached = isQuotaReached(selectedCampaign);
 
     return (
       <div className="w-full animate-in fade-in duration-300 pb-28">
@@ -177,9 +197,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
             <h3 className="text-sm font-black text-slate-900 truncate flex-1">{selectedCampaign.title}</h3>
-            {days && (
-              <span className="bg-rose-500 text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0">{days}</span>
-            )}
+            {isClosed ? (
+              <span className="bg-slate-400 text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0">마감</span>
+            ) : deadline ? (
+              <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900'} text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0`}>
+                {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -278,12 +302,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <div className="mt-2">
                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-500 ${isAlmostFull ? 'bg-rose-500' : 'bg-blue-500'}`}
+                          className={`h-full rounded-full transition-all duration-500 ${quotaReached ? 'bg-emerald-500' : 'bg-blue-500'}`}
                           style={{ width: `${applicantPercent}%` }}
                         />
                       </div>
-                      {isAlmostFull && (
-                        <p className="text-[10px] text-rose-500 font-bold mt-1">마감 임박!</p>
+                      {/* 정원이 차도 지원은 계속 받는다 — 마감이 아니라는 점을 분명히 알린다. */}
+                      {quotaReached && (
+                        <p className="text-[10px] text-emerald-600 font-bold mt-1">모집 인원을 채웠지만 계속 지원할 수 있어요</p>
                       )}
                     </div>
                   )}
@@ -478,8 +503,21 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             )}
 
+            {/* 마감된 캠페인 — 지원 버튼 대신 마감 사유를 안내한다 */}
+            {!isApplied && isClosed && (
+              <div className="py-5">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center">
+                  <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                  </div>
+                  <p className="text-base font-black text-slate-600">마감된 캠페인</p>
+                  <p className="text-sm text-slate-400 font-medium mt-1">{closedReason}</p>
+                </div>
+              </div>
+            )}
+
             {/* Apply Form (inline, above fixed button) */}
-            {!isApplied && showApplyForm && (
+            {!isApplied && !isClosed && showApplyForm && (
               <div className="py-5">
                 <div className="border border-blue-200 rounded-2xl p-5 md:p-6 bg-gradient-to-b from-blue-50/50 to-white space-y-4">
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
@@ -541,7 +579,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
 
         {/* Fixed Bottom CTA */}
-        {!isApplied && !showApplyForm && (
+        {!isApplied && !isClosed && !showApplyForm && (
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom">
             <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
@@ -551,7 +589,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 {selectedCampaign.max_applicants > 0 && (
                   <p className="text-[11px] text-slate-400 font-bold">
                     {selectedCampaign.application_count}/{selectedCampaign.max_applicants}명 지원중
-                    {isAlmostFull && <span className="text-rose-500 ml-1">마감 임박</span>}
+                    {quotaReached && <span className="text-emerald-600 ml-1">정원 초과 지원 가능</span>}
                   </p>
                 )}
               </div>
@@ -565,6 +603,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             </div>
           </div>
         )}
+
+        <Toast
+          message={toast?.message || ''}
+          isVisible={!!toast}
+          onClose={() => setToast(null)}
+          type={toast?.type || 'success'}
+        />
       </div>
     );
   }
@@ -638,7 +683,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5 md:gap-5 py-1">
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
-            const days = campaign.end_date ? daysRemaining(campaign.end_date) : null;
+            const deadline = deadlineInfo(campaign.end_date);
             return (
               <div
                 key={campaign.id}
@@ -665,9 +710,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <span className="bg-white/90 backdrop-blur-sm text-blue-700 px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
                       {TYPE_LABELS[campaign.type] || campaign.type}
                     </span>
-                    {days && (
-                      <span className="bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                        {days}
+                    {deadline && (
+                      <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
+                        {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
                       </span>
                     )}
                   </div>
@@ -713,6 +758,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
+      <Toast
+        message={toast?.message || ''}
+        isVisible={!!toast}
+        onClose={() => setToast(null)}
+        type={toast?.type || 'success'}
+      />
     </div>
   );
 };

@@ -372,9 +372,9 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       </div>
                       <div className="md:col-span-2 mt-2 md:mt-0">
                         {activePlan === 'pro' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 text-[10px] font-black">
                             🚀 프로
-                            <span className="text-[9px] font-bold text-slate-300">{formatDate(r.membership_started_at)}~</span>
+                            <span className="text-[9px] font-bold text-emerald-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : activePlan === 'commerce' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-pink-100 text-pink-700 text-[10px] font-black">
