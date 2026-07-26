@@ -663,13 +663,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             )}
           </div>
 
-          {/* Pro Plan — 모든 멤버십 기능 + 디엠 자동화. Styled with the same light
-              card treatment as the other tiers (pastel border · white surface ·
-              gradient badge and CTA) so it reads as one of the plans instead of a
-              black "different product" block. */}
-          <div className="relative rounded-2xl border-2 border-emerald-200 bg-white p-6 md:p-8 shadow-sm">
+          {/* Pro Plan — 모든 멤버십 기능 + 디엠 자동화. 카드 형태(파스텔 테두리 ·
+              흰 배경 · 그라데이션 배지와 CTA)뿐 아니라 색 계열도 다른 플랜과
+              맞춘다. 초록 계열은 이 화면에서 "구독 중 · 완료" 상태 표시에 쓰이는
+              색이라, 프로 플랜만 초록으로 두면 다른 상품처럼 튀어 보인다. */}
+          <div className="relative rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
-              <span className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+              <span className="bg-gradient-to-r from-indigo-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 프로 플랜 · 🚀 전체 기능
               </span>
             </div>
@@ -707,7 +707,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 type="button"
                 onClick={() => handleStartSubscribe('pro')}
                 disabled={saving}
-                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+                className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
                 {membershipActive && currentPlan
                   ? '프로 플랜으로 업그레이드'
