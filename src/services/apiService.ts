@@ -1,5 +1,61 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
-import type { MembershipTier } from '../utils/membershipTiers';
+import type { BillingPlan, MembershipTier } from '../utils/membershipTiers';
+import { supabase } from './supabase';
+
+/**
+ * 본인 확인이 필요한 API 에 붙일 인증 헤더.
+ *
+ * 서버(`_shared/user-auth.mts`)는 Supabase 액세스 토큰으로 호출자가 정말 그 계정의
+ * 주인인지 확인한다. 일반 회원은 Supabase 세션에서, 비즈니스 계정은 로그인할 때
+ * 저장해 둔 토큰에서 가져온다.
+ */
+async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...extra };
+  let token = '';
+  try {
+    const { data } = (await supabase?.auth.getSession()) || { data: null };
+    token = data?.session?.access_token || '';
+  } catch {
+    // 세션 조회 실패 시 아래 비즈니스 토큰으로 폴백한다.
+  }
+  if (!token) {
+    try {
+      token = localStorage.getItem('picks_business_access_token') || '';
+    } catch {
+      token = '';
+    }
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    lastKnownToken = token;
+  }
+  return headers;
+}
+
+/**
+ * 페이지 언로드(beforeunload/pagehide) 시점에 쓸 토큰 캐시.
+ *
+ * `supabase.auth.getSession()` 은 비동기라 탭이 닫히는 중에는 resolve 를 보장할 수 없다.
+ * 또 `navigator.sendBeacon` 은 헤더를 실을 수 없어서 인증이 필요한 경로(방송 종료 기록)에
+ * 쓸 수 없다. 그래서 평소 호출에서 얻은 토큰을 캐싱해 두고, 언로드 때는 이 값으로
+ * `fetch(..., { keepalive: true })` 를 쏜다.
+ */
+let lastKnownToken = '';
+
+/** 동기적으로 즉시 쓸 수 있는 인증 헤더(언로드 전용). 없으면 빈 객체. */
+export function syncAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  let token = lastKnownToken;
+  if (!token) {
+    try {
+      token = localStorage.getItem('picks_business_access_token') || '';
+    } catch {
+      token = '';
+    }
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
 
 export interface SiteData {
   blocks?: Block[];
@@ -32,19 +88,6 @@ export interface DmRule {
   enabled: boolean;
 }
 
-export interface DmAutomationLog {
-  status: 'sent' | 'failed' | 'skipped';
-  /** 'dm' = 자동 DM, 'reply' = 댓글 공개 답글. 구버전 로그에는 없다(DM 으로 간주). */
-  kind?: 'dm' | 'reply';
-  recipientId?: string;
-  ruleId?: string;
-  messageId?: string;
-  error?: string;
-  reason?: string;
-  test?: boolean;
-  at: string;
-}
-
 export interface DmAutomationSettings {
   enabled: boolean;
   connected: boolean;
@@ -54,7 +97,8 @@ export interface DmAutomationSettings {
   hasAccessToken: boolean;
   automations: DmAutomationItem[];
   rules?: DmRule[];
-  logs?: DmAutomationLog[];
+  /** 인스타그램 장기 토큰 만료 시각(ISO). 만료되면 재연동이 필요하다. */
+  tokenExpiresAt?: string;
   updatedAt?: string;
   // 디엠 자동화는 프로 플랜 전용 — 서버가 계정 자격을 함께 내려준다.
   entitled?: boolean;
@@ -300,7 +344,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/live/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(state)
       });
       return res.ok;
@@ -388,12 +432,14 @@ export const apiService = {
   },
 
   // AWS IVS Stream Key API
-  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily' | 'exhausted'; error?: string } | null> {
+  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily' | 'exhausted'; gate?: 'membership' | 'verification'; error?: string } | null> {
     try {
-      const res = await fetch(`/api/stream-key/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/stream-key/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (res.status === 403) {
-        // Hard-cap reached — surface the structured payload to the caller
-        // so the UI can show "월 50시간 도달" instead of starting the stream.
+        // 한도 초과이거나 라이브 자격(멤버십 · 사업자 인증) 미충족 — 구조화된 응답을
+        // 그대로 넘겨 UI 가 "월 50시간 도달" / "라이브 멤버십 필요"를 구분해 보여준다.
         try { return await res.json(); } catch { return null; }
       }
       if (!res.ok) return null;
@@ -408,7 +454,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/stream-key/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(config)
       });
       return res.ok;
@@ -488,7 +534,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/live-products/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ products })
       });
       return res.ok;
@@ -500,7 +546,9 @@ export const apiService = {
 
   async getLiveOrders(username: string): Promise<LiveOrderInfo[]> {
     try {
-      const res = await fetch(`/api/live-orders/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/live-orders/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data.orders) ? data.orders : [];
@@ -678,7 +726,9 @@ export const apiService = {
   // Broadcast History API
   async getBroadcastHistory(username: string): Promise<{ id: string; startedAt: string; endedAt: string; durationMinutes: number; products: any[]; cartStats: any; peakViewers: number; totalMessages: number }[]> {
     try {
-      const res = await fetch(`/api/broadcast-history/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/broadcast-history/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return data.records || [];
@@ -701,7 +751,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/broadcast-history/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(record)
       });
       return res.ok;
@@ -714,7 +764,8 @@ export const apiService = {
   async deleteBroadcastRecord(username: string, recordId: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/broadcast-history/${encodeURIComponent(username.toLowerCase())}/${recordId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: await authHeaders(),
       });
       return res.ok;
     } catch (e) {
@@ -753,7 +804,9 @@ export const apiService = {
     };
   } | null> {
     try {
-      const res = await fetch(`/api/live-usage/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/live-usage/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return null;
       return await res.json();
     } catch (e) {
@@ -934,7 +987,7 @@ export const apiService = {
   async issueBillingKeyPayment(
     username: string,
     billingKey: string,
-    tier: 'standard' | 'standard_ai' | 'commerce' | 'pro',
+    tier: BillingPlan,
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/billing-issue', {
@@ -960,7 +1013,7 @@ export const apiService = {
   // PortOne 으로만 전달된다. (토스페이·카카오페이는 기존 SDK 빌링키 경로를 그대로 사용한다.)
   async subscribeMembershipCard(
     username: string,
-    tier: 'standard' | 'standard_ai' | 'commerce' | 'pro',
+    tier: BillingPlan,
     card: {
       number: string;
       expiryMonth: string;
@@ -1590,7 +1643,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/cobroadcast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action: 'invite', host: host.toLowerCase(), guest: guest.toLowerCase() }),
       });
       const json = await res.json().catch(() => ({}));
@@ -1605,7 +1658,9 @@ export const apiService = {
   // Pending invites addressed to this user (invitee polls this).
   async getCobroadcastInvites(username: string): Promise<{ id: string; host: string; host_display_name: string; host_avatar_url: string }[]> {
     try {
-      const res = await fetch(`/api/cobroadcast?incoming=${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/cobroadcast?incoming=${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const json = await res.json();
       return Array.isArray(json?.invites) ? json.invites : [];
@@ -1617,7 +1672,9 @@ export const apiService = {
   // The user's own current accepted/live session (host or guest), if any.
   async getActiveCobroadcast(username: string): Promise<{ id: string; status: string; role: 'host' | 'guest'; partner: string; partner_display_name: string; partner_avatar_url: string } | null> {
     try {
-      const res = await fetch(`/api/cobroadcast?active=${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/cobroadcast?active=${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return null;
       const json = await res.json();
       return json?.session || null;
@@ -1642,7 +1699,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/cobroadcast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action, sessionId, user: user.toLowerCase() }),
       });
       return res.ok;
@@ -1655,19 +1712,25 @@ export const apiService = {
   // ---- Instagram DM 자동화 ----
   async getDmAutomation(username: string): Promise<DmAutomationSettings> {
     try {
-      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, { cache: 'no-store' });
+      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        cache: 'no-store',
+        headers: await authHeaders(),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
-      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], logs: [], entitled: false, requiredTier: 'pro' };
+      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], entitled: false, requiredTier: 'pro' };
     }
   },
 
   // 연동된 인스타그램 계정의 피드 게시물 목록.
   async getInstagramMedia(username: string): Promise<InstagramMedia[]> {
     try {
-      const res = await fetch(`/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`, { cache: 'no-store' });
+      const res = await fetch(`/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`, {
+        cache: 'no-store',
+        headers: await authHeaders(),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return Array.isArray(data?.media) ? data.media : [];
@@ -1677,23 +1740,44 @@ export const apiService = {
     }
   },
 
-  async saveDmAutomation(username: string, settings: Partial<DmAutomationSettings>): Promise<boolean> {
+  async saveDmAutomation(
+    username: string,
+    settings: Partial<DmAutomationSettings>,
+  ): Promise<{ ok: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(settings),
       });
-      return res.ok;
+      if (res.ok) return { ok: true };
+      // 잘못된 버튼 링크처럼 사용자가 고칠 수 있는 오류는 서버 메시지를 그대로 보여준다.
+      const data = await res.json().catch(() => ({} as any));
+      return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
     } catch (e) {
       console.error('[API] Failed to save DM automation:', e);
-      return false;
+      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
     }
   },
 
-  // 인스타그램 계정 연동 시작 — 서버 함수가 OAuth authorize 로 리다이렉트한다.
-  instagramConnectUrl(username: string): string {
-    return `/api/instagram/oauth/start?username=${encodeURIComponent(username.toLowerCase())}`;
+  // 인스타그램 계정 연동 시작 — 인증된 요청으로 서명된 state 를 받아 authorize URL 을 얻는다.
+  // (예전처럼 GET 링크로 바로 이동하면 서명 없는 state 라 계정 연동 CSRF 가 성립한다.)
+  async instagramConnectUrl(username: string): Promise<{ url?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/instagram/oauth/start', {
+        method: 'POST',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ username: username.toLowerCase() }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || !data?.url) {
+        return { error: data?.error || `연동을 시작하지 못했습니다. (HTTP ${res.status})` };
+      }
+      return { url: data.url as string };
+    } catch (e) {
+      console.error('[API] Failed to start Instagram OAuth:', e);
+      return { error: '네트워크 오류로 연동을 시작하지 못했습니다.' };
+    }
   },
 
   // 인스타그램 계정 연동 해제.
@@ -1701,7 +1785,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action: 'disconnect' }),
       });
       return res.ok;
@@ -1715,7 +1799,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/send-instagram-dm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ ...payload, username: payload.username.toLowerCase() }),
       });
       return await res.json();

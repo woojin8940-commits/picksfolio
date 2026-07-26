@@ -1,13 +1,21 @@
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { issueSignedState } from "./_shared/oauth-state.mts";
 
 /**
- * 인스타그램 계정 연동 시작 (OAuth authorize 로 리다이렉트).
+ * 인스타그램 계정 연동 시작 (OAuth authorize URL 발급).
  *
  * "Instagram API with Instagram Login" 방식(페이스북 페이지 불필요)을 사용한다.
  * - INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET 환경변수가 필요하다.
  * - state 에 사용자명(username)을 실어 콜백에서 어떤 계정에 저장할지 식별한다.
  * - redirect_uri 는 현재 배포 도메인 기준으로 동적 생성한다
  *   (Meta 앱 대시보드의 "유효한 OAuth 리디렉션 URI"에 아래 경로가 등록돼 있어야 한다).
+ *
+ * 보안: 예전에는 GET 으로 `?username=` 만 받아 서명 없는 state 를 만들어 곧장
+ * 리다이렉트했다. 그러면 누구나 임의의 사용자명이 박힌 authorize 링크를 만들 수 있어
+ * 계정 연동 CSRF 가 성립한다. 지금은 **인증된 POST** 로만 state 를 발급하고
+ * (본인 계정 확인 + HMAC 서명 + 10분 TTL + 1회용 nonce), 클라이언트가 응답받은
+ * URL 로 스스로 이동한다. GET 은 더 이상 지원하지 않는다.
  */
 
 const SCOPES = [
@@ -18,29 +26,49 @@ const SCOPES = [
 
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
-  const username = (url.searchParams.get("username") || "").toLowerCase().trim();
+
+  if (req.method !== "POST") {
+    return Response.json(
+      { error: "이 경로는 POST 로만 사용할 수 있습니다." },
+      { status: 405 },
+    );
+  }
+
+  const body = await req.json().catch(() => ({} as any));
+  const username = String(body?.username || "").toLowerCase().trim();
+  if (!username) {
+    return Response.json({ error: "username은 필수입니다." }, { status: 400 });
+  }
+
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   const appId = process.env.INSTAGRAM_APP_ID;
   if (!appId) {
-    return Response.redirect(`${url.origin}/?ig_error=missing_app_config`, 302);
+    return Response.json(
+      { error: "인스타그램 앱 설정이 준비되지 않았습니다." },
+      { status: 503 },
+    );
   }
-  if (!username) {
-    return Response.redirect(`${url.origin}/?ig_error=missing_username`, 302);
+
+  const issued = await issueSignedState(username, auth.userId);
+  if (!issued.ok) {
+    return Response.json(
+      { error: "연동 요청을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: issued.error },
+      { status: 503 },
+    );
   }
 
   const redirectUri = `${url.origin}/api/instagram/oauth/callback`;
-  // state = 사용자명(우리 시스템 계정) — 콜백에서 저장 대상 식별용.
-  const state = Buffer.from(JSON.stringify({ u: username })).toString("base64url");
-
   const authorizeUrl =
     `https://www.instagram.com/oauth/authorize` +
     `?client_id=${encodeURIComponent(appId)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&response_type=code` +
     `&scope=${encodeURIComponent(SCOPES)}` +
-    `&state=${encodeURIComponent(state)}`;
+    `&state=${encodeURIComponent(issued.state)}`;
 
-  return Response.redirect(authorizeUrl, 302);
+  return Response.json({ url: authorizeUrl });
 };
 
 export const config: Config = {

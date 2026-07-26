@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Users, MessageCircle, X, Send, Camera, Mic, MicOff, CameraOff, Monitor, Settings, Image as ImageIcon, Layout, Upload, Trash2, FlipHorizontal2, SwitchCamera, Sparkles, Radio, Copy, Check, ShoppingBag, Package, BarChart3, TrendingUp, Plus, Zap, UserPlus, UserCheck } from 'lucide-react';
-import { apiService } from '../services/apiService';
+import { apiService, syncAuthHeaders } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
   CHARGE_PAY_METHODS,
@@ -243,7 +243,9 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
   const [ivsLoading, setIvsLoading] = useState(true);
   const [showStreamInfo, setShowStreamInfo] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [capBlock, setCapBlock] = useState<{ kind: 'monthly' | 'daily' | 'exhausted'; message: string } | null>(null);
+  // 'monthly' | 'daily' | 'exhausted' 는 사용량 한도, 'membership' | 'verification' 은
+  // 서버(api-stream-key)가 돌려준 라이브 자격 미충족이다. 어느 쪽이든 송출을 막는다.
+  const [capBlock, setCapBlock] = useState<{ kind: 'monthly' | 'daily' | 'exhausted' | 'membership' | 'verification'; message: string } | null>(null);
 
   // Live Products & Cart State
   const [liveProducts, setLiveProducts] = useState<{ id: string; name: string; price?: string; image?: string; link?: string; blockTitle?: string; options?: { id: string; name: string; values: any[] }[] }[]>([]);
@@ -622,17 +624,23 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
     };
   }, [userName, cleanupLiveState]);
 
-  // Handle browser tab close / navigation: clean up live state via beacon API
+  // Handle browser tab close / navigation: clean up live state on unload.
+  //
+  // sendBeacon 은 헤더를 실을 수 없다. 방송 상태 쓰기는 이제 본인 인증을 요구하므로
+  // (남이 내 방송을 마음대로 끄거나 켤 수 없게) 언로드에도 Authorization 을 실어야 한다.
+  // 그래서 keepalive fetch + 동기 토큰 캐시로 바꾼다. keepalive 요청은 문서가 사라진
+  // 뒤에도 브라우저가 끝까지 보내준다.
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isLiveRef.current) {
         const normalizedUsername = userName.toLowerCase();
         const liveData = JSON.stringify({ isLive: false, viewerCount: 0, currentProduct: null });
-        // Use sendBeacon for reliable delivery during page unload
-        navigator.sendBeacon(
-          `/api/live/${encodeURIComponent(normalizedUsername)}`,
-          new Blob([liveData], { type: 'application/json' })
-        );
+        fetch(`/api/live/${encodeURIComponent(normalizedUsername)}`, {
+          method: 'POST',
+          keepalive: true,
+          headers: syncAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: liveData,
+        }).catch(() => {});
         try { localStorage.setItem(`picks_live_${normalizedUsername}`, liveData); } catch {}
       }
     };
@@ -647,7 +655,14 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
       setCapBlock(null);
       try {
         const config = await apiService.getStreamKey(userName);
-        if (config && (config as any).capReached) {
+        if (config && (config as any).gate) {
+          // 라이브 멤버십 미구독 · 사업자 인증 미완료 — 서버가 자격증명을 내주지 않는다.
+          setCapBlock({
+            kind: (config as any).gate,
+            message: (config as any).error || '라이브를 시작할 수 없는 상태입니다.',
+          });
+          setIvsConfig(null);
+        } else if (config && (config as any).capReached) {
           setCapBlock({
             kind: (config as any).capReached,
             message: (config as any).error || '라이브 송출 한도에 도달했습니다.',
@@ -2448,7 +2463,7 @@ const LiveStreaming: React.FC<LiveStreamingProps> = ({ userName, onClose, select
                 className={`shrink-0 whitespace-nowrap ml-auto px-6 md:px-10 py-3 md:py-5 rounded-full text-sm md:text-lg font-black transition-all shadow-2xl active:scale-95 flex items-center gap-2 md:gap-3 ${isLive ? 'bg-red-600 text-white hover:bg-red-700' : capBlock ? (capBlock.kind === 'exhausted' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-500 text-white/80 cursor-not-allowed') : 'bg-blue-600 text-white hover:bg-blue-700'}`}
               >
                 {ivsConfig && <Radio size={20} className={isLive ? 'animate-pulse' : ''} />}
-                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : '오늘 한도 도달') : '라이브 시작'}
+                {isLive ? '방송 종료' : capBlock ? (capBlock.kind === 'monthly' ? '월 한도 도달' : capBlock.kind === 'exhausted' ? '시간 충전 필요' : capBlock.kind === 'membership' ? '라이브 멤버십 필요' : capBlock.kind === 'verification' ? '인증 필요' : '오늘 한도 도달') : '라이브 시작'}
               </button>
             </div>
           </div>

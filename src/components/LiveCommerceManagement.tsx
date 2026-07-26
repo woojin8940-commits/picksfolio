@@ -12,7 +12,7 @@ import {
   type ChargePayMethod,
 } from '../utils/liveCharge';
 import { isNativeApp } from '../utils/appEnv';
-import { membershipCovers } from '../utils/membershipTiers';
+import { LIVE_PLAN_PRICE, hasLiveCommerceAccess } from '../utils/membershipTiers';
 
 interface LiveCommerceManagementProps {
   userName: string;
@@ -340,24 +340,25 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
 
   const businessVerified = !!verification?.business_verified;
   const settlementRegistered = !!verification?.settlement_registered;
-  // Live broadcasting requires the commerce tier or higher — 스탠다드(4,900원)과
-  // AI 협업(6,900원)은 영상·콘텐츠 업로드와 협업 AI 까지만 포함하고, 프로 플랜(18,700원)은
-  // 커머스를 포함하므로 함께 통과시킨다. 레거시 'live' 라벨은 normalizeTier 가 커머스로 환산한다.
-  const commerceMembershipActive = membershipCovers(verification, 'commerce');
+  // 라이브 커머스는 멤버십 티어에 포함되지 않는 **별도 구독**이다. 스탠다드(4,900원) ·
+  // AI 협업(6,900원) · 프로(18,700원)를 결제해도 라이브는 열리지 않으며, 라이브 커머스
+  // 멤버십(13,900원)을 따로 결제해야 한다. 예전 커머스 멤버십(레거시 'live' 라벨 포함)
+  // 구독자는 hasLiveCommerceAccess 가 그대로 통과시킨다.
+  const liveMembershipActive = hasLiveCommerceAccess(verification);
   // An invited co-host (accepted 함께 방송) bypasses the commerce gate: the gate
   // protects starting your OWN commerce sale, not joining a broadcast you were
   // invited to. Without this, accepting an invite dropped a non-commerce creator
   // on the "인증 필요" screen and the 방송 설정 화면 never appeared.
   const gateBlocked =
     verificationLoaded &&
-    !(businessVerified && settlementRegistered && commerceMembershipActive) &&
+    !(businessVerified && settlementRegistered && liveMembershipActive) &&
     !coBroadcastActive;
 
   if (gateBlocked) {
     const steps: { label: string; done: boolean; desc: string }[] = [
       { label: '사업자 인증', done: businessVerified, desc: '사업자등록증 이미지를 제출하고 관리자 수락을 받습니다' },
       { label: '정산 계좌 등록', done: settlementRegistered, desc: '판매 수익이 입금될 계좌 정보를 등록합니다' },
-      { label: '커머스 멤버십 구독', done: commerceMembershipActive, desc: '월 13,900원 커머스 멤버십(또는 프로 플랜)을 구독하면 라이브 커머스를 송출할 수 있습니다' },
+      { label: '라이브 커머스 멤버십 구독', done: liveMembershipActive, desc: `월 ${LIVE_PLAN_PRICE.toLocaleString()}원(부가세 포함) 라이브 커머스 멤버십을 따로 결제하면 송출할 수 있습니다. 다른 멤버십 플랜에는 포함되지 않습니다` },
     ];
 
     return (
@@ -409,7 +410,7 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
                 멤버십 플랜에서 인증 진행하기
               </button>
               <p className="text-[11px] text-slate-400 font-medium mt-3 text-center">
-                월 13,900원(프로 플랜 18,700원에도 포함) · 언제든 해지 가능 · 구독 후 즉시 방송 가능
+                월 {LIVE_PLAN_PRICE.toLocaleString()}원(부가세 포함) · 멤버십과 별도 결제 · 언제든 해지 가능 · 구독 후 즉시 방송 가능
               </p>
             </>
           )}

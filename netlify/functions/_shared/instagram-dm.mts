@@ -59,6 +59,25 @@ export function isValidLinkUrl(raw: string): boolean {
   }
 }
 
+/**
+ * 저장 시점에 링크를 정리한다.
+ * - `example.com/abc` 처럼 스킴이 빠진 입력은 `https://` 를 붙여 살린다.
+ * - 그래도 http/https 절대 URL 이 아니면 빈 문자열을 돌려준다. 호출부는 이걸
+ *   보고 저장을 거절한다 — 발송 시점에 조용히 버려지면 사용자는 버튼이 왜
+ *   안 보이는지 알 수 없다.
+ */
+export function normalizeLinkUrl(raw: string): string {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  if (isValidLinkUrl(trimmed)) return trimmed;
+  // 스킴 없이 도메인만 적은 경우만 구제한다. (javascript:, mailto: 등은 걸러진다)
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    const withScheme = `https://${trimmed}`;
+    if (isValidLinkUrl(withScheme)) return withScheme;
+  }
+  return "";
+}
+
 function toWebUrlButtons(buttons?: DmButton[]) {
   return (Array.isArray(buttons) ? buttons : [])
     .filter((b) => b && b.label?.trim() && isValidLinkUrl(b.url))

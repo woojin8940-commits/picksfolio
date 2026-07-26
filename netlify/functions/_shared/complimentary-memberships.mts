@@ -35,6 +35,7 @@ export interface MembershipOverlayInput {
   membership_active?: boolean
   membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live' | null
   membership_started_at?: string | null
+  live_plan_active?: boolean
   [key: string]: any
 }
 
@@ -46,6 +47,8 @@ export interface MembershipOverlayInput {
  * - Otherwise upgrades the record so reads see `membership_active: true`
  *   and the comp tier, preserving any business/settlement data already on
  *   the record.
+ * - 라이브 커머스는 멤버십 티어와 별개로 결제하는 구독이라 티어만으로는 열리지
+ *   않는다. 운영/QA 계정은 라이브도 점검해야 하므로 함께 켜 준다.
  */
 export function applyComplimentaryMembership<T extends MembershipOverlayInput | null | undefined>(
   username: string | null | undefined,
@@ -55,6 +58,8 @@ export function applyComplimentaryMembership<T extends MembershipOverlayInput | 
   if (!tier) return record as any
 
   const base: MembershipOverlayInput = record ? { ...record } : {}
+  // 무상 계정은 라이브 커머스도 열어 준다(별도 결제 대상이지만 QA 목적).
+  base.live_plan_active = true
   // 'live' 등 과거 플랜 값도 현재 티어로 환산해 등급을 비교한다.
   const currentTier = normalizeTier(base.membership_plan)
   const alreadyEqualOrHigher =

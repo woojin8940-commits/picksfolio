@@ -1,6 +1,19 @@
 import { getStore } from "@netlify/blobs";
 import { computeLiveUsage } from "./_shared/live-usage.mts";
+import { checkLiveBroadcastAccess } from "./_shared/live-access.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 import type { Config, Context } from "@netlify/functions";
+
+/**
+ * 송출 자격증명(Amazon IVS ingest 주소 + 스트림 키)을 내주는 엔드포인트.
+ *
+ * 스트림 키는 곧 "이 채널로 방송할 수 있는 권한"이다. 개인 채널이 없는 셀러는
+ * IVS_STREAM_KEY 환경변수의 공용 채널로 폴백하므로, 무인증으로 열려 있으면 아무나
+ * 공용 채널을 탈취해 다른 셀러의 방송 위에 송출할 수 있다. 그래서 이 경로는
+ *   1) 본인 계정인지(requireAccountOwner)
+ *   2) 라이브 송출 자격이 있는지(checkLiveBroadcastAccess)
+ * 를 모두 통과해야 한다. 사용량 한도 검사는 그 다음이다.
+ */
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -8,10 +21,27 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
+
   const store = getStore("stream-keys");
   const key = `stream_${username}`;
 
   if (req.method === "GET") {
+    // 멤버십/사업자 인증 게이트. 관리자는 운영 목적으로 통과시킨다.
+    if (!auth.isAdmin) {
+      const access = await checkLiveBroadcastAccess(username);
+      if (!access.allowed) {
+        return Response.json(
+          {
+            error: access.message,
+            gate: access.reason,
+          },
+          { status: 403 },
+        );
+      }
+    }
+
     // Gate broadcasting on remaining time: once the monthly allowance
     // (included 3h + prepaid charged hours) is spent, refuse to hand out the
     // stream key so the live console can't start a new broadcast. The seller

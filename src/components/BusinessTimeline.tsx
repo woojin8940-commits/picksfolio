@@ -1386,7 +1386,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               ) : (
                 <>
                   <p className="text-xs text-gray-500 leading-relaxed mb-5">
-                    AI 협업 멤버십(6,900원) 이상(커머스 13,900원 · 프로 18,700원)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다.
+                    AI 협업 멤버십(6,900원) 이상(프로 18,700원 포함)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다. (모든 금액 부가세 포함)
                   </p>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}

@@ -1,5 +1,14 @@
 import { getStore } from '@netlify/blobs'
+import { requireAccountOwner } from './_shared/user-auth.mts'
 import type { Config, Context } from '@netlify/functions'
+
+/**
+ * 라이브 주문 내역(셀러 대시보드).
+ *
+ * 응답에 주문자·수령인 이름과 연락처, 우편번호, 주소, 배송 메모까지 그대로 들어간다.
+ * 즉 셀러의 **구매자 개인정보** 전체다. 무인증으로 열려 있으면 사용자명만 알면 누구나
+ * 남의 고객 명단을 긁어갈 수 있으므로(개인정보 유출), 채널 주인만 읽을 수 있게 한다.
+ */
 
 interface ShippingInfo {
   ordererName?: string
@@ -51,6 +60,9 @@ export default async (req: Request, context: Context) => {
   if (!username) {
     return Response.json({ success: false, error: 'Missing username' }, { status: 400 })
   }
+
+  const auth = await requireAccountOwner(req, username)
+  if (!auth.ok) return auth.response
 
   const store = getStore({ name: 'live-orders', consistency: 'strong' })
   const data = ((await store.get(username, { type: 'json' })) as LiveOrdersData | null) || {}

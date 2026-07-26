@@ -1,4 +1,5 @@
 import { computeLiveUsage } from './_shared/live-usage.mts'
+import { requireAccountOwner } from './_shared/user-auth.mts'
 import {
   INCLUDED_MINUTES_PER_MONTH,
   OVERAGE_RATE_KRW_PER_HOUR,
@@ -20,6 +21,10 @@ export default async (req: Request, context: Context) => {
   if (req.method !== 'GET') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
   }
+
+  // 잔여시간·초과요금은 셀러 본인의 과금 정보다.
+  const auth = await requireAccountOwner(req, username)
+  if (!auth.ok) return auth.response
 
   try {
     // Aggregate from the Netlify Blobs broadcast-history store (the source the
