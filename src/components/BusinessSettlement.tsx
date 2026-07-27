@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
 import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatters';
+import { authHeaders } from '../services/apiService';
 
 interface BusinessSettlementProps {
   businessUsername: string;
@@ -11,6 +12,16 @@ interface BusinessSettlementProps {
 }
 
 type EditingField = { id: string; field: 'amount' | 'date'; value: string } | null;
+
+/** 서버가 준 오류 메시지를 그대로 보여준다(권한 오류·동시 수정 충돌 구분용). */
+async function readSettlementError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    return data?.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsername, companyName, embedded = false }) => {
   const cleanBusinessUsername = businessUsername.replace(/^biz\//, '');
@@ -44,7 +55,9 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
 
   const fetchSettlements = async () => {
     try {
-      const res = await fetch(`${settlementsBaseUrl}?role=business`);
+      const res = await fetch(`${settlementsBaseUrl}?role=business`, {
+        headers: await authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         const fresh = data.settlements || [];
@@ -69,10 +82,10 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
     try {
       const res = await fetch(`${settlementsBaseUrl}?role=business`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           ...formData,
-          amount: parseInt(formData.amount),
+          amount: parseInt(stripCommas(formData.amount), 10) || 0,
           company_name: companyName,
         }),
       });
@@ -83,7 +96,7 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
         setShowCreateModal(false);
         setFormData({ influencer_username: '', title: '', amount: '', scheduled_date: '', memo: '', proposal_id: '' });
       } else {
-        alert('정산 생성에 실패했습니다.');
+        alert(await readSettlementError(res, '정산 생성에 실패했습니다.'));
       }
     } catch {
       alert('서버 오류가 발생했습니다.');
@@ -96,12 +109,14 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
     try {
       const res = await fetch(`${settlementsBaseUrl}/${settlementId}?role=business`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ status: 'completed' }),
       });
       if (res.ok) {
         const data = await res.json();
         setSettlements(prev => prev.map(s => s.id === settlementId ? data.settlement : s));
+      } else {
+        alert(await readSettlementError(res, '정산 완료 처리에 실패했습니다.'));
       }
     } catch {
       alert('업데이트 실패');
@@ -114,12 +129,12 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
     setSavingEdit(true);
     try {
       const body = editing.field === 'amount'
-        ? { amount: parseInt(editing.value) }
+        ? { amount: parseInt(stripCommas(editing.value), 10) || 0 }
         : { scheduled_date: editing.value };
 
       const res = await fetch(`${settlementsBaseUrl}/${editing.id}?role=business`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       });
       if (res.ok) {
@@ -127,7 +142,7 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
         setSettlements(prev => prev.map(s => s.id === editing.id ? data.settlement : s));
         setEditing(null);
       } else {
-        alert(editing.field === 'amount' ? '금액 수정 실패' : '일정 수정 실패');
+        alert(await readSettlementError(res, editing.field === 'amount' ? '금액 수정 실패' : '일정 수정 실패'));
       }
     } catch {
       alert('서버 오류가 발생했습니다.');
@@ -140,9 +155,12 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
     try {
       const res = await fetch(`${settlementsBaseUrl}/${settlementId}?role=business`, {
         method: 'DELETE',
+        headers: await authHeaders(),
       });
       if (res.ok) {
         setSettlements(prev => prev.filter(s => s.id !== settlementId));
+      } else {
+        alert(await readSettlementError(res, '삭제 실패'));
       }
     } catch {
       alert('삭제 실패');

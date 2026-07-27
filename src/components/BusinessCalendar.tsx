@@ -1,16 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal, CollabRecord, Settlement } from '../types';
 import { apiService } from '../services/apiService';
-import { formatNumberWithCommas, stripCommas, formatKRW } from '../utils/formatters';
+import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '../utils/formatters';
 import UserSettlement from './UserSettlement';
 
 interface BusinessCalendarProps {
   userName: string;
 }
 
-// A collab-history row may be a real, editable collab record or a read-only
-// entry derived from a completed settlement.
-type CollabListItem = CollabRecord & { _fromSettlement?: boolean };
+// 협업 내역 한 줄은 세 가지 출처에서 온다.
+//  - manual     : 사용자가 직접 남긴 협업 기록. 수정·삭제 가능
+//  - settlement : 정산금 항목에서 파생된 읽기 전용 항목
+//  - proposal   : 정산 항목이 아직 없는 수락된 제안(과거 데이터 보정)
+type CollabSource = 'manual' | 'settlement' | 'proposal';
+type CollabListItem = CollabRecord & {
+  _source?: CollabSource;
+  // 읽기 전용 항목 표시용. 기존 코드가 쓰던 플래그를 그대로 유지한다.
+  _fromSettlement?: boolean;
+  _proposalId?: string;
+};
 
 const COLLAB_CATEGORIES = ['광고', '커머스', '기타'] as const;
 const COLLAB_STATUSES = [
@@ -19,6 +27,31 @@ const COLLAB_STATUSES = [
   { value: 'completed', label: '완료' },
   { value: 'cancelled', label: '취소' },
 ] as const;
+
+/**
+ * 로컬 날짜를 YYYY-MM-DD 로 만든다.
+ *
+ * `new Date().toISOString()` 은 UTC 기준이라, 한국 시간 오전 9시 이전에는 어제
+ * 날짜가 나온다. 캘린더의 "오늘"과 완료 여부 판정이 하루씩 어긋나던 원인이라
+ * 로컬 연·월·일을 직접 조립한다.
+ */
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const dayOnly = (value?: string) => (value || '').split('T')[0];
+
+const normalizeText = (v?: string) => (v || '').trim().toLowerCase();
+
+/** 두 협업 기간이 겹치는지. 값이 비어 있으면 겹친다고 보지 않는다. */
+const windowsOverlap = (aStart?: string, aEnd?: string, bStart?: string, bEnd?: string) => {
+  const a1 = dayOnly(aStart);
+  const b1 = dayOnly(bStart);
+  if (!a1 || !b1) return false;
+  const a2 = dayOnly(aEnd) || a1;
+  const b2 = dayOnly(bEnd) || b1;
+  return a1 <= b2 && b1 <= a2;
+};
+
 
 const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const [proposals, setProposals] = useState<BusinessProposal[]>([]);
@@ -99,7 +132,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   const openAddForm = () => {
     resetForm();
-    setFormData(prev => ({ ...prev, date: selectedDate || new Date().toISOString().split('T')[0] }));
+    setFormData(prev => ({ ...prev, date: selectedDate || todayInSeoul() }));
     setShowAddForm(true);
   };
 
@@ -170,14 +203,14 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date().toISOString().split('T')[0];
+  const today = ymd(new Date());
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
   const goToToday = () => {
     const now = new Date();
     setCurrentDate(new Date(now.getFullYear(), now.getMonth(), 1));
-    setSelectedDate(now.toISOString().split('T')[0]);
+    setSelectedDate(ymd(now));
   };
 
   const handleJumpToDate = () => {
@@ -328,26 +361,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     }
   };
 
-  // Stats
-  const totalCollabs = collabRecords.length;
-  const completedCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'completed').length;
-  const inProgressCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'in_progress').length;
-  const scheduledCollabs = collabRecords.filter(c => effectiveCollabStatus(c) === 'scheduled').length;
-  const totalRevenue = collabRecords.filter(c => effectiveCollabStatus(c) === 'completed').reduce((sum, c) => sum + c.fee, 0);
-
-  // Upcoming deadlines (proposals + collabs combined)
-  const upcomingDeadlines = useMemo(() => {
-    const proposalItems = acceptedProposals
-      .filter(p => p.status === 'accepted' && new Date(p.end_date) >= new Date())
-      .map(p => ({ id: p.id, title: p.title, company: p.company_name, endDate: p.end_date, type: 'proposal' as const }));
-    const collabItems = collabRecords
-      .filter(c => (effectiveCollabStatus(c) === 'scheduled' || effectiveCollabStatus(c) === 'in_progress') && new Date(c.end_date || c.date) >= new Date())
-      .map(c => ({ id: c.id, title: c.title, company: c.company_name, endDate: c.end_date || c.date, type: 'collab' as const }));
-    return [...proposalItems, ...collabItems]
-      .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
-      .slice(0, 6);
-  }, [acceptedProposals, collabRecords]);
-
   const getDaysLeft = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (diff < 0) return '마감됨';
@@ -355,49 +368,168 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return `D-${diff}`;
   };
 
-  // All collabs sorted for history view. Completed settlements (auto-created
-  // when a business proposal is accepted, then finalized in the 정산금 tab) are
-  // folded in as read-only collab entries so they also surface in 협업 내역.
-  // They carry `_fromSettlement` so the list hides the edit/delete controls that
-  // only apply to manually-logged collab records.
+  // All collabs sorted for history view. 협업 내역은 세 출처를 합친 하나의 목록이다.
+  //  1) 직접 남긴 협업 기록
+  //  2) 정산금 항목(제안·캠페인 수락 시 자동 생성되거나 업체가 등록)
+  //  3) 정산 항목이 아직 없는 수락된 제안
+  // 예전에는 "완료된 정산"만 합쳐서, 진행 중인 협업은 협업 내역에 아예 없었고
+  // 캘린더 탭의 합계와 협업 내역 탭의 합계가 서로 다른 값을 보여줬다.
+  const proposalById = useMemo(() => {
+    const map = new Map<string, BusinessProposal>();
+    proposals.forEach(p => map.set(p.id, p));
+    return map;
+  }, [proposals]);
+
+  // 같은 협업을 직접 기록으로도 남겼다면 두 번 세지 않는다. 제목+업체명이 같은
+  // 경우와, 제목 표기만 다른 경우(같은 업체·같은 금액·기간 겹침)를 모두 본다.
+  const isCoveredByManualRecord = (item: { title: string; company_name: string; fee: number; date: string; end_date?: string }) =>
+    collabRecords.some(c => {
+      if (
+        normalizeText(c.title) === normalizeText(item.title) &&
+        normalizeText(c.company_name) === normalizeText(item.company_name)
+      ) return true;
+      return (
+        !!normalizeText(item.company_name) &&
+        normalizeText(c.company_name) === normalizeText(item.company_name) &&
+        c.fee > 0 && c.fee === item.fee &&
+        windowsOverlap(c.date, c.end_date, item.date, item.end_date)
+      );
+    });
+
+  const asCollabCategory = (value?: string): CollabRecord['category'] =>
+    value === '광고' || value === '커머스' ? value : '기타';
+
+  // 기간이 지났으면 완료, 시작했으면 진행중. 정산이 완료 처리되면 그대로 완료.
+  const derivedStatus = (settlementDone: boolean, start: string, end?: string): CollabRecord['status'] => {
+    if (settlementDone) return 'completed';
+    const from = dayOnly(start);
+    const to = dayOnly(end) || from;
+    if (to && to < today) return 'completed';
+    if (from && from <= today) return 'in_progress';
+    return 'scheduled';
+  };
+
   const settlementCollabs = useMemo<CollabListItem[]>(() => {
-    // Skip a settlement when a manually-logged collab already covers the same
-    // deal (same title + company), to avoid showing it twice.
-    const normalize = (v?: string) => (v || '').trim().toLowerCase();
-    const existingKeys = new Set(
-      collabRecords.map(c => `${normalize(c.title)}|${normalize(c.company_name)}`)
-    );
-    return settlements
-      .filter(s => s.status === 'completed')
-      .filter(s => !existingKeys.has(`${normalize(s.title)}|${normalize(s.company_name)}`))
-      .map(s => {
-        const date = (s.completed_at || s.scheduled_date || s.created_at || '').split('T')[0];
-        return {
-          id: `stl_collab_${s.id}`,
-          title: s.title || '협업 프로젝트',
-          company_name: s.company_name || '',
-          category: '기타',
-          date,
-          fee: s.amount || 0,
-          status: 'completed',
-          memo: s.memo || '',
-          created_at: s.created_at || date,
-          updated_at: s.updated_at,
-          _fromSettlement: true,
-        };
+    const seenProposalIds = new Set<string>();
+    const items: CollabListItem[] = [];
+
+    settlements.forEach(s => {
+      // 같은 제안에서 나온 정산이 중복 저장돼 있으면 한 번만 센다.
+      if (s.proposal_id) {
+        if (seenProposalIds.has(s.proposal_id)) return;
+        seenProposalIds.add(s.proposal_id);
+      }
+
+      const source = s.proposal_id ? proposalById.get(s.proposal_id) : undefined;
+      // 날짜는 제안의 협업 기간을 우선 쓴다. 없으면 정산 일정으로 대체한다.
+      const date = dayOnly(source?.start_date) || dayOnly(s.completed_at || s.scheduled_date || s.created_at);
+      const endDate = dayOnly(source?.end_date) || undefined;
+      const fee = s.amount || 0;
+      const title = s.title || source?.title || '협업 프로젝트';
+      const companyName = s.company_name || source?.company_name || '';
+
+      if (isCoveredByManualRecord({ title, company_name: companyName, fee, date, end_date: endDate })) return;
+
+      items.push({
+        id: `stl_collab_${s.id}`,
+        title,
+        company_name: companyName,
+        // 예전에는 무조건 '기타'로 넣어서 커머스/광고 필터에 걸리지 않았다.
+        category: asCollabCategory(source?.category),
+        date,
+        end_date: endDate,
+        fee,
+        status: derivedStatus(s.status === 'completed', date, endDate),
+        memo: s.memo || '',
+        created_at: s.created_at || date,
+        updated_at: s.updated_at,
+        _source: 'settlement',
+        _fromSettlement: true,
+        _proposalId: s.proposal_id || undefined,
       });
-  }, [settlements, collabRecords]);
+    });
+
+    return items;
+  }, [settlements, collabRecords, proposalById, today]);
+
+  // 정산 항목이 만들어지기 전에 수락된 제안은 위 목록에 안 잡힌다. 협업 내역에서
+  // 통째로 빠지지 않도록 읽기 전용 항목으로 채워 넣는다.
+  const proposalCollabs = useMemo<CollabListItem[]>(() => {
+    const covered = new Set(
+      settlements.map(s => s.proposal_id).filter(Boolean) as string[]
+    );
+    return acceptedProposals
+      .filter(p => !covered.has(p.id))
+      .map(p => {
+        const date = dayOnly(p.start_date);
+        const endDate = dayOnly(p.end_date) || undefined;
+        return {
+          id: `prop_collab_${p.id}`,
+          title: p.title || '협업 프로젝트',
+          company_name: p.company_name || '',
+          category: asCollabCategory(p.category),
+          date,
+          end_date: endDate,
+          fee: p.fee || 0,
+          status: derivedStatus(p.status === 'completed', date, endDate),
+          memo: '',
+          created_at: p.created_at || date,
+          updated_at: p.updated_at,
+          _source: 'proposal' as CollabSource,
+          _fromSettlement: true,
+          _proposalId: p.id,
+        };
+      })
+      .filter(item => !isCoveredByManualRecord(item));
+  }, [acceptedProposals, settlements, collabRecords, today]);
 
   const allCollabsSorted = useMemo<CollabListItem[]>(() => {
-    return [...collabRecords, ...settlementCollabs].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-  }, [collabRecords, settlementCollabs]);
+    const manual: CollabListItem[] = collabRecords.map(c => ({ ...c, _source: 'manual' }));
+    // 날짜가 비어 있는 항목(정산 일정이 없는 경우)은 뒤로 밀되 목록에서 빠지지는
+    // 않게 한다. new Date('') 는 NaN 이라 예전 정렬에서는 순서가 뒤죽박죽이었다.
+    return [...manual, ...settlementCollabs, ...proposalCollabs].sort((a, b) => {
+      const aDate = dayOnly(a.date);
+      const bDate = dayOnly(b.date);
+      if (!aDate && !bDate) return 0;
+      if (!aDate) return 1;
+      if (!bDate) return -1;
+      return bDate.localeCompare(aDate);
+    });
+  }, [collabRecords, settlementCollabs, proposalCollabs]);
+
+  // Stats — 캘린더 탭의 "일정 현황" 타일과 협업 내역 탭의 요약이 같은 목록
+  // (allCollabsSorted)에서 계산된다. 예전에는 캘린더 타일이 "직접 기록 + 수락된
+  // 제안"을, 협업 내역 타일이 "직접 기록"만 세서 같은 화면에서 숫자가 달랐다.
+  const totalCollabs = allCollabsSorted.length;
+  const completedCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'completed').length;
+  const inProgressCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'in_progress').length;
+  const scheduledCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'scheduled').length;
+  const totalRevenue = allCollabsSorted
+    .filter(c => effectiveCollabStatus(c) === 'completed')
+    .reduce((sum, c) => sum + c.fee, 0);
+
+  // Upcoming deadlines — 협업 내역과 같은 목록을 쓰므로 제안과 정산이 각각
+  // 따로 잡혀 두 번 나오는 일이 없다.
+  const upcomingDeadlines = useMemo(() => {
+    return allCollabsSorted
+      .filter(c => {
+        const status = effectiveCollabStatus(c);
+        if (status !== 'scheduled' && status !== 'in_progress') return false;
+        const end = dayOnly(c.end_date) || dayOnly(c.date);
+        return !!end && end >= today;
+      })
+      .map(c => ({
+        id: c.id,
+        title: c.title,
+        company: c.company_name,
+        endDate: c.end_date || c.date,
+        type: c._source || 'manual',
+      }))
+      .sort((a, b) => dayOnly(a.endDate).localeCompare(dayOnly(b.endDate)))
+      .slice(0, 6);
+  }, [allCollabsSorted, today]);
 
   // --- Period (월별 / 기간 지정) filtering ---------------------------------
-  const ymd = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
   const applyPreset = (preset: 'all' | 'thisMonth' | 'lastMonth' | 'thisYear') => {
     setPeriodPreset(preset);
     const now = new Date();
@@ -419,10 +551,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   // A collab overlaps the selected period if its [date, end_date] window
   // intersects [rangeStart, rangeEnd]. Empty range = include everything.
   // YYYY-MM-DD strings compare lexicographically, so plain string comparison works.
+  // 날짜를 모르는 항목(정산 일정이 비어 있는 경우)은 기간을 지정했을 때 판단할
+  // 근거가 없으므로 제외한다. 전체 기간에서는 그대로 보인다.
   const inSelectedPeriod = (startStr: string, endStr?: string) => {
     if (!rangeStart && !rangeEnd) return true;
-    const s = startStr;
-    const e = endStr || startStr;
+    const s = dayOnly(startStr);
+    if (!s) return false;
+    const e = dayOnly(endStr) || s;
     if (rangeStart && e < rangeStart) return false;
     if (rangeEnd && s > rangeEnd) return false;
     return true;
@@ -452,8 +587,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     [periodCollabs]
   );
 
-  const commerceCount = useMemo(() => collabRecords.filter(c => c.category === '커머스').length, [collabRecords]);
-  const adCount = useMemo(() => collabRecords.filter(c => c.category === '광고').length, [collabRecords]);
+  // 카테고리 집계도 협업 내역 목록과 같은 출처를 쓴다.
+  const commerceCount = useMemo(() => allCollabsSorted.filter(c => c.category === '커머스').length, [allCollabsSorted]);
+  const adCount = useMemo(() => allCollabsSorted.filter(c => c.category === '광고').length, [allCollabsSorted]);
 
   const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -851,11 +987,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 <p className="text-[10px] md:text-xs font-bold text-amber-500">예정</p>
               </div>
               <div className="bg-orange-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-orange-600">{inProgressCollabs + acceptedProposals.filter(p => !isProposalDone(p)).length}</p>
+                <p className="text-xl md:text-2xl font-black text-orange-600">{inProgressCollabs}</p>
                 <p className="text-[10px] md:text-xs font-bold text-orange-500">진행중</p>
               </div>
               <div className="bg-teal-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-teal-600">{completedCollabs + acceptedProposals.filter(p => isProposalDone(p)).length}</p>
+                <p className="text-xl md:text-2xl font-black text-teal-600">{completedCollabs}</p>
                 <p className="text-[10px] md:text-xs font-bold text-teal-500">완료됨</p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center">
@@ -891,9 +1027,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                             {daysLeft}
                           </span>
                           <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                            p.type === 'proposal' ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'
+                            p.type === 'proposal'
+                              ? 'bg-green-100 text-green-600'
+                              : p.type === 'settlement'
+                                ? 'bg-teal-100 text-teal-600'
+                                : 'bg-amber-100 text-amber-600'
                           }`}>
-                            {p.type === 'proposal' ? '제안' : '협업'}
+                            {p.type === 'proposal' ? '제안' : p.type === 'settlement' ? '정산' : '협업'}
                           </span>
                         </div>
                         <span className="text-[11px] font-bold text-slate-300">~{formatDate(p.endDate)}</span>
@@ -1041,7 +1181,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               </div>
               <div className="bg-teal-50 rounded-xl p-3 text-center">
                 <p className="text-sm md:text-lg font-black text-teal-700">{formatFee(periodCompletedFee)}</p>
-                <p className="text-[10px] font-bold text-teal-400">완료 정산금</p>
+                {/* 정산 완료 여부가 아니라 "협업이 끝난 건"의 금액 합계다. 정산 입금
+                    여부는 정산금 탭에서 따로 관리한다. */}
+                <p className="text-[10px] font-bold text-teal-400">완료 협업 금액</p>
               </div>
             </div>
           </div>
@@ -1083,8 +1225,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       {getCollabStatusLabel(effectiveCollabStatus(c))}
                     </span>
                     {c._fromSettlement ? (
-                      <span className="text-[10px] font-black text-slate-300 shrink-0 px-2" title="정산금에서 자동 반영된 내역입니다">
-                        정산
+                      <span
+                        className="text-[10px] font-black text-slate-300 shrink-0 px-2"
+                        title={c._source === 'proposal'
+                          ? '수락한 협업 제안에서 자동 반영된 내역입니다'
+                          : '정산금에서 자동 반영된 내역입니다'}
+                      >
+                        {c._source === 'proposal' ? '제안' : '정산'}
                       </span>
                     ) : (
                     <div className="flex gap-1 shrink-0">
@@ -1117,7 +1264,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       )}
 
       {topTab === 'settlement' && (
-        <UserSettlement userName={userName} embedded />
+        // 정산금 탭에서 금액을 고치거나 완료 처리하면, 협업 내역·합계도 같은
+        // 값으로 다시 계산되도록 목록을 그대로 넘겨받는다.
+        <UserSettlement userName={userName} embedded onSettlementsChange={setSettlements} />
       )}
 
       {/* Add/Edit Collab Modal */}

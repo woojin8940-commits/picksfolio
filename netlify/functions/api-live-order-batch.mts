@@ -1,8 +1,8 @@
-import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricing.mts'
 import { persistLiveOrdersToDatabase } from './_shared/live-order-persistence.mts'
 import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
+import { mutateBlobJSON } from './_shared/blob-write.mts'
 
 /**
  * Batch checkout for all items a viewer has added to their live cart.
@@ -176,19 +176,7 @@ export default async (req: Request, _context: Context) => {
   }
   const { payment, paidAmount } = verified
 
-  const ordersStore = getStore({ name: 'live-orders', consistency: 'strong' })
   const now = new Date().toISOString()
-  const existing =
-    ((await ordersStore.get(username, { type: 'json' })) as LiveOrdersData | null) || {
-      orders: [],
-      updatedAt: now,
-    }
-
-  // Idempotency: if this paymentId was already recorded, don't duplicate.
-  const alreadyRecorded = existing.orders.some((o) => o.paymentId === paymentId)
-  if (alreadyRecorded) {
-    return Response.json({ success: true, alreadyProcessed: true })
-  }
 
   const records: OrderRecord[] = items.map((it, idx) => {
     const itemAmount = Number(it.amount)
@@ -220,14 +208,28 @@ export default async (req: Request, _context: Context) => {
     }
   })
 
-  // Anchor the batch under the original paymentId too so idempotency checks hit.
-  existing.orders.unshift({
-    ...records[0],
-    paymentId,
+  // 동시 결제로 주문이 유실되지 않도록 조건부 쓰기로 반영한다. 중복(같은 paymentId)
+  // 검사도 최신 목록을 기준으로 해야 하므로 같은 블록 안에서 한다.
+  let alreadyRecorded = false
+  await mutateBlobJSON<LiveOrdersData>('live-orders', username, (current) => {
+    const orders = Array.isArray(current?.orders) ? current!.orders : []
+    if (orders.some((o) => o.paymentId === paymentId)) {
+      alreadyRecorded = true
+      return null
+    }
+    alreadyRecorded = false
+    // Anchor the batch under the original paymentId too so idempotency checks hit.
+    const anchor: OrderRecord = { ...records[0], paymentId }
+    return {
+      orders: [...[...records].reverse(), anchor, ...orders],
+      updatedAt: now,
+    }
   })
-  for (const r of records) existing.orders.unshift(r)
-  existing.updatedAt = now
-  await ordersStore.setJSON(username, existing)
+
+  if (alreadyRecorded) {
+    return Response.json({ success: true, alreadyProcessed: true })
+  }
+
   await persistLiveOrdersToDatabase(
     records.map((record) => ({
       id: record.paymentId,
@@ -250,26 +252,27 @@ export default async (req: Request, _context: Context) => {
 
   // Remove just the paid items from this viewer's cart so the seller's
   // live-cart view updates but any unpriceable leftover items remain visible.
+  // 다른 시청자의 담기가 동시에 들어와도 지워지지 않도록 조건부 쓰기로 반영한다.
   const viewerId = body.viewer?.viewerId
   if (viewerId) {
-    const cartStore = getStore({ name: 'live-cart', consistency: 'strong' })
-    const cartData = (await cartStore.get(username, { type: 'json' })) as CartData | null
-    if (cartData) {
-      const paidKeys = new Set(
-        items.map((it) => `${it.productId}|${JSON.stringify(it.selectedOptions || {})}`),
+    const paidKeys = new Set(
+      items.map((it) => `${it.productId}|${JSON.stringify(it.selectedOptions || {})}`),
+    )
+    await mutateBlobJSON<CartData>('live-cart', username, (cartData) => {
+      const carts = Array.isArray(cartData?.carts) ? cartData!.carts : []
+      const cart = carts.find((c) => c.viewerId === viewerId)
+      if (!cart) return null
+
+      const remaining = cart.items.filter(
+        (i) => !paidKeys.has(`${i.productId}|${JSON.stringify(i.selectedOptions || {})}`),
       )
-      const cart = cartData.carts.find((c) => c.viewerId === viewerId)
-      if (cart) {
-        cart.items = cart.items.filter(
-          (i) => !paidKeys.has(`${i.productId}|${JSON.stringify(i.selectedOptions || {})}`),
-        )
-        if (cart.items.length === 0) {
-          cartData.carts = cartData.carts.filter((c) => c.viewerId !== viewerId)
-        }
-        cartData.updatedAt = now
-        await cartStore.setJSON(username, cartData)
-      }
-    }
+      const nextCarts =
+        remaining.length === 0
+          ? carts.filter((c) => c.viewerId !== viewerId)
+          : carts.map((c) => (c.viewerId === viewerId ? { ...c, items: remaining } : c))
+
+      return { carts: nextCarts, updatedAt: now }
+    })
   }
 
   return Response.json({ success: true, count: records.length })

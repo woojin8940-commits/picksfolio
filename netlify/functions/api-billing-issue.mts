@@ -1,4 +1,3 @@
-import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import {
   chargeMembershipMonthly,
@@ -8,6 +7,11 @@ import {
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
 import { issueTossBillingKey } from "./_shared/toss-payments.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { redactSellerRecord } from "./_shared/seller-record.mts";
+
+const STORE = "seller-verification";
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -27,6 +31,11 @@ export default async (req: Request) => {
       );
     }
 
+    // 남의 아이디로 호출하면 그 사람의 빌링키가 내 것으로 덮어써지고(=이후 자동결제가
+    // 내 카드로 나감) 응답으로 그 사람의 정산 계좌·사업자 정보까지 돌아왔다.
+    const auth = await requireAccountOwner(req, String(username));
+    if (!auth.ok) return auth.response;
+
     // 라이브 커머스는 멤버십 티어와 별개로 결제·구독하는 플랜이라 `live_plan` 으로 들어온다.
     const normalizedTier = normalizeBillingPlan(tier);
     if (!normalizedTier) {
@@ -37,7 +46,6 @@ export default async (req: Request) => {
     }
     const isLivePlan = normalizedTier === "live_plan";
 
-    const store = getStore("seller-verification");
     const key = `seller_${username.toLowerCase()}`;
 
     // ── 빌링키(정기결제) 발급 경로 ──
@@ -91,8 +99,6 @@ export default async (req: Request) => {
       );
     }
 
-    const existing = (await store.get(key, { type: "json" })) as Record<string, any> | null;
-
     // Charge the first month immediately against the freshly issued billing key.
     // This anchors the anniversary billing day — every subsequent monthly charge
     // is scheduled relative to this first successful payment. If the first charge
@@ -120,46 +126,49 @@ export default async (req: Request) => {
       success: true,
       paymentId: charge.paymentId,
     };
-    const history = Array.isArray(existing?.billing_history) ? existing!.billing_history : [];
 
-    // 라이브 커머스 구독은 멤버십 티어를 건드리지 않는다. 같은 빌링키를 쓰되
-    // 청구 주기(다음 결제일 · 실패 횟수)는 `live_plan_*` 로 따로 관리한다. 그래야
-    // 프로 + 라이브처럼 두 구독을 동시에 들고 있어도 서로 덮어쓰지 않는다.
-    const planFields = isLivePlan
-      ? {
-          live_plan_active: true,
-          live_plan_started_at: existing?.live_plan_started_at || now,
-          live_plan_amount_krw: charge.amountKrw,
-          live_plan_last_billing_at: now,
-          live_plan_next_billing_date: addOneMonth(now),
-          live_plan_billing_failures: 0,
-        }
-      : {
-          membership_active: true,
-          membership_plan: normalizedTier,
-          membership_started_at: existing?.membership_started_at || now,
-          membership_amount_krw: charge.amountKrw,
-          last_billing_at: now,
-          next_billing_date: addOneMonth(now),
-          billing_failures: 0,
-        };
+    // 같은 레코드를 정기결제 스케줄러도 고친다. 통째로 덮어쓰면 그 사이 기록된
+    // 다음 결제일·결제 이력이 사라질 수 있어 조건부 쓰기로 반영한다.
+    const updated = (await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
+      const history = Array.isArray(current?.billing_history) ? current!.billing_history : [];
 
-    const updated = {
-      ...(existing || {}),
-      ...planFields,
-      billing_key: billingKey,
-      // Which provider backs this billing key, so the recurring scheduler charges it
-      // correctly. TossPayments billing also needs the customerKey on every charge.
-      billing_provider: isToss ? "toss" : "portone",
-      toss_customer_key: isToss ? tossCustomerKey : (existing?.toss_customer_key ?? null),
-      billing_key_issued_at: now,
-      billing_history: [billingEntry, ...history].slice(0, 50),
-      updated_at: now,
-    };
+      // 라이브 커머스 구독은 멤버십 티어를 건드리지 않는다. 같은 빌링키를 쓰되
+      // 청구 주기(다음 결제일 · 실패 횟수)는 `live_plan_*` 로 따로 관리한다. 그래야
+      // 프로 + 라이브처럼 두 구독을 동시에 들고 있어도 서로 덮어쓰지 않는다.
+      const planFields = isLivePlan
+        ? {
+            live_plan_active: true,
+            live_plan_started_at: current?.live_plan_started_at || now,
+            live_plan_amount_krw: charge.amountKrw,
+            live_plan_last_billing_at: now,
+            live_plan_next_billing_date: addOneMonth(now),
+            live_plan_billing_failures: 0,
+          }
+        : {
+            membership_active: true,
+            membership_plan: normalizedTier,
+            membership_started_at: current?.membership_started_at || now,
+            membership_amount_krw: charge.amountKrw,
+            last_billing_at: now,
+            next_billing_date: addOneMonth(now),
+            billing_failures: 0,
+          };
 
-    await store.setJSON(key, updated);
+      return {
+        ...(current || {}),
+        ...planFields,
+        billing_key: billingKey,
+        // Which provider backs this billing key, so the recurring scheduler charges it
+        // correctly. TossPayments billing also needs the customerKey on every charge.
+        billing_provider: isToss ? "toss" : "portone",
+        toss_customer_key: isToss ? tossCustomerKey : (current?.toss_customer_key ?? null),
+        billing_key_issued_at: now,
+        billing_history: [billingEntry, ...history].slice(0, 50),
+        updated_at: now,
+      };
+    })) as Record<string, any>;
 
-    return Response.json({ success: true, data: updated });
+    return Response.json({ success: true, data: redactSellerRecord(updated) });
   } catch (err: any) {
     return Response.json(
       { success: false, error: err?.message || "빌링 발급 실패" },

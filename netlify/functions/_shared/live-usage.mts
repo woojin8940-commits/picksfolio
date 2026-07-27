@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs'
+import { mutateBlobJSON } from './blob-write.mts'
 import {
   summarizeMonthlyLiveTime,
   monthLabelFor,
@@ -55,6 +56,24 @@ export const readBroadcastRecords = async (
 }
 
 /**
+ * Normalize a stored balance into the shape callers expect. Charged time is
+ * monthly-scoped: a stored balance from a previous month reads as zero.
+ */
+const normalizeLiveCredits = (
+  stored: LiveCredits | null,
+  monthLabel: string,
+): LiveCredits => {
+  if (!stored || stored.monthLabel !== monthLabel) {
+    return { monthLabel, chargedMinutes: 0, charges: [] }
+  }
+  return {
+    monthLabel,
+    chargedMinutes: Math.max(0, Math.floor(Number(stored.chargedMinutes) || 0)),
+    charges: Array.isArray(stored.charges) ? stored.charges : [],
+  }
+}
+
+/**
  * Read this seller's prepaid charge balance for the month containing `ref`.
  * Charged time is monthly-scoped: a stored balance from a previous month is
  * treated as zero (the included allowance resets each calendar month too).
@@ -68,22 +87,26 @@ export const readLiveCredits = async (
   const stored = (await store.get(creditsKey(username), { type: 'json' })) as
     | LiveCredits
     | null
-  if (!stored || stored.monthLabel !== monthLabel) {
-    return { monthLabel, chargedMinutes: 0, charges: [] }
-  }
-  return {
-    monthLabel,
-    chargedMinutes: Math.max(0, Math.floor(Number(stored.chargedMinutes) || 0)),
-    charges: Array.isArray(stored.charges) ? stored.charges : [],
-  }
+  return normalizeLiveCredits(stored, monthLabel)
 }
 
-export const writeLiveCredits = async (
+/**
+ * Read-modify-write the balance with a conditional write, so two charges that
+ * land at the same time can't overwrite each other (the loser's paid minutes
+ * would otherwise vanish). Return `null` from `mutate` to leave it untouched.
+ */
+export const mutateLiveCredits = async (
   username: string,
-  credits: LiveCredits,
-): Promise<void> => {
-  const store = getStore(CREDITS_STORE)
-  await store.setJSON(creditsKey(username), credits)
+  mutate: (credits: LiveCredits) => LiveCredits | null,
+  ref: Date = new Date(),
+): Promise<LiveCredits> => {
+  const monthLabel = monthLabelFor(ref)
+  const result = await mutateBlobJSON<LiveCredits>(
+    CREDITS_STORE,
+    creditsKey(username),
+    (stored) => mutate(normalizeLiveCredits(stored, monthLabel)),
+  )
+  return normalizeLiveCredits(result, monthLabel)
 }
 
 /** Combined usage summary for a seller (broadcast minutes + prepaid charge). */

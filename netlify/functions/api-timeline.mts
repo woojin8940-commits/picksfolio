@@ -1,5 +1,9 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+
+const STORE = "timeline";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -7,7 +11,11 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  const store = getStore("timeline");
+  // 이 계정의 활동 기록이다. 읽기·쓰기 모두 본인(또는 관리자)만.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
+
+  const store = getStore(STORE);
   const key = `timeline_${username}`;
 
   if (req.method === "GET") {
@@ -17,10 +25,13 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = await req.json();
-    const existing = (await store.get(key, { type: "json" })) as any || { events: [] };
-    existing.events = existing.events || [];
-    existing.events.unshift({ ...body, createdAt: new Date().toISOString() });
-    await store.setJSON(key, existing);
+    await mutateBlobJSON<{ events: any[] }>(STORE, key, (current) => ({
+      ...(current ?? {}),
+      events: [
+        { ...body, createdAt: new Date().toISOString() },
+        ...(Array.isArray(current?.events) ? current!.events : []),
+      ],
+    }));
     return Response.json({ success: true });
   }
 

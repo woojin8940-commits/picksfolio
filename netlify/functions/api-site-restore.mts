@@ -1,12 +1,18 @@
 import { getDatabase } from "@picks/netlify-database";
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
+
+  // 백업 목록 조회도, 특정 시점으로 되돌리는 것도 본인만 할 수 있어야 한다.
+  // (되돌리기는 현재 페이지 내용을 통째로 갈아치우는 작업이다.)
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   const db = getDatabase();
 

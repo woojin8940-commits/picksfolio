@@ -1,6 +1,12 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+import {
+  addSettlementForProposal,
+  parseAmount,
+  removeSettlementsForProposal,
+} from "./_shared/collab-records.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -8,6 +14,11 @@ export default async (req: Request, context: Context) => {
   if (!username || !proposalId) {
     return Response.json({ error: "Missing params" }, { status: 400 });
   }
+
+  // 수락/거절은 정산 항목을 만들고 업체에 알림톡까지 보낸다. 삭제도 되돌릴 수
+  // 없다. 제안을 받은 본인(또는 관리자)만 상태를 바꿀 수 있어야 한다.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   const store = getStore("proposals");
   const key = `proposals_${username}`;
@@ -151,58 +162,28 @@ export default async (req: Request, context: Context) => {
 
       // Auto-create settlement record for accepted proposal
       try {
-        const settlementStore = getStore("settlements");
         const stlId = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const nowISO = new Date().toISOString();
-        const fee = parseInt(updatedProposal.fee) || 0;
         const scheduledDate = (() => {
           const d = new Date();
           d.setDate(d.getDate() + 30);
           return d.toISOString().split("T")[0];
         })();
 
-        const settlement = {
+        await addSettlementForProposal({
           id: stlId,
           proposal_id: proposalId,
           influencer_username: username,
           business_username: bizUsername,
           company_name: updatedProposal.company_name || "",
           title: updatedProposal.title || "협업 프로젝트",
-          amount: fee,
+          amount: parseAmount(updatedProposal.fee),
           scheduled_date: scheduledDate,
           status: "scheduled",
           memo: "제안 수락 시 자동 생성",
           created_at: nowISO,
           updated_at: nowISO,
-        };
-
-        const getBizRecords = async () => {
-          const k = `settlements_biz_${bizUsername}`;
-          const data = (await settlementStore.get(k, { type: "json" })) as any;
-          if (Array.isArray(data)) return data;
-          if (data && Array.isArray(data.records)) return data.records;
-          if (data && Array.isArray(data.settlements)) return data.settlements;
-          return [];
-        };
-        const getInfRecords = async () => {
-          const k = `settlements_inf_${username}`;
-          const data = (await settlementStore.get(k, { type: "json" })) as any;
-          if (Array.isArray(data)) return data;
-          if (data && Array.isArray(data.records)) return data.records;
-          if (data && Array.isArray(data.settlements)) return data.settlements;
-          return [];
-        };
-
-        const [bizSettlements, infSettlements] = await Promise.all([getBizRecords(), getInfRecords()]);
-
-        if (!bizSettlements.some((s: any) => s.proposal_id === proposalId)) {
-          bizSettlements.push(settlement);
-          await settlementStore.setJSON(`settlements_biz_${bizUsername}`, bizSettlements);
-        }
-        if (!infSettlements.some((s: any) => s.proposal_id === proposalId)) {
-          infSettlements.push(settlement);
-          await settlementStore.setJSON(`settlements_inf_${username}`, infSettlements);
-        }
+        });
       } catch (stlErr) {
         console.error("[api-proposal-item] Failed to auto-create settlement:", stlErr);
       }
@@ -257,6 +238,14 @@ export default async (req: Request, context: Context) => {
         const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
         const bizFiltered = bizExisting.filter((p: any) => p.id !== proposalId);
         await bizStore.setJSON(bizKey, bizFiltered);
+      }
+
+      // 제안에서 자동 생성된 정산 항목이 남아 있으면, 협업 내역에는 사라진
+      // 협업이 정산금 화면에만 계속 떠 있게 된다. 같이 지운다.
+      try {
+        await removeSettlementsForProposal(proposalId, bizUsername, username);
+      } catch (stlErr) {
+        console.error("[api-proposal-item] Failed to remove linked settlements:", stlErr);
       }
     }
 

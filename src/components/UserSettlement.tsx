@@ -1,15 +1,33 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, stripCommas } from '../utils/formatters';
+import { authHeaders } from '../services/apiService';
 
 interface UserSettlementProps {
   userName: string;
   // When rendered inside the 협업 현황 정산금 tab, drop the standalone page padding
   // and the big page title so it sits cleanly within the tab.
   embedded?: boolean;
+  // 협업 현황 안에 들어가 있을 때, 정산 목록이 바뀌면 부모(협업 내역/합계)도
+  // 같은 값을 쓰도록 알려준다. 이게 없으면 정산을 완료 처리해도 협업 내역은
+  // 새로고침할 때까지 예전 상태로 남아 있었다.
+  onSettlementsChange?: (settlements: Settlement[]) => void;
 }
 
-const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false }) => {
+/**
+ * 서버가 돌려준 메시지를 그대로 보여준다. 동시 수정 충돌(409)이나 권한 오류(401/403)
+ * 처럼 사용자가 다음 행동을 정할 수 있는 경우가 있어서, 뭉뚱그린 실패 문구보다 낫다.
+ */
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    return data?.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -18,6 +36,11 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  const commitSettlements = (next: Settlement[]) => {
+    setSettlements(next);
+    onSettlementsChange?.(next);
+  };
 
   const startEditAmount = (s: Settlement) => {
     setEditingId(s.id);
@@ -30,7 +53,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   };
 
   const handleSaveAmount = async (settlementId: string) => {
-    const amount = parseInt(editAmount, 10);
+    const amount = parseInt(stripCommas(editAmount), 10);
     if (isNaN(amount) || amount < 0) {
       alert('올바른 금액을 입력해주세요.');
       return;
@@ -39,12 +62,12 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
     try {
       const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ amount }),
       });
       if (res.ok) {
         const data = await res.json();
-        setSettlements(prev => prev.map(s =>
+        commitSettlements(settlements.map(s =>
           s.id === settlementId
             ? (data.settlement || { ...s, amount })
             : s
@@ -52,7 +75,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
         setEditingId(null);
         setEditAmount('');
       } else {
-        alert('정산금 수정에 실패했습니다.');
+        alert(await readError(res, '정산금 수정에 실패했습니다.'));
       }
     } catch {
       alert('정산금 수정에 실패했습니다.');
@@ -69,18 +92,18 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
     try {
       const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}/${settlementId}?role=influencer`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ status: 'completed' }),
       });
       if (res.ok) {
         const data = await res.json();
-        setSettlements(prev => prev.map(s =>
+        commitSettlements(settlements.map(s =>
           s.id === settlementId
             ? (data.settlement || { ...s, status: 'completed', completed_at: new Date().toISOString() })
             : s
         ));
       } else {
-        alert('정산 완료 처리에 실패했습니다.');
+        alert(await readError(res, '정산 완료 처리에 실패했습니다.'));
       }
     } catch {
       alert('정산 완료 처리에 실패했습니다.');
@@ -91,10 +114,12 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const fetchSettlements = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}?role=influencer`);
+      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}?role=influencer`, {
+        headers: await authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
-        setSettlements(data.settlements || []);
+        commitSettlements(data.settlements || []);
       }
     } catch (e) {
       console.error('Failed to fetch settlements:', e);

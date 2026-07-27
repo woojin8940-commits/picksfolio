@@ -1,3 +1,12 @@
+/**
+ * 오늘 날짜(Asia/Seoul)를 'YYYY-MM-DD'로 반환.
+ *
+ * `new Date().toISOString().split('T')[0]` 은 UTC 기준이라 한국 시간 오전 9시
+ * 이전에는 어제 날짜가 나온다. 화면의 "오늘"은 항상 한국 기준이어야 한다.
+ */
+export const todayInSeoul = (): string =>
+  new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
 export const formatNumberWithCommas = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '';
   const numbers = String(value).replace(/[^0-9]/g, '');

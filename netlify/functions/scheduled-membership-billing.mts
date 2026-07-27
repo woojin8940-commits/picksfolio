@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
   chargeMembershipMonthly,
   addOneMonth,
@@ -9,6 +10,8 @@ import {
   type BillingPlan,
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
+
+const STORE = "seller-verification";
 
 /**
  * Daily recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로)
@@ -53,7 +56,7 @@ interface DueSubscription {
 }
 
 export default async () => {
-  const store = getStore("seller-verification");
+  const store = getStore(STORE);
   const now = new Date();
 
   const { blobs } = await store.list({ prefix: "seller_" });
@@ -106,10 +109,41 @@ export default async () => {
       }
 
       const username = blob.key.replace(/^seller_/, "");
-      // 두 구독이 같은 날 걸릴 수 있으므로 레코드에 차례로 반영한 뒤 한 번만 저장한다.
-      let current: SellerRecord = record;
 
       for (const sub of due) {
+        // ── 1) 결제일 선점 ────────────────────────────────────────────────
+        // 카드를 긁기 전에 다음 결제일을 먼저 한 달 밀어 둔다. 순서를 이렇게
+        // 두는 이유: 청구를 먼저 하고 저장에 실패하면(쓰기 오류 · 다른 요청과
+        // 충돌 · 함수 중단) 결제일이 그대로 남아 다음 날 또 청구된다 —
+        // 이중 청구다. 반대로 선점을 먼저 하면 최악의 경우 이번 달 청구를
+        // 건너뛰는 것으로 끝나고, 돈이 두 번 빠지지는 않는다.
+        // 최신 레코드로 다시 확인하므로 실행이 겹쳐도 한 번만 청구된다.
+        const claim: { base: string | null } = { base: null };
+        try {
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            claim.base = null;
+            if (!latest || !latest.billing_key || !latest[sub.activeField]) return null;
+            const scheduled = latest[sub.nextField] as string | null | undefined;
+            if (!isDue(scheduled, now)) return null; // 이미 다른 실행이 처리했다
+            const at = new Date().toISOString();
+            claim.base = scheduled || at;
+            return {
+              ...latest,
+              [sub.nextField]: addOneMonth(claim.base),
+              updated_at: at,
+            };
+          });
+        } catch (claimErr) {
+          console.error(`[membership-billing] Could not claim ${username} (${sub.plan}):`, claimErr);
+        }
+
+        if (!claim.base) {
+          skipped++;
+          continue;
+        }
+        const scheduledDate = claim.base;
+
+        // ── 2) 청구 ──────────────────────────────────────────────────────
         const charge = await chargeMembershipMonthly(
           username,
           record.billing_key,
@@ -118,8 +152,10 @@ export default async () => {
           (record.toss_customer_key as string | undefined) ?? null,
         );
         const at = new Date().toISOString();
-        const history = Array.isArray(current.billing_history) ? current.billing_history : [];
 
+        // ── 3) 결과 기록 ─────────────────────────────────────────────────
+        // 같은 레코드를 사용자 저장(계좌·사업자 정보)과 빌링키 발급도 고치므로,
+        // 통째로 덮어쓰지 않고 최신 레코드에 결과만 얹는다.
         if (charge.success) {
           const entry: MembershipBillingEntry = {
             at,
@@ -129,51 +165,57 @@ export default async () => {
             success: true,
             paymentId: charge.paymentId,
           };
-          // Advance from the scheduled due date (not "now") so the billing day never
-          // drifts even if the scheduler runs a little late.
-          const base = (current[sub.nextField] as string | null | undefined) || at;
-          current = {
-            ...current,
-            [sub.lastField]: at,
-            [sub.nextField]: addOneMonth(base),
-            [sub.failuresField]: 0,
-            billing_history: [entry, ...history].slice(0, 50),
-            updated_at: at,
-          };
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            const base: SellerRecord = latest ?? {};
+            const history = Array.isArray(base.billing_history) ? base.billing_history : [];
+            return {
+              ...base,
+              [sub.lastField]: at,
+              [sub.failuresField]: 0,
+              billing_history: [entry, ...history].slice(0, 50),
+              updated_at: at,
+            };
+          });
           charged++;
           console.log(
             `[membership-billing] Charged ${username} (${sub.plan}) ₩${charge.amountKrw}`,
           );
         } else {
-          const failures = ((current[sub.failuresField] as number | undefined) || 0) + 1;
-          const entry: MembershipBillingEntry = {
-            at,
-            tier: sub.plan,
-            amountKrw: charge.amountKrw || 0,
-            kind: "recurring",
-            success: false,
-            error: charge.error,
-          };
-          // Dunning: keep the due date unchanged so the charge is retried on the next
-          // daily run. After MAX_BILLING_FAILURES consecutive failures that one
-          // subscription is paused so a dead card stops being retried indefinitely.
-          const exhausted = failures >= MAX_BILLING_FAILURES;
-          current = {
-            ...current,
-            [sub.activeField]: exhausted ? false : current[sub.activeField],
-            [sub.failuresField]: failures,
-            billing_history: [entry, ...history].slice(0, 50),
-            updated_at: at,
-          };
+          // Dunning: 선점해 둔 결제일을 원래 날짜로 돌려 다음 날 다시 시도한다.
+          // MAX_BILLING_FAILURES 번 연속 실패하면 그 구독만 정지시켜, 죽은 카드를
+          // 무한히 재시도하지 않는다.
+          const outcome: { failures: number; exhausted: boolean } = { failures: 0, exhausted: false };
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            const base: SellerRecord = latest ?? {};
+            const history = Array.isArray(base.billing_history) ? base.billing_history : [];
+            const failures = ((base[sub.failuresField] as number | undefined) || 0) + 1;
+            const exhausted = failures >= MAX_BILLING_FAILURES;
+            outcome.failures = failures;
+            outcome.exhausted = exhausted;
+            const entry: MembershipBillingEntry = {
+              at,
+              tier: sub.plan,
+              amountKrw: charge.amountKrw || 0,
+              kind: "recurring",
+              success: false,
+              error: charge.error,
+            };
+            return {
+              ...base,
+              [sub.nextField]: scheduledDate,
+              [sub.activeField]: exhausted ? false : base[sub.activeField],
+              [sub.failuresField]: failures,
+              billing_history: [entry, ...history].slice(0, 50),
+              updated_at: at,
+            };
+          });
           failed++;
           console.error(
-            `[membership-billing] Failed ${username} (${sub.plan}) attempt ${failures}/${MAX_BILLING_FAILURES}` +
-              `${exhausted ? " — subscription paused" : ""}: ${charge.error}`,
+            `[membership-billing] Failed ${username} (${sub.plan}) attempt ${outcome.failures}/${MAX_BILLING_FAILURES}` +
+              `${outcome.exhausted ? " — subscription paused" : ""}: ${charge.error}`,
           );
         }
       }
-
-      await store.setJSON(blob.key, current);
     } catch (e) {
       console.error(`[membership-billing] Error processing ${blob.key}:`, e);
     }

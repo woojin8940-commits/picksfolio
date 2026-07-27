@@ -21,9 +21,9 @@ type CampaignLike = {
   recruit_closed?: boolean;
 };
 
-/** 오늘 날짜(Asia/Seoul)를 'YYYY-MM-DD'로 반환. */
-export const todayInSeoul = (): string =>
-  new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+/** 오늘 날짜(Asia/Seoul)를 'YYYY-MM-DD'로 반환. 공용 헬퍼로 옮겼다. */
+export { todayInSeoul } from './formatters';
+import { todayInSeoul } from './formatters';
 
 const toDateKey = (value?: string | null): string | null => {
   if (!value) return null;

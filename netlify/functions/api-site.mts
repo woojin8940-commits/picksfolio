@@ -3,6 +3,7 @@ import { getStore } from "@netlify/blobs";
 import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";
 import { createUniqueProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -189,6 +190,12 @@ export default async (req: Request, context: Context) => {
     }
 
     if (req.method === "POST") {
+      // 링크 관리의 모든 저장(프로필 · 블록 · 상품 링크 · 디자인 · SNS)이 이 경로를
+      // 지난다. 지금까지는 아이디만 알면 남의 페이지 내용을 바꿀 수 있었다.
+      // (GET 은 공개 페이지 렌더링에 쓰이므로 그대로 열어둔다.)
+      const auth = await requireAccountOwner(req, username);
+      if (!auth.ok) return auth.response;
+
       const bodyText = await req.text();
 
       if (bodyText.length > MAX_PAYLOAD_BYTES) {

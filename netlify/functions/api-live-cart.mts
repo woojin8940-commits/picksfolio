@@ -1,5 +1,9 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+
+const CART_STORE = "live-cart";
 
 interface CartItem {
   productId: string;
@@ -135,6 +139,13 @@ function ensureCartData(raw: unknown): CartData {
   return { carts: [], updatedAt: new Date().toISOString() };
 }
 
+/**
+ * 라이브 장바구니. 접근 권한이 방향에 따라 다르다.
+ *   • 시청자(비로그인): 자기 장바구니 조회(?viewerId=) · 담기 · 자기 항목 삭제
+ *   • 판매자(로그인 본인): 전체 목록·통계 조회 · 카톡 발송 표시 · 전체 비우기
+ * 예전에는 모두 무인증이라, 아이디만 알면 방송 중 고객 명단을 그대로 볼 수 있었고
+ * 본문 없는 DELETE 한 번으로 장바구니 전체를 비울 수 있었다.
+ */
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -147,63 +158,76 @@ export default async (req: Request, context: Context) => {
     if (req.method === "GET") {
       const url = new URL(req.url);
       const viewerId = url.searchParams.get("viewerId");
-      const raw = await store.get(username, { type: "json" });
-      const data = ensureCartData(raw);
 
       if (viewerId) {
+        const raw = await store.get(username, { type: "json" });
+        const data = ensureCartData(raw);
         const cart = data.carts.find((c) => c.viewerId === viewerId);
         return Response.json({ cart: cart?.items || [] });
       }
 
+      // 전체 목록에는 시청자 닉네임·프로필까지 들어간다. 판매자 본인만.
+      const auth = await requireAccountOwner(req, username);
+      if (!auth.ok) return auth.response;
+
+      const raw = await store.get(username, { type: "json" });
+      const data = ensureCartData(raw);
       const stats = computeStats(data);
       return Response.json({ carts: data.carts, stats });
     }
 
     if (req.method === "POST") {
       const body = await req.json();
-      const raw = await store.get(username, { type: "json" });
-      const data = ensureCartData(raw);
-
       const viewerId = body.viewerId || "unknown";
-      let viewerCart = data.carts.find((c) => c.viewerId === viewerId);
-      if (!viewerCart) {
-        viewerCart = {
-          viewerId,
-          viewerNickname: body.viewerNickname || viewerId,
-          viewerProfileImage: body.viewerProfileImage,
-          items: [],
-          kakaoSent: false,
-        };
-        data.carts.push(viewerCart);
-      }
 
-      viewerCart.items.push({
-        productId: body.productId,
-        productName: body.productName,
-        productPrice: body.productPrice,
-        productImage: body.productImage,
-        productLink: body.productLink || "",
-        selectedOptions: body.selectedOptions,
-        addedAt: new Date().toISOString(),
+      // 방송 중에는 여러 시청자가 동시에 담는다. 조건부 쓰기로 반영해야
+      // 나중에 쓴 요청이 다른 시청자의 담기를 지우지 않는다.
+      const saved = await mutateBlobJSON<CartData>(CART_STORE, username, (raw) => {
+        const data = ensureCartData(raw);
+        let viewerCart = data.carts.find((c) => c.viewerId === viewerId);
+        if (!viewerCart) {
+          viewerCart = {
+            viewerId,
+            viewerNickname: body.viewerNickname || viewerId,
+            viewerProfileImage: body.viewerProfileImage,
+            items: [],
+            kakaoSent: false,
+          };
+          data.carts.push(viewerCart);
+        }
+
+        viewerCart.items.push({
+          productId: body.productId,
+          productName: body.productName,
+          productPrice: body.productPrice,
+          productImage: body.productImage,
+          productLink: body.productLink || "",
+          selectedOptions: body.selectedOptions,
+          addedAt: new Date().toISOString(),
+        });
+        data.updatedAt = new Date().toISOString();
+        return data;
       });
-      data.updatedAt = new Date().toISOString();
 
-      await store.setJSON(username, data);
-      const totalItems = data.carts.reduce((s, c) => s + c.items.length, 0);
+      const totalItems = (saved?.carts || []).reduce((s, c) => s + c.items.length, 0);
       return Response.json({ success: true, itemCount: totalItems });
     }
 
     if (req.method === "PATCH") {
+      // 카톡 발송 표시는 판매자 화면의 동작이다.
+      const auth = await requireAccountOwner(req, username);
+      if (!auth.ok) return auth.response;
+
       const body = await req.json();
       if (body.viewerId) {
-        const raw = await store.get(username, { type: "json" });
-        const data = ensureCartData(raw);
-        const cart = data.carts.find((c) => c.viewerId === body.viewerId);
-        if (cart) {
+        await mutateBlobJSON<CartData>(CART_STORE, username, (raw) => {
+          const data = ensureCartData(raw);
+          const cart = data.carts.find((c) => c.viewerId === body.viewerId);
+          if (!cart) return null;
           cart.kakaoSent = true;
           data.updatedAt = new Date().toISOString();
-          await store.setJSON(username, data);
-        }
+          return data;
+        });
       }
       return Response.json({ success: true });
     }
@@ -215,10 +239,12 @@ export default async (req: Request, context: Context) => {
       } catch {}
 
       if (body.viewerId && body.productId) {
-        const raw = await store.get(username, { type: "json" });
-        const data = ensureCartData(raw);
-        const cart = data.carts.find((c) => c.viewerId === body.viewerId);
-        if (cart) {
+        // 시청자가 자기 담은 항목을 빼는 경우.
+        await mutateBlobJSON<CartData>(CART_STORE, username, (raw) => {
+          const data = ensureCartData(raw);
+          const cart = data.carts.find((c) => c.viewerId === body.viewerId);
+          if (!cart) return null;
+
           const optKey = body.selectedOptions ? JSON.stringify(body.selectedOptions) : null;
           const idx = cart.items.findIndex((i) => {
             if (i.productId !== body.productId) return false;
@@ -230,11 +256,16 @@ export default async (req: Request, context: Context) => {
             data.carts = data.carts.filter((c) => c.viewerId !== body.viewerId);
           }
           data.updatedAt = new Date().toISOString();
-          await store.setJSON(username, data);
-        }
-      } else {
-        await store.setJSON(username, { carts: [], updatedAt: new Date().toISOString() });
+          return data;
+        });
+        return Response.json({ success: true });
       }
+
+      // 본문 없는 DELETE = 전체 비우기(방송 종료 후 정리). 판매자 본인만.
+      const auth = await requireAccountOwner(req, username);
+      if (!auth.ok) return auth.response;
+
+      await store.setJSON(username, { carts: [], updatedAt: new Date().toISOString() });
       return Response.json({ success: true });
     }
 

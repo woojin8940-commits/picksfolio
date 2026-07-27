@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
+import { authHeaders } from '../services/apiService';
 
 interface BusinessInboxProps {
   businessUsername: string;
@@ -27,7 +28,9 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
 
   const fetchProposals = async () => {
     try {
-      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
+      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
+        headers: await authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         const fresh = data.proposals || [];

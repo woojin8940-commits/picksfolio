@@ -548,6 +548,21 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
     localStorage.setItem('picks_viewer_id', id);
     return id;
   })());
+  // 배송지 기록을 여는 열쇠. viewerId 는 판매자 화면(장바구니·주문)에 그대로 보이므로
+  // 그것으로 배송지를 열 수 있으면 남의 이름·연락처·주소가 새어 나간다. 이 열쇠는
+  // 브라우저에만 저장되고 배송지 API 로만 오간다.
+  const shippingKeyRef = useRef<string>((() => {
+    const STORAGE_KEY = 'picks_shipping_profile_key';
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved && saved.length >= 24) return saved;
+    } catch {}
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const key = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(STORAGE_KEY, key); } catch {}
+    return key;
+  })());
   const [, startTransition] = useTransition();
 
   // Load the viewer's last-used orderer/배송지 profile once so the checkout
@@ -558,7 +573,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
     shippingLoadedRef.current = true;
     let cancelled = false;
     (async () => {
-      const saved = await apiService.getShippingProfile(viewerIdRef.current);
+      const saved = await apiService.getShippingProfile(shippingKeyRef.current);
       if (cancelled) return;
       if (saved && (saved.ordererName || saved.address1)) {
         setShipping(fromShippingProfile(saved));
@@ -2577,7 +2592,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       }
 
       // Remember this delivery profile for the viewer's next order.
-      apiService.saveShippingProfile(viewerIdRef.current, shippingProfile).catch(() => {});
+      apiService.saveShippingProfile(shippingKeyRef.current, shippingProfile).catch(() => {});
       setCheckoutSuccess(true);
     } catch (err) {
       console.error('[LiveCheckout] PortOne payment error:', err);
@@ -2737,7 +2752,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       }
 
       // Remember this delivery profile for the viewer's next order.
-      apiService.saveShippingProfile(viewerIdRef.current, shippingProfile).catch(() => {});
+      apiService.saveShippingProfile(shippingKeyRef.current, shippingProfile).catch(() => {});
 
       // Remove paid items from local cart; keep any unpriceable ones so the
       // viewer can still jump to the seller's external link for those.

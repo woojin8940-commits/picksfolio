@@ -1,11 +1,16 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
+
+  // 이 계정이 진행 중인 협업 목록(업체명 · 프로젝트명 · 안 읽은 수)이다. 본인만.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const userType = url.searchParams.get("type") || "influencer";

@@ -50,10 +50,10 @@ export type AuthResult =
   | { ok: false; response: Response };
 
 /**
- * `username` 계정의 소유자(또는 관리자)만 통과시킨다.
- * 실패하면 그대로 반환할 수 있는 Response 를 함께 돌려준다.
+ * 토큰을 검증해 "호출한 사람이 누구인지"까지만 확인한다.
+ * 어느 계정에 접근할 수 있는지는 호출부에서 판단한다.
  */
-export async function requireAccountOwner(req: Request, username: string): Promise<AuthResult> {
+export async function requireSignedInUser(req: Request): Promise<AuthResult> {
   const client = getAuthClient();
   if (!client) {
     // 키가 없으면 검증할 방법이 없다. 열어두면 인증이 있으나 마나이므로 막는다.
@@ -93,19 +93,71 @@ export async function requireAccountOwner(req: Request, username: string): Promi
     .eq("id", user.id)
     .maybeSingle();
 
-  const isAdmin = (profile?.role || "").toLowerCase() === "admin";
-  const owner = normalizeName(String(profile?.username || ""));
-  const target = normalizeName(username);
+  return {
+    ok: true,
+    username: normalizeName(String(profile?.username || "")),
+    userId: user.id,
+    isAdmin: (profile?.role || "").toLowerCase() === "admin",
+  };
+}
 
-  if (!isAdmin && (!owner || owner !== target)) {
-    return {
-      ok: false,
-      response: Response.json(
-        { error: "다른 계정의 정보에는 접근할 수 없습니다.", code: "AUTH_FORBIDDEN" },
-        { status: 403 },
-      ),
-    };
+const forbidden = (): { ok: false; response: Response } => ({
+  ok: false,
+  response: Response.json(
+    { error: "다른 계정의 정보에는 접근할 수 없습니다.", code: "AUTH_FORBIDDEN" },
+    { status: 403 },
+  ),
+});
+
+/** 접근 거부 응답. 소유자 목록을 나중에(자원을 읽은 뒤) 판단하는 곳에서 쓴다. */
+export const forbiddenResponse = (): Response => forbidden().response;
+
+/**
+ * 이미 검증된 호출자가 후보 계정 중 하나인지 판단한다. 자원을 먼저 읽어야
+ * 당사자를 알 수 있는 경우(타임라인 등) 토큰을 두 번 검증하지 않도록 분리해 둔다.
+ *
+ * 후보가 모두 비어 있으면 판단할 근거가 없으니 거부한다.
+ */
+export function callerIsAnyOf(
+  caller: { username: string; isAdmin: boolean },
+  usernames: (string | null | undefined)[],
+): boolean {
+  if (caller.isAdmin) return true;
+  const targets = usernames
+    .filter((u): u is string => typeof u === "string" && u.trim() !== "")
+    .map(normalizeName);
+  return !!caller.username && targets.includes(caller.username);
+}
+
+/**
+ * `username` 계정의 소유자(또는 관리자)만 통과시킨다.
+ * 실패하면 그대로 반환할 수 있는 Response 를 함께 돌려준다.
+ */
+export async function requireAccountOwner(req: Request, username: string): Promise<AuthResult> {
+  const caller = await requireSignedInUser(req);
+  if (!caller.ok) return caller;
+
+  const target = normalizeName(username);
+  if (!caller.isAdmin && (!caller.username || caller.username !== target)) {
+    return forbidden();
   }
 
-  return { ok: true, username: target, userId: user.id, isAdmin };
+  return { ok: true, username: target, userId: caller.userId, isAdmin: caller.isAdmin };
+}
+
+/**
+ * 여러 당사자가 정당하게 접근하는 자원(예: 타임라인은 인플루언서와 업체 양쪽이
+ * 본다)에 쓴다. 후보 중 하나라도 본인 계정이면 통과시킨다.
+ *
+ * 후보가 모두 비어 있으면(자원에 주인이 기록돼 있지 않으면) 판단할 근거가 없으니
+ * 막는다 — 빈 목록을 통과시키면 인증이 있으나 마나가 된다.
+ */
+export async function requireAnyAccountOwner(
+  req: Request,
+  usernames: (string | null | undefined)[],
+): Promise<AuthResult> {
+  const caller = await requireSignedInUser(req);
+  if (!caller.ok) return caller;
+  if (!callerIsAnyOf(caller, usernames)) return forbidden();
+  return caller;
 }

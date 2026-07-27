@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
+import { authHeaders } from '../services/apiService';
 import BusinessSettlement from './BusinessSettlement';
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
   companyName: string;
 }
+
+/** 로컬 시간대 기준 YYYY-MM-DD. UTC 변환으로 날짜가 하루 밀리는 것을 막는다. */
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername, companyName }) => {
   const cleanUsername = businessUsername.replace(/^biz\//, '');
@@ -32,7 +37,9 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   useEffect(() => {
     const fetchProposals = async () => {
       try {
-        const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
+        const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
+          headers: await authHeaders(),
+        });
         if (res.ok) {
           const data = await res.json();
           const fresh = (data.proposals || []).filter((p: BusinessProposal) => p.status === 'accepted' || p.status === 'completed');
@@ -52,7 +59,9 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfWeek = new Date(year, month, 1).getDay();
-  const today = new Date().toISOString().split('T')[0];
+  // 로컬 날짜 기준. `toISOString()` 은 UTC라서 한국 시간 오전 9시 이전에는
+  // 어제 날짜가 나오고, 그동안 "오늘"과 완료 판정이 하루씩 어긋났다.
+  const today = ymd(new Date());
 
   // Keep the calendar status in sync with the dates: an accepted proposal whose
   // end date has already passed (or which is already settled/completed) is shown
@@ -106,7 +115,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   const goToToday = () => {
     const now = new Date();
     setCurrentMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-    setSelectedDate(now.toISOString().split('T')[0]);
+    setSelectedDate(ymd(now));
   };
 
   const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
@@ -125,7 +134,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   const acceptedCount = proposals.filter(p => !isCollabDone(p)).length;
   const completedCount = proposals.filter(p => isCollabDone(p)).length;
   const totalInfluencers = new Set(proposals.map(p => p.influencer_username)).size;
-  const totalRevenue = proposals.filter(p => isCollabDone(p)).reduce((sum, p) => sum + (p.fee || 0), 0);
+  const totalCollabCost = proposals.filter(p => isCollabDone(p)).reduce((sum, p) => sum + (p.fee || 0), 0);
 
   // Upcoming deadlines
   const upcomingDeadlines = useMemo(() => {
@@ -394,9 +403,9 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                 <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
               </div>
             </div>
-            {totalRevenue > 0 && (
+            {totalCollabCost > 0 && (
               <div className="mt-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-lg md:text-xl font-black text-blue-700">{formatFee(totalRevenue)}</p>
+                <p className="text-lg md:text-xl font-black text-blue-700">{formatFee(totalCollabCost)}</p>
                 <p className="text-[10px] md:text-xs font-bold text-blue-500">완료 협업 총 비용</p>
               </div>
             )}
@@ -466,8 +475,10 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
               <p className="text-[10px] md:text-xs font-bold text-indigo-500">총 협업</p>
             </div>
             <div className="bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl p-4 text-center">
-              <p className="text-base md:text-xl font-black text-teal-700">{formatFee(totalRevenue)}</p>
-              <p className="text-[10px] md:text-xs font-bold text-teal-500">완료 수익</p>
+              <p className="text-base md:text-xl font-black text-teal-700">{formatFee(totalCollabCost)}</p>
+              {/* 업체 화면에서 이 금액은 지급한 비용이다. 같은 값을 위쪽 타일에서는
+                  "완료 협업 총 비용"이라 부르고 있어서 표기를 맞춘다. */}
+              <p className="text-[10px] md:text-xs font-bold text-teal-500">완료 협업 총 비용</p>
             </div>
           </div>
 
