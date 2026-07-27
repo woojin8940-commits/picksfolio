@@ -3,11 +3,15 @@ import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { SolapiMessageService } from 'solapi'
 import { incrementAlimtalkUsage } from './_shared/alimtalk-usage.mts'
+import { requireAccountOwner } from './_shared/user-auth.mts'
 
 /**
  * 라이브 시작 시 구독자에게 알림톡 발송
  * POST /api/live-notify-send
  * body: { influencer: string }
+ *
+ * 인증이 없어서 아이디만 알면 남의 구독자 전체에게 알림톡·문자를 대신 보내고
+ * 그 사람의 발송 한도까지 태울 수 있었다 → 본인(또는 관리자)만 발송한다.
  */
 
 interface Subscriber {
@@ -33,6 +37,9 @@ export default async (req: Request, context: Context) => {
   if (!influencer) {
     return Response.json({ error: 'influencer is required' }, { status: 400 })
   }
+
+  const auth = await requireAccountOwner(req, influencer)
+  if (!auth.ok) return auth.response
 
   // Format start time in Korean (e.g. "4월 27일 오후 8:30")
   let startedAtLabel = startedAtIso

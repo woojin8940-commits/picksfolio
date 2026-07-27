@@ -4,7 +4,7 @@ import { Bell, Settings, Info, Camera, Upload, Trash2, Image as ImageIcon, Shopp
 import LiveStreaming from './LiveStreaming';
 import MediaAuto from './MediaAuto';
 import { SellerVerification } from '../types';
-import { apiService } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import {
   CHARGE_RATE_KRW_PER_HOUR,
   CHARGE_PAY_METHODS,
@@ -148,7 +148,9 @@ const LiveCommerceManagement: React.FC<LiveCommerceManagementProps> = ({ userNam
     let cancelled = false;
     const loadSubscribers = async () => {
       try {
-        const res = await fetch(`/api/alimtalk-settings?user=${encodeURIComponent(userName.toLowerCase())}`);
+        const res = await fetch(`/api/alimtalk-settings?user=${encodeURIComponent(userName.toLowerCase())}`, {
+          headers: await authHeaders(),
+        });
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;

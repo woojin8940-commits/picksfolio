@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Bell, Users, Save, CheckCircle2, Target, UserCheck } from 'lucide-react';
+import { authHeaders } from '../services/apiService';
 
 interface NotifySettingsProps {
   userName: string;
@@ -62,7 +63,9 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/alimtalk-settings?user=${encodeURIComponent(userName.toLowerCase())}`);
+        const res = await fetch(`/api/alimtalk-settings?user=${encodeURIComponent(userName.toLowerCase())}`, {
+          headers: await authHeaders(),
+        });
         if (res.ok) {
           const data = await res.json();
           if (cancelled) return;
@@ -104,7 +107,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
     try {
       const res = await fetch('/api/alimtalk-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           user: userName.toLowerCase(),
           settings,

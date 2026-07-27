@@ -1,6 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
+import { authHeaders } from '../services/apiService';
 
 const BusinessInbox = lazy(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
@@ -73,7 +74,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
   const fetchProposalStats = async () => {
     try {
-      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`);
+      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
+        headers: await authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         const proposals = data.proposals || [];
@@ -94,7 +97,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   // "이번 달 정산" KPI reflects real data instead of a hardcoded 0.
   const fetchMonthlySettlement = async () => {
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(cleanUsername)}?role=business`);
+      const res = await fetch(`/api/settlements/${encodeURIComponent(cleanUsername)}?role=business`, {
+        headers: await authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         const settlements = data.settlements || [];
@@ -124,7 +129,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business`);
+        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business`, {
+          headers: await authHeaders(),
+        });
         const data = await res.json();
         if (data.timelines) {
           const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);

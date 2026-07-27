@@ -1,5 +1,10 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+
+const STORE = "proposals";
+const BIZ_STORE = "business-proposals";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -7,7 +12,15 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  const store = getStore("proposals");
+  const store = getStore(STORE);
+
+  // 받은 제안함이다(업체 담당자 이름 · 이메일 · 연락처 · 제안 금액이 들어 있다).
+  // 읽기·상태 변경은 본인만. 단 POST(제안 접수)는 로그인 없이 제안서 폼을 채운
+  // 업체도 보내야 하므로 열어 둔다.
+  if (req.method === "GET" || req.method === "PUT") {
+    const auth = await requireAccountOwner(req, username);
+    if (!auth.ok) return auth.response;
+  }
 
   if (req.method === "GET") {
     const allProposals: any[] = [];
@@ -74,10 +87,22 @@ export default async (req: Request, context: Context) => {
         new Date(a.created_at || a.createdAt || 0).getTime()
     );
 
-    // Blob 스토어에 동기화 (PATCH/DELETE 엔드포인트 호환) — deferred
+    // Blob 스토어에 동기화 (PATCH/DELETE 엔드포인트 호환) — deferred.
+    // 조회 중에 새 제안이 들어올 수 있으므로 통째로 덮어쓰지 않고, 최신 목록에
+    // 없는 것만 합친다.
     if (allProposals.length > 0) {
       context.waitUntil(
-        store.setJSON(`proposals_${username}`, allProposals).catch(() => {})
+        mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
+          const latest = Array.isArray(current) ? current : [];
+          const latestIds = new Set(latest.map((p: any) => p?.id));
+          const merged = [...latest, ...allProposals.filter((p: any) => !latestIds.has(p?.id))];
+          merged.sort(
+            (a: any, b: any) =>
+              new Date(b.created_at || b.createdAt || 0).getTime() -
+              new Date(a.created_at || a.createdAt || 0).getTime()
+          );
+          return merged;
+        }).catch(() => null)
       );
     }
 
@@ -86,24 +111,28 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = await req.json();
-    const existing = (await store.get(`proposals_${username}`, { type: "json" })) as any[] || [];
     const proposal = {
-      id: `prop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       ...body,
+      // id·소유자·상태는 서버가 정한다(body 로 덮어쓰지 못하게 뒤에 둔다).
+      id: `prop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       influencer_username: username,
       status: "pending",
       createdAt: new Date().toISOString(),
     };
-    existing.push(proposal);
-    await store.setJSON(`proposals_${username}`, existing);
+
+    // 여러 업체가 같은 인플루언서에게 동시에 제안하면 통째로 덮어쓰기가 앞선
+    // 제안을 지운다. 두 목록 모두 조건부 쓰기로 덧붙인다.
+    await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => [
+      ...(Array.isArray(current) ? current : []),
+      proposal,
+    ]);
 
     const bizUsername = (body.business_username || "").toLowerCase().replace(/^biz\//, "");
     if (bizUsername) {
-      const bizStore = getStore("business-proposals");
-      const bizKey = `biz_proposals_${bizUsername}`;
-      const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
-      bizExisting.push({ ...proposal });
-      await bizStore.setJSON(bizKey, bizExisting);
+      await mutateBlobJSON<any[]>(BIZ_STORE, `biz_proposals_${bizUsername}`, (current) => [
+        ...(Array.isArray(current) ? current : []),
+        { ...proposal },
+      ]);
     }
 
     // Persist to SQL database
@@ -188,12 +217,14 @@ export default async (req: Request, context: Context) => {
 
     // Update in blob store
     try {
-      const existing = (await store.get(`proposals_${username}`, { type: "json" })) as any[] || [];
-      const idx = existing.findIndex((p: any) => p.id === body.id);
-      if (idx !== -1) {
-        existing[idx] = { ...existing[idx], status: body.status, updatedAt: new Date().toISOString() };
-        await store.setJSON(`proposals_${username}`, existing);
-      }
+      await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
+        const existing = Array.isArray(current) ? current : [];
+        const idx = existing.findIndex((p: any) => p.id === body.id);
+        if (idx === -1) return null;
+        const next = [...existing];
+        next[idx] = { ...next[idx], status: body.status, updatedAt: new Date().toISOString() };
+        return next;
+      });
     } catch (blobErr) {
       console.error("[api-proposals] Blob update failed:", blobErr);
     }

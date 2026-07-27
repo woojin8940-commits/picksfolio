@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, todayInSeoul } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
 import AdminLiveConsole from './admin/AdminLiveConsole';
@@ -231,7 +231,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayInSeoul();
 
   const getDateStr = (day: number) =>
     `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;

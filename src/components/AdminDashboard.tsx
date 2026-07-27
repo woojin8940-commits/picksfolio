@@ -3,8 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getStatsForRange, getTopClickedItemsForRange } from '../services/analyticsService';
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
-import { apiService } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
+import { todayInSeoul } from '../utils/formatters';
 import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
 
@@ -51,8 +52,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineUnread, setTimelineUnread] = useState(0);
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(() => todayInSeoul());
+  const [endDate, setEndDate] = useState(() => todayInSeoul());
 
   // Dashboard data counts
   const [previewBlocks, setPreviewBlocks] = useState<Block[]>([]);
@@ -107,7 +108,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const cacheKey = `picks_timelines_influencer_${normalizedName}`;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer`);
+        const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer`, {
+          headers: await authHeaders(),
+        });
         const data = await res.json();
         if (data.timelines) {
           const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
@@ -147,7 +150,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     fetchStats();
     // Only auto-refresh if the end date is today
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInSeoul();
     if (endDate === today) {
       const interval = setInterval(fetchStats, 3600000); // Update every hour
       return () => clearInterval(interval);
@@ -427,12 +430,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <StatCard
                 label="방문자 수"
                 value={stats.views.toLocaleString()}
-                trend={startDate === endDate && startDate === new Date().toISOString().split('T')[0] ? '실시간' : undefined}
+                trend={startDate === endDate && startDate === todayInSeoul() ? '실시간' : undefined}
               />
               <StatCard
                 label="링크 클릭률"
                 value={`${stats.ctr}%`}
-                trend={startDate === endDate && startDate === new Date().toISOString().split('T')[0] ? '실시간' : undefined}
+                trend={startDate === endDate && startDate === todayInSeoul() ? '실시간' : undefined}
               />
 
               <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm col-span-2 lg:col-span-1">

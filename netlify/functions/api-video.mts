@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -16,6 +17,11 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
+    // 저장은 이 계정의 영상 목록을 통째로 바꾼다. 예전에는 인증이 없어 남의
+    // 아이디만 알면 영상 목록을 비워버릴 수 있었다.
+    const auth = await requireAccountOwner(req, username);
+    if (!auth.ok) return auth.response;
+
     const body = await req.json();
     await store.setJSON(key, body);
     return Response.json({ success: true });

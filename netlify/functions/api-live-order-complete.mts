@@ -1,8 +1,8 @@
-import { getStore } from '@netlify/blobs'
 import type { Config, Context } from '@netlify/functions'
 import { splitLiveCommission, LIVE_COMMISSION_RATE } from './_shared/live-pricing.mts'
 import { persistLiveOrderToDatabase } from './_shared/live-order-persistence.mts'
 import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
+import { mutateBlobJSON } from './_shared/blob-write.mts'
 
 /**
  * Live-commerce product purchase completion — verifies a PortOne V2 payment
@@ -140,20 +140,7 @@ export default async (req: Request, _context: Context) => {
   const { payment, paidAmount } = verified
 
   // Verification passed — append the order to the seller's live-orders blob.
-  const store = getStore({ name: 'live-orders', consistency: 'strong' })
   const now = new Date().toISOString()
-
-  const existing = ((await store.get(username, { type: 'json' })) as LiveOrdersData | null) || {
-    orders: [],
-    updatedAt: now,
-  }
-
-  // Idempotency: if this paymentId was already recorded, don't duplicate.
-  const alreadyRecorded = existing.orders.some((o) => o.paymentId === paymentId)
-  if (alreadyRecorded) {
-    return Response.json({ success: true, alreadyProcessed: true })
-  }
-
   const split = splitLiveCommission(paidAmount)
 
   const order: OrderRecord = {
@@ -181,9 +168,24 @@ export default async (req: Request, _context: Context) => {
     shipping: normalizeShipping(body.shipping),
   }
 
-  existing.orders.unshift(order)
-  existing.updatedAt = now
-  await store.setJSON(username, existing)
+  // 방송 중에는 결제가 동시에 여러 건 들어온다. 목록을 통째로 읽고 다시 쓰면
+  // 나중에 쓴 요청이 그 사이 들어온 주문을 덮어써서 결제는 됐는데 주문이 사라진다.
+  // 조건부 쓰기로 반영하고, 중복(같은 paymentId) 검사도 그 안에서 한다.
+  let alreadyRecorded = false
+  await mutateBlobJSON<LiveOrdersData>('live-orders', username, (current) => {
+    const orders = Array.isArray(current?.orders) ? current!.orders : []
+    if (orders.some((o) => o.paymentId === paymentId)) {
+      alreadyRecorded = true
+      return null
+    }
+    alreadyRecorded = false
+    return { orders: [order, ...orders], updatedAt: now }
+  })
+
+  if (alreadyRecorded) {
+    return Response.json({ success: true, alreadyProcessed: true })
+  }
+
   await persistLiveOrderToDatabase({
     id: paymentId,
     username,

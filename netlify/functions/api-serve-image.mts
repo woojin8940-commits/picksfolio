@@ -1,31 +1,30 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
-
-const CONTENT_TYPES: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  avif: "image/avif",
-  pdf: "application/pdf",
-  // Video types so uploaded clips are served with the correct content type and
-  // can be played back (range requests below keep each response small).
-  mp4: "video/mp4",
-  webm: "video/webm",
-  ogg: "video/ogg",
-  ogv: "video/ogg",
-  mov: "video/quicktime",
-  m4v: "video/x-m4v",
-  avi: "video/x-msvideo",
-  mkv: "video/x-matroska",
-};
+import {
+  ALLOWED_CONTENT_TYPES,
+  protectiveHeaders,
+  safeExtension,
+} from "./_shared/upload-media.mts";
 
 // Netlify Functions cap the response body at ~6MB. Videos can be much larger,
 // so we never return more than this per request and rely on HTTP range requests
 // to deliver the rest in chunks. This is also what makes <video> seekable.
 const MAX_CHUNK = 4 * 1024 * 1024;
+
+/**
+ * 내려줄 형식은 확장자를 기준으로 서버가 정한다. 블롭에 저장된 형식은 허용 목록에
+ * 있는 값일 때만 참고한다 — 예전에 저장된 레코드에는 브라우저가 보낸 임의 문자열
+ * (`text/html` 등)이 들어 있을 수 있고, 그대로 내려주면 우리 도메인에서 실행된다.
+ */
+function safeContentType(key: string, stored: unknown): string {
+  const byExt = ALLOWED_CONTENT_TYPES[safeExtension(key)];
+  if (byExt) return byExt;
+
+  const declared = String(stored || "").split(";")[0].trim().toLowerCase();
+  if (declared && Object.values(ALLOWED_CONTENT_TYPES).includes(declared)) return declared;
+
+  return "application/octet-stream";
+}
 
 export default async (req: Request, context: Context) => {
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -46,11 +45,8 @@ export default async (req: Request, context: Context) => {
     return new Response("Image not found", { status: 404 });
   }
 
-  const ext = key.split(".").pop()?.toLowerCase() || "";
-  const contentType =
-    (result.metadata?.contentType as string) ||
-    CONTENT_TYPES[ext] ||
-    "application/octet-stream";
+  const contentType = safeContentType(key, result.metadata?.contentType);
+  const guards = protectiveHeaders(contentType);
 
   const data = result.data as ArrayBuffer;
   const total = data.byteLength;
@@ -85,6 +81,7 @@ export default async (req: Request, context: Context) => {
     return new Response(chunk, {
       status: 206,
       headers: {
+        ...guards,
         "Content-Type": contentType,
         "Content-Range": `bytes ${start}-${end}/${total}`,
         "Accept-Ranges": "bytes",
@@ -97,6 +94,7 @@ export default async (req: Request, context: Context) => {
   return new Response(data, {
     status: 200,
     headers: {
+      ...guards,
       "Content-Type": contentType,
       "Accept-Ranges": "bytes",
       "Cache-Control": "public, max-age=31536000, immutable",

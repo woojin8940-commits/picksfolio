@@ -6,10 +6,11 @@ import {
   CLAUDE_MODEL,
   deductionCredits,
   rawCostKrw,
+  mutateClaudeCredits,
   readClaudeCreditsSynced,
-  writeClaudeCredits,
   type ClaudeCredits,
 } from "./_shared/claude-credits.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 // Collaboration AI assistant.
 //
@@ -251,6 +252,11 @@ export default async (req: Request) => {
   if (!username) {
     return Response.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
+  // 지금까지는 본문의 username 을 그대로 믿었다. 그래서 남의 아이디를 적으면
+  // 그 사람의 협업 대화 내용이 프롬프트에 실려 답변으로 돌아오고, 크레딧도 그쪽
+  // 지갑에서 빠져나갔다. 실제 그 계정으로 로그인한 사람인지 확인한다.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
   if (messages.length === 0) {
     return Response.json({ error: "메시지가 비어 있습니다." }, { status: 400 });
   }
@@ -404,7 +410,6 @@ export default async (req: Request) => {
 
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {
-    const credits = claudeCredits as ClaudeCredits;
     // Anthropic message format. The large system instruction (role + workspace
     // overview) is sent as a cached block, so repeat turns within ~5 minutes are
     // billed at the discounted cache-read rate — the saving is passed through to
@@ -451,33 +456,35 @@ export default async (req: Request) => {
 
       // Deduct credits based on the tokens actually consumed, then (if opted in
       // and the balance is now low) auto-recharge for the next request.
+      // 차감은 최신 지갑에 대고 조건부로 쓴다. 요청을 보내는 동안 크레딧 충전이
+      // 들어왔을 수 있는데, 통째로 덮어쓰면 그 충전분이 사라진다.
       const usage = data?.usage || {};
       const charged = deductionCredits(usage);
-      credits.balanceCredits = Math.max(0, credits.balanceCredits - charged);
-      credits.lifetimeSpentCredits += charged;
-      credits.usage = [
-        {
-          at: new Date().toISOString(),
-          model: CLAUDE_MODEL,
-          inputTokens:
-            (Number(usage.input_tokens) || 0) +
-            (Number(usage.cache_creation_input_tokens) || 0) +
-            (Number(usage.cache_read_input_tokens) || 0),
-          outputTokens: Number(usage.output_tokens) || 0,
-          cachedTokens: Number(usage.cache_read_input_tokens) || 0,
-          costKrw: Math.round(rawCostKrw(usage)),
-          chargedCredits: charged,
-        },
-        ...credits.usage,
-      ].slice(0, 50);
+      const usageEntry = {
+        at: new Date().toISOString(),
+        model: CLAUDE_MODEL,
+        inputTokens:
+          (Number(usage.input_tokens) || 0) +
+          (Number(usage.cache_creation_input_tokens) || 0) +
+          (Number(usage.cache_read_input_tokens) || 0),
+        outputTokens: Number(usage.output_tokens) || 0,
+        cachedTokens: Number(usage.cache_read_input_tokens) || 0,
+        costKrw: Math.round(rawCostKrw(usage)),
+        chargedCredits: charged,
+      };
 
-      await writeClaudeCredits(username, credits);
+      const saved = await mutateClaudeCredits(username, (latest) => ({
+        ...latest,
+        balanceCredits: Math.max(0, latest.balanceCredits - charged),
+        lifetimeSpentCredits: latest.lifetimeSpentCredits + charged,
+        usage: [usageEntry, ...latest.usage].slice(0, 50),
+      }));
 
       return Response.json({
         reply,
         model: "claude",
         creditsUsed: charged,
-        balanceCredits: credits.balanceCredits,
+        balanceCredits: saved.balanceCredits,
       });
     } catch (e) {
       console.error("[collab-ai] claude request failed", e);

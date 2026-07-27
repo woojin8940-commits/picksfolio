@@ -1,5 +1,10 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import {
+  callerIsAnyOf,
+  forbiddenResponse,
+  requireSignedInUser,
+} from "./_shared/user-auth.mts";
 
 export default async (req: Request, context: Context) => {
   const proposalId = context.params.proposalId;
@@ -7,12 +12,22 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing proposalId" }, { status: 400 });
   }
 
+  // 협업 대화 전문과 첨부 파일이 그대로 들어 있다. proposalId 만 알면 누구나 읽을 수
+  // 있었으므로, 로그인한 사람인지 먼저 확인하고 대화를 읽은 뒤 그 대화의 당사자
+  // (인플루언서 · 업체) 인지 대조한다. 당사자를 알려면 자원을 먼저 읽어야 하므로
+  // 토큰 검증은 여기서 한 번만 한다.
+  const caller = await requireSignedInUser(req);
+  if (!caller.ok) return caller.response;
+
   const store = getStore("timelines");
   const key = `detail_${proposalId}`;
 
   if (req.method === "GET") {
     const data = await store.get(key, { type: "json" }) as any;
     if (data) {
+      if (!callerIsAnyOf(caller, [data.influencerUsername, data.businessUsername])) {
+        return forbiddenResponse();
+      }
       return Response.json({ timeline: data });
     }
 
@@ -31,6 +46,9 @@ export default async (req: Request, context: Context) => {
 
       if (Array.isArray(rows) && rows.length > 0) {
         const row = rows[0] as any;
+        if (!callerIsAnyOf(caller, [row.influencer_username, row.business_username])) {
+          return forbiddenResponse();
+        }
         const comments = Array.isArray(msgRows) ? msgRows.map((m: any) => ({
           id: m.id,
           proposalId: m.proposal_id,

@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs'
 import { lookupPaymentCancellation, type PaymentProvider } from './payment-cancellation.mts'
+import { mutateBlobJSON } from './blob-write.mts'
 
 /**
  * Claude (Anthropic) credit wallet for the collaboration AI assistant.
@@ -174,15 +175,16 @@ const applyComplimentaryClaudePlan = (username: string, credits: ClaudeCredits):
   }
 }
 
-export const readClaudeCredits = async (username: string): Promise<ClaudeCredits> => {
-  const store = getStore(STORE)
-  const stored = (await store
-    .get(creditsKey(username), { type: 'json' })
-    .catch(() => null)) as (Partial<ClaudeCredits> & {
-    // Legacy ₩-denominated fields, migrated to credits on read (see below).
-    balanceKrw?: number
-    lifetimeSpentKrw?: number
-  }) | null
+/** 저장된 원본(구버전 ₩ 필드 포함)을 현재 스키마로 맞춘다. */
+type StoredCredits =
+  | (Partial<ClaudeCredits> & {
+      // Legacy ₩-denominated fields, migrated to credits on read (see below).
+      balanceKrw?: number
+      lifetimeSpentKrw?: number
+    })
+  | null
+
+const normalizeStoredCredits = (username: string, stored: StoredCredits): ClaudeCredits => {
   if (!stored) return applyComplimentaryClaudePlan(username, blank())
   const base = blank()
   // Migrate wallets written before the ₩→credit switch: their balance was held in
@@ -205,12 +207,40 @@ export const readClaudeCredits = async (username: string): Promise<ClaudeCredits
   })
 }
 
+export const readClaudeCredits = async (username: string): Promise<ClaudeCredits> => {
+  const store = getStore(STORE)
+  const stored = (await store
+    .get(creditsKey(username), { type: 'json' })
+    .catch(() => null)) as StoredCredits
+  return normalizeStoredCredits(username, stored)
+}
+
 export const writeClaudeCredits = async (
   username: string,
   credits: ClaudeCredits,
 ): Promise<void> => {
   const store = getStore(STORE)
   await store.setJSON(creditsKey(username), credits)
+}
+
+/**
+ * 지갑을 "읽고 → 고치고 → 쓰는" 안전한 방법.
+ *
+ * 이 지갑은 세 곳에서 동시에 고쳐진다: AI 호출 시 차감, 크레딧 충전, 환불 반영.
+ * 통째로 읽고 다시 쓰면 그 사이 일어난 다른 변경이 사라진다(충전과 차감이 겹치면
+ * 충전분이 날아가거나 차감이 무시된다). 저장 직전에 값이 그대로인지 확인하고,
+ * 바뀌었으면 최신 값으로 다시 계산한다.
+ *
+ * mutate 는 최신 지갑을 받아 새 지갑을 반환한다. null 을 반환하면 쓰지 않는다.
+ */
+export const mutateClaudeCredits = async (
+  username: string,
+  mutate: (credits: ClaudeCredits) => ClaudeCredits | null,
+): Promise<ClaudeCredits> => {
+  const result = await mutateBlobJSON<any>(STORE, creditsKey(username), (raw) =>
+    mutate(normalizeStoredCredits(username, raw as StoredCredits)),
+  )
+  return normalizeStoredCredits(username, result as StoredCredits)
 }
 
 // ── Refunds ──────────────────────────────────────────────────────────────────
@@ -300,21 +330,20 @@ export const syncClaudeRefunds = async (
     return { credits, revokedCredits: 0 }
   }
 
-  const next: ClaudeCredits = {
-    ...credits,
-    grants: credits.grants.map((g) => ({ ...g })),
-  }
-  const targets = next.grants
-    .filter((g) => isRefundSyncCandidate(g, now))
-    .slice(0, REFUND_SYNC_MAX_LOOKUPS)
+  const targets = candidates.slice(0, REFUND_SYNC_MAX_LOOKUPS)
 
   let revokedCredits = 0
   let checked = 0
+  // PG 조회 결과(지급 건별 취소 금액)를 먼저 모은다. 실제 지갑 반영은 조건부 쓰기
+  // 안에서 최신 값에 대고 다시 계산해야, 그 사이 일어난 충전·차감이 사라지지 않는다.
+  const cancellations: { paymentId: string; cancelledKrw: number }[] = []
   for (const grant of targets) {
     const lookup = await lookupPaymentCancellation(grant.paymentId!, grant.provider)
     if (!lookup.ok) continue // 조회 실패/미확인 건은 건드리지 않는다(오차감 방지).
     checked += 1
-    if (lookup.cancelledKrw > 0) revokedCredits += applyGrantRefund(next, grant, lookup.cancelledKrw)
+    if (lookup.cancelledKrw > 0) {
+      cancellations.push({ paymentId: grant.paymentId!, cancelledKrw: lookup.cancelledKrw })
+    }
   }
 
   if (checked === 0) {
@@ -322,21 +351,35 @@ export const syncClaudeRefunds = async (
     return { credits, revokedCredits: 0 }
   }
 
-  next.lastRefundSyncAt = new Date().toISOString()
+  const saved = await mutateClaudeCredits(username, (latest) => {
+    const draft: ClaudeCredits = {
+      ...latest,
+      grants: latest.grants.map((g) => ({ ...g })),
+    }
 
-  // 플랜 시작 결제가 전액 취소되면 클로드 플랜 자체를 비활성으로 되돌린다.
-  const activationGrants = next.grants.filter((g) => g.kind === 'activation' && g.paymentId)
-  const activationFullyRefunded =
-    activationGrants.length > 0 &&
-    activationGrants.every((g) => (g.refundedKrw || 0) >= (Number(g.amountKrw) || 0))
-  if (activationFullyRefunded && next.planActive) {
-    next.planActive = false
-    next.planActivatedAt = null
-  }
+    revokedCredits = 0
+    for (const { paymentId, cancelledKrw } of cancellations) {
+      const grant = draft.grants.find((g) => g.paymentId === paymentId)
+      if (grant) revokedCredits += applyGrantRefund(draft, grant, cancelledKrw)
+    }
 
-  await writeClaudeCredits(username, next)
+    draft.lastRefundSyncAt = new Date().toISOString()
+
+    // 플랜 시작 결제가 전액 취소되면 클로드 플랜 자체를 비활성으로 되돌린다.
+    const activationGrants = draft.grants.filter((g) => g.kind === 'activation' && g.paymentId)
+    const activationFullyRefunded =
+      activationGrants.length > 0 &&
+      activationGrants.every((g) => (g.refundedKrw || 0) >= (Number(g.amountKrw) || 0))
+    if (activationFullyRefunded && draft.planActive) {
+      draft.planActive = false
+      draft.planActivatedAt = null
+    }
+
+    return draft
+  })
+
   // 무료 제공 계정은 환불과 무관하게 플랜/잔액이 유지되어야 하므로 오버레이를 다시 적용한다.
-  return { credits: applyComplimentaryClaudePlan(username, next), revokedCredits }
+  return { credits: applyComplimentaryClaudePlan(username, saved), revokedCredits }
 }
 
 /** 지갑을 읽고 환불 반영까지 마친 상태를 돌려준다. */

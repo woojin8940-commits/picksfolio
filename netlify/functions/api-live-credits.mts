@@ -1,7 +1,7 @@
 import {
   computeLiveUsage,
+  mutateLiveCredits,
   readLiveCredits,
-  writeLiveCredits,
 } from './_shared/live-usage.mts'
 import {
   CHARGE_RATE_KRW_PER_HOUR,
@@ -12,6 +12,7 @@ import {
 import type { Config, Context } from '@netlify/functions'
 import { confirmTossPayment } from './_shared/toss-payments.mts'
 import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
+import { requireAccountOwner } from './_shared/user-auth.mts'
 
 // Prepaid live-time top-up ("시간 충전하기").
 //   GET  /api/live-credits/:username                          → current month balance + usage
@@ -34,6 +35,10 @@ export default async (req: Request, context: Context) => {
   if (!username) {
     return Response.json({ error: 'Missing username' }, { status: 400 })
   }
+
+  // 잔여 송출 시간·결제 이력이고, 쓰기는 유료 시간을 얹는다. 본인(또는 관리자)만.
+  const auth = await requireAccountOwner(req, username)
+  if (!auth.ok) return auth.response
 
   try {
     const now = new Date()
@@ -81,6 +86,8 @@ export default async (req: Request, context: Context) => {
 
       // Idempotency: never credit the same PortOne payment twice (e.g. on a
       // double-submit or a retried request after a transient network error).
+      // (결제 검증 전에 하는 빠른 차단용이다. 동시에 들어온 두 요청은 둘 다 통과할 수
+      //  있으므로, 실제 적립 직전에 최신 잔액으로 한 번 더 확인한다.)
       if ((credits.charges || []).some((c) => c.paymentId === paymentId)) {
         const usage = await computeLiveUsage(username, now)
         return Response.json({ success: true, alreadyProcessed: true, credits, usage })
@@ -117,26 +124,54 @@ export default async (req: Request, context: Context) => {
           paymentId,
           expectedKrw: amountKrw,
           payMethod,
+          // 남의 결제번호를 주워와 자기 시간으로 충전하는 것을 막는다.
+          expectedOwner: username,
         })
         if (!verified.ok) {
           return Response.json({ error: verified.error }, { status: verified.status })
         }
       }
 
-      // Payment verified — credit the time.
-      credits.chargedMinutes += addedMinutes
-      credits.charges = [
-        { at: now.toISOString(), hours, minutes: addedMinutes, amountKrw, paymentId, payMethod },
-        ...(credits.charges || []),
-      ].slice(0, 100)
-
-      await writeLiveCredits(username, credits)
+      // Payment verified — credit the time. 적립은 최신 잔액에 대고 조건부로 쓴다.
+      // 결제 검증에 걸리는 시간 동안 다른 충전이나 사용이 겹쳐도 서로를 덮어쓰지 않는다.
+      // (월 한도 재확인은 여기서 하지 않는다. 이미 결제가 승인된 뒤라 거절하면 돈만
+      //  받고 시간을 안 주는 상태가 되므로, 동시 충전으로 한도를 조금 넘는 편이 낫다.)
+      let alreadyProcessed = false
+      const saved = await mutateLiveCredits(
+        username,
+        (latest) => {
+          if ((latest.charges || []).some((c) => c.paymentId === paymentId)) {
+            alreadyProcessed = true
+            return null
+          }
+          alreadyProcessed = false
+          return {
+            ...latest,
+            chargedMinutes: latest.chargedMinutes + addedMinutes,
+            charges: [
+              {
+                at: now.toISOString(),
+                hours,
+                minutes: addedMinutes,
+                amountKrw,
+                paymentId,
+                payMethod,
+              },
+              ...(latest.charges || []),
+            ].slice(0, 100),
+          }
+        },
+        now,
+      )
 
       const usage = await computeLiveUsage(username, now)
+      if (alreadyProcessed) {
+        return Response.json({ success: true, alreadyProcessed: true, credits: saved, usage })
+      }
       return Response.json({
         success: true,
         charged: { hours, minutes: addedMinutes, amountKrw },
-        credits,
+        credits: saved,
         usage,
       })
     }

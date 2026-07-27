@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
+import { authHeaders } from '../services/apiService';
 import type { ClaudeCreditsResponse } from '../services/apiService';
 import {
   payClaudePlan,
@@ -253,7 +254,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     try {
       const res = await fetch('/api/collab-ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           username: normalizedUserName.toLowerCase(),
           userType,
@@ -328,7 +329,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   const fetchTimelines = useCallback(async () => {
     try {
-      const res = await fetch(`/api/timeline/list/${normalizedUserName}?type=${userType}`);
+      const res = await fetch(`/api/timeline/list/${normalizedUserName}?type=${userType}`, {
+        headers: await authHeaders(),
+      });
       const data = await res.json();
       if (data.timelines) {
         setTimelines(data.timelines);
@@ -359,7 +362,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       }
     }
     try {
-      const res = await fetch(`/api/timeline/detail/${proposalId}`);
+      const res = await fetch(`/api/timeline/detail/${proposalId}`, {
+        headers: await authHeaders(),
+      });
       const data = await res.json();
       if (data.timeline) {
         const serverCount = (data.timeline.comments || []).length;
@@ -380,7 +385,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         try { localStorage.setItem(detailCacheKey(proposalId), JSON.stringify(data.timeline)); } catch {}
         fetch(`/api/timeline/read/${proposalId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ username: normalizedUserName.toLowerCase() }),
         }).catch(() => {});
       }
@@ -486,7 +491,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
         const res = await fetch(`/api/timeline/comment/${proposalId}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             authorType: userType,
             authorName: normalizedUserName,

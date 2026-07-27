@@ -2,6 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { addSettlementForProposal, parseAmount } from "./_shared/collab-records.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -161,7 +162,7 @@ export default async (req: Request) => {
           content: campaign?.description || "",
           start_date: campaign?.start_date || "",
           end_date: campaign?.end_date || "",
-          fee: parseInt(campaign?.reward_amount) || 0,
+          fee: parseAmount(campaign?.reward_amount),
           revenue_share: 0,
           reference_links: [],
           attachments: [],
@@ -199,55 +200,28 @@ export default async (req: Request) => {
 
         // 3) Auto-create settlement record for accepted campaign collaboration
         try {
-          const settlementStore = getStore("settlements");
           const stlId = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const stlNow = new Date().toISOString();
-          const fee = parseInt(campaign?.reward_amount) || 0;
           const scheduledDate = (() => {
             const d = new Date();
             d.setDate(d.getDate() + 30);
             return d.toISOString().split("T")[0];
           })();
 
-          const settlement = {
+          await addSettlementForProposal({
             id: stlId,
             proposal_id: proposalId,
             influencer_username: creatorUsername,
             business_username: businessUsername,
             company_name: companyName,
             title: campaignTitle,
-            amount: fee,
+            amount: parseAmount(campaign?.reward_amount),
             scheduled_date: scheduledDate,
             status: "scheduled",
             memo: "캠페인 수락 시 자동 생성",
             created_at: stlNow,
             updated_at: stlNow,
-          };
-
-          const getRecordsFrom = async (key: string) => {
-            const data = (await settlementStore.get(key, { type: "json" })) as any;
-            if (Array.isArray(data)) return data;
-            if (data && Array.isArray(data.records)) return data.records;
-            if (data && Array.isArray(data.settlements)) return data.settlements;
-            return [];
-          };
-
-          const bizKey = `settlements_biz_${businessUsername}`;
-          const infKey = `settlements_inf_${creatorUsername}`;
-
-          const [bizSettlements, infSettlements] = await Promise.all([
-            getRecordsFrom(bizKey),
-            getRecordsFrom(infKey),
-          ]);
-
-          if (!bizSettlements.some((s: any) => s.proposal_id === proposalId)) {
-            bizSettlements.push(settlement);
-            await settlementStore.setJSON(bizKey, bizSettlements);
-          }
-          if (!infSettlements.some((s: any) => s.proposal_id === proposalId)) {
-            infSettlements.push(settlement);
-            await settlementStore.setJSON(infKey, infSettlements);
-          }
+          });
         } catch (stlErr) {
           console.error("[campaign-applicants] Failed to auto-create settlement:", stlErr);
         }

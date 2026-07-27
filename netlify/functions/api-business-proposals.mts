@@ -1,5 +1,9 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
+
+const STORE = "business-proposals";
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -7,7 +11,12 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  const store = getStore("business-proposals");
+  // 업체가 보낸/받은 제안 목록이다(인플루언서 이름 · 제안 금액 · 담당자 연락처).
+  // 해당 업체 계정 본인(또는 관리자)만.
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
+
+  const store = getStore(STORE);
   const key = `biz_proposals_${username}`;
 
   if (req.method === "GET") {
@@ -106,20 +115,35 @@ export default async (req: Request, context: Context) => {
 
     allProposals.sort((a: any, b: any) => new Date(b.createdAt || b.created_at || 0).getTime() - new Date(a.createdAt || a.created_at || 0).getTime());
 
-    context.waitUntil(store.setJSON(key, allProposals).catch(() => {}));
+    // 조회 중에 새 제안이 들어올 수 있으므로, 통째로 덮어쓰지 않고 최신 목록에
+    // 없는 것만 합친다(덮어쓰면 방금 접수된 제안이 사라진다).
+    context.waitUntil(
+      mutateBlobJSON<any[]>(STORE, key, (current) => {
+        const latest = Array.isArray(current) ? current : [];
+        const latestIds = new Set(latest.map((p: any) => p?.id));
+        const merged = [...latest, ...allProposals.filter((p: any) => !latestIds.has(p?.id))];
+        merged.sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt || b.created_at || 0).getTime() -
+            new Date(a.createdAt || a.created_at || 0).getTime()
+        );
+        return merged;
+      }).catch(() => null)
+    );
 
     return Response.json({ proposals: allProposals });
   }
 
   if (req.method === "POST") {
     const body = await req.json();
-    const existing = (await store.get(key, { type: "json" })) as any[] || [];
-    existing.push({
-      id: `biz_${Date.now()}`,
-      ...body,
-      createdAt: new Date().toISOString(),
-    });
-    await store.setJSON(key, existing);
+    await mutateBlobJSON<any[]>(STORE, key, (current) => [
+      ...(Array.isArray(current) ? current : []),
+      {
+        ...body,
+        id: `biz_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
     return Response.json({ success: true });
   }
 

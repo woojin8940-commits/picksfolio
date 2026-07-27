@@ -283,7 +283,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(data)
       });
       if (res.ok) {
@@ -371,7 +371,9 @@ export const apiService = {
 
   async getProposals(username: string): Promise<BusinessProposal[]> {
     try {
-      const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return data.proposals || [];
@@ -389,7 +391,7 @@ export const apiService = {
       }
       const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}/${proposalId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
       });
       return res.ok;
@@ -402,7 +404,8 @@ export const apiService = {
   async deleteProposal(username: string, proposalId: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}/${proposalId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: await authHeaders(),
       });
       return res.ok;
     } catch (e) {
@@ -561,7 +564,9 @@ export const apiService = {
   // Collaboration Records API
   async getCollabRecords(username: string): Promise<CollabRecord[]> {
     try {
-      const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return data.records || [];
@@ -575,7 +580,9 @@ export const apiService = {
   // 협업 현황 page reads these so completed settlements also surface in 협업 내역.
   async getSettlements(username: string): Promise<Settlement[]> {
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=influencer`);
+      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=influencer`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return data.settlements || [];
@@ -589,7 +596,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(record)
       });
       if (!res.ok) return null;
@@ -605,7 +612,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}/${collabId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updates)
       });
       return res.ok;
@@ -618,7 +625,8 @@ export const apiService = {
   async deleteCollabRecord(username: string, collabId: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}/${collabId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: await authHeaders(),
       });
       return res.ok;
     } catch (e) {
@@ -658,7 +666,9 @@ export const apiService = {
     stats: { totalViewers: number; totalItems: number; totalRevenue: number; productCounts: { productId: string; name: string; count: number; image?: string; link: string; price?: string; optionCounts: Record<string, Record<string, number>> }[] };
   } | null> {
     try {
-      const res = await fetch(`/api/live-cart/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/live-cart/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return null;
       return await res.json();
     } catch (e) {
@@ -683,7 +693,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/live-cart/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ viewerId })
       });
       return res.ok;
@@ -696,7 +706,8 @@ export const apiService = {
   async clearLiveCart(username: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/live-cart/${encodeURIComponent(username.toLowerCase())}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: await authHeaders(),
       });
       return res.ok;
     } catch (e) {
@@ -843,7 +854,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/live-credits/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ hours, paymentId: payment.paymentId, payMethod: payment.payMethod }),
       });
       const data = await res.json().catch(() => ({}));
@@ -930,7 +941,9 @@ export const apiService = {
 
   async getSellerVerification(username: string): Promise<SellerVerification | null> {
     try {
-      const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return null;
       const data = (await res.json()) as SellerVerification;
       writeVerificationCache(username, data);
@@ -945,7 +958,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(data),
       });
       const json = await res.json();
@@ -992,7 +1005,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/billing-issue', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ username: username.toLowerCase(), billingKey, tier }),
       });
       const json = await res.json();
@@ -1025,7 +1038,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/billing-issue', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ username: username.toLowerCase(), tier, card }),
       });
       const json = await res.json();
@@ -1055,6 +1068,7 @@ export const apiService = {
       const query = options.refresh ? '?refresh=1' : '';
       const res = await fetch(
         `/api/claude-credits/${encodeURIComponent(username.toLowerCase())}${query}`,
+        { headers: await authHeaders() },
       );
       if (!res.ok) return null;
       return (await res.json()) as ClaudeCreditsResponse;
@@ -1076,7 +1090,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/claude-credits/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
@@ -1173,9 +1187,12 @@ export const apiService = {
   // ───────────────────── Live Shipping Profile (orderer + 배송지) ─────────────────────
   // Fetch the viewer's last-used orderer/shipping details so the live checkout
   // form can be pre-filled. Returns null when nothing has been saved yet.
-  async getShippingProfile(viewerId: string): Promise<ShippingProfile | null> {
+  //
+  // `profileKey` 는 이 브라우저에만 저장되는 난수 열쇠다(viewerId 와 다른 값).
+  // viewerId 는 판매자 화면에 보이므로 그것을 열쇠로 쓰면 남의 배송지가 열린다.
+  async getShippingProfile(profileKey: string): Promise<ShippingProfile | null> {
     try {
-      const res = await fetch(`/api/live-shipping-profile?viewerId=${encodeURIComponent(viewerId)}`);
+      const res = await fetch(`/api/live-shipping-profile?profileKey=${encodeURIComponent(profileKey)}`);
       if (!res.ok) return null;
       const json = await res.json();
       return (json?.profile as ShippingProfile) || null;
@@ -1186,12 +1203,12 @@ export const apiService = {
   },
 
   // Persist the viewer's orderer/shipping details for reuse on their next order.
-  async saveShippingProfile(viewerId: string, profile: ShippingProfile): Promise<boolean> {
+  async saveShippingProfile(profileKey: string, profile: ShippingProfile): Promise<boolean> {
     try {
       const res = await fetch('/api/live-shipping-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ viewerId, profile }),
+        body: JSON.stringify({ profileKey, profile }),
       });
       return res.ok;
     } catch (e) {
@@ -1203,7 +1220,9 @@ export const apiService = {
   // ───────────────────── Site Data Snapshots & Restore ─────────────────────
   async getSiteDataSnapshots(username: string): Promise<{ snapshots: { id: number; snapshot_reason: string; created_at: string; block_count: number; portfolio_count: number }[] }> {
     try {
-      const res = await fetch(`/api/site-restore/${encodeURIComponent(username.toLowerCase())}`);
+      const res = await fetch(`/api/site-restore/${encodeURIComponent(username.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return { snapshots: [] };
       return await res.json();
     } catch (e) {
@@ -1216,7 +1235,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/site-restore/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ snapshot_id: snapshotId })
       });
       return res.ok;

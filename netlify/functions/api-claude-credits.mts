@@ -8,14 +8,15 @@ import {
   MARGIN_MULTIPLIER,
   RECHARGE_PACKS_KRW,
   creditsForKrw,
+  mutateClaudeCredits,
   readClaudeCredits,
   readClaudeCreditsSynced,
   syncClaudeRefunds,
-  writeClaudeCredits,
   publicCredits,
   type ClaudeCredits,
   type ClaudeGrant,
 } from './_shared/claude-credits.mts'
+import { requireAccountOwner } from './_shared/user-auth.mts'
 
 // Claude plan credit wallet API.
 //
@@ -38,8 +39,15 @@ const verifyPortOnePayment = async (
   paymentId: string,
   expectedKrw: number,
   payMethod: string,
+  expectedOwner: string,
 ): Promise<{ ok: boolean; error?: string }> => {
-  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw, payMethod })
+  const verified = await verifyLivePortOnePayment({
+    paymentId,
+    expectedKrw,
+    payMethod,
+    // 남의 결제번호를 주워와 자기 지갑에 적립하는 것을 막는다.
+    expectedOwner,
+  })
   return verified.ok ? { ok: true } : { ok: false, error: verified.error }
 }
 
@@ -60,6 +68,10 @@ export default async (req: Request, context: Context) => {
   if (!username) {
     return Response.json({ error: '사용자 정보가 필요합니다.' }, { status: 400 })
   }
+
+  // 지갑 잔액·결제 이력이며, 쓰기는 크레딧을 지급한다. 본인(또는 관리자)만.
+  const auth = await requireAccountOwner(req, username)
+  if (!auth.ok) return auth.response
 
   try {
     if (req.method === 'GET') {
@@ -116,6 +128,8 @@ export default async (req: Request, context: Context) => {
       const credits = await readClaudeCredits(username)
 
       // Idempotency: never credit the same payment twice.
+      // (이 확인은 PG 검증 전에 하는 빠른 차단용이다. 두 요청이 동시에 들어오면 둘 다
+      //  통과할 수 있으므로, 실제 지급 직전에 최신 지갑으로 한 번 더 확인한다.)
       if (credits.grants.some((g) => g.paymentId && g.paymentId === paymentId)) {
         return respond(credits, { alreadyProcessed: true })
       }
@@ -133,7 +147,7 @@ export default async (req: Request, context: Context) => {
           )
         }
       } else {
-        const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod)
+        const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod, username)
         if (!verified.ok) {
           return Response.json({ error: verified.error }, { status: 400 })
         }
@@ -144,12 +158,6 @@ export default async (req: Request, context: Context) => {
       // tracks real money; the wallet balance tracks credits.
       const grantCredits =
         kind === 'activation' ? ACTIVATION_GRANT_CREDITS : creditsForKrw(amountKrw)
-      credits.balanceCredits += grantCredits
-      credits.lifetimeChargedKrw += amountKrw
-      if (kind === 'activation') {
-        credits.planActive = true
-        if (!credits.planActivatedAt) credits.planActivatedAt = new Date().toISOString()
-      }
       const grant: ClaudeGrant = {
         at: new Date().toISOString(),
         amountKrw,
@@ -160,10 +168,35 @@ export default async (req: Request, context: Context) => {
         // 환불 조회를 어느 PG 에 해야 하는지 기록해 둔다(포트원 paymentId / 토스 paymentKey).
         provider: isToss ? 'toss' : 'portone',
       }
-      credits.grants = [grant, ...credits.grants].slice(0, 100)
 
-      await writeClaudeCredits(username, credits)
-      return respond(credits, { granted: { credits: grantCredits, amountKrw, kind } })
+      // 지급은 최신 지갑에 대고 조건부로 쓴다. 그래야 (1) 결제 확인에 걸리는 시간 동안
+      // 겹쳐 들어온 같은 결제가 두 번 지급되지 않고, (2) 그 사이 AI 사용으로 차감된
+      // 크레딧이 되살아나지 않는다.
+      let duplicated = false
+      const saved = await mutateClaudeCredits(username, (latest) => {
+        if (latest.grants.some((g) => g.paymentId && g.paymentId === paymentId)) {
+          duplicated = true
+          return null
+        }
+        duplicated = false
+
+        const next: ClaudeCredits = {
+          ...latest,
+          balanceCredits: latest.balanceCredits + grantCredits,
+          lifetimeChargedKrw: latest.lifetimeChargedKrw + amountKrw,
+          grants: [grant, ...latest.grants].slice(0, 100),
+        }
+        if (kind === 'activation') {
+          next.planActive = true
+          if (!next.planActivatedAt) next.planActivatedAt = grant.at
+        }
+        return next
+      })
+
+      if (duplicated) {
+        return respond(saved, { alreadyProcessed: true })
+      }
+      return respond(saved, { granted: { credits: grantCredits, amountKrw, kind } })
     }
 
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
