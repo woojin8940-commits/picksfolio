@@ -75,6 +75,7 @@ const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement')
 const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeline'));
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
+import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
 type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
@@ -88,8 +89,90 @@ const LazyFallback = () => (
   </div>
 );
 
+// Records that the user asked for the homepage on purpose (header "홈"), so that
+// reloading — pull-to-refresh is always on in the native shell — doesn't bounce
+// them into the dashboard as if the app had just been launched. Deliberately
+// short-lived so a later cold start still lands on the dashboard even if the
+// WebView happened to keep sessionStorage around.
+const HOME_INTENT_KEY = 'picks_home_intent';
+const HOME_INTENT_TTL = 5 * 60 * 1000;
+
+function markHomeIntent(): void {
+  try { sessionStorage.setItem(HOME_INTENT_KEY, Date.now().toString()); } catch {}
+}
+
+function hasRecentHomeIntent(): boolean {
+  try {
+    const stamp = sessionStorage.getItem(HOME_INTENT_KEY);
+    if (!stamp) return false;
+    return Date.now() - parseInt(stamp, 10) < HOME_INTENT_TTL;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Which view a native-app launch should open directly, or null for the normal
+ * "start on the homepage" behaviour.
+ *
+ * The native shell always loads the site root, so a signed-in user used to land
+ * on the public marketing homepage and tap through to their dashboard on every
+ * single launch. When there is a cached session we open the dashboard as the
+ * very first render instead — `isLoggedIn`/`userName`/`profileChecked` are all
+ * seeded from that same cache, so the dashboard paints immediately with no
+ * homepage flash, and Supabase confirms (or invalidates) the session in the
+ * background exactly as before.
+ *
+ * Deliberately conservative: only the native app, only the bare root url, never
+ * during an OAuth callback (the login flow owns that redirect), never a push
+ * deep link, and never right after the user asked for the homepage themselves.
+ * And only when there is a real auth token to go with the cached username — a
+ * user who has to log in must see the homepage, not a dashboard that bounces.
+ */
+function launchDashboardView(): View | null {
+  if (!isNativeApp()) return null;
+  try {
+    if (window.location.pathname.replace(/^\//, '')) return null;
+    if (window.location.hash.includes('access_token')) return null;
+    if (window.location.hash.includes('invite_token=')) return null;
+    if (new URLSearchParams(window.location.search).get('code')) return null;
+    if (hasRecentHomeIntent()) return null;
+    // A creator (Kakao) session wins over a business one when both are cached.
+    if (localStorage.getItem('picks_user_session') && hasStoredSupabaseSession()) return 'admin';
+    if (
+      localStorage.getItem('picks_business_session') &&
+      localStorage.getItem('picks_business_access_token')
+    ) {
+      return 'business-admin';
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * True when Supabase has a persisted session in localStorage (`sb-<ref>-auth-token`).
+ * Its access token may well be expired — Supabase refreshes it on start-up — but
+ * if the entry is gone entirely then the user is signed out and needs to log in.
+ */
+function hasStoredSupabaseSession(): boolean {
+  try {
+    return Object.keys(localStorage).some((key) => /^sb-.*-auth-token$/.test(key));
+  } catch {
+    return false;
+  }
+}
+
 const App: React.FC = () => {
-  const [view, setView] = useState<View>('home');
+  // Native-app launch shortcut, resolved once per page load before the first
+  // render so the dashboard can be the initial view (see launchDashboardView).
+  const launchViewRef = useRef<View | null>(launchDashboardView());
+  // Same decision, kept for the whole page load: if the cached session turns out
+  // to be dead, an app launch falls back to the homepage (where the user can log
+  // in) instead of dropping them straight onto the login form.
+  const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
+  const [view, setView] = useState<View>(() => launchViewRef.current ?? 'home');
   const [subView, setSubView] = useState<SubView>('dashboard');
   const [targetUser, setTargetUser] = useState('');
   const [initialId, setInitialId] = useState('');
@@ -564,16 +647,34 @@ const App: React.FC = () => {
         setProfileRole(userRole);
         localStorage.setItem('picks_user_session', existingUsername);
         setProfileChecked(true);
+        // Supabase confirmed a live session, so the optimistic launch was right.
+        // From here on, losing the session means a real logout — which belongs on
+        // the login page, not the homepage.
+        launchedIntoDashboardRef.current = false;
 
         const currentView = viewRef.current;
+        // Native app cold start: the shell always loads the site root, so a
+        // signed-in user would land on the public marketing homepage and have to
+        // tap through to their dashboard every single launch. Treat that first
+        // restored session like a login and drop them straight into the
+        // dashboard instead. Only the initial page load qualifies
+        // (INITIAL_SESSION), so tapping "홈" inside the app still works — and a
+        // reload right after doing so is honored via the home-intent marker set
+        // by navigate().
+        const isAppLaunchOnHome =
+          currentView === 'home' &&
+          event === 'INITIAL_SESSION' &&
+          isNativeApp() &&
+          !hasRecentHomeIntent();
         // Only redirect away from the "login" entry page; preserve settled/valid pages.
-        // The home page is intentionally NOT auto-redirected: a logged-in user who
-        // visits the main homepage stays there and must press a button (e.g. the
-        // header "dashboard" link) to move to the dashboard. This prevents the
+        // On the web the home page is intentionally NOT auto-redirected: a logged-in
+        // user who visits the main homepage stays there and must press a button (e.g.
+        // the header "dashboard" link) to move to the dashboard. This prevents the
         // homepage from jumping to the dashboard on its own after a restored session.
         // Exclude 'signup' and 'business-signup' — users who explicitly navigated there should stay
-        if (currentView === 'login') {
-          // Redirect logged-in users to dashboard from the login page only.
+        if (currentView === 'login' || isAppLaunchOnHome) {
+          // Redirect logged-in users to dashboard from the login page (and, in the
+          // native app, from the launch homepage).
           // This covers fresh logins (OAuth callback) and restored sessions that
           // land on the login page.
           // Set loginTransitioning BEFORE clearing oauthProcessing to prevent
@@ -764,15 +865,23 @@ const App: React.FC = () => {
     };
   }, []); // Only run once on mount
 
-  // Persistent auto-logout after 2 hours of inactivity.
-  // The check runs on mount BEFORE seeding picks_last_activity so a stale
-  // timestamp (e.g. browser closed for 3 hours, or the computer was asleep)
-  // is honored and logs the user out instead of being overwritten with "now".
-  // The timer is refreshed by real user interaction (mousemove/keydown/scroll/
-  // touchstart/click), so passively sitting on any view — public or protected —
-  // counts as inactivity once those events stop firing.
+  // Persistent auto-logout after 2 hours of inactivity — desktop only.
+  // On mobile (native shell or mobile web) the login is meant to last: see
+  // isPersistentLoginEnv(). There the effect exits immediately and drops the
+  // stored timestamp, so a session that predates this behaviour can't be
+  // logged out by a stale value either.
+  // On desktop the check runs on mount BEFORE seeding picks_last_activity so a
+  // stale timestamp (e.g. browser closed for 3 hours, or the computer was
+  // asleep) is honored and logs the user out instead of being overwritten with
+  // "now". The timer is refreshed by real user interaction (mousemove/keydown/
+  // scroll/touchstart/click), so passively sitting on any view — public or
+  // protected — counts as inactivity once those events stop firing.
   useEffect(() => {
     if (!isLoggedIn) return;
+    if (isPersistentLoginEnv()) {
+      localStorage.removeItem('picks_last_activity');
+      return;
+    }
 
     const INACTIVITY_LIMIT = 2 * 60 * 60 * 1000;
     let loggedOut = false;
@@ -877,9 +986,14 @@ const App: React.FC = () => {
     };
   }, [isLoggedIn]);
 
-  // Business account inactivity timer (separate from regular user timer)
+  // Business account inactivity timer (separate from regular user timer).
+  // Same rule as above: desktop only, mobile logins stay signed in.
   useEffect(() => {
     if (!isBusinessLoggedIn) return;
+    if (isPersistentLoginEnv()) {
+      localStorage.removeItem('picks_business_last_activity');
+      return;
+    }
 
     const INACTIVITY_LIMIT = 2 * 60 * 60 * 1000;
     let loggedOut = false;
@@ -1080,7 +1194,20 @@ const App: React.FC = () => {
         setView('operator-login');
         return;
       }
-      if (!path) setView('home');
+      if (!path) {
+        // First run of a native-app launch that opened the dashboard directly:
+        // keep it and align the url with it, instead of resetting to the
+        // homepage. Consumed once, so a later Back/popstate to "/" still lands
+        // on the homepage as usual.
+        const launchView = launchViewRef.current;
+        launchViewRef.current = null;
+        if (launchView) {
+          window.history.replaceState(null, '', `/${launchView}`);
+          setView(launchView);
+          return;
+        }
+        setView('home');
+      }
       else if (path === 'setup-link') {
         const savedUser = localStorage.getItem('picks_user_session');
         if (savedUser && isLoggedIn) {
@@ -1113,6 +1240,9 @@ const App: React.FC = () => {
     } else if (newView !== 'home') {
       path = `/${newView}`;
     }
+    // Remember/forget a deliberate visit to the homepage so the native app's
+    // launch redirect can tell "just opened the app" from "tapped 홈".
+    if (newView === 'home') markHomeIntent();
     setView(newView);
     window.history.pushState(null, '', path);
     window.scrollTo(0, 0);
@@ -1219,8 +1349,11 @@ const App: React.FC = () => {
   }
   if (view === 'business-admin') {
     if (!isBusinessLoggedIn || !businessUsername) {
-      // Redirect to business login
-      setTimeout(() => navigate('business-login'), 0);
+      // Redirect to business login — or back to the homepage when this was an
+      // app launch on a session that turned out to be dead.
+      const fallback: View = launchedIntoDashboardRef.current ? 'home' : 'business-login';
+      launchedIntoDashboardRef.current = false;
+      setTimeout(() => navigate(fallback), 0);
       return null;
     }
     return (
@@ -1306,7 +1439,9 @@ const App: React.FC = () => {
   }
   if (view === 'admin') {
     if (!isLoggedIn || !userName) {
-      setTimeout(() => navigate('login'), 0);
+      const fallback: View = launchedIntoDashboardRef.current ? 'home' : 'login';
+      launchedIntoDashboardRef.current = false;
+      setTimeout(() => navigate(fallback), 0);
       return null;
     }
     if (!profileChecked && supabase) {
