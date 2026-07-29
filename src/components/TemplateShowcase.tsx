@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Grid, List, CheckCircle2 } from 'lucide-react';
+import { Grid, List, Briefcase, Bell, ExternalLink } from 'lucide-react';
 
 interface TemplateShowcaseProps {
   onSignup: () => void;
@@ -9,18 +9,18 @@ interface TemplateShowcaseProps {
 }
 
 const templates = [
-  { 
-    id: 'shoppable', 
-    name: '쇼퍼블 그리드', 
+  {
+    id: 'shoppable',
+    name: '쇼퍼블 그리드',
     icon: Grid,
     description: '인스타그램 피드와 상품 정보를 하나로',
     title: '쇼퍼블 그리드',
     subtitle: '인스타그램 피드와 동일한 경험을 제공합니다. 클릭 시 상품 정보가 하단에서 스윽 올라옵니다.',
     features: ['인스타 피드 동기화', '상품 정보 오버레이', '끊김 없는 쇼핑 경험']
   },
-  { 
-    id: 'minimal', 
-    name: '미니멀 브랜드', 
+  {
+    id: 'minimal',
+    name: '미니멀 브랜드',
     icon: List,
     description: '깔끔하고 정돈된 브랜드 아이덴티티',
     title: '미니멀 브랜드',
@@ -28,6 +28,28 @@ const templates = [
     features: ['미니멀 디자인', '브랜드 스토리텔링', '깔끔한 상품 목록']
   },
 ];
+
+const ACCENT = '#2563EB';
+const SCREEN_BG = '#1E1E2E';
+
+/** 실제 공개 페이지(UserPage)의 dense 그리드와 동일한 span 규칙: 1=풀폭, 2=1/2, 3=1/3 */
+const gridItems = [
+  { seed: 'pfg1', span: 3, title: 'Spring Layering', category: 'FASHION', count: 4 },
+  { seed: 'pfg2', span: 3, title: 'Daily Glow Kit', category: 'BEAUTY', count: 3 },
+  { seed: 'pfg3', span: 2, title: 'Desk Setup', category: 'LIFE', count: 5 },
+  { seed: 'pfg4', span: 2, title: 'Running Gear', category: 'SPORTS', count: 2 },
+  { seed: 'pfg5', span: 2, title: 'Cafe Picks', category: 'FOOD', count: 6 },
+];
+
+const minimalItems = [
+  { seed: 'pfm1', name: 'Spring Windbreaker' },
+  { seed: 'pfm2', name: 'Wide Denim Pants' },
+  { seed: 'pfm3', name: 'Salomon XT-6' },
+  { seed: 'pfm4', name: 'Cotton Half Zip-up' },
+  { seed: 'pfm5', name: 'Leather Card Wallet' },
+];
+
+const categories = ['전체', 'FASHION', 'BEAUTY', 'LIFE'];
 
 const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
   const [activeTab, setActiveTab] = useState('shoppable');
@@ -64,84 +86,163 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
         </div>
 
         <div className="flex justify-center">
-          {/* Mobile Mockup */}
+          {/* Mobile Mockup — 실제 공개 페이지와 동일한 구성으로 렌더링한다. */}
           <div className="relative flex justify-center">
-            <div className="w-[200px] h-[400px] md:w-[230px] md:h-[460px] bg-[#050505] rounded-[2rem] md:rounded-[2.5rem] border-[6px] md:border-[8px] border-[#1A1D26] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden relative">
-              {/* Mockup Content */}
-              <div className="p-4 pt-12 h-full flex flex-col">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-primary to-blue-secondary"></div>
-                  <div>
-                    <div className="text-xs font-bold text-white flex items-center gap-1">
-                      picks_official <CheckCircle2 className="w-3 h-3 text-blue-400 fill-blue-400" />
-                    </div>
-                    <div className="text-[10px] text-slate-500">Daily Curator & Lifestyle ✨</div>
+            <div
+              className="relative w-[300px] md:w-[380px] aspect-[9/19.5] bg-[#050505] rounded-[2.5rem] md:rounded-[3rem] border-[8px] md:border-[10px] border-[#1A1D26] shadow-[0_0_120px_rgba(37,99,235,0.15)] overflow-hidden"
+            >
+              <div className="w-full h-full flex flex-col overflow-hidden" style={{ backgroundColor: SCREEN_BG }}>
+                {/* Cover Header — 실제 페이지와 동일한 4:5 커버 + 하단 페이드 */}
+                <div className="relative aspect-[4/5] flex-shrink-0">
+                  <img
+                    src="https://picsum.photos/seed/pfcover/720/900"
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    alt=""
+                  />
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: `linear-gradient(to top, ${SCREEN_BG} 0%, ${SCREEN_BG}88 18%, transparent 50%)` }}
+                  />
+                  {/* Dynamic Island */}
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 w-16 h-4 md:w-20 md:h-5 bg-black rounded-full" />
+                  <div className="absolute bottom-3 left-4 right-4">
+                    <h3 className="text-lg md:text-xl font-black tracking-tighter text-white mb-0.5">picks_official</h3>
+                    <p className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em]" style={{ color: ACCENT }}>
+                      Daily Curator & Lifestyle
+                    </p>
                   </div>
                 </div>
 
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeTab}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.3 }}
-                    className="flex-1"
+                {/* Action Buttons — 실제 페이지 헤더의 버튼 세트 */}
+                <div className="flex gap-1.5 px-3 pt-2 pb-1 justify-center flex-wrap flex-shrink-0">
+                  <span
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap"
+                    style={{ backgroundColor: ACCENT }}
                   >
-                    {activeTab === 'shoppable' ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="aspect-[3/4] bg-slate-800 rounded-xl relative overflow-hidden group">
-                          <img src="https://picsum.photos/seed/p1/300/400" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <div className="absolute bottom-2 left-2 bg-white/20 backdrop-blur-md text-[8px] font-bold px-2 py-1 rounded-full text-white">ITEM 5</div>
-                        </div>
-                        <div className="aspect-[3/4] bg-slate-800 rounded-xl relative overflow-hidden">
-                          <img src="https://picsum.photos/seed/p2/300/400" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <div className="absolute top-2 right-2 bg-white/20 backdrop-blur-md text-[8px] font-bold px-2 py-1 rounded-full text-white">ITEM 2</div>
-                        </div>
-                        <div className="aspect-[3/4] bg-slate-800 rounded-xl relative overflow-hidden">
-                          <img src="https://picsum.photos/seed/p3/300/400" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <div className="absolute bottom-2 left-2 bg-white/20 backdrop-blur-md text-[8px] font-bold px-2 py-1 rounded-full text-white">ITEM 3</div>
-                        </div>
-                        <div className="aspect-[3/4] bg-slate-800 rounded-xl relative overflow-hidden">
-                          <img src="https://picsum.photos/seed/p4/300/400" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
-                          <div className="w-12 h-12 rounded-lg bg-slate-800 overflow-hidden">
-                            <img src="https://picsum.photos/seed/m1/100/100" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <Briefcase size={9} strokeWidth={2.5} />
+                    비즈니스 제안
+                  </span>
+                  <span className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-blue-primary">
+                    <Bell size={9} strokeWidth={2.5} />
+                    라이브 알림받기
+                  </span>
+                </div>
+
+                {/* Curation Section Header */}
+                <div className="px-3 pt-2.5 pb-1.5 flex-shrink-0">
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <h4 className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.15em] mb-0.5" style={{ color: ACCENT }}>
+                        My Curations
+                      </h4>
+                      <h3 className="text-xs md:text-sm font-black tracking-tighter text-white">Explore My Picks</h3>
+                    </div>
+                    <div className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-white/20">
+                      {activeTab === 'shoppable' ? gridItems.length : minimalItems.length} Items
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category Tabs */}
+                <div className="px-3 pb-2 flex gap-1.5 overflow-hidden flex-shrink-0">
+                  {categories.map((cat) => (
+                    <span
+                      key={cat}
+                      className={`px-2 py-0.5 text-[8px] md:text-[9px] font-black whitespace-nowrap rounded-full border ${
+                        cat === '전체' ? 'text-white border-transparent' : 'bg-white/10 border-white/20 text-white/50'
+                      }`}
+                      style={cat === '전체' ? { backgroundColor: ACCENT } : {}}
+                    >
+                      {cat}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Content — 탭에 따라 실제 템플릿과 동일한 레이아웃 */}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={activeTab}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                      className="h-full"
+                    >
+                      {activeTab === 'shoppable' ? (
+                        /* 쇼퍼블 그리드: 6칼럼 dense 그리드 + 상품 수 배지 + 하단 그라데이션 캡션 */
+                        <div className="px-2 pb-4">
+                          <div
+                            className="grid grid-flow-dense"
+                            style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px' }}
+                          >
+                            {gridItems.map((item) => (
+                              <div
+                                key={item.seed}
+                                className="relative overflow-hidden aspect-square shadow-sm border border-white/5"
+                                style={{ gridColumn: `span ${item.span}`, borderRadius: '1rem' }}
+                              >
+                                <img
+                                  src={`https://picsum.photos/seed/${item.seed}/400/400`}
+                                  className="w-full h-full object-cover opacity-90"
+                                  referrerPolicy="no-referrer"
+                                  alt=""
+                                />
+                                <div className="absolute top-2 right-2">
+                                  <span className="bg-black/60 backdrop-blur-md text-[8px] font-black px-1.5 py-0.5 rounded-md text-white border border-white/10 shadow-lg">
+                                    {item.count}
+                                  </span>
+                                </div>
+                                <div className="absolute bottom-0 left-0 right-0 p-2.5 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                                  <div className="text-[9px] md:text-[10px] font-black truncate text-white uppercase tracking-tight">
+                                    {item.title}
+                                  </div>
+                                  <div className="text-[7px] md:text-[8px] font-bold text-white/50 uppercase tracking-widest mt-0.5">
+                                    {item.category}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          <div className="flex-1">
-                            <div className="text-[10px] font-bold text-white">Spring Windbreaker</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/1</div>
-                          </div>
                         </div>
-                        <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
-                          <div className="w-12 h-12 rounded-lg bg-slate-800 overflow-hidden">
-                            <img src="https://picsum.photos/seed/m2/100/100" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="text-[10px] font-bold text-white">Wide Denim Pants</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/2</div>
-                          </div>
+                      ) : (
+                        /* 미니멀 브랜드: 실제 페이지와 동일한 전체폭 상품 리스트 행 */
+                        <div className="px-3 pb-4 space-y-2">
+                          {minimalItems.map((item) => (
+                            <div
+                              key={item.seed}
+                              className="flex items-center justify-between p-2.5 border bg-white/5 border-white/10 shadow-sm"
+                              style={{ borderRadius: '1rem' }}
+                            >
+                              <div className="flex items-center gap-2.5 flex-1 min-w-0 mr-2">
+                                <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl overflow-hidden flex-shrink-0 border border-white/10">
+                                  <img
+                                    src={`https://picsum.photos/seed/${item.seed}/120/120`}
+                                    className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                    alt=""
+                                  />
+                                </div>
+                                <span className="text-[10px] md:text-[11px] font-black truncate text-white">{item.name}</span>
+                              </div>
+                              <div
+                                className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-white"
+                                style={{ backgroundColor: ACCENT }}
+                              >
+                                <ExternalLink size={10} />
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="bg-white/5 rounded-2xl p-3 flex items-center gap-4 border border-white/5">
-                          <div className="w-12 h-12 rounded-lg bg-slate-800 overflow-hidden">
-                            <img src="https://picsum.photos/seed/m3/100/100" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="text-[10px] font-bold text-white">Salomon XT-6</div>
-                            <div className="text-[8px] text-blue-primary font-bold">picks-folio.com/product/3</div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
               </div>
+
               {/* Home Indicator */}
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full"></div>
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-28 md:w-32 h-1 bg-white/30 rounded-full" />
             </div>
           </div>
         </div>
