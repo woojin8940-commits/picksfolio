@@ -40,7 +40,12 @@ async function loadCampaign(db: any, campaignId: string) {
            description, reward_type, reward_amount, start_date, end_date, status,
            product_name, product_url, upload_channel, content_format, video_concept,
            guideline_url, guideline_note, second_use_fee, second_use_note,
-           upload_from, upload_to
+           upload_from, upload_to,
+           -- 패키지 등급은 협업 단계를 정한다(시딩에는 대본·검수 단계가 없다).
+           -- 희망 인플루언서 조건은 담당자가 후보를 고를 때 읽는 값이다.
+           package_tier, ad_objective, influencer_gender, influencer_ages,
+           sns_category, follower_tiers, min_views, influencer_styles,
+           exclude_keywords, target_audience
     FROM campaigns WHERE id = ${campaignId}
   `;
   return (rows as any[])?.[0] || null;
@@ -65,6 +70,17 @@ const shapeCampaign = (c: any) => ({
   guidelineUrl: c.guideline_url || "",
   guidelineNote: c.guideline_note || "",
   secondUseFee: Number(c.second_use_fee || 0),
+  // 담당자 리스트업 화면이 후보를 고를 때 쓰는 조건.
+  packageTier: c.package_tier || "full",
+  adObjective: c.ad_objective || "",
+  influencerGender: c.influencer_gender || "",
+  influencerAges: c.influencer_ages || "",
+  snsCategory: c.sns_category || "",
+  followerTiers: c.follower_tiers || "",
+  minViews: Number(c.min_views || 0),
+  influencerStyles: c.influencer_styles || "",
+  excludeKeywords: c.exclude_keywords || "",
+  targetAudience: c.target_audience || "",
 });
 
 export default async (req: Request) => {

@@ -59,6 +59,47 @@ const AD_COLLAB: StageTemplateSet = {
 };
 
 /**
+ * 알뜰 패키지. 구성안(대본) 단계를 빼고 바로 촬영으로 들어간다.
+ *
+ * 브랜드가 이 패키지를 고르는 이유는 일정이다. 구성안 제출과 검수에 최소 일주일이
+ * 붙는데, 이미 만들 그림이 정해져 있는 광고형 콘텐츠에서는 그 왕복이 결과를 크게
+ * 바꾸지 않는다. 대신 콘텐츠 검수는 그대로 둔다 — 촬영 결과를 한 번도 보지 않고
+ * 업로드하게 하면 브랜드가 가장 걱정하는 지점이 열린 채로 남는다.
+ */
+const AD_COLLAB_LITE: StageTemplateSet = {
+  key: "ad_collab_lite_v1",
+  label: "알뜰 패키지",
+  stages: [
+    { key: "terms", title: "조건 확정", owner: "manager", dueOffsetDays: 1, hint: "담당자가 금액·일정·산출물 규격을 확정합니다." },
+    { key: "guide", title: "가이드 전달", owner: "manager", dueOffsetDays: 2, hint: "브랜드 가이드를 정리해 전달합니다." },
+    { key: "content", title: "콘텐츠 제출", owner: "influencer", dueOffsetDays: 8, deliverable: "content", hint: "가이드에 맞춰 촬영·편집한 결과물을 제출해 주세요." },
+    { key: "content_review", title: "콘텐츠 검수", owner: "manager", dueOffsetDays: 10, hint: "수정 요청이 있으면 항목별로 전달합니다." },
+    { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 13, deliverable: "upload", hint: "업로드 후 게시물 링크를 등록해 주세요." },
+    { key: "confirm", title: "업로드 확인", owner: "manager", dueOffsetDays: 14, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 15, hint: "확인 월의 익월 말일에 지급됩니다." },
+  ],
+};
+
+/**
+ * 유가 시딩. 검수 단계가 없다.
+ *
+ * 시딩은 한 사람의 콘텐츠 완성도를 올리는 일이 아니라 여러 사람이 같은 시기에
+ * 올리게 하는 일이다. 수십 건을 한 건씩 검수하면 그 자체로 진행이 멈추고, 단가
+ * (1건 10만원)로는 그 손이 감당되지 않는다. 그래서 가이드를 주고 업로드를 확인한다.
+ */
+const SEEDING: StageTemplateSet = {
+  key: "seeding_v1",
+  label: "유가 시딩",
+  stages: [
+    { key: "terms", title: "조건 확정", owner: "manager", dueOffsetDays: 1, hint: "담당자가 제품 발송과 업로드 기한을 확정합니다." },
+    { key: "guide", title: "가이드 전달", owner: "manager", dueOffsetDays: 2, hint: "필수 표기와 촬영 가이드를 전달합니다." },
+    { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 10, deliverable: "upload", hint: "가이드에 맞춰 업로드하고 게시물 링크를 등록해 주세요." },
+    { key: "confirm", title: "업로드 확인", owner: "manager", dueOffsetDays: 11, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 12, hint: "확인 월의 익월 말일에 지급됩니다." },
+  ],
+};
+
+/**
  * 공동구매. 판매 콘텐츠는 구성안 단계를 따로 두지 않는다 — 상품과 혜택이 이미
  * 정해져 있어 구성안 검수가 실제로는 콘텐츠 검수와 겹친다.
  */
@@ -76,14 +117,29 @@ const GROUP_BUY: StageTemplateSet = {
   ],
 };
 
-const TEMPLATES: StageTemplateSet[] = [AD_COLLAB, GROUP_BUY];
+const TEMPLATES: StageTemplateSet[] = [AD_COLLAB, AD_COLLAB_LITE, SEEDING, GROUP_BUY];
 
-/** 캠페인 유형에 맞는 단계 묶음. 알 수 없는 유형은 광고 협업으로 본다. */
-export function templateForCampaignType(campaignType?: string | null): StageTemplateSet {
+/**
+ * 캠페인 유형과 패키지에 맞는 단계 묶음.
+ *
+ * 유형이 먼저다. 공동구매는 어떤 패키지를 골랐든 판매 흐름을 따라야 한다(혜택
+ * 표기 검수를 뺄 수 없다). 광고 협업일 때만 패키지가 단계를 정한다.
+ *
+ * 등록 화면이 "대본 피드백 제외"라고 보여준 패키지에서 실제로 대본 단계가 생기면
+ * 브랜드는 자기가 고른 것과 다른 진행을 보게 된다. 그래서 표시와 단계를 한 곳에서
+ * 맞춘다 — 화면 쪽 짝은 src/utils/campaignPackages.ts 의 PACKAGES.stages 다.
+ */
+export function templateForCampaignType(
+  campaignType?: string | null,
+  packageTier?: string | null,
+): StageTemplateSet {
   const type = String(campaignType || "").trim().toLowerCase();
   if (type.includes("group_buy") || type.includes("공동구매") || type.includes("commerce")) {
     return GROUP_BUY;
   }
+  const tier = String(packageTier || "").trim().toLowerCase();
+  if (tier === "seeding") return SEEDING;
+  if (tier === "lite") return AD_COLLAB_LITE;
   return AD_COLLAB;
 }
 
@@ -368,6 +424,12 @@ export type CreateCollabInput = {
   campaignId: string;
   applicationId: string;
   campaignType?: string | null;
+  /**
+   * 캠페인의 패키지 등급(full / lite / seeding). 어떤 검수를 거치는지가 여기서
+   * 정해지므로 협업 단계를 만들 때 반드시 함께 넘겨야 한다. 넘기지 않으면
+   * 풀패키지로 보고 대본 단계까지 생긴다 — 시딩 캠페인에는 없어야 하는 단계다.
+   */
+  packageTier?: string | null;
   campaignTitle: string;
   companyName: string;
   businessUsername: string;
@@ -420,7 +482,7 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   const businessUsername = norm(input.businessUsername);
   const creatorUsername = norm(input.creatorUsername);
   const managerUsername = norm(input.managerUsername);
-  const template = templateForCampaignType(input.campaignType);
+  const template = templateForCampaignType(input.campaignType, input.packageTier);
   const startKey = (input.startDate && /^\d{4}-\d{2}-\d{2}/.test(String(input.startDate)))
     ? String(input.startDate).slice(0, 10)
     : todayInSeoul();

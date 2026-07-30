@@ -590,9 +590,11 @@ export const apiService = {
 
   // Settlements created from accepted proposals. The influencer view of the
   // 협업 현황 page reads these so completed settlements also surface in 협업 내역.
-  async getSettlements(username: string): Promise<Settlement[]> {
+  // 브랜드 쪽(role='business')은 같은 정산을 지급하는 입장에서 읽는다 — 캠페인
+  // 상세의 정산 탭이 이 값을 캠페인별로 걸러 보여 준다.
+  async getSettlements(username: string, role: 'influencer' | 'business' = 'influencer'): Promise<Settlement[]> {
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=influencer`, {
+      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
         headers: await authHeaders(),
       });
       if (!res.ok) return [];
