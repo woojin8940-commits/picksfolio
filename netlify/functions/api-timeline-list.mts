@@ -1,19 +1,32 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { requireManager } from "./_shared/manager-auth.mts";
 
+/**
+ * 대화방 목록. `?type=influencer|business|manager`
+ *
+ * 담당자 유형이 추가됐다. 담당자는 자기에게 배정된 협업의 두 채널
+ * (인플루언서 채널 · 브랜드 채널)을 한 목록에서 본다 — 협업 하나에 방이 둘이므로
+ * 어느 쪽이 답을 기다리는지 한눈에 보이지 않으면 응답이 늦는 쪽이 방치된다.
+ */
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
-  // 이 계정이 진행 중인 협업 목록(업체명 · 프로젝트명 · 안 읽은 수)이다. 본인만.
-  const auth = await requireAccountOwner(req, username);
-  if (!auth.ok) return auth.response;
-
   const url = new URL(req.url);
   const userType = url.searchParams.get("type") || "influencer";
+
+  if (userType === "manager") {
+    const manager = await requireManager(req);
+    if (!manager.ok) return manager.response;
+  } else {
+    // 이 계정이 진행 중인 협업 목록(업체명 · 프로젝트명 · 안 읽은 수)이다. 본인만.
+    const auth = await requireAccountOwner(req, username);
+    if (!auth.ok) return auth.response;
+  }
 
   const store = getStore("timelines");
   const indexKey = `index_${userType}_${username}`;
@@ -39,6 +52,11 @@ export default async (req: Request, context: Context) => {
       const [cRows, tRows] = await Promise.all([
         (async () => {
           try {
+            // 담당자 중개 구조로 바뀐 뒤 선정된 협업은 브랜드↔인플루언서 방을 만들지
+            // 않는다. 그래서 협업 행(campaign_collabs)이 있는 건은 여기서 제외한다 —
+            // 제외하지 않으면 없어야 할 직접 대화방이 목록에서 되살아난다.
+            // 예전에 이미 진행된 협업은 협업 행이 없으므로 그대로 복구된다.
+            if (userType === "manager") return [];
             if (userType === "business") {
               return await dbInstance.sql`
                 SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
@@ -46,33 +64,57 @@ export default async (req: Request, context: Context) => {
                 JOIN campaigns c ON c.id = ca.campaign_id
                 WHERE ca.status = 'accepted'
                 AND LOWER(REPLACE(c.business_username, 'biz/', '')) = ${username}
-              ` as any[];
-            } else {
-              return await dbInstance.sql`
-                SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
-                FROM campaign_applications ca
-                JOIN campaigns c ON c.id = ca.campaign_id
-                WHERE ca.status = 'accepted'
-                AND LOWER(ca.applicant_username) = ${username}
+                AND NOT EXISTS (
+                  SELECT 1 FROM campaign_collabs cc
+                  WHERE cc.campaign_id = ca.campaign_id
+                  AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+                )
               ` as any[];
             }
+            return await dbInstance.sql`
+              SELECT ca.*, c.title as campaign_title, c.business_username as biz_user, c.brand_name
+              FROM campaign_applications ca
+              JOIN campaigns c ON c.id = ca.campaign_id
+              WHERE ca.status = 'accepted'
+              AND LOWER(ca.applicant_username) = ${username}
+              AND NOT EXISTS (
+                SELECT 1 FROM campaign_collabs cc
+                WHERE cc.campaign_id = ca.campaign_id
+                AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+              )
+            ` as any[];
           } catch { return []; }
         })(),
         (async () => {
           try {
+            if (userType === "manager") {
+              const mineOnly = url.searchParams.get("mine") === "1";
+              if (mineOnly) {
+                return await dbInstance.sql`
+                  SELECT * FROM timelines
+                  WHERE LOWER(manager_username) = ${username}
+                  ORDER BY created_at DESC
+                ` as any[];
+              }
+              return await dbInstance.sql`
+                SELECT * FROM timelines
+                WHERE kind IN ('influencer_support', 'brand_support')
+                ORDER BY created_at DESC
+                LIMIT 300
+              ` as any[];
+            }
             if (userType === "business") {
               return await dbInstance.sql`
                 SELECT * FROM timelines
                 WHERE LOWER(business_username) = ${username}
                 ORDER BY created_at DESC
               ` as any[];
-            } else {
-              return await dbInstance.sql`
-                SELECT * FROM timelines
-                WHERE LOWER(influencer_username) = ${username}
-                ORDER BY created_at DESC
-              ` as any[];
             }
+            return await dbInstance.sql`
+              SELECT * FROM timelines
+              WHERE LOWER(influencer_username) = ${username}
+              ORDER BY created_at DESC
+            ` as any[];
           } catch { return []; }
         })(),
       ]);
@@ -86,8 +128,11 @@ export default async (req: Request, context: Context) => {
         seenProposalIds.add(row.proposal_id);
         existing.push({
           proposalId: row.proposal_id,
+          kind: row.kind || "brand_influencer",
+          collabId: row.collab_id || "",
           influencerUsername: row.influencer_username || "",
           businessUsername: row.business_username || "",
+          managerUsername: row.manager_username || "",
           companyName: row.company_name || "",
           proposalTitle: row.proposal_title || "",
           createdAt: row.created_at || new Date().toISOString(),
@@ -107,8 +152,11 @@ export default async (req: Request, context: Context) => {
 
         existing.push({
           proposalId,
+          kind: "brand_influencer",
+          collabId: "",
           influencerUsername: infUser,
           businessUsername: bizUser,
+          managerUsername: "",
           companyName: row.brand_name || "",
           proposalTitle: row.campaign_title || "",
           createdAt: row.updated_at || row.created_at || new Date().toISOString(),
@@ -124,6 +172,7 @@ export default async (req: Request, context: Context) => {
               const campaignTitle = row.campaign_title || "";
               const timelineData = {
                 proposalId,
+                kind: "brand_influencer",
                 influencerUsername: infUser,
                 businessUsername: bizUser,
                 companyName,
@@ -194,6 +243,7 @@ export default async (req: Request, context: Context) => {
     const enriched = existing.map((t: any) => ({
       ...t,
       unreadCount: unreadMap[t.proposalId] || 0,
+      lastMessageAt: latestMessageMap[t.proposalId] || null,
     }));
 
     return Response.json({ timelines: enriched });

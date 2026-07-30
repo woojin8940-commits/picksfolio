@@ -95,7 +95,7 @@ export default async (req: Request, context: Context) => {
         );
       }
 
-      if (!["approve", "reject"].includes(action)) {
+      if (!["approve", "reject", "assign_manager"].includes(action)) {
         return Response.json(
           { error: "잘못된 액션입니다." },
           { status: 400 }
@@ -110,10 +110,47 @@ export default async (req: Request, context: Context) => {
         );
       }
 
-      if (action === "approve") {
+      // 담당자 식별자는 이메일 앞부분을 쓴다(운영 콘솔은 Netlify Identity 로그인).
+      const actingManager = String((admin as any).email || "")
+        .split("@")[0]
+        .trim()
+        .toLowerCase();
+
+      if (action === "assign_manager") {
+        const target = String(body.managerUsername || actingManager)
+          .trim()
+          .toLowerCase()
+          .replace(/^biz\//, "");
         await db.sql`
           UPDATE campaigns
-          SET status = 'active', admin_approved_at = NOW(), admin_rejected_reason = '', updated_at = NOW()
+          SET manager_username = ${target}, manager_assigned_at = NOW(), updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        // 이미 진행 중인 협업의 담당자도 함께 옮긴다 — 캠페인 담당자와 협업 담당자가
+        // 갈리면 지원자는 누구에게 물어야 할지 알 수 없다.
+        await db.sql`
+          UPDATE campaign_collabs
+          SET manager_username = ${target}, updated_at = NOW()
+          WHERE campaign_id = ${id}
+        `;
+        return Response.json({ success: true, managerUsername: target });
+      }
+
+      if (action === "approve") {
+        // 승인하는 순간 담당자가 정해진다. 담당자 없는 캠페인은 지원이 들어와도
+        // 아무도 선정하지 못하는 상태가 되므로 승인과 배정을 한 동작으로 묶는다.
+        const target = String(body.managerUsername || actingManager)
+          .trim()
+          .toLowerCase()
+          .replace(/^biz\//, "");
+        await db.sql`
+          UPDATE campaigns
+          SET status = 'active',
+              admin_approved_at = NOW(),
+              admin_rejected_reason = '',
+              manager_username = CASE WHEN COALESCE(manager_username, '') = '' THEN ${target} ELSE manager_username END,
+              manager_assigned_at = COALESCE(manager_assigned_at, NOW()),
+              updated_at = NOW()
           WHERE id = ${id}
         `;
       } else {

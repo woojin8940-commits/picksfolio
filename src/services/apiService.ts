@@ -33,6 +33,18 @@ export async function authHeaders(extra: Record<string, string> = {}): Promise<R
 }
 
 /**
+ * 협업 API 용 인증 헤더.
+ *
+ * 협업 화면은 브랜드 · 인플루언서 · 담당자가 같은 엔드포인트를 쓰는데 인증 방식이
+ * 다르다 — 서비스 화면은 Supabase 토큰(`authHeaders`)이고, 운영 콘솔은 Netlify
+ * Identity 토큰이라 화면에서 명시적으로 넘겨받는다. `token` 이 있으면 담당자 호출.
+ */
+export async function collabHeaders(token?: string): Promise<Record<string, string>> {
+  if (token) return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  return await authHeaders({ 'Content-Type': 'application/json' });
+}
+
+/**
  * 페이지 언로드(beforeunload/pagehide) 시점에 쓸 토큰 캐시.
  *
  * `supabase.auth.getSession()` 은 비동기라 탭이 닫히는 중에는 resolve 를 보장할 수 없다.
@@ -1509,7 +1521,13 @@ export const apiService = {
     }
   },
 
-  async adminCampaignAction(token: string, id: string, action: 'approve' | 'reject', reason?: string): Promise<{ success: boolean; error?: string }> {
+  async adminCampaignAction(
+    token: string,
+    id: string,
+    action: 'approve' | 'reject' | 'assign_manager',
+    reason?: string,
+    managerUsername?: string,
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -1517,7 +1535,7 @@ export const apiService = {
         method: 'PATCH',
         credentials: 'same-origin',
         headers,
-        body: JSON.stringify({ id, action, reason }),
+        body: JSON.stringify({ id, action, reason, managerUsername }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -1527,6 +1545,331 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to perform admin campaign action:', e);
       return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // ───────────────────── 담당자 중개 협업 (collab workflow) ─────────────────────
+  async getCollabs(
+    role: 'brand' | 'influencer' | 'manager',
+    opts: { token?: string; mine?: boolean; status?: string } = {},
+  ): Promise<{ collabs: any[]; role?: string; error?: string }> {
+    try {
+      const params = new URLSearchParams({ role });
+      if (opts.mine) params.set('mine', '1');
+      if (opts.status) params.set('status', opts.status);
+      const res = await fetch(`/api/collab-workflow?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { collabs: [], error: json?.error || '협업 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get collabs:', e);
+      return { collabs: [], error: '네트워크 오류' };
+    }
+  },
+
+  async getCollabDetail(collabId: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '협업 정보를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get collab detail:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 단계 제출 · 승인 · 수정요청 · 피드백 · 조건 확정 등 모든 상태 변경의 단일 입구. */
+  async collabAction(
+    collabId: string,
+    action: string,
+    payload: Record<string, any> = {},
+    token?: string,
+  ): Promise<{ success?: boolean; error?: string; [k: string]: any }> {
+    try {
+      const res = await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ action, ...payload }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '요청을 처리하지 못했습니다.', code: json?.code };
+      return json;
+    } catch (e) {
+      console.error(`[API] Collab action failed (${action}):`, e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 담당자 대기 큐 — 지금 담당자가 막고 있는 일만 모아 본다. */
+  async getManagerQueue(token: string, mine = false): Promise<any> {
+    try {
+      const res = await fetch(`/api/manager-queue${mine ? '?mine=1' : ''}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '대기 큐를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get manager queue:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 지원자 목록. 브랜드(본인 캠페인)와 담당자 모두 같은 경로를 쓴다. */
+  async getCampaignApplicants(campaignId: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/campaign-applicants?campaign_id=${encodeURIComponent(campaignId)}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { applicants: [], error: json?.error || '지원자를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get campaign applicants:', e);
+      return { applicants: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 브랜드 의견 표시(추천 · 보류). 선정 권한은 없다 — 담당자에게 전달되는 메모다. */
+  async setApplicantPreference(
+    applicantId: string,
+    brandPreference: '' | 'shortlist' | 'pass',
+    note = '',
+  ): Promise<{ success?: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/campaign-applicants', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id: applicantId, brandPreference, brandPreferenceNote: note }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '의견을 저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to set applicant preference:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 지원자 선정 · 거절. 담당자만 호출할 수 있다. */
+  async decideApplicant(
+    applicantId: string,
+    status: 'accepted' | 'rejected',
+    opts: { token?: string; managerNote?: string } = {},
+  ): Promise<{ success?: boolean; collabId?: string; threads?: any; error?: string; code?: string }> {
+    try {
+      const res = await fetch('/api/campaign-applicants', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+        body: JSON.stringify({ id: applicantId, status, managerNote: opts.managerNote }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '처리에 실패했습니다.', code: json?.code };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to decide applicant:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 담당자 채널 대화 읽기.
+   *
+   * 담당자는 운영 콘솔(Netlify Identity)로 로그인해 있어서 서비스 화면의 대화 UI를
+   * 그대로 쓸 수 없다. 운영 콘솔 안에서 답장할 수 있도록 같은 대화 API 를 관리자
+   * 토큰으로 호출한다.
+   */
+  async getTimelineThread(proposalId: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/timeline/detail/${encodeURIComponent(proposalId)}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '대화를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get timeline thread:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 담당자 채널에 답장. 작성자는 서버가 토큰에서 확인한 본인으로 기록된다. */
+  async postTimelineComment(
+    proposalId: string,
+    content: string,
+    token?: string,
+  ): Promise<{ success?: boolean; comment?: any; error?: string }> {
+    try {
+      const res = await fetch(`/api/timeline/comment/${encodeURIComponent(proposalId)}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ content }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '메시지를 보내지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to post timeline comment:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  // ───────────────────── 리스트업 (후보 명단 · 제안 조율) ─────────────────────
+
+  /**
+   * 캠페인 후보 명단. 브랜드는 자기 캠페인의 명단을, 담당자는 명단과 함께
+   * `pool` 로 명단에 올릴 후보 풀까지 받는다.
+   */
+  async getCampaignListup(
+    campaignId: string,
+    opts: { token?: string; pool?: boolean; q?: string } = {},
+  ): Promise<any> {
+    try {
+      const params = new URLSearchParams({ campaign_id: campaignId });
+      if (opts.pool) params.set('pool', '1');
+      if (opts.q) params.set('q', opts.q);
+      const res = await fetch(`/api/campaign-listup?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { candidates: [], error: json?.error || '리스트업을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get campaign listup:', e);
+      return { candidates: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 인플루언서가 받은 제안 목록. */
+  async getMyListupOffers(username: string): Promise<{ offers: any[]; error?: string }> {
+    try {
+      const res = await fetch(`/api/campaign-listup?influencer=${encodeURIComponent(username)}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { offers: [], error: json?.error || '받은 제안을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get listup offers:', e);
+      return { offers: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 후보를 명단에 올린다(담당자). */
+  async addListupCandidates(
+    campaignId: string,
+    usernames: string[],
+    opts: { token?: string; note?: string } = {},
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/campaign-listup', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+        body: JSON.stringify({ campaignId, usernames, note: opts.note || '' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '명단에 올리지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to add listup candidates:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 명단 위의 모든 상태 변경. 동작 이름이 권한을 결정한다 —
+   * brand_decision 은 브랜드, send_offer/withdraw_offer/note/remove 는 담당자,
+   * respond 는 인플루언서(또는 대신 기록하는 담당자).
+   */
+  async listupAction(
+    id: string,
+    action: 'brand_decision' | 'send_offer' | 'withdraw_offer' | 'respond' | 'note' | 'remove',
+    payload: Record<string, any> = {},
+    token?: string,
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/campaign-listup', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ id, action, ...payload }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '처리에 실패했습니다.', code: json?.code };
+      return json;
+    } catch (e) {
+      console.error(`[API] Listup action failed (${action}):`, e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  // ───────────────────── 인플루언서 채널(인스타 계정) 등록 ─────────────────────
+
+  async getCreatorChannel(username: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/creator-channel?username=${encodeURIComponent(username)}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '채널 정보를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get creator channel:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 본인이 입력한 계정·지표 저장. */
+  async saveCreatorChannel(payload: Record<string, any>): Promise<any> {
+    try {
+      const res = await fetch('/api/creator-channel', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to save creator channel:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 메타 API 로 최근 릴스·평균 조회수 갱신. 연동 전이면 META_NOT_LINKED 로 답한다. */
+  async syncCreatorChannel(username: string, token?: string): Promise<any> {
+    try {
+      const res = await fetch('/api/creator-channel', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ username, action: 'sync' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '갱신하지 못했습니다.', code: json?.code };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to sync creator channel:', e);
+      return { error: '네트워크 오류' };
     }
   },
 

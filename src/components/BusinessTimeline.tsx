@@ -40,7 +40,7 @@ interface TimelineAttachment {
 interface TimelineComment {
   id: string;
   proposalId: string;
-  authorType: 'influencer' | 'business';
+  authorType: 'influencer' | 'business' | 'manager';
   authorName: string;
   authorUsername: string;
   content: string;
@@ -58,7 +58,24 @@ interface TimelineData {
   comments?: TimelineComment[];
   createdAt: string;
   unreadCount?: number;
+  /**
+   * 방의 종류. 담당자 채널(influencer_support · brand_support)에서는 상대가
+   * 브랜드나 인플루언서가 아니라 픽스폴리오 담당자다. 이름을 그대로 브랜드명으로
+   * 보여주면 브랜드와 직접 말하고 있다고 오해하게 된다.
+   */
+  kind?: string;
+  managerUsername?: string;
+  collabId?: string;
 }
+
+const MANAGER_THREAD_KINDS = ['influencer_support', 'brand_support'];
+
+/** 이 방에서 내가 마주 앉은 상대의 이름. 담당자 채널이면 담당자다. */
+const counterpartOf = (t: TimelineData | null, userType: string): string => {
+  if (!t) return '';
+  if (t.kind && MANAGER_THREAD_KINDS.includes(t.kind)) return '픽스폴리오 담당자';
+  return userType === 'influencer' ? t.companyName : t.influencerUsername;
+};
 
 interface BusinessTimelineProps {
   userName: string;
@@ -230,10 +247,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     const context = selectedTimeline
       ? {
           title: selectedTimeline.proposalTitle,
-          partner: userType === 'influencer' ? selectedTimeline.companyName : selectedTimeline.influencerUsername,
+          partner: counterpartOf(selectedTimeline, userType),
           transcript: (selectedTimeline.comments || [])
             .slice(-40)
-            .map(c => `${c.authorName}(${c.authorType === 'business' ? '비즈니스' : '인플루언서'}): ${c.content || '[첨부 파일]'}`)
+            .map(c => `${c.authorName}(${c.authorType === 'business' ? '비즈니스' : c.authorType === 'manager' ? '픽스폴리오 담당자' : '인플루언서'}): ${c.content || '[첨부 파일]'}`)
             .join('\n'),
         }
       : null;
@@ -790,7 +807,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 : null;
               const isUnread = (timeline.unreadCount || 0) > 0;
               const isActive = selectedTimeline?.proposalId === timeline.proposalId;
-              const displayName = userType === 'influencer' ? timeline.companyName : timeline.influencerUsername;
+              const displayName = counterpartOf(timeline, userType);
 
               return (
                 <button
@@ -887,9 +904,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       );
     }
 
-    const partnerName = userType === 'influencer'
-      ? selectedTimeline.companyName
-      : selectedTimeline.influencerUsername;
+    const partnerName = counterpartOf(selectedTimeline, userType);
+    const isManagerThread = !!selectedTimeline.kind && MANAGER_THREAD_KINDS.includes(selectedTimeline.kind);
 
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
@@ -931,20 +947,33 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {/* Header actions */}
             <div className="flex items-center gap-1 shrink-0">
               <div className="hidden md:flex items-center -space-x-1.5 bg-white border border-gray-200 rounded-md px-1.5 py-1">
-                <div className={`w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white ${
-                  userType === 'influencer'
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
-                    : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
-                }`}>
-                  {getInitials(selectedTimeline.influencerUsername)}
-                </div>
-                <div className={`w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white ${
-                  userType === 'business'
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
-                    : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
-                }`}>
-                  {getInitials(selectedTimeline.companyName)}
-                </div>
+                {isManagerThread ? (
+                  <>
+                    <div className="w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+                      {getInitials(normalizedUserName)}
+                    </div>
+                    <div className="w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white bg-gradient-to-br from-slate-800 to-slate-900 text-white">
+                      PF
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className={`w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white ${
+                      userType === 'influencer'
+                        ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
+                        : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
+                    }`}>
+                      {getInitials(selectedTimeline.influencerUsername)}
+                    </div>
+                    <div className={`w-6 h-6 rounded-[4px] flex items-center justify-center text-[10px] font-bold ring-2 ring-white ${
+                      userType === 'business'
+                        ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
+                        : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
+                    }`}>
+                      {getInitials(selectedTimeline.companyName)}
+                    </div>
+                  </>
+                )}
                 <span className="text-[11px] text-gray-600 font-semibold pl-2 pr-1">2</span>
               </div>
             </div>
@@ -967,6 +996,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             <p className="text-xs md:text-sm text-gray-500 leading-relaxed">
               <span className="font-semibold text-gray-700">{partnerName}</span>와의 협업 공간
             </p>
+            {isManagerThread && (
+              <p className="text-[11px] md:text-xs text-gray-400 font-medium mt-1 leading-relaxed">
+                {userType === 'influencer'
+                  ? '이 채널은 담당자와 1:1입니다. 브랜드는 이 대화를 볼 수 없고, 전달이 필요한 내용은 담당자가 정리해 옮깁니다.'
+                  : '이 채널은 담당자와 1:1입니다. 인플루언서는 이 대화를 볼 수 없고, 수정 요청이나 의견은 담당자가 정리해 전달합니다.'}
+              </p>
+            )}
             <div className="mt-2 md:mt-3 inline-flex items-center gap-1.5 md:gap-2 bg-gray-50 border border-gray-200 rounded-md px-2 md:px-3 py-1 md:py-1.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.5)]">
               <svg className="w-3 h-3 md:w-3.5 md:h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1004,8 +1040,22 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               ? comment.readBy.includes(otherPartyUsername.toLowerCase())
               : false;
 
+            // 담당자 채널이 생긴 뒤로는 상대가 브랜드/인플루언서가 아니라 픽스폴리오
+            // 담당자인 경우가 대부분이다. 색과 역할 표시를 따로 둬서 "누구에게 말하고
+            // 있는지"가 한눈에 보이게 한다.
+            const isManager = comment.authorType === 'manager';
             const isBusiness = comment.authorType === 'business';
-            const roleLabel = isBusiness ? '비즈니스' : '인플루언서';
+            const roleLabel = isManager ? '픽스폴리오 담당자' : isBusiness ? '비즈니스' : '인플루언서';
+            const avatarCls = isManager
+              ? 'bg-gradient-to-br from-slate-800 to-slate-900 text-white'
+              : isBusiness
+                ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
+                : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white';
+            const roleBadgeCls = isManager
+              ? 'bg-slate-900 text-white'
+              : isBusiness
+                ? 'bg-blue-50 text-blue-600'
+                : 'bg-emerald-50 text-emerald-600';
 
             return (
               <React.Fragment key={comment.id}>
@@ -1026,11 +1076,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 >
                   {/* Avatar column */}
                   {!isSameAuthor ? (
-                    <div className={`shrink-0 w-7 h-7 md:w-10 md:h-10 rounded-md flex items-center justify-center text-xs md:text-base font-bold shadow-[0_5px_12px_-4px_rgba(15,23,42,0.5)] ${
-                      isBusiness
-                        ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
-                        : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
-                    }`}>
+                    <div className={`shrink-0 w-7 h-7 md:w-10 md:h-10 rounded-md flex items-center justify-center text-xs md:text-base font-bold shadow-[0_5px_12px_-4px_rgba(15,23,42,0.5)] ${avatarCls}`}>
                       {getInitials(comment.authorName)}
                     </div>
                   ) : (
@@ -1050,11 +1096,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                         <span className="text-[12px] md:text-[13px] font-semibold text-gray-700 tracking-tight">
                           {comment.authorName}
                         </span>
-                        <span className={`text-[10px] md:text-[11px] font-bold px-1 md:px-1.5 py-0.5 rounded ${
-                          isBusiness
-                            ? 'bg-blue-50 text-blue-600'
-                            : 'bg-emerald-50 text-emerald-600'
-                        }`}>
+                        <span className={`text-[10px] md:text-[11px] font-bold px-1 md:px-1.5 py-0.5 rounded ${roleBadgeCls}`}>
                           {roleLabel}
                         </span>
                         {isMe && (

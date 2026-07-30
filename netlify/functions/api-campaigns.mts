@@ -14,6 +14,16 @@ const withRecruitState = (rows: any[]) => {
   return rows.map((c) => ({ ...c, recruit_closed: isRecruitClosed(c, today) }));
 };
 
+/**
+ * 브리프에 들어오는 금액. "150,000원"처럼 사람이 적은 형태로 와도 숫자로 만든다 —
+ * 숫자 컬럼에 문자열이 들어가면 저장 자체가 실패해서 캠페인 등록이 통째로 막힌다.
+ */
+const briefFee = (raw: unknown) => {
+  const digits = String(raw ?? "").replace(/[^\d]/g, "");
+  const n = Number(digits);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+};
+
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
@@ -91,8 +101,23 @@ export default async (req: Request) => {
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       await db.sql`
-        INSERT INTO campaigns (id, business_username, type, title, description, brand_name, thumbnail_url, category, reward_type, reward_amount, requirements, max_applicants, start_date, end_date, status)
-        VALUES (${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""}, ${body.brand_name || ""}, ${body.thumbnail_url || ""}, ${body.category || ""}, ${body.reward_type || ""}, ${body.reward_amount || ""}, ${body.requirements || ""}, ${body.max_applicants || 0}, ${body.start_date || null}, ${body.end_date || null}, 'pending_approval')
+        INSERT INTO campaigns (
+          id, business_username, type, title, description, brand_name, thumbnail_url, category,
+          reward_type, reward_amount, requirements, max_applicants, start_date, end_date, status,
+          product_name, product_url, upload_channel, content_format, video_concept,
+          guideline_url, guideline_note, second_use_fee, second_use_note, upload_from, upload_to
+        )
+        VALUES (
+          ${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""},
+          ${body.brand_name || ""}, ${body.thumbnail_url || ""}, ${body.category || ""},
+          ${body.reward_type || ""}, ${body.reward_amount || ""}, ${body.requirements || ""},
+          ${body.max_applicants || 0}, ${body.start_date || null}, ${body.end_date || null}, 'pending_approval',
+          ${body.product_name || ""}, ${body.product_url || ""}, ${body.upload_channel || ""},
+          ${body.content_format || ""}, ${body.video_concept || ""},
+          ${body.guideline_url || ""}, ${body.guideline_note || ""},
+          ${briefFee(body.second_use_fee)}, ${body.second_use_note || ""},
+          ${body.upload_from || ""}, ${body.upload_to || ""}
+        )
       `;
 
       return Response.json({ success: true, id });
@@ -140,6 +165,17 @@ export default async (req: Request) => {
             max_applicants = ${updates.max_applicants ?? c.max_applicants},
             start_date = ${updates.start_date ?? c.start_date},
             end_date = ${updates.end_date ?? c.end_date},
+            product_name = ${updates.product_name ?? c.product_name ?? ""},
+            product_url = ${updates.product_url ?? c.product_url ?? ""},
+            upload_channel = ${updates.upload_channel ?? c.upload_channel ?? ""},
+            content_format = ${updates.content_format ?? c.content_format ?? ""},
+            video_concept = ${updates.video_concept ?? c.video_concept ?? ""},
+            guideline_url = ${updates.guideline_url ?? c.guideline_url ?? ""},
+            guideline_note = ${updates.guideline_note ?? c.guideline_note ?? ""},
+            second_use_fee = ${updates.second_use_fee === undefined ? Number(c.second_use_fee || 0) : briefFee(updates.second_use_fee)},
+            second_use_note = ${updates.second_use_note ?? c.second_use_note ?? ""},
+            upload_from = ${updates.upload_from ?? c.upload_from ?? ""},
+            upload_to = ${updates.upload_to ?? c.upload_to ?? ""},
             status = ${newStatus},
             updated_at = NOW()
         WHERE id = ${id}
