@@ -88,7 +88,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     <>
       <button
         onClick={() => setOpen(true)}
-        className={buttonClassName ?? 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_8px_20px_-6px_rgba(37,99,235,0.5)] hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] transition-all'}
+        className={buttonClassName ?? 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_12px_26px_-8px_rgba(37,99,235,0.65)] hover:shadow-[0_16px_32px_-8px_rgba(37,99,235,0.75)] hover:-translate-y-0.5 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] active:translate-y-0 transition-all'}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
         {copy.title}
@@ -97,7 +97,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       {open && (
         <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={() => !submitting && setOpen(false)}>
           <div
-            className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom md:fade-in duration-300"
+            className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom md:fade-in duration-300 shadow-[0_-16px_40px_-16px_rgba(15,23,42,0.5)] md:shadow-[0_28px_60px_-20px_rgba(15,23,42,0.6)]"
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
@@ -183,7 +183,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
-                className="w-full mt-5 rounded-xl bg-blue-600 text-white font-black text-sm py-3.5 hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-60"
+                className="w-full mt-5 rounded-xl bg-blue-600 text-white font-black text-sm py-3.5 shadow-[0_12px_26px_-10px_rgba(37,99,235,0.7)] hover:bg-blue-700 hover:shadow-[0_16px_32px_-10px_rgba(37,99,235,0.8)] active:scale-[0.99] transition-all disabled:opacity-60 disabled:shadow-none"
               >
                 {submitting ? '접수 중...' : '지원하기'}
               </button>

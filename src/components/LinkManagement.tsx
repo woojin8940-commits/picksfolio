@@ -23,6 +23,23 @@ const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
   { value: '#F1F5F9', label: '회색' }
 ];
 
+// 테마 프리셋의 기본 포인트 색상 외에, 자주 쓰는 색을 한 번에 고를 수 있게 하는
+// 빠른 선택용 팔레트. 여기 없는 색은 ColorPicker 로 직접 지정한다.
+const ACCENT_COLOR_PRESETS: { value: string; label: string }[] = [
+  { value: '#3B82F6', label: '블루' },
+  { value: '#0f172a', label: '잉크 블랙' },
+  { value: '#6366F1', label: '인디고' },
+  { value: '#8B5CF6', label: '바이올렛' },
+  { value: '#EC4899', label: '핑크' },
+  { value: '#EF4444', label: '레드' },
+  { value: '#F97316', label: '오렌지' },
+  { value: '#F59E0B', label: '앰버' },
+  { value: '#10B981', label: '에메랄드' },
+  { value: '#14B8A6', label: '틸' },
+  { value: '#0EA5E9', label: '스카이' },
+  { value: '#64748B', label: '슬레이트' }
+];
+
 interface LinkManagementProps {
   userName: string;
   onNavigateMembership?: () => void;
@@ -200,7 +217,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   });
 
   // Mobile Preview State
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block', id: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block' | 'category', id: string } | null>(null);
   const [showBlockTypeModal, setShowBlockTypeModal] = useState(false);
   const [newBlockColSpan, setNewBlockColSpan] = useState<1 | 2 | 3>(1);
   const [newBlockDisplayType, setNewBlockDisplayType] = useState<BlockDisplayType>('grid');
@@ -604,13 +621,108 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
   }, [isEditing]);
 
+  // --- 텍스트 블록 부분 서식 -------------------------------------------------
+  // 볼드·밑줄·색상 버튼을 누르는 순간 contentEditable 의 포커스가 버튼으로 넘어가
+  // 선택 영역이 사라진다. 그래서 마지막 선택 위치를 따로 기억해 두고, 버튼을
+  // 눌렀을 때 그 영역을 되살려서 선택한 글자에만 서식을 넣는다.
+  // 선택한 글자가 없으면 예전처럼 블록 전체 설정을 바꾼다.
+  const textSelectionRangeRef = useRef<Range | null>(null);
+
+  const rememberTextSelection = () => {
+    const el = textEditorRef.current;
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (!el || !sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return;
+    textSelectionRangeRef.current = range.cloneRange();
+  };
+
+  // 기억해 둔 선택 영역을 복원한다. 실제로 고른 글자가 있을 때만 true.
+  const restoreTextSelection = (): boolean => {
+    const el = textEditorRef.current;
+    const range = textSelectionRangeRef.current;
+    if (!el || !range) return false;
+    if (!el.contains(range.commonAncestorContainer)) return false;
+    const sel = window.getSelection();
+    if (!sel) return false;
+    el.focus();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return !sel.isCollapsed && sel.toString().length > 0;
+  };
+
+  const syncTextContentFromEditor = () => {
+    const el = textEditorRef.current;
+    if (!el) return;
+    const html = el.innerHTML;
+    setEditForm(prev => ({ ...prev, textContent: html }));
+  };
+
+  // execCommand 는 구식이지만 contentEditable 의 부분 서식에 대해서는 여전히
+  // 모든 주요 브라우저가 지원하는 유일한 방법이다. styleWithCSS 를 켜 두면
+  // <font> 대신 style 이 붙은 <span> 이 생겨서 저장·렌더링 경로(sanitizeRichHtml)와
+  // 그대로 맞는다.
+  const runEditorCommand = (command: string, value?: string): boolean => {
+    try {
+      document.execCommand('styleWithCSS', false, 'true');
+    } catch { /* 지원하지 않는 브라우저는 <font> 로 떨어진다 (sanitizer 가 허용) */ }
+    try {
+      return document.execCommand(command, false, value);
+    } catch {
+      return false;
+    }
+  };
+
+  type TextToggleField = 'bold' | 'italic' | 'underline' | 'strikethrough';
+
+  const applyTextToggle = (command: string, field: TextToggleField) => {
+    if (!restoreTextSelection()) {
+      setEditForm(prev => ({ ...prev, [field]: !prev[field] }));
+      return;
+    }
+    runEditorCommand(command);
+    rememberTextSelection();
+    syncTextContentFromEditor();
+  };
+
+  const applyTextColor = (color: string) => {
+    if (!restoreTextSelection()) {
+      setEditForm(prev => ({ ...prev, color }));
+      return;
+    }
+    runEditorCommand('foreColor', color);
+    rememberTextSelection();
+    syncTextContentFromEditor();
+  };
+
+  const applyTextHighlight = (color: string) => {
+    if (!restoreTextSelection()) {
+      setEditForm(prev => ({ ...prev, highlight: color }));
+      return;
+    }
+    // hiliteColor 를 지원하지 않는 브라우저(구형 Edge 등)는 backColor 로 대체된다.
+    if (!runEditorCommand('hiliteColor', color)) runEditorCommand('backColor', color);
+    rememberTextSelection();
+    syncTextContentFromEditor();
+  };
+
+  // 선택한 글자에 들어간 부분 서식만 걷어낸다. 블록 전체 설정은 그대로 둔다.
+  const clearSelectionFormatting = () => {
+    if (!restoreTextSelection()) return;
+    runEditorCommand('removeFormat');
+    rememberTextSelection();
+    syncTextContentFromEditor();
+  };
+
+  const THEME_DEFAULT_ACCENT = { midnight: '#3B82F6', white: '#0f172a' } as const;
+
   const handleThemeChange = (theme: 'midnight' | 'white') => {
     setThemePreset(theme);
-    if (theme === 'white') {
-      setAccentColor('#0f172a');
-    } else {
-      setAccentColor('#3B82F6');
-    }
+    // 프리셋 기본색을 그대로 쓰고 있었다면 새 프리셋의 기본색으로 바꾼다.
+    // 팔레트로 직접 고른 색은 프리셋을 바꿔도 그대로 유지한다.
+    const isDefaultAccent = Object.values(THEME_DEFAULT_ACCENT)
+      .some(c => c.toLowerCase() === (accentColor || '').toLowerCase());
+    if (isDefaultAccent) setAccentColor(THEME_DEFAULT_ACCENT[theme]);
   };
 
   const showSuccessFeedback = (message: string) => {
@@ -801,7 +913,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       category: assignedCategory,
       coverMedia: '',
       mediaType: 'image',
-      products: newBlockDisplayType === 'text' ? [] : [{ id: generateId(), name: '새 상품', price: '0', image: '', link: '' }],
+      products: newBlockDisplayType === 'text' ? [] : [{ id: generateId(), name: '새 상품', image: '', link: '' }],
       colSpan: effectiveColSpan,
       displayType: newBlockDisplayType,
       ...(newBlockDisplayType === 'text' ? { textContent: '', fontSizePx: 14, color: '#37352f' } : {}),
@@ -935,7 +1047,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     showSuccessFeedback(`카테고리가 '${trimmed}'(으)로 변경되었습니다!`);
   };
 
-  const handleDeleteCategory = (catName: string) => {
+  // 카테고리는 안에 들어 있는 포스트까지 함께 지우기 때문에, 휴지통을 누르면
+  // 바로 지우지 않고 블록·상품 삭제와 같은 확인창을 한 번 띄운다.
+  const handleDeleteCategory = (catName: string) => setConfirmDelete({ type: 'category', id: catName });
+
+  const executeDeleteCategory = (catName: string) => {
     const updatedBlocks = blocks.filter(b => b.category !== catName);
     setBlocks(updatedBlocks);
     localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
@@ -1040,6 +1156,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     } else if (confirmDelete.type === 'product') {
       const updatedProducts = (editForm.products || []).filter(p => p.id !== confirmDelete.id);
       setEditForm({ ...editForm, products: updatedProducts } as Block);
+    } else if (confirmDelete.type === 'category') {
+      executeDeleteCategory(confirmDelete.id);
     }
     setConfirmDelete(null);
   };
@@ -1516,41 +1634,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               </section>
 
               <section className="space-y-3">
-                <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">레이아웃</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setLayoutTemplate('grid')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'grid' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 grid grid-cols-3 gap-px p-1.5 flex-shrink-0">
-                      {[1,2,3,4,5,6].map(i => <div key={i} className="bg-slate-300 rounded-[1px]"></div>)}
-                    </div>
-                    <div className="text-left">
-                      <span className="font-black text-sm block">쇼퍼블 그리드</span>
-                      <span className="text-xs text-slate-500 font-bold">이미지 중심 갤러리</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setLayoutTemplate('list')}
-                    className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-3 ${layoutTemplate === 'list' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-[#E2E8F0] bg-white hover:border-blue-300'}`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex flex-col gap-1 p-2 justify-center flex-shrink-0">
-                      {[1,2,3].map(i => (
-                        <div key={i} className="flex items-center gap-0.5">
-                          <div className="w-1.5 h-1.5 bg-slate-300 rounded-[1px] flex-shrink-0"></div>
-                          <div className="h-1 bg-slate-300 rounded-[1px] flex-1"></div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="text-left">
-                      <span className="font-black text-sm block">미니멀 리스트</span>
-                      <span className="text-xs text-slate-500 font-bold">텍스트 중심 목록</span>
-                    </div>
-                  </button>
-                </div>
-              </section>
-
-              <section className="space-y-3">
                 <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">테마 프리셋</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -1577,6 +1660,45 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       <span className="text-xs text-slate-500 font-bold">밝고 깨끗한 미니멀</span>
                     </div>
                   </button>
+                </div>
+
+                {/* 프리셋의 기본 포인트 색상을 그대로 쓰거나, 팔레트로 원하는 색을
+                    직접 골라 쓸 수 있다. 프리셋 자체(밝은/어두운 배경)는 유지된다. */}
+                <div className="p-5 rounded-2xl border-2 border-[#E2E8F0] bg-white space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className="font-black text-sm block">포인트 색상</span>
+                      <span className="text-xs text-slate-500 font-bold">버튼·강조 요소에 쓰이는 색을 자유롭게 정하세요</span>
+                    </div>
+                    <ColorPicker
+                      value={accentColor}
+                      onChange={setAccentColor}
+                      triggerClassName="w-11 h-11 rounded-2xl flex-shrink-0"
+                      aria-label="포인트 색상 직접 지정"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {ACCENT_COLOR_PRESETS.map(c => (
+                      <button
+                        key={c.value}
+                        onClick={() => setAccentColor(c.value)}
+                        title={c.label}
+                        aria-label={c.label}
+                        className={`w-8 h-8 rounded-xl border-2 transition-all ${accentColor.toLowerCase() === c.value.toLowerCase() ? 'border-blue-600 scale-110 shadow-md' : 'border-slate-200 hover:scale-105'}`}
+                        style={{ backgroundColor: c.value }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">현재</span>
+                    <span className="text-xs font-black text-slate-600">{accentColor.toUpperCase()}</span>
+                    <button
+                      onClick={() => setAccentColor(THEME_DEFAULT_ACCENT[themePreset])}
+                      className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                    >
+                      프리셋 기본색으로
+                    </button>
+                  </div>
                 </div>
               </section>
 
@@ -1713,7 +1835,23 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </div>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
-                    <input type="text" value={editForm.category || ''} onChange={e => setEditForm({ ...editForm, category: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black uppercase focus:border-blue-600 transition-all" placeholder="카테고리" />
+                    {/* 카테고리는 직접 입력하지 않고 이미 만들어 둔 목록에서 고른다.
+                        오타로 비슷한 카테고리가 여러 개 생기는 일을 막는다. */}
+                    <select
+                      value={editForm.category || ''}
+                      onChange={e => setEditForm({ ...editForm, category: e.target.value })}
+                      className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="">카테고리 없음</option>
+                      {managedCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      {managedCategories.length === 0
+                        ? '아직 카테고리가 없습니다. 포스트 목록 위의 카테고리 관리에서 먼저 추가해 주세요.'
+                        : '카테고리 관리에서 추가한 목록에서 선택합니다.'}
+                    </p>
                   </div>
                   </>
                   )}
@@ -1748,6 +1886,139 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="space-y-4">
                   <h4 className="text-lg font-black text-blue-600">텍스트 디자인</h4>
                   <div className="bg-[#F8FAFC] p-5 rounded-2xl border border-[#E2E8F0] space-y-4">
+                    {/* 서식 도구는 입력창 위에 둔다. 글자를 고른 뒤 바로 위 버튼을
+                        누르는 흐름이 아래에 있을 때보다 훨씬 자연스럽다. */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">텍스트 옵션</label>
+                        <button
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={clearSelectionFormatting}
+                          className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                        >
+                          선택 서식 지우기
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                      {/* Font Size */}
+                      <div className="flex items-center gap-1 bg-white rounded-xl border border-[#E2E8F0] px-2 py-1">
+                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.max(8, (editForm.fontSizePx || 14) - 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronDown size={14} /></button>
+                        <span className="text-xs font-black w-8 text-center">{editForm.fontSizePx || 14}</span>
+                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.min(96, (editForm.fontSizePx || 14) + 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronUp size={14} /></button>
+                      </div>
+
+                      {/* Bold */}
+                      <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => applyTextToggle('bold', 'bold')}
+                        className={`p-2 rounded-xl transition-all ${editForm.bold ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                        title="굵게 (글자를 선택하면 선택한 부분만)"
+                      ><BoldIcon size={16} /></button>
+
+                      {/* Italic */}
+                      <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => applyTextToggle('italic', 'italic')}
+                        className={`p-2 rounded-xl transition-all ${editForm.italic ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                        title="기울임 (글자를 선택하면 선택한 부분만)"
+                      ><ItalicIcon size={16} /></button>
+
+                      {/* Underline */}
+                      <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => applyTextToggle('underline', 'underline')}
+                        className={`p-2 rounded-xl transition-all ${editForm.underline ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                        title="밑줄 (글자를 선택하면 선택한 부분만)"
+                      ><UnderlineIcon size={16} /></button>
+
+                      {/* Strikethrough */}
+                      <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => applyTextToggle('strikeThrough', 'strikethrough')}
+                        className={`p-2 rounded-xl transition-all ${editForm.strikethrough ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
+                        title="취소선 (글자를 선택하면 선택한 부분만)"
+                      ><StrikethroughIcon size={16} /></button>
+
+                      {/* Text Color */}
+                      <div className="relative">
+                        <button
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => { setShowTextColorPicker(!showTextColorPicker); setShowTextHighlightPicker(false); }}
+                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
+                          title="글씨색"
+                        >
+                          <span className="text-xs font-black">A</span>
+                          <div className="w-4 h-1 rounded-full" style={{ backgroundColor: editForm.color || '#37352f' }}></div>
+                        </button>
+                        {showTextColorPicker && (
+                          <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">글씨색</p>
+                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
+                              {TEXT_COLOR_PRESETS.map(c => (
+                                <button key={c}
+                                  onMouseDown={e => e.preventDefault()}
+                                  onClick={() => { applyTextColor(c); setShowTextColorPicker(false); }}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
+                                  style={{ backgroundColor: c }}
+                                />
+                              ))}
+                            </div>
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                              <ColorPicker
+                                value={editForm.color || '#37352f'}
+                                onChange={applyTextColor}
+                                triggerClassName="w-7 h-7 rounded-lg"
+                                aria-label="글씨색 직접 지정"
+                              />
+                              팔레트에서 직접 선택
+                            </label>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Highlight Color */}
+                      <div className="relative">
+                        <button
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => { setShowTextHighlightPicker(!showTextHighlightPicker); setShowTextColorPicker(false); }}
+                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
+                          title="배경색"
+                        >
+                          <span className="text-xs font-black px-0.5 rounded" style={{ backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : '#FEF3C7' }}>H</span>
+                        </button>
+                        {showTextHighlightPicker && (
+                          <div className="absolute top-full mt-2 right-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">배경색</p>
+                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
+                              {HIGHLIGHT_COLOR_PRESETS.map(c => (
+                                <button key={c.value}
+                                  onMouseDown={e => e.preventDefault()}
+                                  onClick={() => { applyTextHighlight(c.value); setShowTextHighlightPicker(false); }}
+                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
+                                  style={{ backgroundColor: c.value === 'transparent' ? '#fff' : c.value }}
+                                >
+                                  {c.value === 'transparent' ? '✕' : ''}
+                                </button>
+                              ))}
+                            </div>
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                              <ColorPicker
+                                value={(editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : '#FEF3C7'}
+                                onChange={applyTextHighlight}
+                                triggerClassName="w-7 h-7 rounded-lg"
+                                aria-label="배경색 직접 지정"
+                              />
+                              팔레트에서 직접 선택
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                      </div>
+                      <p className="text-[10px] text-blue-500 font-bold">
+                        글자를 선택한 뒤 버튼을 누르면 선택한 부분만 바뀝니다. 아무것도 선택하지 않으면 블록 전체에 적용됩니다.
+                      </p>
+                    </div>
+
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">텍스트 내용</label>
                       <div
@@ -1763,98 +2034,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           color: editForm.color || '#37352f',
                           backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : undefined,
                         }}
-                        onInput={(e) => setEditForm(prev => ({ ...prev, textContent: (e.target as HTMLDivElement).innerHTML }))}
+                        onInput={(e) => { setEditForm(prev => ({ ...prev, textContent: (e.target as HTMLDivElement).innerHTML })); rememberTextSelection(); }}
+                        onKeyUp={rememberTextSelection}
+                        onMouseUp={rememberTextSelection}
+                        onSelect={rememberTextSelection}
+                        onBlur={rememberTextSelection}
                         data-placeholder="내용을 자유롭게 입력하세요. 키보드 이모지를 사용해 꾸밀 수 있어요."
                       />
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Font Size */}
-                      <div className="flex items-center gap-1 bg-white rounded-xl border border-[#E2E8F0] px-2 py-1">
-                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.max(8, (editForm.fontSizePx || 14) - 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronDown size={14} /></button>
-                        <span className="text-xs font-black w-8 text-center">{editForm.fontSizePx || 14}</span>
-                        <button onClick={() => setEditForm({ ...editForm, fontSizePx: Math.min(96, (editForm.fontSizePx || 14) + 1) })} className="p-1 hover:bg-slate-100 rounded"><ChevronUp size={14} /></button>
-                      </div>
-
-                      {/* Bold */}
-                      <button
-                        onClick={() => setEditForm({ ...editForm, bold: !editForm.bold })}
-                        className={`p-2 rounded-xl transition-all ${editForm.bold ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
-                      ><BoldIcon size={16} /></button>
-
-                      {/* Italic */}
-                      <button
-                        onClick={() => setEditForm({ ...editForm, italic: !editForm.italic })}
-                        className={`p-2 rounded-xl transition-all ${editForm.italic ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
-                      ><ItalicIcon size={16} /></button>
-
-                      {/* Underline */}
-                      <button
-                        onClick={() => setEditForm({ ...editForm, underline: !editForm.underline })}
-                        className={`p-2 rounded-xl transition-all ${editForm.underline ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
-                      ><UnderlineIcon size={16} /></button>
-
-                      {/* Strikethrough */}
-                      <button
-                        onClick={() => setEditForm({ ...editForm, strikethrough: !editForm.strikethrough })}
-                        className={`p-2 rounded-xl transition-all ${editForm.strikethrough ? 'bg-slate-900 text-white' : 'bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50'}`}
-                      ><StrikethroughIcon size={16} /></button>
-
-                      {/* Text Color */}
-                      <div className="relative">
-                        <button
-                          onClick={() => { setShowTextColorPicker(!showTextColorPicker); setShowTextHighlightPicker(false); }}
-                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
-                        >
-                          <span className="text-xs font-black">A</span>
-                          <div className="w-4 h-1 rounded-full" style={{ backgroundColor: editForm.color || '#37352f' }}></div>
-                        </button>
-                        {showTextColorPicker && (
-                          <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
-                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
-                              {TEXT_COLOR_PRESETS.map(c => (
-                                <button key={c} onClick={() => { setEditForm({ ...editForm, color: c }); setShowTextColorPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-blue-600 scale-110' : 'border-transparent hover:scale-105'}`}
-                                  style={{ backgroundColor: c }}
-                                />
-                              ))}
-                            </div>
-                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                              <ColorPicker
-                                value={editForm.color || '#37352f'}
-                                onChange={c => setEditForm({ ...editForm, color: c })}
-                                triggerClassName="w-7 h-7 rounded-lg"
-                                aria-label="텍스트 색상 직접 지정"
-                              />
-                              직접 지정
-                            </label>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Highlight Color */}
-                      <div className="relative">
-                        <button
-                          onClick={() => { setShowTextHighlightPicker(!showTextHighlightPicker); setShowTextColorPicker(false); }}
-                          className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-500 hover:bg-slate-50 transition-all flex items-center gap-1"
-                        >
-                          <span className="text-xs font-black px-0.5 rounded" style={{ backgroundColor: (editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : '#FEF3C7' }}>H</span>
-                        </button>
-                        {showTextHighlightPicker && (
-                          <div className="absolute top-full mt-2 right-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3">
-                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
-                              {HIGHLIGHT_COLOR_PRESETS.map(c => (
-                                <button key={c.value} onClick={() => { setEditForm({ ...editForm, highlight: c.value }); setShowTextHighlightPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
-                                  style={{ backgroundColor: c.value === 'transparent' ? '#fff' : c.value }}
-                                >
-                                  {c.value === 'transparent' ? '✕' : ''}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
                     </div>
                     <p className="text-[10px] text-slate-400 font-bold">키보드 이모지를 사용해 꾸밀 수 있어요</p>
                   </div>
@@ -1870,7 +2056,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 {editForm.products?.map(product => (
                   <div key={product.id} className="bg-[#F8FAFC] p-6 rounded-[2.5rem] border border-[#E2E8F0] space-y-4">
                     <input type="text" placeholder="상품명" value={product.name} onChange={e => handleUpdateProduct(product.id, 'name', e.target.value)} className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
-                    <input type="text" placeholder="가격 (선택사항, 예: 29,000원)" value={product.price || ''} onChange={e => handleUpdateProduct(product.id, 'price', e.target.value)} className="w-full bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
                     <div className="flex gap-3 min-w-0">
                       <input type="text" placeholder="구매 링크 (URL)" value={product.link} onChange={e => handleUpdateProduct(product.id, 'link', e.target.value)} className="flex-1 min-w-0 bg-white border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black" />
                       <button onClick={() => handleDeleteProduct(product.id)} className="w-14 h-14 bg-white border border-red-100 text-red-400 rounded-2xl flex items-center justify-center hover:text-red-500 transition-all"><Trash2 size={20} /></button>
@@ -1950,7 +2135,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
             <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
               <AlertTriangle size={32} />
             </div>
-            <h3 className="text-xl font-black text-center mb-8">정말 삭제하시겠습니까?</h3>
+            <h3 className="text-xl font-black text-center mb-3">삭제 하시겠습니까?</h3>
+            <p className="text-xs font-bold text-slate-400 text-center mb-8">
+              {confirmDelete.type === 'category'
+                ? `'${confirmDelete.id}' 카테고리와 이 카테고리에 속한 포스트가 함께 삭제됩니다.`
+                : '삭제하면 되돌릴 수 없습니다.'}
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <button onClick={() => setConfirmDelete(null)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">취소</button>
               <button onClick={executeDelete} className="py-4 bg-red-500 text-white rounded-2xl font-black">삭제</button>

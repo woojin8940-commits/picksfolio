@@ -212,7 +212,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               height) so it no longer fills the whole viewport. Without the cap the
               square grew to the full 3xl container width, pushing the campaign
               description and info cards entirely below the fold. */}
-          <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4 aspect-square bg-slate-100 overflow-hidden relative md:rounded-3xl">
+          <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4 aspect-square bg-slate-100 overflow-hidden relative md:rounded-3xl md:shadow-[0_20px_44px_-20px_rgba(15,23,42,0.5)]">
             {selectedCampaign.thumbnail_url ? (
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
             ) : (
@@ -273,9 +273,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div className="grid grid-cols-2 gap-3">
                 {/* Reward Card */}
                 {selectedCampaign.reward_amount && (
-                  <div className="col-span-2 bg-gradient-to-r from-blue-50 to-pink-50 border border-blue-100 rounded-2xl p-4 md:p-5">
+                  <div className="col-span-2 bg-gradient-to-r from-blue-50 to-pink-50 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-[0_10px_26px_-12px_rgba(37,99,235,0.45)]">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
+                      <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center shadow-[0_3px_8px_-3px_rgba(37,99,235,0.5)]">
                         <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       </div>
                       <span className="text-xs text-blue-500 font-black uppercase tracking-wider">리워드</span>
@@ -286,9 +286,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 )}
 
                 {/* Recruitment Card */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-4">
+                <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center">
+                    <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(37,99,235,0.45)]">
                       <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </div>
                     <span className="text-[10px] text-slate-400 font-black uppercase">모집 인원</span>
@@ -315,9 +315,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 </div>
 
                 {/* Period Card */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-4">
+                <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center">
+                    <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(16,185,129,0.45)]">
                       <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     </div>
                     <span className="text-[10px] text-slate-400 font-black uppercase">캠페인 기간</span>
@@ -351,7 +351,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
                   {selectedCampaign.start_date && (
                     <div className="relative mb-5">
-                      <div className="absolute -left-6 top-0.5 w-[18px] h-[18px] rounded-full border-2 border-blue-500 bg-white flex items-center justify-center">
+                      <div className="absolute -left-6 top-0.5 w-[18px] h-[18px] rounded-full border-2 border-blue-500 bg-white flex items-center justify-center shadow-[0_3px_8px_-2px_rgba(37,99,235,0.55)]">
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                       </div>
                       <div>
@@ -363,7 +363,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
                   {selectedCampaign.end_date && (
                     <div className="relative mb-1">
-                      <div className={`absolute -left-6 top-0.5 w-[18px] h-[18px] rounded-full border-2 ${days ? 'border-slate-300 bg-white' : 'border-rose-500 bg-rose-500'} flex items-center justify-center`}>
+                      <div className={`absolute -left-6 top-0.5 w-[18px] h-[18px] rounded-full border-2 shadow-[0_3px_8px_-2px_rgba(15,23,42,0.35)] ${days ? 'border-slate-300 bg-white' : 'border-rose-500 bg-rose-500'} flex items-center justify-center`}>
                         {!days && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
                       </div>
                       <div>
@@ -385,7 +385,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                   캠페인 상세 설명
                 </h3>
-                <div className="bg-slate-50 rounded-2xl p-5 md:p-6">
+                <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.25)]">
                   <div className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8]">
                     {selectedCampaign.description}
                   </div>
@@ -400,7 +400,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                   지원 조건
                 </h3>
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 md:p-6">
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 md:p-6 shadow-[0_8px_22px_-12px_rgba(217,119,6,0.45)]">
                   <div className="text-sm text-amber-900 font-medium whitespace-pre-wrap leading-[1.8]">
                     {selectedCampaign.requirements.split('\n').map((line, i) => (
                       <div key={i} className="flex gap-2 items-start">
@@ -424,7 +424,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 캠페인 정보
               </h3>
-              <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden divide-y divide-slate-50">
+              <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden divide-y divide-slate-50 shadow-[0_8px_22px_-12px_rgba(15,23,42,0.28)]">
                 <div className="flex items-center px-5 py-3.5">
                   <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">유형</span>
                   <span className="text-sm text-slate-900 font-bold">{TYPE_LABELS[selectedCampaign.type] || selectedCampaign.type}</span>
@@ -473,8 +473,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div className="py-5">
                 {acceptedCampaigns.has(selectedCampaign.id) ? (
                   <div className="space-y-3">
-                    <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-5 text-center">
-                      <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-5 text-center shadow-[0_10px_26px_-12px_rgba(16,185,129,0.5)]">
+                      <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-3px_rgba(16,185,129,0.5)]">
                         <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                       </div>
                       <p className="text-base font-black text-emerald-700">협업이 승인되었습니다!</p>
@@ -485,15 +485,15 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                         const proposalId = `campaign_${selectedCampaign.id}_${userName.toLowerCase()}`;
                         window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
                       }}
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_16px_34px_-10px_rgba(37,99,235,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                       브랜드와 채팅하기
                     </button>
                   </div>
                 ) : (
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-center">
-                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-center shadow-[0_10px_26px_-12px_rgba(37,99,235,0.5)]">
+                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-3px_rgba(37,99,235,0.5)]">
                       <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
                     <p className="text-base font-black text-blue-700">지원 완료</p>
@@ -506,8 +506,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             {/* 마감된 캠페인 — 지원 버튼 대신 마감 사유를 안내한다 */}
             {!isApplied && isClosed && (
               <div className="py-5">
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center">
-                  <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center shadow-[0_8px_22px_-12px_rgba(15,23,42,0.3)]">
+                  <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.35)]">
                     <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                   </div>
                   <p className="text-base font-black text-slate-600">마감된 캠페인</p>
@@ -519,7 +519,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             {/* Apply Form (inline, above fixed button) */}
             {!isApplied && !isClosed && showApplyForm && (
               <div className="py-5">
-                <div className="border border-blue-200 rounded-2xl p-5 md:p-6 bg-gradient-to-b from-blue-50/50 to-white space-y-4">
+                <div className="border border-blue-200 rounded-2xl p-5 md:p-6 bg-gradient-to-b from-blue-50/50 to-white space-y-4 shadow-[0_12px_30px_-14px_rgba(37,99,235,0.5)]">
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                     <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     캠페인 지원하기
@@ -559,7 +559,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <button
                       onClick={handleApply}
                       disabled={applying || !applyForm.contact.trim() || !applyForm.instagram_url.trim()}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:shadow-none shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_14px_30px_-10px_rgba(37,99,235,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       {applying ? (
                         <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> 지원 중...</>
@@ -580,7 +580,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
         {/* Fixed Bottom CTA */}
         {!isApplied && !isClosed && !showApplyForm && (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom">
+          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.35)]">
             <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 {selectedCampaign.reward_amount && (
@@ -595,7 +595,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
               <button
                 onClick={() => setShowApplyForm(true)}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3.5 rounded-2xl font-black text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 flex-shrink-0"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3.5 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(37,99,235,0.8)] hover:shadow-[0_16px_34px_-10px_rgba(37,99,235,0.9)] hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 flex-shrink-0"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                 지원하기
@@ -639,7 +639,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
+              className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white shadow-[0_4px_14px_-8px_rgba(15,23,42,0.35)]"
               placeholder="캠페인 검색..."
             />
           </div>
@@ -651,8 +651,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               onClick={() => setActiveFilter(f.value)}
               className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all ${
                 activeFilter === f.value
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  ? 'bg-slate-900 text-white shadow-[0_6px_14px_-6px_rgba(15,23,42,0.85)] -translate-y-px'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 shadow-[0_2px_6px_-3px_rgba(15,23,42,0.3)] hover:shadow-[0_5px_12px_-5px_rgba(15,23,42,0.4)] hover:-translate-y-px'
               }`}
             >
               {f.label}
