@@ -27,6 +27,18 @@ async function readError(res: Response, fallback: string): Promise<string> {
   }
 }
 
+/**
+ * 'YYYY-MM-DD' 를 그대로 new Date() 에 넣으면 UTC 자정으로 해석돼서, 한국 시간
+ * 기준으로 하루가 밀려 보인다. 날짜만 들어온 값은 그 지역의 자정으로 읽는다.
+ */
+function parseLocalDate(value?: string): Date | null {
+  if (!value) return null;
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (ymd) return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,14 +141,31 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
 
   useEffect(() => { fetchSettlements(); }, [userName]);
 
+  // 날짜가 비어 있거나 형식이 깨진 항목은 예전에는 NaN 으로 비교돼서 목록 순서가
+  // 들쭉날쭉했다. 지금은 날짜 있는 항목을 먼저 빠른 순으로 놓고, 날짜가 없는
+  // 항목은 뒤로 모아 둔다.
   const scheduledSettlements = useMemo(() =>
     settlements.filter(s => s.status === 'scheduled' || s.status === 'pending')
-      .sort((a, b) => new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime()),
+      .sort((a, b) => {
+        const at = parseLocalDate(a.scheduled_date)?.getTime();
+        const bt = parseLocalDate(b.scheduled_date)?.getTime();
+        if (at === undefined && bt === undefined) return 0;
+        if (at === undefined) return 1;
+        if (bt === undefined) return -1;
+        return at - bt;
+      }),
     [settlements]
   );
   const completedSettlements = useMemo(() =>
     settlements.filter(s => s.status === 'completed')
-      .sort((a, b) => new Date(b.completed_at || b.updated_at || '').getTime() - new Date(a.completed_at || a.updated_at || '').getTime()),
+      .sort((a, b) => {
+        const at = parseLocalDate(a.completed_at || a.updated_at)?.getTime();
+        const bt = parseLocalDate(b.completed_at || b.updated_at)?.getTime();
+        if (at === undefined && bt === undefined) return 0;
+        if (at === undefined) return 1;
+        if (bt === undefined) return -1;
+        return bt - at;
+      }),
     [settlements]
   );
 
@@ -145,15 +174,22 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const pendingAmount = totalAmount - completedAmount;
 
   const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
+    const d = parseLocalDate(dateStr);
+    if (!d) return '-';
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
   const formatFee = (fee: number) => formatKRW(fee);
 
   const getDaysUntil = (dateStr: string) => {
-    const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const target = parseLocalDate(dateStr);
+    if (!target) return null;
+    // 날짜끼리만 비교한다. 예전에는 'YYYY-MM-DD' 를 그대로 Date 로 만들어(UTC 자정)
+    // 지금 시각과 뺐기 때문에, 한국 시간 오전 9시 이전에는 오늘 정산이 'D-1' 로,
+    // 오후에는 어제 정산이 '오늘' 로 보이는 하루 오차가 있었다.
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const diff = Math.round((target.getTime() - startOfToday.getTime()) / 86400000);
     if (diff < 0) return <span className="text-red-500 font-black text-[10px]">기한 지남</span>;
     if (diff === 0) return <span className="text-amber-500 font-black text-[10px]">오늘</span>;
     if (diff <= 7) return <span className="text-amber-500 font-black text-[10px]">D-{diff}</span>;

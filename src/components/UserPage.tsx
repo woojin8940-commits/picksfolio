@@ -1369,7 +1369,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                    setSelectedBlockId(block.id);
                                    trackClick(username, block.id);
                                  }}
-                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] shadow-sm ${isDark ? 'bg-white/5 border border-white/10' : 'bg-white border border-slate-100'}`}
+                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] ${isDark ? 'bg-white/5 border border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                  style={{
                                    gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
@@ -1749,7 +1749,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                                   setSelectedBlockId(block.id);
                                   trackClick(username, block.id);
                                 }}
-                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}
+                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${isDark ? 'bg-white/5 border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                 style={{
                                   gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'

@@ -724,7 +724,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             placeholder="대화 검색..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/30 transition-all"
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/30 transition-all shadow-[0_3px_10px_-6px_rgba(15,23,42,0.4)]"
           />
         </div>
       </div>
@@ -737,12 +737,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             onClick={openAiAssistant}
             className={`w-full text-left px-3 py-3 rounded-xl transition-all group border ${
               aiActive
-                ? 'bg-gradient-to-r from-violet-50 to-blue-50 border-violet-300 ring-1 ring-violet-300/40'
-                : 'bg-gradient-to-r from-violet-50/70 to-blue-50/70 border-violet-100 hover:border-violet-200 hover:from-violet-50 hover:to-blue-50'
+                ? 'bg-gradient-to-r from-violet-50 to-blue-50 border-violet-300 ring-1 ring-violet-300/40 shadow-[0_10px_24px_-10px_rgba(124,58,237,0.55)]'
+                : 'bg-gradient-to-r from-violet-50/70 to-blue-50/70 border-violet-100 hover:border-violet-200 hover:from-violet-50 hover:to-blue-50 shadow-[0_6px_16px_-8px_rgba(124,58,237,0.45)] hover:shadow-[0_12px_26px_-10px_rgba(124,58,237,0.5)] hover:-translate-y-0.5'
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <div className="shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-sm">
+              <div className="shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-[0_5px_12px_-4px_rgba(124,58,237,0.7)]">
                 <span className="text-base leading-none">✨</span>
               </div>
               <div className="flex-1 min-w-0">
@@ -803,15 +803,15 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   }}
                   className={`w-full text-left px-3 py-3 rounded-xl transition-all group ${
                     isActive
-                      ? 'bg-blue-50 border border-blue-200'
+                      ? 'bg-blue-50 border border-blue-200 shadow-[0_10px_22px_-10px_rgba(37,99,235,0.5)]'
                       : isUnread
-                        ? 'bg-gray-50 hover:bg-gray-100 border border-transparent'
-                        : 'hover:bg-gray-50 border border-transparent'
+                        ? 'bg-white hover:bg-gray-50 border border-gray-100 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.4)] hover:shadow-[0_10px_22px_-10px_rgba(15,23,42,0.45)] hover:-translate-y-0.5'
+                        : 'bg-white hover:bg-gray-50 border border-transparent hover:border-gray-100 shadow-[0_3px_10px_-8px_rgba(15,23,42,0.35)] hover:shadow-[0_8px_18px_-10px_rgba(15,23,42,0.4)] hover:-translate-y-0.5'
                   }`}
                 >
                   <div className="flex items-start gap-2">
                     {/* Avatar */}
-                    <div className={`shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-xs md:text-sm font-bold ${
+                    <div className={`shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-xs md:text-sm font-bold shadow-[0_4px_10px_-4px_rgba(15,23,42,0.5)] ${
                       isActive
                         ? 'bg-blue-500 text-white'
                         : userType === 'influencer'
@@ -894,7 +894,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
         {/* Channel Header (Slack-style) */}
-        <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-sm z-10">
+        <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)] z-10">
           <div className="flex items-center gap-2 md:gap-3">
             {/* Mobile back button */}
             <button
@@ -958,7 +958,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           <div className="min-h-full flex flex-col justify-end">
           {/* Channel intro (Slack-style) */}
           <div className="px-3 md:px-5 pb-2 md:pb-4 mb-1 md:mb-2">
-            <div className="w-9 h-9 md:w-12 md:h-12 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-2 md:mb-3">
+            <div className="w-9 h-9 md:w-12 md:h-12 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-2 md:mb-3 shadow-[0_8px_18px_-6px_rgba(37,99,235,0.7)]">
               <span className="text-lg md:text-2xl font-bold text-white leading-none">#</span>
             </div>
             <h3 className="text-base md:text-xl font-extrabold text-gray-900 mb-0.5 md:mb-1">
@@ -967,7 +967,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             <p className="text-xs md:text-sm text-gray-500 leading-relaxed">
               <span className="font-semibold text-gray-700">{partnerName}</span>와의 협업 공간
             </p>
-            <div className="mt-2 md:mt-3 inline-flex items-center gap-1.5 md:gap-2 bg-gray-50 border border-gray-200 rounded-md px-2 md:px-3 py-1 md:py-1.5">
+            <div className="mt-2 md:mt-3 inline-flex items-center gap-1.5 md:gap-2 bg-gray-50 border border-gray-200 rounded-md px-2 md:px-3 py-1 md:py-1.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.5)]">
               <svg className="w-3 h-3 md:w-3.5 md:h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
@@ -1026,7 +1026,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 >
                   {/* Avatar column */}
                   {!isSameAuthor ? (
-                    <div className={`shrink-0 w-7 h-7 md:w-10 md:h-10 rounded-md flex items-center justify-center text-xs md:text-base font-bold ${
+                    <div className={`shrink-0 w-7 h-7 md:w-10 md:h-10 rounded-md flex items-center justify-center text-xs md:text-base font-bold shadow-[0_5px_12px_-4px_rgba(15,23,42,0.5)] ${
                       isBusiness
                         ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white'
                         : 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white'
@@ -1070,7 +1070,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
                     {/* Message content */}
                     {comment.content && (
-                      <div className={`inline-block max-w-full ${isMe ? 'bg-blue-50 border border-blue-100 rounded-2xl rounded-tr-sm px-2.5 py-1.5 md:px-3.5 md:py-2' : 'md:bg-transparent md:border-0 md:rounded-none md:px-0 md:py-0 bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-2.5 py-1.5 md:px-3.5 md:py-2'}`}>
+                      <div className={`inline-block max-w-full ${isMe ? 'bg-blue-50 border border-blue-100 rounded-2xl rounded-tr-sm px-2.5 py-1.5 md:px-3.5 md:py-2 shadow-[0_6px_16px_-8px_rgba(37,99,235,0.55)]' : 'md:bg-transparent md:border-0 md:rounded-none md:px-0 md:py-0 md:shadow-none bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-2.5 py-1.5 md:px-3.5 md:py-2 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)]'}`}>
                         <p className="text-[13px] leading-[1.5] md:text-[15px] md:leading-[1.6] text-gray-900 whitespace-pre-wrap break-words font-normal">
                           {comment.content}
                         </p>
@@ -1090,7 +1090,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                                   <img
                                     src={att.url}
                                     alt={att.fileName}
-                                    className="w-full max-w-[240px] md:max-w-[420px] max-h-[240px] md:max-h-[340px] rounded-lg border border-gray-200 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                                    className="w-full max-w-[240px] md:max-w-[420px] max-h-[240px] md:max-h-[340px] rounded-lg border border-gray-200 object-cover cursor-pointer hover:opacity-90 transition-all shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)] hover:shadow-[0_12px_26px_-10px_rgba(15,23,42,0.6)]"
                                   />
                                 </a>
                                 <button
@@ -1189,13 +1189,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         </div>
 
         {/* Message Composer (fixed at the very bottom on mobile) */}
-        <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
+        <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0 shadow-[0_-8px_22px_-14px_rgba(15,23,42,0.5)] md:shadow-none" style={{ touchAction: 'manipulation' }}>
           <div
             onDragOver={handleComposerDragOver}
             onDragEnter={handleComposerDragOver}
             onDragLeave={handleComposerDragLeave}
             onDrop={handleComposerDrop}
-            className={`relative bg-white border-2 rounded-lg overflow-hidden focus-within:border-gray-400 transition-all ${
+            className={`relative bg-white border-2 rounded-lg overflow-hidden focus-within:border-gray-400 transition-all shadow-[0_8px_20px_-14px_rgba(15,23,42,0.55)] focus-within:shadow-[0_12px_26px_-14px_rgba(15,23,42,0.6)] ${
               isDragOverComposer ? 'border-blue-400 ring-2 ring-blue-400/35' : 'border-gray-300'
             }`}
           >
@@ -1266,7 +1266,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 disabled={!newMessage.trim() && pendingFiles.length === 0}
                 className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
                   (newMessage.trim() || pendingFiles.length > 0)
-                    ? 'bg-blue-600 text-white hover:bg-blue-500 active:scale-95'
+                    ? 'bg-blue-600 text-white hover:bg-blue-500 active:scale-95 shadow-[0_6px_14px_-5px_rgba(37,99,235,0.8)] hover:shadow-[0_9px_18px_-5px_rgba(37,99,235,0.85)]'
                     : 'bg-gray-100 text-gray-400'
                 }`}
               >
@@ -1298,7 +1298,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
         {/* Header */}
-        <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-sm z-10">
+        <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)] z-10">
           <div className="flex items-center gap-2 md:gap-3">
             <button
               onClick={() => { setAiActive(false); setShowList(true); }}
@@ -1308,7 +1308,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <div className="shrink-0 w-7 h-7 md:w-9 md:h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-sm">
+            <div className="shrink-0 w-7 h-7 md:w-9 md:h-9 rounded-lg bg-gradient-to-br from-violet-500 to-blue-600 flex items-center justify-center shadow-[0_6px_14px_-5px_rgba(124,58,237,0.7)]">
               <span className="text-sm md:text-base leading-none">✨</span>
             </div>
             <div className="flex-1 min-w-0">
@@ -1347,12 +1347,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </button>
                 )
               )}
-              <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+              <div className="flex items-center bg-gray-100 rounded-lg p-0.5 shadow-[inset_0_1px_3px_rgba(15,23,42,0.12)]">
                 <button
                   type="button"
                   onClick={() => setAiModel('gemini')}
                   className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
-                    aiModel === 'gemini' ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    aiModel === 'gemini' ? 'bg-white text-violet-700 shadow-[0_3px_8px_-3px_rgba(15,23,42,0.4)]' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   ✨ 제미나이
@@ -1366,7 +1366,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   type="button"
                   onClick={() => setAiModel('claude')}
                   className={`px-2 md:px-2.5 py-1 rounded-md text-[11px] md:text-xs font-bold transition-all ${
-                    aiModel === 'claude' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    aiModel === 'claude' ? 'bg-white text-orange-700 shadow-[0_3px_8px_-3px_rgba(15,23,42,0.4)]' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   🤖 클로드
@@ -1422,7 +1422,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               <div className="space-y-3 md:space-y-4 max-w-3xl mx-auto">
                 {aiMessages.map((m, idx) => (
                   <div key={idx} className={`flex gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                    <div className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+                    <div className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs font-bold shadow-[0_5px_12px_-4px_rgba(76,29,149,0.55)] ${
                       m.role === 'user'
                         ? 'bg-blue-600 text-white'
                         : 'bg-gradient-to-br from-violet-500 to-blue-600 text-white'
@@ -1432,8 +1432,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
                       <div className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] break-words text-left ${
                         m.role === 'user'
-                          ? 'bg-blue-50 border border-blue-100 text-gray-900 rounded-tr-sm whitespace-pre-wrap'
-                          : 'bg-gray-50 border border-gray-100 text-gray-900 rounded-tl-sm'
+                          ? 'bg-blue-50 border border-blue-100 text-gray-900 rounded-tr-sm whitespace-pre-wrap shadow-[0_6px_16px_-8px_rgba(37,99,235,0.55)]'
+                          : 'bg-gray-50 border border-gray-100 text-gray-900 rounded-tl-sm shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)]'
                       }`}>
                         {m.role === 'assistant'
                           ? <AiMarkdown content={m.content} />
@@ -1469,8 +1469,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </div>
 
             {/* Composer */}
-            <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0" style={{ touchAction: 'manipulation' }}>
-              <div className="max-w-3xl mx-auto relative bg-white border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-400 transition-all">
+            <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0 shadow-[0_-8px_22px_-14px_rgba(15,23,42,0.5)] md:shadow-none" style={{ touchAction: 'manipulation' }}>
+              <div className="max-w-3xl mx-auto relative bg-white border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-400 transition-all shadow-[0_8px_20px_-14px_rgba(15,23,42,0.55)] focus-within:shadow-[0_12px_26px_-14px_rgba(124,58,237,0.5)]">
                 <div className="flex items-end gap-1.5 md:gap-2 p-2 md:p-2.5">
                   <textarea
                     ref={aiInputRef}
@@ -1492,7 +1492,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     disabled={!aiInput.trim() || aiLoading}
                     className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
                       aiInput.trim() && !aiLoading
-                        ? 'bg-gradient-to-br from-violet-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
+                        ? 'bg-gradient-to-br from-violet-600 to-blue-600 text-white hover:opacity-90 active:scale-95 shadow-[0_6px_14px_-5px_rgba(124,58,237,0.8)] hover:shadow-[0_9px_18px_-5px_rgba(124,58,237,0.85)]'
                         : 'bg-gray-100 text-gray-400'
                     }`}
                   >
@@ -1565,7 +1565,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   return (
     <div className={`${chatOpen ? 'h-[100dvh]' : 'h-[calc(100dvh-60px)]'} md:h-[calc(100vh/0.75)] w-full animate-in fade-in duration-300`}>
       {/* Desktop: Two-panel layout */}
-      <div className="hidden md:flex h-full rounded-2xl overflow-hidden border border-gray-200 bg-gray-50 shadow-lg shadow-gray-200/50">
+      <div className="hidden md:flex h-full rounded-2xl overflow-hidden border border-gray-200 bg-gray-50 shadow-[0_24px_56px_-24px_rgba(15,23,42,0.45)]">
         <div className="w-[320px] shrink-0">
           {renderSidebar()}
         </div>

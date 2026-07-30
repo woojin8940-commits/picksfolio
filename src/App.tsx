@@ -384,7 +384,13 @@ const App: React.FC = () => {
 
       const uid = session.user.id;
       setAuthUserId(uid);
-      setProfileChecked(false); // Start profile verification
+      // 새로고침할 때마다 "프로필 확인 중" 스피너가 몇 초씩 뜨던 원인.
+      // 캐시된 사용자 이름이 이미 있으면 화면을 막지 않고 그대로 대시보드를
+      // 보여주고, 프로필 검증은 아래에서 그대로 이어서 한다(끝나면 최신 값으로
+      // 덮어쓴다). 캐시가 없는 첫 로그인에서는 예전처럼 확인이 끝날 때까지
+      // 기다려야 하므로 그때만 게이트를 닫는다.
+      const hasCachedIdentity = !!(localStorage.getItem('picks_user_session') || userNameRef.current);
+      if (!hasCachedIdentity) setProfileChecked(false);
 
       // NON-BLOCKING profile fetch: Use safeFetchProfile with 5s timeout.
       // If the fetch fails or times out, immediately proceed with a fallback
@@ -423,7 +429,20 @@ const App: React.FC = () => {
       const isKakaoUser = session.user.app_metadata?.provider === 'kakao'
         || session.user.identities?.some((i: any) => i.provider === 'kakao');
 
-      if (isKakaoUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+      // 카카오 프로필 보정은 "아직 프로필이 채워지지 않은 경우"에만 필요하다.
+      // 이미 username 이 있는 계정이 단순 새로고침한 것이라면, 이 호출은 새로
+      // 가져올 정보가 없는데도(provider_token 은 OAuth 콜백에서만 생긴다)
+      // 최대 15초까지 기다리게 만들어 대시보드 진입을 늦춘다. 그래서 새 정보가
+      // 실제로 있을 때(로그인 직후 또는 프로필 미완성)만 호출한다.
+      const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
+        || sessionStorage.getItem('kakao_provider_token')
+        || sessionStorage.getItem('kakao_client_phone')
+        || sessionStorage.getItem('kakao_client_name'));
+      const needsKakaoProfileSetup = !(profileData?.username || '').trim()
+        || event === 'SIGNED_IN'
+        || hasKakaoHandoff;
+
+      if (isKakaoUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && needsKakaoProfileSetup) {
         const effectiveProviderToken = session.provider_token || capturedProviderToken || sessionStorage.getItem('kakao_provider_token') || '';
         // 클라이언트에서 캐시한 카카오 전화번호/이름 (handleOAuthCallback에서 직접 API 호출 결과)
         const clientKakaoPhone = sessionStorage.getItem('kakao_client_phone') || '';

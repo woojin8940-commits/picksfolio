@@ -40,6 +40,19 @@ const ymd = (d: Date) =>
 
 const dayOnly = (value?: string) => (value || '').split('T')[0];
 
+/**
+ * 'YYYY-MM-DD' 를 로컬 자정 Date 로 만든다.
+ *
+ * `new Date('2026-07-15')` 는 UTC 자정으로 해석되는데, 여기에 getDate()/setDate()
+ * 로 하루씩 더하면 로컬 기준(한국은 +9)과 어긋나서 같은 날이 두 번 잡히거나
+ * 마지막 날이 빠지는 일이 생긴다. 그래서 연·월·일을 직접 넘겨 로컬 날짜로 만든다.
+ */
+const parseYmd = (value?: string): Date | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dayOnly(value));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+};
+
 const normalizeText = (v?: string) => (v || '').trim().toLowerCase();
 
 /** 두 협업 기간이 겹치는지. 값이 비어 있으면 겹친다고 보지 않는다. */
@@ -228,15 +241,18 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   };
 
   // Map proposal events per date
+  // 날짜 키는 로컬 기준으로 만든다. 예전에는 UTC 자정으로 파싱한 Date 에
+  // setDate() 로 하루씩 더하면서 toISOString() 으로 키를 뽑았는데, 한국 시간대에서는
+  // 첫날이 두 번 들어가고 마지막 날이 아예 빠져 캘린더 막대가 하루 짧게 그려졌다.
   const proposalEventsMap = useMemo(() => {
     const map: Record<string, BusinessProposal[]> = {};
     acceptedProposals.forEach(p => {
-      if (!p.start_date || !p.end_date) return;
-      const start = new Date(p.start_date);
-      const end = new Date(p.end_date);
+      const start = parseYmd(p.start_date);
+      const end = parseYmd(p.end_date);
+      if (!start || !end) return;
       const cursor = new Date(start);
       while (cursor <= end) {
-        const key = cursor.toISOString().split('T')[0];
+        const key = ymd(cursor);
         if (!map[key]) map[key] = [];
         map[key].push(p);
         cursor.setDate(cursor.getDate() + 1);
@@ -249,12 +265,12 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const collabEventsMap = useMemo(() => {
     const map: Record<string, CollabRecord[]> = {};
     collabRecords.forEach(c => {
-      if (!c.date) return;
-      const start = new Date(c.date);
-      const end = c.end_date ? new Date(c.end_date) : start;
+      const start = parseYmd(c.date);
+      if (!start) return;
+      const end = parseYmd(c.end_date) || start;
       const cursor = new Date(start);
       while (cursor <= end) {
-        const key = cursor.toISOString().split('T')[0];
+        const key = ymd(cursor);
         if (!map[key]) map[key] = [];
         map[key].push(c);
         cursor.setDate(cursor.getDate() + 1);
@@ -276,9 +292,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   }, [acceptedProposals]);
 
   const getEventPosition = (startDate: string, endDate: string, dateStr: string) => {
-    const startStr = new Date(startDate).toISOString().split('T')[0];
-    const endStr = new Date(endDate).toISOString().split('T')[0];
-    const dayOfWeek = new Date(dateStr).getDay();
+    // 문자열 그대로 비교하고 요일도 로컬 날짜로 구한다. toISOString() 을 쓰면
+    // 타임존에 따라 시작/끝 판정이 하루씩 밀려 막대의 둥근 모서리가 엉켰다.
+    const startStr = dayOnly(startDate);
+    const endStr = dayOnly(endDate);
+    const dayOfWeek = (parseYmd(dateStr) || new Date(dateStr)).getDay();
     const isFirst = dateStr === startStr || dayOfWeek === 0;
     const isLast = dateStr === endStr || dayOfWeek === 6;
     return { isFirst, isLast };
@@ -382,15 +400,22 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   // 같은 협업을 직접 기록으로도 남겼다면 두 번 세지 않는다. 제목+업체명이 같은
   // 경우와, 제목 표기만 다른 경우(같은 업체·같은 금액·기간 겹침)를 모두 본다.
+  // 단, 제목·업체명이 같아도 기간이 전혀 겹치지 않으면 다른 협업으로 본다.
+  // 매달 같은 이름으로 진행하는 협업에서, 한 달치를 직접 기록해 두면 나머지 달의
+  // 정산·제안 내역이 통째로 사라지던 문제가 있었다.
   const isCoveredByManualRecord = (item: { title: string; company_name: string; fee: number; date: string; end_date?: string }) =>
     collabRecords.some(c => {
-      if (
-        normalizeText(c.title) === normalizeText(item.title) &&
-        normalizeText(c.company_name) === normalizeText(item.company_name)
-      ) return true;
+      const sameCompany = normalizeText(c.company_name) === normalizeText(item.company_name);
+      const sameTitle = !!normalizeText(item.title) && normalizeText(c.title) === normalizeText(item.title);
+      // 한쪽 날짜가 비어 있으면 기간을 비교할 근거가 없으니 날짜는 따지지 않는다.
+      const datesComparable = !!dayOnly(c.date) && !!dayOnly(item.date);
+      if (sameTitle && sameCompany) {
+        if (!datesComparable) return true;
+        if (windowsOverlap(c.date, c.end_date, item.date, item.end_date)) return true;
+      }
       return (
         !!normalizeText(item.company_name) &&
-        normalizeText(c.company_name) === normalizeText(item.company_name) &&
+        sameCompany &&
         c.fee > 0 && c.fee === item.fee &&
         windowsOverlap(c.date, c.end_date, item.date, item.end_date)
       );
@@ -588,8 +613,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   );
 
   // 카테고리 집계도 협업 내역 목록과 같은 출처를 쓴다.
-  const commerceCount = useMemo(() => allCollabsSorted.filter(c => c.category === '커머스').length, [allCollabsSorted]);
-  const adCount = useMemo(() => allCollabsSorted.filter(c => c.category === '광고').length, [allCollabsSorted]);
+  // 기간을 고르면 목록·합계와 함께 이 숫자들도 같은 기간으로 좁혀진다. 예전에는
+  // 목록만 걸러지고 위쪽 타일은 전체 기간 숫자를 그대로 보여줘서, "이번 달"을
+  // 골랐는데 총 협업 건수가 목록보다 훨씬 많은 것처럼 읽혔다.
+  const periodCommerceCount = useMemo(() => periodCollabs.filter(c => c.category === '커머스').length, [periodCollabs]);
+  const periodAdCount = useMemo(() => periodCollabs.filter(c => c.category === '광고').length, [periodCollabs]);
 
   const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -1087,23 +1115,26 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
       {topTab === 'collabs' && (
         <div className="space-y-5">
-          {/* Category summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-indigo-50 rounded-2xl p-4 text-center">
-              <p className="text-xl md:text-2xl font-black text-indigo-600">{commerceCount}</p>
-              <p className="text-[10px] md:text-xs font-bold text-indigo-500">커머스</p>
-            </div>
-            <div className="bg-pink-50 rounded-2xl p-4 text-center">
-              <p className="text-xl md:text-2xl font-black text-pink-600">{adCount}</p>
-              <p className="text-[10px] md:text-xs font-bold text-pink-500">광고</p>
-            </div>
-            <div className="bg-blue-50 rounded-2xl p-4 text-center">
-              <p className="text-xl md:text-2xl font-black text-blue-600">{totalCollabs}</p>
-              <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
-            </div>
-            <div className="bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl p-4 text-center">
-              <p className="text-base md:text-xl font-black text-teal-700">{formatFee(totalRevenue)}</p>
-              <p className="text-[10px] md:text-xs font-bold text-teal-500">완료 수익</p>
+          {/* Category summary — 아래 기간 필터와 같은 기간을 기준으로 센다 */}
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{periodLabel} 기준</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-indigo-50 rounded-2xl p-4 text-center">
+                <p className="text-xl md:text-2xl font-black text-indigo-600">{periodCommerceCount}</p>
+                <p className="text-[10px] md:text-xs font-bold text-indigo-500">커머스</p>
+              </div>
+              <div className="bg-pink-50 rounded-2xl p-4 text-center">
+                <p className="text-xl md:text-2xl font-black text-pink-600">{periodAdCount}</p>
+                <p className="text-[10px] md:text-xs font-bold text-pink-500">광고</p>
+              </div>
+              <div className="bg-blue-50 rounded-2xl p-4 text-center">
+                <p className="text-xl md:text-2xl font-black text-blue-600">{periodCollabs.length}</p>
+                <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
+              </div>
+              <div className="bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl p-4 text-center">
+                <p className="text-base md:text-xl font-black text-teal-700">{formatFee(periodCompletedFee)}</p>
+                <p className="text-[10px] md:text-xs font-bold text-teal-500">완료 수익</p>
+              </div>
             </div>
           </div>
 
@@ -1169,12 +1200,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 </button>
               )}
             </div>
-            {/* Period summary */}
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <div className="bg-slate-50 rounded-xl p-3 text-center">
-                <p className="text-base md:text-lg font-black text-slate-900">{periodCollabs.length}<span className="text-xs font-bold">건</span></p>
-                <p className="text-[10px] font-bold text-slate-400">기간 내 협업</p>
-              </div>
+            {/* Period summary — 건수는 위 타일과 겹치므로 금액만 보여준다 */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <p className="text-sm md:text-lg font-black text-blue-700">{formatFee(periodTotalFee)}</p>
                 <p className="text-[10px] font-bold text-blue-400">총 금액</p>

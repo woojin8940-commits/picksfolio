@@ -203,7 +203,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div
                     key={block.id}
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group shadow-sm ${themePreset === 'white' ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}
+                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group ${themePreset === 'white' ? 'bg-white border border-slate-200 shadow-[0_2px_7px_-3px_rgba(15,23,42,0.16)]' : 'bg-white/5 border border-white/20 shadow-[0_2px_7px_-3px_rgba(0,0,0,0.5)]'}`}
                     style={{
                       gridColumn: `span ${gridSpan}`,
                       borderRadius: '0.75rem',

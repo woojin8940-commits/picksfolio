@@ -558,7 +558,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                   + 옵션 추가
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400 mb-2">옵션 값마다 가격이나 할인율을 따로 설정할 수 있습니다.</p>
+              <p className="text-[10px] text-slate-400 mb-2">옵션마다 상품명과 가격을 따로 설정할 수 있습니다.</p>
               <div className="space-y-3">
                 {(editForm.options || []).map((opt) => (
                   <div key={opt.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -583,7 +583,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                         <div key={vi} className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-xl p-2">
                           <input
                             type="text"
-                            placeholder={`값 ${vi + 1}`}
+                            placeholder="상품명"
                             value={val.value}
                             onChange={(e) => {
                               const next = opt.values.map((v, i) => i === vi ? { ...v, value: e.target.value } : v);
@@ -607,22 +607,6 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                             />
                             <span className="text-[10px] font-bold text-slate-400">원</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              placeholder="할인"
-                              value={typeof val.discount === 'number' ? val.discount : ''}
-                              onChange={(e) => {
-                                const num = e.target.value === '' ? undefined : Number(e.target.value);
-                                const next = opt.values.map((v, i) => i === vi ? { ...v, discount: num } : v);
-                                updateOptionValues(opt.id, next);
-                              }}
-                              className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs font-bold focus:outline-none focus:border-blue-500"
-                            />
-                            <span className="text-[10px] font-bold text-slate-400">%</span>
-                          </div>
                           {opt.values.length > 1 && (
                             <button
                               type="button"
@@ -631,7 +615,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                                 updateOptionValues(opt.id, next);
                               }}
                               className="text-red-300 hover:text-red-500 transition-all"
-                              aria-label="값 삭제"
+                              aria-label="상품 삭제"
                             >
                               <X size={14} />
                             </button>
@@ -643,7 +627,7 @@ const BroadcastSettings: React.FC<BroadcastSettingsProps> = ({ userName, onNavig
                         onClick={() => updateOptionValues(opt.id, [...opt.values, { value: '' }])}
                         className="text-blue-400 text-[10px] font-black bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition-all"
                       >
-                        + 값 추가
+                        + 상품 추가
                       </button>
                     </div>
                   </div>
