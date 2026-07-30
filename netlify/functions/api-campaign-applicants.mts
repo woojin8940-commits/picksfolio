@@ -86,7 +86,8 @@ export default async (req: Request) => {
                c.start_date, c.end_date, c.manager_username, c.description,
                c.product_name, c.product_url, c.upload_channel, c.content_format,
                c.video_concept, c.guideline_url, c.guideline_note,
-               c.second_use_fee, c.second_use_note, c.upload_from, c.upload_to
+               c.second_use_fee, c.second_use_note, c.upload_from, c.upload_to,
+               c.package_tier
         FROM campaign_applications ca
         JOIN campaigns c ON c.id = ca.campaign_id
         WHERE ca.id = ${id}
@@ -174,6 +175,7 @@ export default async (req: Request) => {
         campaignId: appRow.campaign_id,
         applicationId: appRow.id,
         campaignType: appRow.campaign_type,
+        packageTier: appRow.package_tier,
         campaignTitle,
         companyName,
         businessUsername,

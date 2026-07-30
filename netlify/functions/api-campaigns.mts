@@ -24,6 +24,16 @@ const briefFee = (raw: unknown) => {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 };
 
+/**
+ * 여러 개를 고르는 항목(연령대, 팔로워 규모, 스타일...)은 쉼표로 이어 한 칸에 넣는다.
+ * 화면에서 배열로 보내도 되고 이미 이어진 문자열로 보내도 되게 받아 둔다 — 등록
+ * 화면과 수정 화면이 서로 다른 모양으로 보내다가 조건이 통째로 사라지는 일을 막는다.
+ */
+const csv = (raw: unknown): string => {
+  if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean).join(",");
+  return String(raw ?? "").trim();
+};
+
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
@@ -105,7 +115,10 @@ export default async (req: Request) => {
           id, business_username, type, title, description, brand_name, thumbnail_url, category,
           reward_type, reward_amount, requirements, max_applicants, start_date, end_date, status,
           product_name, product_url, upload_channel, content_format, video_concept,
-          guideline_url, guideline_note, second_use_fee, second_use_note, upload_from, upload_to
+          guideline_url, guideline_note, second_use_fee, second_use_note, upload_from, upload_to,
+          package_tier, product_provide, ad_objective, budget_krw, seeding_count, fast_track,
+          influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
+          influencer_styles, exclude_keywords, target_audience
         )
         VALUES (
           ${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""},
@@ -116,7 +129,14 @@ export default async (req: Request) => {
           ${body.content_format || ""}, ${body.video_concept || ""},
           ${body.guideline_url || ""}, ${body.guideline_note || ""},
           ${briefFee(body.second_use_fee)}, ${body.second_use_note || ""},
-          ${body.upload_from || ""}, ${body.upload_to || ""}
+          ${body.upload_from || ""}, ${body.upload_to || ""},
+          ${body.package_tier || "full"}, ${body.product_provide || "provide"},
+          ${body.ad_objective || "awareness"}, ${briefFee(body.budget_krw)},
+          ${briefFee(body.seeding_count)}, ${Boolean(body.fast_track)},
+          ${body.influencer_gender || ""}, ${csv(body.influencer_ages)},
+          ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
+          ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
+          ${body.target_audience || ""}
         )
       `;
 
@@ -176,6 +196,20 @@ export default async (req: Request) => {
             second_use_note = ${updates.second_use_note ?? c.second_use_note ?? ""},
             upload_from = ${updates.upload_from ?? c.upload_from ?? ""},
             upload_to = ${updates.upload_to ?? c.upload_to ?? ""},
+            package_tier = ${updates.package_tier ?? c.package_tier ?? "full"},
+            product_provide = ${updates.product_provide ?? c.product_provide ?? "provide"},
+            ad_objective = ${updates.ad_objective ?? c.ad_objective ?? "awareness"},
+            budget_krw = ${updates.budget_krw === undefined ? Number(c.budget_krw || 0) : briefFee(updates.budget_krw)},
+            seeding_count = ${updates.seeding_count === undefined ? Number(c.seeding_count || 0) : briefFee(updates.seeding_count)},
+            fast_track = ${updates.fast_track === undefined ? Boolean(c.fast_track) : Boolean(updates.fast_track)},
+            influencer_gender = ${updates.influencer_gender ?? c.influencer_gender ?? ""},
+            influencer_ages = ${updates.influencer_ages === undefined ? (c.influencer_ages ?? "") : csv(updates.influencer_ages)},
+            sns_category = ${updates.sns_category ?? c.sns_category ?? ""},
+            follower_tiers = ${updates.follower_tiers === undefined ? (c.follower_tiers ?? "") : csv(updates.follower_tiers)},
+            min_views = ${updates.min_views === undefined ? Number(c.min_views || 0) : briefFee(updates.min_views)},
+            influencer_styles = ${updates.influencer_styles === undefined ? (c.influencer_styles ?? "") : csv(updates.influencer_styles)},
+            exclude_keywords = ${updates.exclude_keywords === undefined ? (c.exclude_keywords ?? "") : csv(updates.exclude_keywords)},
+            target_audience = ${updates.target_audience ?? c.target_audience ?? ""},
             status = ${newStatus},
             updated_at = NOW()
         WHERE id = ${id}
