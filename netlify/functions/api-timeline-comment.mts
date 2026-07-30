@@ -2,11 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { sendPushToUser } from "./_shared/push.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
-import {
-  callerIsAnyOf,
-  forbiddenResponse,
-  requireSignedInUser,
-} from "./_shared/user-auth.mts";
+import { participantList, resolveTimelineAccess } from "./_shared/timeline-access.mts";
 
 const STORE = "timelines";
 
@@ -22,11 +18,8 @@ export default async (req: Request, context: Context) => {
   if (req.method === "POST") {
     // 작성자 정보를 body 에서 그대로 받아 저장하던 곳이다. 즉 남의 협업방에
     // 상대방 이름으로 메시지를 넣고 푸시까지 보낼 수 있었다. 이제 (1) 로그인한
-    // 사람인지 확인하고, (2) 그 협업의 당사자인지 대조하고, (3) 작성자 이름은
+    // 사람인지 확인하고, (2) 그 방의 참여자인지 대조하고, (3) 작성자 이름은
     // body 가 아니라 토큰에서 확인된 본인으로 기록한다.
-    const caller = await requireSignedInUser(req);
-    if (!caller.ok) return caller.response;
-
     const body = await req.json();
 
     const store = getStore(STORE);
@@ -36,25 +29,28 @@ export default async (req: Request, context: Context) => {
     // 방이 아직 없으면(첫 메시지) body 가 알려준 당사자를 기준으로 판단한다.
     const influencerUsername = stored?.influencerUsername || body.influencerUsername || "";
     const businessUsername = stored?.businessUsername || body.businessUsername || "";
-    if (!callerIsAnyOf(caller, [influencerUsername, businessUsername])) {
-      return forbiddenResponse();
-    }
+    const managerUsername = stored?.managerUsername || "";
+    const threadKind = stored?.kind || "brand_influencer";
 
-    // 관리자는 지원 목적으로 대신 작성할 수 있으므로 body 값을 존중한다.
-    const authorUsername = caller.isAdmin
-      ? norm(body.authorUsername || caller.username)
-      : caller.username;
-    const authorType = caller.isAdmin
-      ? body.authorType
-      : authorUsername === norm(businessUsername)
-        ? "business"
-        : "influencer";
+    const access = await resolveTimelineAccess(req, {
+      influencer: influencerUsername,
+      business: businessUsername,
+      manager: managerUsername,
+    });
+    if (!access.ok) return access.response;
+
+    // 담당자는 지원 목적으로 다른 참여자 이름으로 대신 쓸 수 있어야 했지만, 담당자
+    // 채널이 생긴 뒤로는 그럴 이유가 없다. 담당자가 쓴 말은 담당자 이름으로 남는다 —
+    // 나중에 "누가 그렇게 말했나"를 따질 때 이게 유일한 근거다.
+    const authorUsername = access.username;
+    const authorType = access.authorType;
+    const defaultAuthorName = authorType === "manager" ? "픽스폴리오 담당자" : authorUsername;
 
     const comment = {
       id: `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       proposalId,
       authorType,
-      authorName: body.authorName || authorUsername,
+      authorName: body.authorName || defaultAuthorName,
       authorUsername,
       content: body.content || "",
       createdAt: new Date().toISOString(),
@@ -69,6 +65,8 @@ export default async (req: Request, context: Context) => {
         proposalId,
         influencerUsername: body.influencerUsername || "",
         businessUsername: body.businessUsername || "",
+        managerUsername: "",
+        kind: "brand_influencer",
         companyName: body.companyName || "",
         proposalTitle: body.proposalTitle || "",
         comments: [],
@@ -109,8 +107,11 @@ export default async (req: Request, context: Context) => {
           return [
             {
               proposalId,
+              kind: existing.kind || threadKind,
+              collabId: existing.collabId || "",
               influencerUsername: existing.influencerUsername,
               businessUsername: existing.businessUsername,
+              managerUsername: existing.managerUsername || "",
               companyName: existing.companyName,
               proposalTitle: existing.proposalTitle,
               createdAt: existing.createdAt,
@@ -126,6 +127,9 @@ export default async (req: Request, context: Context) => {
       if (existing.businessUsername) {
         indexPromises.push(ensureIndex("business", existing.businessUsername));
       }
+      if (existing.managerUsername) {
+        indexPromises.push(ensureIndex("manager", existing.managerUsername));
+      }
 
       const dbPromise = (async () => {
         try {
@@ -133,8 +137,8 @@ export default async (req: Request, context: Context) => {
           const db = getDatabase();
           await Promise.all([
             db.sql`
-              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
-              VALUES (${proposalId}, ${(existing.influencerUsername || "").toLowerCase()}, ${(existing.businessUsername || "").toLowerCase()}, ${existing.companyName || ""}, ${existing.proposalTitle || ""}, ${existing.createdAt || new Date().toISOString()})
+              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at, kind, manager_username, collab_id)
+              VALUES (${proposalId}, ${(existing.influencerUsername || "").toLowerCase()}, ${(existing.businessUsername || "").toLowerCase()}, ${existing.companyName || ""}, ${existing.proposalTitle || ""}, ${existing.createdAt || new Date().toISOString()}, ${existing.kind || threadKind}, ${norm(existing.managerUsername)}, ${existing.collabId || ""})
               ON CONFLICT (proposal_id) DO NOTHING
             `,
             db.sql`
@@ -150,18 +154,37 @@ export default async (req: Request, context: Context) => {
 
       const notifPromise = (async () => {
         try {
-          const authorUsername = norm(comment.authorUsername);
-          const influencerUser = norm(existing.influencerUsername);
+          const author = norm(comment.authorUsername);
           const businessUser = norm(existing.businessUsername);
-          const recipientUsername = authorUsername === influencerUser ? businessUser : influencerUser;
+          const managerUser = norm(existing.managerUsername);
+          // 참여자가 둘이라고 가정하던 곳이다("상대방 = 인플루언서가 아니면 업체").
+          // 담당자 채널이 생긴 뒤로는 방마다 참여자 구성이 다르므로, 작성자를 뺀
+          // 나머지 전원에게 보낸다. 이렇게 두면 나중에 참여자가 늘어도 알림이 빠지지 않는다.
+          const recipients = participantList({
+            influencer: existing.influencerUsername,
+            business: existing.businessUsername,
+            manager: existing.managerUsername,
+          }).filter((u) => u !== author);
 
-          if (recipientUsername && recipientUsername !== authorUsername) {
-            const notifQueue = getStore({ name: "notification-queue", consistency: "strong" });
+          if (recipients.length === 0) return;
+
+          const notifQueue = getStore({ name: "notification-queue", consistency: "strong" });
+          const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
+          const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
+          const messagePreview = (body.content || "").slice(0, 50);
+          const projectName = existing.proposalTitle || "협업 프로젝트";
+          const senderName = comment.authorName
+            || (comment.authorType === "manager" ? "픽스폴리오 담당자" : existing.companyName)
+            || "상대방";
+
+          await Promise.all(recipients.map(async (recipientUsername) => {
             const queueKey = `pending:${proposalId}_${recipientUsername}`;
             const existingNotif = await notifQueue.get(queueKey, { type: "json" }) as any;
-            const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-            const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
-            const messagePreview = (body.content || "").slice(0, 50);
+            const recipientType = recipientUsername === managerUser
+              ? "manager"
+              : recipientUsername === businessUser
+                ? "business"
+                : "influencer";
 
             if (existingNotif) {
               existingNotif.messageCount = (existingNotif.messageCount || 1) + 1;
@@ -171,11 +194,11 @@ export default async (req: Request, context: Context) => {
             } else {
               await notifQueue.setJSON(queueKey, {
                 recipientUsername,
-                recipientType: recipientUsername === businessUser ? "business" : "influencer",
+                recipientType,
                 proposalId,
                 companyName: existing.companyName || "",
-                proposalTitle: existing.proposalTitle || "협업 프로젝트",
-                senderName: comment.authorName || "",
+                proposalTitle: projectName,
+                senderName,
                 messageCount: 1,
                 firstMessagePreview: messagePreview,
                 lastMessagePreview: messagePreview,
@@ -188,8 +211,6 @@ export default async (req: Request, context: Context) => {
             // Native push is immediate — its whole value is reaching the
             // recipient the moment the message lands (the Kakao alimtalk above
             // is debounced 30s and acts as the fallback when the app is gone).
-            const projectName = existing.proposalTitle || "협업 프로젝트";
-            const senderName = comment.authorName || existing.companyName || "상대방";
             const pushBody = messagePreview
               || (body.attachments?.length ? "사진을 보냈어요." : "새 메시지가 도착했어요.");
             await sendPushToUser(recipientUsername, {
@@ -201,7 +222,7 @@ export default async (req: Request, context: Context) => {
                 path: `/admin?tab=timeline&proposal=${proposalId}`,
               },
             });
-          }
+          }));
         } catch (notifErr) {
           console.error("[timeline-comment] Failed to queue notification:", notifErr);
         }

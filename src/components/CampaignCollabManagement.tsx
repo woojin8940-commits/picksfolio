@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { formatNumberWithCommas, formatKoreanWon } from '../utils/formatters';
+import React, { useState, useEffect, useCallback } from 'react';
+import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
-import { authHeaders } from '../services/apiService';
-import ImageCropper from './ImageCropper';
+import { authHeaders, apiService } from '../services/apiService';
 import CollabMatchRegister from './CollabMatchRegister';
+import BrandCollabProgress from './BrandCollabProgress';
+import CampaignBriefComposer from './collab/CampaignBriefComposer';
+import CampaignListupBoard from './collab/CampaignListupBoard';
 import Toast from './Toast';
 
 interface Campaign {
@@ -27,6 +29,19 @@ interface Campaign {
   admin_approved_at?: string;
   created_at: string;
   recruit_closed?: boolean;
+  // 캠페인 등록 때 브랜드가 작성하는 브리프. 담당자와 인플루언서가 이 내용으로 협업을
+  // 시작하므로, 목록·상세 화면도 같이 읽는다.
+  product_name?: string;
+  product_url?: string;
+  upload_channel?: string;
+  content_format?: string;
+  video_concept?: string;
+  guideline_url?: string;
+  guideline_note?: string;
+  second_use_fee?: number;
+  second_use_note?: string;
+  upload_from?: string;
+  upload_to?: string;
 }
 
 interface Applicant {
@@ -40,6 +55,13 @@ interface Applicant {
   youtube_naver_url: string;
   status: string;
   created_at: string;
+  // 브랜드가 남기는 의견. 선정 권한과 분리된 값이라 status 와 다른 컬럼에 있다.
+  brand_preference?: string;
+  brand_preference_note?: string;
+  // 담당자가 선정한 뒤 만들어지는 협업 본체.
+  collab_id?: string;
+  collab_status?: string;
+  current_stage_key?: string;
 }
 
 interface CampaignCollabManagementProps {
@@ -95,33 +117,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
+  const [campaignManager, setCampaignManager] = useState('');
+  const [prefSaving, setPrefSaving] = useState('');
   const [activeTypeFilter, setActiveTypeFilter] = useState('');
   const [viewMode, setViewMode] = useState<'mine' | 'all'>('mine');
   const [allCampaigns, setAllCampaigns] = useState<Campaign[]>([]);
   const [allLoading, setAllLoading] = useState(false);
-  const [thumbnailPreview, setThumbnailPreview] = useState<string>('');
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
-  const pendingFileRef = useRef<File | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
-
-  const [formData, setFormData] = useState({
-    type: 'ad_collab',
-    title: '',
-    description: '',
-    brand_name: companyName,
-    thumbnail_url: '',
-    category: '',
-    reward_type: 'fixed',
-    reward_amount: '',
-    requirements: '',
-    max_applicants: 0,
-    start_date: '',
-    end_date: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -161,12 +164,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);
     try {
-      // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자인지 확인한다.
-      const res = await fetch(`/api/campaign-applicants?campaign_id=${campaignId}`, {
-        headers: await authHeaders(),
-      });
-      const data = await res.json();
+      // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자(또는 담당자)인지 확인한다.
+      const data = await apiService.getCampaignApplicants(campaignId);
       setApplicants(data.applicants || []);
+      setCampaignManager(data.managerUsername || '');
     } catch {
       console.error('Failed to fetch applicants');
     } finally {
@@ -185,115 +186,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      notify('이미지 크기는 5MB 이하만 가능합니다.', 'error');
-      return;
-    }
-    pendingFileRef.current = file;
-    const previewUrl = URL.createObjectURL(file);
-    setCropperSrc(previewUrl);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleCropConfirm = async (croppedBlob: Blob) => {
-    const file = pendingFileRef.current;
-    setCropperSrc(null);
-    pendingFileRef.current = null;
-    if (!file) return;
-    setUploadingImage(true);
-
-    try {
-      const previewUrl = URL.createObjectURL(croppedBlob);
-      setThumbnailPreview(previewUrl);
-
-      const fd = new FormData();
-      fd.append('image', new File([croppedBlob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
-      fd.append('username', businessUsername);
-      const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (data.url) {
-        setFormData(p => ({ ...p, thumbnail_url: data.url }));
-      } else {
-        notify('이미지 업로드에 실패했습니다.', 'error');
-        setThumbnailPreview('');
-      }
-    } catch {
-      notify('이미지 업로드 중 오류가 발생했습니다.', 'error');
-      setThumbnailPreview('');
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
-  const handleCropCancel = () => {
-    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
-    setCropperSrc(null);
-    pendingFileRef.current = null;
-  };
-
-  const handleCreateOrUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.title.trim()) {
-      notify('캠페인 제목을 입력해 주세요.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      if (editingCampaign) {
-        // 수정·삭제는 서버에서 계정 주인인지 확인하므로 인증 헤더를 함께 보낸다.
-        const res = await fetch('/api/campaigns', {
-          method: 'PATCH',
-          headers: await authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ id: editingCampaign.id, ...formData }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          notify(err.error || '수정 실패', 'error');
-          return;
-        }
-        notify('캠페인이 수정되었습니다.');
-      } else {
-        const res = await fetch('/api/campaigns', {
-          method: 'POST',
-          headers: await authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ ...formData, business_username: businessUsername }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          notify(err.error || '등록 실패', 'error');
-          return;
-        }
-        notify('캠페인이 등록되었습니다. 관리자 승인 후 공개됩니다.');
-      }
-      resetForm();
-      fetchCampaigns();
-    } catch {
-      notify('서버 오류가 발생했습니다.', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+  /**
+   * 수정 진입. 폼 상태는 브리프 작성 화면이 직접 들고 있으므로 여기서는 무엇을
+   * 수정하는지만 정한다 — 같은 값을 두 곳에서 들고 있으면 반드시 한쪽이 어긋난다.
+   */
   const handleEdit = (campaign: Campaign) => {
     setEditingCampaign(campaign);
-    setFormData({
-      type: campaign.type,
-      title: campaign.title,
-      description: campaign.description,
-      brand_name: campaign.brand_name,
-      thumbnail_url: campaign.thumbnail_url || '',
-      category: campaign.category,
-      reward_type: campaign.reward_type,
-      reward_amount: campaign.reward_amount,
-      requirements: campaign.requirements,
-      max_applicants: campaign.max_applicants,
-      start_date: campaign.start_date || '',
-      end_date: campaign.end_date || '',
-    });
-    setThumbnailPreview(campaign.thumbnail_url || '');
     setShowForm(true);
     setSelectedCampaign(null);
   };
@@ -341,47 +239,45 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     }
   };
 
-  const handleApplicantStatus = async (applicantId: string, status: string) => {
+  /**
+   * 브랜드 의견 표시.
+   *
+   * 예전에는 이 자리에 수락/거절 버튼이 있었다. 그 한 번의 클릭이 대화방과 정산까지
+   * 만들어 냈지만, 그 뒤를 챙기는 사람이 정해져 있지 않았다. 이제 선정은 담당자가
+   * 하고, 브랜드는 "이 사람이 좋다 / 아니다"를 남긴다 — 담당자에게 전달되는 메모다.
+   */
+  const handleApplicantPreference = async (applicantId: string, preference: 'shortlist' | 'pass' | '') => {
+    setPrefSaving(applicantId);
     try {
-      const res = await fetch('/api/campaign-applicants', {
-        method: 'PATCH',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ id: applicantId, status }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        notify(err.error || '상태 변경에 실패했습니다.', 'error');
+      const res = await apiService.setApplicantPreference(applicantId, preference);
+      if (res.error) {
+        notify(res.error, 'error');
         return;
       }
-      if (status === 'accepted') {
-        notify('지원자를 수락했습니다. 타임라인이 생성되어 채팅으로 협업을 진행할 수 있습니다.');
-      } else {
-        notify('지원자를 거절했습니다.');
-      }
-      if (selectedCampaign) fetchApplicants(selectedCampaign.id);
-    } catch {
-      notify('상태 변경에 실패했습니다.', 'error');
+      setApplicants(prev => prev.map(a => (a.id === applicantId ? { ...a, brand_preference: preference } : a)));
+      notify(
+        preference === 'shortlist'
+          ? '추천으로 표시했습니다. 담당자가 확인 후 선정을 진행합니다.'
+          : preference === 'pass'
+            ? '보류로 표시했습니다.'
+            : '의견을 지웠습니다.',
+      );
+    } finally {
+      setPrefSaving('');
     }
+  };
+
+  /** 담당자 채널 열기. 브랜드는 인플루언서와 직접 대화하지 않는다. */
+  const openManagerThread = (app: Applicant) => {
+    if (!app.collab_id) return;
+    window.dispatchEvent(
+      new CustomEvent('navigate-timeline', { detail: { proposalId: `support_biz_${app.collab_id}` } }),
+    );
   };
 
   const resetForm = () => {
     setShowForm(false);
     setEditingCampaign(null);
-    setThumbnailPreview('');
-    setFormData({
-      type: 'ad_collab',
-      title: '',
-      description: '',
-      brand_name: companyName,
-      thumbnail_url: '',
-      category: '',
-      reward_type: 'fixed',
-      reward_amount: '',
-      requirements: '',
-      max_applicants: 0,
-      start_date: '',
-      end_date: '',
-    });
   };
 
   const statusBadge = (status: string) => {
@@ -548,13 +444,127 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{selectedCampaign.requirements}</p>
               </div>
             )}
+
+            {/* 요청 브리프 — 담당자와 인플루언서가 협업을 시작할 때 그대로 읽는 내용이다.
+                비어 있으면 칸을 감추지 않고 무엇이 빠졌는지 알려 준다. 선정 뒤에 다시
+                물어보는 일을 줄이는 것이 이 카드의 목적이다. */}
+            {(() => {
+              const brief = [
+                { label: '제품 · 서비스', value: selectedCampaign.product_name },
+                { label: '업로드 채널', value: selectedCampaign.upload_channel },
+                {
+                  label: '희망 게시일',
+                  value:
+                    selectedCampaign.upload_from || selectedCampaign.upload_to
+                      ? `${selectedCampaign.upload_from || '미정'} ~ ${selectedCampaign.upload_to || '미정'}`
+                      : '',
+                },
+                {
+                  label: '2차 활용',
+                  value:
+                    Number(selectedCampaign.second_use_fee || 0) > 0
+                      ? `${formatKoreanWon(selectedCampaign.second_use_fee)}${selectedCampaign.second_use_note ? ` · ${selectedCampaign.second_use_note}` : ''}`
+                      : '',
+                },
+              ].filter(r => r.value);
+              const missing = !selectedCampaign.product_name || !selectedCampaign.video_concept;
+
+              return (
+                <div className="mt-4 border border-slate-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-[9px] text-slate-400 font-black uppercase">요청 브리프</p>
+                    {isOwner && missing && (
+                      <button
+                        onClick={() => handleEdit(selectedCampaign)}
+                        className="px-2.5 py-1 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-black hover:bg-orange-100"
+                      >
+                        내용 채우기
+                      </button>
+                    )}
+                  </div>
+
+                  {brief.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                      {brief.map(r => (
+                        <div key={r.label} className="bg-slate-50 rounded-lg px-3 py-2">
+                          <p className="text-[9px] text-slate-400 font-black uppercase">{r.label}</p>
+                          <p className="text-xs font-bold text-slate-800 mt-0.5">{r.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedCampaign.product_url && (
+                    <a
+                      href={selectedCampaign.product_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block mb-3 text-[11px] text-blue-600 font-black hover:underline"
+                    >
+                      제품 바로가기 →
+                    </a>
+                  )}
+
+                  <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+                    <p className="text-[9px] text-slate-400 font-black uppercase mb-1">영상 컨셉</p>
+                    <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">
+                      {selectedCampaign.video_concept || (
+                        <span className="text-orange-500 font-bold">
+                          아직 적지 않으셨습니다. 인플루언서가 대본을 쓸 때 가장 먼저 보는 항목입니다.
+                        </span>
+                      )}
+                    </p>
+                  </div>
+
+                  {(selectedCampaign.guideline_url || selectedCampaign.guideline_note) && (
+                    <div className="bg-slate-50 rounded-lg px-3 py-2.5 mt-2">
+                      <p className="text-[9px] text-slate-400 font-black uppercase mb-1">필수 확인 사항</p>
+                      {selectedCampaign.guideline_note && (
+                        <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">
+                          {selectedCampaign.guideline_note}
+                        </p>
+                      )}
+                      {selectedCampaign.guideline_url && (
+                        <a
+                          href={selectedCampaign.guideline_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-1.5 text-[11px] text-blue-600 font-black hover:underline"
+                        >
+                          가이드라인 문서 보기 →
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
+
+        {/* 담당자가 올린 후보 명단. 지원을 기다리는 것과 별개로 진행되는 길이므로
+            지원자 목록보다 위에 둔다 — 대부분의 캠페인은 이 명단에서 시작한다. */}
+        {isOwner && (
+          <div className="mb-6">
+            <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />
+          </div>
+        )}
 
         {/* Applicants — only the owning business can view the applicant list */}
         {isOwner ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
-          <h3 className="text-lg font-black text-slate-900 mb-4">지원자 목록 ({applicants.length}명)</h3>
+          <h3 className="text-lg font-black text-slate-900 mb-2">지원자 목록 ({applicants.length}명)</h3>
+          {/* 선정 주체를 화면에서 분명히 해 둔다. 예전 흐름을 기억하는 브랜드가
+              "수락 버튼이 없어졌다"고 느끼지 않도록 무엇을 하면 되는지 함께 적는다. */}
+          <div className="mb-5 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+            <p className="text-xs text-slate-700 font-bold">
+              지원자 선정은 픽스폴리오 담당자{campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.
+            </p>
+            <p className="text-[11px] text-slate-500 font-medium mt-1">
+              함께하고 싶은 지원자를 <span className="font-black text-blue-600">추천</span>으로 표시해 주세요. 담당자가 조건과 일정을 정리해
+              협업을 시작하고, 진행 상황은 아래에서 확인하실 수 있습니다.
+            </p>
+          </div>
           {applicantsLoading ? (
             <div className="text-center py-12">
               <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
@@ -579,28 +589,45 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     </div>
                     {app.status === 'pending' && (
                       <div className="flex gap-1.5 ml-3 flex-shrink-0">
-                        <button onClick={() => handleApplicantStatus(app.id, 'accepted')} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 transition-colors">
-                          수락
+                        <button
+                          onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'shortlist' ? '' : 'shortlist')}
+                          disabled={prefSaving === app.id}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors disabled:opacity-50 ${
+                            app.brand_preference === 'shortlist'
+                              ? 'bg-blue-600 text-white hover:bg-blue-500'
+                              : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                          }`}
+                        >
+                          {app.brand_preference === 'shortlist' ? '★ 추천함' : '추천'}
                         </button>
-                        <button onClick={() => handleApplicantStatus(app.id, 'rejected')} className="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg text-[10px] font-black hover:bg-slate-200 transition-colors">
-                          거절
+                        <button
+                          onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
+                          disabled={prefSaving === app.id}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors disabled:opacity-50 ${
+                            app.brand_preference === 'pass'
+                              ? 'bg-slate-600 text-white hover:bg-slate-500'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          {app.brand_preference === 'pass' ? '보류함' : '보류'}
                         </button>
                       </div>
                     )}
-                    {app.status === 'accepted' && selectedCampaign && (
+                    {app.status === 'accepted' && (
                       <button
-                        onClick={() => {
-                          const proposalId = `campaign_${selectedCampaign.id}_${app.applicant_username.toLowerCase()}`;
-                          window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
-                        }}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 transition-colors ml-3 flex-shrink-0 flex items-center gap-1"
+                        onClick={() => openManagerThread(app)}
+                        disabled={!app.collab_id}
+                        className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700 transition-colors ml-3 flex-shrink-0 flex items-center gap-1 disabled:opacity-40"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                        채팅하기
+                        담당자와 대화
                       </button>
                     )}
                   </div>
                   {app.message && <p className="text-xs text-slate-600 font-medium mb-3 whitespace-pre-wrap">{app.message}</p>}
+                  {app.status === 'pending' && app.brand_preference === 'shortlist' && (
+                    <p className="text-[11px] text-blue-600 font-bold mb-3">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
+                  )}
 
                   {/* Contact & Links */}
                   <div className="bg-slate-50 rounded-lg p-3 space-y-2">
@@ -646,12 +673,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             <p className="text-xs text-slate-400 font-medium mt-1">지원자 목록은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
           </div>
         )}
+        {/* 선정 이후의 진행 상황. 브랜드는 여기서 단계와 산출물을 보고 담당자에게
+            의견을 남긴다 — 인플루언서에게 직접 전달되지 않고 담당자를 거친다. */}
+        {isOwner && (
+          <div className="mt-6">
+            <BrandCollabProgress campaignId={selectedCampaign.id} onNotify={notify} />
+          </div>
+        )}
         {toastEl}
       </main>
     );
   }
 
-  // --- Campaign Form ---
+  // --- 캠페인 브리프 작성 ---
   if (showForm) {
     return (
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-3xl mx-auto">
@@ -660,216 +694,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           캠페인 목록
         </button>
 
-        <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
-          <h2 className="text-xl font-black text-slate-900 mb-6">{editingCampaign ? '캠페인 수정' : '새 캠페인 등록'}</h2>
-          <form onSubmit={handleCreateOrUpdate} className="space-y-5">
-            {/* Thumbnail Upload */}
-            <div>
-              <label className="block text-xs font-black text-slate-700 mb-2">캠페인 대표 이미지</label>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-              {(thumbnailPreview || formData.thumbnail_url) ? (
-                <div className="relative w-full aspect-square max-w-[400px] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
-                  <img
-                    src={thumbnailPreview || formData.thumbnail_url}
-                    alt="캠페인 썸네일"
-                    className="w-full h-full object-cover"
-                  />
-                  {uploadingImage && (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-4 py-2 bg-white rounded-xl text-xs font-black text-slate-700 shadow-lg"
-                    >
-                      이미지 변경
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setThumbnailPreview('');
-                        setFormData(p => ({ ...p, thumbnail_url: '' }));
-                      }}
-                      className="px-4 py-2 bg-red-500 text-white rounded-xl text-xs font-black shadow-lg ml-2"
-                    >
-                      삭제
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full aspect-square max-w-[400px] border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center hover:border-blue-400 hover:bg-blue-50/50 transition-all group"
-                >
-                  <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
-                    <svg className="w-6 h-6 text-slate-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <p className="text-xs font-bold text-slate-400 group-hover:text-blue-500">클릭하여 이미지 업로드</p>
-                  <p className="text-[10px] text-slate-300 mt-1">JPG, PNG (최대 5MB · 400×400 자동 리사이즈)</p>
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">캠페인 유형</label>
-                <select
-                  value={formData.type}
-                  onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  <option value="ad_collab">광고 협업</option>
-                  <option value="group_buy">공동구매</option>
-                  <option value="other">기타</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">카테고리</label>
-                <select
-                  value={formData.category}
-                  onChange={e => setFormData(p => ({ ...p, category: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  {CATEGORIES.map(c => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-black text-slate-700 mb-1.5">캠페인 제목 *</label>
-              <input
-                type="text" value={formData.title}
-                onChange={e => setFormData(p => ({ ...p, title: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                placeholder="캠페인 제목을 입력하세요"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-black text-slate-700 mb-1.5">상세 설명</label>
-              <textarea
-                value={formData.description}
-                onChange={e => setFormData(p => ({ ...p, description: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[120px] resize-y"
-                placeholder="캠페인 상세 내용을 입력하세요 (모집 조건, 활동 내용 등)"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">브랜드명</label>
-                <input
-                  type="text" value={formData.brand_name}
-                  onChange={e => setFormData(p => ({ ...p, brand_name: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder="브랜드 이름"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">모집 인원 (0=무제한)</label>
-                <input
-                  type="number" value={formData.max_applicants}
-                  onChange={e => setFormData(p => ({ ...p, max_applicants: parseInt(e.target.value) || 0 }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  min="0"
-                />
-                <p className="text-[11px] text-slate-400 font-medium mt-1.5">
-                  목표 인원입니다. 정원을 채워도 종료일까지는 지원을 계속 받아, 더 많은 지원자 중에서 고를 수 있습니다.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">보상 유형</label>
-                <select
-                  value={formData.reward_type}
-                  onChange={e => setFormData(p => ({ ...p, reward_type: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                >
-                  <option value="fixed">고정 금액</option>
-                  <option value="product">제품 제공</option>
-                  <option value="revenue_share">수익 배분</option>
-                  <option value="mixed">복합</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">보상 금액/내용</label>
-                <input
-                  type="text" value={formData.reward_amount}
-                  onChange={e => {
-                    const raw = e.target.value;
-                    const digitsOnly = raw.replace(/,/g, '');
-                    if (/^\d*$/.test(digitsOnly) && digitsOnly.length > 0) {
-                      setFormData(p => ({ ...p, reward_amount: formatNumberWithCommas(digitsOnly) + (raw.endsWith('원') ? '원' : '') }));
-                    } else {
-                      setFormData(p => ({ ...p, reward_amount: raw }));
-                    }
-                  }}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder="예: 500,000원, 제품 1세트"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-black text-slate-700 mb-1.5">지원 조건</label>
-              <textarea
-                value={formData.requirements}
-                onChange={e => setFormData(p => ({ ...p, requirements: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 min-h-[80px] resize-y"
-                placeholder="팔로워 수, 콘텐츠 스타일 등 지원 조건"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">시작일</label>
-                <input
-                  type="date" value={formData.start_date}
-                  onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-700 mb-1.5">종료일</label>
-                <input
-                  type="date" value={formData.end_date}
-                  onChange={e => setFormData(p => ({ ...p, end_date: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="submit" disabled={submitting || uploadingImage}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {submitting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    {editingCampaign ? '수정 중...' : '등록 중...'}
-                  </>
-                ) : (
-                  editingCampaign ? '캠페인 수정' : '캠페인 등록'
-                )}
-              </button>
-              <button type="button" onClick={resetForm} className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 transition-colors">
-                취소
-              </button>
-            </div>
-          </form>
-        </div>
+        <CampaignBriefComposer
+          businessUsername={businessUsername}
+          companyName={companyName}
+          editing={editingCampaign}
+          categories={CATEGORIES}
+          onCancel={resetForm}
+          onSaved={() => {
+            resetForm();
+            fetchCampaigns();
+          }}
+          onNotify={notify}
+        />
         {toastEl}
       </main>
     );
@@ -878,14 +714,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // --- Campaign List ---
   return (
     <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
-      {cropperSrc && (
-        <ImageCropper
-          src={cropperSrc}
-          onCrop={handleCropConfirm}
-          onCancel={handleCropCancel}
-          aspectRatio={1}
-        />
-      )}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>

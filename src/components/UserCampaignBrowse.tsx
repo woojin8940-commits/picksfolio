@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
+import { apiService } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import CollabMatchRegister from './CollabMatchRegister';
+import CreatorCollabWorkspace from './CreatorCollabWorkspace';
+import CreatorOfferInbox from './collab/CreatorOfferInbox';
+import CreatorChannelPanel from './collab/CreatorChannelPanel';
 import Toast from './Toast';
 
 interface Campaign {
@@ -62,6 +66,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [applying, setApplying] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [acceptedCampaigns, setAcceptedCampaigns] = useState<Map<string, string>>(new Map());
+  // 캠페인 → 협업 ID. 담당자 채널을 열 때 필요하다(협업 하나에 방이 두 개라 ID 로 찾는다).
+  const [collabByCampaign, setCollabByCampaign] = useState<Record<string, string>>({});
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -105,6 +111,18 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       } catch {}
     };
     if (userName) fetchApplied();
+  }, [userName]);
+
+  useEffect(() => {
+    const fetchCollabs = async () => {
+      const res = await apiService.getCollabs('influencer');
+      const map: Record<string, string> = {};
+      (res.collabs || []).forEach((c: any) => {
+        if (c.campaignId) map[c.campaignId] = c.id;
+      });
+      setCollabByCampaign(map);
+    };
+    if (userName) fetchCollabs();
   }, [userName]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -477,19 +495,33 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-3px_rgba(16,185,129,0.5)]">
                         <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                       </div>
-                      <p className="text-base font-black text-emerald-700">협업이 승인되었습니다!</p>
-                      <p className="text-sm text-emerald-500 font-medium mt-1">채팅으로 브랜드와 소통을 시작해보세요</p>
+                      <p className="text-base font-black text-emerald-700">캠페인에 선정되었습니다!</p>
+                      <p className="text-sm text-emerald-500 font-medium mt-1">
+                        {collabByCampaign[selectedCampaign.id]
+                          ? '담당자가 조건과 일정을 안내드립니다. 궁금한 점은 담당자에게 물어보세요.'
+                          : '담당자가 진행을 안내드립니다.'}
+                      </p>
                     </div>
                     <button
                       onClick={() => {
-                        const proposalId = `campaign_${selectedCampaign.id}_${userName.toLowerCase()}`;
+                        // 담당자 중개 구조에서는 인플루언서가 브랜드와 직접 대화하지 않는다.
+                        // 협업이 있으면 담당자 채널, 예전 협업이면 기존 방을 그대로 연다.
+                        const collabId = collabByCampaign[selectedCampaign.id];
+                        const proposalId = collabId
+                          ? `support_inf_${collabId}`
+                          : `campaign_${selectedCampaign.id}_${userName.toLowerCase()}`;
                         window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
                       }}
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_16px_34px_-10px_rgba(37,99,235,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
+                      className="w-full bg-slate-900 hover:bg-slate-700 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(15,23,42,0.75)] hover:shadow-[0_16px_34px_-10px_rgba(15,23,42,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                      브랜드와 채팅하기
+                      {collabByCampaign[selectedCampaign.id] ? '담당자와 대화하기' : '대화하기'}
                     </button>
+                    {collabByCampaign[selectedCampaign.id] && (
+                      <p className="text-[11px] text-slate-400 font-medium text-center">
+                        단계별 제출과 마감일은 캠페인 목록 화면 상단의 진행 중인 협업에서 확인하실 수 있습니다.
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-center shadow-[0_10px_26px_-12px_rgba(37,99,235,0.5)]">
@@ -630,6 +662,26 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         <p className="text-sm text-slate-400 font-medium">브랜드 캠페인에 지원하고 협업 기회를 잡아보세요</p>
       </div>
 
+      {/* 선정된 협업의 작업 화면. 지원 목록보다 위에 둔다 — 마감이 있는 일이
+          새 캠페인 구경보다 먼저 보여야 한다. 협업이 없으면 그리지 않는다. */}
+      {userName && (
+        <div className="mb-6">
+          <CreatorCollabWorkspace userName={userName} hideWhenEmpty />
+        </div>
+      )}
+
+      {/* 담당자가 조건까지 정리해 보낸 제안. 답을 기다리는 일이므로 진행 중 협업 다음,
+          새 캠페인 구경보다는 앞에 둔다. 받은 게 없으면 그리지 않는다. */}
+      {userName && (
+        <div className="mb-6">
+          <CreatorOfferInbox
+            userName={userName}
+            hideWhenEmpty
+            onNotify={(message, type = 'success') => setToast({ message, type })}
+          />
+        </div>
+      )}
+
       {/* Search & Filter */}
       <div className="flex flex-col gap-3 mb-6">
         <form onSubmit={handleSearch}>
@@ -663,6 +715,15 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
         {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정) */}
         <CollabMatchRegister variant="influencer" applicantUsername={userName} />
+
+        {/* 인스타 계정 등록. 매칭 등록 바로 아래에 둔다 — 둘 다 "브랜드에게 나를
+            보여주는" 일이고, 계정이 없으면 후보 명단에 올라가도 보여줄 숫자가 없다. */}
+        {userName && (
+          <CreatorChannelPanel
+            userName={userName}
+            onNotify={(message, type = 'success') => setToast({ message, type })}
+          />
+        )}
       </div>
 
       {/* Campaign Cards */}

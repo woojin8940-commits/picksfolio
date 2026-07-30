@@ -9,12 +9,13 @@ import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
+import AdminCollabManagerConsole from './admin/AdminCollabManagerConsole';
 import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'sellers' | 'directory';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'collabs' | 'sellers' | 'directory';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -572,6 +573,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
             { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
+            { key: 'collabs' as OperatorTab, label: '협업 담당' },
             { key: 'directory' as OperatorTab, label: '리스트 등록' },
             { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
@@ -943,6 +945,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               </div>
             )
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
+        )}
+
+        {/* 협업 담당(브랜드↔인플루언서 중간 관리) Tab */}
+        {activeTab === 'collabs' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="협업 담당 · 지원자 선정부터 정산 예약까지"
+                  body="브랜드는 캠페인 신청과 의견 전달까지만, 인플루언서는 지원과 제출까지만 합니다. 지원자 선정, 협업 조건 확정, 제출물 검수, 브랜드 의견 전달, 일정 변경은 이 탭에서 담당자가 처리합니다."
+                />
+                <AdminCollabManagerConsole token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 협업 담당 관리가 표시됩니다." />
         )}
 
         {/* 캠페인 리스트 등록(인플루언서/브랜드 지원) Tab */}

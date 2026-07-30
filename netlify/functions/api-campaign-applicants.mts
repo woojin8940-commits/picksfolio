@@ -1,8 +1,22 @@
 import { getDatabase } from "@picks/netlify-database";
-import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
-import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { addSettlementForProposal, parseAmount } from "./_shared/collab-records.mts";
+import { requireAccountOwner, requireSignedInUser } from "./_shared/user-auth.mts";
+import { requireManager } from "./_shared/manager-auth.mts";
+import { parseAmount } from "./_shared/collab-records.mts";
+import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
+import { mirrorCollabProposal } from "./_shared/campaign-listup.mts";
+
+/**
+ * 캠페인 지원자 — 조회와 선정.
+ *
+ * 예전에는 브랜드가 직접 지원자를 수락/거절했다. 수락 한 번에 대화방과 정산까지
+ * 만들어졌으므로 사실상 계약 체결 버튼이었는데, 그 뒤를 챙기는 사람은 아무도 없었다.
+ *
+ * 이제 선정은 픽스폴리오 담당자가 한다. 브랜드는 지원자를 보고 "이 사람이 좋다 /
+ * 아니다"를 남길 수 있고(brand_preference), 그 의견은 담당자의 판단 근거가 되지만
+ * 그 자체로 협업을 만들지는 않는다. 브랜드 의견과 실제 결정을 다른 컬럼에 두는 것이
+ * 이 변경의 핵심이다 — 같은 컬럼을 공유하면 "누가 결정했는가"가 사라진다.
+ */
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -15,21 +29,40 @@ export default async (req: Request) => {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
 
-      // 지원자 목록에는 연락처·SNS 링크가 들어 있다. 캠페인을 등록한 브랜드만 볼 수 있다.
-      const owner = await db.sql`SELECT business_username FROM campaigns WHERE id = ${campaign_id}`;
+      const owner = await db.sql`
+        SELECT business_username, manager_username, title, type FROM campaigns WHERE id = ${campaign_id}
+      `;
       if (owner.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
-      const auth = await requireAccountOwner(req, String((owner[0] as any).business_username || ""));
-      if (!auth.ok) return auth.response;
+      const campaign = owner[0] as any;
+
+      // 지원자 목록에는 연락처·SNS 링크가 들어 있다. 캠페인을 등록한 브랜드와
+      // 픽스폴리오 담당자만 볼 수 있다.
+      const manager = await requireManager(req);
+      let viewerRole: "manager" | "brand" = "manager";
+      if (!manager.ok) {
+        const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
+        if (!auth.ok) return auth.response;
+        viewerRole = "brand";
+      }
 
       const result = await db.sql`
-        SELECT * FROM campaign_applications
-        WHERE campaign_id = ${campaign_id}
-        ORDER BY created_at DESC
+        SELECT ca.*, cc.id AS collab_id, cc.status AS collab_status, cc.current_stage_key
+        FROM campaign_applications ca
+        LEFT JOIN campaign_collabs cc
+          ON cc.campaign_id = ca.campaign_id AND cc.creator_username = ca.applicant_username
+        WHERE ca.campaign_id = ${campaign_id}
+        ORDER BY ca.created_at DESC
       `;
 
-      return Response.json({ applicants: result });
+      return Response.json({
+        applicants: result,
+        viewerRole,
+        // 브랜드 화면이 "수락" 버튼을 감추고 의견 입력으로 바꿀 수 있게 알려준다.
+        selectionBy: "manager",
+        managerUsername: campaign.manager_username || "",
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }
@@ -38,18 +71,22 @@ export default async (req: Request) => {
   if (req.method === "PATCH") {
     try {
       const body = await req.json();
-      const { id, status } = body;
+      const { id } = body as any;
+      const status = (body as any).status ? String((body as any).status) : "";
+      const hasPreference = (body as any).brandPreference !== undefined;
+      const preference = hasPreference ? String((body as any).brandPreference || "") : "";
 
-      if (!id || !status) {
+      if (!id) {
         return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
       }
 
-      if (!["pending", "accepted", "rejected"].includes(status)) {
-        return Response.json({ error: "잘못된 상태값입니다." }, { status: 400 });
-      }
-
       const appRows = await db.sql`
-        SELECT ca.*, c.title as campaign_title, c.business_username, c.brand_name
+        SELECT ca.*, c.title as campaign_title, c.business_username, c.brand_name,
+               c.type as campaign_type, c.reward_type, c.reward_amount,
+               c.start_date, c.end_date, c.manager_username, c.description,
+               c.product_name, c.product_url, c.upload_channel, c.content_format,
+               c.video_concept, c.guideline_url, c.guideline_note,
+               c.second_use_fee, c.second_use_note, c.upload_from, c.upload_to
         FROM campaign_applications ca
         JOIN campaigns c ON c.id = ca.campaign_id
         WHERE ca.id = ${id}
@@ -59,175 +96,147 @@ export default async (req: Request) => {
         return Response.json({ error: "지원 내역을 찾을 수 없습니다." }, { status: 404 });
       }
 
-      // 수락/거절은 캠페인을 등록한 브랜드만 할 수 있다. 수락은 타임라인·정산까지
-      // 만들어 내므로 남이 대신 눌러서는 안 된다.
-      const auth = await requireAccountOwner(req, String(appRow.business_username || ""));
-      if (!auth.ok) return auth.response;
+      // --- 브랜드 의견 (구속력 없음) -------------------------------------
+      // 의견을 지우는 것("")도 정상 요청이므로 값이 비었는지가 아니라 필드가
+      // 왔는지로 분기한다.
+      if (!status && hasPreference) {
+        if (!["", "shortlist", "pass"].includes(preference)) {
+          return Response.json({ error: "잘못된 의견 값입니다." }, { status: 400 });
+        }
+        const auth = await requireAccountOwner(req, String(appRow.business_username || ""));
+        if (!auth.ok) return auth.response;
+
+        const note = String((body as any).brandPreferenceNote ?? (body as any).note ?? "");
+        await db.sql`
+          UPDATE campaign_applications
+          SET brand_preference = ${preference},
+              brand_preference_note = ${note},
+              updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        return Response.json({ success: true, brandPreference: preference });
+      }
+
+      if (!status) {
+        return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
+      }
+      if (!["pending", "accepted", "rejected"].includes(status)) {
+        return Response.json({ error: "잘못된 상태값입니다." }, { status: 400 });
+      }
+
+      // --- 선정/거절 (담당자만) ------------------------------------------
+      // 브랜드 소유자 확인에서 담당자 확인으로 바뀐 지점이다. 수락은 협업 본체와
+      // 단계, 담당자 채널을 한꺼번에 만들어 내므로 중간에서 관리하는 사람이 눌러야 한다.
+      const manager = await requireManager(req);
+      if (!manager.ok) {
+        // 브랜드가 예전 화면(캐시된 스크립트)으로 수락을 시도할 수 있으므로,
+        // 왜 막혔는지와 무엇을 대신 할 수 있는지를 함께 알려준다.
+        const signedIn = await requireSignedInUser(req);
+        const isBrandOwner = signedIn.ok && signedIn.username === norm(appRow.business_username);
+        if (isBrandOwner) {
+          return Response.json(
+            {
+              error:
+                "지원자 선정은 픽스폴리오 담당자가 진행합니다. 원하는 지원자를 '추천'으로 표시해 주시면 담당자가 확인합니다.",
+              code: "SELECTION_BY_MANAGER",
+            },
+            { status: 403 },
+          );
+        }
+        return manager.response;
+      }
+
+      const managerUsername = norm(appRow.manager_username) || manager.managerUsername;
 
       await db.sql`
         UPDATE campaign_applications
-        SET status = ${status}, updated_at = NOW()
+        SET status = ${status},
+            manager_note = ${String((body as any).note || appRow.manager_note || "")},
+            decided_by = ${manager.managerUsername},
+            decided_at = NOW(),
+            updated_at = NOW()
         WHERE id = ${id}
       `;
 
-      if (status === "accepted" && appRow) {
-        const rawBizUser = appRow.business_username || "";
-        const businessUsername = rawBizUser.toLowerCase().replace(/^biz\//, "");
-        const creatorUsername = (appRow.applicant_username || "").toLowerCase();
-        const companyName = appRow.brand_name || "";
-        const campaignTitle = appRow.campaign_title || "";
-        const proposalId = `campaign_${appRow.campaign_id}_${creatorUsername}`;
-        const nowISO = new Date().toISOString();
-
-        // 1) Create timeline entry
-        const store = getStore("timelines");
-        const detailKey = `detail_${proposalId}`;
-        const existingTimeline = await store.get(detailKey, { type: "json" });
-
-        if (!existingTimeline) {
-          const timelineData = {
-            proposalId,
-            influencerUsername: creatorUsername,
-            businessUsername,
-            companyName,
-            proposalTitle: campaignTitle,
-            comments: [
-              {
-                id: `tc_${Date.now()}_system`,
-                proposalId,
-                authorType: "business",
-                authorName: companyName || businessUsername,
-                authorUsername: businessUsername,
-                content: `🎉 지원하신 "${campaignTitle}" 캠페인에 선정되셨습니다! 지금부터 ${companyName || businessUsername}와(과) 이곳에서 메시지를 주고받으며 협업을 진행할 수 있습니다.`,
-                createdAt: nowISO,
-                readBy: [businessUsername],
-              },
-            ],
-            createdAt: nowISO,
-          };
-
-          await store.setJSON(detailKey, timelineData);
-
-          const ensureIndex = async (type: string, username: string) => {
-            const indexKey = `index_${type}_${username.toLowerCase()}`;
-            const indexData = ((await store.get(indexKey, { type: "json" })) as any[]) || [];
-            const exists = indexData.some((t: any) => t.proposalId === proposalId);
-            if (!exists) {
-              indexData.unshift({
-                proposalId,
-                influencerUsername: creatorUsername,
-                businessUsername,
-                companyName,
-                proposalTitle: campaignTitle,
-                createdAt: nowISO,
-              });
-              await store.setJSON(indexKey, indexData);
-            }
-          };
-
-          if (creatorUsername) await ensureIndex("influencer", creatorUsername);
-          if (businessUsername) await ensureIndex("business", businessUsername);
-
-          // Persist timeline to SQL
-          try {
-            const systemComment = timelineData.comments[0];
-            await db.sql`
-              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
-              VALUES (${proposalId}, ${creatorUsername}, ${businessUsername}, ${companyName}, ${campaignTitle}, ${nowISO})
-              ON CONFLICT (proposal_id) DO NOTHING
-            `;
-            await db.sql`
-              INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
-              VALUES (${systemComment.id}, ${proposalId}, ${systemComment.authorType}, ${systemComment.authorName}, ${systemComment.authorUsername}, ${systemComment.content}, ${[businessUsername]}, ${nowISO})
-              ON CONFLICT (id) DO NOTHING
-            `;
-          } catch (sqlErr) {
-            console.error("[campaign-applicants] Failed to persist timeline to SQL:", sqlErr);
-          }
-        }
-
-        // 2) Create proposal entries so business inbox and influencer proposals show this collaboration
-        const campaignRows = await db.sql`SELECT * FROM campaigns WHERE id = ${appRow.campaign_id}`;
-        const campaign = (campaignRows as any[])?.[0];
-
-        const proposalEntry = {
-          id: proposalId,
-          influencer_username: creatorUsername,
-          category: campaign?.type === "group_buy" ? "커머스" : "광고",
-          company_name: companyName,
-          contact_person: "",
-          contact_email: "",
-          contact_phone: "",
-          title: campaignTitle,
-          content: campaign?.description || "",
-          start_date: campaign?.start_date || "",
-          end_date: campaign?.end_date || "",
-          fee: parseAmount(campaign?.reward_amount),
-          revenue_share: 0,
-          reference_links: [],
-          attachments: [],
-          business_username: businessUsername,
-          status: "accepted",
-          created_at: nowISO,
-          updated_at: nowISO,
-          createdAt: nowISO,
-          updatedAt: nowISO,
-        };
-
-        try {
-          const proposalStore = getStore("proposals");
-          const infKey = `proposals_${creatorUsername}`;
-          const infExisting = ((await proposalStore.get(infKey, { type: "json" })) as any[]) || [];
-          if (!infExisting.some((p: any) => p.id === proposalId)) {
-            infExisting.push(proposalEntry);
-            await proposalStore.setJSON(infKey, infExisting);
-          }
-        } catch (e) {
-          console.error("[campaign-applicants] Failed to create influencer proposal entry:", e);
-        }
-
-        try {
-          const bizStore = getStore("business-proposals");
-          const bizKey = `biz_proposals_${businessUsername}`;
-          const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
-          if (!bizExisting.some((p: any) => p.id === proposalId)) {
-            bizExisting.push(proposalEntry);
-            await bizStore.setJSON(bizKey, bizExisting);
-          }
-        } catch (e) {
-          console.error("[campaign-applicants] Failed to create business proposal entry:", e);
-        }
-
-        // 3) Auto-create settlement record for accepted campaign collaboration
-        try {
-          const stlId = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const stlNow = new Date().toISOString();
-          const scheduledDate = (() => {
-            const d = new Date();
-            d.setDate(d.getDate() + 30);
-            return d.toISOString().split("T")[0];
-          })();
-
-          await addSettlementForProposal({
-            id: stlId,
-            proposal_id: proposalId,
-            influencer_username: creatorUsername,
-            business_username: businessUsername,
-            company_name: companyName,
-            title: campaignTitle,
-            amount: parseAmount(campaign?.reward_amount),
-            scheduled_date: scheduledDate,
-            status: "scheduled",
-            memo: "캠페인 수락 시 자동 생성",
-            created_at: stlNow,
-            updated_at: stlNow,
-          });
-        } catch (stlErr) {
-          console.error("[campaign-applicants] Failed to auto-create settlement:", stlErr);
-        }
+      if (status !== "accepted") {
+        return Response.json({ success: true });
       }
 
-      return Response.json({ success: true });
+      const businessUsername = norm(appRow.business_username);
+      const creatorUsername = norm(appRow.applicant_username);
+      const companyName = appRow.brand_name || "";
+      const campaignTitle = appRow.campaign_title || "";
+      const fee = parseAmount(appRow.reward_amount);
+
+      // 1) 협업 본체 + 단계 + 조건 초안 + 담당자 채널 2개
+      const collab = await createCollabForApplication({
+        db,
+        campaignId: appRow.campaign_id,
+        applicationId: appRow.id,
+        campaignType: appRow.campaign_type,
+        campaignTitle,
+        companyName,
+        businessUsername,
+        creatorUsername,
+        managerUsername,
+        rewardType: appRow.reward_type,
+        fee,
+        startDate: appRow.start_date,
+        brief: {
+          productName: appRow.product_name,
+          productUrl: appRow.product_url,
+          uploadChannel: appRow.upload_channel,
+          contentFormat: appRow.content_format,
+          videoConcept: appRow.video_concept,
+          guideUrl: appRow.guideline_url,
+          guideNote: appRow.guideline_note,
+          secondUseFee: Number(appRow.second_use_fee || 0),
+          secondUseNote: appRow.second_use_note,
+          uploadFrom: appRow.upload_from,
+          uploadTo: appRow.upload_to,
+        },
+      });
+
+      // 2) 인플루언서의 제안 목록과 브랜드 수신함에 이 협업을 노출한다.
+      //    (대화는 담당자 채널로 가지만, 목록에는 진행 중 협업으로 보여야 한다.)
+      //    리스트업 수락도 같은 반영이 필요해서 공용 함수로 빼 두었다.
+      await mirrorCollabProposal({
+        collabId: collab.id,
+        campaignId: appRow.campaign_id,
+        campaignType: appRow.campaign_type,
+        campaignTitle,
+        description: appRow.description || "",
+        companyName,
+        businessUsername,
+        creatorUsername,
+        managerUsername,
+        startDate: appRow.start_date || "",
+        endDate: appRow.end_date || "",
+        fee,
+      });
+
+      // 3) 정산은 여기서 만들지 않는다.
+      //    예전에는 수락 시점 +30일로 예약했는데, 업로드가 그보다 늦어지면 아직
+      //    게시되지도 않은 협업의 정산이 잡혀 있는 상태가 됐다. 이제 담당자가
+      //    업로드를 확인한 단계(confirm)에서 익월 말일 기준으로 예약한다.
+      await logCollabEvent(db, {
+        collabId: collab.id,
+        type: "applicant_selected",
+        actorRole: "manager",
+        actorUsername: manager.managerUsername,
+        summary: `${creatorUsername} 선정`,
+        payload: { applicationId: appRow.id, fee },
+      });
+
+      return Response.json({
+        success: true,
+        collabId: collab.id,
+        threads: {
+          influencerSupport: collab.influencerThreadId,
+          brandSupport: collab.brandThreadId,
+        },
+        created: collab.created,
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "상태 변경 실패" }, { status: 500 });
     }
