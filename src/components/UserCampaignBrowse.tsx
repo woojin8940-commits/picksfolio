@@ -5,7 +5,6 @@ import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } f
 import CollabMatchRegister from './CollabMatchRegister';
 import CreatorCollabWorkspace from './CreatorCollabWorkspace';
 import CreatorOfferInbox from './collab/CreatorOfferInbox';
-import CreatorChannelPanel from './collab/CreatorChannelPanel';
 import Toast from './Toast';
 
 interface Campaign {
@@ -713,17 +712,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{filteredCampaigns.length}개</span>
         </div>
 
-        {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정) */}
+        {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정).
+            채널 정보(인스타 계정 · 팔로워)는 이 등록서에서 함께 받으므로 별도의
+            계정 등록 카드는 두지 않는다. */}
         <CollabMatchRegister variant="influencer" applicantUsername={userName} />
-
-        {/* 인스타 계정 등록. 매칭 등록 바로 아래에 둔다 — 둘 다 "브랜드에게 나를
-            보여주는" 일이고, 계정이 없으면 후보 명단에 올라가도 보여줄 숫자가 없다. */}
-        {userName && (
-          <CreatorChannelPanel
-            userName={userName}
-            onNotify={(message, type = 'success') => setToast({ message, type })}
-          />
-        )}
       </div>
 
       {/* Campaign Cards */}
