@@ -1143,8 +1143,17 @@ const App: React.FC = () => {
 
   // 인스타그램 DM 연동 콜백 복귀 — DM 자동화 화면으로 이동한다.
   // (DmAutomation 컴포넌트가 ?ig_connected/?ig_error 를 읽어 배너 표시 후 URL 을 정리한다.)
+  //
+  // 브랜드 매칭 등록(?collab_match)에서 시작한 연동은 캠페인 화면으로 돌려보낸다.
+  // subView 는 URL 이 아니라 상태로만 관리되므로 연동 후 페이지가 새로 뜨면 기본
+  // 대시보드로 돌아간다. 그러면 작성 중이던 등록서를 되살릴 화면 자체가 뜨지 않는다.
+  // (등록서 복원과 안내 배너는 CollabMatchRegister 가 같은 파라미터를 읽어 처리한다.)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get('collab_match')) {
+      setSubView('campaigns');
+      return;
+    }
     if (params.get('ig_connected') || params.get('ig_error')) {
       setSubView('dm-automation');
     }

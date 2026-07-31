@@ -821,6 +821,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setBanner({ type: 'err', text: '연동에 실패했어요. 잠시 후 다시 시도해주세요.' });
       params.delete('ig_error');
     } else return;
+    // 콜백이 함께 실어 보내는 지표 동기화 결과 — 이 화면에서는 쓰지 않으므로 지운다.
+    params.delete('ig_metrics');
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     const t = setTimeout(() => setBanner(null), 5000);

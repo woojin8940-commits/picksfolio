@@ -1969,6 +1969,30 @@ export const apiService = {
 
   // ───────────────────── 인플루언서 채널(인스타 계정) 등록 ─────────────────────
 
+  /**
+   * 브랜드/인플루언서 매칭 등록서 접수.
+   *
+   * 로그인 없이도 접수되는 경로지만, 로그인한 사람이 보내면 서버가 본인 확인 후
+   * 연동해 둔 인스타 지표(팔로워·팔로잉·릴스 평균 조회수)를 등록서에 붙여 준다.
+   * 그래서 인증 헤더를 함께 실어 보낸다.
+   */
+  async submitCollabDirectory(payload: Record<string, any>): Promise<any> {
+    try {
+      const res = await fetch('/api/collab-directory', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '등록에 실패했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to submit collab directory application:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getCreatorChannel(username: string, token?: string): Promise<any> {
     try {
       const res = await fetch(`/api/creator-channel?username=${encodeURIComponent(username)}`, {
@@ -2271,12 +2295,15 @@ export const apiService = {
 
   // 인스타그램 계정 연동 시작 — 인증된 요청으로 서명된 state 를 받아 authorize URL 을 얻는다.
   // (예전처럼 GET 링크로 바로 이동하면 서명 없는 state 라 계정 연동 CSRF 가 성립한다.)
-  async instagramConnectUrl(username: string): Promise<{ url?: string; error?: string }> {
+  //
+  // returnTo 는 연동을 마친 뒤 돌아올 우리 사이트 내부 경로다. 브랜드 매칭 등록처럼
+  // 관리자 화면이 아닌 곳에서 연동을 시작하면 이 값을 넘겨 원래 있던 화면으로 복귀한다.
+  async instagramConnectUrl(username: string, returnTo?: string): Promise<{ url?: string; error?: string }> {
     try {
       const res = await fetch('/api/instagram/oauth/start', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ username: username.toLowerCase() }),
+        body: JSON.stringify({ username: username.toLowerCase(), returnTo }),
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok || !data?.url) {

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { apiService } from '../services/apiService';
 
 // 캠페인 협업 "매칭 받기" 등록 버튼 + 모달.
 // variant 로 역할을 고정한다:
@@ -7,6 +8,10 @@ import React, { useState } from 'react';
 //  - 'brand'      : 비즈니스 대시보드에서 사용. 항상 브랜드(광고주)로 지원하며
 //    버튼/모달은 "인플루언서 매칭 받기" 로 표시한다.
 // 지원 유형 선택 UI 는 더 이상 노출하지 않는다(역할 고정).
+//
+// 인플루언서 등록은 이름·연락처를 받은 뒤 본인 인스타 계정을 연동하게 한다.
+// 연동해 두면 팔로워·팔로잉과 최근 릴스 평균 조회수를 픽스폴리오가 직접 보관하므로,
+// 브랜드가 명단에서 보는 숫자가 자기 입력값이 아니라 메타에서 확인한 값이 된다.
 interface Props {
   variant: 'influencer' | 'brand';
   applicantUsername: string;
@@ -23,6 +28,38 @@ const COPY = {
     subtitle: '원하는 조건을 등록하면 조건에 맞는 인플루언서를 매칭해 드립니다.',
   },
 } as const;
+
+/**
+ * 인스타그램 연동은 메타로 나갔다 돌아오는 흐름이라 페이지가 새로 뜬다.
+ * 작성 중이던 등록서를 잃지 않도록 나가기 전에 임시 저장하고, 돌아오면 복원한다.
+ */
+const DRAFT_KEY = 'picks_collab_match_draft';
+/** 복귀 시 이 모달을 다시 열어야 한다는 표시. */
+const RETURN_FLAG = 'collab_match';
+
+interface InfluencerChannel {
+  connected: boolean;
+  handle: string;
+  followers: number;
+  following: number;
+  avgViews: number;
+  avgLikes: number;
+  metricsSource: string;
+  syncedAt: string;
+}
+
+const emptyChannel: InfluencerChannel = {
+  connected: false, handle: '', followers: 0, following: 0,
+  avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '',
+};
+
+const compact = (n: number) => {
+  if (!n || n < 0) return '0';
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, '')}억`;
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}만`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;
+  return n.toLocaleString();
+};
 
 const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName }) => {
   const copy = COPY[variant];
@@ -42,6 +79,76 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     desired_followers: '', budget_text: '', desired_schedule: '', desired_category: '', note: '',
   });
 
+  // 인스타 연동 상태 — 연동 여부와 픽스폴리오가 보관 중인 지표.
+  const [channel, setChannel] = useState<InfluencerChannel>(emptyChannel);
+  const [channelLoading, setChannelLoading] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const isInfluencer = variant === 'influencer';
+
+  const loadChannel = useCallback(async () => {
+    if (!isInfluencer || !applicantUsername) return;
+    setChannelLoading(true);
+    const result = await apiService.getCreatorChannel(applicantUsername);
+    setChannelLoading(false);
+    if (result?.error) return;
+    const c = result?.channel || {};
+    // metaLinked = 토큰이 살아 있다는 뜻. connected = 지표를 한 번이라도 받아 왔다는 뜻.
+    setChannel({
+      connected: !!result?.metaLinked || !!c.connected,
+      handle: String(result?.igUsername || c.instagramHandle || ''),
+      followers: Number(c.followers || 0),
+      following: Number(c.following || 0),
+      avgViews: Number(c.avgViews || 0),
+      avgLikes: Number(c.avgLikes || 0),
+      metricsSource: String(c.metricsSource || ''),
+      syncedAt: String(c.syncedAt || ''),
+    });
+  }, [applicantUsername, isInfluencer]);
+
+  // 연동 후 복귀 — 임시 저장한 등록서를 되살리고 모달을 다시 연다.
+  useEffect(() => {
+    if (!isInfluencer) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get(RETURN_FLAG)) return;
+
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (raw) setInfForm(f => ({ ...f, ...JSON.parse(raw) }));
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // 임시 저장이 없거나 깨졌으면 빈 폼으로 이어간다.
+    }
+
+    if (params.get('ig_connected')) {
+      setNotice(
+        params.get('ig_metrics') === '0'
+          ? { type: 'ok', text: '계정이 연동되었습니다. 지표는 잠시 후 자동으로 채워집니다.' }
+          : { type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' },
+      );
+    } else if (params.get('ig_error')) {
+      setNotice({ type: 'err', text: '연동에 실패했어요. 다시 시도해 주세요.' });
+    }
+
+    setOpen(true);
+
+    // 결과 파라미터는 한 번 읽고 지운다 — 새로고침 때 같은 안내가 다시 뜨지 않도록.
+    params.delete(RETURN_FLAG);
+    params.delete('ig_connected');
+    params.delete('ig_error');
+    params.delete('ig_metrics');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
+
+  // 모달을 열 때마다 연동 상태를 다시 확인한다(다른 화면에서 연동했을 수 있다).
+  useEffect(() => {
+    if (open) loadChannel();
+  }, [open, loadChannel]);
+
   const reset = () => {
     setInfForm({
       name: '', contact: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
@@ -53,37 +160,89 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     });
   };
 
+  /** 메타 authorize 로 이동. 나가기 전에 작성 중인 값을 임시 저장한다. */
+  const linkInstagram = async () => {
+    if (!applicantUsername) {
+      setNotice({ type: 'err', text: '계정 연동은 로그인 후에 할 수 있어요.' });
+      return;
+    }
+    setLinking(true);
+    setNotice(null);
+    try {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(infForm));
+    } catch {
+      // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
+    }
+    const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1`;
+    const result = await apiService.instagramConnectUrl(applicantUsername, returnTo);
+    if (!result.url) {
+      setLinking(false);
+      setNotice({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
+      return;
+    }
+    window.location.href = result.url;
+  };
+
+  /** 이미 연동된 계정의 지표를 다시 받아온다. */
+  const resyncInstagram = async () => {
+    if (!applicantUsername) return;
+    setSyncing(true);
+    setNotice(null);
+    const result = await apiService.syncCreatorChannel(applicantUsername);
+    setSyncing(false);
+    if (result?.error) {
+      setNotice({
+        type: 'err',
+        text: result.code === 'META_NOT_LINKED'
+          ? '먼저 인스타그램 계정을 연동해 주세요.'
+          : result.error,
+      });
+      return;
+    }
+    await loadChannel();
+    setNotice({
+      type: 'ok',
+      text: result?.viewsAvailable === false
+        ? '최신 정보를 불러왔어요. 조회수는 계정 설정상 비공개일 수 있습니다.'
+        : '최신 팔로워·릴스 정보를 불러왔어요.',
+    });
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
+    setNotice(null);
     try {
       const payload = variant === 'influencer'
         ? { role: 'influencer', applicant_username: applicantUsername, ...infForm }
         : { role: 'brand', applicant_username: applicantUsername, ...brandForm, budget: brandForm.budget_text };
       if (!payload.name?.trim()) {
-        alert(variant === 'influencer' ? '이름을 입력해 주세요.' : '담당자/브랜드명을 입력해 주세요.');
+        setNotice({ type: 'err', text: variant === 'influencer' ? '이름을 입력해 주세요.' : '담당자/브랜드명을 입력해 주세요.' });
         setSubmitting(false);
         return;
       }
-      if (variant === 'influencer' && !infForm.instagram_url.trim()) {
-        alert('인스타그램 프로필 링크를 입력해 주세요.');
+      // 연락처가 없으면 매칭 결과를 안내할 방법이 없다.
+      if (!payload.contact?.trim()) {
+        setNotice({ type: 'err', text: '연락처를 입력해 주세요.' });
         setSubmitting(false);
         return;
       }
-      const res = await fetch('/api/collab-directory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
+      // 계정을 연동하면 인스타 링크는 연동 정보에서 채워지므로 직접 입력하지 않아도 된다.
+      if (variant === 'influencer' && !channel.connected && !infForm.instagram_url.trim()) {
+        setNotice({ type: 'err', text: '인스타그램 계정을 연동하거나 프로필 링크를 입력해 주세요.' });
+        setSubmitting(false);
+        return;
+      }
+      const result = await apiService.submitCollabDirectory(payload);
+      if (!result?.error) {
         setOpen(false);
         reset();
+        setNotice(null);
         alert('접수되었습니다. 운영자 검토 후 연락드립니다!');
       } else {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || '등록에 실패했습니다.');
+        setNotice({ type: 'err', text: result.error });
       }
     } catch {
-      alert('서버 오류가 발생했습니다.');
+      setNotice({ type: 'err', text: '서버 오류가 발생했습니다.' });
     } finally {
       setSubmitting(false);
     }
@@ -117,19 +276,58 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
             </div>
 
             <div className="p-5">
+              {notice && (
+                <div
+                  className={`mb-4 rounded-xl px-3.5 py-2.5 text-xs font-bold ${
+                    notice.type === 'ok'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-100'
+                  }`}
+                >
+                  {notice.text}
+                </div>
+              )}
               {variant === 'influencer' ? (
                 <div className="space-y-3">
                   <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
-                  <Field label="연락처" value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
+                  <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
+
+                  {/* 인스타 계정 연동 — 브랜드가 보는 숫자의 출처가 여기서 정해진다. */}
+                  <div className="pt-1">
+                    <p className="text-xs font-black text-slate-500 mb-2">인스타그램 계정 연동</p>
+                    <InstagramLinkCard
+                      channel={channel}
+                      loading={channelLoading}
+                      linking={linking}
+                      syncing={syncing}
+                      canLink={!!applicantUsername}
+                      onLink={linkInstagram}
+                      onResync={resyncInstagram}
+                    />
+                  </div>
 
                   <div className="pt-1">
                     <p className="text-xs font-black text-slate-500 mb-2">내 채널 · 팔로워 수</p>
                     <div className="space-y-2.5">
-                      <ChannelRow
-                        label="인스타그램" urlPlaceholder="https://instagram.com/..."
-                        url={infForm.instagram_url} onUrl={v => setInfForm(f => ({ ...f, instagram_url: v }))}
-                        followers={infForm.instagram_followers} onFollowers={v => setInfForm(f => ({ ...f, instagram_followers: v }))}
-                      />
+                      {channel.connected ? (
+                        // 연동을 마쳤으면 인스타 항목은 손으로 적게 하지 않는다.
+                        // 확인된 숫자 옆에 입력칸을 같이 두면 어느 쪽이 맞는지 알 수 없다.
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-500">인스타그램</span>
+                            <span className="text-[11px] font-bold text-emerald-600">연동 계정에서 자동 확인</span>
+                          </div>
+                          <p className="text-sm font-black text-slate-900 mt-1">
+                            {channel.handle ? `@${channel.handle}` : '연동된 계정'}
+                          </p>
+                        </div>
+                      ) : (
+                        <ChannelRow
+                          label="인스타그램" urlPlaceholder="https://instagram.com/..."
+                          url={infForm.instagram_url} onUrl={v => setInfForm(f => ({ ...f, instagram_url: v }))}
+                          followers={infForm.instagram_followers} onFollowers={v => setInfForm(f => ({ ...f, instagram_followers: v }))}
+                        />
+                      )}
                       <ChannelRow
                         label="유튜브" urlPlaceholder="https://youtube.com/@..." followerPlaceholder="구독자"
                         url={infForm.youtube_url} onUrl={v => setInfForm(f => ({ ...f, youtube_url: v }))}
@@ -143,7 +341,9 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                       <Field label="네이버 블로그" value={infForm.naver_blog_url} onChange={v => setInfForm(f => ({ ...f, naver_blog_url: v }))} placeholder="https://blog.naver.com/..." />
                     </div>
                     <p className="text-[11px] text-slate-400 font-medium leading-relaxed mt-2">
-                      인스타그램 프로필 링크는 필수입니다. Meta 계정을 연동한 경우 팔로워·팔로잉과 최근 릴스 성과를 자동으로 확인하며, 연동 전에는 입력한 팔로워 수를 임시값으로 사용합니다.
+                      {channel.connected
+                        ? '인스타그램은 연동된 계정에서 팔로워·팔로잉과 최근 릴스 성과를 직접 확인합니다. 다른 채널은 직접 입력해 주세요.'
+                        : '인스타그램 계정을 연동하면 팔로워·팔로잉과 릴스 평균 조회수를 자동으로 확인합니다. 연동 전에는 입력한 팔로워 수를 임시값으로 사용합니다.'}
                     </p>
                   </div>
 
@@ -160,7 +360,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
               ) : (
                 <div className="space-y-3">
                   <Field label="담당자 이름 / 브랜드명" required value={brandForm.name} onChange={v => setBrandForm(f => ({ ...f, name: v }))} placeholder="브랜드명 또는 담당자" />
-                  <Field label="연락처" value={brandForm.contact} onChange={v => setBrandForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
+                  <Field label="연락처" required value={brandForm.contact} onChange={v => setBrandForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
                   <Field label="브랜드 홈페이지" value={brandForm.brand_homepage} onChange={v => setBrandForm(f => ({ ...f, brand_homepage: v }))} placeholder="https://..." />
                   <Field label="브랜드 인스타 링크" value={brandForm.brand_instagram} onChange={v => setBrandForm(f => ({ ...f, brand_instagram: v }))} placeholder="https://instagram.com/..." />
                   <div className="grid grid-cols-2 gap-3">
@@ -199,6 +399,109 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     </>
   );
 };
+
+/**
+ * 인스타그램 연동 카드.
+ *
+ * 연동 전에는 "왜 연동하는지"를 먼저 말한다. 계정 로그인을 요구하는 화면에서 이유가
+ * 없으면 사람들은 그냥 닫는다. 연동 후에는 픽스폴리오가 실제로 보관 중인 숫자를
+ * 그대로 보여 준다 — 브랜드에게 전달되는 값이 무엇인지 본인이 확인할 수 있어야 한다.
+ */
+const InstagramLinkCard: React.FC<{
+  channel: InfluencerChannel;
+  loading: boolean;
+  linking: boolean;
+  syncing: boolean;
+  canLink: boolean;
+  onLink: () => void;
+  onResync: () => void;
+}> = ({ channel, loading, linking, syncing, canLink, onLink, onResync }) => {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 flex items-center gap-2.5">
+        <div className="w-4 h-4 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin" />
+        <span className="text-xs font-bold text-slate-400">연동 상태 확인 중...</span>
+      </div>
+    );
+  }
+
+  if (!channel.connected) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-fuchsia-50/60 to-indigo-50/60 px-4 py-4">
+        <p className="text-sm font-black text-slate-900">본인 인스타그램으로 로그인해 연동</p>
+        <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-1.5">
+          연동하면 팔로워·팔로잉 수와 최근 릴스 평균 조회수를 픽스폴리오가 직접 확인해
+          보관합니다. 브랜드는 직접 적은 숫자보다 확인된 숫자를 신뢰하기 때문에 매칭
+          확률이 올라갑니다. 게시물 작성이나 DM 발송 권한은 사용하지 않습니다.
+        </p>
+        <button
+          type="button"
+          onClick={onLink}
+          disabled={linking || !canLink}
+          className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-600 via-rose-500 to-amber-500 text-white font-black text-sm py-3 shadow-[0_12px_26px_-10px_rgba(219,39,119,0.6)] hover:-translate-y-0.5 active:scale-[0.99] active:translate-y-0 transition-all disabled:opacity-60 disabled:shadow-none disabled:hover:translate-y-0"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.96.24 2.4.41.6.24 1.04.52 1.5.98.46.46.74.9.98 1.5.17.44.36 1.23.41 2.4.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.24 1.96-.41 2.4-.24.6-.52 1.04-.98 1.5-.46.46-.9.74-1.5.98-.44.17-1.23.36-2.4.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.96-.24-2.4-.41a4.04 4.04 0 01-1.5-.98 4.04 4.04 0 01-.98-1.5c-.17-.44-.36-1.23-.41-2.4C2.17 15.58 2.16 15.2 2.16 12s.01-3.58.07-4.85c.05-1.17.24-1.96.41-2.4.24-.6.52-1.04.98-1.5.46-.46.9-.74 1.5-.98.44-.17 1.23-.36 2.4-.41C8.42 2.17 8.8 2.16 12 2.16zm0 3.68a6.16 6.16 0 100 12.32 6.16 6.16 0 000-12.32zm0 10.16a4 4 0 110-8 4 4 0 010 8zm7.84-10.4a1.44 1.44 0 11-2.88 0 1.44 1.44 0 012.88 0z" />
+          </svg>
+          {linking ? '연동 창으로 이동 중...' : '인스타그램 계정 연동하기'}
+        </button>
+        {!canLink && (
+          <p className="text-[11px] text-rose-500 font-bold mt-2">
+            계정 연동은 로그인 후에 할 수 있어요.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const verified = channel.metricsSource === 'meta_api';
+  return (
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+            </svg>
+            <p className="text-sm font-black text-slate-900 truncate">
+              {channel.handle ? `@${channel.handle}` : '인스타그램 연동 완료'}
+            </p>
+          </div>
+          <p className="text-[11px] text-emerald-700 font-bold mt-0.5">
+            {verified ? '메타에서 확인된 지표를 보관 중입니다.' : '연동됨 · 지표를 아직 받지 못했습니다.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onResync}
+          disabled={syncing}
+          className="shrink-0 rounded-lg border border-emerald-300 bg-white text-emerald-700 font-black text-[11px] px-2.5 py-1.5 hover:bg-emerald-50 active:scale-[0.98] transition-all disabled:opacity-60"
+        >
+          {syncing ? '불러오는 중' : '새로 불러오기'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mt-3">
+        <Metric label="팔로워" value={compact(channel.followers)} />
+        <Metric label="팔로잉" value={compact(channel.following)} />
+        <Metric label="릴스 평균 조회" value={compact(channel.avgViews)} />
+      </div>
+      {verified && channel.avgViews === 0 && (
+        <p className="text-[11px] text-slate-500 font-medium mt-2 leading-relaxed">
+          릴스 조회수는 계정 설정이나 앱 권한에 따라 비공개일 수 있습니다. 팔로워 수는
+          정상적으로 확인되었습니다.
+        </p>
+      )}
+    </div>
+  );
+};
+
+const Metric: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="rounded-lg bg-white border border-emerald-100 px-2 py-2 text-center">
+    <p className="text-[10px] font-bold text-slate-400 whitespace-nowrap">{label}</p>
+    <p className="text-sm font-black text-slate-900 mt-0.5">{value}</p>
+  </div>
+);
 
 // 채널 링크(넓게) + 팔로워 수(좁게)를 한 줄에 배치하는 입력 행
 const ChannelRow: React.FC<{

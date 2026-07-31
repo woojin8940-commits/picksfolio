@@ -1,14 +1,20 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
-import { consumeSignedState } from "./_shared/oauth-state.mts";
+import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
+import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 
 /**
  * 인스타그램 계정 연동 콜백.
  * - authorize 후 돌아온 code 를 단기 토큰 → 장기 토큰(60일)으로 교환한다.
  * - 연동한 계정의 user_id / username 을 조회해 사용자별 DM 자동화 설정
  *   (dm-automation 블롭)에 병합 저장한다. 기존 automations/rules 는 보존한다.
- * - 완료 후 앱으로 리다이렉트하며 결과를 쿼리스트링으로 전달한다.
+ * - 이어서 팔로워·팔로잉과 최근 릴스 평균 조회수를 받아 creator_channels 에 채운다.
+ *   연동의 목적이 "픽스폴리오가 그 숫자를 갖고 있는 것"이므로, 동의한 순간 한 번은
+ *   받아 둔다. 나중에 누가 갱신 버튼을 눌러 줄 때까지 명단이 비어 있으면 브랜드
+ *   화면에서는 연동하지 않은 사람과 구별되지 않는다.
+ * - 완료 후 state 에 서명해 둔 복귀 경로(없으면 /admin)로 리다이렉트하며 결과를
+ *   쿼리스트링으로 전달한다.
  *
  * 참고: "Instagram API with Instagram Login" 방식이라 토큰은 graph.instagram.com
  * 엔드포인트에서 사용한다(페이스북 그래프 아님).
@@ -37,10 +43,25 @@ export default async (req: Request, _context: Context) => {
   const errorParam = url.searchParams.get("error");
   const stateRaw = url.searchParams.get("state") || "";
 
-  // 연동 결과는 관리자 페이지의 DM 자동화 탭으로 복귀시킨다.
+  // 연동 결과는 기본적으로 관리자 페이지의 DM 자동화 탭으로 복귀시킨다.
   // (/admin 경로 → admin 뷰, ?ig_connected/?ig_error → dm-automation 서브뷰 선택)
-  const fail = (reason: string) =>
-    Response.redirect(`${origin}/admin?ig_error=${encodeURIComponent(reason)}`, 302);
+  // 브랜드 매칭 등록처럼 다른 화면에서 시작한 연동은 state 에 실려 온 경로로 돌아간다.
+  // state 검증 전에 실패하는 경우에는 알 수 있는 게 없으니 기본값을 쓴다.
+  let returnPath = "/admin";
+
+  /** 복귀 경로에 결과 파라미터를 붙인다. 경로에 이미 쿼리가 있을 수 있다. */
+  const redirectBack = (params: Record<string, string>) => {
+    const target = new URL(returnPath, origin);
+    for (const [key, value] of Object.entries(params)) {
+      target.searchParams.set(key, value);
+    }
+    // sanitizeReturnPath 로 내부 경로만 통과시켰지만, 최종 목적지가 우리 도메인인지
+    // 한 번 더 확인한다. 리다이렉트는 틀리면 조용히 외부로 나가는 종류의 실수다.
+    if (target.origin !== origin) return Response.redirect(`${origin}/admin`, 302);
+    return Response.redirect(target.toString(), 302);
+  };
+
+  const fail = (reason: string) => redirectBack({ ig_error: reason });
 
   // 사용자가 동의를 취소한 경우
   if (errorParam) return fail(errorParam);
@@ -54,6 +75,8 @@ export default async (req: Request, _context: Context) => {
   if (!verified.ok) return fail(verified.error);
   username = verified.payload.u;
   if (!username) return fail("bad_state");
+  // 복귀 경로는 발급 때 검증했지만, 서명된 값이라고 그대로 믿지 않고 다시 통과시킨다.
+  returnPath = sanitizeReturnPath(verified.payload.r) || returnPath;
 
   const appId = process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
@@ -165,7 +188,27 @@ export default async (req: Request, _context: Context) => {
       console.warn("[ig-oauth] webhook subscribe failed:", sub.error);
     }
 
-    return Response.redirect(`${origin}/admin?ig_connected=1`, 302);
+    // 동의한 순간 팔로워·팔로잉과 최근 릴스 평균 조회수를 한 번 받아 둔다.
+    // 이게 연동의 목적이므로 여기서 실패하면 알려는 주되(ig_metrics=0), 연동 자체를
+    // 되돌리지는 않는다. 토큰은 이미 저장됐으니 갱신 버튼으로 다시 시도할 수 있다.
+    //
+    // 데이터베이스 모듈은 여기서만 필요하고 optional dependency 라, 파일 맨 위에서
+    // 정적으로 가져오면 그 모듈이 없는 환경에서 계정 연동 전체가 실패한다. 지표는
+    // 부가 기능이고 연동은 그렇지 않으므로 필요한 순간에만 불러온다.
+    let metricsSynced = false;
+    try {
+      const { getDatabase } = await import("@picks/netlify-database");
+      const synced = await syncChannelFromMeta(getDatabase(), username, next);
+      if (synced.ok) {
+        metricsSynced = true;
+      } else {
+        console.warn("[ig-oauth] metrics sync failed:", synced.error);
+      }
+    } catch (e) {
+      console.warn("[ig-oauth] metrics sync error:", (e as Error)?.message);
+    }
+
+    return redirectBack({ ig_connected: "1", ig_metrics: metricsSynced ? "1" : "0" });
   } catch (e: any) {
     console.error("[ig-oauth] callback error:", e);
     return fail("unexpected_error");
