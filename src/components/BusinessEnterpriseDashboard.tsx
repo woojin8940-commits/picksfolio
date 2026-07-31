@@ -1,7 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
-import { authHeaders } from '../services/apiService';
+import { authHeaders, setActiveBusinessAccount } from '../services/apiService';
 
 const BusinessInbox = lazy(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
@@ -33,6 +33,21 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const statsCacheKey = `picks_biz_stats_${cleanUsername}`;
   const trendCacheKey = `picks_biz_trend`;
   const settlementCacheKey = `picks_biz_settlement_${cleanUsername}`;
+
+  /**
+   * 이 화면에 있는 동안의 요청은 비즈니스 계정 토큰으로 보낸다.
+   *
+   * 같은 브라우저에 크리에이터 세션이 남아 있으면 인증 헤더가 그쪽 토큰을 집어
+   * 서버에서 "다른 계정의 정보에는 접근할 수 없습니다"로 막혔다(캠페인 등록 실패).
+   * 대시보드를 벗어나면 다시 비운다 — 크리에이터 화면은 크리에이터 토큰을 써야 한다.
+   *
+   * 렌더 중에도 한 번 맞춘다: 자식 화면의 첫 요청이 아래 effect 보다 먼저 나갈 수 있다.
+   */
+  setActiveBusinessAccount(cleanUsername);
+  useEffect(() => {
+    setActiveBusinessAccount(cleanUsername);
+    return () => setActiveBusinessAccount('');
+  }, [cleanUsername]);
 
   const cachedStats = (() => {
     try {

@@ -548,7 +548,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
       const res = await fetch('/api/campaigns', {
         method: editing ? 'PATCH' : 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeaders(
+          { 'Content-Type': 'application/json' },
+          { account: businessUsername },
+        ),
         body: JSON.stringify(
           editing
             ? { id: editing.id, ...payload }
@@ -557,6 +560,16 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        // 인증에서 막힌 경우는 입력 문제가 아니다. 원문("다른 계정의 정보에는…")만
+        // 보여 주면 브랜드는 무엇을 고쳐야 하는지 알 수 없으니, 다시 로그인하라고
+        // 알려 준다. 작성 내용은 임시 저장에 남아 있어 로그인 후 이어서 쓸 수 있다.
+        if (res.status === 401 || res.status === 403) {
+          onNotify(
+            '로그인 정보가 만료되었습니다. 비즈니스 계정으로 다시 로그인하면 작성한 내용은 그대로 남아 있습니다.',
+            'error',
+          );
+          return;
+        }
         onNotify(err.error || (editing ? '수정 실패' : '등록 실패'), 'error');
         return;
       }
@@ -844,7 +857,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             <>
               <div>
                 <label className={LABEL}>진행 방식 *</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* 세 방식을 한 줄에 나란히 둔다 — 나란히 보이지 않으면 무엇을 고르는지
+                    비교가 안 되고, 두 줄로 접히면 마지막 방식이 덤처럼 보인다. */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {REWARD_MODES.map(m => {
                     const active = form.reward_mode === m.value;
                     return (
@@ -852,19 +867,19 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                         key={m.value}
                         type="button"
                         onClick={() => patch('reward_mode', m.value)}
-                        className={`text-left p-4 rounded-2xl border-2 transition-colors ${
+                        className={`text-left p-3 rounded-xl border-2 transition-colors ${
                           active ? 'border-slate-900 bg-slate-50' : 'border-slate-100 hover:border-slate-300'
                         }`}
                       >
-                        <span className="inline-block px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-black">
+                        <span className="inline-block px-1.5 py-0.5 rounded-full bg-slate-900 text-white text-[9px] font-black">
                           {m.tagline}
                         </span>
-                        <p className="text-sm font-black text-slate-900 mt-2">{m.label}</p>
-                        <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">
+                        <p className="text-[13px] font-black text-slate-900 mt-1.5">{m.label}</p>
+                        <p className="text-[10px] text-slate-500 font-medium mt-1 leading-snug">
                           {m.lines[0]}<br />{m.lines[1]}
                         </p>
                         {/* 지원을 받는 방식인지 아닌지가 이후 단계를 바꾼다. 고르기 전에 알려 준다. */}
-                        <p className="text-[10px] font-black text-slate-400 mt-2">
+                        <p className="text-[9px] font-black text-slate-400 mt-1.5 leading-snug">
                           {m.openApply ? '캠페인 협업 목록에 노출 · 인플루언서가 직접 지원' : '목록에 노출하지 않고 담당자가 후보를 리스트업'}
                         </p>
                       </button>
