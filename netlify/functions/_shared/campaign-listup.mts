@@ -354,9 +354,10 @@ async function applyOfferToCollab(
   collabId: string,
   campaignType: string | null | undefined,
   packageTier: string | null | undefined,
+  rewardMode: string | null | undefined,
   offer: ListupOffer,
 ) {
-  const template = templateForCampaignType(campaignType, packageTier);
+  const template = templateForCampaignType(campaignType, packageTier, rewardMode);
   const startKey = offer.startDate || todayInSeoul();
   const stageDue = (deliverable: string) => {
     const stage = template.stages.find((s) => s.deliverable === deliverable);
@@ -491,6 +492,7 @@ export async function acceptListup(input: {
     applicationId,
     campaignType: campaign.type,
     packageTier: campaign.package_tier,
+    rewardMode: campaign.reward_mode,
     campaignTitle: campaign.title || "",
     companyName: campaign.brand_name || "",
     businessUsername,
@@ -515,7 +517,7 @@ export async function acceptListup(input: {
   });
 
   // 3) 합의한 조건으로 덮어쓰기 (금액·마감일)
-  await applyOfferToCollab(db, collab.id, campaign.type, campaign.package_tier, offer);
+  await applyOfferToCollab(db, collab.id, campaign.type, campaign.package_tier, campaign.reward_mode, offer);
 
   // 4) 양쪽 목록에 노출
   await mirrorCollabProposal({

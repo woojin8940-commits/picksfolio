@@ -524,25 +524,29 @@ export default async (req: Request, context: Context) => {
           const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
           const fee = Number(termsRows?.[0]?.fee || 0);
           const scheduledDate = settlementDateFrom(todayInSeoul());
-          try {
-            const stlNow = new Date().toISOString();
-            await addSettlementForProposal({
-              id: newId("stl"),
-              proposal_id: collab.proposal_id || `campaign_${collab.campaign_id}_${collab.creator_username}`,
-              influencer_username: collab.creator_username,
-              business_username: collab.business_username,
-              company_name: collab.company_name || "",
-              title: collab.campaign_title || "",
-              amount: fee,
-              scheduled_date: scheduledDate,
-              status: "scheduled",
-              memo: `업로드 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
-              created_at: stlNow,
-              updated_at: stlNow,
-            });
-            settlement = { scheduledDate, amount: fee, net: netAfterWithholding(fee) };
-          } catch (stlErr) {
-            console.error("[collab-workflow] 정산 예약 실패:", stlErr);
+          // 제품 협찬형 협업은 지급할 광고비가 없다. 그대로 두면 0원 정산이
+          // 예약되고, 인플루언서 정산 목록에 받을 것 없는 줄이 하나 남는다.
+          if (fee > 0) {
+            try {
+              const stlNow = new Date().toISOString();
+              await addSettlementForProposal({
+                id: newId("stl"),
+                proposal_id: collab.proposal_id || `campaign_${collab.campaign_id}_${collab.creator_username}`,
+                influencer_username: collab.creator_username,
+                business_username: collab.business_username,
+                company_name: collab.company_name || "",
+                title: collab.campaign_title || "",
+                amount: fee,
+                scheduled_date: scheduledDate,
+                status: "scheduled",
+                memo: `업로드 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
+                created_at: stlNow,
+                updated_at: stlNow,
+              });
+              settlement = { scheduledDate, amount: fee, net: netAfterWithholding(fee) };
+            } catch (stlErr) {
+              console.error("[collab-workflow] 정산 예약 실패:", stlErr);
+            }
           }
         }
 
