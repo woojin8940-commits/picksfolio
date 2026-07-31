@@ -100,6 +100,7 @@ export type ChannelSnapshot = {
   instagramHandle: string;
   instagramUrl: string;
   followers: number;
+  following: number;
   avgViews: number;
   avgLikes: number;
   avgComments: number;
@@ -123,6 +124,7 @@ const emptySnapshot = (): ChannelSnapshot => ({
   instagramHandle: "",
   instagramUrl: "",
   followers: 0,
+  following: 0,
   avgViews: 0,
   avgLikes: 0,
   avgComments: 0,
@@ -149,6 +151,7 @@ export function shapeChannel(row: any): ChannelSnapshot {
     instagramHandle: row.instagram_handle || "",
     instagramUrl: row.instagram_url || "",
     followers: Number(row.followers || 0),
+    following: Number(row.following || 0),
     avgViews: Number(row.avg_views || 0),
     avgLikes: Number(row.avg_likes || 0),
     avgComments: Number(row.avg_comments || 0),

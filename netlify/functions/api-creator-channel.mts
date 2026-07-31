@@ -261,15 +261,20 @@ export default async (req: Request) => {
       const avgLikes = avg(likes) || Number(existing?.avg_likes || 0);
       const avgComments = avg(comments) || Number(existing?.avg_comments || 0);
 
-      // 팔로워 수는 별도 필드(followers_count)를 요구한다. 실패하면 기존 값을 둔다.
+      // 팔로워·팔로잉 수는 프로필 필드로 별도 조회한다. 일부 권한에서 팔로잉 수가
+      // 빠질 수 있으므로 각각 기존 값을 유지하는 방식으로 갱신한다.
       let followers = Number(existing?.followers || 0);
+      let following = Number(existing?.following || 0);
       try {
         const profileRes = await fetch(
-          `https://${graphHost}/me?fields=username,followers_count&access_token=${encodeURIComponent(settings.accessToken)}`,
+          `https://${graphHost}/me?fields=username,followers_count,follows_count&access_token=${encodeURIComponent(settings.accessToken)}`,
         );
         const profile = (await profileRes.json().catch(() => ({}))) as any;
         if (profileRes.ok && profile?.followers_count) {
           followers = intOf(profile.followers_count);
+        }
+        if (profileRes.ok && typeof profile?.follows_count !== "undefined") {
+          following = intOf(profile.follows_count);
         }
       } catch (e) {
         console.warn("[creator-channel] 팔로워 수 조회 실패:", (e as Error)?.message);
@@ -296,11 +301,11 @@ export default async (req: Request) => {
 
       await db.sql`
         INSERT INTO creator_channels (
-          username, instagram_handle, instagram_url, connected, followers, avg_views,
+          username, instagram_handle, instagram_url, connected, followers, following, avg_views,
           avg_likes, avg_comments, reels_count, metrics_source, recent_reels, synced_at,
           intro, categories
         ) VALUES (
-          ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${avgViews},
+          ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
           ${avgLikes}, ${avgComments}, ${reels.length}, 'meta_api',
           ${JSON.stringify(recentReels)}, NOW(),
           ${String(existing?.intro || "")}, ${String(existing?.categories || "")}
@@ -310,6 +315,7 @@ export default async (req: Request) => {
           instagram_url = COALESCE(NULLIF(EXCLUDED.instagram_url, ''), creator_channels.instagram_url),
           connected = TRUE,
           followers = EXCLUDED.followers,
+          following = EXCLUDED.following,
           avg_views = EXCLUDED.avg_views,
           avg_likes = EXCLUDED.avg_likes,
           avg_comments = EXCLUDED.avg_comments,

@@ -69,6 +69,48 @@ function genId(): string {
   return `cda_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function parseJsonArray(raw: unknown): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function average(values: number[]): number {
+  const valid = values.filter((value) => Number.isFinite(value) && value >= 0);
+  if (!valid.length) return 0;
+  return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length);
+}
+
+function shapeInfluencerApplication(row: any) {
+  const recentReels = parseJsonArray(row.instagram_recent_reels).slice(0, 6);
+  const recentAverage = average(recentReels.slice(0, 3).map((reel) => Number(reel?.views || 0)));
+  const previousAverage = average(recentReels.slice(3, 6).map((reel) => Number(reel?.views || 0)));
+  const trendPercent = previousAverage > 0
+    ? Math.round(((recentAverage - previousAverage) / previousAverage) * 100)
+    : null;
+
+  return {
+    ...row,
+    follower_count: Number(row.instagram_meta_followers || row.follower_count || 0),
+    follower_source: row.instagram_metrics_source === "meta_api" ? "meta_api" : row.follower_source,
+    instagram_followers: Number(row.instagram_meta_followers || row.instagram_followers || 0),
+    instagram_following: Number(row.instagram_following || 0),
+    instagram_avg_views: Number(row.instagram_avg_views || 0),
+    instagram_avg_likes: Number(row.instagram_avg_likes || 0),
+    instagram_avg_comments: Number(row.instagram_avg_comments || 0),
+    instagram_connected: !!row.instagram_connected,
+    instagram_recent_reels: recentReels.slice(0, 3),
+    instagram_reel_trend_percent: trendPercent,
+    instagram_recent_average_views: recentAverage,
+    instagram_previous_average_views: previousAverage,
+  };
+}
+
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
@@ -93,6 +135,10 @@ export default async (req: Request) => {
         const youtube_url = (b.youtube_url || "").toString().trim();
         const naver_blog_url = (b.naver_blog_url || "").toString().trim();
 
+        if (!instagram_url) {
+          return Response.json({ error: "인스타그램 프로필 링크를 입력해 주세요." }, { status: 400 });
+        }
+
         // 채널별 수기 입력 팔로워 수
         const instagram_followers = Math.max(0, parseInt(b.instagram_followers, 10) || 0);
         const youtube_followers = Math.max(0, parseInt(b.youtube_followers, 10) || 0);
@@ -109,10 +155,10 @@ export default async (req: Request) => {
           short_price && `숏폼 ${short_price}`,
         ].filter(Boolean).join(" / ") || (b.ad_price || "").toString().trim();
 
-        // 인스타 → 틱톡 순으로 크롤링 시도, 실패하면 수기 입력값(채널 최대) 사용
-        let crawled: number | null = null;
-        if (instagram_url) crawled = await crawlFollowers(instagram_url);
-        if (crawled == null && tiktok_url) crawled = await crawlFollowers(tiktok_url);
+        // 인스타그램 지표는 공개 HTML 크롤링 값이 아니라 Meta 연동 데이터만 검증값으로
+        // 사용한다. 지원 시점에는 수기값을 저장하고, 운영자 명단에서 Meta 동기화한다.
+        // 틱톡은 기존 분류 호환을 위해 공개 페이지 확인을 best-effort 로 유지한다.
+        const crawled = tiktok_url ? await crawlFollowers(tiktok_url) : null;
 
         const follower_count = crawled != null ? crawled : manualFollowers;
         const follower_source = crawled != null ? "crawled" : "manual";
@@ -175,14 +221,46 @@ export default async (req: Request) => {
         }
       } else if (role === "influencer") {
         if (sort === "followers") {
-          rows = await db.sql`SELECT * FROM collab_directory_applications WHERE role='influencer' ORDER BY follower_count DESC, created_at DESC`;
+          rows = await db.sql`
+            SELECT a.*,
+              c.connected AS instagram_connected,
+              c.followers AS instagram_meta_followers,
+              c.following AS instagram_following,
+              c.avg_views AS instagram_avg_views,
+              c.avg_likes AS instagram_avg_likes,
+              c.avg_comments AS instagram_avg_comments,
+              c.metrics_source AS instagram_metrics_source,
+              c.recent_reels AS instagram_recent_reels,
+              c.synced_at AS instagram_synced_at
+            FROM collab_directory_applications a
+            LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
+            WHERE a.role='influencer'
+            ORDER BY COALESCE(c.followers, a.follower_count) DESC, a.created_at DESC
+          `;
         } else {
-          rows = await db.sql`SELECT * FROM collab_directory_applications WHERE role='influencer' ORDER BY created_at DESC`;
+          rows = await db.sql`
+            SELECT a.*,
+              c.connected AS instagram_connected,
+              c.followers AS instagram_meta_followers,
+              c.following AS instagram_following,
+              c.avg_views AS instagram_avg_views,
+              c.avg_likes AS instagram_avg_likes,
+              c.avg_comments AS instagram_avg_comments,
+              c.metrics_source AS instagram_metrics_source,
+              c.recent_reels AS instagram_recent_reels,
+              c.synced_at AS instagram_synced_at
+            FROM collab_directory_applications a
+            LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
+            WHERE a.role='influencer'
+            ORDER BY a.created_at DESC
+          `;
         }
       } else {
         rows = await db.sql`SELECT * FROM collab_directory_applications ORDER BY created_at DESC`;
       }
-      return Response.json({ applications: rows });
+      return Response.json({
+        applications: role === "influencer" ? rows.map(shapeInfluencerApplication) : rows,
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }

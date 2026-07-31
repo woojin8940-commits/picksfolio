@@ -64,6 +64,11 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
+      if (variant === 'influencer' && !infForm.instagram_url.trim()) {
+        alert('인스타그램 프로필 링크를 입력해 주세요.');
+        setSubmitting(false);
+        return;
+      }
       const res = await fetch('/api/collab-directory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -138,7 +143,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                       <Field label="네이버 블로그" value={infForm.naver_blog_url} onChange={v => setInfForm(f => ({ ...f, naver_blog_url: v }))} placeholder="https://blog.naver.com/..." />
                     </div>
                     <p className="text-[11px] text-slate-400 font-medium leading-relaxed mt-2">
-                      팔로워 수는 인스타/틱톡 링크에서 자동 확인을 시도하며, 확인이 어려운 경우 입력하신 값으로 분류됩니다.
+                      인스타그램 프로필 링크는 필수입니다. Meta 계정을 연동한 경우 팔로워·팔로잉과 최근 릴스 성과를 자동으로 확인하며, 연동 전에는 입력한 팔로워 수를 임시값으로 사용합니다.
                     </p>
                   </div>
 

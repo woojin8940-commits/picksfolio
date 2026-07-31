@@ -9,13 +9,14 @@ import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
+import AdminCampaignListup from './admin/AdminCampaignListup';
 import AdminCollabManagerConsole from './admin/AdminCollabManagerConsole';
 import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'collabs' | 'sellers' | 'directory';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -572,9 +573,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
         <div className="flex gap-2 mb-6 flex-wrap">
           {[
             { key: 'overview' as OperatorTab, label: '전체 현황' },
-            { key: 'campaigns' as OperatorTab, label: '캠페인 승인' },
-            { key: 'collabs' as OperatorTab, label: '협업 담당' },
-            { key: 'directory' as OperatorTab, label: '리스트 등록' },
+            { key: 'campaigns' as OperatorTab, label: '1. 캠페인 승인' },
+            { key: 'listup' as OperatorTab, label: '2. 인플루언서 리스트업' },
+            { key: 'collabs' as OperatorTab, label: '3. 선정 인플루언서 관리' },
+            { key: 'directory' as OperatorTab, label: '브랜드 매칭 지원자' },
             { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
@@ -947,6 +949,22 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
         )}
 
+        {/* Campaign influencer listup Tab */}
+        {activeTab === 'listup' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  tone="blue"
+                  title="인플루언서 리스트업 · 승인 캠페인 후보 추천"
+                  body="승인된 캠페인을 선택해 지원자와 등록 인플루언서 풀을 함께 검토하고, 브랜드에 제안할 후보 명단을 만듭니다. 브랜드가 진행 요청한 후보에게 담당자가 조건을 보내고, 수락되면 협업 관리 단계로 자동 전환됩니다."
+                />
+                <AdminCampaignListup token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 리스트업이 표시됩니다." />
+        )}
+
         {/* 협업 담당(브랜드↔인플루언서 중간 관리) Tab */}
         {activeTab === 'collabs' && (
           adminToken
@@ -954,8 +972,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               <div className="space-y-4">
                 <TabIntro
                   tone="blue"
-                  title="협업 담당 · 지원자 선정부터 정산 예약까지"
-                  body="브랜드는 캠페인 신청과 의견 전달까지만, 인플루언서는 지원과 제출까지만 합니다. 지원자 선정, 협업 조건 확정, 제출물 검수, 브랜드 의견 전달, 일정 변경은 이 탭에서 담당자가 처리합니다."
+                  title="선정 인플루언서 관리 · 협업 생성부터 정산 예약까지"
+                  body="리스트업 제안을 수락했거나 지원자 중 선정된 인플루언서를 담당자가 관리합니다. 협업 조건 확정, 제출물 검수, 브랜드 의견 전달, 일정 변경과 정산 예약을 한곳에서 처리합니다."
                 />
                 <AdminCollabManagerConsole token={adminToken} />
               </div>
@@ -970,8 +988,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               <div className="space-y-4">
                 <TabIntro
                   tone="blue"
-                  title="리스트 등록 · 인플루언서/브랜드 지원 관리"
-                  body="캠페인 협업 메뉴에서 접수된 지원을 인플루언서(팔로워 구간별)와 브랜드(일정·예산 정렬)로 나눠 확인합니다. 인플루언서 팔로워 수는 인스타/틱톡 링크에서 자동 확인을 시도하며, 실패 시 지원자가 입력한 값으로 분류되고 운영자가 직접 수정할 수 있습니다."
+                  title="브랜드 매칭 지원자 · 인플루언서 채널 검토"
+                  body="브랜드 매칭 받기에 지원한 인플루언서를 팔로워 구간별로 확인합니다. 연결된 Instagram Meta 계정에서 팔로워·팔로잉, 최근 릴스 3개와 최근 3개 대비 이전 3개의 평균 조회수 동향을 갱신해 검토할 수 있습니다."
                 />
                 <AdminCollabDirectory token={adminToken} />
               </div>

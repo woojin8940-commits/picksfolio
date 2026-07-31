@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiService } from '../../services/apiService';
 
 interface DirApplication {
   id: string;
@@ -15,6 +16,25 @@ interface DirApplication {
   category: string;
   follower_count: number;
   follower_source: string;
+  instagram_followers: number;
+  instagram_following: number;
+  instagram_avg_views: number;
+  instagram_avg_likes: number;
+  instagram_avg_comments: number;
+  instagram_connected: boolean;
+  instagram_recent_reels: Array<{
+    id: string;
+    permalink: string;
+    thumbnailUrl: string;
+    caption: string;
+    views: number;
+    likes: number;
+    comments: number;
+    timestamp: string;
+  }>;
+  instagram_reel_trend_percent: number | null;
+  instagram_recent_average_views: number;
+  instagram_synced_at?: string;
   // brand
   brand_homepage: string;
   brand_instagram: string;
@@ -80,6 +100,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
   const [activeTier, setActiveTier] = useState<string>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const authHeaders = useCallback(() => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -120,6 +141,23 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
     } catch {
       alert('저장에 실패했습니다.');
     }
+  };
+
+  const syncInstagram = async (item: DirApplication) => {
+    if (!item.applicant_username) {
+      alert('로그인 계정 정보가 없어 Meta 계정을 연결할 수 없습니다.');
+      return;
+    }
+    setSyncingId(item.id);
+    const result = await apiService.syncCreatorChannel(item.applicant_username, token);
+    setSyncingId(null);
+    if (result.error) {
+      alert(result.code === 'META_NOT_LINKED'
+        ? '지원자가 아직 Instagram Meta 계정을 연동하지 않았습니다.'
+        : result.error);
+      return;
+    }
+    await fetchItems();
   };
 
   const influencers = items.filter(i => i.role === 'influencer');
@@ -210,8 +248,8 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                       <>
                         <span className="text-lg font-black text-slate-900">{fmtFollowers(it.follower_count)}</span>
                         <span className="text-[11px] text-slate-400 font-bold">팔로워</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${it.follower_source === 'crawled' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                          {it.follower_source === 'crawled' ? '자동확인' : '수기입력'}
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${it.follower_source === 'meta_api' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                          {it.follower_source === 'meta_api' ? 'Meta 확인' : '수기입력'}
                         </span>
                         <button
                           onClick={() => { setEditingId(it.id); setEditValue(String(it.follower_count || '')); }}
@@ -228,6 +266,59 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                     <LinkChip label="유튜브" url={it.youtube_url} />
                     <LinkChip label="틱톡" url={it.tiktok_url} />
                     <LinkChip label="블로그" url={it.naver_blog_url} />
+                  </div>
+
+                  <div className="mb-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Instagram Meta 데이터</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-slate-500">
+                          {it.instagram_connected
+                            ? `최근 동기화 ${fmtDate(it.instagram_synced_at || '') || '완료'}`
+                            : '지원자의 Meta 계정 연동이 필요합니다.'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => syncInstagram(it)}
+                        disabled={syncingId === it.id}
+                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-black text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
+                      >
+                        {syncingId === it.id ? '동기화 중...' : 'Meta 새로고침'}
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <Metric label="팔로워" value={it.instagram_followers || it.follower_count} />
+                      <Metric label="팔로잉" value={it.instagram_following} />
+                      <Metric label="릴스 평균 조회" value={it.instagram_avg_views} />
+                      <TrendMetric value={it.instagram_reel_trend_percent} />
+                    </div>
+
+                    {it.instagram_recent_reels?.length > 0 && (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {it.instagram_recent_reels.map((reel, index) => (
+                          <a
+                            key={reel.id || reel.permalink || index}
+                            href={reel.permalink || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white"
+                          >
+                            <div className="aspect-[4/5] bg-slate-200">
+                              {reel.thumbnailUrl ? (
+                                <img src={reel.thumbnailUrl} alt={`최근 릴스 ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-[10px] font-black text-slate-400">REELS</div>
+                              )}
+                            </div>
+                            <div className="p-2">
+                              <p className="text-[10px] font-black text-slate-700">조회 {(reel.views || 0).toLocaleString()}</p>
+                              <p className="mt-0.5 text-[9px] font-bold text-slate-400">좋아요 {(reel.likes || 0).toLocaleString()}</p>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between text-xs">
@@ -312,6 +403,27 @@ const Info: React.FC<{ label: string; value: string }> = ({ label, value }) => (
     <span className="text-slate-700 font-bold truncate">{value || '-'}</span>
   </div>
 );
+
+const Metric: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+  <div className="rounded-lg bg-white px-2.5 py-2">
+    <p className="text-[9px] font-black text-slate-400">{label}</p>
+    <p className="mt-0.5 text-sm font-black text-slate-800">{Number(value || 0).toLocaleString()}</p>
+  </div>
+);
+
+const TrendMetric: React.FC<{ value: number | null }> = ({ value }) => {
+  const available = typeof value === 'number';
+  const positive = available && value > 0;
+  const negative = available && value < 0;
+  return (
+    <div className="rounded-lg bg-white px-2.5 py-2">
+      <p className="text-[9px] font-black text-slate-400">최근 릴스 동향</p>
+      <p className={`mt-0.5 text-sm font-black ${positive ? 'text-emerald-600' : negative ? 'text-rose-500' : 'text-slate-500'}`}>
+        {available ? `${positive ? '+' : ''}${value}%` : '데이터 부족'}
+      </p>
+    </div>
+  );
+};
 
 const EmptyBox: React.FC<{ message: string }> = ({ message }) => (
   <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
