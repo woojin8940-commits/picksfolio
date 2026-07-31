@@ -9,6 +9,7 @@ import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
+import InfluencerCandidateCard from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
   parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor,
@@ -57,8 +58,10 @@ interface Campaign {
   product_provide?: string;
   ad_objective?: string;
   budget_krw?: number;
-  /** 제품 협찬형의 협찬 가능 수량. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다. */
+  /** 제품 협찬형의 협찬 인원. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다. */
   seeding_count?: number;
+  /** 공동구매의 판매 수수료(%). 다른 방식에서는 0 이다. */
+  groupbuy_commission_rate?: number;
   influencer_gender?: string;
   influencer_ages?: string;
   sns_category?: string;
@@ -83,10 +86,17 @@ interface Applicant {
   // 브랜드가 남기는 의견. 선정 권한과 분리된 값이라 status 와 다른 컬럼에 있다.
   brand_preference?: string;
   brand_preference_note?: string;
-  // 담당자가 선정한 뒤 만들어지는 협업 본체.
+  // 수락한 뒤 만들어지는 협업 본체. 만드는 사람은 진행 방식에 따라 브랜드일 수도,
+  // 담당자일 수도 있다.
   collab_id?: string;
   collab_status?: string;
   current_stage_key?: string;
+  /**
+   * 메타 API 로 받아 둔 채널 지표(팔로워 · 평균 조회수 · 최근 릴스). 서버가 지원자마다
+   * 붙여 준다. 연동 전이거나 등록서만 있는 사람은 metricsSource 로 구분된다 —
+   * 브랜드가 사람을 고르는 화면이므로 숫자의 출처가 보여야 한다.
+   */
+  insights?: any;
 }
 
 interface CampaignCollabManagementProps {
@@ -144,6 +154,17 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [campaignManager, setCampaignManager] = useState('');
   const [prefSaving, setPrefSaving] = useState('');
+  /**
+   * 지원자를 고르는 사람. 서버가 캠페인의 진행 방식을 보고 알려준다.
+   *
+   * 'brand'  — 제품 협찬형·공동구매. 브랜드가 직접 수락하고 담당자가 그 뒤를 맡는다.
+   * 'manager' — 광고비 지급형. 브랜드는 추천 의견만 남긴다.
+   *
+   * 화면에서 진행 방식을 보고 직접 판단하지 않고 서버 값을 쓴다 — 버튼은 보이는데
+   * 서버가 막는(또는 그 반대의) 상태를 만들지 않으려면 판단이 한 곳에 있어야 한다.
+   */
+  const [selectionBy, setSelectionBy] = useState<'brand' | 'manager'>('manager');
+  const [accepting, setAccepting] = useState('');
   // 상세 화면의 탭. 캠페인 하나에 붙는 정보가 네 갈래(누가 하는지 / 어디까지 왔는지 /
   // 성과 / 지급)로 늘어나 한 화면에 세로로 쌓으면 아래쪽은 아무도 보지 않는다.
   const [detailTab, setDetailTab] = useState<'influencer' | 'progress' | 'insight' | 'settlement'>('influencer');
@@ -201,6 +222,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       const data = await apiService.getCampaignApplicants(campaignId);
       setApplicants(data.applicants || []);
       setCampaignManager(data.managerUsername || '');
+      setSelectionBy(data.selectionBy === 'brand' ? 'brand' : 'manager');
     } catch {
       console.error('Failed to fetch applicants');
     } finally {
@@ -297,9 +319,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   /**
    * 브랜드 의견 표시.
    *
-   * 예전에는 이 자리에 수락/거절 버튼이 있었다. 그 한 번의 클릭이 대화방과 정산까지
-   * 만들어 냈지만, 그 뒤를 챙기는 사람이 정해져 있지 않았다. 이제 선정은 담당자가
-   * 하고, 브랜드는 "이 사람이 좋다 / 아니다"를 남긴다 — 담당자에게 전달되는 메모다.
+   * 광고비 지급형에서만 쓰인다. 선정은 담당자가 하고, 브랜드는 "이 사람이 좋다 /
+   * 아니다"를 남긴다 — 담당자에게 전달되는 메모다. 제품 협찬형·공동구매에서는
+   * 브랜드가 직접 수락하므로, 여기서는 '보류'만 쓴다.
    */
   const handleApplicantPreference = async (applicantId: string, preference: 'shortlist' | 'pass' | '') => {
     setPrefSaving(applicantId);
@@ -319,6 +341,45 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       );
     } finally {
       setPrefSaving('');
+    }
+  };
+
+  /**
+   * 지원자 수락(제품 협찬형·공동구매).
+   *
+   * 이 버튼 한 번으로 협업 본체와 단계, 담당자 채널 두 개가 생기고 인플루언서에게
+   * 선정 알림이 간다. 되돌릴 수 없는 통보가 나가므로 누르기 전에 한 번 확인한다.
+   *
+   * 수락 뒤에는 목록을 다시 읽는다 — 협업 ID 가 생겨야 '담당자와 대화' 버튼이
+   * 어느 방으로 갈지 알 수 있고, 그 값은 서버가 만든다.
+   */
+  const handleAcceptApplicant = async (app: Applicant) => {
+    if (
+      !window.confirm(
+        `@${app.applicant_username} 님을 수락하시겠습니까?\n\n` +
+          '수락하면 인플루언서에게 선정 안내가 가고, 픽스폴리오 담당자가 중간에서 조건과 일정을 정리해 진행합니다.',
+      )
+    ) {
+      return;
+    }
+    setAccepting(app.id);
+    try {
+      const res = await apiService.decideApplicant(app.id, 'accepted');
+      if (res.error) {
+        notify(res.error, 'error');
+        return;
+      }
+      notify(
+        res.managerUsername
+          ? `수락했습니다. 담당자 (@${res.managerUsername})가 이어서 진행합니다.`
+          : '수락했습니다. 픽스폴리오 담당자가 곧 연락드립니다.',
+      );
+      if (selectedCampaign) {
+        await fetchApplicants(selectedCampaign.id);
+        fetchCollabSummary(selectedCampaign.id);
+      }
+    } finally {
+      setAccepting('');
     }
   };
 
@@ -396,14 +457,26 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     // 로 되돌려 준다.
     const mode = rewardModeOf(selectedCampaign.reward_mode);
     const isBarter = mode.value === 'barter';
+    const isGroupBuy = mode.value === 'groupbuy';
+    // 지원을 받아 브랜드가 고르는 방식인지. 담당자 리스트업이 붙는지가 여기서 갈린다.
+    const openApply = mode.openApply;
+    // 브랜드가 직접 수락하는 캠페인인지. 실제 권한 판단은 서버(selectionBy)가 하고,
+    // 목록을 읽어 오는 동안에는 진행 방식으로 안내 문구만 미리 맞춰 둔다(그 사이에는
+    // 버튼이 그려지지 않는다).
+    const brandSelects = applicantsLoading ? openApply : selectionBy === 'brand';
     const tierCounts = parseTierCounts(selectedCampaign.tier_counts);
     const tierRows = chosenTiers(tierCounts).filter(t => (tierCounts[t.key] || 0) > 0);
-    const supplyCount = Number(selectedCampaign.seeding_count || 0);
-    const budget = isBarter ? 0 : Number(selectedCampaign.budget_krw || 0);
+    // 협찬 인원. 세는 대상은 제품이 아니라 사람이다 — 컬럼은 예전 시딩 건수 칸을 쓴다.
+    const barterHeadcount = Number(selectedCampaign.seeding_count || 0) || Number(selectedCampaign.max_applicants || 0);
+    const commissionRate = Number(selectedCampaign.groupbuy_commission_rate || 0);
+    const budget = mode.pickInfluencer ? Number(selectedCampaign.budget_krw || 0) : 0;
     const stageMarks = stageMarksFor(mode.value);
     const uploadedCount = collabSummary.filter(c => c.uploadUrl).length;
     const provideLabel = PRODUCT_PROVIDE.find(p => p.value === selectedCampaign.product_provide)?.label || '';
-    const objectiveLabel = AD_OBJECTIVES.find(o => o.value === selectedCampaign.ad_objective)?.label || '';
+    // 광고 목적은 담당자 리스트업에 쓰는 조건이라 광고비 지급형에만 있다.
+    const objectiveLabel = mode.pickInfluencer
+      ? AD_OBJECTIVES.find(o => o.value === selectedCampaign.ad_objective)?.label || ''
+      : '';
 
     // 섭외중 / 진행중. 브랜드가 가장 알고 싶은 것은 "지금 사람을 찾고 있는지, 이미
     // 찍고 있는지"다. 캠페인 상태(active/inactive)만으로는 그 구분이 안 된다.
@@ -454,7 +527,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 )}
                 <span className="text-[11px] text-slate-400 font-bold">{typeLabel(selectedCampaign.type)}</span>
                 <span className="text-[11px] text-slate-400 font-bold">· {mode.label}</span>
-                {isBarter && (
+                {openApply && (
                   <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black">
                     {mode.tagline}
                   </span>
@@ -508,9 +581,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 )}
                 {isBarter ? (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">협찬 수량</p>
+                    <p className="text-[9px] text-slate-400 font-black uppercase">협찬 인원</p>
                     <p className="text-sm font-black text-slate-900">
-                      {supplyCount > 0 ? `${supplyCount}개` : '-'}
+                      {barterHeadcount > 0 ? `${barterHeadcount}명` : '-'}
+                    </p>
+                  </div>
+                ) : isGroupBuy ? (
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-[9px] text-slate-400 font-black uppercase">판매 수수료</p>
+                    <p className="text-sm font-black text-slate-900">
+                      {commissionRate > 0 ? `${commissionRate}%` : '담당자 조율'}
                     </p>
                   </div>
                 ) : (
@@ -520,7 +600,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </div>
                 )}
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-[9px] text-slate-400 font-black uppercase">예정 인원</p>
+                  <p className="text-[9px] text-slate-400 font-black uppercase">
+                    {openApply ? mode.headcountLabel : '예정 인원'}
+                  </p>
                   <p className="text-sm font-black text-blue-600">
                     {selectedCampaign.max_applicants > 0 ? `${selectedCampaign.max_applicants}명` : '담당자 조율'}
                   </p>
@@ -567,12 +649,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         </span>
                         <span className="text-[11px] font-black text-slate-500 flex-shrink-0">
                           {tierCounts[t.key]}명
-                          {!isBarter && <span className="text-slate-400 font-bold ml-1.5">1인 {tierFeeLabel(t)}</span>}
+                          {mode.pickInfluencer && <span className="text-slate-400 font-bold ml-1.5">1인 {tierFeeLabel(t)}</span>}
                         </span>
                       </div>
                     ))}
                   </div>
-                  {!isBarter && (
+                  {mode.pickInfluencer && (
                     <p className="text-[11px] text-slate-400 font-medium mt-3 pt-3 border-t border-slate-200">
                       최소 집행액 {formatKoreanWon(allocatedFloor(tierCounts)) || '0원'}
                       {budget > 0 && ` · 예산 ${formatKoreanWon(budget)}`}
@@ -712,20 +794,46 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           isOwner ? (
             <div className="space-y-4">
               {/* 담당자가 올린 후보 명단. 지원을 기다리는 것과 별개로 진행되는 길이므로
-                  지원자 목록보다 위에 둔다 — 대부분의 캠페인은 이 명단에서 시작한다. */}
-              <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />
+                  지원자 목록보다 위에 둔다 — 대부분의 캠페인은 이 명단에서 시작한다.
+                  지원을 받아 고르는 방식(제품 협찬형·공동구매)에는 리스트업이 없다.
+                  빈 명단을 띄워 두면 "담당자가 아직 안 올려 줬나"로 읽힌다. */}
+              {!openApply && <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />}
 
               <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
                 <h3 className="text-lg font-black text-slate-900 mb-2">지원자 목록 ({applicants.length}명)</h3>
-                {/* 선정 주체를 화면에서 분명히 해 둔다. 예전 흐름을 기억하는 브랜드가
-                    "수락 버튼이 없어졌다"고 느끼지 않도록 무엇을 하면 되는지 함께 적는다. */}
+                {/* 고르는 사람이 누구인지를 화면 맨 위에서 분명히 해 둔다. 제품 협찬형·
+                    공동구매는 브랜드가 직접 수락하고, 광고비 지급형은 담당자가 고른다.
+                    어느 쪽이든 수락 뒤의 조건·일정·발송은 담당자가 맡는다 — 그래서
+                    "고르기"와 "진행"을 한 문장 안에서 나눠 적는다. */}
                 <div className="mb-5 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
                   <p className="text-xs text-slate-700 font-bold">
-                    지원자 선정은 픽스폴리오 담당자{campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.
+                    {brandSelects
+                      ? `함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 중간에서 맡습니다.`
+                      : `지원자 선정은 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.`}
                   </p>
                   <p className="text-[11px] text-slate-500 font-medium mt-1">
-                    함께하고 싶은 지원자를 <span className="font-black text-blue-600">추천</span>으로 표시해 주세요. 담당자가 조건과 일정을 정리해
-                    협업을 시작하고, 진행 상황은 <span className="font-black">진행사항</span> 탭에서 확인하실 수 있습니다.
+                    {brandSelects ? (
+                      <>
+                        지원자의 팔로워·평균 조회수와 최근 릴스를 보고 함께하고 싶은 분을{' '}
+                        <span className="font-black text-blue-600">수락</span>해 주세요.
+                        {selectedCampaign.max_applicants > 0
+                          ? ` ${mode.headcountLabel} ${selectedCampaign.max_applicants}명만큼 수락하시면 됩니다. `
+                          : ' '}
+                        수락하는 순간 담당자가 조건과 일정을 정리해 진행을 맡고, 상황은 <span className="font-black">진행사항</span> 탭에서 확인하실 수 있습니다.
+                        함께하기 어려운 분은 <span className="font-black">보류</span>로 표시해 두시면 담당자가 정리해 안내합니다.
+                      </>
+                    ) : (
+                      <>
+                        함께하고 싶은 지원자를 <span className="font-black text-blue-600">추천</span>으로 표시해 주세요.
+                        담당자가 조건과 일정을 정리해 협업을 시작하고, 진행 상황은 <span className="font-black">진행사항</span> 탭에서 확인하실 수 있습니다.
+                      </>
+                    )}
+                  </p>
+                  {/* 지표 출처를 미리 알려 둔다. '본인 입력'과 '메타 연동 확인'이 같은
+                      굵기로 보이면 브랜드는 어느 숫자도 믿지 않게 된다. */}
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    숫자 옆 배지는 지표의 출처입니다 — <span className="font-black text-emerald-600">메타 연동 확인</span>은 인스타그램 계정을 연동해 받아온 값이고,
+                    <span className="font-black text-amber-600"> 본인 입력</span>은 인플루언서가 적어 낸 값입니다.
                   </p>
                 </div>
                 {applicantsLoading ? (
@@ -738,95 +846,157 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
                       <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </div>
-                    <p className="text-sm text-slate-500 font-bold">담당자가 후보를 찾고 있습니다</p>
+                    <p className="text-sm text-slate-500 font-bold">
+                      {openApply ? '아직 지원자가 없습니다' : '담당자가 후보를 찾고 있습니다'}
+                    </p>
                     <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-                      등록하신 조건으로 후보를 추려 위쪽 명단에 올려 드립니다.<br />
-                      직접 지원한 인플루언서도 이 목록에 함께 표시됩니다.
+                      {openApply ? (
+                        <>
+                          승인된 캠페인은 캠페인 협업 목록에 올라갑니다.<br />
+                          조건을 보고 지원한 인플루언서가 이 목록에 쌓입니다.
+                        </>
+                      ) : (
+                        <>
+                          등록하신 조건으로 후보를 추려 위쪽 명단에 올려 드립니다.<br />
+                          직접 지원한 인플루언서도 이 목록에 함께 표시됩니다.
+                        </>
+                      )}
                     </p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {applicants.map(app => (
-                      <div key={app.id} className="border border-slate-100 rounded-xl p-4 hover:border-slate-200 transition-colors">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-sm text-slate-900">@{app.applicant_username}</span>
+                      /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
+                         화면이 두 곳(담당자 명단 · 지원자 목록)인데 숫자가 다르게 생기면
+                         고른 근거를 나중에 맞춰 볼 수 없다. 지원서에 적어 낸 인스타 주소는
+                         채널 연동이 없을 때의 대체값으로만 쓴다. */
+                      <InfluencerCandidateCard
+                        key={app.id}
+                        data={{
+                          ...(app.insights || {}),
+                          username: app.applicant_username,
+                          instagramUrl: app.insights?.instagramUrl || app.instagram_url || '',
+                        }}
+                        badges={
+                          <>
                             {statusBadge(app.status)}
-                            <span className="text-[10px] text-slate-300 font-bold">{new Date(app.created_at).toLocaleDateString('ko-KR')}</span>
-                          </div>
+                            {app.status === 'pending' && app.brand_preference === 'pass' && (
+                              <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-[11px] font-black">보류</span>
+                            )}
+                            <span className="text-[10px] text-slate-300 font-bold">
+                              {new Date(app.created_at).toLocaleDateString('ko-KR')}
+                            </span>
+                          </>
+                        }
+                      >
+                        <div className="space-y-3">
                           {app.status === 'pending' && (
-                            <div className="flex gap-1.5 ml-3 flex-shrink-0">
-                              <button
-                                onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'shortlist' ? '' : 'shortlist')}
-                                disabled={prefSaving === app.id}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors disabled:opacity-50 ${
-                                  app.brand_preference === 'shortlist'
-                                    ? 'bg-blue-600 text-white hover:bg-blue-500'
-                                    : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                                }`}
-                              >
-                                {app.brand_preference === 'shortlist' ? '★ 추천함' : '추천'}
-                              </button>
-                              <button
-                                onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
-                                disabled={prefSaving === app.id}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-colors disabled:opacity-50 ${
-                                  app.brand_preference === 'pass'
-                                    ? 'bg-slate-600 text-white hover:bg-slate-500'
-                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                                }`}
-                              >
-                                {app.brand_preference === 'pass' ? '보류함' : '보류'}
-                              </button>
+                            <div className="flex flex-wrap gap-1.5">
+                              {brandSelects ? (
+                                <>
+                                  {/* 이 버튼이 협업을 만든다. 그래서 '추천'보다 크게 두고,
+                                      누르면 담당자가 무엇을 이어받는지 확인 창에서 알린다. */}
+                                  <button
+                                    onClick={() => handleAcceptApplicant(app)}
+                                    disabled={accepting === app.id}
+                                    className="px-3.5 py-2 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 transition-colors disabled:opacity-50"
+                                  >
+                                    {accepting === app.id ? '수락 중...' : '수락하고 진행하기'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
+                                    disabled={prefSaving === app.id}
+                                    className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      app.brand_preference === 'pass'
+                                        ? 'bg-slate-600 text-white hover:bg-slate-500'
+                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                  >
+                                    {app.brand_preference === 'pass' ? '보류함' : '보류'}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'shortlist' ? '' : 'shortlist')}
+                                    disabled={prefSaving === app.id}
+                                    className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      app.brand_preference === 'shortlist'
+                                        ? 'bg-blue-600 text-white hover:bg-blue-500'
+                                        : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                                    }`}
+                                  >
+                                    {app.brand_preference === 'shortlist' ? '★ 추천함' : '추천'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
+                                    disabled={prefSaving === app.id}
+                                    className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      app.brand_preference === 'pass'
+                                        ? 'bg-slate-600 text-white hover:bg-slate-500'
+                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                  >
+                                    {app.brand_preference === 'pass' ? '보류함' : '보류'}
+                                  </button>
+                                </>
+                              )}
                             </div>
                           )}
                           {app.status === 'accepted' && (
                             <button
                               onClick={() => openManagerThread(app)}
                               disabled={!app.collab_id}
-                              className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700 transition-colors ml-3 flex-shrink-0 flex items-center gap-1 disabled:opacity-40"
+                              className="px-3 py-2 bg-slate-900 text-white rounded-lg text-[11px] font-black hover:bg-slate-700 transition-colors flex items-center gap-1 disabled:opacity-40"
                             >
                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                               담당자와 대화
                             </button>
                           )}
-                        </div>
-                        {app.message && <p className="text-xs text-slate-600 font-medium mb-3 whitespace-pre-wrap">{app.message}</p>}
-                        {app.status === 'pending' && app.brand_preference === 'shortlist' && (
-                          <p className="text-[11px] text-blue-600 font-bold mb-3">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
-                        )}
+                          {app.status === 'accepted' && (
+                            <p className="text-[11px] text-emerald-600 font-bold">
+                              수락 완료. 조건과 일정은 담당자{campaignManager ? ` (@${campaignManager})` : ''}가 정리해 진행합니다.
+                            </p>
+                          )}
+                          {app.status === 'pending' && !brandSelects && app.brand_preference === 'shortlist' && (
+                            <p className="text-[11px] text-blue-600 font-bold">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
+                          )}
+                          {app.message && (
+                            <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{app.message}</p>
+                          )}
 
-                        {/* Contact & Links */}
-                        <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                          {app.contact && (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                              <span className="text-xs text-slate-700 font-bold">{app.contact}</span>
-                            </div>
-                          )}
-                          {app.instagram_url && (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-3.5 h-3.5 text-pink-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" /></svg>
-                              <a href={app.instagram_url} target="_blank" rel="noopener noreferrer" className="text-xs text-pink-600 font-bold hover:underline truncate">{app.instagram_url}</a>
-                            </div>
-                          )}
-                          {app.youtube_naver_url && (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
-                              <a href={app.youtube_naver_url} target="_blank" rel="noopener noreferrer" className="text-xs text-red-600 font-bold hover:underline truncate">{app.youtube_naver_url}</a>
-                            </div>
-                          )}
-                          {app.portfolio_url && (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                              <a href={app.portfolio_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline truncate">{app.portfolio_url}</a>
-                            </div>
-                          )}
-                          {!app.contact && !app.instagram_url && !app.youtube_naver_url && !app.portfolio_url && (
-                            <p className="text-[11px] text-slate-400 font-medium">등록된 연락처/링크가 없습니다</p>
-                          )}
+                          {/* Contact & Links */}
+                          <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                            {app.contact && (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                                <span className="text-xs text-slate-700 font-bold">{app.contact}</span>
+                              </div>
+                            )}
+                            {app.instagram_url && (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-3.5 h-3.5 text-pink-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" /></svg>
+                                <a href={app.instagram_url} target="_blank" rel="noopener noreferrer" className="text-xs text-pink-600 font-bold hover:underline truncate">{app.instagram_url}</a>
+                              </div>
+                            )}
+                            {app.youtube_naver_url && (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
+                                <a href={app.youtube_naver_url} target="_blank" rel="noopener noreferrer" className="text-xs text-red-600 font-bold hover:underline truncate">{app.youtube_naver_url}</a>
+                              </div>
+                            )}
+                            {app.portfolio_url && (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                <a href={app.portfolio_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline truncate">{app.portfolio_url}</a>
+                              </div>
+                            )}
+                            {!app.contact && !app.instagram_url && !app.youtube_naver_url && !app.portfolio_url && (
+                              <p className="text-[11px] text-slate-400 font-medium">등록된 연락처/링크가 없습니다</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      </InfluencerCandidateCard>
                     ))}
                   </div>
                 )}
@@ -893,8 +1063,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   진행 {collabSummary.length}명
                   {selectedCampaign.max_applicants > 0 && ` / 예정 ${selectedCampaign.max_applicants}명`}
                   {isBarter
-                    ? supplyCount > 0 && ` · 협찬 ${supplyCount}개`
-                    : budget > 0 && ` · ${formatKoreanWon(budget)}`}
+                    ? barterHeadcount > 0 && ` · 협찬 ${barterHeadcount}명`
+                    : isGroupBuy
+                      ? commissionRate > 0 && ` · 수수료 ${commissionRate}%`
+                      : budget > 0 && ` · ${formatKoreanWon(budget)}`}
                 </p>
               </div>
               <button
@@ -947,7 +1119,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
             {viewMode === 'mine'
               ? '내가 등록한 캠페인을 관리하고 지원자를 확인하세요'
-              : '플랫폼에 등록된 모든 캠페인을 둘러보세요'}
+              : '캠페인 협업에 올라와 있는 캠페인을 둘러보세요'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

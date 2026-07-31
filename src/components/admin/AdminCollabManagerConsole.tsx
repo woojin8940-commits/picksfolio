@@ -472,6 +472,12 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                             {!a.managerUsername && (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600">담당자 미배정</span>
                             )}
+                            {/* 제품 협찬형·공동구매는 브랜드가 직접 수락한다. 담당자가
+                                대신 눌러 버리면 브랜드가 고르는 중인 사람을 앞질러
+                                결정하게 되므로, 누구를 기다리는 줄인지 표시해 둔다. */}
+                            {a.selectionBy === 'brand' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-violet-50 text-violet-600">브랜드 수락 대기</span>
+                            )}
                           </div>
                           <p className="text-[11px] text-slate-500 font-bold truncate mt-0.5">
                             {a.campaignTitle} · {a.brandName}
@@ -497,12 +503,18 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                           </div>
                         </div>
                         <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          {/* 브랜드가 고르는 캠페인에서는 '선정'을 흐리게 둔다 — 대신
+                              눌러야 하는 경우(브랜드 요청·연락 두절)가 있으니 막지는 않는다. */}
                           <button
                             onClick={() => decide(a.id, 'accepted')}
                             disabled={busy}
-                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 disabled:opacity-40"
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black disabled:opacity-40 ${
+                              a.selectionBy === 'brand'
+                                ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                : 'bg-blue-600 text-white hover:bg-blue-500'
+                            }`}
                           >
-                            선정
+                            {a.selectionBy === 'brand' ? '대신 선정' : '선정'}
                           </button>
                           <button
                             onClick={() => decide(a.id, 'rejected')}

@@ -478,6 +478,14 @@ export type CreateCollabInput = {
   businessUsername: string;
   creatorUsername: string;
   managerUsername: string;
+  /**
+   * 누가 이 지원자를 수락했는지.
+   *
+   * 광고비 지급형은 담당자가 고르고, 제품 협찬형·공동구매는 브랜드가 지원자 중에서
+   * 직접 고른다. 첫 메시지를 하나로 두면 브랜드가 방금 자기 손으로 누른 수락을
+   * "선정했습니다"라고 통보받는 모양이 되어, 담당자가 대신 결정한 것처럼 읽힌다.
+   */
+  selectedBy?: "manager" | "brand";
   rewardType?: string | null;
   fee?: number;
   startDate?: string | null;
@@ -641,6 +649,8 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
     `;
   }
 
+  const byBrand = input.selectedBy === "brand";
+
   const influencerThreadId = await ensureSupportThread({
     db,
     kind: "influencer_support",
@@ -650,8 +660,11 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
     companyName: input.companyName,
     title: input.campaignTitle,
     firstMessage:
-      `"${input.campaignTitle}" 캠페인에 선정되셨습니다. 지금부터 진행은 픽스폴리오 담당자가 함께 챙깁니다.\n` +
-      `단계별 할 일과 마감일은 협업 화면에서 확인하실 수 있고, 궁금한 점은 여기로 편하게 남겨 주세요.`,
+      (byBrand
+        ? `"${input.campaignTitle}" 캠페인에 선정되셨습니다. 브랜드가 지원자 중에서 직접 수락했어요.\n`
+        : `"${input.campaignTitle}" 캠페인에 선정되셨습니다.\n`) +
+      `지금부터 진행은 픽스폴리오 담당자가 함께 챙깁니다. 단계별 할 일과 마감일은 협업 화면에서 ` +
+      `확인하실 수 있고, 궁금한 점은 여기로 편하게 남겨 주세요.`,
   });
 
   const brandThreadId = await ensureSupportThread({
@@ -662,16 +675,19 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
     managerUsername,
     companyName: input.companyName,
     title: input.campaignTitle,
-    firstMessage:
-      `"${input.campaignTitle}" 캠페인에 ${creatorUsername} 크리에이터를 선정했습니다.\n` +
-      `진행 상황은 협업 현황에서 단계별로 확인하실 수 있고, 수정 요청이나 의견은 여기로 남겨 주시면 담당자가 정리해 전달합니다.`,
+    firstMessage: byBrand
+      ? `"${input.campaignTitle}" 캠페인에 ${creatorUsername} 크리에이터를 수락해 주셨습니다.\n` +
+        `지금부터 조건과 일정은 픽스폴리오 담당자가 중간에서 정리해 진행합니다. 요청이나 의견은 ` +
+        `여기로 남겨 주시면 담당자가 크리에이터에게 전달합니다.`
+      : `"${input.campaignTitle}" 캠페인에 ${creatorUsername} 크리에이터를 선정했습니다.\n` +
+        `진행 상황은 협업 현황에서 단계별로 확인하실 수 있고, 수정 요청이나 의견은 여기로 남겨 주시면 담당자가 정리해 전달합니다.`,
   });
 
   await logCollabEvent(db, {
     collabId,
     type: "collab_created",
-    actorRole: "manager",
-    actorUsername: managerUsername,
+    actorRole: byBrand ? "brand" : "manager",
+    actorUsername: byBrand ? businessUsername : managerUsername,
     stageKey: template.stages[0].key,
     summary: `${input.campaignTitle} 협업 시작`,
     payload: { templateKey: template.key, creatorUsername, businessUsername },

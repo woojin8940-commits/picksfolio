@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { daysUntil } from "./_shared/collab-workflow.mts";
+import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 
 /**
  * 담당자 대기 큐.
@@ -47,7 +48,8 @@ export default async (req: Request) => {
         db.sql`
           SELECT ca.id, ca.campaign_id, ca.applicant_username, ca.message, ca.contact,
                  ca.portfolio_url, ca.brand_preference, ca.brand_preference_note, ca.created_at,
-                 c.title AS campaign_title, c.brand_name, c.manager_username, c.reward_amount, c.type
+                 c.title AS campaign_title, c.brand_name, c.manager_username, c.reward_amount,
+                 c.type, c.reward_mode
           FROM campaign_applications ca
           JOIN campaigns c ON c.id = ca.campaign_id
           WHERE ca.status = 'pending'
@@ -143,6 +145,10 @@ export default async (req: Request) => {
         brandPreferenceNote: a.brand_preference_note || "",
         rewardAmount: a.reward_amount || "",
         campaignType: a.type || "",
+        rewardMode: normalizeRewardMode(a.reward_mode),
+        // 제품 협찬형·공동구매는 브랜드가 직접 수락한다. 담당자 화면이 이걸 모르면
+        // 브랜드가 아직 고르는 중인 지원자를 담당자가 대신 선정해 버릴 수 있다.
+        selectionBy: isOpenApplyMode(a.reward_mode) ? "brand" : "manager",
         createdAt: a.created_at,
       })),
       awaitingReview: (awaitingReview as any[]).map((s) => ({
