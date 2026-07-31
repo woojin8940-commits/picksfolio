@@ -41,9 +41,11 @@ async function loadCampaign(db: any, campaignId: string) {
            product_name, product_url, upload_channel, content_format, video_concept,
            guideline_url, guideline_note, second_use_fee, second_use_note,
            upload_from, upload_to,
-           -- 패키지 등급은 협업 단계를 정한다(시딩에는 대본·검수 단계가 없다).
+           -- 진행 방식이 협업 단계를 정한다(제품 협찬형에는 검수·정산 단계가 없다).
+           -- package_tier 는 진행 방식이 없던 시절 캠페인의 대체값으로만 쓴다.
            -- 희망 인플루언서 조건은 담당자가 후보를 고를 때 읽는 값이다.
-           package_tier, ad_objective, influencer_gender, influencer_ages,
+           reward_mode, tier_counts, package_tier,
+           ad_objective, influencer_gender, influencer_ages,
            sns_category, follower_tiers, min_views, influencer_styles,
            exclude_keywords, target_audience
     FROM campaigns WHERE id = ${campaignId}
@@ -71,6 +73,9 @@ const shapeCampaign = (c: any) => ({
   guidelineNote: c.guideline_note || "",
   secondUseFee: Number(c.second_use_fee || 0),
   // 담당자 리스트업 화면이 후보를 고를 때 쓰는 조건.
+  rewardMode: c.reward_mode || "paid",
+  // 규모별 모집 인원. 'nano:10,micro:3' 형태 그대로 넘겨 화면에서 풀어 읽는다.
+  tierCounts: c.tier_counts || "",
   packageTier: c.package_tier || "full",
   adObjective: c.ad_objective || "",
   influencerGender: c.influencer_gender || "",

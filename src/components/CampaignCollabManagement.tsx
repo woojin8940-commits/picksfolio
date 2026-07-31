@@ -9,7 +9,10 @@ import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
-import { packageOf, PRODUCT_PROVIDE, AD_OBJECTIVES, totalBudget } from '../utils/campaignPackages';
+import {
+  rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
+  parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor,
+} from '../utils/campaignBrief';
 import Toast from './Toast';
 
 interface Campaign {
@@ -46,13 +49,16 @@ interface Campaign {
   second_use_note?: string;
   upload_from?: string;
   upload_to?: string;
-  // 등록 화면이 패키지로 정하는 값. 진행 단계와 1인 단가가 여기서 나온다.
+  // 등록 화면이 정하는 값. 진행 단계는 진행 방식에서, 인원은 규모별 배분에서 나온다.
+  reward_mode?: string;
+  tier_counts?: string;
+  /** 패키지를 없애기 전에 등록된 캠페인만 이 값을 쓴다. */
   package_tier?: string;
   product_provide?: string;
   ad_objective?: string;
   budget_krw?: number;
+  /** 제품 협찬형의 협찬 가능 수량. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다. */
   seeding_count?: number;
-  fast_track?: boolean;
   influencer_gender?: string;
   influencer_ages?: string;
   sns_category?: string;
@@ -386,12 +392,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // --- Campaign Detail View ---
   if (selectedCampaign) {
     const isOwner = normalizeUser(selectedCampaign.business_username) === normalizeUser(businessUsername);
-    const pkg = packageOf(selectedCampaign.package_tier);
-    const budget = totalBudget(
-      pkg.tier,
-      Number(selectedCampaign.budget_krw || 0),
-      Number(selectedCampaign.seeding_count || 0),
-    );
+    // 진행 방식이 없던 시절 캠페인은 모두 광고비를 지급했다 — rewardModeOf 가 'paid'
+    // 로 되돌려 준다.
+    const mode = rewardModeOf(selectedCampaign.reward_mode);
+    const isBarter = mode.value === 'barter';
+    const tierCounts = parseTierCounts(selectedCampaign.tier_counts);
+    const tierRows = chosenTiers(tierCounts).filter(t => (tierCounts[t.key] || 0) > 0);
+    const supplyCount = Number(selectedCampaign.seeding_count || 0);
+    const budget = isBarter ? 0 : Number(selectedCampaign.budget_krw || 0);
+    const stageMarks = stageMarksFor(mode.value);
     const uploadedCount = collabSummary.filter(c => c.uploadUrl).length;
     const provideLabel = PRODUCT_PROVIDE.find(p => p.value === selectedCampaign.product_provide)?.label || '';
     const objectiveLabel = AD_OBJECTIVES.find(o => o.value === selectedCampaign.ad_objective)?.label || '';
@@ -444,9 +453,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </span>
                 )}
                 <span className="text-[11px] text-slate-400 font-bold">{typeLabel(selectedCampaign.type)}</span>
-                <span className="text-[11px] text-slate-400 font-bold">· {pkg.name}</span>
-                {selectedCampaign.fast_track && (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 text-[10px] font-black">패스트 트랙</span>
+                <span className="text-[11px] text-slate-400 font-bold">· {mode.label}</span>
+                {isBarter && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black">
+                    {mode.tagline}
+                  </span>
                 )}
               </div>
               <h2 className="text-xl md:text-2xl font-black text-slate-900">{selectedCampaign.title}</h2>
@@ -495,14 +506,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     <p className="text-sm font-black text-slate-900">{categoryLabel(selectedCampaign.category)}</p>
                   </div>
                 )}
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-[9px] text-slate-400 font-black uppercase">1인 단가</p>
-                  <p className="text-sm font-black text-slate-900">{formatKoreanWon(pkg.unitPrice)}</p>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-[9px] text-slate-400 font-black uppercase">집행 예산</p>
-                  <p className="text-sm font-black text-slate-900">{formatKoreanWon(budget) || '-'}</p>
-                </div>
+                {isBarter ? (
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-[9px] text-slate-400 font-black uppercase">협찬 수량</p>
+                    <p className="text-sm font-black text-slate-900">
+                      {supplyCount > 0 ? `${supplyCount}개` : '-'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-[9px] text-slate-400 font-black uppercase">집행 예산</p>
+                    <p className="text-sm font-black text-slate-900">{formatKoreanWon(budget) || '-'}</p>
+                  </div>
+                )}
                 <div className="bg-slate-50 rounded-xl p-3">
                   <p className="text-[9px] text-slate-400 font-black uppercase">예정 인원</p>
                   <p className="text-sm font-black text-blue-600">
@@ -537,11 +553,39 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 )}
               </div>
 
-              {/* 패키지가 정한 진행 단계. 등록 화면에서 본 것과 같은 표시여야 한다. */}
+              {/* 규모별 모집 인원. 등록 때 배분한 구성을 그대로 되짚어 준다 —
+                  담당자가 올린 후보가 그 구성과 맞는지 대조할 수 있어야 한다. */}
+              {tierRows.length > 0 && (
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-[9px] text-slate-400 font-black uppercase mb-3">모집 구성</p>
+                  <div className="space-y-2">
+                    {tierRows.map(t => (
+                      <div key={t.key} className="flex items-center justify-between gap-3">
+                        <span className="text-xs font-black text-slate-900">
+                          {t.label}
+                          <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
+                        </span>
+                        <span className="text-[11px] font-black text-slate-500 flex-shrink-0">
+                          {tierCounts[t.key]}명
+                          {!isBarter && <span className="text-slate-400 font-bold ml-1.5">1인 {tierFeeLabel(t)}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {!isBarter && (
+                    <p className="text-[11px] text-slate-400 font-medium mt-3 pt-3 border-t border-slate-200">
+                      최소 집행액 {formatKoreanWon(allocatedFloor(tierCounts)) || '0원'}
+                      {budget > 0 && ` · 예산 ${formatKoreanWon(budget)}`}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* 진행 방식이 정한 진행 단계. 등록 화면에서 본 것과 같은 표시여야 한다. */}
               <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-[9px] text-slate-400 font-black uppercase mb-3">진행 단계 · {pkg.name}</p>
+                <p className="text-[9px] text-slate-400 font-black uppercase mb-3">진행 단계 · {mode.label}</p>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
-                  {pkg.stages.map((s, i) => (
+                  {stageMarks.map((s, i) => (
                     <React.Fragment key={s.label}>
                       <div className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[76px]">
                         <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black ${s.included ? 'bg-slate-900 text-white' : 'bg-white text-slate-300 border border-slate-200'}`}>
@@ -551,11 +595,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                           {s.label}
                         </span>
                       </div>
-                      {i < pkg.stages.length - 1 && <span className="w-4 h-px bg-slate-200 flex-shrink-0" />}
+                      {i < stageMarks.length - 1 && <span className="w-4 h-px bg-slate-200 flex-shrink-0" />}
                     </React.Fragment>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-400 font-medium mt-2">{pkg.secondUseNote}</p>
+                <p className="text-[11px] text-slate-400 font-medium mt-2">{mode.secondUseNote}</p>
               </div>
 
               {selectedCampaign.video_concept && (
@@ -844,11 +888,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
             <div className="max-w-5xl mx-auto px-4 md:px-10 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] font-black text-slate-400">{pkg.name}</p>
+                <p className="text-[10px] font-black text-slate-400">{mode.label}</p>
                 <p className="text-xs font-black text-slate-900 truncate">
                   진행 {collabSummary.length}명
                   {selectedCampaign.max_applicants > 0 && ` / 예정 ${selectedCampaign.max_applicants}명`}
-                  {budget > 0 && ` · ${formatKoreanWon(budget)}`}
+                  {isBarter
+                    ? supplyCount > 0 && ` · 협찬 ${supplyCount}개`
+                    : budget > 0 && ` · ${formatKoreanWon(budget)}`}
                 </p>
               </div>
               <button

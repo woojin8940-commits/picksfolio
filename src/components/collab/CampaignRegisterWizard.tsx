@@ -2,29 +2,38 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { formatNumberWithCommas, formatKoreanWon, todayInSeoul } from '../../utils/formatters';
 import { authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
+import DateRangeCalendar from './DateRangeCalendar';
 import {
-  PACKAGES, packageOf, PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, GENDERS, AGE_BANDS,
-  FOLLOWER_TIERS, INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
-  totalBudget, derivedHeadcount, derivedTitle, derivedRequirements,
-  type PackageTier,
-} from '../../utils/campaignPackages';
+  REWARD_MODES, rewardModeOf, TIERS, tierFeeLabel, stageMarksFor,
+  PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, GENDERS, AGE_BANDS,
+  INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
+  parseTierCounts, serializeTierCounts, chosenTiers, totalHeadcount,
+  allocatedFloor, allocatedCeiling, remainingBudget, canAddOne, affordableCount,
+  derivedTitle, derivedRequirements, derivedUnitFee,
+  type RewardMode, type TierCounts, type TierKey,
+} from '../../utils/campaignBrief';
 
 /**
  * 캠페인 등록.
  *
- * 예전 화면은 다섯 단계에 걸쳐 스무 칸을 받았다. 제목, 보상 유형, 1인 광고비, 모집
- * 인원, 모집 시작일, 모집 종료일, 콘텐츠 형식, 2차 활용 비용... 브랜드가 처음
- * 캠페인을 올릴 때 이 값들을 스스로 정할 수 있는 경우는 거의 없어서, 대부분 비워 둔
- * 채로 제출하고 담당자가 다시 물었다. 등록을 두 번 하는 셈이었다.
- *
- * 그래서 묻는 것을 세 가지로 줄였다.
+ * 묻는 것은 세 가지다.
  *   ① 제품 정보  — 무엇을 알릴 것인가
- *   ② 캠페인 설정 — 어떤 패키지로, 얼마에, 언제까지
- *   ③ 희망 인플루언서 — 누가 올리면 좋겠는가
+ *   ② 캠페인 설정 — 어떻게 진행하고, 얼마를 쓰고, 언제 올릴 것인가
+ *   ③ 희망 인플루언서 — 누가 몇 명 올리면 좋겠는가
  *
- * 나머지는 계산한다. 제목은 제품명에서, 1인 단가와 진행 단계와 2차 활용 조건은
- * 패키지에서, 모집 인원은 예산에서 나온다(campaignPackages.ts). 사라진 칸이 아니라
- * 물어보지 않게 된 칸이다 — 서버로 가는 값은 예전과 같다.
+ * 예전에는 여기에 패키지가 있었다. 브랜드가 패키지를 고르면 1인 단가가 정해지고,
+ * 모집 인원은 예산 ÷ 단가로 계산됐다. 그런데 그 나눗셈이 실제 섭외와 맞지 않았다.
+ * 예산 5,000만원을 시딩 단가로 나누면 500명이 나오는데, 브랜드가 실제로 원하는 것은
+ * "메가 한 명을 중심에 두고 마이크로를 여러 명" 같은 구성이었다.
+ *
+ * 그래서 패키지를 없애고 두 가지를 직접 받는다. 예산(또는 협찬 가능 수량)과 규모별
+ * 인원이다. 인원을 계산해 주는 대신, 각 규모의 최소 단가로 배분액을 계산해 예산을
+ * 넘기지 못하게 막는다. 브랜드는 남은 예산을 보면서 구성을 직접 굴려 볼 수 있고,
+ * 나온 구성은 정의상 예산 안에 있다.
+ *
+ * 진행 방식은 두 갈래다. 광고비 지급형은 구성안·콘텐츠 검수를 거치고 정산이 붙는다.
+ * 제품 협찬형은 광고비 없이 제품만 제공하므로 검수와 정산 단계가 없다 — 진행 단계
+ * 표시는 stageMarksFor() 한 곳에서 만들고, 협업에 실제로 생기는 단계와 짝을 맞춰 둔다.
  *
  * 가이드라인은 등록에서 빼서 등록 직후 상세 화면의 배너로 옮겼다. 가이드라인은
  * 인플루언서가 정해진 뒤에 쓰는 것이 자연스럽고, 등록 단계에서 필수로 두면 "아직
@@ -56,12 +65,12 @@ export interface CampaignBriefDraft {
   second_use_note?: string;
   upload_from?: string;
   upload_to?: string;
-  package_tier?: string;
+  reward_mode?: string;
+  tier_counts?: string;
   product_provide?: string;
   ad_objective?: string;
   budget_krw?: number;
   seeding_count?: number;
-  fast_track?: boolean;
   influencer_gender?: string;
   influencer_ages?: string;
   sns_category?: string;
@@ -86,7 +95,7 @@ interface CampaignRegisterWizardProps {
 const STEPS = [
   { key: 'product', label: '제품 정보', hint: '무엇을 알릴까요' },
   { key: 'campaign', label: '캠페인 설정', hint: '어떻게 진행할까요' },
-  { key: 'influencer', label: '희망 인플루언서', hint: '누가 올리면 좋을까요' },
+  { key: 'influencer', label: '희망 인플루언서', hint: '누가 몇 명 올릴까요' },
 ];
 
 const INPUT =
@@ -99,6 +108,23 @@ const digitsOnly = (raw: unknown) => String(raw ?? '').replace(/[^\d]/g, '');
 /** 쉼표로 이어 저장된 값 ↔ 배열. 수정 모드에서 기존 캠페인을 되읽을 때 쓴다. */
 const splitCsv = (raw: unknown): string[] =>
   String(raw ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
+/**
+ * 수정 모드에서 규모별 인원을 되읽는다.
+ *
+ * 규모별 인원이 생기기 전에 등록된 캠페인은 tier_counts 가 비어 있고 follower_tiers
+ * 에 고른 구간만 남아 있다. 그 구간들을 인원 0 으로 골라 둔 상태로 살려 둔다 —
+ * 그러지 않으면 수정 화면에서 브랜드가 예전에 고른 조건이 통째로 사라진 것처럼 보인다.
+ */
+const initialTierCounts = (editing: CampaignBriefDraft | null): TierCounts => {
+  const parsed = parseTierCounts(editing?.tier_counts);
+  if (Object.keys(parsed).length > 0) return parsed;
+  const legacy: TierCounts = {};
+  splitCsv(editing?.follower_tiers).forEach(key => {
+    if (TIERS.some(t => t.key === key)) legacy[key as TierKey] = 0;
+  });
+  return legacy;
+};
 
 /** 단계별 작성 상태. 사이드바에서 완료/미입력으로 보여 준다. */
 type FieldState = { label: string; done: boolean; required: boolean };
@@ -117,7 +143,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const [thumbnailPreview, setThumbnailPreview] = useState(editing?.thumbnail_url || '');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
-  const [showDetail, setShowDetail] = useState(false);
   const [savedAt, setSavedAt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingFileRef = useRef<File | null>(null);
@@ -137,20 +162,20 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     description: editing?.description || '',
     product_provide: editing?.product_provide || 'provide',
 
-    package_tier: (editing?.package_tier || 'full') as PackageTier,
+    reward_mode: (editing?.reward_mode === 'barter' ? 'barter' : 'paid') as RewardMode,
     upload_channel: editing?.upload_channel || '인스타그램',
     budget_krw: formatNumberWithCommas(digitsOnly(editing?.budget_krw || '')),
-    seeding_count: String(editing?.seeding_count || ''),
+    // 제품 협찬형에서 제공할 수 있는 제품 수. 예산이 없는 대신 이 수량이 인원을 막는다.
+    supply_count: String(editing?.seeding_count || ''),
     upload_from: editing?.upload_from || '',
     upload_to: editing?.upload_to || '',
-    fast_track: Boolean(editing?.fast_track),
     video_concept: editing?.video_concept || '',
 
     influencer_gender: editing?.influencer_gender || 'any',
     influencer_ages: splitCsv(editing?.influencer_ages),
     sns_category: editing?.sns_category || '',
     ad_objective: editing?.ad_objective || 'awareness',
-    follower_tiers: splitCsv(editing?.follower_tiers),
+    tier_counts: initialTierCounts(editing),
     min_views: formatNumberWithCommas(digitsOnly(editing?.min_views || '')),
     target_audience: editing?.target_audience || '',
     influencer_styles: splitCsv(editing?.influencer_styles),
@@ -178,19 +203,55 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const patch = (key: keyof typeof form, value: any) => setForm(p => ({ ...p, [key]: value }));
 
   /** 칩·체크박스처럼 여러 개를 고르는 항목. 이미 있으면 뺀다. */
-  const toggle = (key: 'influencer_ages' | 'follower_tiers' | 'influencer_styles' | 'exclude_keywords', value: string) =>
+  const toggle = (key: 'influencer_ages' | 'influencer_styles' | 'exclude_keywords', value: string) =>
     setForm(p => {
       const list = p[key] as string[];
       return { ...p, [key]: list.includes(value) ? list.filter(v => v !== value) : [...list, value] };
     });
 
   // ------------------------------------------------------------------ 파생값
-  const pkg = packageOf(form.package_tier);
-  const isSeeding = form.package_tier === 'seeding';
+  const mode = rewardModeOf(form.reward_mode);
+  const isBarter = form.reward_mode === 'barter';
   const budgetKrw = Number(digitsOnly(form.budget_krw) || 0);
-  const seedingCount = Number(digitsOnly(form.seeding_count) || 0);
-  const budget = totalBudget(form.package_tier, budgetKrw, seedingCount);
-  const headcount = derivedHeadcount(form.package_tier, budgetKrw, seedingCount);
+  const supplyCount = Number(digitsOnly(form.supply_count) || 0);
+  const counts = form.tier_counts;
+  const headcount = totalHeadcount(counts);
+  const floorSum = allocatedFloor(counts);
+  const ceilingSum = allocatedCeiling(counts);
+  const leftover = remainingBudget(budgetKrw, counts);
+  const cheapestFee = Math.min(...TIERS.map(t => t.minFee));
+  const overBudget = !isBarter && budgetKrw > 0 && floorSum > budgetKrw;
+  const overSupply = isBarter && supplyCount > 0 && headcount > supplyCount;
+
+  // ------------------------------------------------------------------ 규모별 인원
+  /** 카드를 누르면 그 구간을 고르거나 뺀다. 처음 고를 때 한 명으로 시작한다. */
+  const toggleTier = (key: TierKey) =>
+    setForm(p => {
+      const next: TierCounts = { ...p.tier_counts };
+      if (next[key] !== undefined) {
+        delete next[key];
+        return { ...p, tier_counts: next };
+      }
+      const tier = TIERS.find(t => t.key === key)!;
+      const seed = canAddOne(tier, p.reward_mode, Number(digitsOnly(p.budget_krw) || 0),
+        Number(digitsOnly(p.supply_count) || 0), next) ? 1 : 0;
+      next[key] = seed;
+      return { ...p, tier_counts: next };
+    });
+
+  const bumpTier = (key: TierKey, delta: number) =>
+    setForm(p => {
+      const next: TierCounts = { ...p.tier_counts };
+      const current = next[key] || 0;
+      if (delta > 0) {
+        const tier = TIERS.find(t => t.key === key)!;
+        const budget = Number(digitsOnly(p.budget_krw) || 0);
+        const supply = Number(digitsOnly(p.supply_count) || 0);
+        if (!canAddOne(tier, p.reward_mode, budget, supply, next)) return p;
+      }
+      next[key] = Math.max(0, current + delta);
+      return { ...p, tier_counts: next };
+    });
 
   // ------------------------------------------------------------------ 이미지
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -259,11 +320,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제품 제공 방식', done: !!form.product_provide, required: true },
     ],
     [
-      { label: '패키지', done: !!form.package_tier, required: true },
+      { label: '진행 방식', done: !!form.reward_mode, required: true },
       { label: '업로드 채널', done: !!form.upload_channel, required: true },
       {
-        label: isSeeding ? '광고 집행 건수' : '광고 집행 예산',
-        done: isSeeding ? seedingCount > 0 : budgetKrw >= pkg.minBudget,
+        label: isBarter ? '협찬 가능 수량' : '광고 집행 예산',
+        done: isBarter ? supplyCount > 0 : budgetKrw >= cheapestFee,
         required: true,
       },
       { label: '희망 업로드 일정', done: !!form.upload_from, required: true },
@@ -274,13 +335,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '연령', done: form.influencer_ages.length > 0, required: true },
       { label: 'SNS 채널 카테고리', done: !!form.sns_category, required: true },
       { label: '광고 목적', done: !!form.ad_objective, required: true },
-      { label: '채널 규모', done: form.follower_tiers.length > 0, required: false },
+      { label: '규모별 모집 인원', done: headcount > 0 && !overBudget && !overSupply, required: true },
       { label: '희망 최소 조회수', done: Number(digitsOnly(form.min_views) || 0) > 0, required: false },
       { label: '타겟 오디언스', done: !!form.target_audience.trim(), required: false },
       { label: '인플루언서 스타일', done: form.influencer_styles.length > 0, required: false },
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
     ],
-  ], [form, isSeeding, seedingCount, budgetKrw, pkg.minBudget]);
+  ], [form, isBarter, supplyCount, budgetKrw, cheapestFee, headcount, overBudget, overSupply]);
 
   /** 그 단계에서 반드시 있어야 하는 것. 없으면 다음으로 넘기지 않는다. */
   const stepError = (index: number): string => {
@@ -292,17 +353,14 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       return '';
     }
     if (index === 1) {
-      if (isSeeding) {
-        if (seedingCount < 1) return '광고 집행 건수를 입력해 주세요.';
-        if (budget < pkg.minBudget) {
-          return `유가 시딩은 ${formatKoreanWon(pkg.minBudget)}(${pkg.minBudget / pkg.unitPrice}건)부터 진행할 수 있습니다.`;
-        }
-      } else if (budgetKrw < pkg.minBudget) {
-        return `${pkg.name}는 ${formatKoreanWon(pkg.minBudget)}부터 진행할 수 있습니다.`;
+      if (isBarter) {
+        if (supplyCount < 1) return '협찬 가능 수량을 입력해 주세요.';
+      } else if (budgetKrw < cheapestFee) {
+        return `광고 집행 예산은 ${formatKoreanWon(cheapestFee)}부터 입력할 수 있습니다.`;
       }
       if (!form.upload_from) return '희망 업로드 시작일을 선택해 주세요.';
       if (form.upload_from && form.upload_to && form.upload_from > form.upload_to) {
-        return '희망 업로드 일정의 시작일이 종료일보다 늦습니다.';
+        return '희망 업로드 일정의 시작일이 마감일보다 늦습니다.';
       }
       if (!form.video_concept.trim()) return '원하는 영상 컨셉을 적어 주세요.';
       return '';
@@ -310,6 +368,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     if (index === 2) {
       if (form.influencer_ages.length === 0) return '희망 연령대를 한 개 이상 선택해 주세요.';
       if (!form.sns_category) return 'SNS 채널 카테고리를 선택해 주세요.';
+      if (headcount < 1) return '규모를 고르고 모집 인원을 1명 이상 배분해 주세요.';
+      if (overBudget) return `배분한 인원의 최소 집행액이 예산을 ${formatKoreanWon(floorSum - budgetKrw)} 넘습니다.`;
+      if (overSupply) return `배분한 인원이 협찬 가능 수량(${supplyCount}명)을 넘습니다.`;
       return '';
     }
     return '';
@@ -341,10 +402,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     setSubmitting(true);
     try {
       const requirements = derivedRequirements({
+        mode: form.reward_mode,
         gender: form.influencer_gender,
         ages: form.influencer_ages,
         snsCategory: form.sns_category,
-        followerTiers: form.follower_tiers,
+        tierCounts: counts,
         minViews: Number(digitsOnly(form.min_views) || 0),
         styles: form.influencer_styles,
         excludes: form.exclude_keywords,
@@ -358,8 +420,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         brand_name: form.brand_name,
         thumbnail_url: form.thumbnail_url,
         category: form.category,
-        reward_type: 'fixed',
-        reward_amount: String(pkg.unitPrice),
+        // 제품 협찬형은 지급할 광고비가 없다 — 보상 유형을 '제품 제공'으로 남기고
+        // 금액은 비워 둔다. 0 을 넣으면 인플루언서 화면에 보상이 "0원"으로 크게 찍힌다.
+        reward_type: isBarter ? 'product' : 'fixed',
+        reward_amount: isBarter ? '' : String(derivedUnitFee(form.reward_mode, counts)),
         requirements,
         max_applicants: headcount,
         // 모집은 등록 즉시 시작하고, 희망 업로드 시작일까지 받는다.
@@ -367,7 +431,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         end_date: form.upload_from || '',
         content_format: 'shortform',
         second_use_fee: 0,
-        second_use_note: pkg.secondUseNote,
+        second_use_note: mode.secondUseNote,
 
         product_name: form.product_name,
         product_url: form.product_url,
@@ -376,16 +440,21 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         upload_from: form.upload_from,
         upload_to: form.upload_to,
 
-        package_tier: form.package_tier,
+        reward_mode: form.reward_mode,
+        tier_counts: serializeTierCounts(counts),
+        // 패키지를 걷어내기 전에 만들어진 화면들이 아직 이 값을 읽는다. 진행 방식에서
+        // 짝이 되는 값을 남겨 둬야 그쪽에서 협업 단계를 엉뚱하게 잡지 않는다.
+        package_tier: isBarter ? 'seeding' : 'full',
         product_provide: form.product_provide,
         ad_objective: form.ad_objective,
-        budget_krw: budget,
-        seeding_count: seedingCount,
-        fast_track: form.fast_track,
+        budget_krw: isBarter ? 0 : budgetKrw,
+        // 제품 협찬형의 공급 수량. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다.
+        seeding_count: isBarter ? supplyCount : 0,
         influencer_gender: form.influencer_gender,
         influencer_ages: form.influencer_ages,
         sns_category: form.sns_category,
-        follower_tiers: form.follower_tiers,
+        // 담당자 리스트업은 고른 구간만 읽는다. 인원까지 필요한 화면은 tier_counts 를 본다.
+        follower_tiers: chosenTiers(counts).filter(t => (counts[t.key] || 0) > 0).map(t => t.key),
         min_views: Number(digitsOnly(form.min_views) || 0),
         influencer_styles: form.influencer_styles,
         exclude_keywords: form.exclude_keywords,
@@ -430,20 +499,77 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
     }`;
 
+  const stageMarks = stageMarksFor(form.reward_mode);
+
   const TIPS = [
     {
       title: '제품 소개는 왜 필요할까요?',
       body: '인플루언서가 지원 여부를 정할 때 가장 먼저 읽는 내용입니다. 제품의 특징과 꼭 강조하고 싶은 점을 두세 줄로 적어 주세요.',
     },
     {
-      title: '예산은 어떻게 정할까요?',
-      body: `${pkg.name}는 1인 ${formatKoreanWon(pkg.unitPrice)}${pkg.priceNote === '부터~' ? '부터' : ''} 기준입니다. 예산을 적으면 모집 인원이 자동으로 계산됩니다.`,
+      title: isBarter ? '제품 협찬형은 무엇이 다를까요?' : '예산은 어떻게 정할까요?',
+      body: isBarter
+        ? '광고비 없이 제품만 제공합니다. 대신 구성안·콘텐츠 검수 단계가 없고, 가이드를 전달한 뒤 업로드를 확인하는 흐름으로 진행됩니다.'
+        : '쓸 수 있는 총액을 적어 주세요. 다음 단계에서 규모별로 인원을 배분할 때, 이 예산 안에서만 담을 수 있게 잔액을 보여 드립니다.',
     },
     {
-      title: '조건은 좁을수록 좋을까요?',
-      body: '너무 좁히면 후보가 줄어듭니다. 꼭 필요한 조건만 남기고, 나머지는 담당자가 제안하는 후보를 보며 조율하세요.',
+      title: '규모는 섞는 게 좋을까요?',
+      body: '메가 한 명으로 화제를 만들고 마이크로·나노로 후속 반응을 채우는 구성이 가장 흔합니다. 배분액은 각 규모의 최소 단가 기준이고, 실제 금액은 담당자가 후보를 확정할 때 정해집니다.',
     },
   ];
+
+  /** 예산·수량 대비 배분 상태. 규모 카드 위에 한 줄로 얹는다. */
+  const allocationBar = () => {
+    const cap = isBarter ? supplyCount : budgetKrw;
+    const used = isBarter ? headcount : floorSum;
+    const ratio = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+    const over = isBarter ? overSupply : overBudget;
+    return (
+      <div className={`rounded-2xl border p-4 ${over ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-black text-slate-500">
+              {isBarter ? '배분한 인원' : '배분한 최소 집행액'}
+            </p>
+            <p className={`text-lg font-black ${over ? 'text-rose-600' : 'text-slate-900'}`}>
+              {isBarter ? `${headcount}명` : formatKoreanWon(floorSum) || '0원'}
+              <span className="text-[11px] font-bold text-slate-400 ml-1.5">
+                / {isBarter ? `${supplyCount || 0}명` : formatKoreanWon(budgetKrw) || '0원'}
+              </span>
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-black text-slate-500">
+              {isBarter ? '남은 수량' : '남은 예산'}
+            </p>
+            <p className={`text-sm font-black ${over ? 'text-rose-600' : 'text-emerald-600'}`}>
+              {isBarter
+                ? `${Math.max(0, supplyCount - headcount)}명`
+                : formatKoreanWon(leftover) || '0원'}
+            </p>
+          </div>
+        </div>
+        <div className="h-1.5 rounded-full bg-white mt-3 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${over ? 'bg-rose-500' : 'bg-slate-900'}`}
+            style={{ width: `${ratio}%` }}
+          />
+        </div>
+        {!isBarter && headcount > 0 && (
+          <p className="text-[11px] text-slate-400 font-medium mt-2">
+            실제 집행액은 규모별 단가 구간에 따라 {formatKoreanWon(floorSum)} ~ {formatKoreanWon(ceilingSum)} 사이에서 확정됩니다.
+          </p>
+        )}
+        {over && (
+          <p className="text-[11px] text-rose-600 font-black mt-2">
+            {isBarter
+              ? '협찬 가능 수량을 넘었습니다. 인원을 줄이거나 수량을 늘려 주세요.'
+              : '예산을 넘었습니다. 인원을 줄이거나 예산을 늘려 주세요.'}
+          </p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
@@ -458,7 +584,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             {editing ? '캠페인 수정' : '캠페인 등록'}
           </h2>
           <p className="text-xs text-slate-400 font-medium mt-1">
-            세 단계만 채우면 담당자가 이어서 진행합니다. 제목·모집 인원·1인 단가는 자동으로 정해집니다.
+            세 단계만 채우면 담당자가 이어서 진행합니다. 제목과 지원 조건은 적으신 내용으로 자동 정리됩니다.
           </p>
 
           <div className="flex items-center gap-1 mt-5 overflow-x-auto">
@@ -604,44 +730,37 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           {step === 1 && (
             <>
               <div>
-                <label className={LABEL}>패키지 *</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {PACKAGES.map(p => {
-                    const active = form.package_tier === p.tier;
+                <label className={LABEL}>진행 방식 *</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {REWARD_MODES.map(m => {
+                    const active = form.reward_mode === m.value;
                     return (
                       <button
-                        key={p.tier}
+                        key={m.value}
                         type="button"
-                        onClick={() => patch('package_tier', p.tier)}
+                        onClick={() => patch('reward_mode', m.value)}
                         className={`text-left p-4 rounded-2xl border-2 transition-colors ${
                           active ? 'border-slate-900 bg-slate-50' : 'border-slate-100 hover:border-slate-300'
                         }`}
                       >
                         <span className="inline-block px-2 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-black">
-                          {p.badge}
+                          {m.tagline}
                         </span>
-                        <p className="text-sm font-black text-slate-900 mt-2">{p.name}</p>
+                        <p className="text-sm font-black text-slate-900 mt-2">{m.label}</p>
                         <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">
-                          {p.lines[0]}<br />{p.lines[1]}
+                          {m.lines[0]}<br />{m.lines[1]}
                         </p>
-                        <p className="text-base font-black text-slate-900 mt-3">
-                          {formatKoreanWon(p.unitPrice)}
-                          <span className="text-[11px] font-bold text-slate-400 ml-1">{p.priceNote}</span>
-                        </p>
-                        <p className="text-[10px] text-slate-400 font-bold mt-1">{p.usageNote}</p>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* 포함/제외 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다. */}
+              {/* 진행 방식이 정하는 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다. */}
               <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                <p className="text-[11px] font-black text-slate-700 mb-3">
-                  {pkg.name} 진행 단계
-                </p>
+                <p className="text-[11px] font-black text-slate-700 mb-3">{mode.label} 진행 단계</p>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
-                  {pkg.stages.map((s, i) => (
+                  {stageMarks.map((s, i) => (
                     <React.Fragment key={s.label}>
                       <div className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[76px]">
                         <span
@@ -655,12 +774,12 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                           {s.label}
                         </span>
                       </div>
-                      {i < pkg.stages.length - 1 && <span className="w-4 h-px bg-slate-200 flex-shrink-0" />}
+                      {i < stageMarks.length - 1 && <span className="w-4 h-px bg-slate-200 flex-shrink-0" />}
                     </React.Fragment>
                   ))}
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium mt-2">
-                  {pkg.secondUseNote} · 제외된 단계는 협업에도 생기지 않습니다.
+                  {mode.secondUseNote} · 제외된 단계는 협업에도 생기지 않습니다.
                 </p>
               </div>
 
@@ -675,25 +794,22 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               </div>
 
-              {isSeeding ? (
+              {isBarter ? (
                 <div>
-                  <label className={LABEL}>광고 집행 건수 *</label>
+                  <label className={LABEL}>협찬 가능 수량 *</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="text"
                       inputMode="numeric"
-                      value={form.seeding_count}
-                      onChange={e => patch('seeding_count', digitsOnly(e.target.value))}
+                      value={form.supply_count}
+                      onChange={e => patch('supply_count', digitsOnly(e.target.value))}
                       className={`${INPUT} max-w-[160px]`}
-                      placeholder="10"
+                      placeholder="20"
                     />
-                    <span className="text-sm font-black text-slate-500">건</span>
+                    <span className="text-sm font-black text-slate-500">개</span>
                   </div>
-                  <p className="text-xs font-black text-slate-900 mt-2">
-                    {formatKoreanWon(pkg.unitPrice)} × {seedingCount || 0}건 = {formatKoreanWon(budget)}
-                  </p>
-                  <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    최소 {formatKoreanWon(pkg.minBudget)}({pkg.minBudget / pkg.unitPrice}건)부터 진행할 수 있습니다.
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    제공할 수 있는 제품 수입니다. 다음 단계에서 이 수량 안에서 규모별 인원을 배분합니다.
                   </p>
                 </div>
               ) : (
@@ -706,42 +822,26 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                       value={form.budget_krw}
                       onChange={e => patch('budget_krw', formatNumberWithCommas(digitsOnly(e.target.value)))}
                       className={`${INPUT} max-w-[220px]`}
-                      placeholder={String(pkg.minBudget)}
+                      placeholder="50,000,000"
                     />
                     <span className="text-sm font-black text-slate-500">원</span>
                   </div>
-                  <p className="text-xs font-black text-slate-900 mt-2">
-                    {formatKoreanWon(budget)} ÷ 1인 {formatKoreanWon(pkg.unitPrice)} = 약 {headcount}명 모집
-                  </p>
-                  <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    최소 {formatKoreanWon(pkg.minBudget)}부터 진행할 수 있습니다. 인원은 담당자와 조율할 수 있습니다.
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    쓸 수 있는 총액을 적어 주세요. 다음 단계에서 이 예산 안에서 규모별 인원을 배분합니다.
                   </p>
                 </div>
               )}
 
               <div>
                 <label className={LABEL}>희망 업로드 일정 *</label>
-                <div className="flex items-center gap-2">
-                  <input type="date" value={form.upload_from} onChange={e => patch('upload_from', e.target.value)} className={INPUT} />
-                  <span className="text-xs font-black text-slate-400">~</span>
-                  <input type="date" value={form.upload_to} onChange={e => patch('upload_to', e.target.value)} className={INPUT} />
-                </div>
-              </div>
-
-              <label className="flex items-start gap-3 p-4 rounded-2xl border border-slate-200 cursor-pointer hover:border-slate-400 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={form.fast_track}
-                  onChange={e => patch('fast_track', e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-slate-900"
+                <DateRangeCalendar
+                  from={form.upload_from}
+                  to={form.upload_to}
+                  onChange={(nextFrom, nextTo) =>
+                    setForm(p => ({ ...p, upload_from: nextFrom, upload_to: nextTo }))
+                  }
                 />
-                <span>
-                  <span className="block text-sm font-black text-slate-900">패스트 트랙</span>
-                  <span className="block text-[11px] text-slate-400 font-medium mt-0.5">
-                    일정이 급합니다. 담당자가 섭외와 검수를 최우선으로 진행합니다.
-                  </span>
-                </span>
-              </label>
+              </div>
 
               <div>
                 <label className={LABEL}>영상 컨셉 *</label>
@@ -822,97 +922,162 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </p>
               </div>
 
-              {/* 상세 조건은 접어 둔다. 필수가 아니고, 처음 올리는 브랜드에게는
-                  선택지가 많은 것 자체가 등록을 멈추게 하는 이유가 된다. */}
-              <button
-                type="button"
-                onClick={() => setShowDetail(v => !v)}
-                className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-slate-200 text-xs font-black text-slate-600 hover:border-slate-400 transition-colors"
-              >
-                <span>상세 조건 {showDetail ? '접기' : '더 지정하기'} <span className="text-slate-400 font-bold">(선택)</span></span>
-                <span className="text-slate-400">{showDetail ? '▲' : '▼'}</span>
-              </button>
+              {/* ------------------------------------------ 규모별 모집 인원 */}
+              <div>
+                <label className={LABEL}>
+                  규모별 모집 인원 *{' '}
+                  <span className="text-slate-400 font-bold">
+                    {isBarter ? '(협찬 수량 안에서 배분)' : '(예산 안에서 배분)'}
+                  </span>
+                </label>
 
-              {showDetail && (
-                <div className="space-y-5 pt-1">
-                  <div>
-                    <label className={LABEL}>채널 규모 (팔로워)</label>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {FOLLOWER_TIERS.map(t => {
-                        const active = form.follower_tiers.includes(t.value);
-                        return (
-                          <button
-                            key={t.value}
-                            type="button"
-                            onClick={() => toggle('follower_tiers', t.value)}
-                            className={`text-left p-3 rounded-xl border-2 transition-colors ${
-                              active ? 'border-slate-900 bg-slate-50' : 'border-slate-100 hover:border-slate-300'
-                            }`}
-                          >
-                            <span className="inline-block px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[9px] font-black">
-                              {t.badge}
+                {allocationBar()}
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+                  {TIERS.map(t => {
+                    const chosen = counts[t.key] !== undefined;
+                    const room = isBarter
+                      ? Math.max(0, supplyCount - headcount)
+                      : affordableCount(t, budgetKrw, counts);
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => toggleTier(t.key)}
+                        className={`text-left p-3 rounded-xl border-2 transition-colors ${
+                          chosen ? 'border-slate-900 bg-slate-50' : 'border-slate-100 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-black text-slate-900">{t.label}</span>
+                          {chosen && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-slate-900 text-white text-[9px] font-black">
+                              {counts[t.key]}명
                             </span>
-                            <p className="text-xs font-black text-slate-900 mt-1.5">{t.label}</p>
-                            <p className="text-[10px] text-slate-400 font-bold">{t.range}</p>
-                            <p className="text-[10px] text-slate-400 font-medium mt-1">{t.unit}</p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className={LABEL}>희망 최소 조회수</label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={form.min_views}
-                        onChange={e => patch('min_views', formatNumberWithCommas(digitsOnly(e.target.value)))}
-                        className={`${INPUT} max-w-[200px]`}
-                        placeholder="10,000"
-                      />
-                      <span className="text-sm font-black text-slate-500">회 이상</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className={LABEL}>타겟 오디언스</label>
-                    <input
-                      type="text"
-                      value={form.target_audience}
-                      onChange={e => patch('target_audience', e.target.value)}
-                      className={INPUT}
-                      placeholder="예) 민감성 피부로 고민하는 20대 후반 직장인"
-                    />
-                    <p className="text-[11px] text-slate-400 font-medium mt-1">
-                      제품을 쓸 사람을 적어 주세요. 인플루언서 조건과 함께 담당자에게 전달됩니다.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className={LABEL}>인플루언서 스타일</label>
-                    <div className="flex flex-wrap gap-2">
-                      {INFLUENCER_STYLES.map(s => (
-                        <button key={s} type="button" onClick={() => toggle('influencer_styles', s)} className={chip(form.influencer_styles.includes(s))}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className={LABEL}>제외하고 싶은 인플루언서</label>
-                    <div className="flex flex-wrap gap-2">
-                      {EXCLUDE_KEYWORDS.map(s => (
-                        <button key={s} type="button" onClick={() => toggle('exclude_keywords', s)} className={chip(form.exclude_keywords.includes(s))}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                          )}
+                        </span>
+                        <span className="block text-[10px] text-slate-400 font-bold mt-1">{t.followers}</span>
+                        {!isBarter && (
+                          <span className="block text-[10px] text-slate-500 font-black mt-1">
+                            1인 {tierFeeLabel(t)}
+                          </span>
+                        )}
+                        <span className="block text-[10px] text-slate-400 font-medium mt-1 leading-tight">
+                          {chosen ? `${room}명 더 배분 가능` : t.note}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
+
+                {/* 고른 규모마다 인원 조절 줄. 고르기 전에는 나오지 않는다. */}
+                {chosenTiers(counts).length > 0 ? (
+                  <div className="mt-3 rounded-2xl border border-slate-100 divide-y divide-slate-100 overflow-hidden">
+                    {chosenTiers(counts).map(t => {
+                      const n = counts[t.key] || 0;
+                      const addable = canAddOne(t, form.reward_mode, budgetKrw, supplyCount, counts);
+                      return (
+                        <div key={t.key} className="flex items-center justify-between gap-3 px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-black text-slate-900">
+                              {t.label}
+                              <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                              {isBarter
+                                ? '제품 협찬 · 광고비 없음'
+                                : `1인 ${tierFeeLabel(t)} · 최소 ${formatKoreanWon(t.minFee * n) || '0원'}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => bumpTier(t.key, -1)}
+                              disabled={n <= 0}
+                              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 font-black text-sm disabled:opacity-30 hover:border-slate-400"
+                            >
+                              −
+                            </button>
+                            <span className="w-10 text-center text-sm font-black text-slate-900">{n}</span>
+                            <button
+                              type="button"
+                              onClick={() => bumpTier(t.key, 1)}
+                              disabled={!addable}
+                              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 font-black text-sm disabled:opacity-30 hover:border-slate-400"
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleTier(t.key)}
+                              className="ml-1 text-[10px] font-black text-slate-400 hover:text-rose-500"
+                            >
+                              제거
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 font-medium mt-2">
+                    규모를 고르면 인원을 배분할 수 있습니다.
+                    {!isBarter && budgetKrw <= 0 && ' 먼저 캠페인 설정에서 예산을 입력해 주세요.'}
+                    {isBarter && supplyCount <= 0 && ' 먼저 캠페인 설정에서 협찬 가능 수량을 입력해 주세요.'}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className={LABEL}>희망 최소 조회수</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.min_views}
+                    onChange={e => patch('min_views', formatNumberWithCommas(digitsOnly(e.target.value)))}
+                    className={`${INPUT} max-w-[200px]`}
+                    placeholder="10,000"
+                  />
+                  <span className="text-sm font-black text-slate-500">회 이상</span>
+                </div>
+              </div>
+
+              <div>
+                <label className={LABEL}>타겟 오디언스</label>
+                <input
+                  type="text"
+                  value={form.target_audience}
+                  onChange={e => patch('target_audience', e.target.value)}
+                  className={INPUT}
+                  placeholder="예) 민감성 피부로 고민하는 20대 후반 직장인"
+                />
+                <p className="text-[11px] text-slate-400 font-medium mt-1">
+                  제품을 쓸 사람을 적어 주세요. 인플루언서 조건과 함께 담당자에게 전달됩니다.
+                </p>
+              </div>
+
+              <div>
+                <label className={LABEL}>인플루언서 스타일</label>
+                <div className="flex flex-wrap gap-2">
+                  {INFLUENCER_STYLES.map(s => (
+                    <button key={s} type="button" onClick={() => toggle('influencer_styles', s)} className={chip(form.influencer_styles.includes(s))}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className={LABEL}>제외하고 싶은 인플루언서</label>
+                <div className="flex flex-wrap gap-2">
+                  {EXCLUDE_KEYWORDS.map(s => (
+                    <button key={s} type="button" onClick={() => toggle('exclude_keywords', s)} className={chip(form.exclude_keywords.includes(s))}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -976,24 +1141,39 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           )}
         </div>
 
-        {/* 지금까지 고른 것으로 정해진 조건. 예산을 적으면 인원이 바로 바뀐다. */}
+        {/* 지금까지 고른 것으로 정해진 조건. 인원을 배분하면 바로 바뀐다. */}
         {step >= 1 && (
           <div className="bg-slate-900 rounded-2xl p-5 text-white">
             <p className="text-[11px] font-black text-white/60">현재 설정</p>
-            <p className="text-sm font-black mt-2">{pkg.name}</p>
+            <p className="text-sm font-black mt-2">{mode.label}</p>
             <div className="mt-3 space-y-1.5 text-[11px] font-bold">
               <div className="flex items-center justify-between">
-                <span className="text-white/50">1인 단가</span>
-                <span>{formatKoreanWon(pkg.unitPrice)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/50">{isSeeding ? '집행 건수' : '모집 인원'}</span>
+                <span className="text-white/50">모집 인원</span>
                 <span>{headcount}명</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/50">총 예산</span>
-                <span>{formatKoreanWon(budget)}</span>
-              </div>
+              {isBarter ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/50">협찬 수량</span>
+                  <span>{supplyCount || 0}개</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">집행 예산</span>
+                    <span>{formatKoreanWon(budgetKrw) || '0원'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">배분(최소)</span>
+                    <span>{formatKoreanWon(floorSum) || '0원'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">잔액</span>
+                    <span className={overBudget ? 'text-rose-300' : 'text-emerald-300'}>
+                      {overBudget ? `-${formatKoreanWon(floorSum - budgetKrw)}` : formatKoreanWon(leftover) || '0원'}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-white/50">채널</span>
                 <span>{form.upload_channel}</span>
@@ -1005,6 +1185,15 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               )}
             </div>
+            {chosenTiers(counts).length > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-1.5">
+                {chosenTiers(counts).map(t => (
+                  <span key={t.key} className="px-2 py-1 rounded-full bg-white/10 text-[10px] font-black">
+                    {t.label} {counts[t.key]}명
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1013,7 +1202,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             "약 N명"을 보여 주면 지키지 못할 약속이 된다. */}
         {step === 2 && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <p className="text-xs font-black text-slate-900">매칭 가능 인플루언서</p>
+            <p className="text-xs font-black text-slate-900">담당자에게 전달되는 조건</p>
             <p className="text-[11px] text-slate-500 font-medium mt-2 leading-relaxed">
               등록하시면 담당자가 아래 조건으로 후보를 찾아 리스트업해 드립니다.
               보시고 마음에 드는 후보만 남기면 됩니다.
@@ -1023,7 +1212,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 GENDERS.find(g => g.value === form.influencer_gender)?.label,
                 ...form.influencer_ages,
                 form.sns_category,
-                ...form.follower_tiers.map(t => FOLLOWER_TIERS.find(f => f.value === t)?.label),
+                ...chosenTiers(counts).map(t => `${t.label} ${counts[t.key]}명`),
                 ...form.influencer_styles,
               ]
                 .filter(Boolean)
