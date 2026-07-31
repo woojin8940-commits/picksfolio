@@ -21,6 +21,8 @@ interface Campaign {
   application_count: number;
   admin_rejected_reason?: string;
   admin_approved_at?: string;
+  manager_username?: string;
+  manager_assigned_at?: string;
   created_at: string;
 }
 
@@ -77,6 +79,18 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
       fetchCampaigns();
     } else {
       alert(result.error || '거절 실패');
+    }
+    setProcessing(null);
+  };
+
+  const handleAssignManager = async (id: string) => {
+    if (!confirm('이 캠페인을 내 담당으로 배정하시겠습니까? 진행 중인 협업 담당자도 함께 변경됩니다.')) return;
+    setProcessing(id);
+    const result = await apiService.adminCampaignAction(token, id, 'assign_manager');
+    if (result.success) {
+      await fetchCampaigns();
+    } else {
+      alert(result.error || '담당자 배정 실패');
     }
     setProcessing(null);
   };
@@ -222,6 +236,12 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                         {campaign.application_count}명 지원
                       </span>
                     </div>
+                    <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                      <span className="text-[10px] font-black text-slate-400">담당자</span>
+                      <span className={`text-[11px] font-black ${campaign.manager_username ? 'text-slate-700' : 'text-amber-600'}`}>
+                        {campaign.manager_username ? `@${campaign.manager_username}` : '미배정'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -313,6 +333,26 @@ const AdminCampaignApproval: React.FC<AdminCampaignApprovalProps> = ({ token }) 
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
                         거절
+                      </button>
+                    </div>
+                  )}
+
+                  {campaign.status !== 'pending_approval' && campaign.status !== 'admin_rejected' && (
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                      <div>
+                        <p className="text-[11px] font-black text-slate-700">운영 담당자</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-slate-400">
+                          {campaign.manager_username
+                            ? `현재 @${campaign.manager_username} 담당 · 변경 시 진행 중 협업도 함께 이관됩니다.`
+                            : '담당자를 배정해야 리스트업과 협업 운영 책임이 명확해집니다.'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleAssignManager(campaign.id)}
+                        disabled={processing === campaign.id}
+                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                      >
+                        {processing === campaign.id ? '배정 중...' : '내 담당으로 배정'}
                       </button>
                     </div>
                   )}
