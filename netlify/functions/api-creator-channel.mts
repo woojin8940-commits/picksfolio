@@ -1,10 +1,16 @@
 import { getDatabase } from "@picks/netlify-database";
-import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { norm } from "./_shared/collab-workflow.mts";
 import { shapeChannel } from "./_shared/campaign-listup.mts";
+import {
+  SHOW_SIZE,
+  intOf,
+  linkIsUsable,
+  loadMetaLink,
+  syncChannelFromMeta,
+} from "./_shared/instagram-metrics.mts";
 
 /**
  * 인플루언서 채널 등록 — 리스트업에서 브랜드가 보는 숫자의 출처.
@@ -21,28 +27,14 @@ import { shapeChannel } from "./_shared/campaign-listup.mts";
  * 메타 연동은 아직 앱 심사 범위에 따라 조회수(insights)를 못 받는 경우가 있다.
  * 그래서 sync 는 "받을 수 있는 것만 받고, 못 받은 항목은 자기 입력값을 남긴다".
  * 심사가 끝나 권한이 늘어나면 이 함수만 고치면 되고 화면과 리스트업은 그대로다.
+ *
+ * 그래프 API 호출과 저장 규칙 자체는 _shared/instagram-metrics.mts 에 있다.
+ * 계정 연동 직후(instagram-oauth-callback)에도 같은 규칙으로 지표를 채우기 때문이다.
  */
-
-/** 평균을 낼 때 볼 최근 릴스 개수. 오래된 영상까지 섞으면 지금 실력이 흐려진다. */
-const SAMPLE_SIZE = 12;
-/** 화면에 보여줄 최근 릴스 개수. */
-const SHOW_SIZE = 6;
 
 const handleFromUrl = (raw: string) => {
   const m = String(raw || "").match(/instagram\.com\/([A-Za-z0-9._]+)/i);
   return m ? m[1] : "";
-};
-
-const intOf = (raw: unknown) => {
-  const digits = String(raw ?? "").replace(/[^\d]/g, "");
-  const n = digits ? Number(digits) : Number(raw ?? 0);
-  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-};
-
-const avg = (nums: number[]) => {
-  const valid = nums.filter((n) => Number.isFinite(n) && n > 0);
-  if (valid.length === 0) return 0;
-  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 };
 
 async function loadChannel(db: any, username: string) {
@@ -70,21 +62,17 @@ export default async (req: Request) => {
       }
 
       const row = await loadChannel(db, username);
-      // 메타 계정이 이미 연동돼 있으면(디엠 자동화에서 연결한 계정) sync 버튼을
-      // 켤 수 있다는 뜻이다. 토큰 자체는 절대 내려보내지 않는다.
-      let metaLinked = false;
-      try {
-        const store = getStore("dm-automation");
-        const settings = (await store.get(`dm_${username}`, { type: "json" })) as any;
-        metaLinked = !!(settings?.accessToken && (settings?.igUserId || settings?.igAccountId));
-      } catch {
-        metaLinked = false;
-      }
+      // 메타 계정이 이미 연동돼 있으면(브랜드 매칭 등록·디엠 자동화에서 연결한 계정)
+      // sync 버튼을 켤 수 있다는 뜻이다. 토큰 자체는 절대 내려보내지 않는다.
+      const link = await loadMetaLink(username);
+      const metaLinked = linkIsUsable(link);
 
       return Response.json({
         registered: !!row,
         channel: shapeChannel(row),
         metaLinked,
+        // 연동한 인스타 계정을 화면에서 확인할 수 있게 아이디만 함께 내린다.
+        igUsername: metaLinked ? String(link?.igUsername || "") : "",
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "채널 정보를 불러오지 못했습니다." }, { status: 500 });
@@ -195,10 +183,8 @@ export default async (req: Request) => {
         if (!auth.ok) return auth.response;
       }
 
-      const store = getStore("dm-automation");
-      const settings = (await store.get(`dm_${username}`, { type: "json" })) as any;
-      const igId = settings?.igUserId || settings?.igAccountId;
-      if (!settings?.accessToken || !igId) {
+      const link = await loadMetaLink(username);
+      if (!linkIsUsable(link)) {
         return Response.json(
           {
             error:
@@ -209,130 +195,17 @@ export default async (req: Request) => {
         );
       }
 
-      const graphHost =
-        settings.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
-
-      // 조회수 필드는 앱 권한에 따라 거부될 수 있다. 거부되면 그 필드만 빼고 한 번
-      // 더 부른다 — 조회수를 못 받는다고 릴스 목록까지 포기할 이유는 없다.
-      const withViews =
-        "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
-        "like_count,comments_count,view_count";
-      const withoutViews =
-        "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
-        "like_count,comments_count";
-
-      const fetchMedia = async (fields: string) => {
-        const endpoint =
-          `https://${graphHost}/me/media?fields=${encodeURIComponent(fields)}` +
-          `&limit=${SAMPLE_SIZE * 2}&access_token=${encodeURIComponent(settings.accessToken)}`;
-        const res = await fetch(endpoint);
-        const data = (await res.json().catch(() => ({}))) as any;
-        return { ok: res.ok, status: res.status, data };
-      };
-
-      let viewsAvailable = true;
-      let result = await fetchMedia(withViews);
-      if (!result.ok) {
-        viewsAvailable = false;
-        result = await fetchMedia(withoutViews);
-      }
-      if (!result.ok) {
-        const msg = result.data?.error?.message || `메타 API 오류 (HTTP ${result.status})`;
-        return Response.json({ error: msg, code: "META_ERROR" }, { status: 502 });
+      const synced = await syncChannelFromMeta(db, username, link!);
+      if (!synced.ok) {
+        return Response.json({ error: synced.error, code: "META_ERROR" }, { status: synced.status });
       }
 
-      const items: any[] = Array.isArray(result.data?.data) ? result.data.data : [];
-      // 릴스만 본다. 사진 게시물의 조회수는 없고, 있다 해도 릴스 성과와 섞으면
-      // 평균이 무슨 숫자인지 알 수 없어진다.
-      const reels = items
-        .filter(
-          (m) =>
-            String(m?.media_product_type || "").toUpperCase() === "REELS" ||
-            String(m?.media_type || "").toUpperCase() === "VIDEO",
-        )
-        .slice(0, SAMPLE_SIZE);
-
-      const views = reels.map((m) => intOf(m?.view_count));
-      const likes = reels.map((m) => intOf(m?.like_count));
-      const comments = reels.map((m) => intOf(m?.comments_count));
-
-      const existing = await loadChannel(db, username);
-      const avgViews = avg(views) || Number(existing?.avg_views || 0);
-      const avgLikes = avg(likes) || Number(existing?.avg_likes || 0);
-      const avgComments = avg(comments) || Number(existing?.avg_comments || 0);
-
-      // 팔로워·팔로잉 수는 프로필 필드로 별도 조회한다. 일부 권한에서 팔로잉 수가
-      // 빠질 수 있으므로 각각 기존 값을 유지하는 방식으로 갱신한다.
-      let followers = Number(existing?.followers || 0);
-      let following = Number(existing?.following || 0);
-      try {
-        const profileRes = await fetch(
-          `https://${graphHost}/me?fields=username,followers_count,follows_count&access_token=${encodeURIComponent(settings.accessToken)}`,
-        );
-        const profile = (await profileRes.json().catch(() => ({}))) as any;
-        if (profileRes.ok && profile?.followers_count) {
-          followers = intOf(profile.followers_count);
-        }
-        if (profileRes.ok && typeof profile?.follows_count !== "undefined") {
-          following = intOf(profile.follows_count);
-        }
-      } catch (e) {
-        console.warn("[creator-channel] 팔로워 수 조회 실패:", (e as Error)?.message);
-      }
-
-      const recentReels = reels.slice(0, SHOW_SIZE).map((m) => ({
-        id: String(m?.id || ""),
-        permalink: String(m?.permalink || ""),
-        thumbnailUrl: String(m?.thumbnail_url || m?.media_url || ""),
-        caption: String(m?.caption || "").slice(0, 200),
-        views: intOf(m?.view_count),
-        likes: intOf(m?.like_count),
-        comments: intOf(m?.comments_count),
-        timestamp: String(m?.timestamp || ""),
-        source: "meta_api",
-      }));
-
-      const handle =
-        String(existing?.instagram_handle || "") ||
-        String(settings?.igUsername || settings?.username || "");
-      const igUrl =
-        String(existing?.instagram_url || "") ||
-        (handle ? `https://www.instagram.com/${handle}/` : "");
-
-      await db.sql`
-        INSERT INTO creator_channels (
-          username, instagram_handle, instagram_url, connected, followers, following, avg_views,
-          avg_likes, avg_comments, reels_count, metrics_source, recent_reels, synced_at,
-          intro, categories
-        ) VALUES (
-          ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
-          ${avgLikes}, ${avgComments}, ${reels.length}, 'meta_api',
-          ${JSON.stringify(recentReels)}, NOW(),
-          ${String(existing?.intro || "")}, ${String(existing?.categories || "")}
-        )
-        ON CONFLICT (username) DO UPDATE SET
-          instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
-          instagram_url = COALESCE(NULLIF(EXCLUDED.instagram_url, ''), creator_channels.instagram_url),
-          connected = TRUE,
-          followers = EXCLUDED.followers,
-          following = EXCLUDED.following,
-          avg_views = EXCLUDED.avg_views,
-          avg_likes = EXCLUDED.avg_likes,
-          avg_comments = EXCLUDED.avg_comments,
-          reels_count = EXCLUDED.reels_count,
-          metrics_source = 'meta_api',
-          recent_reels = EXCLUDED.recent_reels,
-          synced_at = NOW(),
-          updated_at = NOW()
-      `;
-
-      const row = await loadChannel(db, username);
       return Response.json({
         success: true,
-        channel: shapeChannel(row),
+        channel: shapeChannel(synced.row),
         // 조회수를 못 받았으면 화면이 "연동은 됐지만 조회수는 비공개"를 말할 수 있어야 한다.
-        viewsAvailable,
-        sampled: reels.length,
+        viewsAvailable: synced.viewsAvailable,
+        sampled: synced.sampled,
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "갱신에 실패했습니다." }, { status: 500 });

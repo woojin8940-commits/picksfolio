@@ -48,6 +48,29 @@ export interface StatePayload {
   n: string
   /** 만료 시각(epoch ms). */
   e: number
+  /**
+   * 연동을 마친 뒤 돌아갈 우리 사이트 내부 경로. 없으면 콜백이 기본값을 쓴다.
+   *
+   * 값은 서명 대상 안에 들어가므로 위조할 수 없지만, 발급 시점에 한 번 더 검증한다
+   * (`/`로 시작하고 `//`·스킴이 없어야 한다). 서명만 믿고 임의 문자열을 그대로
+   * `Response.redirect` 에 넘기면 우리가 서명해 준 오픈 리다이렉트가 된다.
+   */
+  r?: string
+}
+
+/**
+ * 콜백 복귀 경로로 허용할 수 있는 값인지 검사한다.
+ * 내부 절대 경로만 통과시킨다 — 외부 도메인(`//evil.com`, `https://…`)은 거부.
+ */
+export function sanitizeReturnPath(raw: unknown): string {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  if (!value.startsWith('/')) return ''
+  if (value.startsWith('//')) return ''
+  // 개행·역슬래시 등으로 브라우저 파싱을 흔드는 값은 받지 않는다.
+  if (/[\\\s]/.test(value)) return ''
+  if (value.length > 256) return ''
+  return value
 }
 
 /**
@@ -57,6 +80,7 @@ export interface StatePayload {
 export async function issueSignedState(
   username: string,
   sessionUserId: string,
+  returnTo?: string,
 ): Promise<{ ok: true; state: string } | { ok: false; error: string }> {
   const key = signingKey()
   if (!key) return { ok: false, error: 'missing_state_secret' }
@@ -67,6 +91,8 @@ export async function issueSignedState(
     n: randomBytes(16).toString('base64url'),
     e: Date.now() + STATE_TTL_MS,
   }
+  const safeReturn = sanitizeReturnPath(returnTo)
+  if (safeReturn) payload.r = safeReturn
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const state = `${body}.${sign(body, key)}`
 

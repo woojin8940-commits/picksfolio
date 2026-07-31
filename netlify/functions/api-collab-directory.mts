@@ -1,5 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import { requireAdmin } from "./_shared/admin-auth.mts";
+import { callerIsAnyOf, requireSignedInUser } from "./_shared/user-auth.mts";
 import type { Config } from "@netlify/functions";
 
 // "1.2M", "12.3K", "1,234", "1234 followers" 같은 표기를 정수로 변환.
@@ -69,6 +70,39 @@ function genId(): string {
   return `cda_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * 지원자가 이미 메타 계정을 연동해 뒀는지 확인한다.
+ *
+ * 연동을 마친 계정은 creator_channels 에 metrics_source='meta_api' 로 기록돼 있다.
+ * 등록서에 손으로 적은 팔로워 수보다 이 값이 우선이다. 연동만 해 두고 아직 지표를
+ * 못 받은 경우(권한 거부 등)도 있으므로 행이 있으면 그대로 돌려주고, 판단은 호출부에서 한다.
+ *
+ * 이 등록서 접수는 로그인 없이도 열려 있다. 그래서 `applicant_username` 을 그대로
+ * 믿고 조회하면 아무나 남의 아이디를 적어 넣어 그 사람의 검증된 팔로워 수를 응답으로
+ * 받아낼 수 있다(연동 여부까지 함께 새어 나간다). 그러므로 **본인 확인을 통과한
+ * 요청에서만** 연동 지표를 붙인다. 확인이 안 되면 조회 자체를 하지 않고 수기 입력값을
+ * 쓴다 — 접수를 막지는 않는다.
+ */
+async function loadLinkedChannel(db: any, req: Request, applicantUsername: string) {
+  const username = applicantUsername.trim().toLowerCase();
+  if (!username) return null;
+
+  const caller = await requireSignedInUser(req);
+  if (!caller.ok) return null;
+  if (!callerIsAnyOf(caller, [username])) return null;
+
+  try {
+    const rows = await db.sql`
+      SELECT instagram_handle, instagram_url, followers, following, avg_views, metrics_source
+      FROM creator_channels
+      WHERE LOWER(username) = ${username} AND connected = TRUE
+    `;
+    return (rows as any[])?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 function parseJsonArray(raw: unknown): any[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw !== "string" || !raw) return [];
@@ -126,21 +160,45 @@ export default async (req: Request) => {
       if (!name) {
         return Response.json({ error: "이름을 입력해 주세요." }, { status: 400 });
       }
+      // 연락처가 없으면 접수는 되지만 매칭을 진행할 방법이 없다. 운영자가 나중에
+      // 사람을 찾아다니는 일을 만들지 않으려면 접수 시점에 받아 두는 편이 낫다.
+      if (!contact) {
+        return Response.json(
+          { error: "연락처를 입력해 주세요. 매칭 결과를 안내할 방법이 필요합니다." },
+          { status: 400 },
+        );
+      }
 
       const id = genId();
 
       if (role === "influencer") {
-        const instagram_url = (b.instagram_url || "").toString().trim();
+        const applicantUsername = (b.applicant_username || "").toString();
+        // 메타 연동을 마친 계정이면 인스타 정보는 검증된 값(creator_channels)을 쓴다.
+        // 자기 입력값과 섞으면 브랜드가 명단의 어느 숫자도 믿지 않게 된다.
+        const linked = applicantUsername
+          ? await loadLinkedChannel(db, req, applicantUsername)
+          : null;
+
+        const instagram_url =
+          (b.instagram_url || "").toString().trim() ||
+          (linked?.instagram_url ? String(linked.instagram_url) : "") ||
+          (linked?.instagram_handle ? `https://www.instagram.com/${linked.instagram_handle}/` : "");
         const tiktok_url = (b.tiktok_url || "").toString().trim();
         const youtube_url = (b.youtube_url || "").toString().trim();
         const naver_blog_url = (b.naver_blog_url || "").toString().trim();
 
+        // 연동한 사람은 인스타 링크를 손으로 적을 필요가 없다(위에서 채워진다).
         if (!instagram_url) {
-          return Response.json({ error: "인스타그램 프로필 링크를 입력해 주세요." }, { status: 400 });
+          return Response.json(
+            { error: "인스타그램 계정을 연동하거나 프로필 링크를 입력해 주세요." },
+            { status: 400 },
+          );
         }
 
-        // 채널별 수기 입력 팔로워 수
-        const instagram_followers = Math.max(0, parseInt(b.instagram_followers, 10) || 0);
+        // 채널별 수기 입력 팔로워 수. 인스타는 연동값이 있으면 그것을 우선한다.
+        const metaFollowers = linked ? Math.max(0, Number(linked.followers || 0)) : 0;
+        const instagram_followers =
+          metaFollowers || Math.max(0, parseInt(b.instagram_followers, 10) || 0);
         const youtube_followers = Math.max(0, parseInt(b.youtube_followers, 10) || 0);
         const tiktok_followers = Math.max(0, parseInt(b.tiktok_followers, 10) || 0);
         // 구간 분류/정렬용 대표 팔로워 수는 채널별 입력값 중 최대값을 사용한다.
@@ -156,12 +214,21 @@ export default async (req: Request) => {
         ].filter(Boolean).join(" / ") || (b.ad_price || "").toString().trim();
 
         // 인스타그램 지표는 공개 HTML 크롤링 값이 아니라 Meta 연동 데이터만 검증값으로
-        // 사용한다. 지원 시점에는 수기값을 저장하고, 운영자 명단에서 Meta 동기화한다.
+        // 사용한다. 연동을 마쳤으면 그 숫자를 대표값으로 굳히고, 연동 전에는 수기값을
+        // 저장한 뒤 운영자 명단에서 Meta 동기화한다.
         // 틱톡은 기존 분류 호환을 위해 공개 페이지 확인을 best-effort 로 유지한다.
         const crawled = tiktok_url ? await crawlFollowers(tiktok_url) : null;
 
-        const follower_count = crawled != null ? crawled : manualFollowers;
-        const follower_source = crawled != null ? "crawled" : "manual";
+        let follower_count = manualFollowers;
+        let follower_source = "manual";
+        if (metaFollowers > 0) {
+          // 연동 계정의 팔로워가 다른 채널보다 적어도 검증된 값이라는 사실이 더 중요하다.
+          follower_count = Math.max(metaFollowers, youtube_followers, tiktok_followers);
+          follower_source = "meta_api";
+        } else if (crawled != null) {
+          follower_count = crawled;
+          follower_source = "crawled";
+        }
 
         await db.sql`
           INSERT INTO collab_directory_applications
@@ -171,13 +238,20 @@ export default async (req: Request) => {
              ad_price, post_price, short_price, category,
              follower_count, follower_source, note)
           VALUES
-            (${id}, 'influencer', ${(b.applicant_username || "").toString()}, ${name}, ${contact},
+            (${id}, 'influencer', ${applicantUsername}, ${name}, ${contact},
              ${instagram_url}, ${youtube_url}, ${tiktok_url}, ${naver_blog_url},
              ${instagram_followers}, ${youtube_followers}, ${tiktok_followers},
              ${ad_price}, ${post_price}, ${short_price}, ${(b.category || "").toString()},
              ${follower_count}, ${follower_source}, ${(b.note || "").toString()})
         `;
-        return Response.json({ success: true, id, follower_count, follower_source });
+        return Response.json({
+          success: true,
+          id,
+          follower_count,
+          follower_source,
+          // 화면이 "검증된 숫자로 접수됐다"를 말할 수 있게 연동 여부를 함께 알려준다.
+          instagram_connected: !!linked,
+        });
       }
 
       // brand

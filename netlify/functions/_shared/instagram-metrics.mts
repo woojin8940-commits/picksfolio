@@ -1,0 +1,279 @@
+import { getStore } from "@netlify/blobs";
+
+/**
+ * 메타(인스타그램) 지표 수집 — 픽스폴리오가 보관하는 숫자의 단일 출처.
+ *
+ * 브랜드 매칭 명단에서 브랜드가 실제로 보는 것은 팔로워 수가 아니라 최근 릴스의
+ * 평균 조회수다. 그 숫자를 어디서 받아와 어디에 굳히는지를 이 파일 한 곳에 모은다.
+ *
+ * 이 로직을 부르는 곳이 두 군데다.
+ *   1) 인스타그램 계정 연동 직후(instagram-oauth-callback) — 연동하는 순간 지표를 채운다.
+ *   2) 이후 수동 갱신(api-creator-channel POST {action:'sync'}).
+ *
+ * 둘이 각자 그래프 API 를 호출하면 "연동은 했는데 명단에는 숫자가 없는" 상태가
+ * 생긴다. 연동 시점에 한 번 채워 두면 운영자가 sync 를 누르기 전에도 명단이
+ * 비어 보이지 않는다.
+ *
+ * 메타 앱 심사 범위에 따라 조회수(view_count)가 거부될 수 있다. 그래서 여기서는
+ * "받을 수 있는 것만 받고, 못 받은 항목은 기존 값을 남긴다". 조회수를 못 받는다고
+ * 릴스 목록이나 팔로워 수까지 포기할 이유는 없다.
+ */
+
+/** 평균을 낼 때 볼 최근 릴스 개수. 오래된 영상까지 섞으면 지금 실력이 흐려진다. */
+export const SAMPLE_SIZE = 12;
+/** 화면에 보여줄 최근 릴스 개수. */
+export const SHOW_SIZE = 6;
+
+export interface MetaLink {
+  accessToken?: string;
+  tokenSource?: string;
+  igUserId?: string;
+  igAccountId?: string;
+  igUsername?: string;
+  username?: string;
+}
+
+export interface RecentReel {
+  id: string;
+  permalink: string;
+  thumbnailUrl: string;
+  caption: string;
+  views: number;
+  likes: number;
+  comments: number;
+  timestamp: string;
+  source: string;
+}
+
+export interface MetaMetrics {
+  igUsername: string;
+  followers: number | null;
+  following: number | null;
+  avgViews: number;
+  avgLikes: number;
+  avgComments: number;
+  reelsCount: number;
+  recentReels: RecentReel[];
+  /** 조회수 필드를 실제로 받았는지 — 화면이 "연동됐지만 조회수는 비공개"를 말할 수 있어야 한다. */
+  viewsAvailable: boolean;
+}
+
+export const intOf = (raw: unknown) => {
+  const digits = String(raw ?? "").replace(/[^\d]/g, "");
+  const n = digits ? Number(digits) : Number(raw ?? 0);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+};
+
+const avg = (nums: number[]) => {
+  const valid = nums.filter((n) => Number.isFinite(n) && n > 0);
+  if (valid.length === 0) return 0;
+  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+};
+
+/** "Instagram API with Instagram Login" 토큰은 graph.instagram.com 을 쓴다(페이스북 그래프 아님). */
+const graphHostFor = (tokenSource?: string) =>
+  tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
+
+/** 사용자별 인스타그램 연동 정보(디엠 자동화 블롭에 함께 보관된다). */
+export async function loadMetaLink(username: string): Promise<MetaLink | null> {
+  try {
+    const store = getStore("dm-automation");
+    const settings = (await store.get(`dm_${username}`, { type: "json" })) as MetaLink | null;
+    if (!settings) return null;
+    return settings;
+  } catch {
+    return null;
+  }
+}
+
+export const linkIsUsable = (link: MetaLink | null): boolean =>
+  !!(link?.accessToken && (link?.igUserId || link?.igAccountId));
+
+/**
+ * 연동된 계정의 프로필(팔로워·팔로잉)과 최근 릴스 성과를 읽어 온다.
+ *
+ * 팔로워·팔로잉은 권한에 따라 개별 필드가 빠질 수 있으므로 못 받은 값은 null 로
+ * 두고, 저장하는 쪽에서 기존 값을 유지하게 한다. 0 으로 덮어쓰면 이미 확인해 둔
+ * 숫자가 사라진다.
+ */
+export async function fetchInstagramMetrics(
+  link: MetaLink,
+): Promise<{ ok: true; metrics: MetaMetrics } | { ok: false; error: string; status: number }> {
+  const token = String(link.accessToken || "");
+  if (!token) return { ok: false, error: "액세스 토큰이 없습니다.", status: 409 };
+
+  const graphHost = graphHostFor(link.tokenSource);
+
+  const withViews =
+    "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
+    "like_count,comments_count,view_count";
+  const withoutViews =
+    "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
+    "like_count,comments_count";
+
+  const fetchMedia = async (fields: string) => {
+    const endpoint =
+      `https://${graphHost}/me/media?fields=${encodeURIComponent(fields)}` +
+      `&limit=${SAMPLE_SIZE * 2}&access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(endpoint);
+    const data = (await res.json().catch(() => ({}))) as any;
+    return { ok: res.ok, status: res.status, data };
+  };
+
+  let viewsAvailable = true;
+  let result = await fetchMedia(withViews);
+  if (!result.ok) {
+    // 조회수 권한이 없으면 그 필드만 빼고 한 번 더 부른다.
+    viewsAvailable = false;
+    result = await fetchMedia(withoutViews);
+  }
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.data?.error?.message || `메타 API 오류 (HTTP ${result.status})`,
+      status: 502,
+    };
+  }
+
+  const items: any[] = Array.isArray(result.data?.data) ? result.data.data : [];
+  // 릴스만 본다. 사진 게시물은 조회수가 없고, 섞으면 평균이 무슨 숫자인지 알 수 없어진다.
+  const reels = items
+    .filter(
+      (m) =>
+        String(m?.media_product_type || "").toUpperCase() === "REELS" ||
+        String(m?.media_type || "").toUpperCase() === "VIDEO",
+    )
+    .slice(0, SAMPLE_SIZE);
+
+  // 팔로워·팔로잉은 프로필 필드로 별도 조회한다.
+  let igUsername = String(link.igUsername || "");
+  let followers: number | null = null;
+  let following: number | null = null;
+  try {
+    const profileRes = await fetch(
+      `https://${graphHost}/me?fields=username,followers_count,follows_count` +
+        `&access_token=${encodeURIComponent(token)}`,
+    );
+    const profile = (await profileRes.json().catch(() => ({}))) as any;
+    if (profileRes.ok) {
+      if (profile?.username) igUsername = String(profile.username);
+      if (typeof profile?.followers_count !== "undefined") followers = intOf(profile.followers_count);
+      if (typeof profile?.follows_count !== "undefined") following = intOf(profile.follows_count);
+    }
+  } catch (e) {
+    console.warn("[ig-metrics] 프로필(팔로워/팔로잉) 조회 실패:", (e as Error)?.message);
+  }
+
+  return {
+    ok: true,
+    metrics: {
+      igUsername,
+      followers,
+      following,
+      avgViews: avg(reels.map((m) => intOf(m?.view_count))),
+      avgLikes: avg(reels.map((m) => intOf(m?.like_count))),
+      avgComments: avg(reels.map((m) => intOf(m?.comments_count))),
+      reelsCount: reels.length,
+      recentReels: reels.slice(0, SHOW_SIZE).map((m) => ({
+        id: String(m?.id || ""),
+        permalink: String(m?.permalink || ""),
+        thumbnailUrl: String(m?.thumbnail_url || m?.media_url || ""),
+        caption: String(m?.caption || "").slice(0, 200),
+        views: intOf(m?.view_count),
+        likes: intOf(m?.like_count),
+        comments: intOf(m?.comments_count),
+        timestamp: String(m?.timestamp || ""),
+        source: "meta_api",
+      })),
+      viewsAvailable,
+    },
+  };
+}
+
+async function loadChannel(db: any, username: string) {
+  const rows = await db.sql`SELECT * FROM creator_channels WHERE username = ${username}`;
+  return (rows as any[])?.[0] || null;
+}
+
+/**
+ * 메타에서 받은 지표를 creator_channels 에 굳힌다.
+ *
+ * 못 받은 항목(권한 거부 등)은 기존 값을 유지한다. 연동 후 첫 저장이라 기존 값이
+ * 없으면 0 이 되지만, 그건 "아직 못 받았다"와 같은 뜻이라 문제되지 않는다.
+ */
+export async function persistMetrics(
+  db: any,
+  username: string,
+  metrics: MetaMetrics,
+): Promise<any> {
+  const existing = await loadChannel(db, username);
+
+  const followers = metrics.followers ?? Number(existing?.followers || 0);
+  const following = metrics.following ?? Number(existing?.following || 0);
+  const avgViews = metrics.avgViews || Number(existing?.avg_views || 0);
+  const avgLikes = metrics.avgLikes || Number(existing?.avg_likes || 0);
+  const avgComments = metrics.avgComments || Number(existing?.avg_comments || 0);
+  const reelsCount = metrics.reelsCount || Number(existing?.reels_count || 0);
+  const recentReels = metrics.recentReels.length
+    ? metrics.recentReels
+    : Array.isArray(existing?.recent_reels)
+      ? existing.recent_reels
+      : [];
+
+  const handle = metrics.igUsername || String(existing?.instagram_handle || "");
+  const igUrl =
+    String(existing?.instagram_url || "") ||
+    (handle ? `https://www.instagram.com/${handle}/` : "");
+
+  await db.sql`
+    INSERT INTO creator_channels (
+      username, instagram_handle, instagram_url, connected, followers, following, avg_views,
+      avg_likes, avg_comments, reels_count, metrics_source, recent_reels, synced_at,
+      intro, categories
+    ) VALUES (
+      ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
+      ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
+      ${JSON.stringify(recentReels)}, NOW(),
+      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}
+    )
+    ON CONFLICT (username) DO UPDATE SET
+      instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
+      instagram_url = COALESCE(NULLIF(EXCLUDED.instagram_url, ''), creator_channels.instagram_url),
+      connected = TRUE,
+      followers = EXCLUDED.followers,
+      following = EXCLUDED.following,
+      avg_views = EXCLUDED.avg_views,
+      avg_likes = EXCLUDED.avg_likes,
+      avg_comments = EXCLUDED.avg_comments,
+      reels_count = EXCLUDED.reels_count,
+      metrics_source = 'meta_api',
+      recent_reels = EXCLUDED.recent_reels,
+      synced_at = NOW(),
+      updated_at = NOW()
+  `;
+
+  return await loadChannel(db, username);
+}
+
+/**
+ * 연동 정보로 지표를 받아 바로 저장하는 한 번의 동작.
+ * 연동 직후 콜백과 수동 sync 가 같은 결과를 남기도록 여기 한 군데만 쓴다.
+ */
+export async function syncChannelFromMeta(
+  db: any,
+  username: string,
+  link: MetaLink,
+): Promise<
+  | { ok: true; row: any; viewsAvailable: boolean; sampled: number }
+  | { ok: false; error: string; status: number }
+> {
+  const fetched = await fetchInstagramMetrics(link);
+  if (!fetched.ok) return fetched;
+  const row = await persistMetrics(db, username, fetched.metrics);
+  return {
+    ok: true,
+    row,
+    viewsAvailable: fetched.metrics.viewsAvailable,
+    sampled: fetched.metrics.reelsCount,
+  };
+}
