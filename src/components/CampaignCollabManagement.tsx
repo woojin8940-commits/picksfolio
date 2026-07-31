@@ -278,7 +278,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     try {
       const res = await fetch('/api/campaigns', {
         method: 'PATCH',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: businessUsername }),
         body: JSON.stringify({ id: campaign.id, status: newStatus }),
       });
       if (!res.ok) {
@@ -301,7 +301,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     try {
       const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, {
         method: 'DELETE',
-        headers: await authHeaders(),
+        headers: await authHeaders({}, { account: businessUsername }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {

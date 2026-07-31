@@ -12,6 +12,16 @@ const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3M
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || FALLBACK_SUPABASE_URL;
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || FALLBACK_SUPABASE_ANON_KEY;
 
+/**
+ * 비즈니스 계정 토큰을 직접 갱신할 때 쓴다(`apiService.authHeaders`).
+ *
+ * 비즈니스 로그인은 서버 함수에서 로그인해 토큰만 받아 오므로 이 클라이언트의 세션이
+ * 아니다. 그래서 `supabase.auth.refreshSession()` 으로 갱신하면 브라우저에 남아 있는
+ * 크리에이터 세션을 덮어쓴다. 갱신은 auth REST 엔드포인트로 직접 호출한다.
+ */
+export const SUPABASE_URL = supabaseUrl;
+export const SUPABASE_ANON_KEY = supabaseAnonKey;
+
 let supabase: SupabaseClient | null = null;
 
 // In-process fallback lock: serializes concurrent calls within this tab without

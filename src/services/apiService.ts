@@ -1,6 +1,122 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 import type { BillingPlan, MembershipTier } from '../utils/membershipTiers';
-import { supabase } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
+
+const BIZ_SESSION_KEY = 'picks_business_session';
+const BIZ_TOKEN_KEY = 'picks_business_access_token';
+const BIZ_REFRESH_KEY = 'picks_business_refresh_token';
+
+/** `_shared/user-auth.mts` 의 비교 방식과 같게 맞춘다(biz/ 접두사 제거 · 소문자). */
+const normalizeAccount = (raw: string | null | undefined): string =>
+  (raw || '').replace(/^biz\//, '').trim().toLowerCase();
+
+const readLocal = (key: string): string => {
+  try {
+    return localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * 지금 화면이 다루고 있는 비즈니스 계정. 비즈니스 대시보드가 켜져 있는 동안만 값이 있다.
+ *
+ * 브라우저에는 크리에이터 세션(Supabase)과 비즈니스 세션(localStorage 토큰)이 함께
+ * 남아 있을 수 있다 — 로그아웃할 때 서로의 키를 일부러 지우지 않기 때문이다. 그래서
+ * 이 값 없이는 어느 쪽 토큰으로 보내야 하는지 알 수 없고, 비즈니스 화면의 요청이
+ * 크리에이터 토큰으로 나가 서버에서 "다른 계정의 정보에는 접근할 수 없습니다"(403)로
+ * 막혔다. 캠페인 등록이 마지막 단계에서 실패한 원인이 이것이다.
+ */
+let activeBusinessAccount = '';
+
+/** 비즈니스 대시보드가 마운트되는 동안 자기 계정을 등록한다. 빠져나갈 때 비운다. */
+export function setActiveBusinessAccount(username: string): void {
+  activeBusinessAccount = normalizeAccount(username);
+}
+
+/** JWT 만료 시각(ms). 읽을 수 없으면 0 — 그때는 만료 판단을 하지 않는다. */
+function tokenExpiresAt(token: string): number {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return 0;
+    const json = JSON.parse(
+      decodeURIComponent(
+        atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+          .split('')
+          .map(ch => `%${`00${ch.charCodeAt(0).toString(16)}`.slice(-2)}`)
+          .join(''),
+      ),
+    );
+    return typeof json?.exp === 'number' ? json.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let businessRefreshInFlight: Promise<string> | null = null;
+
+/**
+ * 비즈니스 액세스 토큰을 갱신한다.
+ *
+ * 비즈니스 로그인은 서버 함수가 대신 로그인해 토큰을 넘겨주는 방식이라 Supabase
+ * 클라이언트가 자동 갱신해 주지 않는다. 액세스 토큰 수명은 1시간이라, 캠페인 등록처럼
+ * 오래 붙잡고 쓰는 화면에서는 저장할 때 이미 만료돼 있는 일이 흔하다. 리프레시 토큰으로
+ * auth 엔드포인트를 직접 불러 갱신하고, 새 토큰을 같은 자리에 저장한다.
+ */
+async function refreshBusinessToken(refreshToken: string): Promise<string> {
+  if (businessRefreshInFlight) return businessRefreshInFlight;
+  businessRefreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) return '';
+      const data = await res.json().catch(() => null);
+      const nextAccess = String(data?.access_token || '');
+      if (!nextAccess) return '';
+      try {
+        localStorage.setItem(BIZ_TOKEN_KEY, nextAccess);
+        if (data?.refresh_token) localStorage.setItem(BIZ_REFRESH_KEY, String(data.refresh_token));
+      } catch {
+        // 저장하지 못해도 이번 요청은 새 토큰으로 보낼 수 있다.
+      }
+      return nextAccess;
+    } catch {
+      return '';
+    } finally {
+      businessRefreshInFlight = null;
+    }
+  })();
+  return businessRefreshInFlight;
+}
+
+/** 저장된 비즈니스 토큰. 만료가 가까우면 갱신한 값을 돌려준다. */
+async function businessAccessToken(): Promise<string> {
+  const token = readLocal(BIZ_TOKEN_KEY);
+  const expiresAt = tokenExpiresAt(token);
+  // 60초 여유를 둔다 — 요청이 서버에 닿는 사이 만료되는 경계를 피한다.
+  if (token && (!expiresAt || expiresAt - Date.now() > 60_000)) return token;
+
+  const refreshToken = readLocal(BIZ_REFRESH_KEY);
+  if (!refreshToken) return token;
+  const refreshed = await refreshBusinessToken(refreshToken);
+  // 갱신에 실패하면 있는 토큰을 그대로 보낸다. 서버가 만료로 판단해 재로그인을 안내한다.
+  return refreshed || token;
+}
+
+export interface AuthHeaderOptions {
+  /**
+   * 이 요청이 다루는 계정. 비즈니스 계정이면 그 계정 토큰으로 보낸다.
+   * 생략하면 지금 켜져 있는 비즈니스 대시보드의 계정으로 판단한다.
+   */
+  account?: string;
+}
 
 /**
  * 본인 확인이 필요한 API 에 붙일 인증 헤더.
@@ -8,22 +124,35 @@ import { supabase } from './supabase';
  * 서버(`_shared/user-auth.mts`)는 Supabase 액세스 토큰으로 호출자가 정말 그 계정의
  * 주인인지 확인한다. 일반 회원은 Supabase 세션에서, 비즈니스 계정은 로그인할 때
  * 저장해 둔 토큰에서 가져온다.
+ *
+ * 두 세션이 동시에 남아 있을 수 있으므로(위 `activeBusinessAccount` 주석) 요청이
+ * 다루는 계정이 비즈니스 계정이면 Supabase 세션보다 비즈니스 토큰을 먼저 쓴다.
  */
-export async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+export async function authHeaders(
+  extra: Record<string, string> = {},
+  opts: AuthHeaderOptions = {},
+): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...extra };
   let token = '';
-  try {
-    const { data } = (await supabase?.auth.getSession()) || { data: null };
-    token = data?.session?.access_token || '';
-  } catch {
-    // 세션 조회 실패 시 아래 비즈니스 토큰으로 폴백한다.
+
+  const target = normalizeAccount(opts.account) || activeBusinessAccount;
+  const businessName = normalizeAccount(readLocal(BIZ_SESSION_KEY));
+  const useBusinessToken = !!target && !!businessName && target === businessName;
+
+  if (useBusinessToken) {
+    token = await businessAccessToken();
   }
+
   if (!token) {
     try {
-      token = localStorage.getItem('picks_business_access_token') || '';
+      const { data } = (await supabase?.auth.getSession()) || { data: null };
+      token = data?.session?.access_token || '';
     } catch {
-      token = '';
+      // 세션 조회 실패 시 아래 비즈니스 토큰으로 폴백한다.
     }
+  }
+  if (!token) {
+    token = readLocal(BIZ_TOKEN_KEY);
   }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -39,9 +168,9 @@ export async function authHeaders(extra: Record<string, string> = {}): Promise<R
  * 다르다 — 서비스 화면은 Supabase 토큰(`authHeaders`)이고, 운영 콘솔은 Netlify
  * Identity 토큰이라 화면에서 명시적으로 넘겨받는다. `token` 이 있으면 담당자 호출.
  */
-export async function collabHeaders(token?: string): Promise<Record<string, string>> {
+export async function collabHeaders(token?: string, opts: AuthHeaderOptions = {}): Promise<Record<string, string>> {
   if (token) return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  return await authHeaders({ 'Content-Type': 'application/json' });
+  return await authHeaders({ 'Content-Type': 'application/json' }, opts);
 }
 
 /**
