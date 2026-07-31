@@ -175,17 +175,12 @@ export async function buildSnapshot(
   username: string,
 ): Promise<ChannelSnapshot> {
   const uname = norm(username);
-  const [channelRows, dirRows] = await Promise.all([
-    db.sql`SELECT * FROM creator_channels WHERE username = ${uname}` as Promise<any[]>,
-    db.sql`
-      SELECT * FROM collab_directory_applications
-      WHERE role = 'influencer' AND applicant_username = ${uname}
-      ORDER BY created_at DESC LIMIT 1
-    ` as Promise<any[]>,
-  ]);
+  const map = await buildSnapshots(db, [uname]);
+  return map.get(uname) || emptySnapshot();
+}
 
-  const channel = (channelRows as any[])?.[0];
-  const dir = (dirRows as any[])?.[0];
+/** 채널 행 + 등록서 행을 하나의 스냅샷으로 겹친다. 합치는 규칙은 여기 한 군데만 둔다. */
+function mergeSnapshot(channel: any, dir: any): ChannelSnapshot {
   const snap = shapeChannel(channel);
 
   if (dir) {
@@ -202,6 +197,43 @@ export async function buildSnapshot(
 
   snap.syncedFrom = channel ? "creator" : dir ? "directory" : "";
   return snap;
+}
+
+/**
+ * 여러 사람의 스냅샷을 한 번에 모은다.
+ *
+ * 지원자 목록처럼 사람이 수십 명 나오는 화면이 buildSnapshot 을 사람마다 부르면
+ * 쿼리가 인원수의 두 배로 늘어난다. 목록에서 보는 숫자와 명단에 올릴 때 굳는 숫자가
+ * 어긋나면 안 되므로, 겹치는 규칙(mergeSnapshot)은 그대로 쓰고 조회만 한 번에 한다.
+ */
+export async function buildSnapshots(
+  db: any,
+  usernames: string[],
+): Promise<Map<string, ChannelSnapshot>> {
+  const names = Array.from(new Set((usernames || []).map((u) => norm(u)).filter(Boolean)));
+  const out = new Map<string, ChannelSnapshot>();
+  if (!names.length) return out;
+
+  const [channelRows, dirRows] = await Promise.all([
+    db.sql`SELECT * FROM creator_channels WHERE username = ANY(${names})` as Promise<any[]>,
+    // 등록서는 사람마다 여러 장일 수 있다. 가장 최근 것만 본다(단건 조회의 LIMIT 1 과 같은 규칙).
+    db.sql`
+      SELECT DISTINCT ON (applicant_username) *
+      FROM collab_directory_applications
+      WHERE role = 'influencer' AND applicant_username = ANY(${names})
+      ORDER BY applicant_username, created_at DESC
+    ` as Promise<any[]>,
+  ]);
+
+  const channelBy = new Map<string, any>();
+  for (const row of (channelRows as any[]) || []) channelBy.set(norm(row.username), row);
+  const dirBy = new Map<string, any>();
+  for (const row of (dirRows as any[]) || []) dirBy.set(norm(row.applicant_username), row);
+
+  for (const name of names) {
+    out.set(name, mergeSnapshot(channelBy.get(name), dirBy.get(name)));
+  }
+  return out;
 }
 
 /** campaign_listups 행 → 화면용. 인플루언서에게는 다른 후보 이야기가 가지 않는다. */

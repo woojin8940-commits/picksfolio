@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { todayInSeoul } from '../../utils/formatters';
 
 /**
@@ -14,6 +14,11 @@ import { todayInSeoul } from '../../utils/formatters';
  *
  * 시작일보다 앞선 날짜를 두 번째로 누르면 종료일로 받지 않고 시작일을 다시 잡는다 —
  * "잘못 골랐으니 다시"가 가장 흔한 다음 행동이다.
+ *
+ * 달력은 띄우는(absolute) 대신 자리를 차지하며 펼친다. 예전에는 떠 있는 카드였는데,
+ * 캠페인 등록 폼이 `overflow-hidden` 카드 안에 있어서 달력의 아래쪽(마지막 주와 초기화·
+ * 닫기 줄)이 카드 경계에서 잘려 보이지 않았다. 자리를 차지하면 카드가 그만큼 늘어나므로
+ * 어떤 화면 크기에서도 달력 전체가 보인다.
  */
 
 interface DateRangeCalendarProps {
@@ -45,7 +50,6 @@ const DateRangeCalendar: React.FC<DateRangeCalendarProps> = ({ from, to, onChang
   const floor = minDate || today;
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState('');
-  const wrapRef = useRef<HTMLDivElement>(null);
 
   // 보여 줄 달. 이미 고른 시작일이 있으면 그 달에서 시작한다.
   const anchor = from || floor;
@@ -53,20 +57,6 @@ const DateRangeCalendar: React.FC<DateRangeCalendarProps> = ({ from, to, onChang
     const [y, m] = anchor.split('-').map(Number);
     return { year: y, month: (m || 1) - 1 };
   });
-
-  // 바깥을 누르면 닫는다. 시작일만 고른 채로 닫히면 절반만 고른 상태가 남으므로
-  // 그때는 고른 시작일을 그대로 두고 마감일은 비워 둔다(선택 사항이다).
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setHovered('');
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
 
   const openAt = (which: 'from' | 'to') => {
     const base = which === 'to' && to ? to : from || floor;
@@ -120,7 +110,7 @@ const DateRangeCalendar: React.FC<DateRangeCalendarProps> = ({ from, to, onChang
     'flex-1 text-left px-4 py-3 rounded-xl border text-sm font-bold transition-colors min-w-0';
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div className="relative">
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -152,7 +142,7 @@ const DateRangeCalendar: React.FC<DateRangeCalendarProps> = ({ from, to, onChang
       )}
 
       {open && (
-        <div className="absolute z-30 mt-2 w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl border border-slate-200 shadow-xl p-4">
+        <div className="mt-2 w-full max-w-[360px] bg-white rounded-2xl border border-slate-200 shadow-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <button
               type="button"

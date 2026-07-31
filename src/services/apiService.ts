@@ -1664,18 +1664,34 @@ export const apiService = {
     }
   },
 
-  /** 지원자 선정 · 거절. 담당자만 호출할 수 있다. */
+  /**
+   * 지원자 선정 · 거절.
+   *
+   * 토큰을 넘기면 담당자 자격으로, 넘기지 않으면 로그인한 브랜드 자격으로 간다.
+   * 브랜드는 제품 협찬형·공동구매 캠페인의 '수락'만 할 수 있다(거절은 담당자 몫).
+   * 권한이 없으면 서버가 code 로 이유를 준다 — SELECTION_BY_MANAGER(선정 자체가
+   * 담당자 몫) / REJECTION_BY_MANAGER(거절만 담당자 몫).
+   */
   async decideApplicant(
     applicantId: string,
     status: 'accepted' | 'rejected',
     opts: { token?: string; managerNote?: string } = {},
-  ): Promise<{ success?: boolean; collabId?: string; threads?: any; error?: string; code?: string }> {
+  ): Promise<{
+    success?: boolean;
+    collabId?: string;
+    threads?: any;
+    managerUsername?: string;
+    error?: string;
+    code?: string;
+  }> {
     try {
       const res = await fetch('/api/campaign-applicants', {
         method: 'PATCH',
         credentials: 'same-origin',
         headers: await collabHeaders(opts.token),
-        body: JSON.stringify({ id: applicantId, status, managerNote: opts.managerNote }),
+        // 서버가 읽는 필드 이름은 note 다. managerNote 로 보내던 동안 담당자가 적은
+        // 선정 메모가 저장되지 않고 사라졌다.
+        body: JSON.stringify({ id: applicantId, status, note: opts.managerNote || '' }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '처리에 실패했습니다.', code: json?.code };

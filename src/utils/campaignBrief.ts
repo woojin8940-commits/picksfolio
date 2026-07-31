@@ -20,9 +20,15 @@
  *
  * 진행 단계는 진행 방식이 정한다. 광고비를 지급하면 구성안·콘텐츠 검수를 거치고
  * 정산이 붙는다. 제품 협찬형은 가이드를 주고 업로드를 확인하는 데서 끝난다 — 지급할
- * 광고비가 없으니 정산 단계도 없다. 서버 쪽 짝은
+ * 광고비가 없으니 정산 단계도 없다. 공동구매는 판매 콘텐츠라 검수를 거치고 수수료
+ * 정산이 붙는다. 서버 쪽 짝은
  * netlify/functions/_shared/collab-workflow.mts 의 stage template 이고, 한쪽을 바꾸면
  * 다른 쪽도 같이 바꿔야 한다.
+ *
+ * 진행 방식은 "누가 인플루언서를 정하는가"도 함께 정한다. 광고비 지급형은 담당자가
+ * 조건에 맞는 후보를 찾아 리스트업하고, 제품 협찬형·공동구매는 캠페인 협업 목록에
+ * 걸어 두고 지원을 받는다. 그래서 규모별 인원 배분(희망 인플루언서)은 광고비 지급형에만
+ * 있다 — 누가 지원할지 모르는 상태에서 "메가 1명"을 못 박아 두면 지킬 수 없다.
  */
 
 import { formatKoreanWon } from './formatters';
@@ -31,7 +37,7 @@ import { formatKoreanWon } from './formatters';
 // 진행 방식
 // ---------------------------------------------------------------------------
 
-export type RewardMode = 'paid' | 'barter';
+export type RewardMode = 'paid' | 'barter' | 'groupbuy';
 
 export type RewardModeDef = {
   value: RewardMode;
@@ -40,6 +46,26 @@ export type RewardModeDef = {
   lines: [string, string];
   /** 협업 조건에 그대로 들어가는 2차 활용 범위. */
   secondUseNote: string;
+  /**
+   * 캠페인 협업 목록에 걸어 두고 인플루언서가 직접 지원하는 방식인지.
+   *
+   * 광고비 지급형은 담당자가 조건에 맞는 후보를 찾아 리스트업하는 길이라, 목록에
+   * 걸어 두면 지원해도 그 지원이 섭외로 이어지지 않는다. 그래서 노출하지 않는다.
+   * 제품 협찬형과 공동구매는 반대다 — 지원한 사람 중에서 브랜드가 고르는 방식이므로
+   * 목록에 보여야 지원이 들어온다.
+   */
+  openApply: boolean;
+  /**
+   * 희망 인플루언서(규모별 인원 배분)를 브랜드가 직접 정하는지.
+   *
+   * 지원을 받아 고르는 방식에서는 나노·매크로처럼 규모를 미리 못 박을 수 없다.
+   * 누가 지원할지 모르는 상태에서 정한 구성은 지킬 수 없는 약속이 된다.
+   */
+  pickInfluencer: boolean;
+  /** 지원/모집 인원 칸에 붙는 이름. 진행 방식마다 세는 대상이 다르다. */
+  headcountLabel: string;
+  /** 캠페인 유형(type) 컬럼에 저장할 값. 협업 단계 묶음이 이 값으로 갈린다. */
+  campaignType: string;
 };
 
 export const REWARD_MODES: RewardModeDef[] = [
@@ -47,20 +73,49 @@ export const REWARD_MODES: RewardModeDef[] = [
     value: 'paid',
     label: '광고비 지급형',
     tagline: '제품 + 광고비',
-    lines: ['광고비를 지급하고 콘텐츠를 의뢰합니다.', '구성안·콘텐츠를 확인하고 업로드합니다.'],
+    lines: ['광고비를 지급하고 콘텐츠를 의뢰합니다.', '담당자가 조건에 맞는 후보를 찾아 드립니다.'],
     secondUseNote: '2차 활용 범위는 담당자와 협의합니다',
+    openApply: false,
+    pickInfluencer: true,
+    headcountLabel: '모집 인원',
+    campaignType: 'ad_collab',
   },
   {
     value: 'barter',
     label: '제품 협찬형',
     tagline: '제품만 제공',
-    lines: ['광고비 없이 제품 협찬만으로 진행합니다.', '가이드를 전달하고 업로드를 확인합니다.'],
+    lines: ['광고비 없이 제품 협찬만으로 진행합니다.', '지원한 인플루언서 중에서 골라 진행합니다.'],
     secondUseNote: '2차 활용은 별도 동의가 필요합니다',
+    openApply: true,
+    pickInfluencer: false,
+    headcountLabel: '협찬 인원',
+    campaignType: 'ad_collab',
+  },
+  {
+    value: 'groupbuy',
+    label: '공동구매형',
+    tagline: '판매 수수료',
+    lines: ['제품을 함께 팔고 판매 수수료를 지급합니다.', '지원한 인플루언서 중에서 골라 진행합니다.'],
+    secondUseNote: '판매 기간과 수수료 지급은 담당자가 정리합니다',
+    openApply: true,
+    pickInfluencer: false,
+    headcountLabel: '모집 인원',
+    campaignType: 'group_buy',
   },
 ];
 
 export const rewardModeOf = (value: string | null | undefined): RewardModeDef =>
   REWARD_MODES.find(m => m.value === value) || REWARD_MODES[0];
+
+/** 저장·전송할 진행 방식 값. 모르는 값은 예전 캠페인과 같게 'paid' 로 본다. */
+export const normalizeRewardMode = (value: unknown): RewardMode =>
+  rewardModeOf(typeof value === 'string' ? value : '').value;
+
+/** 캠페인 협업 목록에 노출되는 진행 방식들. 서버 필터와 짝이다. */
+export const OPEN_APPLY_MODES: RewardMode[] = REWARD_MODES.filter(m => m.openApply).map(m => m.value);
+
+/** 공동구매 판매 수수료(%) 의 허용 범위. */
+export const COMMISSION_RANGE = { min: 1, max: 90 } as const;
 
 // ---------------------------------------------------------------------------
 // 인플루언서 규모
@@ -192,9 +247,9 @@ export const remainingBudget = (budgetKrw: number, counts: TierCounts): number =
 /**
  * 이 구간에 한 명 더 넣을 수 있는지.
  *
- * 광고비 지급형은 예산이 기준이고, 제품 협찬형은 협찬 가능 수량이 기준이다. 넣을 수
- * 없을 때 버튼을 눌리게 두면 브랜드는 예산을 넘긴 구성을 다 짜 놓고 마지막에
- * 거절당한다.
+ * 규모별 배분은 광고비 지급형에만 있다(다른 방식은 지원을 받아 고른다). 그래서 기준은
+ * 예산이다. 넣을 수 없을 때 버튼을 눌리게 두면 브랜드는 예산을 넘긴 구성을 다 짜 놓고
+ * 마지막에 거절당한다.
  */
 export const canAddOne = (
   tier: TierDef,
@@ -203,7 +258,7 @@ export const canAddOne = (
   supplyCount: number,
   counts: TierCounts,
 ): boolean => {
-  if (mode === 'barter') {
+  if (mode !== 'paid') {
     return supplyCount <= 0 || totalHeadcount(counts) < supplyCount;
   }
   if (budgetKrw <= 0) return false;
@@ -226,16 +281,29 @@ export type StageMark = { label: string; included: boolean };
  * 등록 화면·상세 화면이 보여 주는 진행 단계.
  *
  * 협업에 실제로 생기는 단계와 짝을 맞춰야 한다. "콘텐츠 검수 포함"이라고 보여 주고
- * 협업에 그 단계가 없으면 그 표시는 거짓말이 된다.
+ * 협업에 그 단계가 없으면 그 표시는 거짓말이 된다. 공동구매는 단계 이름 자체가 다르므로
+ * (가이드 전달 → 상품 정보 전달, 업로드 → 판매 시작) 목록을 따로 둔다.
  */
-export const stageMarksFor = (mode: RewardMode): StageMark[] => [
-  { label: '조건 확정', included: true },
-  { label: '가이드 전달', included: true },
-  { label: '구성안 검수', included: mode === 'paid' },
-  { label: '콘텐츠 검수', included: mode === 'paid' },
-  { label: '업로드 확인', included: true },
-  { label: '광고비 정산', included: mode === 'paid' },
-];
+export const stageMarksFor = (mode: RewardMode): StageMark[] => {
+  if (mode === 'groupbuy') {
+    return [
+      { label: '조건 확정', included: true },
+      { label: '상품 정보 전달', included: true },
+      { label: '콘텐츠 검수', included: true },
+      { label: '판매 시작', included: true },
+      { label: '게시 확인', included: true },
+      { label: '수수료 정산', included: true },
+    ];
+  }
+  return [
+    { label: '조건 확정', included: true },
+    { label: '가이드 전달', included: true },
+    { label: '구성안 검수', included: mode === 'paid' },
+    { label: '콘텐츠 검수', included: mode === 'paid' },
+    { label: '업로드 확인', included: true },
+    { label: '광고비 정산', included: mode === 'paid' },
+  ];
+};
 
 // ---------------------------------------------------------------------------
 // 선택지
@@ -272,7 +340,14 @@ export const AD_OBJECTIVES = [
   },
 ] as const;
 
-export const CHANNELS = ['인스타그램', '유튜브', '틱톡'] as const;
+/**
+ * 업로드 채널.
+ *
+ * 우선 인스타그램만 받는다. 유튜브·틱톡은 산출물 규격과 검수 기준이 달라, 채널만
+ * 열어 두면 브랜드가 고른 채널로 진행할 준비가 되지 않은 상태에서 캠페인이 올라간다.
+ * 채널이 늘어나면 이 목록에 더하면 된다 — 등록 화면은 목록을 그대로 그린다.
+ */
+export const CHANNELS = ['인스타그램'] as const;
 
 export const GENDERS = [
   { value: 'female', label: '여성' },
@@ -315,7 +390,7 @@ export const derivedTitle = (productName: string, brandName: string): string => 
  * 숫자가 된다. 구간별 금액은 지원 조건 문장에 그대로 남겨 둔다.
  */
 export const derivedUnitFee = (mode: RewardMode, counts: TierCounts): number => {
-  if (mode === 'barter') return 0;
+  if (mode !== 'paid') return 0;
   const fees = chosenTiers(counts)
     .filter(t => (counts[t.key] || 0) > 0)
     .map(t => t.minFee);
@@ -328,6 +403,10 @@ export const derivedUnitFee = (mode: RewardMode, counts: TierCounts): number => 
  * 인플루언서 지원 화면과 담당자 리스트업 화면은 requirements 를 읽어 왔다. 조건을
  * 칩으로 받게 바꿨으니 그 값을 사람이 읽는 문장으로도 남겨 둔다 — 그러지 않으면
  * 기존 화면에서 지원 조건이 갑자기 비어 보인다.
+ *
+ * 지원을 받아 고르는 방식(제품 협찬형·공동구매)은 규모나 성별로 지원을 막지 않는다.
+ * 그 방식에서 조건 문장에 "여성 20대 나노"를 적어 두면, 목록을 보는 인플루언서는
+ * 자기가 지원 대상이 아니라고 읽는다. 그래서 인원과 진행 조건만 남긴다.
  */
 export const derivedRequirements = (input: {
   mode: RewardMode;
@@ -338,9 +417,29 @@ export const derivedRequirements = (input: {
   minViews: number;
   styles: string[];
   excludes: string[];
+  /** 지원을 받아 고르는 방식의 모집·협찬 인원. */
+  headcount?: number;
+  /** 공동구매 판매 수수료(%). */
+  commissionRate?: number;
+  /** 업로드 채널. 지원 전에 알아야 하는 조건이다. */
+  channel?: string;
 }): string => {
+  const def = rewardModeOf(input.mode);
   const lines: string[] = [];
-  lines.push(`진행 방식: ${rewardModeOf(input.mode).label}`);
+  lines.push(`진행 방식: ${def.label}`);
+  if (input.channel) lines.push(`업로드 채널: ${input.channel}`);
+
+  if (!def.pickInfluencer) {
+    if (input.headcount && input.headcount > 0) {
+      lines.push(`${def.headcountLabel}: ${input.headcount}명`);
+    }
+    if (input.mode === 'groupbuy' && input.commissionRate && input.commissionRate > 0) {
+      lines.push(`판매 수수료: ${input.commissionRate}%`);
+    }
+    lines.push('지원해 주신 인플루언서 중에서 브랜드가 함께할 분을 고릅니다.');
+    return lines.join('\n');
+  }
+
   const genderLabel = GENDERS.find(g => g.value === input.gender)?.label;
   const who = [genderLabel && genderLabel !== '성별 무관' ? genderLabel : '', input.ages.join('·')]
     .filter(Boolean)
@@ -352,11 +451,7 @@ export const derivedRequirements = (input: {
   if (picked.length) {
     lines.push(
       `모집 구성: ${picked
-        .map(t =>
-          input.mode === 'barter'
-            ? `${t.label} ${input.tierCounts[t.key]}명`
-            : `${t.label} ${input.tierCounts[t.key]}명(1인 ${tierFeeLabel(t)})`,
-        )
+        .map(t => `${t.label} ${input.tierCounts[t.key]}명(1인 ${tierFeeLabel(t)})`)
         .join(' · ')}`,
     );
   }

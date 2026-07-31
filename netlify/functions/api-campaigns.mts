@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { isRecruitClosed, todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -33,6 +34,12 @@ const csv = (raw: unknown): string => {
   if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean).join(",");
   return String(raw ?? "").trim();
 };
+
+/**
+ * 진행 방식·목록 노출 규칙은 _shared/reward-mode.mts 에 모아 두었다. 브랜드 화면의
+ * 수락 권한도 같은 규칙을 보기 때문에, 여기서 따로 판단하지 않는다.
+ */
+const rewardMode = (raw: unknown): string => normalizeRewardMode(raw);
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -85,10 +92,14 @@ export default async (req: Request) => {
       // 공개 목록(브랜드 자신의 관리 화면이 아닌 경우)에서는 모집이 끝난 캠페인을
       // 제외한다. 브랜드가 "마감"을 누르지 않았더라도 종료일이 지난 캠페인은
       // 지원할 수 없어, 노출해 봐야 막다른 길이기 때문이다.
-      // 브랜드 관리 화면(business 파라미터)에서는 마감된 캠페인도 그대로 보여
-      // 준다 — 수정·재개·삭제해야 하므로.
+      // 진행 방식으로도 한 번 더 거른다 — 광고비 지급형은 지원을 받는 캠페인이 아니라
+      // 담당자가 후보를 리스트업하는 캠페인이다(_shared/reward-mode.mts 주석 참고).
+      // 브랜드 관리 화면(business 파라미터)에서는 마감된 캠페인도, 광고비 지급형도
+      // 그대로 보여 준다 — 수정·재개·삭제해야 하므로.
       if (!business) {
-        return Response.json({ campaigns: campaigns.filter((c) => !c.recruit_closed) });
+        return Response.json({
+          campaigns: campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode)),
+        });
       }
 
       return Response.json({ campaigns });
@@ -110,6 +121,9 @@ export default async (req: Request) => {
 
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+      // 광고 목적(ad_objective)은 || 가 아니라 ?? 로 받는다. 지원을 받아 고르는 방식
+      // (제품 협찬형·공동구매)에는 광고 목적이 없어서 빈 문자열로 오는데, || 로 접으면
+      // 고르지도 않은 '인지도'가 저장되고 담당자 화면에 조건으로 뜬다.
       await db.sql`
         INSERT INTO campaigns (
           id, business_username, type, title, description, brand_name, thumbnail_url, category,
@@ -117,7 +131,7 @@ export default async (req: Request) => {
           product_name, product_url, upload_channel, content_format, video_concept,
           guideline_url, guideline_note, second_use_fee, second_use_note, upload_from, upload_to,
           package_tier, reward_mode, tier_counts,
-          product_provide, ad_objective, budget_krw, seeding_count, fast_track,
+          product_provide, ad_objective, budget_krw, seeding_count, groupbuy_commission_rate, fast_track,
           influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
           influencer_styles, exclude_keywords, target_audience
         )
@@ -132,10 +146,11 @@ export default async (req: Request) => {
           ${briefFee(body.second_use_fee)}, ${body.second_use_note || ""},
           ${body.upload_from || ""}, ${body.upload_to || ""},
           ${body.package_tier || "full"},
-          ${body.reward_mode === "barter" ? "barter" : "paid"}, ${body.tier_counts || ""},
+          ${rewardMode(body.reward_mode)}, ${body.tier_counts || ""},
           ${body.product_provide || "provide"},
-          ${body.ad_objective || "awareness"}, ${briefFee(body.budget_krw)},
-          ${briefFee(body.seeding_count)}, ${Boolean(body.fast_track)},
+          ${body.ad_objective ?? "awareness"}, ${briefFee(body.budget_krw)},
+          ${briefFee(body.seeding_count)}, ${briefFee(body.groupbuy_commission_rate)},
+          ${Boolean(body.fast_track)},
           ${body.influencer_gender || ""}, ${csv(body.influencer_ages)},
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
           ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
@@ -200,12 +215,13 @@ export default async (req: Request) => {
             upload_from = ${updates.upload_from ?? c.upload_from ?? ""},
             upload_to = ${updates.upload_to ?? c.upload_to ?? ""},
             package_tier = ${updates.package_tier ?? c.package_tier ?? "full"},
-            reward_mode = ${updates.reward_mode === undefined ? (c.reward_mode || "paid") : (updates.reward_mode === "barter" ? "barter" : "paid")},
+            reward_mode = ${updates.reward_mode === undefined ? rewardMode(c.reward_mode) : rewardMode(updates.reward_mode)},
             tier_counts = ${updates.tier_counts === undefined ? (c.tier_counts ?? "") : String(updates.tier_counts || "")},
             product_provide = ${updates.product_provide ?? c.product_provide ?? "provide"},
             ad_objective = ${updates.ad_objective ?? c.ad_objective ?? "awareness"},
             budget_krw = ${updates.budget_krw === undefined ? Number(c.budget_krw || 0) : briefFee(updates.budget_krw)},
             seeding_count = ${updates.seeding_count === undefined ? Number(c.seeding_count || 0) : briefFee(updates.seeding_count)},
+            groupbuy_commission_rate = ${updates.groupbuy_commission_rate === undefined ? Number(c.groupbuy_commission_rate || 0) : briefFee(updates.groupbuy_commission_rate)},
             fast_track = ${updates.fast_track === undefined ? Boolean(c.fast_track) : Boolean(updates.fast_track)},
             influencer_gender = ${updates.influencer_gender ?? c.influencer_gender ?? ""},
             influencer_ages = ${updates.influencer_ages === undefined ? (c.influencer_ages ?? "") : csv(updates.influencer_ages)},

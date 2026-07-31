@@ -4,13 +4,14 @@ import { authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
 import {
-  REWARD_MODES, rewardModeOf, TIERS, tierFeeLabel, stageMarksFor,
+  REWARD_MODES, rewardModeOf, normalizeRewardMode, COMMISSION_RANGE,
+  TIERS, tierFeeLabel, stageMarksFor,
   PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, GENDERS, AGE_BANDS,
   INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
   parseTierCounts, serializeTierCounts, chosenTiers, totalHeadcount,
   allocatedFloor, allocatedCeiling, remainingBudget, canAddOne, affordableCount,
   derivedTitle, derivedRequirements, derivedUnitFee,
-  type RewardMode, type TierCounts, type TierKey,
+  type TierCounts, type TierKey,
 } from '../../utils/campaignBrief';
 
 /**
@@ -21,19 +22,26 @@ import {
  *   ② 캠페인 설정 — 어떻게 진행하고, 얼마를 쓰고, 언제 올릴 것인가
  *   ③ 희망 인플루언서 — 누가 몇 명 올리면 좋겠는가
  *
+ * ③ 은 진행 방식에 따라 아예 없어진다. 제품 협찬형·공동구매는 캠페인 협업 목록에
+ * 걸어 두고 지원을 받는 방식이라, 브랜드가 규모(나노·매크로…)나 성별을 미리 못 박을 수
+ * 없다. 지원자가 누구일지 모르는 상태에서 정한 구성은 지킬 수 없는 약속이고, 그 조건을
+ * 목록에 걸어 두면 해당하지 않는 인플루언서는 아예 지원하지 않는다. 그래서 그 방식에서는
+ * 인원(협찬 인원 / 모집 인원)만 받고 단계를 하나 줄인다 — 광고 목적도 담당자 리스트업에
+ * 쓰는 값이라 같이 뺀다.
+ *
  * 예전에는 여기에 패키지가 있었다. 브랜드가 패키지를 고르면 1인 단가가 정해지고,
  * 모집 인원은 예산 ÷ 단가로 계산됐다. 그런데 그 나눗셈이 실제 섭외와 맞지 않았다.
  * 예산 5,000만원을 시딩 단가로 나누면 500명이 나오는데, 브랜드가 실제로 원하는 것은
  * "메가 한 명을 중심에 두고 마이크로를 여러 명" 같은 구성이었다.
  *
- * 그래서 패키지를 없애고 두 가지를 직접 받는다. 예산(또는 협찬 가능 수량)과 규모별
- * 인원이다. 인원을 계산해 주는 대신, 각 규모의 최소 단가로 배분액을 계산해 예산을
- * 넘기지 못하게 막는다. 브랜드는 남은 예산을 보면서 구성을 직접 굴려 볼 수 있고,
- * 나온 구성은 정의상 예산 안에 있다.
+ * 그래서 패키지를 없애고 두 가지를 직접 받는다. 예산과 규모별 인원이다. 인원을 계산해
+ * 주는 대신, 각 규모의 최소 단가로 배분액을 계산해 예산을 넘기지 못하게 막는다. 브랜드는
+ * 남은 예산을 보면서 구성을 직접 굴려 볼 수 있고, 나온 구성은 정의상 예산 안에 있다.
  *
- * 진행 방식은 두 갈래다. 광고비 지급형은 구성안·콘텐츠 검수를 거치고 정산이 붙는다.
- * 제품 협찬형은 광고비 없이 제품만 제공하므로 검수와 정산 단계가 없다 — 진행 단계
- * 표시는 stageMarksFor() 한 곳에서 만들고, 협업에 실제로 생기는 단계와 짝을 맞춰 둔다.
+ * 진행 방식은 세 갈래다. 광고비 지급형은 구성안·콘텐츠 검수를 거치고 정산이 붙는다.
+ * 제품 협찬형은 광고비 없이 제품만 제공하므로 검수와 정산 단계가 없다. 공동구매는
+ * 판매 콘텐츠라 검수를 거치고 수수료 정산이 붙는다 — 진행 단계 표시는 stageMarksFor()
+ * 한 곳에서 만들고, 협업에 실제로 생기는 단계와 짝을 맞춰 둔다.
  *
  * 가이드라인은 등록에서 빼서 등록 직후 상세 화면의 배너로 옮겼다. 가이드라인은
  * 인플루언서가 정해진 뒤에 쓰는 것이 자연스럽고, 등록 단계에서 필수로 두면 "아직
@@ -71,6 +79,7 @@ export interface CampaignBriefDraft {
   ad_objective?: string;
   budget_krw?: number;
   seeding_count?: number;
+  groupbuy_commission_rate?: number | string;
   influencer_gender?: string;
   influencer_ages?: string;
   sns_category?: string;
@@ -92,7 +101,15 @@ interface CampaignRegisterWizardProps {
   onNotify: (message: string, type?: 'success' | 'error') => void;
 }
 
-const STEPS = [
+/**
+ * 단계 목록.
+ *
+ * '희망 인플루언서'는 광고비 지급형에서만 쓴다. 지원을 받아 고르는 방식에서는 물을
+ * 것이 없어서 빈 단계가 되고, 빈 단계를 남겨 두면 브랜드는 "여기서 뭘 골라야 하지"에서
+ * 멈춘다. 그래서 아래 목록을 진행 방식으로 걸러 쓴다 — 단계 번호가 아니라 key 로
+ * 검사하는 이유도 이것이다. 걸러낸 뒤에는 인덱스가 뜻하는 단계가 달라진다.
+ */
+const ALL_STEPS = [
   { key: 'product', label: '제품 정보', hint: '무엇을 알릴까요' },
   { key: 'campaign', label: '캠페인 설정', hint: '어떻게 진행할까요' },
   { key: 'influencer', label: '희망 인플루언서', hint: '누가 몇 명 올릴까요' },
@@ -153,7 +170,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const draftKey = `picks_campaign_draft_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
   const initialForm = {
-    type: editing?.type || 'ad_collab',
     brand_name: editing?.brand_name || companyName,
     product_name: editing?.product_name || '',
     thumbnail_url: editing?.thumbnail_url || '',
@@ -162,11 +178,14 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     description: editing?.description || '',
     product_provide: editing?.product_provide || 'provide',
 
-    reward_mode: (editing?.reward_mode === 'barter' ? 'barter' : 'paid') as RewardMode,
-    upload_channel: editing?.upload_channel || '인스타그램',
+    reward_mode: normalizeRewardMode(editing?.reward_mode),
+    upload_channel: editing?.upload_channel || CHANNELS[0],
     budget_krw: formatNumberWithCommas(digitsOnly(editing?.budget_krw || '')),
-    // 제품 협찬형에서 제공할 수 있는 제품 수. 예산이 없는 대신 이 수량이 인원을 막는다.
-    supply_count: String(editing?.seeding_count || ''),
+    // 지원을 받아 고르는 방식의 인원. 제품 협찬형은 협찬 인원, 공동구매는 모집 인원이고
+    // 세는 대상은 둘 다 사람이다 — 예전에는 제품 수(개)를 받았는데, 한 사람에게 제품
+    // 하나를 보내는 캠페인에서 같은 수를 두 가지 이름으로 부르고 있었다.
+    apply_headcount: String(editing?.seeding_count || editing?.max_applicants || ''),
+    commission_rate: digitsOnly(editing?.groupbuy_commission_rate || ''),
     upload_from: editing?.upload_from || '',
     upload_to: editing?.upload_to || '',
     video_concept: editing?.video_concept || '',
@@ -182,15 +201,39 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     exclude_keywords: splitCsv(editing?.exclude_keywords),
   };
 
-  const [form, setForm] = useState<typeof initialForm>(() => {
-    if (editing) return initialForm;
+  const [form, setForm] = useState<typeof initialForm>(initialForm);
+
+  /**
+   * 저장된 초안. 되살리지 않고, 되살릴지 물어본다.
+   *
+   * 예전에는 등록 화면을 열면 저장된 초안이 그대로 채워져 있었다. 자리를 뜬 사람에게는
+   * 편했지만, 지난 캠페인을 올리고 나서 다음 캠페인을 등록하러 온 사람에게는 남의
+   * 내용처럼 보이는 값이 이미 들어 있었고, 어디가 예전 값인지 몰라 한 칸씩 지워야 했다.
+   * 그래서 기본은 빈 폼이고, 초안이 있으면 배너로 "이어서 작성"을 고를 수 있게 한다.
+   *
+   * 초안은 첫 렌더에서 읽어 상태로 들고 있는다. 아래 자동 저장 useEffect 가 마운트
+   * 직후 빈 폼을 저장해 버리므로, 그 시점 이후에 localStorage 를 읽으면 이미 늦다.
+   */
+  const [savedDraft, setSavedDraft] = useState<Partial<typeof initialForm> | null>(() => {
+    if (editing) return null;
     try {
       const raw = localStorage.getItem(draftKey);
-      // 저장된 초안은 예전 버전의 폼일 수 있다. 빠진 항목은 initialForm 값으로 채운다.
-      if (raw) return { ...initialForm, ...(JSON.parse(raw) as Partial<typeof initialForm>) };
-    } catch { /* 저장된 내용이 깨졌으면 빈 폼으로 시작한다. */ }
-    return initialForm;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<typeof initialForm>;
+      // 열었다 닫은 흔적까지 물어보면 배너가 잡음이 된다. 적기 시작한 초안만 묻는다.
+      const written = !!String(parsed.product_name || '').trim() || !!String(parsed.description || '').trim();
+      return written ? parsed : null;
+    } catch {
+      return null; // 저장된 내용이 깨졌으면 없는 것으로 본다.
+    }
   });
+
+  const restoreDraft = () => {
+    if (!savedDraft) return;
+    setForm(p => ({ ...p, ...savedDraft, reward_mode: normalizeRewardMode(savedDraft.reward_mode) }));
+    setThumbnailPreview(savedDraft.thumbnail_url || '');
+    setSavedDraft(null);
+  };
 
   useEffect(() => {
     if (editing) return;
@@ -212,18 +255,41 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   // ------------------------------------------------------------------ 파생값
   const mode = rewardModeOf(form.reward_mode);
   const isBarter = form.reward_mode === 'barter';
+  const isGroupBuy = form.reward_mode === 'groupbuy';
+  // 규모별 배분을 브랜드가 직접 정하는 방식인지. 단계 구성과 필수 항목이 여기서 갈린다.
+  const picksInfluencer = mode.pickInfluencer;
   const budgetKrw = Number(digitsOnly(form.budget_krw) || 0);
-  const supplyCount = Number(digitsOnly(form.supply_count) || 0);
+  const applyHeadcount = Number(digitsOnly(form.apply_headcount) || 0);
+  const commissionRate = Number(digitsOnly(form.commission_rate) || 0);
   const counts = form.tier_counts;
-  const headcount = totalHeadcount(counts);
+  // 모집 인원은 방식에 따라 다른 곳에서 나온다 — 배분한 인원 합계이거나, 직접 받은 인원이다.
+  const headcount = picksInfluencer ? totalHeadcount(counts) : applyHeadcount;
   const floorSum = allocatedFloor(counts);
   const ceilingSum = allocatedCeiling(counts);
   const leftover = remainingBudget(budgetKrw, counts);
   const cheapestFee = Math.min(...TIERS.map(t => t.minFee));
-  const overBudget = !isBarter && budgetKrw > 0 && floorSum > budgetKrw;
-  const overSupply = isBarter && supplyCount > 0 && headcount > supplyCount;
+  const overBudget = picksInfluencer && budgetKrw > 0 && floorSum > budgetKrw;
+  const badCommission =
+    isGroupBuy &&
+    (commissionRate < COMMISSION_RANGE.min || commissionRate > COMMISSION_RANGE.max);
+
+  // 진행 방식이 단계를 정한다. 지원을 받아 고르는 방식은 '희망 인플루언서'가 없다.
+  const steps = useMemo(
+    () => (picksInfluencer ? ALL_STEPS : ALL_STEPS.filter(s => s.key !== 'influencer')),
+    [picksInfluencer],
+  );
+
+  // 마지막 단계에서 진행 방식을 바꿔 단계가 줄어들면 지금 보고 있는 단계가 사라진다.
+  useEffect(() => {
+    setStep(s => Math.min(s, steps.length - 1));
+  }, [steps.length]);
+
+  // 지금 단계의 key. 위 useEffect 가 반영되기 전 한 번은 범위를 넘을 수 있어 기본값을 둔다.
+  const stepKey = steps[step]?.key || steps[0].key;
 
   // ------------------------------------------------------------------ 규모별 인원
+  // 규모별 배분은 광고비 지급형에서만 쓰므로 기준은 예산 하나다. canAddOne 의 수량
+  // 인자는 지원을 받아 고르는 방식용이라 여기서는 0 을 넘긴다.
   /** 카드를 누르면 그 구간을 고르거나 뺀다. 처음 고를 때 한 명으로 시작한다. */
   const toggleTier = (key: TierKey) =>
     setForm(p => {
@@ -233,8 +299,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         return { ...p, tier_counts: next };
       }
       const tier = TIERS.find(t => t.key === key)!;
-      const seed = canAddOne(tier, p.reward_mode, Number(digitsOnly(p.budget_krw) || 0),
-        Number(digitsOnly(p.supply_count) || 0), next) ? 1 : 0;
+      const seed = canAddOne(tier, p.reward_mode, Number(digitsOnly(p.budget_krw) || 0), 0, next) ? 1 : 0;
       next[key] = seed;
       return { ...p, tier_counts: next };
     });
@@ -246,8 +311,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (delta > 0) {
         const tier = TIERS.find(t => t.key === key)!;
         const budget = Number(digitsOnly(p.budget_krw) || 0);
-        const supply = Number(digitsOnly(p.supply_count) || 0);
-        if (!canAddOne(tier, p.reward_mode, budget, supply, next)) return p;
+        if (!canAddOne(tier, p.reward_mode, budget, 0, next)) return p;
       }
       next[key] = Math.max(0, current + delta);
       return { ...p, tier_counts: next };
@@ -308,9 +372,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
    *
    * 필수 항목이 어디에 남았는지 항목 단위로 보이지 않으면, 브랜드는 "다음"을 누른
    * 뒤에야 무엇이 비었는지 알게 된다. 단계 안에서 미리 보이도록 목록으로 만든다.
+   * 단계가 방식에 따라 빠지므로 배열 대신 key 로 찾는다.
    */
-  const fieldStates = useMemo<FieldState[][]>(() => [
-    [
+  const fieldStates = useMemo<Record<string, FieldState[]>>(() => ({
+    product: [
       { label: '브랜드명', done: !!form.brand_name.trim(), required: true },
       { label: '제품명', done: !!form.product_name.trim(), required: true },
       { label: '제품 대표 이미지', done: !!form.thumbnail_url, required: false },
@@ -319,44 +384,53 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제품 소개', done: !!form.description.trim(), required: true },
       { label: '제품 제공 방식', done: !!form.product_provide, required: true },
     ],
-    [
+    campaign: [
       { label: '진행 방식', done: !!form.reward_mode, required: true },
       { label: '업로드 채널', done: !!form.upload_channel, required: true },
-      {
-        label: isBarter ? '협찬 가능 수량' : '광고 집행 예산',
-        done: isBarter ? supplyCount > 0 : budgetKrw >= cheapestFee,
-        required: true,
-      },
+      ...(picksInfluencer
+        ? [{ label: '광고 집행 예산', done: budgetKrw >= cheapestFee, required: true }]
+        : [{ label: mode.headcountLabel, done: applyHeadcount > 0, required: true }]),
+      ...(isGroupBuy
+        ? [{ label: '판매 수수료', done: commissionRate > 0 && !badCommission, required: true }]
+        : []),
       { label: '희망 업로드 일정', done: !!form.upload_from, required: true },
       { label: '영상 컨셉', done: !!form.video_concept.trim(), required: true },
     ],
-    [
+    influencer: [
       { label: '성별', done: !!form.influencer_gender, required: true },
       { label: '연령', done: form.influencer_ages.length > 0, required: true },
       { label: 'SNS 채널 카테고리', done: !!form.sns_category, required: true },
       { label: '광고 목적', done: !!form.ad_objective, required: true },
-      { label: '규모별 모집 인원', done: headcount > 0 && !overBudget && !overSupply, required: true },
+      { label: '규모별 모집 인원', done: headcount > 0 && !overBudget, required: true },
       { label: '희망 최소 조회수', done: Number(digitsOnly(form.min_views) || 0) > 0, required: false },
       { label: '타겟 오디언스', done: !!form.target_audience.trim(), required: false },
       { label: '인플루언서 스타일', done: form.influencer_styles.length > 0, required: false },
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
     ],
-  ], [form, isBarter, supplyCount, budgetKrw, cheapestFee, headcount, overBudget, overSupply]);
+  }), [
+    form, mode, picksInfluencer, isGroupBuy, applyHeadcount, commissionRate,
+    badCommission, budgetKrw, cheapestFee, headcount, overBudget,
+  ]);
 
   /** 그 단계에서 반드시 있어야 하는 것. 없으면 다음으로 넘기지 않는다. */
-  const stepError = (index: number): string => {
-    if (index === 0) {
+  const stepError = (key: string): string => {
+    if (key === 'product') {
       if (!form.brand_name.trim()) return '브랜드명을 입력해 주세요.';
       if (!form.product_name.trim()) return '제품명을 입력해 주세요.';
       if (!form.category) return '제품 카테고리를 선택해 주세요.';
       if (!form.description.trim()) return '제품 소개를 입력해 주세요. 인플루언서가 가장 먼저 읽는 내용입니다.';
       return '';
     }
-    if (index === 1) {
-      if (isBarter) {
-        if (supplyCount < 1) return '협찬 가능 수량을 입력해 주세요.';
-      } else if (budgetKrw < cheapestFee) {
-        return `광고 집행 예산은 ${formatKoreanWon(cheapestFee)}부터 입력할 수 있습니다.`;
+    if (key === 'campaign') {
+      if (picksInfluencer) {
+        if (budgetKrw < cheapestFee) {
+          return `광고 집행 예산은 ${formatKoreanWon(cheapestFee)}부터 입력할 수 있습니다.`;
+        }
+      } else if (applyHeadcount < 1) {
+        return `${mode.headcountLabel}을 1명 이상 입력해 주세요.`;
+      }
+      if (isGroupBuy && badCommission) {
+        return `판매 수수료는 ${COMMISSION_RANGE.min}% ~ ${COMMISSION_RANGE.max}% 사이로 입력해 주세요.`;
       }
       if (!form.upload_from) return '희망 업로드 시작일을 선택해 주세요.';
       if (form.upload_from && form.upload_to && form.upload_from > form.upload_to) {
@@ -365,21 +439,20 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (!form.video_concept.trim()) return '원하는 영상 컨셉을 적어 주세요.';
       return '';
     }
-    if (index === 2) {
+    if (key === 'influencer') {
       if (form.influencer_ages.length === 0) return '희망 연령대를 한 개 이상 선택해 주세요.';
       if (!form.sns_category) return 'SNS 채널 카테고리를 선택해 주세요.';
       if (headcount < 1) return '규모를 고르고 모집 인원을 1명 이상 배분해 주세요.';
       if (overBudget) return `배분한 인원의 최소 집행액이 예산을 ${formatKoreanWon(floorSum - budgetKrw)} 넘습니다.`;
-      if (overSupply) return `배분한 인원이 협찬 가능 수량(${supplyCount}명)을 넘습니다.`;
       return '';
     }
     return '';
   };
 
   const goNext = () => {
-    const err = stepError(step);
+    const err = stepError(steps[step].key);
     if (err) { onNotify(err, 'error'); return; }
-    if (step === STEPS.length - 1) { submit(); return; }
+    if (step === steps.length - 1) { submit(); return; }
     setStep(s => s + 1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -387,15 +460,15 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const goTo = (index: number) => {
     // 뒤로는 자유롭게, 앞으로는 지금 단계를 통과해야 한다.
     if (index <= step) { setStep(index); return; }
-    const err = stepError(step);
+    const err = stepError(steps[step].key);
     if (err) { onNotify(err, 'error'); return; }
     setStep(index);
   };
 
   // ------------------------------------------------------------------ 제출
   const submit = async () => {
-    for (let i = 0; i < STEPS.length; i++) {
-      const err = stepError(i);
+    for (let i = 0; i < steps.length; i++) {
+      const err = stepError(steps[i].key);
       if (err) { setStep(i); onNotify(err, 'error'); return; }
     }
 
@@ -410,10 +483,15 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         minViews: Number(digitsOnly(form.min_views) || 0),
         styles: form.influencer_styles,
         excludes: form.exclude_keywords,
+        headcount: applyHeadcount,
+        commissionRate,
+        channel: form.upload_channel,
       });
 
       const payload = {
-        type: form.type,
+        // 캠페인 유형은 진행 방식이 정한다. 공동구매는 협업 단계 묶음 자체가 달라서
+        // (상품 정보 전달 → 판매 시작 → 수수료 정산) 서버가 type 으로 갈라 본다.
+        type: mode.campaignType,
         // 물어보지 않고 만드는 값들. 예전에는 브랜드가 직접 적었다.
         title: derivedTitle(form.product_name, form.brand_name),
         description: form.description,
@@ -422,8 +500,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         category: form.category,
         // 제품 협찬형은 지급할 광고비가 없다 — 보상 유형을 '제품 제공'으로 남기고
         // 금액은 비워 둔다. 0 을 넣으면 인플루언서 화면에 보상이 "0원"으로 크게 찍힌다.
-        reward_type: isBarter ? 'product' : 'fixed',
-        reward_amount: isBarter ? '' : String(derivedUnitFee(form.reward_mode, counts)),
+        // 공동구매는 판매 수수료로 정산하므로 '수익 배분'으로 남긴다.
+        reward_type: isBarter ? 'product' : isGroupBuy ? 'revenue_share' : 'fixed',
+        reward_amount: picksInfluencer ? String(derivedUnitFee(form.reward_mode, counts)) : '',
         requirements,
         max_applicants: headcount,
         // 모집은 등록 즉시 시작하고, 희망 업로드 시작일까지 받는다.
@@ -441,24 +520,30 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         upload_to: form.upload_to,
 
         reward_mode: form.reward_mode,
-        tier_counts: serializeTierCounts(counts),
+        // 지원을 받아 고르는 방식에는 희망 인플루언서 조건이 없다. 폼에 남아 있는 값이
+        // 있어도(방식을 바꾸기 전에 골라 둔 값) 보내지 않는다 — 조건으로 저장되면
+        // 지원 화면에 "여성 20대 나노"가 걸려 지원 자체가 줄어든다.
+        tier_counts: picksInfluencer ? serializeTierCounts(counts) : '',
         // 패키지를 걷어내기 전에 만들어진 화면들이 아직 이 값을 읽는다. 진행 방식에서
         // 짝이 되는 값을 남겨 둬야 그쪽에서 협업 단계를 엉뚱하게 잡지 않는다.
         package_tier: isBarter ? 'seeding' : 'full',
         product_provide: form.product_provide,
-        ad_objective: form.ad_objective,
-        budget_krw: isBarter ? 0 : budgetKrw,
-        // 제품 협찬형의 공급 수량. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다.
-        seeding_count: isBarter ? supplyCount : 0,
-        influencer_gender: form.influencer_gender,
-        influencer_ages: form.influencer_ages,
-        sns_category: form.sns_category,
+        ad_objective: picksInfluencer ? form.ad_objective : '',
+        budget_krw: picksInfluencer ? budgetKrw : 0,
+        // 제품 협찬형의 협찬 인원. 컬럼은 예전 시딩 건수 칸을 그대로 쓴다.
+        seeding_count: isBarter ? applyHeadcount : 0,
+        groupbuy_commission_rate: isGroupBuy ? commissionRate : 0,
+        influencer_gender: picksInfluencer ? form.influencer_gender : 'any',
+        influencer_ages: picksInfluencer ? form.influencer_ages : [],
+        sns_category: picksInfluencer ? form.sns_category : '',
         // 담당자 리스트업은 고른 구간만 읽는다. 인원까지 필요한 화면은 tier_counts 를 본다.
-        follower_tiers: chosenTiers(counts).filter(t => (counts[t.key] || 0) > 0).map(t => t.key),
-        min_views: Number(digitsOnly(form.min_views) || 0),
-        influencer_styles: form.influencer_styles,
-        exclude_keywords: form.exclude_keywords,
-        target_audience: form.target_audience,
+        follower_tiers: picksInfluencer
+          ? chosenTiers(counts).filter(t => (counts[t.key] || 0) > 0).map(t => t.key)
+          : [],
+        min_views: picksInfluencer ? Number(digitsOnly(form.min_views) || 0) : 0,
+        influencer_styles: picksInfluencer ? form.influencer_styles : [],
+        exclude_keywords: picksInfluencer ? form.exclude_keywords : [],
+        target_audience: picksInfluencer ? form.target_audience : '',
       };
 
       const res = await fetch('/api/campaigns', {
@@ -481,7 +566,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       onNotify(
         editing
           ? '캠페인이 수정되었습니다.'
-          : '캠페인이 등록되었습니다. 담당자가 조건에 맞는 인플루언서를 찾아 리스트업해 드립니다.',
+          : picksInfluencer
+            ? '캠페인이 등록되었습니다. 담당자가 조건에 맞는 인플루언서를 찾아 리스트업해 드립니다.'
+            : '캠페인이 등록되었습니다. 승인 후 캠페인 협업 목록에 올라가고, 지원자가 모이면 그 중에서 고르실 수 있습니다.',
       );
       onSaved();
     } catch {
@@ -501,70 +588,66 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
   const stageMarks = stageMarksFor(form.reward_mode);
 
-  const TIPS = [
-    {
+  /** 단계마다 하나씩. 단계가 빠질 수 있으니 목록이 아니라 key 로 찾는다. */
+  const TIPS: Record<string, { title: string; body: string }> = {
+    product: {
       title: '제품 소개는 왜 필요할까요?',
       body: '인플루언서가 지원 여부를 정할 때 가장 먼저 읽는 내용입니다. 제품의 특징과 꼭 강조하고 싶은 점을 두세 줄로 적어 주세요.',
     },
-    {
-      title: isBarter ? '제품 협찬형은 무엇이 다를까요?' : '예산은 어떻게 정할까요?',
-      body: isBarter
-        ? '광고비 없이 제품만 제공합니다. 대신 구성안·콘텐츠 검수 단계가 없고, 가이드를 전달한 뒤 업로드를 확인하는 흐름으로 진행됩니다.'
-        : '쓸 수 있는 총액을 적어 주세요. 다음 단계에서 규모별로 인원을 배분할 때, 이 예산 안에서만 담을 수 있게 잔액을 보여 드립니다.',
+    campaign: {
+      title: picksInfluencer
+        ? '예산은 어떻게 정할까요?'
+        : isGroupBuy
+          ? '공동구매는 무엇이 다를까요?'
+          : '제품 협찬형은 무엇이 다를까요?',
+      body: picksInfluencer
+        ? '쓸 수 있는 총액을 적어 주세요. 다음 단계에서 규모별로 인원을 배분할 때, 이 예산 안에서만 담을 수 있게 잔액을 보여 드립니다.'
+        : isGroupBuy
+          ? '캠페인 협업 목록에 올라가고, 판매를 함께할 인플루언서가 직접 지원합니다. 광고비 대신 판매 수수료로 정산하며, 콘텐츠 검수와 수수료 정산 단계가 있습니다.'
+          : '캠페인 협업 목록에 올라가고, 인플루언서가 직접 지원합니다. 광고비 없이 제품만 제공하므로 구성안·콘텐츠 검수 단계가 없고, 가이드를 전달한 뒤 업로드를 확인하는 흐름으로 진행됩니다.',
     },
-    {
+    influencer: {
       title: '규모는 섞는 게 좋을까요?',
       body: '메가 한 명으로 화제를 만들고 마이크로·나노로 후속 반응을 채우는 구성이 가장 흔합니다. 배분액은 각 규모의 최소 단가 기준이고, 실제 금액은 담당자가 후보를 확정할 때 정해집니다.',
     },
-  ];
+  };
 
-  /** 예산·수량 대비 배분 상태. 규모 카드 위에 한 줄로 얹는다. */
+  /** 예산 대비 배분 상태. 규모 카드 위에 한 줄로 얹는다. */
   const allocationBar = () => {
-    const cap = isBarter ? supplyCount : budgetKrw;
-    const used = isBarter ? headcount : floorSum;
-    const ratio = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
-    const over = isBarter ? overSupply : overBudget;
+    const ratio = budgetKrw > 0 ? Math.min(100, Math.round((floorSum / budgetKrw) * 100)) : 0;
     return (
-      <div className={`rounded-2xl border p-4 ${over ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
+      <div className={`rounded-2xl border p-4 ${overBudget ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="text-[11px] font-black text-slate-500">
-              {isBarter ? '배분한 인원' : '배분한 최소 집행액'}
-            </p>
-            <p className={`text-lg font-black ${over ? 'text-rose-600' : 'text-slate-900'}`}>
-              {isBarter ? `${headcount}명` : formatKoreanWon(floorSum) || '0원'}
+            <p className="text-[11px] font-black text-slate-500">배분한 최소 집행액</p>
+            <p className={`text-lg font-black ${overBudget ? 'text-rose-600' : 'text-slate-900'}`}>
+              {formatKoreanWon(floorSum) || '0원'}
               <span className="text-[11px] font-bold text-slate-400 ml-1.5">
-                / {isBarter ? `${supplyCount || 0}명` : formatKoreanWon(budgetKrw) || '0원'}
+                / {formatKoreanWon(budgetKrw) || '0원'}
               </span>
             </p>
           </div>
           <div className="text-right">
-            <p className="text-[11px] font-black text-slate-500">
-              {isBarter ? '남은 수량' : '남은 예산'}
-            </p>
-            <p className={`text-sm font-black ${over ? 'text-rose-600' : 'text-emerald-600'}`}>
-              {isBarter
-                ? `${Math.max(0, supplyCount - headcount)}명`
-                : formatKoreanWon(leftover) || '0원'}
+            <p className="text-[11px] font-black text-slate-500">남은 예산</p>
+            <p className={`text-sm font-black ${overBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
+              {formatKoreanWon(leftover) || '0원'}
             </p>
           </div>
         </div>
         <div className="h-1.5 rounded-full bg-white mt-3 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${over ? 'bg-rose-500' : 'bg-slate-900'}`}
+            className={`h-full rounded-full transition-all ${overBudget ? 'bg-rose-500' : 'bg-slate-900'}`}
             style={{ width: `${ratio}%` }}
           />
         </div>
-        {!isBarter && headcount > 0 && (
+        {headcount > 0 && (
           <p className="text-[11px] text-slate-400 font-medium mt-2">
             실제 집행액은 규모별 단가 구간에 따라 {formatKoreanWon(floorSum)} ~ {formatKoreanWon(ceilingSum)} 사이에서 확정됩니다.
           </p>
         )}
-        {over && (
+        {overBudget && (
           <p className="text-[11px] text-rose-600 font-black mt-2">
-            {isBarter
-              ? '협찬 가능 수량을 넘었습니다. 인원을 줄이거나 수량을 늘려 주세요.'
-              : '예산을 넘었습니다. 인원을 줄이거나 예산을 늘려 주세요.'}
+            예산을 넘었습니다. 인원을 줄이거나 예산을 늘려 주세요.
           </p>
         )}
       </div>
@@ -584,11 +667,41 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             {editing ? '캠페인 수정' : '캠페인 등록'}
           </h2>
           <p className="text-xs text-slate-400 font-medium mt-1">
-            세 단계만 채우면 담당자가 이어서 진행합니다. 제목과 지원 조건은 적으신 내용으로 자동 정리됩니다.
+            {steps.length}단계만 채우면 담당자가 이어서 진행합니다. 제목과 지원 조건은 적으신 내용으로 자동 정리됩니다.
           </p>
 
+          {/* 저장된 초안은 물어보고 되살린다. 새 캠페인을 등록하러 온 사람에게 지난
+              내용이 이미 채워져 있으면 어디가 예전 값인지 몰라 한 칸씩 지워야 한다. */}
+          {savedDraft && (
+            <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <p className="text-xs font-black text-blue-900">
+                작성하던 캠페인이 있습니다
+                {savedDraft.product_name ? ` · ${savedDraft.product_name}` : ''}
+              </p>
+              <p className="text-[11px] text-blue-700 font-medium mt-1 leading-relaxed">
+                이어서 작성하거나, 지금 화면(빈 폼)에서 새로 시작하실 수 있습니다.
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={restoreDraft}
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black hover:bg-blue-700"
+                >
+                  이어서 작성
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSavedDraft(null)}
+                  className="px-3.5 py-2 rounded-xl bg-white border border-blue-200 text-blue-700 text-[11px] font-black hover:bg-blue-100"
+                >
+                  새로 시작
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-1 mt-5 overflow-x-auto">
-            {STEPS.map((s, i) => (
+            {steps.map((s, i) => (
               <React.Fragment key={s.key}>
                 <button type="button" onClick={() => goTo(i)} className="flex items-center gap-2 flex-shrink-0 group">
                   <span
@@ -602,7 +715,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     {s.label}
                   </span>
                 </button>
-                {i < STEPS.length - 1 && <span className="flex-1 h-px bg-slate-200 min-w-[16px]" />}
+                {i < steps.length - 1 && <span className="flex-1 h-px bg-slate-200 min-w-[16px]" />}
               </React.Fragment>
             ))}
           </div>
@@ -610,7 +723,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
         <div className="px-5 md:px-7 py-6 space-y-5">
           {/* ---------------------------------------------- ① 제품 정보 */}
-          {step === 0 && (
+          {stepKey === 'product' && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -727,7 +840,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           )}
 
           {/* ---------------------------------------------- ② 캠페인 설정 */}
-          {step === 1 && (
+          {stepKey === 'campaign' && (
             <>
               <div>
                 <label className={LABEL}>진행 방식 *</label>
@@ -749,6 +862,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                         <p className="text-sm font-black text-slate-900 mt-2">{m.label}</p>
                         <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">
                           {m.lines[0]}<br />{m.lines[1]}
+                        </p>
+                        {/* 지원을 받는 방식인지 아닌지가 이후 단계를 바꾼다. 고르기 전에 알려 준다. */}
+                        <p className="text-[10px] font-black text-slate-400 mt-2">
+                          {m.openApply ? '캠페인 협업 목록에 노출 · 인플루언서가 직접 지원' : '목록에 노출하지 않고 담당자가 후보를 리스트업'}
                         </p>
                       </button>
                     );
@@ -792,27 +909,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     </button>
                   ))}
                 </div>
+                {/* 유튜브·틱톡은 산출물 규격과 검수 기준이 달라 아직 받지 않는다. */}
+                <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                  현재는 인스타그램 캠페인만 진행합니다.
+                </p>
               </div>
 
-              {isBarter ? (
-                <div>
-                  <label className={LABEL}>협찬 가능 수량 *</label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={form.supply_count}
-                      onChange={e => patch('supply_count', digitsOnly(e.target.value))}
-                      className={`${INPUT} max-w-[160px]`}
-                      placeholder="20"
-                    />
-                    <span className="text-sm font-black text-slate-500">개</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
-                    제공할 수 있는 제품 수입니다. 다음 단계에서 이 수량 안에서 규모별 인원을 배분합니다.
-                  </p>
-                </div>
-              ) : (
+              {picksInfluencer ? (
                 <div>
                   <label className={LABEL}>광고 집행 예산 *</label>
                   <div className="flex items-center gap-3">
@@ -828,6 +931,46 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-1.5">
                     쓸 수 있는 총액을 적어 주세요. 다음 단계에서 이 예산 안에서 규모별 인원을 배분합니다.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className={LABEL}>{mode.headcountLabel} *</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={form.apply_headcount}
+                      onChange={e => patch('apply_headcount', digitsOnly(e.target.value))}
+                      className={`${INPUT} max-w-[160px]`}
+                      placeholder="20"
+                    />
+                    <span className="text-sm font-black text-slate-500">명</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    {isBarter
+                      ? '제품을 협찬할 인플루언서 수입니다. 지원자 중에서 이 인원만큼 골라 진행합니다.'
+                      : '함께 판매할 인플루언서 수입니다. 지원자 중에서 이 인원만큼 골라 진행합니다.'}
+                  </p>
+                </div>
+              )}
+
+              {isGroupBuy && (
+                <div>
+                  <label className={LABEL}>판매 수수료 *</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={form.commission_rate}
+                      onChange={e => patch('commission_rate', digitsOnly(e.target.value).slice(0, 2))}
+                      className={`${INPUT} max-w-[120px]`}
+                      placeholder="15"
+                    />
+                    <span className="text-sm font-black text-slate-500">%</span>
+                  </div>
+                  <p className={`text-[11px] font-medium mt-1.5 ${badCommission && form.commission_rate ? 'text-rose-500 font-black' : 'text-slate-400'}`}>
+                    판매 금액에서 인플루언서에게 지급할 비율입니다. {COMMISSION_RANGE.min}% ~ {COMMISSION_RANGE.max}% 사이로 적어 주세요.
                   </p>
                 </div>
               )}
@@ -861,7 +1004,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           )}
 
           {/* ---------------------------------------------- ③ 희망 인플루언서 */}
-          {step === 2 && (
+          {stepKey === 'influencer' && (
             <>
               <div>
                 <label className={LABEL}>성별 *</label>
@@ -925,10 +1068,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               {/* ------------------------------------------ 규모별 모집 인원 */}
               <div>
                 <label className={LABEL}>
-                  규모별 모집 인원 *{' '}
-                  <span className="text-slate-400 font-bold">
-                    {isBarter ? '(협찬 수량 안에서 배분)' : '(예산 안에서 배분)'}
-                  </span>
+                  규모별 모집 인원 * <span className="text-slate-400 font-bold">(예산 안에서 배분)</span>
                 </label>
 
                 {allocationBar()}
@@ -936,9 +1076,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
                   {TIERS.map(t => {
                     const chosen = counts[t.key] !== undefined;
-                    const room = isBarter
-                      ? Math.max(0, supplyCount - headcount)
-                      : affordableCount(t, budgetKrw, counts);
+                    const room = affordableCount(t, budgetKrw, counts);
                     return (
                       <button
                         key={t.key}
@@ -957,11 +1095,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                           )}
                         </span>
                         <span className="block text-[10px] text-slate-400 font-bold mt-1">{t.followers}</span>
-                        {!isBarter && (
-                          <span className="block text-[10px] text-slate-500 font-black mt-1">
-                            1인 {tierFeeLabel(t)}
-                          </span>
-                        )}
+                        <span className="block text-[10px] text-slate-500 font-black mt-1">
+                          1인 {tierFeeLabel(t)}
+                        </span>
                         <span className="block text-[10px] text-slate-400 font-medium mt-1 leading-tight">
                           {chosen ? `${room}명 더 배분 가능` : t.note}
                         </span>
@@ -975,7 +1111,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   <div className="mt-3 rounded-2xl border border-slate-100 divide-y divide-slate-100 overflow-hidden">
                     {chosenTiers(counts).map(t => {
                       const n = counts[t.key] || 0;
-                      const addable = canAddOne(t, form.reward_mode, budgetKrw, supplyCount, counts);
+                      const addable = canAddOne(t, form.reward_mode, budgetKrw, 0, counts);
                       return (
                         <div key={t.key} className="flex items-center justify-between gap-3 px-4 py-3">
                           <div className="min-w-0">
@@ -984,9 +1120,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                               <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
                             </p>
                             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                              {isBarter
-                                ? '제품 협찬 · 광고비 없음'
-                                : `1인 ${tierFeeLabel(t)} · 최소 ${formatKoreanWon(t.minFee * n) || '0원'}`}
+                              1인 {tierFeeLabel(t)} · 최소 {formatKoreanWon(t.minFee * n) || '0원'}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
@@ -1022,8 +1156,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 ) : (
                   <p className="text-[11px] text-slate-400 font-medium mt-2">
                     규모를 고르면 인원을 배분할 수 있습니다.
-                    {!isBarter && budgetKrw <= 0 && ' 먼저 캠페인 설정에서 예산을 입력해 주세요.'}
-                    {isBarter && supplyCount <= 0 && ' 먼저 캠페인 설정에서 협찬 가능 수량을 입력해 주세요.'}
+                    {budgetKrw <= 0 && ' 먼저 캠페인 설정에서 예산을 입력해 주세요.'}
                   </p>
                 )}
               </div>
@@ -1098,7 +1231,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           >
             {submitting
               ? '저장 중...'
-              : step === STEPS.length - 1
+              : step === steps.length - 1
                 ? (editing ? '수정 완료' : '캠페인 생성 완료')
                 : '다음 →'}
           </button>
@@ -1109,13 +1242,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       <aside className="lg:sticky lg:top-6 space-y-3">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-slate-900">{STEPS[step].label}</p>
-            <span className="text-[10px] font-black text-slate-400">{step + 1} / {STEPS.length}</span>
+            <p className="text-xs font-black text-slate-900">{steps[step]?.label}</p>
+            <span className="text-[10px] font-black text-slate-400">{step + 1} / {steps.length}</span>
           </div>
-          <p className="text-[11px] text-slate-400 font-medium mt-0.5">{STEPS[step].hint}</p>
+          <p className="text-[11px] text-slate-400 font-medium mt-0.5">{steps[step]?.hint}</p>
 
           <div className="mt-4 space-y-1.5">
-            {fieldStates[step].map(f => (
+            {(fieldStates[stepKey] || []).map(f => (
               <div key={f.label} className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold text-slate-500 truncate">
                   {f.label}
@@ -1148,15 +1281,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
             <p className="text-sm font-black mt-2">{mode.label}</p>
             <div className="mt-3 space-y-1.5 text-[11px] font-bold">
               <div className="flex items-center justify-between">
-                <span className="text-white/50">모집 인원</span>
+                <span className="text-white/50">{mode.headcountLabel}</span>
                 <span>{headcount}명</span>
               </div>
-              {isBarter ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-white/50">협찬 수량</span>
-                  <span>{supplyCount || 0}개</span>
-                </div>
-              ) : (
+              {picksInfluencer ? (
                 <>
                   <div className="flex items-center justify-between">
                     <span className="text-white/50">집행 예산</span>
@@ -1173,6 +1301,19 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     </span>
                   </div>
                 </>
+              ) : (
+                <>
+                  {isGroupBuy && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/50">판매 수수료</span>
+                      <span>{commissionRate > 0 ? `${commissionRate}%` : '-'}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">인플루언서</span>
+                    <span>지원자 중 선택</span>
+                  </div>
+                </>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-white/50">채널</span>
@@ -1185,7 +1326,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               )}
             </div>
-            {chosenTiers(counts).length > 0 && (
+            {picksInfluencer && chosenTiers(counts).length > 0 && (
               <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-1.5">
                 {chosenTiers(counts).map(t => (
                   <span key={t.key} className="px-2 py-1 rounded-full bg-white/10 text-[10px] font-black">
@@ -1200,7 +1341,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         {/* 후보 수를 숫자로 약속하지 않는다. 리스트업은 담당자가 캠페인을 확인한 뒤
             만들고, 조건에 맞는 사람이 몇 명인지는 그때 정해진다. 등록 화면에서
             "약 N명"을 보여 주면 지키지 못할 약속이 된다. */}
-        {step === 2 && (
+        {stepKey === 'influencer' && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <p className="text-xs font-black text-slate-900">담당자에게 전달되는 조건</p>
             <p className="text-[11px] text-slate-500 font-medium mt-2 leading-relaxed">
@@ -1225,10 +1366,33 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
           </div>
         )}
 
+        {/* 지원을 받아 고르는 방식은 리스트업이 없다. 대신 지원이 어떻게 들어오고
+            누가 고르는지를 등록 전에 적어 둔다 — 등록 후 "지원자가 왜 없나요"를 가장
+            많이 묻는 지점이다. */}
+        {!picksInfluencer && stepKey === 'campaign' && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <p className="text-xs font-black text-slate-900">지원은 이렇게 들어옵니다</p>
+            <ol className="mt-3 space-y-2">
+              {[
+                '등록하시면 담당자 승인 후 캠페인 협업 목록에 올라갑니다.',
+                '조건을 보고 인플루언서가 직접 지원합니다.',
+                `지원자 목록에서 함께할 분을 ${mode.headcountLabel}만큼 고르시면 담당자가 협업을 만들어 드립니다.`,
+              ].map((line, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="w-4 h-4 rounded-full bg-slate-900 text-white text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium leading-relaxed">{line}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
         <div className="bg-amber-50 rounded-2xl border border-amber-100 p-5">
           <p className="text-[11px] font-black text-amber-700">작성 Tip</p>
-          <p className="text-xs font-black text-amber-900 mt-2">{TIPS[step].title}</p>
-          <p className="text-[11px] text-amber-700 font-medium mt-1.5 leading-relaxed">{TIPS[step].body}</p>
+          <p className="text-xs font-black text-amber-900 mt-2">{TIPS[stepKey].title}</p>
+          <p className="text-[11px] text-amber-700 font-medium mt-1.5 leading-relaxed">{TIPS[stepKey].body}</p>
         </div>
       </aside>
     </div>

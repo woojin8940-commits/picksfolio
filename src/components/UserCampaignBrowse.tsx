@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
 import { apiService } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
+import { rewardModeOf } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
 import CreatorCollabWorkspace from './CreatorCollabWorkspace';
 import CreatorOfferInbox from './collab/CreatorOfferInbox';
@@ -26,6 +27,12 @@ interface Campaign {
   application_count: number;
   created_at: string;
   recruit_closed?: boolean;
+  /** 진행 방식. 이 목록에 올라오는 것은 제품 협찬형·공동구매형뿐이다(서버에서 걸러 준다). */
+  reward_mode?: string;
+  /** 제품 협찬형의 협찬 인원. max_applicants 와 같은 값이지만 예전 캠페인은 이쪽만 있다. */
+  seeding_count?: number;
+  /** 공동구매형의 판매 수수료(%). */
+  groupbuy_commission_rate?: number;
 }
 
 interface UserCampaignBrowseProps {
@@ -33,11 +40,18 @@ interface UserCampaignBrowseProps {
   onBack?: () => void;
 }
 
+/**
+ * 걸러 볼 수 있는 캠페인 갈래.
+ *
+ * 값은 캠페인 유형(type) 그대로 서버 질의에 붙는다. 이 목록에는 인플루언서가 직접
+ * 지원하는 방식만 올라오므로 — 광고비 지급형은 담당자가 후보를 리스트업하는 길이라
+ * 노출하지 않는다 — 실제로 보이는 유형은 제품 협찬(ad_collab)과 공동구매(group_buy)
+ * 둘뿐이다. 그래서 ad_collab 의 이름표를 '광고 협업' 이 아니라 '제품 협찬' 으로 둔다.
+ */
 const REWARD_FILTERS = [
   { value: '', label: '전체' },
-  { value: 'ad_collab', label: '광고 협업' },
+  { value: 'ad_collab', label: '제품 협찬' },
   { value: 'group_buy', label: '공동구매' },
-  { value: 'other', label: '기타' },
 ];
 
 const CATEGORIES: Record<string, string> = {
@@ -55,6 +69,55 @@ const TYPE_LABELS: Record<string, string> = {
 const REWARD_LABELS: Record<string, string> = {
   fixed: '고정 금액', product: '제품 제공', revenue_share: '수익 배분', mixed: '복합',
 };
+
+/**
+ * 캠페인에 붙는 이름표. 유형(type)보다 진행 방식(reward_mode)이 먼저다.
+ *
+ * 제품 협찬형은 유형 컬럼에 'ad_collab' 으로 저장된다 — 협업 단계 묶음이 광고 협업과
+ * 같기 때문이다. 그래서 유형을 그대로 보여 주면 광고비를 주는 캠페인처럼 읽힌다.
+ * 지원할지 말지는 "돈을 받는지 제품을 받는지"에 달려 있으니, 진행 방식을 앞세운다.
+ */
+const modeBadge = (c: Campaign): string => {
+  const mode = rewardModeOf(c.reward_mode);
+  return mode.openApply ? mode.label : TYPE_LABELS[c.type] || c.type;
+};
+
+/**
+ * 리워드 한 줄. 방식마다 받는 것이 달라 금액 칸 하나로는 표현되지 않는다.
+ *
+ *   제품 협찬형  받는 것이 제품이라 금액이 없다. 예전에는 reward_amount 가 비어
+ *                리워드 카드가 아예 사라졌고, 목록 카드에서는 빈자리로 보였다.
+ *   공동구매형   판매 수수료율. 등록 시점에는 판매량이 정해지지 않아 금액이 없다.
+ *   광고비 지급형 금액 그대로. 지금은 이 목록에 노출되지 않지만, 예전 캠페인이
+ *                남아 있을 수 있어 계산은 남겨 둔다.
+ *
+ * short 는 목록 카드용 짧은 표기다(카드 너비가 두 줄을 못 받는다).
+ */
+const rewardText = (c: Campaign): { headline: string; caption: string; short: string } | null => {
+  const mode = rewardModeOf(c.reward_mode);
+  if (mode.value === 'barter') {
+    return {
+      headline: '제품 협찬',
+      caption: '광고비 없이 제품을 제공받는 캠페인이에요',
+      short: '제품 협찬',
+    };
+  }
+  if (mode.value === 'groupbuy') {
+    const rate = Number(c.groupbuy_commission_rate || 0);
+    return {
+      headline: rate > 0 ? `판매 수수료 ${rate}%` : '판매 수수료 협의',
+      caption: '함께 판매하고 판매 금액의 일부를 수수료로 받아요',
+      short: rate > 0 ? `수수료 ${rate}%` : '수수료 협의',
+    };
+  }
+  if (!c.reward_amount) return null;
+  const won = formatKoreanWon(c.reward_amount);
+  return { headline: won, caption: REWARD_LABELS[c.reward_type] || '', short: won };
+};
+
+/** 모집 인원. 협찬형은 seeding_count 에만 들어 있는 캠페인이 있다. */
+const headcountOf = (c: Campaign): number =>
+  Number(c.max_applicants || 0) || Number(c.seeding_count || 0);
 
 const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBack }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -196,8 +259,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       : '브랜드가 모집을 마감했습니다';
     const deadline = deadlineInfo(selectedCampaign.end_date);
     const days = deadline?.label ?? null;
-    const applicantPercent = selectedCampaign.max_applicants > 0
-      ? Math.min(100, Math.round((selectedCampaign.application_count / selectedCampaign.max_applicants) * 100))
+    const mode = rewardModeOf(selectedCampaign.reward_mode);
+    const reward = rewardText(selectedCampaign);
+    const headcount = headcountOf(selectedCampaign);
+    const commissionRate = Number(selectedCampaign.groupbuy_commission_rate || 0);
+    const applicantPercent = headcount > 0
+      ? Math.min(100, Math.round((selectedCampaign.application_count / headcount) * 100))
       : 0;
     // 정원이 차도 모집은 계속된다. 경쟁률이 높다는 정보로만 쓴다.
     const quotaReached = isQuotaReached(selectedCampaign);
@@ -244,7 +311,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             {/* Badges on image */}
             <div className="absolute top-4 left-4 flex items-center gap-2 flex-wrap">
               <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[11px] font-black shadow-lg">
-                {TYPE_LABELS[selectedCampaign.type] || selectedCampaign.type}
+                {modeBadge(selectedCampaign)}
               </span>
               {selectedCampaign.category && (
                 <span className="bg-white/90 backdrop-blur-sm text-slate-700 px-3 py-1 rounded-full text-[11px] font-bold shadow-sm">
@@ -289,7 +356,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             <div className="py-5 border-b border-slate-100">
               <div className="grid grid-cols-2 gap-3">
                 {/* Reward Card */}
-                {selectedCampaign.reward_amount && (
+                {reward && (
                   <div className="col-span-2 bg-gradient-to-r from-blue-50 to-pink-50 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-[0_10px_26px_-12px_rgba(37,99,235,0.45)]">
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center shadow-[0_3px_8px_-3px_rgba(37,99,235,0.5)]">
@@ -297,8 +364,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       </div>
                       <span className="text-xs text-blue-500 font-black uppercase tracking-wider">리워드</span>
                     </div>
-                    <p className="text-2xl font-black text-blue-700">{formatKoreanWon(selectedCampaign.reward_amount)}</p>
-                    <span className="text-xs font-bold text-blue-400 mt-1 inline-block">{REWARD_LABELS[selectedCampaign.reward_type] || ''}</span>
+                    <p className="text-2xl font-black text-blue-700">{reward.headline}</p>
+                    <span className="text-xs font-bold text-blue-400 mt-1 inline-block">{reward.caption}</span>
                   </div>
                 )}
 
@@ -308,14 +375,14 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(37,99,235,0.45)]">
                       <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-black uppercase">모집 인원</span>
+                    <span className="text-[10px] text-slate-400 font-black uppercase">{mode.headcountLabel}</span>
                   </div>
                   <p className="text-lg font-black text-slate-900">
-                    {selectedCampaign.max_applicants > 0
-                      ? <><span className="text-blue-600">{selectedCampaign.application_count}</span> / {selectedCampaign.max_applicants}명</>
+                    {headcount > 0
+                      ? <><span className="text-blue-600">{selectedCampaign.application_count}</span> / {headcount}명</>
                       : <><span className="text-blue-600">{selectedCampaign.application_count}</span>명 지원</>}
                   </p>
-                  {selectedCampaign.max_applicants > 0 && (
+                  {headcount > 0 && (
                     <div className="mt-2">
                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
@@ -444,7 +511,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden divide-y divide-slate-50 shadow-[0_8px_22px_-12px_rgba(15,23,42,0.28)]">
                 <div className="flex items-center px-5 py-3.5">
                   <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">유형</span>
-                  <span className="text-sm text-slate-900 font-bold">{TYPE_LABELS[selectedCampaign.type] || selectedCampaign.type}</span>
+                  <span className="text-sm text-slate-900 font-bold">{modeBadge(selectedCampaign)}</span>
                 </div>
                 {selectedCampaign.category && (
                   <div className="flex items-center px-5 py-3.5">
@@ -470,14 +537,28 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <span className="text-sm text-blue-700 font-black">{formatKoreanWon(selectedCampaign.reward_amount)}</span>
                   </div>
                 )}
+                {mode.value === 'groupbuy' && (
+                  <div className="flex items-center px-5 py-3.5">
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">판매 수수료</span>
+                    <span className="text-sm text-blue-700 font-black">
+                      {commissionRate > 0 ? `${commissionRate}%` : '담당자와 협의'}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center px-5 py-3.5">
-                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">모집 인원</span>
+                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{mode.headcountLabel}</span>
                   <span className="text-sm text-slate-900 font-bold">
-                    {selectedCampaign.max_applicants > 0
-                      ? `${selectedCampaign.max_applicants}명`
-                      : '제한 없음'}
+                    {headcount > 0 ? `${headcount}명` : '제한 없음'}
                   </span>
                 </div>
+                {/* 지원해도 바로 확정이 아니라는 점을 미리 알린다 — 협찬형·공동구매형은
+                    지원자가 모인 뒤 브랜드가 고르고, 협업은 담당자가 만들어 준다. */}
+                {mode.openApply && (
+                  <div className="flex items-center px-5 py-3.5">
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">선정 방식</span>
+                    <span className="text-sm text-slate-900 font-bold">지원자 중 브랜드가 선정</span>
+                  </div>
+                )}
                 <div className="flex items-center px-5 py-3.5">
                   <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">등록일</span>
                   <span className="text-sm text-slate-900 font-bold">{formatDate(selectedCampaign.created_at)}</span>
@@ -614,12 +695,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.35)]">
             <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                {selectedCampaign.reward_amount && (
-                  <p className="text-lg font-black text-blue-700 truncate">{formatKoreanWon(selectedCampaign.reward_amount)}</p>
+                {reward && (
+                  <p className="text-lg font-black text-blue-700 truncate">{reward.headline}</p>
                 )}
-                {selectedCampaign.max_applicants > 0 && (
+                {headcount > 0 && (
                   <p className="text-[11px] text-slate-400 font-bold">
-                    {selectedCampaign.application_count}/{selectedCampaign.max_applicants}명 지원중
+                    {selectedCampaign.application_count}/{headcount}명 지원중
                     {quotaReached && <span className="text-emerald-600 ml-1">정원 초과 지원 가능</span>}
                   </p>
                 )}
@@ -658,7 +739,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">캠페인</h2>
-        <p className="text-sm text-slate-400 font-medium">브랜드 캠페인에 지원하고 협업 기회를 잡아보세요</p>
+        <p className="text-sm text-slate-400 font-medium">제품 협찬 · 공동구매 캠페인에 직접 지원하고 협업 기회를 잡아보세요</p>
       </div>
 
       {/* 선정된 협업의 작업 화면. 지원 목록보다 위에 둔다 — 마감이 있는 일이
@@ -737,6 +818,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
             const deadline = deadlineInfo(campaign.end_date);
+            const reward = rewardText(campaign);
+            const headcount = headcountOf(campaign);
             return (
               <div
                 key={campaign.id}
@@ -761,7 +844,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   {/* Badges overlay */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     <span className="bg-white/90 backdrop-blur-sm text-blue-700 px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                      {TYPE_LABELS[campaign.type] || campaign.type}
+                      {modeBadge(campaign)}
                     </span>
                     {deadline && (
                       <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
@@ -795,12 +878,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     {campaign.title}
                   </h3>
                   <div className="flex items-center justify-between">
-                    {campaign.reward_amount ? (
-                      <span className="text-xs font-black text-rose-500">{formatKoreanWon(campaign.reward_amount)}</span>
+                    {reward ? (
+                      <span className="text-xs font-black text-rose-500">{reward.short}</span>
                     ) : <span />}
                     <span className="text-[10px] text-slate-400 font-bold">
-                      {campaign.max_applicants > 0
-                        ? `${campaign.application_count}/${campaign.max_applicants}명`
+                      {headcount > 0
+                        ? `${campaign.application_count}/${headcount}명`
                         : `${campaign.application_count}명 지원중`}
                     </span>
                   </div>

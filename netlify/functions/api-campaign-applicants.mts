@@ -4,18 +4,29 @@ import { requireAccountOwner, requireSignedInUser } from "./_shared/user-auth.mt
 import { requireManager } from "./_shared/manager-auth.mts";
 import { parseAmount } from "./_shared/collab-records.mts";
 import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
-import { mirrorCollabProposal } from "./_shared/campaign-listup.mts";
+import { buildSnapshots, mirrorCollabProposal } from "./_shared/campaign-listup.mts";
+import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 
 /**
  * 캠페인 지원자 — 조회와 선정.
  *
- * 예전에는 브랜드가 직접 지원자를 수락/거절했다. 수락 한 번에 대화방과 정산까지
- * 만들어졌으므로 사실상 계약 체결 버튼이었는데, 그 뒤를 챙기는 사람은 아무도 없었다.
+ * 누가 고르는지가 진행 방식에 따라 갈린다.
  *
- * 이제 선정은 픽스폴리오 담당자가 한다. 브랜드는 지원자를 보고 "이 사람이 좋다 /
- * 아니다"를 남길 수 있고(brand_preference), 그 의견은 담당자의 판단 근거가 되지만
- * 그 자체로 협업을 만들지는 않는다. 브랜드 의견과 실제 결정을 다른 컬럼에 두는 것이
- * 이 변경의 핵심이다 — 같은 컬럼을 공유하면 "누가 결정했는가"가 사라진다.
+ *   광고비 지급형(paid): 담당자가 조건에 맞는 후보를 찾아 리스트업하는 길이다. 지원자
+ *     선정도 담당자가 한다. 브랜드는 "이 사람이 좋다 / 아니다"를 남길 수 있고
+ *     (brand_preference) 그 의견은 담당자의 판단 근거가 되지만 협업을 만들지는 않는다.
+ *
+ *   제품 협찬형·공동구매(OPEN_APPLY_MODES): 지원자 명단이 곧 후보 명단이다. 브랜드가
+ *     지원자를 보고 함께 하고 싶은 사람을 직접 수락하고, 그 뒤부터 픽스폴리오 담당자가
+ *     중간에서 조건과 일정을 맡는다. 브랜드가 "추천"만 남기고 담당자의 확인을 기다리게
+ *     하면, 브랜드는 이미 결정을 내렸는데 아무 일도 일어나지 않는 시간이 생긴다.
+ *
+ * 어느 쪽이든 수락은 협업 본체·단계·담당자 채널 2개를 한꺼번에 만든다(담당자가 중간에
+ * 들어오는 지점이다). 그래서 누가 눌렀는지를 decided_by / decided_by_role 로 나눠 남긴다
+ * — 한 컬럼을 공유하면 "브랜드가 고른 협업"과 "담당자가 고른 협업"을 나중에 구분할 수 없다.
+ *
+ * 브랜드가 사람을 고를 수 있어야 하니, 목록에는 메타 API 로 받아 둔 채널 지표를 함께
+ * 실어 보낸다(buildSnapshots). 지원서에 적힌 자기 소개만으로는 고를 수 없다.
  */
 
 export default async (req: Request) => {
@@ -30,7 +41,8 @@ export default async (req: Request) => {
       }
 
       const owner = await db.sql`
-        SELECT business_username, manager_username, title, type FROM campaigns WHERE id = ${campaign_id}
+        SELECT business_username, manager_username, title, type, reward_mode
+        FROM campaigns WHERE id = ${campaign_id}
       `;
       if (owner.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
@@ -56,11 +68,25 @@ export default async (req: Request) => {
         ORDER BY ca.created_at DESC
       `;
 
+      // 지원자마다 채널 지표를 붙인다. 메타 API 로 받아 둔 값이 있으면 그것이 먼저고,
+      // 없으면 등록서에 적어 둔 값이 온다 — 어느 쪽인지는 metricsSource 로 구분된다.
+      // 화면이 사람마다 따로 조회하면 목록 하나에 요청이 수십 개 나가므로 한 번에 모은다.
+      const rows = (result as any[]) || [];
+      const snapshots = await buildSnapshots(
+        db,
+        rows.map((r) => String(r.applicant_username || "")),
+      );
+
+      const rewardMode = normalizeRewardMode(campaign.reward_mode);
       return Response.json({
-        applicants: result,
+        applicants: rows.map((r) => ({
+          ...r,
+          insights: snapshots.get(norm(r.applicant_username)) || null,
+        })),
         viewerRole,
-        // 브랜드 화면이 "수락" 버튼을 감추고 의견 입력으로 바꿀 수 있게 알려준다.
-        selectionBy: "manager",
+        // 브랜드 화면이 "수락" 버튼과 "추천 의견" 중 무엇을 보여줄지 여기서 갈린다.
+        selectionBy: isOpenApplyMode(rewardMode) ? "brand" : "manager",
+        rewardMode,
         managerUsername: campaign.manager_username || "",
       });
     } catch (err: any) {
@@ -125,35 +151,52 @@ export default async (req: Request) => {
         return Response.json({ error: "잘못된 상태값입니다." }, { status: 400 });
       }
 
-      // --- 선정/거절 (담당자만) ------------------------------------------
-      // 브랜드 소유자 확인에서 담당자 확인으로 바뀐 지점이다. 수락은 협업 본체와
-      // 단계, 담당자 채널을 한꺼번에 만들어 내므로 중간에서 관리하는 사람이 눌러야 한다.
+      // --- 선정/거절 ------------------------------------------------------
+      // 제품 협찬형·공동구매는 브랜드가 지원자 중에서 직접 수락하고, 광고비 지급형은
+      // 담당자가 고른다. 어느 쪽이든 수락은 협업 본체와 단계, 담당자 채널을 한꺼번에
+      // 만들어 담당자를 중간에 세운다.
+      const openApply = isOpenApplyMode(appRow.reward_mode);
       const manager = await requireManager(req);
+      let actorRole: "manager" | "brand" = "manager";
+      let actorUsername = manager.ok ? manager.managerUsername : "";
+
       if (!manager.ok) {
-        // 브랜드가 예전 화면(캐시된 스크립트)으로 수락을 시도할 수 있으므로,
-        // 왜 막혔는지와 무엇을 대신 할 수 있는지를 함께 알려준다.
         const signedIn = await requireSignedInUser(req);
         const isBrandOwner = signedIn.ok && signedIn.username === norm(appRow.business_username);
-        if (isBrandOwner) {
+        if (!isBrandOwner) return manager.response;
+
+        // 브랜드가 못 하는 것은 거절이다. 지원자에게 "안 됐다"를 전하는 일까지 브랜드가
+        // 하면 중간에서 맡는 의미가 없다 — 브랜드는 '보류' 표시만 남기고 담당자가 정리한다.
+        // (광고비 지급형은 수락도 담당자 몫이다. 예전 화면이 캐시돼 있을 수 있으므로
+        //  왜 막혔고 무엇을 대신 할 수 있는지 함께 알려준다.)
+        if (!openApply || status !== "accepted") {
           return Response.json(
             {
-              error:
-                "지원자 선정은 픽스폴리오 담당자가 진행합니다. 원하는 지원자를 '추천'으로 표시해 주시면 담당자가 확인합니다.",
-              code: "SELECTION_BY_MANAGER",
+              error: openApply
+                ? "지원자 거절은 픽스폴리오 담당자가 진행합니다. 함께 하고 싶은 지원자만 수락해 주시고 나머지는 '보류'로 표시해 주세요."
+                : "지원자 선정은 픽스폴리오 담당자가 진행합니다. 원하는 지원자를 '추천'으로 표시해 주시면 담당자가 확인합니다.",
+              code: openApply ? "REJECTION_BY_MANAGER" : "SELECTION_BY_MANAGER",
             },
             { status: 403 },
           );
         }
-        return manager.response;
+        actorRole = "brand";
+        actorUsername = signedIn.username;
       }
 
-      const managerUsername = norm(appRow.manager_username) || manager.managerUsername;
+      // 캠페인에 배정된 담당자가 곧 이 협업의 담당자다. 브랜드가 수락한 경우에는
+      // 누르는 사람이 담당자가 아니므로 캠페인 쪽 배정만 본다. 아직 배정 전이라면
+      // 빈 값으로 두고, 담당자 콘솔의 "담당자 없는 협업"에 잡히게 한다 — 여기서
+      // 임의의 담당자를 넣으면 아무도 자기 일인 줄 모르는 협업이 생긴다.
+      const managerUsername =
+        norm(appRow.manager_username) || (manager.ok ? manager.managerUsername : "");
 
       await db.sql`
         UPDATE campaign_applications
         SET status = ${status},
             manager_note = ${String((body as any).note || appRow.manager_note || "")},
-            decided_by = ${manager.managerUsername},
+            decided_by = ${actorUsername},
+            decided_by_role = ${actorRole},
             decided_at = NOW(),
             updated_at = NOW()
         WHERE id = ${id}
@@ -182,6 +225,7 @@ export default async (req: Request) => {
         businessUsername,
         creatorUsername,
         managerUsername,
+        selectedBy: actorRole,
         rewardType: appRow.reward_type,
         fee,
         startDate: appRow.start_date,
@@ -225,9 +269,9 @@ export default async (req: Request) => {
       await logCollabEvent(db, {
         collabId: collab.id,
         type: "applicant_selected",
-        actorRole: "manager",
-        actorUsername: manager.managerUsername,
-        summary: `${creatorUsername} 선정`,
+        actorRole,
+        actorUsername,
+        summary: `${creatorUsername} ${actorRole === "brand" ? "수락(브랜드)" : "선정"}`,
         payload: { applicationId: appRow.id, fee },
       });
 
@@ -239,6 +283,8 @@ export default async (req: Request) => {
           brandSupport: collab.brandThreadId,
         },
         created: collab.created,
+        // 담당자 배정 전이라면 화면이 "담당자가 곧 연락드립니다"로 안내할 수 있게 알려준다.
+        managerUsername,
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "상태 변경 실패" }, { status: 500 });
