@@ -14,9 +14,10 @@ import AdminCollabManagerConsole from './admin/AdminCollabManagerConsole';
 import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
+import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory' | 'managers';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -579,6 +580,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             { key: 'directory' as OperatorTab, label: '브랜드 매칭 지원자' },
             { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
+            { key: 'managers' as OperatorTab, label: '담당자 계정' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
             { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
             { key: 'workflow' as OperatorTab, label: '제안 워크플로' },
@@ -892,6 +894,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
           adminToken
             ? <AdminInfluencersPanel token={adminToken} />
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 데이터가 표시됩니다." />
+        )}
+
+        {/* 담당자 계정 — 일반 계정에 담당자 권한을 주고 내린다. */}
+        {activeTab === 'managers' && (
+          adminToken
+            ? <AdminManagerAccounts token={adminToken} />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 담당자 목록이 표시됩니다." />
         )}
 
         {/* Settlement Console Tab */}

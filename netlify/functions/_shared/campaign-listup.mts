@@ -80,6 +80,36 @@ export function normalizeOffer(raw: any): ListupOffer {
   };
 }
 
+export type ListupQuote = {
+  fee: number;
+  secondUseFee: number;
+  guaranteedViews: number;
+  badge: string;
+  profileLine: string;
+};
+
+/**
+ * 브랜드에게 보여 줄 견적을 정규화한다.
+ *
+ * 제안 조건(offer)과 나눠 둔 이유는 시점이다. offer 는 브랜드가 고른 뒤 담당자가
+ * 인플루언서에게 보내는 최종 조건이고, 여기 견적은 브랜드가 고르기 *전에* 카드에
+ * 찍히는 숫자다. 브랜드가 광고비와 보장 조회수를 보고 고르는데 그 값이 고른 뒤에야
+ * 생기면 순서가 뒤집힌다.
+ *
+ * CPV 는 담지 않는다. 광고비와 보장 조회수에서 나오는 값이라 따로 저장하면 둘 중
+ * 하나만 고쳤을 때 조용히 어긋난다.
+ */
+export function normalizeQuote(raw: any): ListupQuote {
+  const q = raw && typeof raw === "object" ? raw : {};
+  return {
+    fee: money(q.fee),
+    secondUseFee: money(q.secondUseFee),
+    guaranteedViews: money(q.guaranteedViews),
+    badge: String(q.badge || "").trim().slice(0, 20),
+    profileLine: String(q.profileLine || "").trim().slice(0, 60),
+  };
+}
+
 /** 캠페인 브리프를 제안 초안으로 옮긴다. 담당자는 이 초안을 고쳐서 보낸다. */
 export function offerFromCampaign(campaign: any): ListupOffer {
   return normalizeOffer({
@@ -243,6 +273,8 @@ export async function buildSnapshots(
 export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer") {
   const snapshot = (row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}) as any;
   const offer = normalizeOffer(row.offer);
+  const quotedFee = Number(row.quoted_fee || 0);
+  const guaranteedViews = Number(row.guaranteed_views || 0);
   const base = {
     id: row.id,
     campaignId: row.campaign_id,
@@ -254,8 +286,18 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     brandDecision: row.brand_decision || "pending",
     brandDecisionNote: row.brand_decision_note || "",
     brandDecidedAt: row.brand_decided_at || null,
+    brandFavorite: !!row.brand_favorite,
     outreachStatus: row.outreach_status || "not_sent",
     offer,
+    // 브랜드가 고르기 전에 보는 제시 조건. offer 와 다른 값이며 다른 시점에 적힌다.
+    quotedFee,
+    quotedSecondUseFee: Number(row.quoted_second_use_fee || 0),
+    guaranteedViews,
+    // 조회수당 단가. 나눗셈을 화면마다 다시 하면 반올림이 어긋나므로 여기서 한 번만 한다.
+    cpv: guaranteedViews > 0 && quotedFee > 0 ? Math.round(quotedFee / guaranteedViews) : 0,
+    badge: row.badge || "",
+    // 카드 이름 아래 한 줄. 비어 있으면 화면이 스냅샷의 카테고리로 되돌아간다.
+    profileLine: row.profile_line || "",
     offerSentAt: row.offer_sent_at || null,
     respondedAt: row.responded_at || null,
     responseNote: row.response_note || "",
@@ -289,6 +331,13 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     ...base,
     listedBy: row.listed_by || "",
     offerSentBy: row.offer_sent_by || "",
+    ...(viewer === "brand"
+      ? {
+          // 계정 이름도 신원이다. 이름만 가리고 아이디를 남기면 가린 뜻이 없다.
+          influencerUsername: base.outreachStatus === "accepted" ? base.influencerUsername : "",
+          snapshot: maskSnapshot(snapshot, base.outreachStatus),
+        }
+      : {}),
     ...(viewer === "manager"
       ? {
           campaignTitle: row.campaign_title || "",
@@ -298,6 +347,43 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
         }
       : {}),
   };
+}
+
+/**
+ * 브랜드 화면에 나가는 후보의 신원을 가린다.
+ *
+ * 수락 전까지 브랜드는 계정 이름·인스타 주소·릴스 링크를 받지 않는다. 지표와
+ * 영상 미리보기는 그대로 나가므로 고르는 데 필요한 판단 재료는 줄지 않는다.
+ * 가리는 이유는 순서다. 브랜드가 명단만 받고 직접 연락하면 조건을 조율하는
+ * 사람이 사라지고, 인플루언서는 담당자가 합의한 단가를 보장받지 못한다.
+ *
+ * 화면에서만 별표로 덮는 방식은 쓰지 않는다. 응답에 값이 실려 있으면 가린 것이
+ * 아니다. 수락된 뒤에는 이미 협업이 시작된 사이이므로 그대로 내보낸다.
+ */
+function maskSnapshot(snapshot: any, outreachStatus: string) {
+  if (outreachStatus === "accepted") return snapshot;
+  const name = String(snapshot?.name || "");
+  const reels = Array.isArray(snapshot?.recentReels) ? snapshot.recentReels : [];
+  return {
+    ...snapshot,
+    name: maskName(name),
+    username: "",
+    instagramHandle: "",
+    instagramUrl: "",
+    recentReels: reels.map((r: any) => ({
+      id: r?.id || "",
+      thumbnailUrl: r?.thumbnailUrl || "",
+      views: Number(r?.views || 0),
+    })),
+  };
+}
+
+/** "김하실" → "**실". 마지막 글자만 남긴다 — 부르는 이름은 있어야 대화가 된다. */
+function maskName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  if (trimmed.length === 1) return "*";
+  return "*".repeat(trimmed.length - 1) + trimmed.slice(-1);
 }
 
 /**

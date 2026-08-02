@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatKoreanWon } from '../../utils/formatters';
-import InfluencerCandidateCard from './InfluencerCandidateCard';
+import { formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 
 /**
- * 브랜드가 보는 리스트업 — 담당자가 올린 후보 명단.
+ * 브랜드가 보는 리스트업 — 담당자가 올린 추천 조합.
  *
- * 브랜드가 여기서 하는 일은 하나다. 고르거나 넘기는 것. 제안을 보내고 단가를
- * 조율하는 것은 담당자이고, 답하는 것은 인플루언서다. 그래서 이 화면에는 "제안
- * 보내기" 버튼이 없다 — 있으면 브랜드가 직접 접촉하게 되고, 그 순간 중간에서
+ * 브랜드가 여기서 하는 일은 하나다. 담을 사람을 고르고 확정하는 것. 제안을 보내고
+ * 단가를 조율하는 것은 담당자이고, 답하는 것은 인플루언서다. 그래서 이 화면에는
+ * "제안 보내기" 버튼이 없다 — 있으면 브랜드가 직접 접촉하게 되고, 그 순간 중간에서
  * 조율하는 사람이 사라진다.
  *
- * 대신 고른 뒤에 무엇이 일어나는지는 상태로 계속 보여준다. 브랜드가 고르고 나서
- * 아무 표시도 없으면 "우리가 고른 건 어디 갔나"를 담당자에게 다시 물어보게 된다.
+ * 카드에 이름이 별표로 나오는 것은 화면 장식이 아니다. 서버가 수락 전까지 계정
+ * 이름·인스타 주소·릴스 링크를 아예 실어 보내지 않는다. 지표와 영상 미리보기는
+ * 그대로 오므로 고르는 데 필요한 판단 재료는 줄지 않는다.
+ *
+ * 확정은 한 번에 한다. 한 명씩 눌러 확정하면 중간에 끊겼을 때 절반만 확정된 명단이
+ * 남는데, 그 상태는 화면 어디에도 보이지 않는다. 그래서 고르는 동안에는 화면 안에서만
+ * 담고, 맨 아래 버튼을 누를 때 캠페인 단위로 한 번에 보낸다.
  */
 
 interface CampaignListupBoardProps {
@@ -20,26 +24,40 @@ interface CampaignListupBoardProps {
   onNotify?: (message: string, type?: 'success' | 'error') => void;
 }
 
-const DECISION_BADGE: Record<string, { label: string; cls: string }> = {
-  pending: { label: '검토 중', cls: 'bg-slate-100 text-slate-500' },
-  pick: { label: '진행 요청', cls: 'bg-blue-50 text-blue-600' },
-  pass: { label: '넘김', cls: 'bg-slate-100 text-slate-400' },
-};
-
 const OUTREACH_BADGE: Record<string, { label: string; cls: string }> = {
-  not_sent: { label: '제안 전', cls: 'bg-slate-100 text-slate-400' },
+  not_sent: { label: '', cls: '' },
   sent: { label: '제안 발송 · 응답 대기', cls: 'bg-amber-50 text-amber-600' },
   accepted: { label: '수락 · 협업 시작', cls: 'bg-emerald-50 text-emerald-600' },
   declined: { label: '거절', cls: 'bg-red-50 text-red-500' },
   expired: { label: '기한 지남', cls: 'bg-slate-100 text-slate-400' },
 };
 
+/** 남은 시간을 56:55:12 처럼 시:분:초로. 하루를 넘겨도 시간으로 이어 센다. */
+const formatRemaining = (ms: number) => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+};
+
+/**
+ * 카드에 찍는 한 줄 소개. 담당자가 캠페인에 맞춰 적어 둔 줄이 우선이고, 비워
+ * 뒀으면 채널에 등록된 카테고리로 되돌아간다.
+ */
+const profileLine = (c: any) => String(c?.profileLine || c?.snapshot?.categories || '').trim();
+
 const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
+  const [campaign, setCampaign] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
-  const [noteFor, setNoteFor] = useState('');
-  const [note, setNote] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [now, setNow] = useState(() => Date.now());
+  // 사용자가 화면에서 담고 있는 중이면 새로고침이 그 선택을 덮지 않게 한다.
+  const touched = useRef(false);
 
   const notify = useCallback(
     (message: string, type: 'success' | 'error' = 'success') => {
@@ -55,197 +73,314 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
       notify(res.error, 'error');
       return;
     }
-    setCandidates(res.candidates || []);
+    const list = res.candidates || [];
+    setCandidates(list);
+    setCampaign(res.campaign || null);
+    if (!touched.current) {
+      setSelected(
+        new Set(list.filter((c: any) => c.brandDecision === 'pick').map((c: any) => c.id)),
+      );
+    }
   }, [campaignId, notify]);
 
   useEffect(() => {
     setLoading(true);
+    touched.current = false;
     load();
   }, [load]);
 
-  const decide = async (id: string, decision: 'pick' | 'pass' | 'pending') => {
-    setBusyId(id);
-    const res = await apiService.listupAction(id, 'brand_decision', {
-      decision,
-      note: noteFor === id ? note : '',
+  // 남은 시간 표시. 기한이 없는 캠페인에서는 타이머를 돌리지 않는다.
+  const due = campaign?.listupConfirmDue ? new Date(campaign.listupConfirmDue).getTime() : 0;
+  useEffect(() => {
+    if (!due) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [due]);
+
+  const toggleSelect = (id: string) => {
+    touched.current = true;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
+  };
+
+  const toggleFavorite = async (c: any) => {
+    setBusyId(c.id);
+    const res = await apiService.listupAction(c.id, 'favorite', { favorite: !c.brandFavorite });
     setBusyId('');
     if (res.error) {
       notify(res.error, 'error');
       return;
     }
-    setNoteFor('');
-    setNote('');
-    await load();
-    notify(
-      decision === 'pick'
-        ? '이 인플루언서로 진행 요청했습니다. 담당자가 조건을 정리해 제안합니다.'
-        : decision === 'pass'
-          ? '이 후보를 넘겼습니다.'
-          : '선택을 되돌렸습니다.',
+    setCandidates((prev) =>
+      prev.map((x) => (x.id === c.id ? { ...x, brandFavorite: !c.brandFavorite } : x)),
     );
   };
+
+  const confirmSelection = async () => {
+    if (!selected.size) {
+      notify('담은 인플루언서가 없습니다.', 'error');
+      return;
+    }
+    setConfirming(true);
+    const res = await apiService.confirmListupSelection(campaignId, Array.from(selected));
+    setConfirming(false);
+    if (res.error) {
+      notify(res.error, 'error');
+      return;
+    }
+    touched.current = false;
+    await load();
+    notify(`${selected.size}명으로 확정했습니다. 담당자가 조건을 정리해 제안합니다.`);
+  };
+
+  const openList = useMemo(
+    () => candidates.filter((c) => c.outreachStatus !== 'accepted'),
+    [candidates],
+  );
+  const runningList = useMemo(
+    () => candidates.filter((c) => c.outreachStatus === 'accepted'),
+    [candidates],
+  );
+
+  const totalFee = useMemo(
+    () =>
+      candidates
+        .filter((c) => selected.has(c.id))
+        .reduce((sum, c) => sum + Number(c.quotedFee || 0), 0),
+    [candidates, selected],
+  );
+
+  const remaining = due ? due - now : 0;
+  const expired = due > 0 && remaining <= 0;
 
   if (loading) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
         <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-sm text-slate-400 font-bold">후보 명단을 불러오는 중...</p>
+        <p className="text-sm text-slate-400 font-bold">추천 조합을 불러오는 중...</p>
       </div>
     );
   }
 
-  const picked = candidates.filter((c) => c.brandDecision === 'pick');
-  const waiting = candidates.filter((c) => c.brandDecision === 'pending');
-  const passed = candidates.filter((c) => c.brandDecision === 'pass');
-  const running = candidates.filter((c) => c.outreachStatus === 'accepted');
-
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div className="px-4 md:px-5 py-4 border-b border-slate-100">
-        <h3 className="text-base font-black text-slate-900">인플루언서 리스트업</h3>
+        <h3 className="text-base font-black text-slate-900">담당자 추천 인플루언서</h3>
         <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-          담당자가 캠페인에 맞는 인플루언서를 찾아 올린 명단입니다. 진행하고 싶은 사람을 골라 주시면
-          담당자가 일정·가이드·단가를 들고 직접 제안합니다.
+          픽스폴리오 담당자가 캠페인에 맞는 인플루언서를 찾아 올린 조합입니다. 함께하고 싶은 분을
+          리스트에 담아 주시면 담당자가 일정·가이드·단가를 들고 직접 제안합니다.
         </p>
-
-        {candidates.length > 0 && (
-          <div className="grid grid-cols-4 gap-2 mt-3">
-            {[
-              { label: '전체 후보', value: candidates.length },
-              { label: '검토 중', value: waiting.length },
-              { label: '진행 요청', value: picked.length },
-              { label: '협업 시작', value: running.length },
-            ].map((s) => (
-              <div key={s.label} className="bg-slate-50 rounded-lg px-3 py-2">
-                <p className="text-[9px] text-slate-400 font-black uppercase">{s.label}</p>
-                <p className="text-lg text-slate-900 font-black leading-tight">{s.value}</p>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {candidates.length === 0 ? (
         <div className="p-8 text-center">
-          <p className="text-sm text-slate-400 font-bold">아직 올라온 후보가 없습니다.</p>
+          <p className="text-sm text-slate-400 font-bold">아직 올라온 추천이 없습니다.</p>
           <p className="text-[11px] text-slate-400 font-medium mt-1">
             담당자가 캠페인 내용을 확인하고 어울리는 인플루언서를 찾아 이 자리에 올립니다.
           </p>
         </div>
       ) : (
-        <div className="p-4 md:p-5 bg-slate-50/60 space-y-3">
-          {[...waiting, ...picked, ...passed].map((c) => {
-            const decision = DECISION_BADGE[c.brandDecision] || DECISION_BADGE.pending;
-            const outreach = OUTREACH_BADGE[c.outreachStatus] || OUTREACH_BADGE.not_sent;
-            const locked = c.outreachStatus === 'accepted';
-            return (
-              <InfluencerCandidateCard
-                key={c.id}
-                data={c}
-                note={c.managerNote}
-                badges={
-                  <>
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${decision.cls}`}>
-                      {decision.label}
-                    </span>
-                    {c.outreachStatus !== 'not_sent' && (
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${outreach.cls}`}>
-                        {outreach.label}
-                      </span>
-                    )}
-                  </>
-                }
-              >
-                {/* 제안이 나간 뒤에는 브랜드가 볼 조건을 그대로 보여준다. 담당자가
-                    조정한 금액을 브랜드가 모르면 정산 때 문제가 된다. */}
-                {c.outreachStatus !== 'not_sent' && c.offer?.fee ? (
-                  <div className="bg-slate-50 rounded-lg px-3 py-2 mb-2.5">
-                    <p className="text-[9px] text-slate-400 font-black uppercase mb-1">제안한 조건</p>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1">
-                      <span className="text-[11px] text-slate-700 font-bold">
-                        단가 {formatKoreanWon(c.offer.fee)}
-                      </span>
-                      {c.offer.secondUseFee ? (
-                        <span className="text-[11px] text-slate-500 font-bold">
-                          2차 활용 {formatKoreanWon(c.offer.secondUseFee)}
+        <>
+          <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-2 gap-3">
+            {[...openList, ...runningList].map((c) => {
+              const snap = c.snapshot || {};
+              const reels = (Array.isArray(snap.recentReels) ? snap.recentReels : []).slice(0, 3);
+              const outreach = OUTREACH_BADGE[c.outreachStatus] || OUTREACH_BADGE.not_sent;
+              const locked = c.outreachStatus === 'accepted';
+              const inList = selected.has(c.id);
+              const line = profileLine(c);
+
+              return (
+                <div
+                  key={c.id}
+                  className={`bg-white rounded-2xl border p-3 md:p-4 flex flex-col ${
+                    inList ? 'border-orange-300 ring-1 ring-orange-100' : 'border-slate-100'
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {/* 프로필 사진은 받아 두지 않는다. 이름 끝 글자로 자리를 채운다. */}
+                    <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
+                      {String(snap.name || '?').slice(-1)}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-black text-slate-900 truncate">
+                          {snap.name || '비공개'}
                         </span>
-                      ) : null}
-                      {c.offer.uploadFrom && (
-                        <span className="text-[11px] text-slate-500 font-bold">
-                          게시 {c.offer.uploadFrom}
-                          {c.offer.uploadTo ? ` ~ ${c.offer.uploadTo}` : ''}
+                        {c.badge && (
+                          <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 text-[10px] font-black">
+                            {c.badge}
+                          </span>
+                        )}
+                      </div>
+                      {line && (
+                        <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">{line}</p>
+                      )}
+                      {outreach.label && (
+                        <span
+                          className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[10px] font-black ${outreach.cls}`}
+                        >
+                          {outreach.label}
                         </span>
                       )}
                     </div>
-                    {c.responseNote && (
-                      <p className="text-[11px] text-slate-500 font-medium mt-1.5">
-                        인플루언서 답변: {c.responseNote}
+
+                    {/* 찜하기는 확정과 다른 뜻이다. "나중에 다시 볼게요"를 담을 곳이
+                        없으면 브랜드는 고민 중인 후보까지 리스트에 담게 된다. */}
+                    <button
+                      onClick={() => toggleFavorite(c)}
+                      disabled={busyId === c.id}
+                      title="찜하기"
+                      aria-label="찜하기"
+                      aria-pressed={!!c.brandFavorite}
+                      className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className={`w-4 h-4 ${c.brandFavorite ? 'text-red-500' : 'text-slate-300'}`}
+                        fill={c.brandFavorite ? 'currentColor' : 'none'}
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1L12 21.2l7.7-7.8 1.1-1a5.5 5.5 0 0 0 0-7.8z" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {reels.length > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5 mt-3">
+                      {reels.map((r: any, i: number) => (
+                        <div key={r?.id || i}>
+                          {r?.thumbnailUrl ? (
+                            <img
+                              src={r.thumbnailUrl}
+                              alt=""
+                              loading="lazy"
+                              className="w-full aspect-[9/16] object-cover rounded-lg bg-slate-100"
+                            />
+                          ) : (
+                            <div className="w-full aspect-[9/16] rounded-lg bg-slate-100 flex items-center justify-center">
+                              <span className="text-[10px] text-slate-300 font-bold">영상</span>
+                            </div>
+                          )}
+                          {r?.views ? (
+                            <p className="text-[10px] text-slate-400 font-bold mt-0.5 truncate">
+                              조회 {formatNumberWithCommas(r.views)}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {c.managerNote && (
+                    <div className="mt-3 bg-slate-50 rounded-xl px-3 py-2">
+                      <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
+                      <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap line-clamp-4">
+                        {c.managerNote}
                       </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-slate-400 font-black">팔로워</p>
+                      <p className="text-[13px] text-slate-900 font-black truncate">
+                        {snap.followers ? formatNumberWithCommas(snap.followers) : '—'}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-slate-400 font-black">보장 조회수</p>
+                      <p className="text-[13px] text-slate-900 font-black truncate">
+                        {c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : '—'}
+                      </p>
+                      {c.cpv > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold">CPV {c.cpv}원</p>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-slate-400 font-black">광고비</p>
+                      <p className="text-[13px] text-slate-900 font-black truncate">
+                        {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
+                      </p>
+                      {c.quotedSecondUseFee > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold truncate">
+                          2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    {locked ? (
+                      <p className="text-[11px] text-emerald-600 font-bold text-center py-1.5">
+                        협업이 시작됐습니다. 진행 상황은 아래 협업 현황에서 확인하실 수 있습니다.
+                      </p>
+                    ) : (
+                      <button
+                        onClick={() => toggleSelect(c.id)}
+                        className={`w-full py-2.5 rounded-xl text-[12px] font-black transition-colors ${
+                          inList
+                            ? 'bg-white border border-orange-400 text-orange-500 hover:bg-orange-50'
+                            : 'bg-orange-500 text-white hover:bg-orange-600'
+                        }`}
+                      >
+                        {inList ? '리스트에 담김' : '리스트에 담기'}
+                      </button>
                     )}
                   </div>
-                ) : null}
+                </div>
+              );
+            })}
+          </div>
 
-                {locked ? (
-                  <p className="text-[11px] text-emerald-600 font-bold">
-                    계약이 시작됐습니다. 진행 상황은 아래 협업 현황에서 단계별로 확인하실 수 있습니다.
-                  </p>
-                ) : (
-                  <>
-                    {noteFor === c.id && (
-                      <textarea
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                        rows={2}
-                        placeholder="담당자에게 전할 말 (예: 이 톤으로 가고 싶어요 / 단가는 이 선까지)"
-                        className="w-full text-[11px] font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:border-blue-400 mb-2"
-                      />
-                    )}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        onClick={() => decide(c.id, 'pick')}
-                        disabled={busyId === c.id || c.brandDecision === 'pick'}
-                        className="px-3.5 py-1.5 bg-slate-900 text-white rounded-lg text-[11px] font-black hover:bg-slate-700 disabled:opacity-40"
-                      >
-                        이 사람으로 진행
-                      </button>
-                      <button
-                        onClick={() => decide(c.id, 'pass')}
-                        disabled={busyId === c.id || c.brandDecision === 'pass'}
-                        className="px-3.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[11px] font-black hover:bg-slate-200 disabled:opacity-40"
-                      >
-                        넘기기
-                      </button>
-                      <button
-                        onClick={() => {
-                          setNoteFor(noteFor === c.id ? '' : c.id);
-                          setNote(c.brandDecisionNote || '');
-                        }}
-                        className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 rounded-lg text-[11px] font-black hover:bg-slate-50"
-                      >
-                        {noteFor === c.id ? '메모 접기' : '메모 남기기'}
-                      </button>
-                      {c.brandDecision !== 'pending' && (
-                        <button
-                          onClick={() => decide(c.id, 'pending')}
-                          disabled={busyId === c.id}
-                          className="text-[11px] text-slate-400 font-bold hover:text-slate-600 ml-auto"
-                        >
-                          되돌리기
-                        </button>
-                      )}
-                    </div>
-                    {c.brandDecisionNote && noteFor !== c.id && (
-                      <p className="text-[11px] text-slate-500 font-medium mt-2">
-                        남긴 메모: {c.brandDecisionNote}
-                      </p>
-                    )}
-                  </>
-                )}
-              </InfluencerCandidateCard>
-            );
-          })}
-        </div>
+          {/* 확정 바. 화면 아래에 붙여 두는 이유는 카드를 훑어 내려가는 동안에도
+              지금 몇 명 · 얼마인지가 계속 보여야 하기 때문이다. */}
+          <div className="sticky bottom-0 bg-slate-900 text-white px-4 md:px-5 py-3">
+            {due > 0 && (
+              <div className="flex items-center justify-between gap-3 pb-2.5 mb-2.5 border-b border-white/10">
+                <p className="text-[11px] text-white/60 font-bold truncate">
+                  {expired
+                    ? '확정 기한이 지났습니다. 담당자에게 기한 연장을 요청해 주세요.'
+                    : '제한 시간이 지나면 이 추천 조합은 사라져요 ⌛'}
+                </p>
+                <p className="text-[11px] font-black flex-shrink-0">
+                  <span className="text-white/60 font-bold mr-1.5">캠페인 확정까지 남은 시간</span>
+                  <span className={expired ? 'text-red-400' : 'text-white'}>
+                    {formatRemaining(remaining)}
+                  </span>
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] text-white/60 font-bold">
+                  선택한 인플루언서{' '}
+                  <span className="text-white font-black">{selected.size}명</span>
+                </p>
+                <p className="text-[11px] text-white/60 font-bold">
+                  총 금액{' '}
+                  <span className="text-white font-black">
+                    {formatNumberWithCommas(totalFee)}원
+                  </span>
+                </p>
+              </div>
+              <button
+                onClick={confirmSelection}
+                disabled={confirming || selected.size === 0}
+                className="flex-shrink-0 px-4 py-2.5 bg-white text-slate-900 rounded-xl text-[12px] font-black hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {confirming ? '확정하는 중...' : '인플루언서 모두 선택 완료'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
