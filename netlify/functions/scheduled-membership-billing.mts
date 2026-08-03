@@ -7,15 +7,14 @@ import {
   normalizeTier,
   isDue,
   MAX_BILLING_FAILURES,
-  type BillingPlan,
+  type MembershipTier,
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
 
 const STORE = "seller-verification";
 
 /**
- * Daily recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로)
- * 및 별도 구독인 라이브 커머스 멤버십.
+ * Daily recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로).
  *
  * Every member is billed on the anniversary of the day they subscribed (가입일
  * 기준): the subscribe flow stores `next_billing_date`, and this job — running
@@ -24,9 +23,8 @@ const STORE = "seller-verification";
  * members who paid on different days are billed on different days; they are not
  * all charged together.
  *
- * 라이브 커머스는 멤버십과 따로 결제하는 구독이라 청구 상태도 `live_plan_*` 필드로
- * 따로 관리한다. 한 사람이 멤버십과 라이브를 같이 들고 있으면 각각의 결제일에 각각
- * 청구된다(같은 빌링키를 쓰되 청구는 두 건).
+ * 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다 — `live_plan_*` 필드는 더 이상
+ * 청구 대상이 아니므로 예전 구독자에게도 추가 청구가 발생하지 않는다.
  *
  * The Claude plan is deliberately NOT handled here — it is a prepaid credit wallet
  * in a different store with balance-based top-ups, not a monthly subscription.
@@ -39,20 +37,17 @@ interface SellerRecord {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingEntry[];
-  live_plan_active?: boolean;
-  live_plan_next_billing_date?: string | null;
-  live_plan_billing_failures?: number;
   [k: string]: unknown;
 }
 
 /** 한 레코드 안에서 따로 청구되는 구독 한 건. */
 interface DueSubscription {
-  plan: BillingPlan;
+  plan: MembershipTier;
   /** 실패가 누적됐을 때 꺼야 하는 활성 플래그. */
-  activeField: "membership_active" | "live_plan_active";
-  nextField: "next_billing_date" | "live_plan_next_billing_date";
-  lastField: "last_billing_at" | "live_plan_last_billing_at";
-  failuresField: "billing_failures" | "live_plan_billing_failures";
+  activeField: "membership_active";
+  nextField: "next_billing_date";
+  lastField: "last_billing_at";
+  failuresField: "billing_failures";
 }
 
 export default async () => {
@@ -90,16 +85,6 @@ export default async () => {
           nextField: "next_billing_date",
           lastField: "last_billing_at",
           failuresField: "billing_failures",
-        });
-      }
-
-      if (record.live_plan_active && isDue(record.live_plan_next_billing_date, now)) {
-        due.push({
-          plan: "live_plan",
-          activeField: "live_plan_active",
-          nextField: "live_plan_next_billing_date",
-          lastField: "live_plan_last_billing_at",
-          failuresField: "live_plan_billing_failures",
         });
       }
 

@@ -55,8 +55,8 @@ export interface PortOneIntent {
   amountKrw?: number;
   // claude credit grant kind
   kind?: 'activation' | 'recharge';
-  // membership subscription tier ('live_plan' 은 라이브 커머스 별도 구독)
-  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
+  // membership subscription tier
+  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
   // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)
   // 빌링키 발급은 본인인증(휴대폰 인증)을 강제하므로, 클로드 플랜과 동일하게 단건 결제로
   // 첫 달을 즉시 결제해 본인인증 없이 카드만 입력하도록 한다.

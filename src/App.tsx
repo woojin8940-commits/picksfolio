@@ -6,7 +6,6 @@ import TemplateShowcase from './components/TemplateShowcase';
 import DataBoardSection from './components/DataBoardSection';
 import ErrorBoundary, { clearChunkReloadFlag } from './components/ErrorBoundary';
 import Footer from './components/Footer';
-import CoBroadcastInviteNotice from './components/CoBroadcastInviteNotice';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 
 // Wrap React.lazy so a failed dynamic import() (the usual cause of the
@@ -53,10 +52,7 @@ const SignupPage = lazyWithRetry(() => import('./components/SignupPage'));
 const LoginPage = lazyWithRetry(() => import('./components/LoginPage'));
 const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
-const LiveCommerceManagement = lazyWithRetry(() => import('./components/LiveCommerceManagement'));
-const BroadcastSettings = lazyWithRetry(() => import('./components/BroadcastSettings'));
 const DmAutomation = lazyWithRetry(() => import('./components/DmAutomation'));
-const BroadcastHistory = lazyWithRetry(() => import('./components/BroadcastHistory'));
 const BusinessProposalForm = lazyWithRetry(() => import('./components/BusinessProposalForm'));
 const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashboard'));
 const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalendar'));
@@ -80,7 +76,7 @@ import { clearAllLinkCache } from './services/prefetchService';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-[40vh]">
@@ -1559,17 +1555,8 @@ const App: React.FC = () => {
       case 'links':
         subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
         break;
-      case 'live':
-        subComponent = <Suspense fallback={<LazyFallback />}><LiveCommerceManagement userName={userName} onNavigateMembership={() => setSubView('membership')} onNavigateBroadcastSettings={() => setSubView('broadcast-settings')} /></Suspense>;
-        break;
-      case 'broadcast-settings':
-        subComponent = <Suspense fallback={<LazyFallback />}><BroadcastSettings userName={userName} onNavigateLive={() => setSubView('live')} /></Suspense>;
-        break;
       case 'dm-automation':
         subComponent = <Suspense fallback={<LazyFallback />}><DmAutomation userName={userName} /></Suspense>;
-        break;
-      case 'broadcast-history':
-        subComponent = <Suspense fallback={<LazyFallback />}><BroadcastHistory userName={userName} /></Suspense>;
         break;
       case 'business':
         subComponent = <Suspense fallback={<LazyFallback />}><BusinessDashboard userName={userName} /></Suspense>;
@@ -1602,9 +1589,6 @@ const App: React.FC = () => {
 
     return (
       <>
-        {/* 함께 방송 초대 알림 — 크리에이터 대시보드의 어느 서브뷰에 있든 초대가
-            도착하면 상단에 떠서, 라이브/방송 설정 화면을 열고 있지 않아도 알 수 있다. */}
-        <CoBroadcastInviteNotice username={userName} onGoLive={() => setSubView('live')} />
         {/* 담당자로 배정된 계정은 자기 크리에이터 대시보드도 그대로 쓴다. 두 화면을
             오갈 길이 없으면 로그인 직후에만 담당자 화면에 갈 수 있게 되므로,
             여기에 들어가는 문을 하나 둔다. */}
@@ -1623,8 +1607,6 @@ const App: React.FC = () => {
         currentSubView={subView}
         onNavigateDashboard={() => setSubView('dashboard')}
         onNavigateLinks={() => setSubView('links')}
-        onNavigateLive={() => setSubView('live')}
-        onNavigateBroadcastSettings={() => setSubView('broadcast-settings')}
         onNavigateDmAutomation={() => setSubView('dm-automation')}
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
@@ -1646,12 +1628,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background selection:bg-blue-primary/30 flex flex-col">
-      {/* 함께 방송 초대 알림 — 대시보드(admin) 밖의 화면(홈·내 페이지 등)에 있어도
-          로그인한 크리에이터라면 초대가 도착하는 즉시 상단에 떠야 하므로, 여기서도
-          한 번 더 마운트해 앱 어디서나 초대가 보이도록 한다. */}
-      {isLoggedIn && userName && (
-        <CoBroadcastInviteNotice username={userName} onGoLive={() => { setSubView('live'); navigate('admin'); }} />
-      )}
       <SiteHeader
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}

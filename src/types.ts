@@ -179,7 +179,7 @@ export interface SellerVerification {
   business?: SellerBusinessVerification | null;
   settlement?: SellerSettlementAccount | null;
   business_verified?: boolean;
-  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 라이브 송출이 가능하다.
+  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 사업자 인증이 완료된 것으로 본다.
   business_review_status?: 'pending' | 'approved' | 'rejected';
   business_review_reason?: string;
   business_submitted_at?: string | null;
@@ -197,8 +197,8 @@ export interface SellerVerification {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingHistoryEntry[];
-  // 라이브 커머스 멤버십 — 위 멤버십 티어와 별개로 결제·구독하는 플랜이라
-  // 활성 여부와 청구 상태를 따로 들고 있다. 빌링키는 멤버십과 공유한다.
+  // 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다. 아래 필드는 예전 구독자
+  // 기록에만 남아 있는 레거시 값이며 새로 쓰이지 않는다.
   live_plan_active?: boolean;
   live_plan_started_at?: string | null;
   live_plan_amount_krw?: number | null;
@@ -211,6 +211,7 @@ export interface SellerVerification {
 
 export interface MembershipBillingHistoryEntry {
   at: string;
+  // 'live_plan' 은 판매 종료된 라이브 커머스 멤버십의 과거 청구 기록에만 남는다.
   tier: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
   amountKrw: number;
   kind: 'initial' | 'recurring';

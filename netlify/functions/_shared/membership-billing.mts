@@ -21,18 +21,10 @@
 export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro'
 
 /**
- * 라이브 커머스는 티어 사다리에서 빠져 있는 "별도 구독"이다.
- *
- * 예전에는 커머스(13,900) 티어에 라이브가 들어 있고 프로(18,700)가 커머스를
- * 포함했기 때문에, 프로만 결제해도 라이브가 딸려 왔다. 라이브는 송출 인프라 비용이
- * 실제로 나가는 기능이라 다른 멤버십과 묶어 팔면 원가를 회수하지 못한다. 그래서
- * 라이브만 따로 결제하는 플랜으로 떼어냈다.
- *
- * 기존 커머스(또는 구 'live') 구독자는 그대로 라이브를 쓸 수 있게 남겨 둔다
- * (grandfathering). 다만 신규 판매는 하지 않는다 — 화면에서도 커머스 카드를
- * 없애고 라이브 커머스 카드를 맨 끝에 둔다.
+ * 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다 — 결제·구독·정기청구 경로가
+ * 모두 없어졌으므로 여기에도 플랜이 없다. 커머스(13,900) 티어는 예전 구독자의
+ * 등급 비교를 위해서만 남는다(신규 판매 없음).
  */
-export type BillingPlan = MembershipTier | 'live_plan'
 
 // Keep these in sync with the prices shown in src/components/MembershipPlan.tsx.
 // 표시가는 모두 부가세(VAT 10%) 포함 금액이다 — 결제도 이 금액 그대로 청구한다.
@@ -43,27 +35,11 @@ export const TIER_PRICE_KRW: Record<MembershipTier, number> = {
   pro: 18700,
 }
 
-/** 라이브 커머스 별도 구독료(부가세 포함). */
-export const LIVE_PLAN_PRICE_KRW = 13900
-
 export const TIER_LABEL: Record<MembershipTier, string> = {
   standard: '스탠다드 멤버십',
   standard_ai: 'AI 협업 멤버십',
   commerce: '커머스 멤버십',
   pro: '프로 플랜',
-}
-
-export const LIVE_PLAN_LABEL = '라이브 커머스 멤버십'
-
-/** 결제 가능한 모든 플랜(멤버십 티어 + 라이브 별도 구독)의 가격·이름. */
-export const PLAN_PRICE_KRW: Record<BillingPlan, number> = {
-  ...TIER_PRICE_KRW,
-  live_plan: LIVE_PLAN_PRICE_KRW,
-}
-
-export const PLAN_LABEL: Record<BillingPlan, string> = {
-  ...TIER_LABEL,
-  live_plan: LIVE_PLAN_LABEL,
 }
 
 /** Normalise a stored plan value to a billable tier, or null if it isn't one.
@@ -76,17 +52,11 @@ export const normalizeTier = (plan: unknown): MembershipTier | null => {
   return null
 }
 
-/** 결제 요청에 들어온 플랜 값을 검증한다(멤버십 티어 또는 라이브 별도 구독). */
-export const normalizeBillingPlan = (plan: unknown): BillingPlan | null => {
-  if (plan === 'live_plan') return 'live_plan'
-  return normalizeTier(plan)
-}
-
 /**
- * 라이브 커머스를 쓸 수 있는 상태인지.
- * - 라이브 별도 구독이 살아 있거나,
- * - 예전 커머스(구 'live') 멤버십을 유지 중인 기존 구독자.
- * 프로 플랜은 더 이상 라이브를 포함하지 않는다.
+ * 라이브 커머스를 쓸 수 있는 상태인지 — 레거시 판정 전용.
+ * 라이브 커머스 멤버십은 판매를 종료했으므로 새로 통과하는 경로는 없고,
+ * 예전에 결제한 기록(live_plan_active) 또는 예전 커머스(구 'live') 멤버십을
+ * 유지 중인 기존 구독자만 true 가 된다. 그 밖에는 모두 차단된다(fail-closed).
  */
 export const hasLiveCommerceAccess = (
   record:
@@ -173,12 +143,12 @@ const asciiSafe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) 
 export const chargeMembershipBillingKey = async (
   username: string,
   billingKey: string,
-  tier: BillingPlan,
+  tier: MembershipTier,
 ): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
   const apiSecret = process.env.PORTONE_V2_API_SECRET
   if (!apiSecret) return { success: false, error: 'PORTONE_V2_API_SECRET 미설정' }
 
-  const amountKrw = PLAN_PRICE_KRW[tier]
+  const amountKrw = TIER_PRICE_KRW[tier]
   const paymentId = `membership-${asciiSafe(username)}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`
@@ -194,7 +164,7 @@ export const chargeMembershipBillingKey = async (
         body: JSON.stringify({
           billingKey,
           storeId: PORTONE_STORE_ID,
-          orderName: `픽스폴리오 ${PLAN_LABEL[tier]} 월 구독료`,
+          orderName: `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
           customer: { customerId: asciiSafe(username) },
           amount: { total: amountKrw },
           currency: 'KRW',
@@ -291,9 +261,9 @@ export const chargeTossMembershipBillingKey = async (
   username: string,
   billingKey: string,
   customerKey: string,
-  tier: BillingPlan,
+  tier: MembershipTier,
 ): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
-  const amountKrw = PLAN_PRICE_KRW[tier]
+  const amountKrw = TIER_PRICE_KRW[tier]
   const orderId = `membership-${asciiSafe(username)}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`
@@ -302,7 +272,7 @@ export const chargeTossMembershipBillingKey = async (
     customerKey,
     amountKrw,
     orderId,
-    `픽스폴리오 ${PLAN_LABEL[tier]} 월 구독료`,
+    `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
   )
   if (!charge.ok) return { success: false, amountKrw, error: charge.error }
   return { success: true, paymentId: charge.paymentKey || orderId, amountKrw }
@@ -317,12 +287,12 @@ export const chargeTossMembershipBillingKey = async (
 export const chargeMembershipMonthly = async (
   username: string,
   billingKey: string,
-  tier: BillingPlan,
+  tier: MembershipTier,
   provider?: string | null,
   tossCustomerKey?: string | null,
 ): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
   if (provider === 'toss') {
-    if (!tossCustomerKey) return { success: false, amountKrw: PLAN_PRICE_KRW[tier], error: '토스페이먼츠 customerKey 누락' }
+    if (!tossCustomerKey) return { success: false, amountKrw: TIER_PRICE_KRW[tier], error: '토스페이먼츠 customerKey 누락' }
     return chargeTossMembershipBillingKey(username, billingKey, tossCustomerKey, tier)
   }
   return chargeMembershipBillingKey(username, billingKey, tier)
@@ -331,7 +301,7 @@ export const chargeMembershipMonthly = async (
 // ── Subscription record shape (stored on the seller-verification blob) ────────
 export interface MembershipBillingEntry {
   at: string
-  tier: BillingPlan
+  tier: MembershipTier
   amountKrw: number
   kind: 'initial' | 'recurring'
   success: boolean

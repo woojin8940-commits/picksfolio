@@ -1,5 +1,5 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
-import type { BillingPlan, MembershipTier } from '../utils/membershipTiers';
+import type { MembershipTier } from '../utils/membershipTiers';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 
 const BIZ_SESSION_KEY = 'picks_business_session';
@@ -1143,7 +1143,7 @@ export const apiService = {
   async issueBillingKeyPayment(
     username: string,
     billingKey: string,
-    tier: BillingPlan,
+    tier: MembershipTier,
   ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
     try {
       const res = await fetch('/api/billing-issue', {
@@ -1169,7 +1169,7 @@ export const apiService = {
   // PortOne 으로만 전달된다. (토스페이·카카오페이는 기존 SDK 빌링키 경로를 그대로 사용한다.)
   async subscribeMembershipCard(
     username: string,
-    tier: BillingPlan,
+    tier: MembershipTier,
     card: {
       number: string;
       expiryMonth: string;
