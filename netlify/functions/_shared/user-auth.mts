@@ -101,6 +101,47 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
   };
 }
 
+/**
+ * username 으로 서비스 계정을 찾는다.
+ *
+ * 운영자가 담당자를 배정할 때 아이디를 손으로 입력하기 때문에 필요하다. 오타가 그대로
+ * 들어가면 배정 목록에는 한 줄이 생기지만 그 아이디로 로그인하는 사람은 없으므로,
+ * 운영자에게는 "권한을 주었습니다" 라고 보이는데 담당자 대시보드는 아무에게도 열리지
+ * 않는다. 조용히 실패하는 대신 배정 전에 확인한다.
+ *
+ * 반환값이 null 이면 "확인할 수 없었다"는 뜻이다(서비스 롤 키 없음 · 조회 실패).
+ * "그런 계정이 없다"와 반드시 구분해야 한다 — 확인 실패를 없는 계정으로 취급하면
+ * 키 설정이 어긋난 환경에서 정상적인 배정이 전부 막힌다.
+ */
+export async function findProfileByUsername(
+  username: string,
+): Promise<{ found: boolean; username: string; role: string } | null> {
+  const client = getAuthClient();
+  if (!client) return null;
+
+  const target = normalizeName(username);
+  if (!target) return { found: false, username: "", role: "" };
+
+  // 저장된 값의 대소문자를 모를 수 있어 ilike 로 찾는다. 다만 `_` 와 `%` 는 패턴
+  // 문자라서 그대로 넣으면 `woo_jin` 이 `wooXjin` 에도 걸린다 — 남의 계정을 담당자로
+  // 올리게 되므로 이스케이프한다.
+  const pattern = target.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data, error } = await client
+    .from("profiles")
+    .select("username, role")
+    .ilike("username", pattern)
+    .limit(1);
+  if (error) return null;
+
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) return { found: false, username: target, role: "" };
+  return {
+    found: true,
+    username: normalizeName(String(row.username || "")) || target,
+    role: String(row.role || ""),
+  };
+}
+
 const forbidden = (): { ok: false; response: Response } => ({
   ok: false,
   response: Response.json(

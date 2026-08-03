@@ -58,7 +58,10 @@ const AdminManagerAccounts: React.FC<AdminManagerAccountsProps> = ({ token }) =>
     setError('');
     setManagers(res.managers || []);
     setForm({ username: '', displayName: '', email: '', note: '' });
-    notify(`@${username} 계정에 담당자 권한을 주었습니다.`);
+    // 이미 로그인해 있는 세션은 배정 사실을 모른다. 담당자 여부는 로그인 시점(또는
+    // 새로고침)에 한 번 확인하므로, 운영자가 "배정했는데 안 바뀐다"로 헤매지 않게
+    // 여기서 미리 알려 준다.
+    notify(`@${username} 계정에 담당자 권한을 주었습니다. 이미 로그인 중이라면 새로고침 후 적용됩니다.`);
   };
 
   const setActive = async (username: string, active: boolean, campaignCount: number) => {

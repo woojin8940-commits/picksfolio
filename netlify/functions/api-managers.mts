@@ -1,7 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireOperator } from "./_shared/manager-auth.mts";
-import { requireSignedInUser } from "./_shared/user-auth.mts";
+import { requireSignedInUser, findProfileByUsername } from "./_shared/user-auth.mts";
 
 /**
  * 담당자 계정 관리.
@@ -99,6 +99,22 @@ export default async (req: Request) => {
       const username = norm(body.username);
       if (!username) {
         return Response.json({ error: "계정 아이디를 입력해 주세요." }, { status: 400 });
+      }
+
+      // 아이디는 손으로 입력한다. 오타가 그대로 저장되면 목록에는 담당자가 한 명 늘고
+      // 운영자에게는 성공으로 보이지만, `?me=1` 은 어느 로그인과도 맞지 않아서 담당자
+      // 대시보드가 아무에게도 열리지 않는다. 확인할 수 있을 때는 배정 전에 막는다.
+      const profile = await findProfileByUsername(username);
+      if (profile && !profile.found) {
+        return Response.json(
+          {
+            error: `@${username} 계정을 찾을 수 없습니다. 서비스에 가입된 아이디인지 확인해 주세요.`,
+          },
+          { status: 404 },
+        );
+      }
+      if (!profile) {
+        console.warn("[api-managers] 계정 확인을 건너뛰었다(프로필 조회 불가):", username);
       }
 
       await db.sql`

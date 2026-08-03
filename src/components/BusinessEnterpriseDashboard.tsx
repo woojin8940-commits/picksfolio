@@ -1,17 +1,20 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
 import { authHeaders, setActiveBusinessAccount } from '../services/apiService';
+// 청크를 못 받은 화면이 "로딩 중" 에서 멈추지 않도록, 크리에이터 대시보드와 같은
+// 래퍼(재시도 → 실패 시 오류 경계)를 쓴다.
+import { lazyWithRetry, LazyRoute } from '../utils/lazyRoute';
 
-const BusinessInbox = lazy(() => import('./BusinessInbox'));
-const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
-const LinkManagement = lazy(() => import('./LinkManagement'));
-const AITrendAnalysis = lazy(() => import('./AITrendAnalysis'));
-const DmAutomation = lazy(() => import('./DmAutomation'));
-const OpenScheduleManagement = lazy(() => import('./OpenScheduleManagement'));
-const MembershipPlan = lazy(() => import('./MembershipPlan'));
-const BusinessTimeline = lazy(() => import('./BusinessTimeline'));
-const CampaignCollabManagement = lazy(() => import('./CampaignCollabManagement'));
+const BusinessInbox = lazyWithRetry(() => import('./BusinessInbox'));
+const BusinessEntCalendar = lazyWithRetry(() => import('./BusinessEntCalendar'));
+const LinkManagement = lazyWithRetry(() => import('./LinkManagement'));
+const AITrendAnalysis = lazyWithRetry(() => import('./AITrendAnalysis'));
+const DmAutomation = lazyWithRetry(() => import('./DmAutomation'));
+const OpenScheduleManagement = lazyWithRetry(() => import('./OpenScheduleManagement'));
+const MembershipPlan = lazyWithRetry(() => import('./MembershipPlan'));
+const BusinessTimeline = lazyWithRetry(() => import('./BusinessTimeline'));
+const CampaignCollabManagement = lazyWithRetry(() => import('./CampaignCollabManagement'));
 
 interface BusinessEnterpriseDashboardProps {
   businessUsername: string;
@@ -212,52 +215,43 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     </button>
   );
 
-  const BizLazyFallback = () => (
-    <div className="flex items-center justify-center min-h-[40vh]">
-      <div className="text-center animate-in fade-in duration-300">
-        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-        <p className="text-slate-400 font-semibold text-xs">로딩 중...</p>
-      </div>
-    </div>
-  );
-
   let subComponent: React.ReactNode = null;
   switch (currentSubView) {
     case 'links':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><LinkManagement userName={businessUsername} /></Suspense>;
+      subComponent = <LazyRoute><LinkManagement userName={businessUsername} /></LazyRoute>;
       break;
     case 'trend':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><AITrendAnalysis userName={businessUsername} /></Suspense>;
+      subComponent = <LazyRoute><AITrendAnalysis userName={businessUsername} /></LazyRoute>;
       break;
     case 'dm-automation':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><DmAutomation userName={businessUsername} /></Suspense>;
+      subComponent = <LazyRoute><DmAutomation userName={businessUsername} /></LazyRoute>;
       break;
     case 'open-schedule':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><OpenScheduleManagement userName={businessUsername} /></Suspense>;
+      subComponent = <LazyRoute><OpenScheduleManagement userName={businessUsername} /></LazyRoute>;
       break;
     case 'membership':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><MembershipPlan userName={businessUsername} /></Suspense>;
+      subComponent = <LazyRoute><MembershipPlan userName={businessUsername} /></LazyRoute>;
       break;
     case 'inbox':
       subComponent = (
-        <Suspense fallback={<BizLazyFallback />}><BusinessInbox businessUsername={businessUsername} companyName={companyName} /></Suspense>
+        <LazyRoute><BusinessInbox businessUsername={businessUsername} companyName={companyName} /></LazyRoute>
       );
       break;
     case 'calendar':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><BusinessEntCalendar businessUsername={businessUsername} companyName={companyName} /></Suspense>;
+      subComponent = <LazyRoute><BusinessEntCalendar businessUsername={businessUsername} companyName={companyName} /></LazyRoute>;
       break;
     case 'timeline':
       subComponent = (
-        <Suspense fallback={<BizLazyFallback />}>
+        <LazyRoute>
           <BusinessTimeline userName={businessUsername} userType="business" initialProposalId={timelineProposalId || undefined} />
-        </Suspense>
+        </LazyRoute>
       );
       break;
     case 'campaign-collab':
       subComponent = (
-        <Suspense fallback={<BizLazyFallback />}>
+        <LazyRoute>
           <CampaignCollabManagement businessUsername={businessUsername} companyName={companyName} />
-        </Suspense>
+        </LazyRoute>
       );
       break;
     default:
@@ -325,9 +319,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           {/* AI Trend section — embedded directly on the home like the user
               dashboard, so the business account sees the same AI capability. */}
           <section className="mb-6 md:mb-8">
-            <Suspense fallback={<BizLazyFallback />}>
+            <LazyRoute>
               <AITrendAnalysis userName={businessUsername} embedded />
-            </Suspense>
+            </LazyRoute>
           </section>
 
           {/* Collaboration Timeline CTA (AI 협업 도우미) — mirrors the user

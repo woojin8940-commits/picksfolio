@@ -104,8 +104,7 @@ export async function addSettlementForProposal(settlement: {
   }
 }
 
-/** 제안이 삭제되면 그 제안에서 파생된 정산 항목도 같이 지운다. */
-export async function removeSettlementsForProposal(
+/** 제안이 삭제되면 그 제안에서 파생된 정산 항목도 같이 지운다. */export async function removeSettlementsForProposal(
   proposalId: string,
   businessUsername: string,
   influencerUsername: string,
@@ -123,3 +122,78 @@ export async function removeSettlementsForProposal(
     await mutateRecords(SETTLEMENTS_STORE, key, filterOut);
   }
 }
+
+/**
+ * 캠페인 협업에서 확정된 일정을 협업 내역(협업 현황 → 협업 내역 · 캘린더)에 올린다.
+ *
+ * 협업 내역은 원래 사용자가 직접 남기는 기록과 정산 항목에서 파생된 항목으로만
+ * 채워졌다. 정산 항목은 업로드 확인 뒤에야 생기므로, 협업이 확정된 시점부터 몇 주
+ * 동안은 캘린더에 그 협업이 존재하지 않았다. 담당자가 기간을 확인해 체크하면 그
+ * 즉시 이 함수가 협업 내역에 한 줄을 만든다.
+ *
+ * 같은 협업은 언제 다시 체크해도 한 줄이어야 하므로 `collab_id` 로 찾아 갱신한다
+ * (id 는 처음 만든 값을 유지한다 — 사용자가 그 줄을 수정·삭제한 적이 있어도
+ * 가리키는 대상이 바뀌지 않는다).
+ */
+export type CollabScheduleRecordInput = {
+  collabId: string;
+  influencerUsername: string;
+  title: string;
+  companyName: string;
+  category: "광고" | "커머스" | "기타";
+  /** 협업 시작일 (YYYY-MM-DD). */
+  date: string;
+  /** 협업 종료일 (YYYY-MM-DD). 비면 하루짜리로 본다. */
+  endDate?: string;
+  fee: number;
+  status: "scheduled" | "in_progress" | "completed" | "cancelled";
+  memo?: string;
+  confirmedBy: string;
+};
+
+export async function upsertCollabScheduleRecord(
+  input: CollabScheduleRecordInput,
+): Promise<{ record: any; created: boolean } | null> {
+  const username = input.influencerUsername.toLowerCase().replace(/^biz\//, "");
+  if (!username) return null;
+
+  const now = new Date().toISOString();
+  let created = false;
+  let saved: any = null;
+
+  await mutateRecords(COLLABS_STORE, collabsKey(username), (records) => {
+    const idx = records.findIndex((r: any) => r?.collab_id === input.collabId);
+    const base = idx === -1 ? null : records[idx];
+    created = idx === -1;
+
+    const record = {
+      ...(base || {}),
+      id: base?.id || `collab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: input.title,
+      company_name: input.companyName,
+      category: input.category,
+      date: input.date,
+      end_date: input.endDate || "",
+      fee: parseAmount(input.fee),
+      status: input.status,
+      memo: input.memo || "",
+      // 출처 표시. 협업 내역 화면은 CollabRecord 필드만 읽으므로 화면에는 영향이
+      // 없고, 담당자가 다시 체크할 때 같은 줄을 찾는 근거가 된다.
+      collab_id: input.collabId,
+      source: "campaign_collab",
+      schedule_confirmed_by: input.confirmedBy,
+      schedule_confirmed_at: now,
+      created_at: base?.created_at || base?.createdAt || now,
+      updated_at: now,
+    };
+
+    saved = record;
+    if (idx === -1) return [...records, record];
+    const next = [...records];
+    next[idx] = record;
+    return next;
+  });
+
+  return saved ? { record: saved, created } : null;
+}
+

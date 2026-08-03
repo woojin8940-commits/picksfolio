@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import {
   addSettlementForProposal,
@@ -85,77 +86,18 @@ export default async (req: Request, context: Context) => {
     }
 
     if (body.status === "accepted") {
+      // 방은 제안이 도착할 때 이미 열려 있다(api-proposals POST). 여기서는 수락
+      // 안내만 덧붙이고, 예전 제안이나 방 생성이 실패했던 건은 이 시점에 만든다.
       try {
-        const timelineStore = getStore("timelines");
-        const detailKey = `detail_${proposalId}`;
-        const existingTimeline = await timelineStore.get(detailKey, { type: "json" });
-
-        if (!existingTimeline) {
-          const influencerUsername = username;
-          const companyName = updatedProposal.company_name || "";
-          const proposalTitle = updatedProposal.title || "";
-          const nowISO = new Date().toISOString();
-
-          const systemComment = {
-            id: `tc_${Date.now()}_system`,
-            proposalId,
-            authorType: "business",
-            authorName: companyName || bizUsername,
-            authorUsername: bizUsername,
-            content: `"${proposalTitle}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
-            createdAt: nowISO,
-            readBy: [influencerUsername],
-          };
-
-          const timelineData = {
-            proposalId,
-            influencerUsername,
-            businessUsername: bizUsername,
-            companyName,
-            proposalTitle,
-            comments: [systemComment],
-            createdAt: nowISO,
-          };
-
-          await timelineStore.setJSON(detailKey, timelineData);
-
-          const ensureIndex = async (type: string, uname: string) => {
-            const indexKey = `index_${type}_${uname.toLowerCase()}`;
-            const indexData = ((await timelineStore.get(indexKey, { type: "json" })) as any[]) || [];
-            if (!indexData.some((t: any) => t.proposalId === proposalId)) {
-              indexData.unshift({
-                proposalId,
-                influencerUsername,
-                businessUsername: bizUsername,
-                companyName,
-                proposalTitle,
-                createdAt: timelineData.createdAt,
-              });
-              await timelineStore.setJSON(indexKey, indexData);
-            }
-          };
-
-          if (influencerUsername) await ensureIndex("influencer", influencerUsername);
-          if (bizUsername) await ensureIndex("business", bizUsername);
-
-          // Persist timeline to SQL
-          try {
-            const { getDatabase } = await import("@picks/netlify-database");
-            const db = getDatabase();
-            await db.sql`
-              INSERT INTO timelines (proposal_id, influencer_username, business_username, company_name, proposal_title, created_at)
-              VALUES (${proposalId}, ${influencerUsername}, ${bizUsername}, ${companyName}, ${proposalTitle}, NOW())
-              ON CONFLICT (proposal_id) DO NOTHING
-            `;
-            await db.sql`
-              INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
-              VALUES (${systemComment.id}, ${proposalId}, ${systemComment.authorType}, ${systemComment.authorName}, ${systemComment.authorUsername}, ${systemComment.content}, ${[influencerUsername]}, NOW())
-              ON CONFLICT (id) DO NOTHING
-            `;
-          } catch (dbErr) {
-            console.error("[api-proposal-item] Failed to persist timeline to SQL:", dbErr);
-          }
-        }
+        await ensureTimelineRoom({
+          proposalId,
+          influencerUsername: username,
+          businessUsername: bizUsername,
+          companyName: updatedProposal.company_name || "",
+          proposalTitle: updatedProposal.title || "",
+          systemMessage: `"${updatedProposal.title || "협업 제안"}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
+          appendIfExists: true,
+        });
       } catch (e) {
         console.error("Failed to create timeline on accept:", e);
       }

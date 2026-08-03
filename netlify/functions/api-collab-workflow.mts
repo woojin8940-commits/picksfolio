@@ -2,7 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
-import { addSettlementForProposal } from "./_shared/collab-records.mts";
+import { addSettlementForProposal, upsertCollabScheduleRecord } from "./_shared/collab-records.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 import {
   canTransitionStage,
@@ -207,6 +207,10 @@ export default async (req: Request, context: Context) => {
           openFeedbackCount: openMap.get(row.id) || 0,
           uploadUrl: row.upload_url || "",
           confirmedAt: row.confirmed_at,
+          scheduleStart: row.schedule_start || "",
+          scheduleEnd: row.schedule_end || "",
+          scheduleConfirmedAt: row.schedule_confirmed_at,
+          scheduleConfirmedBy: row.schedule_confirmed_by || "",
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         };
@@ -262,6 +266,10 @@ export default async (req: Request, context: Context) => {
           uploadUrl: collab.upload_url || "",
           adCode: collab.ad_code || "",
           confirmedAt: collab.confirmed_at,
+          scheduleStart: collab.schedule_start || "",
+          scheduleEnd: collab.schedule_end || "",
+          scheduleConfirmedAt: collab.schedule_confirmed_at,
+          scheduleConfirmedBy: collab.schedule_confirmed_by || "",
           cancelledAt: collab.cancelled_at,
           cancelReason: collab.cancel_reason || "",
           progress: progressOf(stages),
@@ -797,6 +805,123 @@ export default async (req: Request, context: Context) => {
         });
 
         return Response.json({ success: true });
+      }
+
+      // 담당자: 협업 내역 일정 체크 --------------------------------------
+      //
+      // 성사된 캠페인 협업이 당사자 화면(협업 현황 → 협업 내역 · 캘린더)에
+      // 나타나는 것은 업로드 확인 뒤 정산 항목이 생긴 다음이었다. 확정부터
+      // 업로드까지 몇 주 동안 인플루언서 캘린더에는 그 협업이 없어서, 촬영
+      // 일정이 다른 협업과 겹치는지 볼 수도 없었다.
+      //
+      // 담당자가 기간을 확인해 체크하면 그 즉시 협업 내역에 일정으로 올린다.
+      // 조건 확정(update_terms)에서 자동으로 하지 않는 이유는, 마감일이 곧
+      // 협업 기간은 아니어서(촬영 기간·게시 유지 기간은 담당자가 조율한다)
+      // 사람이 한 번 확인한 값만 당사자 캘린더에 들어가야 하기 때문이다.
+      case "confirm_schedule": {
+        if (role !== "manager") return jsonError("일정 체크는 담당자가 처리합니다.", 403);
+
+        const termsRows = (await db.sql`SELECT * FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
+        const terms = termsRows?.[0] || null;
+
+        const ymd = (value: unknown) => {
+          const s = String(value || "").trim().split("T")[0];
+          return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+        };
+
+        // 시작일은 담당자가 넘긴 값 → 이미 체크된 값 → 오늘. 종료일은 담당자가
+        // 넘긴 값 → 이미 체크된 값 → 확정된 업로드 마감일 순으로 본다.
+        const startDate =
+          ymd((body as any).startDate) || ymd(collab.schedule_start) || todayInSeoul();
+        const endDate =
+          ymd((body as any).endDate) ||
+          ymd(collab.schedule_end) ||
+          ymd(terms?.upload_due) ||
+          ymd(terms?.content_due) ||
+          "";
+
+        if (endDate && endDate < startDate) {
+          return jsonError("종료일이 시작일보다 앞설 수 없습니다.");
+        }
+
+        const fee =
+          (body as any).fee === undefined
+            ? Number(terms?.fee || 0)
+            : Math.max(0, Math.floor(Number((body as any).fee) || 0));
+
+        // 캠페인 유형을 협업 내역의 분류로 옮긴다(광고 협업 / 공동구매 / 기타).
+        const category =
+          collab.campaign_type === "ad_collab"
+            ? "광고"
+            : collab.campaign_type === "group_buy"
+              ? "커머스"
+              : "기타";
+
+        // 상태는 날짜로 정한다. 협업 자체가 끝났거나 취소됐으면 그 상태를 따른다.
+        const today = todayInSeoul();
+        const recordStatus: "scheduled" | "in_progress" | "completed" | "cancelled" =
+          collab.status === "completed"
+            ? "completed"
+            : collab.status === "cancelled"
+              ? "cancelled"
+              : endDate && endDate < today
+                ? "completed"
+                : startDate <= today
+                  ? "in_progress"
+                  : "scheduled";
+
+        const memo = String((body as any).memo || "").trim();
+        let record: any = null;
+        try {
+          const result = await upsertCollabScheduleRecord({
+            collabId,
+            influencerUsername: collab.creator_username,
+            title: collab.campaign_title || "캠페인 협업",
+            companyName: collab.company_name || "",
+            category,
+            date: startDate,
+            endDate,
+            fee,
+            status: recordStatus,
+            memo: memo || "캠페인 협업 · 담당자 일정 확인",
+            confirmedBy: caller.username,
+          });
+          record = result?.record || null;
+        } catch (recErr: any) {
+          console.error("[collab-workflow] 협업 내역 일정 기록 실패:", recErr);
+          return jsonError(
+            recErr?.name === "RecordWriteConflictError"
+              ? "협업 내역이 방금 변경되었습니다. 다시 시도해 주세요."
+              : "협업 내역에 일정을 올리지 못했습니다.",
+            recErr?.name === "RecordWriteConflictError" ? 409 : 500,
+          );
+        }
+
+        await db.sql`
+          UPDATE campaign_collabs
+          SET schedule_start = ${startDate},
+              schedule_end = ${endDate},
+              schedule_confirmed_at = NOW(),
+              schedule_confirmed_by = ${caller.username},
+              schedule_record_id = ${record?.id || ""},
+              updated_at = NOW()
+          WHERE id = ${collabId}
+        `;
+
+        await logCollabEvent(db, {
+          collabId,
+          type: collab.schedule_confirmed_at ? "schedule_rechecked" : "schedule_confirmed",
+          ...actor,
+          stageKey: "terms",
+          summary: `협업 내역 일정 ${startDate}${endDate ? ` ~ ${endDate}` : ""} 확인`,
+          payload: { startDate, endDate, fee, category, recordId: record?.id || "" },
+        });
+
+        return Response.json({
+          success: true,
+          schedule: { startDate, endDate, fee, category, status: recordStatus },
+          record,
+        });
       }
 
       // 담당자: 배정 변경 ------------------------------------------------

@@ -348,17 +348,22 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
             </div>
           )}
 
-          {/* Timeline Chat Button - for accepted/completed proposals */}
-          {(proposal.status === 'accepted' || proposal.status === 'completed') && (
+          {/* 협업 타임라인 — 대기 중인 제안도 여기서 먼저 물어볼 수 있다.
+              방은 제안이 접수될 때 열린다(수락 전에도 대화 가능). */}
+          {(proposal.status === 'pending' || proposal.status === 'accepted' || proposal.status === 'completed') && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // Navigate to the timeline view — timeline was already created on acceptance
                 window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId: proposal.id } }));
               }}
-              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-xl font-black text-sm shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+              className={`w-full py-3 rounded-xl font-black text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2 ${
+                proposal.status === 'pending'
+                  ? 'bg-white text-blue-600 border-2 border-blue-200 hover:bg-blue-50'
+                  : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50'
+              }`}
             >
-              <span>💬</span> 타임라인에서 대화하기
+              <span>💬</span>
+              {proposal.status === 'pending' ? '수락 전에 조건 상의하기' : '타임라인에서 대화하기'}
             </button>
           )}
 
