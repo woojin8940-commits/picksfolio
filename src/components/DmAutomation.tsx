@@ -762,6 +762,11 @@ const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md'; d
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [loaded, setLoaded] = useState(false);
+  // 설정을 받아오지 못한 상태. 예전에는 이 경우를 구분하지 않아서, 응답이 오지
+  // 않으면 스피너가 그대로 남았고(화면이 "계속 로딩 중"), 응답 실패를 자격 없음으로
+  // 삼키면 프로 플랜 사용자에게 결제 안내가 떴다. 실패는 실패로 보여 준다.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloading, setReloading] = useState(false);
   // 저장이 진행 중인 동안에는 토글·삭제를 막는다. 두 번의 저장이 겹치면 나중에 끝난
   // 요청이 앞선 변경을 덮어써 자동화가 되살아나거나 사라진 것처럼 보인다.
   const [saving, setSaving] = useState(false);
@@ -790,20 +795,35 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     setMediaLoading(true);
     apiService.getInstagramMedia(userName)
       .then((m) => setMedia(m))
+      .catch(() => setMedia([]))
       .finally(() => setMediaLoading(false));
   };
 
   const load = () => {
-    apiService.getDmAutomation(userName).then((s) => {
-      setEnabled(s.enabled);
-      setConnected(Boolean(s.connected));
-      setIgUsername(s.igUsername || '');
-      setTokenExpiresAt(s.tokenExpiresAt);
-      setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
-      setEntitled(s.entitled !== false);
-      setLoaded(true);
-      if (s.connected) loadMedia();
-    });
+    setReloading(true);
+    apiService.getDmAutomation(userName)
+      .then((s) => {
+        if (s.loadError) {
+          setLoadFailed(true);
+          return;
+        }
+        setLoadFailed(false);
+        setEnabled(s.enabled);
+        setConnected(Boolean(s.connected));
+        setIgUsername(s.igUsername || '');
+        setTokenExpiresAt(s.tokenExpiresAt);
+        setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
+        setEntitled(s.entitled !== false);
+        setLoaded(true);
+        if (s.connected) loadMedia();
+      })
+      // getDmAutomation 은 스스로 오류를 삼키지만, 앞으로 구현이 바뀌어도 스피너가
+      // 남지 않도록 여기서도 반드시 끝을 만든다.
+      .catch((e) => {
+        console.error('[DmAutomation] 설정을 불러오지 못했습니다:', e);
+        setLoadFailed(true);
+      })
+      .finally(() => setReloading(false));
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [userName]);
@@ -909,6 +929,36 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     return days <= 7 ? { expired: false, days } : null;
   }, [connected, tokenExpiresAt]);
 
+  // 아직 한 번도 못 불러왔는데 실패했다면, 스피너를 계속 돌리는 대신 이유와 재시도를
+  // 준다. 로그인이 풀렸거나(401) 네트워크가 끊긴 경우가 대부분이다.
+  if (!loaded && loadFailed) {
+    return (
+      <div className="p-4 md:p-14 w-full max-w-2xl mx-auto">
+        <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 md:p-10 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-6 h-6 text-slate-400" />
+          </div>
+          <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2">
+            DM 자동화 설정을 불러오지 못했습니다.
+          </h2>
+          <p className="text-slate-500 text-xs md:text-sm font-medium leading-relaxed mb-6">
+            네트워크가 불안정하거나 로그인이 만료되었을 수 있어요.
+            <br />
+            다시 시도해도 같으면 로그아웃 후 다시 로그인해 주세요.
+          </p>
+          <button
+            type="button"
+            onClick={load}
+            disabled={reloading}
+            className="px-6 py-3 rounded-xl font-black text-sm text-white bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 transition-all shadow-md"
+          >
+            {reloading ? '불러오는 중...' : '다시 시도'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center min-h-[40vh]">
@@ -946,6 +996,24 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         }`}>
           {banner.type === 'ok' ? <Check size={16} /> : <AlertCircle size={16} />}
           {banner.text}
+        </div>
+      )}
+
+      {/* 한 번 불러온 뒤의 새로고침이 실패한 경우. 이미 보여 준 내용을 지우면 작업
+          중이던 것이 사라지므로, 오래된 내용일 수 있다는 사실만 알리고 남겨 둔다. */}
+      {loadFailed && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-bold text-amber-700">
+            <AlertCircle size={16} /> 최신 설정을 불러오지 못했어요. 화면의 내용이 오래되었을 수 있습니다.
+          </span>
+          <button
+            type="button"
+            onClick={load}
+            disabled={reloading}
+            className="px-3 py-1.5 rounded-lg bg-white text-amber-700 border border-amber-200 text-xs font-black hover:bg-amber-100 disabled:opacity-50"
+          >
+            {reloading ? '불러오는 중...' : '다시 불러오기'}
+          </button>
         </div>
       )}
 

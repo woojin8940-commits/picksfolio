@@ -79,6 +79,22 @@
   to = "/index.html"
   status = 200
 
+# 해시가 붙은 빌드 산출물은 SPA catch-all 로 넘기지 않는다.
+#
+# 새 배포가 올라가면 브라우저에 열려 있던 예전 index.html 은 사라진 파일명
+# (/assets/DmAutomation-a1b2c3.js)을 계속 요청한다. 그 요청이 아래 catch-all 에
+# 걸리면 Netlify 는 index.html 을 200 · text/html 로 돌려주는데, 브라우저 모듈
+# 로더는 "JS 모듈이 아니다"로 이 응답을 영구히 거부한다. 재시도해도 같은 HTML 이
+# 오므로 그 화면은 계속 로딩 중에 머문다(디엠 자동화 메뉴가 그랬다).
+#
+# 없는 파일은 404 로 분명히 실패해야 앱이 청크 오류로 알아보고 새 매니페스트를
+# 받아오는 새로고침으로 회복할 수 있다. 파일이 실제로 있으면 정적 파일이 먼저
+# 서브되므로(force 기본값 false) 정상 요청에는 영향이 없다.
+[[redirects]]
+  from = "/assets/*"
+  to = "/assets/:splat"
+  status = 404
+
 # SPA catch-all (must be last)
 [[redirects]]
   from = "/*"

@@ -116,6 +116,9 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
   const [reviewNote, setReviewNote] = useState('');
   const [relayText, setRelayText] = useState<Record<string, string>>({});
   const [scheduleForm, setScheduleForm] = useState({ stageKey: '', nextDue: '', reason: '' });
+  // 협업 내역 일정 체크 — 담당자가 확인한 협업 기간. 확정된 업로드 마감일을 기본값
+  // 으로 채워 두고, 실제 촬영·게시 기간으로 담당자가 손보게 한다.
+  const [collabSchedule, setCollabSchedule] = useState({ startDate: '', endDate: '', memo: '' });
   // 장면·시점에 붙여 검수하는 화면. 목록에서 훑는 것과 한 장면씩 짚는 것은 다른 일이라 따로 띄운다.
   const [reviewTarget, setReviewTarget] = useState<'' | 'script' | 'content'>('');
 
@@ -160,6 +163,11 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
       uploadDue: res.terms?.uploadDue || '',
       guideUrl: res.terms?.guideUrl || '',
       guideNote: res.terms?.guideNote || '',
+    });
+    setCollabSchedule({
+      startDate: res.collab?.scheduleStart || '',
+      endDate: res.collab?.scheduleEnd || res.terms?.uploadDue || res.terms?.contentDue || '',
+      memo: '',
     });
     return res;
   };
@@ -669,6 +677,17 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                           {c.status === 'cancelled' && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-red-50 text-red-600">취소</span>
                           )}
+                          {/* 일정 체크가 끝나지 않은 협업은 당사자 캘린더에 아직
+                              안 보인다 — 목록에서 바로 눈에 띄어야 한다. */}
+                          {c.status !== 'cancelled' && !c.scheduleConfirmedAt && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600">일정 미체크</span>
+                          )}
+                          {c.scheduleConfirmedAt && c.scheduleStart && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-teal-50 text-teal-600">
+                              일정 {c.scheduleStart}
+                              {c.scheduleEnd ? `~${c.scheduleEnd}` : ''}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-slate-500 font-bold">
                           {c.currentStageTitle || '-'}
@@ -822,6 +841,72 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                 className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 disabled:opacity-40"
                               >
                                 확정하고 알리기
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 협업 내역 일정 체크 — 성사된 협업을 당사자 캘린더에 올린다.
+                              업로드 확인 뒤 생기는 정산 항목을 기다리면, 확정부터
+                              업로드까지 몇 주 동안 인플루언서 캘린더가 비어 있다. */}
+                          <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-[9px] text-slate-400 font-black uppercase">협업 내역 일정</p>
+                              <span className={`text-[10px] font-black ${detail.collab?.scheduleConfirmedAt ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                {detail.collab?.scheduleConfirmedAt ? '체크됨' : '미체크'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 font-bold mb-3">
+                              {detail.collab?.scheduleConfirmedAt
+                                ? `${detail.collab.scheduleStart || '미정'}${detail.collab.scheduleEnd ? ` ~ ${detail.collab.scheduleEnd}` : ''} · ${detail.collab.scheduleConfirmedBy || '담당자'} 확인`
+                                : '체크하면 인플루언서의 협업 현황(협업 내역 · 캘린더)에 일정으로 올라갑니다.'}
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="block">
+                                <span className="text-[10px] text-slate-400 font-bold">협업 시작일</span>
+                                <input
+                                  type="date"
+                                  value={collabSchedule.startDate}
+                                  onChange={e => setCollabSchedule(p => ({ ...p, startDate: e.target.value }))}
+                                  className="w-full text-xs font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="text-[10px] text-slate-400 font-bold">협업 종료일</span>
+                                <input
+                                  type="date"
+                                  value={collabSchedule.endDate}
+                                  onChange={e => setCollabSchedule(p => ({ ...p, endDate: e.target.value }))}
+                                  className="w-full text-xs font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                                />
+                              </label>
+                            </div>
+                            <input
+                              type="text"
+                              value={collabSchedule.memo}
+                              onChange={e => setCollabSchedule(p => ({ ...p, memo: e.target.value }))}
+                              placeholder="협업 내역에 남길 메모 (선택)"
+                              className="w-full mt-2 text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                            />
+                            <div className="flex justify-end mt-2">
+                              <button
+                                onClick={() =>
+                                  act(c.id, 'confirm_schedule', {
+                                    startDate: collabSchedule.startDate,
+                                    endDate: collabSchedule.endDate,
+                                    ...(collabSchedule.memo.trim() ? { memo: collabSchedule.memo.trim() } : {}),
+                                  }).then(r =>
+                                    r &&
+                                    notify(
+                                      detail.collab?.scheduleConfirmedAt
+                                        ? '협업 내역 일정을 갱신했습니다.'
+                                        : '협업 내역에 일정을 올렸습니다.',
+                                    ),
+                                  )
+                                }
+                                disabled={busy || !collabSchedule.startDate}
+                                className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-500 disabled:opacity-40"
+                              >
+                                {detail.collab?.scheduleConfirmedAt ? '일정 다시 체크' : '일정 체크하고 협업 내역에 올리기'}
                               </button>
                             </div>
                           </div>

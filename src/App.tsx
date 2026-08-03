@@ -1,49 +1,15 @@
 
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
 import TemplateShowcase from './components/TemplateShowcase';
 import DataBoardSection from './components/DataBoardSection';
-import ErrorBoundary, { clearChunkReloadFlag } from './components/ErrorBoundary';
+import ErrorBoundary from './components/ErrorBoundary';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
-
-// Wrap React.lazy so a failed dynamic import() (the usual cause of the
-// intermittent "앱을 표시할 수 없습니다" crash — a stale chunk after a new deploy,
-// or a dropped request inside an in-app WebView) retries before giving up, and
-// falls back to a one-time page reload that pulls the fresh asset manifest. The
-// reload is guarded by sessionStorage so it can never loop.
-const CHUNK_RELOAD_KEY = 'picks_chunk_reload';
-function lazyWithRetry<T extends React.ComponentType<any>>(
-  factory: () => Promise<{ default: T }>,
-): React.LazyExoticComponent<T> {
-  return lazy(async () => {
-    try {
-      const mod = await factory();
-      // A chunk loaded successfully — reset the one-time reload guard so a
-      // future deploy can recover again.
-      try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch {}
-      return mod;
-    } catch (err) {
-      // Retry once after a short delay (covers transient network blips), then
-      // fall back to a single hard reload to fetch the new manifest.
-      try {
-        await new Promise((r) => setTimeout(r, 400));
-        return await factory();
-      } catch (err2) {
-        try {
-          if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
-            sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
-            window.location.reload();
-            // Keep the Suspense fallback up until the reload navigates away.
-            return await new Promise<{ default: T }>(() => {});
-          }
-        } catch {}
-        throw err2;
-      }
-    }
-  });
-}
+// 실패한 dynamic import() 를 재시도하고, 그래도 안 되면 오류를 던져 오류 경계가
+// 안내하게 하는 래퍼. 구현과 이유는 utils/lazyRoute.tsx 에 있다.
+import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
 
 const UserPage = lazyWithRetry(() => import('./components/UserPage'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
@@ -78,14 +44,9 @@ import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
-const LazyFallback = () => (
-  <div className="flex items-center justify-center min-h-[40vh]">
-    <div className="text-center animate-in fade-in duration-300">
-      <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-      <p className="text-slate-400 font-semibold text-xs">로딩 중...</p>
-    </div>
-  </div>
-);
+// 지연 로딩 화면은 모두 utils/lazyRoute 의 LazyRoute 로 감싼다 — 로딩 표시와
+// 오류 경계가 항상 함께 붙어야, 청크를 못 받은 화면이 로딩 표시에서 멈춘 것처럼
+// 보이지 않는다.
 
 // Records that the user asked for the homepage on purpose (header "홈"), so that
 // reloading — pull-to-refresh is always on in the native shell — doesn't bounce
@@ -206,12 +167,10 @@ const App: React.FC = () => {
   // Track the user's role from the Supabase profile (e.g. 'user', 'admin')
   const [, setProfileRole] = useState<string>('');
 
-  // The app rendered successfully — clear the one-time chunk-reload guard so a
-  // future stale-chunk error (after the next deploy) can recover with a reload
-  // again instead of being suppressed.
-  useEffect(() => {
-    clearChunkReloadFlag();
-  }, []);
+  // 청크 회복 기록은 앱이 떴다고 지우지 않는다. 새로고침 직후에도 앱은 항상 뜨기
+  // 때문에, 여기서 지우면 "한 번만 새로고침" 이 지켜지지 않아 실패한 청크가 있을 때
+  // 새로고침이 반복될 수 있다. 대신 utils/chunkReload.ts 가 시각 기반 쿨다운으로
+  // 다음 배포에서의 재회복을 허용한다.
 
   // loginTransitioning: true during the brief period between login success and admin dashboard ready.
   // Shows a smooth loading screen instead of a blank/flickering dashboard.
@@ -233,11 +192,37 @@ const App: React.FC = () => {
   const [isPlatformManager, setIsPlatformManager] = useState(false);
   const [managerDisplayName, setManagerDisplayName] = useState('');
   const isPlatformManagerRef = useRef(false);
+  // 아이디 로그인 직후 담당자 화면으로 한 번만 보내기 위한 표시. 로그인 처리에서는
+  // 아직 Supabase 세션이 없어서 배정 여부를 물을 수 없고, 세션이 생긴 뒤(인증 이벤트)
+  // 물어야 한다. 그 시점에 "방금 로그인해서 아직 첫 화면을 못 정했다"를 알려면
+  // 표시가 필요하다 — 이후의 토큰 갱신 이벤트에서 화면을 가로채면 안 되기 때문이다.
+  const pendingManagerRouteRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { userNameRef.current = userName; }, [userName]);
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
+
+  /**
+   * 담당자 배정 여부를 서버에 물어 화면 상태에 반영한다.
+   *
+   * 로그인 경로가 하나가 아니라서(카카오 OAuth · 아이디+비밀번호 · 세션 복원) 한
+   * 곳에서만 물으면 어떤 경로로 들어온 담당자는 계속 일반 사용자로 취급된다. 실제로
+   * 아이디 로그인은 인증 이벤트 처리를 건너뛰는 경로여서, 운영자가 담당자로 배정해도
+   * 그 계정은 크리에이터 대시보드만 보고 담당자 대시보드에 들어갈 문(플로팅 버튼)조차
+   * 뜨지 않았다. 그래서 판정을 이 함수 하나로 모았다.
+   *
+   * 관리자는 담당자로 보지 않는다 — 관리자의 자리는 운영 콘솔이고, 여기서 담당자로
+   * 치면 로그인 직후 운영 콘솔이 아니라 담당자 대시보드로 가게 된다.
+   */
+  const refreshManagerStatus = useCallback(async (): Promise<boolean> => {
+    const status = await apiService.getMyManagerStatus();
+    const assigned = !!status.isManager && !status.isAdmin;
+    setIsPlatformManager(assigned);
+    isPlatformManagerRef.current = assigned;
+    setManagerDisplayName(assigned ? status.displayName || '' : '');
+    return assigned;
+  }, []);
 
   // Views that are considered "settled" — user should NOT be kicked out of these
   const settledViews: View[] = ['admin', 'operator', 'operator-login', 'user-page', 'setup-link', 'business-admin', 'manager'];
@@ -684,11 +669,7 @@ const App: React.FC = () => {
         // 실패하면 담당자가 아닌 것으로 본다 — 여는 쪽으로 실패하면 안 되는 값이다.
         let managerAssigned = false;
         if (userRole !== 'admin') {
-          const managerStatus = await apiService.getMyManagerStatus();
-          managerAssigned = !!managerStatus.isManager;
-          setIsPlatformManager(managerAssigned);
-          isPlatformManagerRef.current = managerAssigned;
-          setManagerDisplayName(managerStatus.displayName || '');
+          managerAssigned = await refreshManagerStatus();
         }
 
         const currentView = viewRef.current;
@@ -719,6 +700,8 @@ const App: React.FC = () => {
           // Set loginTransitioning BEFORE clearing oauthProcessing to prevent
           // a brief flash of the login page between the two state updates.
           setLoginTransitioning(true);
+          // 이 경로에서 첫 화면을 정했으므로, 인증 이벤트 쪽에서 한 번 더 옮기지 않는다.
+          pendingManagerRouteRef.current = false;
           if (userRole === 'admin') {
             navigate('operator');
           } else if (managerAssigned) {
@@ -865,6 +848,24 @@ const App: React.FC = () => {
             setUserName(savedUsername);
             setIsLoggedIn(true);
           }
+          // 아이디 로그인은 이 분기로 들어와 processUserSession 을 건너뛴다. 그래서
+          // 담당자 배정 여부를 여기서도 물어야 한다 — 묻지 않으면 배정된 계정이
+          // 크리에이터 대시보드만 보고, 담당자 대시보드로 가는 버튼도 뜨지 않는다.
+          //
+          // 세션이 막 만들어진 직후(로그인 처리에서 setSession 을 부른 결과)라서
+          // 여기가 배정 여부를 물을 수 있는 첫 시점이다. 화면 이동은 "방금 로그인해
+          // 첫 화면을 정하는 중"일 때만 한다 — 이 분기는 이후 토큰 갱신에서도
+          // 실행되므로, 조건 없이 옮기면 담당자가 자기 크리에이터 대시보드를 보다가
+          // 갑자기 담당자 화면으로 끌려간다.
+          const routeAfterLogin = pendingManagerRouteRef.current;
+          pendingManagerRouteRef.current = false;
+          refreshManagerStatus()
+            .then((assigned) => {
+              if (assigned && routeAfterLogin && viewRef.current === 'admin') {
+                navigate('manager');
+              }
+            })
+            .catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
           return;
         }
         // Skip re-processing for TOKEN_REFRESHED if user is already settled on a page
@@ -941,6 +942,10 @@ const App: React.FC = () => {
       setUserName('');
       setProfileChecked(false);
       loginNavigationHandledRef.current = false;
+      pendingManagerRouteRef.current = false;
+      isPlatformManagerRef.current = false;
+      setIsPlatformManager(false);
+      setManagerDisplayName('');
       Object.keys(localStorage).filter(key => key.startsWith('picks_') && !businessKeys.includes(key)).forEach(key => localStorage.removeItem(key));
       Object.keys(localStorage).filter(key => key.startsWith('sb-') || key.includes('supabase.auth')).forEach(key => localStorage.removeItem(key));
       sessionStorage.clear();
@@ -1128,7 +1133,10 @@ const App: React.FC = () => {
 
   // Clear login transition after a brief delay to allow state to settle
   useEffect(() => {
-    if (loginTransitioning && (view === 'admin' || view === 'operator') && userName && isLoggedIn) {
+    // 담당자 대시보드도 로그인 직후 도착지가 될 수 있다. 여기에 'manager' 가 빠져
+    // 있으면 그 화면에서는 전환 표시가 8초 안전장치로만 풀려서, 그 사이에 크리에이터
+    // 대시보드로 넘어가면 뜬금없는 스피너를 보게 된다.
+    if (loginTransitioning && (view === 'admin' || view === 'operator' || view === 'manager') && userName && isLoggedIn) {
       const timer = setTimeout(() => {
         setLoginTransitioning(false);
       }, 400);
@@ -1307,6 +1315,12 @@ const App: React.FC = () => {
     //    but PRESERVE business session keys so business login survives
     const businessKeys = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
     loginNavigationHandledRef.current = false;
+    // 다음 사람이 같은 브라우저로 로그인할 때 앞사람의 담당자 권한이 남아 있으면
+    // 안 된다. 서버에 다시 물어 정해질 값이므로 여기서는 비워만 둔다.
+    pendingManagerRouteRef.current = false;
+    isPlatformManagerRef.current = false;
+    setIsPlatformManager(false);
+    setManagerDisplayName('');
     setProfileChecked(false);
     setIsLoggedIn(false);
     setUserName('');
@@ -1365,18 +1379,18 @@ const App: React.FC = () => {
   // Business views
   if (view === 'business-signup') {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <LazyRoute>
         <BusinessSignupPage
           onNavigateHome={() => navigate('home')}
           onNavigateLogin={() => navigate('business-login')}
           onSignupSuccess={() => navigate('business-login')}
         />
-      </Suspense>
+      </LazyRoute>
     );
   }
   if (view === 'business-login') {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <LazyRoute>
         <BusinessLoginPage
           onNavigateHome={() => navigate('home')}
           onNavigateBusinessSignup={() => navigate('business-signup')}
@@ -1396,7 +1410,7 @@ const App: React.FC = () => {
             }
           }}
         />
-      </Suspense>
+      </LazyRoute>
     );
   }
   if (view === 'business-admin') {
@@ -1409,17 +1423,17 @@ const App: React.FC = () => {
       return null;
     }
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <LazyRoute>
         <BusinessEnterpriseDashboard
           businessUsername={businessUsername}
           companyName={businessCompanyName}
           onLogout={handleBusinessLogout}
         />
-      </Suspense>
+      </LazyRoute>
     );
   }
 
-  if (view === 'operator-login') return <Suspense fallback={<LazyFallback />}><OperatorLogin onLoginSuccess={(info) => {
+  if (view === 'operator-login') return <LazyRoute><OperatorLogin onLoginSuccess={(info) => {
     if (info?.username && info?.token) {
       localStorage.setItem('picks_user_session', info.username);
       localStorage.setItem('picks_admin_token', info.token);
@@ -1428,7 +1442,7 @@ const App: React.FC = () => {
       setProfileChecked(true);
     }
     navigate('operator');
-  }} /></Suspense>;
+  }} /></LazyRoute>;
   if (view === 'operator') {
     if (!isLoggedIn) {
       setTimeout(() => navigate('operator-login'), 0);
@@ -1444,7 +1458,7 @@ const App: React.FC = () => {
         </div>
       );
     }
-    return <Suspense fallback={<LazyFallback />}><OperatorDashboard onLogout={() => navigate('operator-login')} /></Suspense>;
+    return <LazyRoute><OperatorDashboard onLogout={() => navigate('operator-login')} /></LazyRoute>;
   }
   if (view === 'manager') {
     if (!isLoggedIn) {
@@ -1468,19 +1482,20 @@ const App: React.FC = () => {
       return null;
     }
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <LazyRoute>
         <ManagerDashboard
           username={userName}
           displayName={managerDisplayName}
           onLogout={handleLogout}
+          onNavigateCreator={() => navigate('admin')}
         />
-      </Suspense>
+      </LazyRoute>
     );
   }
-  if (view === 'terms') return <Suspense fallback={<LazyFallback />}><TermsOfService onNavigateHome={() => navigate('home')} /></Suspense>;
-  if (view === 'privacy') return <Suspense fallback={<LazyFallback />}><PrivacyPolicy onNavigateHome={() => navigate('home')} /></Suspense>;
-  if (view === 'proposal') return <Suspense fallback={<LazyFallback />}><BusinessProposalForm username={targetUser} /></Suspense>;
-  if (view === 'user-page') return <Suspense fallback={<LazyFallback />}><UserPage username={targetUser} /></Suspense>;
+  if (view === 'terms') return <LazyRoute><TermsOfService onNavigateHome={() => navigate('home')} /></LazyRoute>;
+  if (view === 'privacy') return <LazyRoute><PrivacyPolicy onNavigateHome={() => navigate('home')} /></LazyRoute>;
+  if (view === 'proposal') return <LazyRoute><BusinessProposalForm username={targetUser} /></LazyRoute>;
+  if (view === 'user-page') return <LazyRoute><UserPage username={targetUser} /></LazyRoute>;
   if (view === 'setup-link') {
     // If user already has a username (existing user), skip setup and go to admin dashboard
     const savedUser = (userName || localStorage.getItem('picks_user_session') || '').trim();
@@ -1506,7 +1521,7 @@ const App: React.FC = () => {
       );
     }
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <LazyRoute>
         <SetupLink
           userId={authUserId}
           onSetupComplete={(newUsername) => {
@@ -1517,7 +1532,7 @@ const App: React.FC = () => {
             navigate('admin');
           }}
         />
-      </Suspense>
+      </LazyRoute>
     );
   }
   if (view === 'admin') {
@@ -1553,35 +1568,35 @@ const App: React.FC = () => {
 
     switch (subView) {
       case 'links':
-        subComponent = <Suspense fallback={<LazyFallback />}><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></Suspense>;
+        subComponent = <LazyRoute><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></LazyRoute>;
         break;
       case 'dm-automation':
-        subComponent = <Suspense fallback={<LazyFallback />}><DmAutomation userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><DmAutomation userName={userName} /></LazyRoute>;
         break;
       case 'business':
-        subComponent = <Suspense fallback={<LazyFallback />}><BusinessDashboard userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><BusinessDashboard userName={userName} /></LazyRoute>;
         break;
       case 'calendar':
-        subComponent = <Suspense fallback={<LazyFallback />}><BusinessCalendar userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><BusinessCalendar userName={userName} /></LazyRoute>;
         break;
       case 'open-schedule':
-        subComponent = <Suspense fallback={<LazyFallback />}><OpenScheduleManagement userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><OpenScheduleManagement userName={userName} /></LazyRoute>;
         break;
       case 'settlement':
-        subComponent = <Suspense fallback={<LazyFallback />}><UserSettlement userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><UserSettlement userName={userName} /></LazyRoute>;
         break;
       case 'timeline':
         subComponent = (
-          <Suspense fallback={<LazyFallback />}>
+          <LazyRoute>
             <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
-          </Suspense>
+          </LazyRoute>
         );
         break;
       case 'membership':
-        subComponent = <Suspense fallback={<LazyFallback />}><MembershipPlan userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><MembershipPlan userName={userName} /></LazyRoute>;
         break;
       case 'campaigns':
-        subComponent = <Suspense fallback={<LazyFallback />}><UserCampaignBrowse userName={userName} /></Suspense>;
+        subComponent = <LazyRoute><UserCampaignBrowse userName={userName} /></LazyRoute>;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
@@ -1600,7 +1615,7 @@ const App: React.FC = () => {
             담당자 대시보드
           </button>
         )}
-        <Suspense fallback={<LazyFallback />}>
+        <LazyRoute>
         <AdminDashboard
         userName={userName}
         onLogout={handleLogout}
@@ -1621,7 +1636,7 @@ const App: React.FC = () => {
           </ErrorBoundary>
         ) : null}
       </AdminDashboard>
-        </Suspense>
+        </LazyRoute>
       </>
     );
   }
@@ -1644,14 +1659,14 @@ const App: React.FC = () => {
             <DataBoardSection />
           </>
         ) : view === 'signup' ? (
-          <Suspense fallback={<LazyFallback />}>
+          <LazyRoute>
           <SignupPage
             initialId={initialId}
             onNavigateHome={() => navigate('home')}
             onNavigateLogin={() => navigate('login')}
             onSignupSuccess={() => navigate('login')}
           />
-          </Suspense>
+          </LazyRoute>
         ) : (
           (oauthProcessing || loginTransitioning) ? (
             <div className="min-h-screen flex items-center justify-center bg-midnight">
@@ -1661,7 +1676,7 @@ const App: React.FC = () => {
               </div>
             </div>
           ) : (
-          <Suspense fallback={<LazyFallback />}>
+          <LazyRoute>
           <LoginPage
             onNavigateHome={() => navigate('home')}
             onNavigateSignup={() => navigate('signup')}
@@ -1669,6 +1684,12 @@ const App: React.FC = () => {
               loginNavigationHandledRef.current = true;
               setProfileChecked(true);
               setLoginTransitioning(true);
+              // 담당자로 배정된 계정이면 첫 화면은 담당자 대시보드다. 다만 이 시점에는
+              // Supabase 세션이 아직 없어서(로그인 화면이 이 콜백 뒤에 setSession 을
+              // 부른다) 배정 여부를 물을 수 없다. 표시만 남기고, 세션이 생긴 직후
+              // 인증 이벤트에서 확인해 옮긴다. 그동안은 예전처럼 크리에이터
+              // 대시보드로 가 두므로, 담당자가 아니면 아무 것도 달라지지 않는다.
+              pendingManagerRouteRef.current = true;
               // Clear any previous user's cached data before setting new user
               const prevUser = localStorage.getItem('picks_user_session');
               if (prevUser && prevUser !== id) {
@@ -1681,6 +1702,17 @@ const App: React.FC = () => {
               }
               setUserName(id);
               setIsLoggedIn(true);
+              // 인증 이벤트가 오지 않는 경우(세션 심기가 실패했거나 토큰이 비어서
+              // 왔을 때)를 위한 안전장치. 표시가 아직 남아 있으면 여기서 한 번 묻는다.
+              window.setTimeout(() => {
+                if (!pendingManagerRouteRef.current) return;
+                pendingManagerRouteRef.current = false;
+                refreshManagerStatus()
+                  .then((assigned) => {
+                    if (assigned && viewRef.current === 'admin') navigate('manager');
+                  })
+                  .catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
+              }, 1500);
               if (hasSiteData) {
                 navigate('admin');
               } else {
@@ -1700,7 +1732,7 @@ const App: React.FC = () => {
               navigate('operator');
             }}
           />
-          </Suspense>
+          </LazyRoute>
           )
         )}
       </main>

@@ -1,6 +1,6 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 import type { MembershipTier } from '../utils/membershipTiers';
-import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, withTimeout } from './supabase';
 
 const BIZ_SESSION_KEY = 'picks_business_session';
 const BIZ_TOKEN_KEY = 'picks_business_access_token';
@@ -198,6 +198,47 @@ export function syncAuthHeaders(extra: Record<string, string> = {}): Record<stri
   return headers;
 }
 
+/**
+ * 응답을 기다리다 화면이 멈추지 않도록 시간 제한을 둔 fetch.
+ *
+ * 화면이 "불러오는 중" 스피너를 걸어 두고 `then` 만 붙여 두면, 요청이 끝나지 않는
+ * 상황(인앱 웹뷰에서 연결이 끊겼는데 소켓이 닫히지 않는 경우 등)에서 스피너가
+ * 영원히 남는다. 실패는 실패로 끝나야 화면이 "다시 시도"를 제안할 수 있다.
+ */
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = 15_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 인증 헤더를 만드는 동안 걸릴 수 있는 시간에도 상한을 둔다.
+ *
+ * `authHeaders()` 는 Supabase 세션 조회를 기다리는데, 탭 사이 잠금(navigator.locks)
+ * 이 얽히면 드물게 아주 오래 걸린다. 여기서 막히면 요청 자체가 시작되지 않아
+ * fetch 타임아웃도 소용이 없다. 시간이 지나면 헤더 없이 보내고, 서버가 401 로
+ * 답하면 화면이 오류로 처리한다 — 스피너에 갇히는 것보다 낫다.
+ */
+async function authHeadersWithTimeout(
+  extra: Record<string, string> = {},
+  timeoutMs = 8_000,
+): Promise<Record<string, string>> {
+  try {
+    return await withTimeout(authHeaders(extra), timeoutMs, 'authHeaders');
+  } catch (e) {
+    console.warn('[API] 인증 헤더 준비가 지연되어 없이 요청합니다:', e);
+    return { ...extra };
+  }
+}
+
 export interface SiteData {
   blocks?: Block[];
   design?: DesignSettings;
@@ -244,6 +285,11 @@ export interface DmAutomationSettings {
   // 디엠 자동화는 프로 플랜 전용 — 서버가 계정 자격을 함께 내려준다.
   entitled?: boolean;
   requiredTier?: MembershipTier;
+  /**
+   * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면
+   * 나머지 필드는 "모른다"는 뜻이므로, 화면은 설정이 아니라 재시도 안내를 보여준다.
+   */
+  loadError?: boolean;
 }
 
 // 인포크 링크식 "댓글 → DM" 자동화 항목.
@@ -2023,6 +2069,12 @@ export const apiService = {
    * 로그인 직후 어느 화면을 띄울지 정하려면 이 한 번의 확인이 필요하다. 실패하면
    * 담당자가 아닌 것으로 본다 — 여는 쪽으로 실패하면 권한 없는 사람에게 담당자
    * 화면이 열린다.
+   *
+   * 다만 "한 번의 실패"로 끝내면 안 되는 이유가 두 개 있다. 첫째, 이 확인은 로그인
+   * 흐름 안에서 기다리는 호출이라 응답이 없으면 대시보드 진입이 멈춘다 — 시간 제한을
+   * 둔다. 둘째, 아이디 로그인은 세션을 심는 중에 이 확인이 일어나서 토큰이 아직
+   * 준비되지 않은 채 401 이 한 번 날 수 있다. 그 한 번을 최종 답으로 삼으면 담당자가
+   * 그 세션 내내 일반 사용자로 남으므로, 짧게 한 번 다시 묻는다.
    */
   async getMyManagerStatus(): Promise<{
     isManager: boolean;
@@ -2030,16 +2082,27 @@ export const apiService = {
     username?: string;
     displayName?: string;
   }> {
-    try {
-      const res = await fetch('/api/managers?me=1', {
-        credentials: 'same-origin',
-        headers: await authHeaders(),
-      });
+    const ask = async () => {
+      const res = await fetchWithTimeout(
+        '/api/managers?me=1',
+        { cache: 'no-store', credentials: 'same-origin', headers: await authHeadersWithTimeout() },
+        8_000,
+      );
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { isManager: false };
-      return json;
-    } catch {
-      return { isManager: false };
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return json as { isManager: boolean; isAdmin?: boolean; username?: string; displayName?: string };
+    };
+
+    try {
+      return await ask();
+    } catch (first) {
+      await new Promise((r) => setTimeout(r, 700));
+      try {
+        return await ask();
+      } catch (second) {
+        console.error('[API] Failed to resolve manager status:', first, second);
+        return { isManager: false };
+      }
     }
   },
 
@@ -2462,27 +2525,37 @@ export const apiService = {
   },
 
   // ---- Instagram DM 자동화 ----
+  //
+  // 이 화면은 설정을 받아오기 전까지 스피너만 보여준다. 그래서 실패를 "빈 설정"으로
+  // 삼키면 안 된다 — 특히 자격(entitled)을 false 로 내려 버리면, 프로 플랜을 결제한
+  // 사용자가 네트워크가 한 번 흔들린 것만으로 "프로 전용 기능입니다" 안내를 보게 된다.
+  // 실패는 loadError 로 분명히 알리고, 자격 여부는 모른다는 뜻으로 그대로 둔다.
   async getDmAutomation(username: string): Promise<DmAutomationSettings> {
     try {
-      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         cache: 'no-store',
-        headers: await authHeaders(),
+        headers: await authHeadersWithTimeout(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
-      return { enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '', hasAccessToken: false, automations: [], entitled: false, requiredTier: 'pro' };
+      return {
+        enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '',
+        hasAccessToken: false, automations: [], requiredTier: 'pro', loadError: true,
+      };
     }
   },
 
   // 연동된 인스타그램 계정의 피드 게시물 목록.
+  // 그래프 API 를 여러 페이지 훑기 때문에 다른 호출보다 여유를 둔다.
   async getInstagramMedia(username: string): Promise<InstagramMedia[]> {
     try {
-      const res = await fetch(`/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`, {
-        cache: 'no-store',
-        headers: await authHeaders(),
-      });
+      const res = await fetchWithTimeout(
+        `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`,
+        { cache: 'no-store', headers: await authHeadersWithTimeout() },
+        25_000,
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return Array.isArray(data?.media) ? data.media : [];
@@ -2497,9 +2570,9 @@ export const apiService = {
     settings: Partial<DmAutomationSettings>,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(settings),
       });
       if (res.ok) return { ok: true };

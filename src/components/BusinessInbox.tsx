@@ -187,8 +187,9 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
                     </div>
                   )}
 
-                  {/* Timeline Chat Button - for accepted/completed proposals */}
-                  {(proposal.status === 'accepted' || proposal.status === 'completed') && (
+                  {/* 협업 타임라인 — 수락을 기다리는 제안도 열어 둔다. 조건을
+                      물어볼 창구가 없으면 확인 없이 수락하거나 그냥 거절된다. */}
+                  {(proposal.status === 'pending' || proposal.status === 'accepted' || proposal.status === 'completed') && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -199,7 +200,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
-                      타임라인에서 대화하기
+                      {proposal.status === 'pending' ? '타임라인에서 조건 상의하기' : '타임라인에서 대화하기'}
                     </button>
                   )}
 

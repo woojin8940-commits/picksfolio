@@ -20,6 +20,12 @@ interface ManagerDashboardProps {
   username: string;
   displayName?: string;
   onLogout: () => void;
+  /**
+   * 자기 크리에이터 대시보드로 돌아가는 문. 담당자도 자기 계정을 그대로 쓰는데,
+   * 여기에 문이 없으면 로그인 직후 담당자 화면에 도착한 사람은 주소를 직접 고치는
+   * 수밖에 없다(크리에이터 대시보드 → 담당자 화면 방향은 버튼이 있다).
+   */
+  onNavigateCreator?: () => void;
 }
 
 type ManagerTab = 'influencers' | 'campaigns' | 'chat';
@@ -34,6 +40,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   username,
   displayName,
   onLogout,
+  onNavigateCreator,
 }) => {
   const [tab, setTab] = useState<ManagerTab>('campaigns');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -67,12 +74,22 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onLogout}
-            className="px-4 py-2 bg-red-50 text-red-500 rounded-xl text-xs font-black hover:bg-red-100 transition-all flex-shrink-0"
-          >
-            로그아웃
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onNavigateCreator && (
+              <button
+                onClick={onNavigateCreator}
+                className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-black hover:bg-slate-200 transition-all"
+              >
+                내 대시보드
+              </button>
+            )}
+            <button
+              onClick={onLogout}
+              className="px-4 py-2 bg-red-50 text-red-500 rounded-xl text-xs font-black hover:bg-red-100 transition-all"
+            >
+              로그아웃
+            </button>
+          </div>
         </div>
       </header>
 

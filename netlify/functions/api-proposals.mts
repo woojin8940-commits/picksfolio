@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 const STORE = "proposals";
@@ -165,6 +166,27 @@ export default async (req: Request, context: Context) => {
       `;
     } catch (dbErr) {
       console.error("[api-proposals] Failed to persist proposal to SQL:", dbErr);
+    }
+
+    // 제안이 도착한 시점에 협업 타임라인을 열어 둔다.
+    //
+    // 예전에는 수락한 뒤에야 방이 생겼다. 그러면 인플루언서는 금액·일정·산출물
+    // 범위를 물어보려면 먼저 수락해야 했고, 브랜드도 조건을 조율할 창구가 없었다.
+    // 받은 즉시 같은 방에서 상의할 수 있게 한다 — 수락/거절은 그대로 제안함에서 한다.
+    if (bizUsername) {
+      try {
+        await ensureTimelineRoom({
+          proposalId: proposal.id,
+          influencerUsername: username,
+          businessUsername: bizUsername,
+          companyName: body.company_name || "",
+          proposalTitle: body.title || "",
+          systemMessage: `"${body.title || "협업 제안"}" 협업 제안이 도착했습니다. 수락 전에도 여기에서 금액·일정·산출물 범위를 상의할 수 있어요.`,
+        });
+      } catch (roomErr) {
+        // 방을 못 만들어도 제안 접수는 성공해야 한다. 수락 시점에 다시 시도된다.
+        console.error("[api-proposals] Failed to open timeline room on receipt:", roomErr);
+      }
     }
 
     // 비즈니스 수신 알림 - 카카오 알림톡

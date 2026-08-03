@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { resolveTimelineAccess } from "./_shared/timeline-access.mts";
+import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 
 export default async (req: Request, context: Context) => {
   const proposalId = context.params.proposalId;
@@ -87,6 +88,58 @@ export default async (req: Request, context: Context) => {
       }
     } catch (dbErr) {
       console.error("[timeline-detail] Failed to recover from SQL:", dbErr);
+    }
+
+    // 방이 없지만 제안은 남아 있는 경우 — 수락 시점에만 방을 만들던 시절에 접수된
+    // 제안들이다. 제안 원본에서 당사자를 찾아 방을 열어 준다. 그래야 예전 제안도
+    // 수락 전에 대화를 시작할 수 있고, 첫 메시지가 참여자 확인에서 막히지 않는다.
+    try {
+      const { getDatabase } = await import("@picks/netlify-database");
+      const db = getDatabase();
+      const rows = (await db.sql`
+        SELECT id, influencer_username, username, business_username, company_name, title
+        FROM proposals WHERE id = ${proposalId}
+      `) as any[];
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        const row = rows[0];
+        const influencerUsername = String(row.influencer_username || row.username || "").toLowerCase();
+        const businessUsername = String(row.business_username || "").toLowerCase().replace(/^biz\//, "");
+        const access = await resolveTimelineAccess(req, {
+          influencer: influencerUsername,
+          business: businessUsername,
+        });
+        if (!access.ok) return access.response;
+
+        const opened = {
+          proposalId,
+          kind: "brand_influencer",
+          influencerUsername,
+          businessUsername,
+          managerUsername: "",
+          companyName: row.company_name || "",
+          proposalTitle: row.title || "",
+          comments: [] as any[],
+          createdAt: new Date().toISOString(),
+        };
+
+        context.waitUntil(
+          ensureTimelineRoom({
+            proposalId,
+            influencerUsername,
+            businessUsername,
+            companyName: opened.companyName,
+            proposalTitle: opened.proposalTitle,
+          }).catch((e) => console.error("[timeline-detail] Failed to open room for proposal:", e)),
+        );
+
+        return Response.json({
+          timeline: opened,
+          viewer: { username: access.username, authorType: access.authorType },
+        });
+      }
+    } catch (proposalErr) {
+      console.error("[timeline-detail] Failed to look up proposal:", proposalErr);
     }
 
     // 방이 아직 없으면 빈 방을 돌려준다. 참여자를 알 수 없으므로 대조할 대상도 없고,
