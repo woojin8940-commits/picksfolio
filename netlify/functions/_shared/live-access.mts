@@ -18,8 +18,10 @@ import { getDatabase } from '@picks/netlify-database'
 import { applyComplimentaryMembership } from './complimentary-memberships.mts'
 import { hasLiveCommerceAccess } from './membership-billing.mts'
 
+// 라이브 커머스 멤버십은 판매를 종료했다 — 새로 구독할 수 있는 경로가 없으므로
+// 가격을 안내하지 않고 이용할 수 없다는 사실만 알린다(기존 구독자는 계속 통과).
 export const LIVE_MEMBERSHIP_REQUIRED_MESSAGE =
-  '라이브 커머스 멤버십(월 13,900원, 부가세 포함)을 구독해야 방송을 시작할 수 있어요.'
+  '라이브 커머스 기능은 현재 제공되지 않습니다.'
 
 export const LIVE_VERIFICATION_REQUIRED_MESSAGE =
   '사업자 인증과 정산 계좌 등록을 마쳐야 라이브를 시작할 수 있어요.'

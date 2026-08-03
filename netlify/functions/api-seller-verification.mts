@@ -66,11 +66,6 @@ export default async (req: Request, context: Context) => {
         next.membership_active = false;
       }
 
-      // 라이브 커머스는 멤버십과 따로 결제하는 구독이라 해지도 따로 받는다.
-      if (body.live_plan_active === false) {
-        next.live_plan_active = false;
-      }
-
       next.updatedAt = new Date().toISOString();
       return next;
     })) as Record<string, any>;
