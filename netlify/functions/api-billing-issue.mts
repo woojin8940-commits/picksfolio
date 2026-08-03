@@ -36,7 +36,6 @@ export default async (req: Request) => {
     const auth = await requireAccountOwner(req, String(username));
     if (!auth.ok) return auth.response;
 
-    // 라이브 커머스는 멤버십 티어와 별개로 결제·구독하는 플랜이라 `live_plan` 으로 들어온다.
     const normalizedTier = normalizeBillingPlan(tier);
     if (!normalizedTier) {
       return Response.json(
@@ -44,7 +43,15 @@ export default async (req: Request) => {
         { status: 400 },
       );
     }
-    const isLivePlan = normalizedTier === "live_plan";
+    // 라이브 커머스(`live_plan`)는 서비스를 종료해 신규 구독을 받지 않는다. 화면에서는
+    // 이미 뺐지만, 이 엔드포인트를 직접 호출해 종료된 플랜을 새로 구독하는 길은 막는다.
+    // 기존 구독자의 자동 갱신(scheduled-membership-billing)과 해지는 그대로 동작한다.
+    if (normalizedTier === "live_plan") {
+      return Response.json(
+        { success: false, error: "라이브 커머스 멤버십은 서비스가 종료되어 더 이상 신규 구독을 받지 않습니다." },
+        { status: 400 },
+      );
+    }
 
     const key = `seller_${username.toLowerCase()}`;
 
@@ -132,27 +139,15 @@ export default async (req: Request) => {
     const updated = (await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
       const history = Array.isArray(current?.billing_history) ? current!.billing_history : [];
 
-      // 라이브 커머스 구독은 멤버십 티어를 건드리지 않는다. 같은 빌링키를 쓰되
-      // 청구 주기(다음 결제일 · 실패 횟수)는 `live_plan_*` 로 따로 관리한다. 그래야
-      // 프로 + 라이브처럼 두 구독을 동시에 들고 있어도 서로 덮어쓰지 않는다.
-      const planFields = isLivePlan
-        ? {
-            live_plan_active: true,
-            live_plan_started_at: current?.live_plan_started_at || now,
-            live_plan_amount_krw: charge.amountKrw,
-            live_plan_last_billing_at: now,
-            live_plan_next_billing_date: addOneMonth(now),
-            live_plan_billing_failures: 0,
-          }
-        : {
-            membership_active: true,
-            membership_plan: normalizedTier,
-            membership_started_at: current?.membership_started_at || now,
-            membership_amount_krw: charge.amountKrw,
-            last_billing_at: now,
-            next_billing_date: addOneMonth(now),
-            billing_failures: 0,
-          };
+      const planFields = {
+        membership_active: true,
+        membership_plan: normalizedTier,
+        membership_started_at: current?.membership_started_at || now,
+        membership_amount_krw: charge.amountKrw,
+        last_billing_at: now,
+        next_billing_date: addOneMonth(now),
+        billing_failures: 0,
+      };
 
       return {
         ...(current || {}),

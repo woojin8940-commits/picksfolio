@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Grid, List, Briefcase, Bell, ExternalLink } from 'lucide-react';
+import { Grid, List, Briefcase, ExternalLink } from 'lucide-react';
 
 interface TemplateShowcaseProps {
   onSignup: () => void;
@@ -122,10 +122,6 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                   >
                     <Briefcase size={9} strokeWidth={2.5} />
                     비즈니스 제안
-                  </span>
-                  <span className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-blue-primary">
-                    <Bell size={9} strokeWidth={2.5} />
-                    라이브 알림받기
                   </span>
                 </div>
 

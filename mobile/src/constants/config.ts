@@ -2,9 +2,8 @@
  * Runtime configuration for the PICKS Folio native shell.
  *
  * The native app is a thin wrapper around the production mobile web app, so
- * everything (login, Kakao OAuth, payments, live commerce, settlements …)
- * behaves exactly like the website. The only thing that needs configuring is
- * which web origin to load. `EXPO_PUBLIC_`-prefixed vars are inlined into the
+ * everything (login, Kakao OAuth, payments, settlements …) behaves exactly like
+ * the website. The only thing that needs configuring is which web origin to load. `EXPO_PUBLIC_`-prefixed vars are inlined into the
  * JS bundle at build time, so the URL can be overridden per build/channel
  * without touching code.
  */
@@ -16,47 +15,5 @@ export const config = {
   brandName: 'PICKS Folio',
   /** Background shown behind the WebView (matches the web app canvas). */
   backgroundColor: '#050507',
-} as const;
-
-/**
- * Native live-broadcast (Amazon IVS) defaults.
- *
- * The native broadcast screen pushes the phone camera straight to an Amazon IVS
- * channel over RTMPS using the device's hardware encoder, replacing the old
- * WebView (getUserMedia) broadcast path. Ingest server + stream key are loaded
- * from the web app's `/api/stream-key/:username` endpoint (which is backed by
- * the seller's stored channel config) or typed in by hand. Everything else here
- * is the encoder profile: a portrait 1080p / 30fps target tuned for product
- * detail, matching the web broadcast's intent.
- */
-export const broadcastConfig = {
-  /** Fallback ingest server prefilled when the seller has no stored channel. */
-  defaultIngestServer:
-    'rtmps://9bb0dddfd063.global-contribute.live-video.net:443/app/',
-  /**
-   * Portrait 1080p encoder profile. `bitrate` values are in bits-per-second as
-   * expected by amazon-ivs-react-native-broadcast. Auto-bitrate lets IVS dial
-   * the rate down on weak uplinks instead of dropping frames.
-   *
-   * Tuned for maximum quality: the target/max bitrate is raised to 8.5 Mbps —
-   * the input ceiling for an IVS standard channel at 1080p — so on a healthy
-   * Wi-Fi/LTE uplink the stream uses the full bitrate budget instead of the old
-   * conservative 6 Mbps cap. The floor is kept at 2 Mbps so that on a weak
-   * network auto-bitrate still has room to back off without 1080p turning to
-   * mush.
-   */
-  video: {
-    width: 1080,
-    height: 1920,
-    targetFrameRate: 30,
-    keyframeInterval: 2 as const,
-    bitrate: 8_000_000,
-    minBitrate: 2_000_000,
-    maxBitrate: 8_500_000,
-    isAutoBitrate: true,
-  },
-  audio: {
-    bitrate: 160_000,
-  },
 } as const;
 

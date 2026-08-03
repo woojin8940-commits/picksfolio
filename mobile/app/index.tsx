@@ -3,14 +3,13 @@ import {
   ActivityIndicator,
   BackHandler,
   Linking,
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -41,62 +40,23 @@ function isInternalUrl(url: string): boolean {
   return INTERNAL_SCHEME.test(url);
 }
 
-/** Deep link the web app can navigate to in order to open the native broadcast. */
-const BROADCAST_DEEPLINK = /^picksfolio:\/\/broadcast/i;
-
-/** Parse a `key=value&…` query string without relying on URLSearchParams. */
-function parseQuery(url: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const q = url.split('?')[1];
-  if (!q) return out;
-  for (const pair of q.split('&')) {
-    const [k, v = ''] = pair.split('=');
-    if (k) out[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, ' '));
-  }
-  return out;
-}
-
-/** Open the native broadcast screen, forwarding only the params we recognise. */
-function openNativeBroadcast(raw: Record<string, unknown>): void {
-  const params: Record<string, string> = {};
-  for (const key of ['username', 'ingestServer', 'streamKey'] as const) {
-    const value = raw[key];
-    if (typeof value === 'string' && value) params[key] = value;
-  }
-  router.push({ pathname: '/broadcast', params });
-}
-
 /**
  * Injected before the web app loads. Advertises the native shell + native push
  * support and exposes `PicksFolioNative.registerPush(username, userType)` so the
  * web app can hand the signed-in user to the shell, which registers the device's
  * push token for new-message alerts.
- *
- * Native broadcast handoff is intentionally NOT advertised
- * (`__PICKSFOLIO_NATIVE_BROADCAST__ = false`). Handing the broadcast off to the
- * standalone fullscreen IVS screen hid the live console (chat, product push,
- * cart status) that the host needs while live. Instead the broadcast now runs
- * inside the WebView (getUserMedia + WebRTC, with the same IVS/RTMPS fallback),
- * so the host keeps the full console on screen while broadcasting and web
- * viewers receive the WebRTC stream as before. `openBroadcast` is still exposed
- * for backwards compatibility but the web app no longer calls it.
  */
 const NATIVE_BRIDGE = `
   (function () {
     if (window.__PICKSFOLIO_NATIVE__) return;
     window.__PICKSFOLIO_NATIVE__ = true;
-    window.__PICKSFOLIO_NATIVE_BROADCAST__ = false;
     window.__PICKSFOLIO_NATIVE_PUSH__ = true;
     function post(payload) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
     }
     window.PicksFolioNative = {
       version: 2,
-      broadcastSupported: false,
       pushSupported: true,
-      openBroadcast: function (opts) {
-        post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
-      },
       registerPush: function (username, userType) {
         post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType } });
       },
@@ -177,36 +137,10 @@ export default function WebAppScreen() {
     webRef.current?.goBack();
   }, []);
 
-  // Ask for the camera + microphone permission once, up front, so the in-WebView
-  // live broadcast can start without a permission prompt interrupting "라이브 시작".
-  // Android remembers the grant, so this is a no-op (no dialog) after the first
-  // time; the system dialog itself is shown in the device's language (Korean).
-  // iOS surfaces its permission prompt from the Info.plist usage strings the
-  // first time getUserMedia runs and likewise remembers the choice.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    (async () => {
-      try {
-        await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        ]);
-      } catch {
-        // Non-fatal: the WebView will request again on first getUserMedia.
-      }
-    })();
-  }, []);
-
   // Route non-http(s) schemes (kakaotalk://, payment apps, tel:, mailto: …)
   // out to the OS; keep all web traffic inside the WebView.
   const onShouldStartLoad = useCallback((req: { url: string }): boolean => {
     const { url } = req;
-    // Native broadcast deep link: open the IVS broadcast screen instead of
-    // handing the custom scheme to the OS.
-    if (BROADCAST_DEEPLINK.test(url)) {
-      openNativeBroadcast(parseQuery(url));
-      return false;
-    }
     if (isInternalUrl(url)) return true;
     if (EXTERNAL_SCHEME.test(url)) {
       Linking.openURL(url).catch(() => {
@@ -224,8 +158,8 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Bridge: the web live console calls window.PicksFolioNative.openBroadcast()
-  // to hand the broadcast off to the native IVS screen.
+  // Bridge: the web app calls window.PicksFolioNative.registerPush() after sign-in
+  // so the shell can register this device's push token.
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
     try {
@@ -233,9 +167,7 @@ export default function WebAppScreen() {
     } catch {
       return;
     }
-    if (msg?.type === 'OPEN_NATIVE_BROADCAST') {
-      openNativeBroadcast(msg.payload ?? {});
-    } else if (msg?.type === 'REGISTER_PUSH') {
+    if (msg?.type === 'REGISTER_PUSH') {
       const username = msg.payload?.username;
       const userType = msg.payload?.userType === 'business' ? 'business' : 'influencer';
       if (typeof username === 'string' && username) {
@@ -250,21 +182,20 @@ export default function WebAppScreen() {
         ref={webRef}
         source={{ uri: sourceUri }}
         style={styles.web}
-        // Advertise the native shell + expose the native broadcast hand-off.
+        // Advertise the native shell + expose the push registration bridge.
         injectedJavaScriptBeforeContentLoaded={NATIVE_BRIDGE}
         // Keep the auth/session cookies that Kakao + Supabase rely on.
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
         domStorageEnabled
         javaScriptEnabled
-        // Live commerce video + camera/mic for streaming and uploads.
+        // Portfolio/product video playback inside the page.
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         allowsFullscreenVideo
-        // Camera/mic for in-WebView live broadcasting. Auto-grant the WebView's
-        // getUserMedia request from the app's already-held OS permission so the
-        // host is asked at most once (the system camera/mic dialog, in Korean)
-        // instead of every time they open the live console or go live.
+        // Auto-grant a getUserMedia request from the app's already-held OS
+        // permission so the member is asked at most once (the system camera/mic
+        // dialog, in Korean) instead of on every capture.
         mediaCapturePermissionGrantType="grant"
         // File pickers for portfolio/image uploads.
         allowFileAccess

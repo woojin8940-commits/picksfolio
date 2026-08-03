@@ -54,7 +54,7 @@ const AdminSellerVerifications: React.FC<AdminSellerVerificationsProps> = ({ tok
   }, [fetchItems]);
 
   const handleApprove = async (username: string) => {
-    if (!confirm(`@${username} 셀러의 사업자 인증을 수락하시겠습니까? 수락하면 라이브 송출이 가능해집니다.`)) return;
+    if (!confirm(`@${username} 셀러의 사업자 인증을 수락하시겠습니까?`)) return;
     setProcessing(username);
     const result = await apiService.adminSellerVerificationAction(token, username, 'approve');
     if (result.success) {

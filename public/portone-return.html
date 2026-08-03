@@ -127,18 +127,6 @@
       // ── 단건 결제 흐름 ── paymentId 로 돌아온다.
       if (!paymentId) { fail("결제 정보가 올바르지 않습니다."); return; }
 
-      if (intent.type === "live") {
-        const r = await send("POST", "/api/live-credits/" + enc(intent.username), {
-          hours: intent.hours,
-          payMethod: payMethod,
-          paymentId: paymentId,
-        });
-        if (!r.ok || r.data.error) { fail(r.data.error || "시간 충전에 실패했습니다."); return; }
-        sessionStorage.removeItem(INTENT_KEY);
-        done(intent.returnPath);
-        return;
-      }
-
       if (intent.type === "claude") {
         const r = await send("POST", "/api/claude-credits/" + enc(intent.username), {
           kind: intent.kind || "activation",
@@ -149,19 +137,6 @@
         if (!r.ok || r.data.error || r.data.success === false) {
           fail(r.data.error || "크레딧 적립에 실패했습니다."); return;
         }
-        sessionStorage.removeItem(INTENT_KEY);
-        done(intent.returnPath);
-        return;
-      }
-
-      // ── 라이브 커머스 시청자 주문 ── 저장해 둔 주문 본문에 paymentId 만 더해 검증한다.
-      if (intent.type === "live-order" || intent.type === "live-order-batch") {
-        const url = intent.type === "live-order"
-          ? "/api/live-order-complete"
-          : "/api/live-order-batch";
-        const order = intent.order || {};
-        const r = await send("POST", url, Object.assign({}, order, { paymentId: paymentId }));
-        if (!r.ok || !r.data.success) { fail(r.data.error || "결제 검증에 실패했습니다."); return; }
         sessionStorage.removeItem(INTENT_KEY);
         done(intent.returnPath);
         return;

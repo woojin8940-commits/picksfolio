@@ -15,11 +15,9 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
-  onNavigateLive: () => void;
-  onNavigateBroadcastSettings: () => void;
   onNavigateDmAutomation: () => void;
   onNavigateBusiness: () => void;
   onNavigateCalendar: () => void;
@@ -36,8 +34,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentSubView,
   onNavigateDashboard,
   onNavigateLinks,
-  onNavigateLive,
-  onNavigateBroadcastSettings,
   onNavigateDmAutomation,
   onNavigateBusiness,
   onNavigateCalendar,
@@ -58,7 +54,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Dashboard data counts
   const [previewBlocks, setPreviewBlocks] = useState<Block[]>([]);
   const [previewSchedule, setPreviewSchedule] = useState<any[]>([]);
-  const [previewMaterials, setPreviewMaterials] = useState<any[]>([]);
 
   const loadDashboardCounts = useCallback(() => {
     const u = (userName || '').toLowerCase();
@@ -70,9 +65,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       const savedSchedule = localStorage.getItem(`picks_schedule_${u}`);
       if (savedSchedule) setPreviewSchedule(JSON.parse(savedSchedule));
-
-      const savedMaterials = localStorage.getItem(`picks_materials_${u}`);
-      if (savedMaterials) setPreviewMaterials(JSON.parse(savedMaterials));
     } catch (e) {
       console.error('Error loading dashboard data from localStorage:', e);
     }
@@ -86,10 +78,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (apiData.openSchedule) {
         setPreviewSchedule(apiData.openSchedule);
         localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
-      }
-      if (apiData.materials) {
-        setPreviewMaterials(apiData.materials);
-        localStorage.setItem(`picks_materials_${u}`, JSON.stringify(apiData.materials));
       }
     }).catch(e => {
       console.warn('Error loading dashboard data from API:', e);
@@ -221,18 +209,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onMouseEnter={() => prefetchLinkData(userName)}
           />
           <NavItem
-            icon="🎥"
-            label="라이브 커머스"
-            active={currentSubView === 'live'}
-            onClick={onNavigateLive}
-          />
-          <NavItem
-            icon="📋"
-            label="방송 설정"
-            active={currentSubView === 'broadcast-settings'}
-            onClick={onNavigateBroadcastSettings}
-          />
-          <NavItem
             icon="📩"
             label="DM 자동화"
             active={currentSubView === 'dm-automation'}
@@ -306,12 +282,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
-          <MobileNavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
+          <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem icon="📨" label="수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem
             icon="⋯"
             label="더보기"
-            active={['broadcast-settings','timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
+            active={['dm-automation','timeline','calendar','open-schedule','settlement','membership'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
             badge={timelineUnread}
           />
@@ -345,8 +321,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
-              <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { onNavigateLive(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { onNavigateBroadcastSettings(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
@@ -482,7 +456,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
               <QuickCard icon="🔗" label="링크 관리" onClick={onNavigateLinks} />
-              <QuickCard icon="🎥" label="라이브 커머스" onClick={onNavigateLive} />
+              <QuickCard icon="📢" label="캠페인" onClick={onNavigateCampaigns} />
               <QuickCard icon="📨" label="비즈니스 수신함" onClick={onNavigateBusiness} />
               <QuickCard icon="📅" label="협업 현황" onClick={onNavigateCalendar} />
             </div>
@@ -493,7 +467,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-4">
                 <DataCard icon="🔗" label="상품 블록" count={previewBlocks.length} onClick={onNavigateLinks} />
                 <DataCard icon="🗓️" label="오픈 일정" count={previewSchedule.filter((s: any) => s.isActive).length} onClick={onNavigateOpenSchedule} />
-                <DataCard icon="🎥" label="방송 자료" count={previewMaterials.length} onClick={onNavigateLive} />
               </div>
             </div>
             </div>

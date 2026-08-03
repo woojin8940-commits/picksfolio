@@ -4,7 +4,7 @@ import { requireAdmin } from "./_shared/admin-auth.mts";
 
 // 셀러 사업자등록증 수동 심사 콘솔용 API.
 // 셀러가 제출한 사업자 정보(사업자등록증 이미지 포함)를 관리자가 직접 검토하고
-// 수락(approve)/거절(reject)한다. 수락된 셀러만 라이브 커머스 송출이 가능하다.
+// 수락(approve)/거절(reject)한다. 수락된 셀러만 사업자 인증 완료로 처리된다.
 const STORE = "seller-verification";
 const PREFIX = "seller_";
 

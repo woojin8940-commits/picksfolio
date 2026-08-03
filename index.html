@@ -4,20 +4,18 @@
     <meta charset="UTF-8">
     <!--
       interactive-widget=overlays-content: when the on-screen keyboard opens it
-      OVERLAYS the page without resizing either viewport. This keeps the live
-      player's fixed, full-screen container perfectly pinned while a viewer types
-      in chat. `resizes-content` (the previous value) shrank the layout viewport,
-      dragging the fixed player up and briefly revealing the host's page behind it
-      ("화면이 솟는" surge). The chat input is lifted above the keyboard manually
-      via the VisualViewport API (see LiveStream.tsx); ordinary form inputs are
-      still scrolled into view by the browser within the unchanged layout viewport.
+      OVERLAYS the page without resizing either viewport, so fixed overlays and
+      modals stay pinned instead of being dragged up. (Originally adopted for the
+      full-screen live player, which has since been removed; kept because
+      `resizes-content` still makes every fixed overlay jump when the keyboard
+      opens.) Ordinary form inputs are scrolled into view by the browser within
+      the unchanged layout viewport.
     -->
     <!--
       maximum-scale=1.0, user-scalable=no: lock the visual viewport so the page
       never zooms. Without this, focusing a text field or double-tapping on
-      mobile magnifies the layout and leaves it stuck mid-zoom — disorienting in
-      the full-screen broadcast/live views. Combined with the >=16px input
-      font-size rule in index.css, this keeps the screen fixed at all times.
+      mobile magnifies the layout and leaves it stuck mid-zoom. Combined with the
+      >=16px input font-size rule in index.css, this keeps the screen fixed.
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
     <meta name="theme-color" content="#2563EB">
@@ -33,13 +31,10 @@
     <meta name="twitter:description" content="단 하나의 링크, PICKS. 무신사-올리브영 데이터로 픽하고, 감각적인 그리드 템플릿으로 연결하세요." />
     <meta name="twitter:image" content="https://picks-folio.com/og-image.png" />
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
-    <script src="/assets/ivs-player-overlay.js"></script>
 </head>
 <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
     <script src="/campaign-inject.js" defer></script>
     <script>

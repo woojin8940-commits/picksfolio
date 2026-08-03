@@ -11,18 +11,6 @@ export interface ProductOption {
   values: string[];   // e.g. ["S", "M", "L"] or ["블랙", "화이트"]
 }
 
-export interface LiveProductOptionValue {
-  value: string;
-  price?: number;     // absolute KRW override; when set, replaces base unit price for this variant
-  discount?: number;  // percent off (0-100); applied on top of resolved unit price
-}
-
-export interface LiveProductOption {
-  id: string;
-  name: string;
-  values: LiveProductOptionValue[];
-}
-
 export interface Product {
   id: string;
   name: string;
@@ -179,7 +167,7 @@ export interface SellerVerification {
   business?: SellerBusinessVerification | null;
   settlement?: SellerSettlementAccount | null;
   business_verified?: boolean;
-  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 라이브 송출이 가능하다.
+  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 사업자 인증이 완료된다.
   business_review_status?: 'pending' | 'approved' | 'rejected';
   business_review_reason?: string;
   business_submitted_at?: string | null;
@@ -197,8 +185,8 @@ export interface SellerVerification {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingHistoryEntry[];
-  // 라이브 커머스 멤버십 — 위 멤버십 티어와 별개로 결제·구독하는 플랜이라
-  // 활성 여부와 청구 상태를 따로 들고 있다. 빌링키는 멤버십과 공유한다.
+  // 라이브 커머스 멤버십(서비스 종료) — 신규 판매는 없지만, 기존 구독자의
+  // 청구 상태를 읽어 해지 버튼을 띄워야 하므로 필드는 남겨둔다.
   live_plan_active?: boolean;
   live_plan_started_at?: string | null;
   live_plan_amount_krw?: number | null;

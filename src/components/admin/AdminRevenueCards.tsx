@@ -6,9 +6,6 @@ import { TIER_PRICE, normalizeTier, type MembershipTier } from '../../utils/memb
 // 멤버십 월 구독료는 utils/membershipTiers 한 곳에서만 정의한다(서버와 동일한 값).
 const PLAN_PRICE = TIER_PRICE;
 
-// Live sales commission (PG fee included). Mirrors live-pricing.mts.
-const LIVE_COMMISSION_RATE = 0.085;
-
 interface SettlementSummary {
   totalAmount: number;
   paidAmount: number;
@@ -27,18 +24,14 @@ const won = (n: number) => formatKRW(n);
 const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
   const [membershipRevenue, setMembershipRevenue] = useState<number | null>(null);
   const [membershipBreakdown, setMembershipBreakdown] = useState<Record<MembershipTier, number>>({ standard: 0, standard_ai: 0, commerce: 0, pro: 0 });
-  const [liveOverage, setLiveOverage] = useState(0);
-  const [liveCommission, setLiveCommission] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [influencers, usage, live] = await Promise.all([
-        apiService.getAdminInfluencers(token).catch(() => ({ influencers: [] as any[] })),
-        apiService.getAdminLiveUsage(token).catch(() => null),
-        apiService.getAdminLiveOverview(token).catch(() => ({ history: [] as any[] })),
-      ]);
+      const influencers = await apiService
+        .getAdminInfluencers(token)
+        .catch(() => ({ influencers: [] as any[] }));
       if (cancelled) return;
 
       const rows = (influencers.influencers || []) as any[];
@@ -53,21 +46,14 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
         (Object.keys(counts) as MembershipTier[]).reduce((sum, tier) => sum + counts[tier] * PLAN_PRICE[tier], 0),
       );
 
-      const overage = (usage?.users || []).reduce((s, u) => s + (u.overageAmountKrw || 0), 0);
-      setLiveOverage(overage);
-
-      const salesRevenue = ((live?.history || []) as any[]).reduce((s, h) => s + (Number(h.revenue) || 0), 0);
-      setLiveCommission(Math.round(salesRevenue * LIVE_COMMISSION_RATE));
-
       setLoaded(true);
     })();
     return () => { cancelled = true; };
   }, [token]);
 
-  const liveFeeTotal = liveOverage + liveCommission;
   const pendingCount = settlementSummary ? settlementSummary.scheduled + settlementSummary.pending : 0;
-  // 픽스폴리오 플랫폼 이번달 수익 = 멤버십 구독료 + 라이브커머스 수수료.
-  const platformRevenue = (membershipRevenue || 0) + liveFeeTotal;
+  // 라이브커머스를 내린 뒤로 플랫폼 수익은 멤버십 구독료뿐이다.
+  const platformRevenue = membershipRevenue || 0;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
@@ -76,12 +62,12 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
         <span className="text-[10px] font-bold text-slate-400">이번달 기준</span>
       </div>
 
-      {/* 픽스폴리오 플랫폼 수익 — 이번달 멤버십 수익 / 라이브커머스 수수료 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+      {/* 픽스폴리오 플랫폼 수익 — 이번달 멤버십 수익 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
         <div className="bg-gradient-to-br from-slate-900 to-slate-700 p-4 rounded-2xl text-white">
           <p className="text-[9px] font-black text-white/60 uppercase tracking-widest mb-1">픽스폴리오 이번달 수익</p>
           <p className="text-2xl font-black">{loaded ? won(platformRevenue) : '—'}</p>
-          <p className="text-[9px] font-bold text-white/50 mt-1">멤버십 + 라이브커머스 수수료</p>
+          <p className="text-[9px] font-bold text-white/50 mt-1">활성 멤버십 구독료</p>
         </div>
         <div className="bg-pink-50 p-4 rounded-2xl border border-pink-100">
           <p className="text-[9px] font-black text-pink-500 uppercase tracking-widest mb-1">이번달 멤버십 수익</p>
@@ -89,15 +75,6 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
           {loaded && (
             <p className="text-[9px] font-bold text-pink-400/80 mt-1">
               스탠다드 {membershipBreakdown.standard} · AI 협업 {membershipBreakdown.standard_ai} · 커머스 {membershipBreakdown.commerce} · 프로 {membershipBreakdown.pro}
-            </p>
-          )}
-        </div>
-        <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
-          <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-1">라이브커머스 수수료</p>
-          <p className="text-2xl font-black text-indigo-600">{loaded ? won(liveFeeTotal) : '—'}</p>
-          {loaded && (
-            <p className="text-[9px] font-bold text-indigo-400/80 mt-1">
-              판매 8.5% {won(liveCommission)} · 송출 초과 {won(liveOverage)}
             </p>
           )}
         </div>
@@ -129,7 +106,7 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary }) => {
         </div>
       </div>
       <p className="text-[10px] font-bold text-slate-400 mt-3">
-        멤버십 수익은 활성 구독자 × 월 구독료 기준이며, 라이브커머스 수수료는 라이브 판매액의 8.5%와 송출 초과 후불 합계 추정치입니다.
+        멤버십 수익은 활성 구독자 × 월 구독료 기준의 추정치입니다.
       </p>
     </div>
   );

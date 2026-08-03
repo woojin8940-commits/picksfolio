@@ -5,7 +5,6 @@ import { apiService } from '../services/apiService';
 import { formatKRW, todayInSeoul } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
-import AdminLiveConsole from './admin/AdminLiveConsole';
 import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
@@ -17,7 +16,7 @@ import AdminCollabDirectory from './admin/AdminCollabDirectory';
 import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory' | 'managers';
+type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory' | 'managers';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -86,7 +85,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [settlements, setSettlements] = useState<SettlementRow[]>([]);
   const [settlementSummary, setSettlementSummary] = useState<SettlementSummary | null>(null);
-  // 라이브 승인 대기(사업자등록증 심사 대기) 건수 — 탭 배지로 노출한다.
+  // 사업자 인증 대기(사업자등록증 심사 대기) 건수 — 탭 배지로 노출한다.
   const [sellerPendingCount, setSellerPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -168,7 +167,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       setNotifications(notifData.notifications || []);
       setUnreadCount(notifData.unreadCount || 0);
 
-      // 라이브 승인 대기 건수를 받아 탭 배지로 표시한다.
+      // 사업자 인증 대기 건수를 받아 탭 배지로 표시한다.
       try {
         const sellerData = await apiService.getAdminSellerVerifications(token, 'pending');
         setSellerPendingCount(sellerData.pendingCount || 0);
@@ -578,11 +577,10 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             { key: 'listup' as OperatorTab, label: '2. 인플루언서 리스트업' },
             { key: 'collabs' as OperatorTab, label: '3. 선정 인플루언서 관리' },
             { key: 'directory' as OperatorTab, label: '브랜드 매칭 지원자' },
-            { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
+            { key: 'sellers' as OperatorTab, label: '사업자 인증', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
             { key: 'users' as OperatorTab, label: '회원 관리' },
             { key: 'managers' as OperatorTab, label: '담당자 계정' },
             { key: 'settlement' as OperatorTab, label: '정산·매출' },
-            { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
             { key: 'workflow' as OperatorTab, label: '제안 워크플로' },
             { key: 'influencer' as OperatorTab, label: '인플루언서별' },
             { key: 'calendar' as OperatorTab, label: '일정 캘린더' },
@@ -910,22 +908,6 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 정산 데이터가 표시됩니다." />
         )}
 
-        {/* Live Commerce Console Tab */}
-        {activeTab === 'live' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="amber"
-                  title="라이브 운영 · 준비중"
-                  body="라이브 커머스 기능은 정식 출시 전 단계입니다. 아래 콘솔(진행 중 방송·사후 리포트·송출 시간·채팅 모더레이션)은 실데이터가 쌓이면 자동으로 채워집니다."
-                />
-                <AdminLiveConsole token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 데이터가 표시됩니다." />
-        )}
-
         {/* Workflow Console Tab */}
         {activeTab === 'workflow' && (
           adminToken
@@ -1013,13 +995,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               <div className="space-y-4">
                 <TabIntro
                   tone="blue"
-                  title="라이브 승인 심사 · 사업자등록증 수동 확인"
-                  body="셀러가 제출한 사업자등록증 이미지를 직접 확인하고 라이브 송출을 승인/거절합니다. 승인한 셀러만 라이브 커머스 송출이 가능합니다."
+                  title="사업자 인증 심사 · 사업자등록증 수동 확인"
+                  body="셀러가 제출한 사업자등록증 이미지를 직접 확인하고 사업자 인증을 승인/거절합니다. 인증된 셀러만 판매자용 기능을 쓸 수 있습니다."
                 />
                 <AdminSellerVerifications token={adminToken} />
               </div>
             )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 승인 심사가 표시됩니다." />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 사업자 인증 심사가 표시됩니다." />
         )}
 
         {/* Influencer Tab */}

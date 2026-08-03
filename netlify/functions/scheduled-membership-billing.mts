@@ -14,8 +14,8 @@ import {
 const STORE = "seller-verification";
 
 /**
- * Daily recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로)
- * 및 별도 구독인 라이브 커머스 멤버십.
+ * Daily recurring billing for the paid memberships (스탠다드 / AI 협업 / 커머스 / 프로),
+ * 그리고 아직 해지하지 않은 기존 라이브 커머스 구독자.
  *
  * Every member is billed on the anniversary of the day they subscribed (가입일
  * 기준): the subscribe flow stores `next_billing_date`, and this job — running
@@ -24,9 +24,9 @@ const STORE = "seller-verification";
  * members who paid on different days are billed on different days; they are not
  * all charged together.
  *
- * 라이브 커머스는 멤버십과 따로 결제하는 구독이라 청구 상태도 `live_plan_*` 필드로
- * 따로 관리한다. 한 사람이 멤버십과 라이브를 같이 들고 있으면 각각의 결제일에 각각
- * 청구된다(같은 빌링키를 쓰되 청구는 두 건).
+ * 라이브 커머스는 서비스를 종료해 신규 구독을 받지 않는다. 다만 청구 상태가 `live_plan_*`
+ * 필드로 따로 관리되는 별도 구독이었기 때문에, 아직 해지하지 않은 기존 구독자는 해지할
+ * 때까지 계속 갱신해 줘야 한다 — 그래서 이 청구 경로는 그대로 남겨 둔다.
  *
  * The Claude plan is deliberately NOT handled here — it is a prepaid credit wallet
  * in a different store with balance-based top-ups, not a monthly subscription.

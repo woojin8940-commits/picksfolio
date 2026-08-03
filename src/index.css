@@ -58,30 +58,6 @@ html {
   .min-h-\[100vh\] {
     min-height: calc(100vh / 0.75) !important;
   }
-
-  /* The live-stream viewer is a full-viewport fixed overlay. Every previous
-     attempt to make it fill the screen *under* the desktop `zoom: 0.75` above
-     fought the same losing battle: whatever height we computed — a JS pixel
-     value, `100dvh`, `100dvh / 0.75`, or even anchoring `bottom: 0` — was
-     reinterpreted through the fractional page zoom, and different browser
-     versions reconcile viewport geometry with CSS `zoom` differently. That kept
-     leaving a band at the bottom that exposed the host's personal page behind
-     the player, and it also skewed how `object-fit` framed the video.
-
-     The definitive fix is to take this one overlay out of the page zoom instead
-     of doing height math against it. CSS `zoom` compounds multiplicatively down
-     the tree, so giving the overlay its own `zoom` of 1 / 0.75 returns it to an
-     effective scale of 1.0 — it now maps 1:1 to the real device viewport. With
-     the zoom neutralised, the overlay's own `top/left/right` pins plus `bottom`
-     fill the real viewport rectangle exactly: the broadcast can never be cut off
-     and the page can never peek through, on any browser. Desktop has no
-     on-screen keyboard, so the inline JS height lock (forced to `auto` here) is
-     not needed. */
-  .live-stream-container {
-    zoom: 1.3333333;
-    bottom: 0 !important;
-    height: auto !important;
-  }
 }
 
 /* Remove the 300ms tap delay and the gray flash on iOS / Android */
@@ -160,69 +136,8 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-/* Video.js HLS Player - Full HD Mobile Optimization */
-.video-js.vjs-fluid {
-  width: 100%;
-  height: 100%;
-}
-
-.video-js .vjs-tech {
-  object-fit: cover;
-  width: 100%;
-  height: 100%;
-}
-
-/* Hide default Video.js controls for custom UI */
-.video-js .vjs-control-bar,
-.video-js .vjs-big-play-button,
-.video-js .vjs-loading-spinner,
-.video-js .vjs-poster {
-  display: none !important;
-}
-
-/* Live Stream Container - Mobile Layout Fix */
-.live-stream-container {
-  width: 100%;
-  height: 100vh;
-  height: -webkit-fill-available;
-  overflow: hidden;
-}
-
-/* On the web, don't cap the viewer at phone width. Instead show a large,
-   centered portrait column whose width is derived from the locked full-screen
-   height at a 9:16 ratio — the exact proportions a phone shows, just scaled up
-   to the desktop's height. The element's height is set inline (locked viewport
-   height) and wins over the base rule above; with width:auto the aspect-ratio
-   computes the matching portrait width. !important so it beats the base
-   `width: 100%`. */
-@media (min-width: 768px) {
-  .live-stream-container {
-    width: auto !important;
-    max-width: 100vw;
-    aspect-ratio: 9 / 16;
-    left: 50% !important;
-    right: auto !important;
-    transform: translateX(-50%);
-  }
-}
-
-/* Ensure video fills container on mobile */
 @media (max-width: 768px) {
-  .video-js {
-    position: absolute !important;
-    top: 0;
-    left: 0;
-    width: 100% !important;
-    height: 100% !important;
-  }
-  .video-js .vjs-tech {
-    object-fit: cover;
-    width: 100% !important;
-    height: 100% !important;
-    -webkit-transform: translateZ(0);
-    transform: translateZ(0);
-  }
-  /* Prevent iOS rubber-band scrolling on live stream views */
+  /* Prevent iOS rubber-band scrolling inside fixed overlays (modals, drawers). */
   .fixed {
     -webkit-overflow-scrolling: touch;
   }
@@ -244,90 +159,11 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-/* Live broadcast overlay padding. On phones the top/bottom controls hug the
-   screen edges (small gap) so they clear the center of the frame as much as
-   possible — the broadcaster asked for minimal obstruction. On the web (≥768px)
-   they get more breathing room so they don't sit flush against the stage edges.
-   Declared here (not via Tailwind py-* utilities) so it reliably wins over the
-   generic .safe-area-pad helper, and folds the notch inset into the base gap.
-
-   On phones the 메시지 입력칸 row now owns the very bottom edge of the broadcast
-   screen and the 카메라/마이크/거울/카메라전환/라이브 시작 strip sits directly ABOVE
-   it (the two rows were swapped at the broadcaster's request). The extra 4.25rem
-   in the bottom gap reserves the height of that chat input row so the controls
-   land just on top of it instead of behind it. The web (≥768px) is unaffected:
-   there the chat lives in the right-hand sidebar, not over the stage. */
-.live-overlay-pad {
-  padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem + 4.25rem);
-  padding-left: calc(env(safe-area-inset-left, 0px) + 0.625rem);
-  padding-right: calc(env(safe-area-inset-right, 0px) + 0.625rem);
-}
-@media (min-width: 768px) {
-  .live-overlay-pad {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 1.75rem);
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.75rem);
-    padding-left: calc(env(safe-area-inset-left, 0px) + 0.875rem);
-    padding-right: calc(env(safe-area-inset-right, 0px) + 0.875rem);
-  }
-}
-
-/* The chat input row is the last element on the phone broadcast screen, so it
-   now has to clear the home indicator itself (it used to sit above the
-   broadcaster controls, which carried that inset). On the web it keeps the
-   md:p-4 padding of its sidebar footer. */
-.live-chat-input-pad {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
-}
-@media (min-width: 768px) {
-  .live-chat-input-pad {
-    padding-bottom: 1rem;
-  }
-}
-
 /* Modal/drawer scroll containers: prevent scroll chaining to the underlying page,
    keep iOS momentum scrolling. Apply with className="overscroll-contain". */
 .overscroll-contain {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-}
-
-/* Live stream video shows the WHOLE broadcast frame, never a zoom-crop. The
-   native app encodes a portrait 9:16 feed; viewers reported the player looking
-   "확대"(zoomed) because `object-fit: cover` center-cropped that feed to fill
-   whatever stage it landed on — hard horizontal cropping on a wide desktop
-   window, and edge cropping on taller-than-16:9 phones. `contain` fits the full
-   frame inside the stage at its true ratio (letterboxed against the black
-   background) so nothing is ever cut off or magnified, matching exactly what the
-   broadcaster sees. The black container fills any leftover area, so the host's
-   page can still never show through. */
-.live-stream-container video,
-.live-stream-container .video-js,
-.live-stream-container .video-js .vjs-tech {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain !important;
-  background-color: #000;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-}
-
-/* 함께 방송 (co-broadcast) split — two complete screens side by side. Each feed
-   is a scaled-down copy of the solo full-screen broadcast: its wrapper is a
-   portrait box that keeps the original ratio (`w-[48%] aspect-[9/16]`), and the
-   inner <video> fills that box. The two windows read as a pair of whole screens,
-   not one screen sliced into narrow columns. */
-
-/* Keep the solo `object-fit: contain` here too: each split window already has
-   the broadcast's own portrait ratio, so `contain` shows the WHOLE frame at its
-   true ratio inside its window — exactly what a single broadcast looks like,
-   just smaller. (Previously this forced `cover`, which zoom-cropped each feed to
-   fill a non-portrait half-cell — the "원래 화면을 절반으로 잘라 방송한다" report.)
-   The `!important` matches the base rule's specificity. */
-.live-stream-container .co-split-feed video,
-.live-stream-container .co-split-feed .video-js,
-.live-stream-container .co-split-feed .video-js .vjs-tech {
-  object-fit: contain !important;
 }
 
 /* The desktop page zoom (html { zoom: 0.75 } above) makes Chrome rasterize CSS

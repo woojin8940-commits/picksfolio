@@ -21,16 +21,10 @@
 export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro'
 
 /**
- * 라이브 커머스는 티어 사다리에서 빠져 있는 "별도 구독"이다.
- *
- * 예전에는 커머스(13,900) 티어에 라이브가 들어 있고 프로(18,700)가 커머스를
- * 포함했기 때문에, 프로만 결제해도 라이브가 딸려 왔다. 라이브는 송출 인프라 비용이
- * 실제로 나가는 기능이라 다른 멤버십과 묶어 팔면 원가를 회수하지 못한다. 그래서
- * 라이브만 따로 결제하는 플랜으로 떼어냈다.
- *
- * 기존 커머스(또는 구 'live') 구독자는 그대로 라이브를 쓸 수 있게 남겨 둔다
- * (grandfathering). 다만 신규 판매는 하지 않는다 — 화면에서도 커머스 카드를
- * 없애고 라이브 커머스 카드를 맨 끝에 둔다.
+ * 라이브 커머스(`live_plan`)는 서비스를 종료했다. 신규 구독은 api-billing-issue 에서
+ * 막지만, 플랜 값 자체는 지우지 않는다 — 아직 해지하지 않은 기존 구독자의 자동 갱신
+ * (scheduled-membership-billing)과 과거 청구 이력이 이 값으로 저장돼 있어서, 파싱하지
+ * 못하면 청구는 계속되는데 기록만 사라진다.
  */
 export type BillingPlan = MembershipTier | 'live_plan'
 
@@ -43,7 +37,7 @@ export const TIER_PRICE_KRW: Record<MembershipTier, number> = {
   pro: 18700,
 }
 
-/** 라이브 커머스 별도 구독료(부가세 포함). */
+/** 라이브 커머스 구독료(부가세 포함) — 종료된 플랜의 기존 구독자 갱신·해지에만 쓴다. */
 export const LIVE_PLAN_PRICE_KRW = 13900
 
 export const TIER_LABEL: Record<MembershipTier, string> = {
@@ -55,7 +49,7 @@ export const TIER_LABEL: Record<MembershipTier, string> = {
 
 export const LIVE_PLAN_LABEL = '라이브 커머스 멤버십'
 
-/** 결제 가능한 모든 플랜(멤버십 티어 + 라이브 별도 구독)의 가격·이름. */
+/** 청구 기록에 나타날 수 있는 모든 플랜(멤버십 티어 + 종료된 라이브 구독)의 가격·이름. */
 export const PLAN_PRICE_KRW: Record<BillingPlan, number> = {
   ...TIER_PRICE_KRW,
   live_plan: LIVE_PLAN_PRICE_KRW,
@@ -76,31 +70,10 @@ export const normalizeTier = (plan: unknown): MembershipTier | null => {
   return null
 }
 
-/** 결제 요청에 들어온 플랜 값을 검증한다(멤버십 티어 또는 라이브 별도 구독). */
+/** 저장·요청에 들어온 플랜 값을 검증한다(멤버십 티어 또는 종료된 라이브 구독). */
 export const normalizeBillingPlan = (plan: unknown): BillingPlan | null => {
   if (plan === 'live_plan') return 'live_plan'
   return normalizeTier(plan)
-}
-
-/**
- * 라이브 커머스를 쓸 수 있는 상태인지.
- * - 라이브 별도 구독이 살아 있거나,
- * - 예전 커머스(구 'live') 멤버십을 유지 중인 기존 구독자.
- * 프로 플랜은 더 이상 라이브를 포함하지 않는다.
- */
-export const hasLiveCommerceAccess = (
-  record:
-    | {
-        membership_active?: boolean
-        membership_plan?: unknown
-        live_plan_active?: boolean
-      }
-    | null
-    | undefined,
-): boolean => {
-  if (!record) return false
-  if (record.live_plan_active) return true
-  return Boolean(record.membership_active) && normalizeTier(record.membership_plan) === 'commerce'
 }
 
 /**

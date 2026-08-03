@@ -41,7 +41,7 @@ export default async (req: Request, context: Context) => {
         const b = body.business;
         // 자동 승인하지 않는다. 사업자등록증 이미지를 받아 관리자가 수동으로 심사·수락한다.
         // 제출이 들어오면 인증을 해제하고 심사 대기(pending) 상태로 둔다. 관리자가 수락해야
-        // business_verified 가 true 가 되어 라이브 송출이 가능해진다.
+        // business_verified 가 true 가 되어 사업자 인증이 완료된다.
         if (b && b.registration_image_url) {
           next.business_verified = false;
           next.business_review_status = "pending";
@@ -66,7 +66,8 @@ export default async (req: Request, context: Context) => {
         next.membership_active = false;
       }
 
-      // 라이브 커머스는 멤버십과 따로 결제하는 구독이라 해지도 따로 받는다.
+      // 종료된 라이브 커머스 구독의 해지. 신규 가입은 막았지만 기존 구독자가 결제를
+      // 멈출 수 있어야 하므로 이 해지 경로는 남겨 둔다.
       if (body.live_plan_active === false) {
         next.live_plan_active = false;
       }

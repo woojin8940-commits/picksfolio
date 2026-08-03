@@ -7,8 +7,6 @@ const BusinessInbox = lazy(() => import('./BusinessInbox'));
 const BusinessEntCalendar = lazy(() => import('./BusinessEntCalendar'));
 const LinkManagement = lazy(() => import('./LinkManagement'));
 const AITrendAnalysis = lazy(() => import('./AITrendAnalysis'));
-const LiveCommerceManagement = lazy(() => import('./LiveCommerceManagement'));
-const BroadcastSettings = lazy(() => import('./BroadcastSettings'));
 const DmAutomation = lazy(() => import('./DmAutomation'));
 const OpenScheduleManagement = lazy(() => import('./OpenScheduleManagement'));
 const MembershipPlan = lazy(() => import('./MembershipPlan'));
@@ -21,7 +19,7 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'live' | 'broadcast-settings' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab';
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
@@ -231,12 +229,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     case 'trend':
       subComponent = <Suspense fallback={<BizLazyFallback />}><AITrendAnalysis userName={businessUsername} /></Suspense>;
       break;
-    case 'live':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><LiveCommerceManagement userName={businessUsername} /></Suspense>;
-      break;
-    case 'broadcast-settings':
-      subComponent = <Suspense fallback={<BizLazyFallback />}><BroadcastSettings userName={businessUsername} onNavigateLive={() => setCurrentSubView('live')} /></Suspense>;
-      break;
     case 'dm-automation':
       subComponent = <Suspense fallback={<BizLazyFallback />}><DmAutomation userName={businessUsername} /></Suspense>;
       break;
@@ -353,7 +345,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           </button>
 
           {/* Feature Cards (matching user dashboard) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-8">
             <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[360px] shadow-xl">
               <div>
                 <h3 className="text-sm md:text-2xl font-black mb-1">AI 트렌드 요약</h3>
@@ -367,13 +359,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
                 <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">인플루언서와의 협업 메시지를 확인하세요.</p>
               </div>
               <button onClick={() => setCurrentSubView('timeline')} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">타임라인 열기</button>
-            </div>
-            <div className="bg-indigo-900 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[360px] shadow-xl">
-              <div>
-                <h3 className="text-sm md:text-2xl font-black mb-1">라이브 커머스</h3>
-                <p className="opacity-80 font-bold text-[9px] md:text-base whitespace-nowrap">실시간 소통으로 구매 전환율을 높여보세요.</p>
-              </div>
-              <button onClick={() => setCurrentSubView('live')} className="bg-indigo-500 text-white px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">스튜디오 입장</button>
             </div>
           </div>
 
@@ -441,8 +426,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <nav className="flex-1 space-y-1">
           <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
           <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
-          <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
-          <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
           <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <div className="my-3 border-t border-white/10" />
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
@@ -471,8 +454,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <div className="flex overflow-x-auto scrollbar-hide px-1 py-2 gap-0.5" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}>
           <MobileNavItem icon="🏠" label="홈" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
-          <MobileNavItem icon="🎥" label="라이브" active={currentSubView === 'live'} onClick={() => setCurrentSubView('live')} />
-          <MobileNavItem icon="📋" label="방송설정" active={currentSubView === 'broadcast-settings'} onClick={() => setCurrentSubView('broadcast-settings')} />
           <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
@@ -496,8 +477,6 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             <nav className="flex-1 space-y-1 overflow-y-auto">
               <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { setCurrentSubView('dashboard'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => { setCurrentSubView('links'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🎥" label="라이브 커머스" active={currentSubView === 'live'} onClick={() => { setCurrentSubView('live'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="📋" label="방송 설정" active={currentSubView === 'broadcast-settings'} onClick={() => { setCurrentSubView('broadcast-settings'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { setCurrentSubView('dm-automation'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} />

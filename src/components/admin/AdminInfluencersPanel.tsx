@@ -37,14 +37,7 @@ interface BusinessRow {
   created_at?: string;
 }
 
-interface LiveCustomerRow {
-  phone: string;
-  nickname: string;
-  subscribed_to: string;
-  subscribed_at: string;
-}
-
-type Segment = 'users' | 'businesses' | 'liveCustomers';
+type Segment = 'users' | 'businesses';
 type SortKey = 'created_at' | 'last_login_at' | 'clicks' | 'views' | 'proposals_total' | 'acceptance_rate';
 
 interface Props {
@@ -76,7 +69,6 @@ const formatTimeAgo = (s?: string | null) => {
 const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const [rows, setRows] = useState<InfluencerRow[]>([]);
   const [businesses, setBusinesses] = useState<BusinessRow[]>([]);
-  const [liveCustomers, setLiveCustomers] = useState<LiveCustomerRow[]>([]);
   const [segment, setSegment] = useState<Segment>('users');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -91,7 +83,6 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
     const data = await apiService.getAdminInfluencers(token);
     setRows(data.influencers || []);
     setBusinesses(data.businesses || []);
-    setLiveCustomers(data.liveCustomers || []);
     setLoading(false);
   };
 
@@ -144,23 +135,6 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
       + businesses.filter(b => isTestUsername(b.raw_username || b.username)).length,
     [rows, businesses]
   );
-
-  const filteredLiveCustomers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = liveCustomers;
-    if (q) {
-      list = list.filter(c =>
-        c.nickname.toLowerCase().includes(q) ||
-        c.phone.toLowerCase().includes(q) ||
-        c.subscribed_to.toLowerCase().includes(q)
-      );
-    }
-    return [...list].sort((a, b) => {
-      const av = new Date(a.subscribed_at || 0).getTime();
-      const bv = new Date(b.subscribed_at || 0).getTime();
-      return sortDir === 'asc' ? av - bv : bv - av;
-    });
-  }, [liveCustomers, search, sortDir]);
 
   const toggleFeatured = async (r: InfluencerRow) => {
     setBusy(r.username);
@@ -226,7 +200,6 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const segmentTabs: { key: Segment; label: string; count: number }[] = [
     { key: 'users',         label: '유저',        count: rows.length },
     { key: 'businesses',    label: '비즈니스',    count: businesses.length },
-    { key: 'liveCustomers', label: '라이브 고객', count: liveCustomers.length },
   ];
 
   return (
@@ -562,108 +535,6 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
         )
       )}
 
-      {segment === 'liveCustomers' && (
-        liveCustomers.length === 0 ? (
-          <EmptyCard
-            title="아직 라이브 알림을 신청한 고객이 없습니다."
-            sub="라이브 커머스 방송 페이지에서 알림 신청한 고객이 여기에 표시됩니다."
-            onReload={load}
-          />
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <StatCard label="전체 알림 신청" value={liveCustomers.length} valueClass="text-slate-900" />
-              <StatCard
-                label="고유 고객 수"
-                value={new Set(liveCustomers.map(r => r.phone)).size}
-                valueClass="text-pink-500"
-              />
-              <StatCard
-                label="구독된 인플루언서"
-                value={new Set(liveCustomers.map(r => r.subscribed_to)).size}
-                valueClass="text-rose-500"
-              />
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center gap-3 justify-between">
-                <div className="flex items-center gap-2 flex-1">
-                  <input
-                    type="text"
-                    placeholder="닉네임, 전화번호, 인플루언서 검색"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    className="w-full md:max-w-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-slate-400"
-                  />
-                  <button
-                    onClick={load}
-                    className="px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200"
-                  >새로고침</button>
-                  <button
-                    onClick={async () => {
-                      if (busy) return;
-                      const ok = window.confirm(`알림 신청한 ${liveCustomers.length}건을 전부 초기화하시겠습니까? 되돌릴 수 없습니다.`);
-                      if (!ok) return;
-                      setBusy('reset-live-notify');
-                      const res = await apiService.resetAdminLiveNotifySubscribers(token);
-                      setBusy(null);
-                      if (res.ok) {
-                        setLiveCustomers([]);
-                        window.alert(`초기화 완료: ${res.removedSubscribers ?? 0}명의 구독자가 삭제되었습니다.`);
-                      } else {
-                        window.alert(`초기화 실패: ${res.error || '알 수 없는 오류'}`);
-                      }
-                    }}
-                    disabled={busy === 'reset-live-notify' || liveCustomers.length === 0}
-                    className="px-3 py-2 bg-red-50 text-red-600 rounded-xl text-xs font-bold hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >{busy === 'reset-live-notify' ? '초기화 중…' : '전체 초기화'}</button>
-                </div>
-                <button
-                  onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
-                  className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-slate-900 text-white"
-                >
-                  신청일 {sortDir === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
-
-              <div className="hidden md:grid grid-cols-12 gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                <div className="col-span-3">고객 닉네임</div>
-                <div className="col-span-3">전화번호</div>
-                <div className="col-span-3">구독한 인플루언서</div>
-                <div className="col-span-3">신청일</div>
-              </div>
-
-              <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
-                {filteredLiveCustomers.length === 0 ? (
-                  <div className="p-12 text-center text-slate-400 font-bold text-sm">조건에 맞는 라이브 고객이 없습니다.</div>
-                ) : filteredLiveCustomers.map((c, idx) => (
-                  <div key={`${c.phone}-${c.subscribed_to}-${idx}`} className="md:grid md:grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-slate-50/50 transition-all">
-                    <div className="md:col-span-3 flex items-center gap-2 min-w-0">
-                      <div className="w-9 h-9 bg-gradient-to-br from-pink-500 to-rose-500 rounded-xl flex items-center justify-center shrink-0">
-                        <span className="text-xs font-black text-white">{(c.nickname || '?').slice(0, 2).toUpperCase()}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-black text-slate-900 text-sm truncate">{c.nickname || '익명'}</p>
-                        <p className="text-[10px] font-bold text-pink-500 truncate">라이브 고객</p>
-                      </div>
-                    </div>
-                    <div className="md:col-span-3 mt-1 md:mt-0">
-                      <p className="text-[12px] font-bold text-slate-700">{c.phone}</p>
-                    </div>
-                    <div className="md:col-span-3 mt-1 md:mt-0">
-                      <p className="text-[12px] font-black text-blue-600 truncate">@{c.subscribed_to}</p>
-                    </div>
-                    <div className="md:col-span-3 mt-1 md:mt-0">
-                      <p className="text-[11px] font-bold text-slate-600">{formatDate(c.subscribed_at)}</p>
-                      <p className="text-[10px] font-bold text-slate-400">{formatTimeAgo(c.subscribed_at)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )
-      )}
     </div>
   );
 };

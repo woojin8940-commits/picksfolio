@@ -24,8 +24,8 @@ const NATIVE_BLOCK_MESSAGE = '이 결제는 앱에서 지원되지 않습니다.
 
 // Claude plan payments. A single one-time payment (requestPayment) through PortOne
 // V2 is used to ACTIVATE the Claude plan and to manually RECHARGE the credit wallet.
-// It is verified server-side before credits are granted (identical guarantee to the
-// live-time top-up flow). The Claude plan is single-payment only — there is no
+// It is verified server-side before credits are granted. The Claude plan is
+// single-payment only — there is no
 // auto/recurring billing (that is reserved for the membership tiers).
 //
 // storeId and channelKey are public browser identifiers; the V2 API secret lives

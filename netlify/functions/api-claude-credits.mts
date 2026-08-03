@@ -26,7 +26,7 @@ import { requireAccountOwner } from './_shared/user-auth.mts'
 //   POST  /api/claude-credits/:username
 //         body { kind: 'activation' | 'recharge', amountKrw, paymentId, payMethod }
 //         Verifies a ONE-TIME PortOne payment server-side (status PAID, KRW, amount
-//         matches) before granting credits — identical guarantee to live-time top-up.
+//         matches) before granting credits.
 //         The member pays in ₩; the wallet is credited in CREDITS at CREDITS_PER_KRW.
 //         'activation' marks the plan active and grants the base 3,000 credits;
 //         'recharge' tops up an already-active wallet with credits proportional to the

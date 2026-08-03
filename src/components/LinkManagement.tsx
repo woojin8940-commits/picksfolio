@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, Bell, User, Eye } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, User, Eye } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -756,7 +756,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       portfolioHeaderImagePosition: coverPosition,
     };
 
-    // 버튼(커스텀 버튼 + 비즈니스 제안/라이브 알림)은 socials 에 저장된다. 빈 버튼은 제외.
+    // 버튼(커스텀 버튼 + 비즈니스 제안)은 socials 에 저장된다. 빈 버튼은 제외.
     const cleanedSocials = {
       ...socials,
       customButtons: (socials.customButtons || []).filter((b: any) => (b.label || '').trim() && (b.url || '').trim()),
@@ -1539,7 +1539,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 </div>
               </section>
 
-              {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 라이브 알림 / 커스텀 버튼. */}
+              {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 커스텀 버튼. */}
               <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">버튼</h3>
@@ -1551,13 +1551,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <Briefcase size={16} className="text-blue-600 shrink-0" />
                     <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼</span>
                     <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
-                  </div>
-                )}
-                {socials.liveNotify && (
-                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3">
-                    <Bell size={16} className="text-blue-600 shrink-0" />
-                    <span className="flex-1 font-bold text-sm text-blue-700">라이브 알림 버튼</span>
-                    <button onClick={() => setSocials({ ...socials, liveNotify: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
                   </div>
                 )}
 
@@ -1617,11 +1610,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   {!socials.businessProposal && (
                     <button onClick={() => setSocials({ ...socials, businessProposal: true })} className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[11px] font-bold hover:bg-blue-50 transition-all">
                       <Plus size={12} /> <Briefcase size={12} /> 비즈니스 제안
-                    </button>
-                  )}
-                  {!socials.liveNotify && (
-                    <button onClick={() => setSocials({ ...socials, liveNotify: true })} className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[11px] font-bold hover:bg-blue-50 transition-all">
-                      <Plus size={12} /> <Bell size={12} /> 라이브 알림
                     </button>
                   )}
                   <button

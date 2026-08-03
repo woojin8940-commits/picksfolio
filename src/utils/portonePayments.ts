@@ -23,12 +23,12 @@
 
 import { toAsciiSafeId } from './formatters';
 
-// PortOne V2 공개 식별자 (브라우저 노출용). 라이브 충전 / 클로드 / 멤버십 결제가 공유한다.
+// PortOne V2 공개 식별자 (브라우저 노출용). 클로드 / 멤버십 결제가 공유한다.
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
 export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 // 카드 단건결제용 나이스정보통신(신모듈) 일반결제 채널 키(MID IM0029308m). 브라우저에 공개되는
-// 식별자이며(시크릿 아님), 클로드·라이브 단건결제에서 쓴다. PortOne 실연동 승인으로 확정된
+// 식별자이며(시크릿 아님), 클로드 단건결제에서 쓴다. PortOne 실연동 승인으로 확정된
 // 채널 키를 소스 기본값으로 두고, 필요 시 환경변수(VITE_PORTONE_NICE_CHANNEL_KEY 또는 MID별
 // 변수명 VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m)로 재정의할 수 있게 한다.
 // (카드 정기결제는 별도 정기결제 채널 MID IM0029309m 를 서버에서 사용한다 — membership-billing.mts)
@@ -43,27 +43,22 @@ export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
 const INTENT_KEY = 'portone_pending_intent';
 
 export interface PortOneIntent {
-  type: 'live' | 'claude' | 'membership' | 'live-order' | 'live-order-batch';
+  type: 'claude' | 'membership';
   username: string;
   payMethod: PortOnePayMethod;
   // Where to send the user back inside the SPA after the server finalises.
   returnPath: string;
   orderName: string;
-  // live top-up
-  hours?: number;
   // claude one-time payment amount
   amountKrw?: number;
   // claude credit grant kind
   kind?: 'activation' | 'recharge';
-  // membership subscription tier ('live_plan' 은 라이브 커머스 별도 구독)
-  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
+  // membership subscription tier
+  tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
   // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)
   // 빌링키 발급은 본인인증(휴대폰 인증)을 강제하므로, 클로드 플랜과 동일하게 단건 결제로
   // 첫 달을 즉시 결제해 본인인증 없이 카드만 입력하도록 한다.
   oneTime?: boolean;
-  // 라이브 커머스 시청자 주문 본문(paymentId 제외). 리다이렉트 전후로 주문 맥락(상품·배송지·
-  // 시청자)을 보존해 돌아온 페이지가 그대로 서버에 전달한다.
-  order?: Record<string, unknown>;
 }
 
 export const channelKeyFor = (m: PortOnePayMethod) =>

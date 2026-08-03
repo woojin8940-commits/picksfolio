@@ -7,7 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 
 // Mobile debug console — activated by `?debug=1` query param so field users
 // (especially in-app WebViews like KakaoTalk, where external devtools cannot
-// attach) can surface console logs and WebRTC/HLS errors on-screen. Off by
+// attach) can surface console logs and runtime errors on-screen. Off by
 // default so it never ships to normal viewers.
 try {
   const params = new URLSearchParams(window.location.search);

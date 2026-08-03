@@ -16,9 +16,8 @@ interface SellerVerificationBlob {
 
 // Admin member management:
 // - GET /api/admin/influencers          → list influencer profiles (role='user' or NULL) with aggregate stats + membership,
-//                                         plus the business profiles (role='business') and the live-notify customers
-//                                         (people who subscribed to a live broadcaster) so the operator dashboard can
-//                                         render three segments: 유저 / 비즈니스 / 라이브 고객.
+//                                         plus the business profiles (role='business') so the operator dashboard can
+//                                         render two segments: 유저 / 비즈니스.
 // - POST /api/admin/influencers/:username → toggle featured / update note / grant or revoke membership
 //   body: { featured?: boolean, featured_note?: string, membership_plan?: 'standard' | 'commerce' | null }
 export default async (req: Request, context: Context) => {
@@ -28,7 +27,6 @@ export default async (req: Request, context: Context) => {
   const supabase = getSupabaseServer()
   const username = context.params.username?.toLowerCase()
   const sellerStore = getStore({ name: 'seller-verification', consistency: 'strong' })
-  const liveSubscriberStore = getStore({ name: 'live-notify-subscribers', consistency: 'strong' })
 
   if (req.method === 'GET' && !username) {
     try {
@@ -308,44 +306,7 @@ export default async (req: Request, context: Context) => {
         created_at: p.created_at,
       }))
 
-      // 5) Live customers. People who subscribed to a creator's live-broadcast
-      //    notifications via `/api/live-notify`. The subscriber list is stored
-      //    per-influencer as a Netlify Blob; flatten into one customer-per-row.
-      const liveCustomers: Array<{
-        phone: string
-        nickname: string
-        subscribed_to: string
-        subscribed_at: string
-      }> = []
-      try {
-        const { blobs } = await liveSubscriberStore.list()
-        await Promise.all(
-          (blobs || []).map(async ({ key }) => {
-            const data = (await liveSubscriberStore.get(key, { type: 'json' })) as
-              | { subscribers?: Array<{ phone: string; nickname: string; subscribedAt: string }> }
-              | null
-            for (const s of data?.subscribers || []) {
-              liveCustomers.push({
-                phone: s.phone,
-                nickname: s.nickname,
-                subscribed_to: key,
-                subscribed_at: s.subscribedAt,
-              })
-            }
-          }),
-        )
-      } catch (e) {
-        // If the blob store hasn't been seeded yet, treat as empty.
-        console.warn('[admin-influencers] live-notify-subscribers list failed:', e)
-      }
-
-      liveCustomers.sort((a, b) => {
-        const ta = new Date(a.subscribed_at).getTime() || 0
-        const tb = new Date(b.subscribed_at).getTime() || 0
-        return tb - ta
-      })
-
-      return Response.json({ influencers, businesses, liveCustomers })
+      return Response.json({ influencers, businesses })
     } catch (e: any) {
       return Response.json({ error: e?.message || 'Failed to fetch influencers' }, { status: 500 })
     }

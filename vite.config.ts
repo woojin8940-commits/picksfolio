@@ -19,7 +19,6 @@ export default defineConfig(({ mode }) => {
       sourcemap: false,
       minify: 'esbuild',
       rollupOptions: {
-        external: ['amazon-ivs-web-broadcast'],
         output: {
           // Split large third-party libraries into their own long-lived chunks
           // so the homepage entry stays small and heavy dependencies are only

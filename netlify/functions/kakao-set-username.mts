@@ -1,9 +1,8 @@
 import { getSupabaseServer } from "./_shared/supabase.mts";
 
-// Sets a Kakao viewer's profile "link name" (the same username they would pick
-// at signup). Live-stream viewers sign in with Kakao and then have their
-// Supabase session signed out so it doesn't clash with the influencer/admin
-// session in the same browser — so the write must go through the service role
+// Sets a Kakao user's profile "link name" (the same username they would pick
+// at signup). Kakao sign-in signs the Supabase session out afterwards so it
+// doesn't clash with the influencer/admin session in the same browser — so the write must go through the service role
 // here rather than a client-side upsert.
 export default async (req: Request) => {
   if (req.method !== "POST") {

@@ -105,20 +105,6 @@
 
       // ── 단건 결제 흐름 ── paymentKey · orderId · amount 로 돌아온다.
       if (paymentKey && orderId && amount) {
-        if (intent.type === "live") {
-          const r = await post("/api/live-credits/" + enc(intent.username), {
-            hours: intent.hours,
-            payMethod: "CARD",
-            provider: "toss",
-            paymentKey: paymentKey,
-            orderId: orderId,
-            amount: Number(amount),
-          });
-          if (!r.ok || r.data.error) { fail(r.data.error || "시간 충전에 실패했습니다."); return; }
-          sessionStorage.removeItem(INTENT_KEY);
-          done(intent.returnPath);
-          return;
-        }
         if (intent.type === "claude") {
           const r = await post("/api/claude-credits/" + enc(intent.username), {
             kind: intent.kind || "activation",

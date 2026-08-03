@@ -304,8 +304,8 @@ export default async (req: Request) => {
     }
   } else {
     // Gemini membership gate. AI is included only in the AI-enabled tiers:
-    // AI 협업 멤버십 (standard_ai, 6,900), 커머스 (13,900), 프로 (18,700). Legacy
-    // 'live' is treated as commerce. The plain standard (4,900) tier is excluded.
+    // AI 협업 멤버십 (standard_ai, 6,900), 커머스 (13,900), 프로 (18,700). 과거
+    // 'live' 값은 커머스로 환산한다. The plain standard (4,900) tier is excluded.
     //
     // Business (company) accounts are exempt from this gate — the AI assistant is
     // part of their collaboration workspace, not an influencer membership add-on.
