@@ -73,11 +73,13 @@ const BusinessLoginPage = lazyWithRetry(() => import('./components/BusinessLogin
 const BusinessEnterpriseDashboard = lazyWithRetry(() => import('./components/BusinessEnterpriseDashboard'));
 const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement'));
 const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeline'));
+// 담당자 대시보드. 운영자가 배정한 일반 계정만 들어온다.
+const ManagerDashboard = lazyWithRetry(() => import('./components/manager/ManagerDashboard'));
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
-type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin';
+type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'live' | 'broadcast-settings' | 'dm-automation' | 'broadcast-history' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
 
 const LazyFallback = () => (
@@ -229,12 +231,20 @@ const App: React.FC = () => {
     return hasCode || hasHashToken;
   });
 
+  // 담당자 여부. 운영자가 배정한 일반 계정은 관리자가 아니면서 담당자 대시보드를
+  // 받는다. profiles.role 로는 알 수 없어서 로그인 직후 한 번 물어본다. ref 로도
+  // 들고 있는 이유는 isViewValidForRole 이 role 문자열만 받기 때문이다.
+  const [isPlatformManager, setIsPlatformManager] = useState(false);
+  const [managerDisplayName, setManagerDisplayName] = useState('');
+  const isPlatformManagerRef = useRef(false);
+
   // Keep refs in sync
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { userNameRef.current = userName; }, [userName]);
+  useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
 
   // Views that are considered "settled" — user should NOT be kicked out of these
-  const settledViews: View[] = ['admin', 'operator', 'operator-login', 'user-page', 'setup-link', 'business-admin'];
+  const settledViews: View[] = ['admin', 'operator', 'operator-login', 'user-page', 'setup-link', 'business-admin', 'manager'];
 
   // Determine if the current view is appropriate for the user's role.
   // Returns true if the user should stay on the current view (no redirect needed).
@@ -245,6 +255,9 @@ const App: React.FC = () => {
     }
     // Admin dashboard: valid for any logged-in user
     if (currentView === 'admin') return true;
+    // 담당자 화면은 배정된 계정만. 배정 여부를 아직 못 물었으면 열지 않는다 —
+    // 열어 두고 나중에 닫으면 권한 없는 사람이 잠깐이라도 명부를 본다.
+    if (currentView === 'manager') return isPlatformManagerRef.current;
     // Setup-link: valid for users without a username (handled separately)
     if (currentView === 'setup-link') return true;
     // User-page: always valid (public)
@@ -671,6 +684,17 @@ const App: React.FC = () => {
         // the login page, not the homepage.
         launchedIntoDashboardRef.current = false;
 
+        // 담당자 배정 여부. 관리자는 운영 콘솔로 가므로 물을 필요가 없다.
+        // 실패하면 담당자가 아닌 것으로 본다 — 여는 쪽으로 실패하면 안 되는 값이다.
+        let managerAssigned = false;
+        if (userRole !== 'admin') {
+          const managerStatus = await apiService.getMyManagerStatus();
+          managerAssigned = !!managerStatus.isManager;
+          setIsPlatformManager(managerAssigned);
+          isPlatformManagerRef.current = managerAssigned;
+          setManagerDisplayName(managerStatus.displayName || '');
+        }
+
         const currentView = viewRef.current;
         // Native app cold start: the shell always loads the site root, so a
         // signed-in user would land on the public marketing homepage and have to
@@ -701,6 +725,10 @@ const App: React.FC = () => {
           setLoginTransitioning(true);
           if (userRole === 'admin') {
             navigate('operator');
+          } else if (managerAssigned) {
+            // 담당자로 배정된 계정은 담당자 대시보드로. 링크 데이터 유무는
+            // 여기서 따지지 않는다 — 담당자에게 필요한 첫 화면은 캠페인이다.
+            navigate('manager');
           } else {
             // Check if user has site data (link blocks) before deciding destination
             try {
@@ -1245,7 +1273,7 @@ const App: React.FC = () => {
           setView('setup-link');
         }
       }
-      else if (['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin'].includes(path)) setView(path as View);
+      else if (['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'manager'].includes(path)) setView(path as View);
       else if (path.endsWith('/proposal')) {
         // /:username/proposal route
         setTargetUser(path.replace('/proposal', ''));
@@ -1422,6 +1450,37 @@ const App: React.FC = () => {
     }
     return <Suspense fallback={<LazyFallback />}><OperatorDashboard onLogout={() => navigate('operator-login')} /></Suspense>;
   }
+  if (view === 'manager') {
+    if (!isLoggedIn) {
+      setTimeout(() => navigate('login'), 0);
+      return null;
+    }
+    // 배정 확인이 끝나기 전에는 아무것도 렌더하지 않는다. 담당자 여부를 모르는
+    // 동안 화면을 열면 배정되지 않은 계정에게 명부가 잠깐 보인다.
+    if (!profileChecked && supabase) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center">
+            <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+            <p className="text-slate-400 text-sm font-bold">권한 확인 중...</p>
+          </div>
+        </div>
+      );
+    }
+    if (!isPlatformManager) {
+      setTimeout(() => navigate('admin'), 0);
+      return null;
+    }
+    return (
+      <Suspense fallback={<LazyFallback />}>
+        <ManagerDashboard
+          username={userName}
+          displayName={managerDisplayName}
+          onLogout={handleLogout}
+        />
+      </Suspense>
+    );
+  }
   if (view === 'terms') return <Suspense fallback={<LazyFallback />}><TermsOfService onNavigateHome={() => navigate('home')} /></Suspense>;
   if (view === 'privacy') return <Suspense fallback={<LazyFallback />}><PrivacyPolicy onNavigateHome={() => navigate('home')} /></Suspense>;
   if (view === 'proposal') return <Suspense fallback={<LazyFallback />}><BusinessProposalForm username={targetUser} /></Suspense>;
@@ -1546,6 +1605,17 @@ const App: React.FC = () => {
         {/* 함께 방송 초대 알림 — 크리에이터 대시보드의 어느 서브뷰에 있든 초대가
             도착하면 상단에 떠서, 라이브/방송 설정 화면을 열고 있지 않아도 알 수 있다. */}
         <CoBroadcastInviteNotice username={userName} onGoLive={() => setSubView('live')} />
+        {/* 담당자로 배정된 계정은 자기 크리에이터 대시보드도 그대로 쓴다. 두 화면을
+            오갈 길이 없으면 로그인 직후에만 담당자 화면에 갈 수 있게 되므로,
+            여기에 들어가는 문을 하나 둔다. */}
+        {isPlatformManager && (
+          <button
+            onClick={() => navigate('manager')}
+            className="fixed bottom-5 right-5 z-50 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl text-xs font-black hover:bg-slate-700"
+          >
+            담당자 대시보드
+          </button>
+        )}
         <Suspense fallback={<LazyFallback />}>
         <AdminDashboard
         userName={userName}

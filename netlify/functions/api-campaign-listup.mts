@@ -7,6 +7,7 @@ import {
   acceptListup,
   buildSnapshot,
   normalizeOffer,
+  normalizeQuote,
   offerFromCampaign,
   shapeChannel,
   shapeListup,
@@ -47,7 +48,9 @@ async function loadCampaign(db: any, campaignId: string) {
            reward_mode, tier_counts, package_tier,
            ad_objective, influencer_gender, influencer_ages,
            sns_category, follower_tiers, min_views, influencer_styles,
-           exclude_keywords, target_audience
+           exclude_keywords, target_audience,
+           -- 명단 확정 기한. 브랜드 화면의 남은 시간 표시가 이 값을 읽는다.
+           listup_confirm_due, listup_published_at
     FROM campaigns WHERE id = ${campaignId}
   `;
   return (rows as any[])?.[0] || null;
@@ -86,6 +89,8 @@ const shapeCampaign = (c: any) => ({
   influencerStyles: c.influencer_styles || "",
   excludeKeywords: c.exclude_keywords || "",
   targetAudience: c.target_audience || "",
+  listupConfirmDue: c.listup_confirm_due || null,
+  listupPublishedAt: c.listup_published_at || null,
 });
 
 export default async (req: Request) => {
@@ -316,6 +321,16 @@ export default async (req: Request) => {
           : [];
       const usernames = Array.from(new Set(rawList.map((u: unknown) => norm(u)).filter(Boolean)));
       const note = String(body.note || "");
+      // 제시 조건. 한 번에 여러 명을 올릴 때 같은 값을 적용하되, 사람마다 다르게
+      // 매기고 싶으면 quotes 로 계정별 값을 덮어쓴다. 담당자가 명단을 만들 때
+      // 금액을 비워 두면 브랜드 화면에는 "협의"로 나가고, 나중에 채울 수 있다.
+      const quoteDefaults = normalizeQuote(body.quote);
+      const quoteByUser: Record<string, ReturnType<typeof normalizeQuote>> = {};
+      if (body.quotes && typeof body.quotes === "object") {
+        for (const [key, value] of Object.entries(body.quotes)) {
+          quoteByUser[norm(key)] = normalizeQuote(value);
+        }
+      }
 
       if (!campaignId || usernames.length === 0) {
         return Response.json({ error: "캠페인과 인플루언서를 지정해 주세요." }, { status: 400 });
@@ -339,13 +354,21 @@ export default async (req: Request) => {
           : snapshot.syncedFrom === "directory"
             ? "directory"
             : "manager";
+        const quote = quoteByUser[username] || quoteDefaults;
+        // 보장 조회수를 담당자가 비워 두면 최근 릴스 평균으로 채운다. 브랜드가
+        // 고를 때 CPV 칸이 비어 있으면 금액만 보고 고르게 되는데, 그 판단은
+        // 팔로워가 많은 쪽으로만 쏠린다.
+        const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
         const res = await db.sql`
           INSERT INTO campaign_listups (
             id, campaign_id, influencer_username, source, snapshot, snapshot_at,
-            manager_note, listed_by
+            manager_note, listed_by,
+            quoted_fee, quoted_second_use_fee, guaranteed_views, badge, profile_line
           ) VALUES (
             ${newId("lst")}, ${campaignId}, ${username}, ${source},
-            ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername}
+            ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername},
+            ${quote.fee}, ${quote.secondUseFee}, ${guaranteedViews}, ${quote.badge},
+            ${quote.profileLine}
           )
           ON CONFLICT (campaign_id, influencer_username) DO NOTHING
           RETURNING id
@@ -380,6 +403,48 @@ export default async (req: Request) => {
       const body = (await req.json()) as any;
       const id = String(body.id || "");
       const action = String(body.action || "");
+
+      // --- 브랜드 일괄 확정 -------------------------------------------------
+      // "인플루언서 모두 선택 완료" 버튼. 한 건씩 보내면 중간에 실패했을 때
+      // 절반만 확정된 상태가 남는데, 브랜드 화면에는 그 절반이 보이지 않는다.
+      // 그래서 캠페인 단위로 한 번에 처리한다.
+      if (action === "brand_decision_bulk") {
+        const campaignId = String(body.campaignId || "");
+        const ids = Array.isArray(body.ids) ? body.ids.map((v: any) => String(v)) : [];
+        if (!campaignId || !ids.length) {
+          return Response.json({ error: "선택한 인플루언서가 없습니다." }, { status: 400 });
+        }
+        const campaign = await loadCampaign(db, campaignId);
+        if (!campaign) {
+          return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
+        }
+        const bulkManager = await requireManager(req);
+        let viewer: "manager" | "brand" = "manager";
+        if (!bulkManager.ok) {
+          const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
+          if (!auth.ok) return auth.response;
+          viewer = "brand";
+        }
+        // 고른 사람은 pick, 나머지는 pass. 이미 수락된 후보는 건드리지 않는다 —
+        // 인플루언서가 수락한 뒤에 브랜드 화면에서 조용히 취소되면 안 된다.
+        await db.sql`
+          UPDATE campaign_listups
+          SET brand_decision = CASE WHEN id = ANY(${ids}) THEN 'pick' ELSE 'pass' END,
+              brand_decided_at = NOW(),
+              updated_at = NOW()
+          WHERE campaign_id = ${campaignId}
+            AND outreach_status <> 'accepted'
+        `;
+        const rows = (await db.sql`
+          SELECT * FROM campaign_listups WHERE campaign_id = ${campaignId}
+          ORDER BY created_at ASC
+        `) as any[];
+        return Response.json({
+          success: true,
+          listups: rows.map((r) => shapeListup(r, viewer)),
+        });
+      }
+
       if (!id || !action) {
         return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
       }
@@ -454,7 +519,47 @@ export default async (req: Request) => {
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
-      // --- 제안 발송 -------------------------------------------------------
+      // --- 브랜드에게 보여 줄 견적 -----------------------------------------
+      // 광고비 · 2차 활용비 · 보장 조회수 · 배지. 명단에 올린 뒤에도 고칠 수 있어야
+      // 한다 — 협의는 명단을 만든 다음에 끝나는 경우가 더 많다.
+      if (action === "quote") {
+        if (!isManager) return managerRequired();
+        const quote = normalizeQuote(body.quote ?? body);
+        const snapshot =
+          listup.snapshot && typeof listup.snapshot === "object" ? (listup.snapshot as any) : {};
+        const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
+        await db.sql`
+          UPDATE campaign_listups
+          SET quoted_fee = ${quote.fee},
+              quoted_second_use_fee = ${quote.secondUseFee},
+              guaranteed_views = ${guaranteedViews},
+              badge = ${quote.badge},
+              profile_line = ${quote.profileLine},
+              updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        return Response.json({ success: true, listup: await reload("manager") });
+      }
+
+      // --- 찜하기 -----------------------------------------------------------
+      // brand_decision 과 따로 두는 이유. 찜은 "나중에 다시 볼게요"이고 pick 은
+      // "이 사람으로 진행해 주세요"다. 한 칸에 담으면 담당자가 브랜드의 어느
+      // 쪽 뜻인지 구분할 수 없다.
+      if (action === "favorite") {
+        let viewer: "manager" | "brand" = "manager";
+        if (!isManager) {
+          const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
+          if (!auth.ok) return auth.response;
+          viewer = "brand";
+        }
+        await db.sql`
+          UPDATE campaign_listups
+          SET brand_favorite = ${body.favorite !== false}, updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        return Response.json({ success: true, listup: await reload(viewer) });
+      }
+
       if (action === "send_offer") {
         if (!isManager) return managerRequired();
         if (listup.outreach_status === "accepted") {

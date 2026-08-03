@@ -1922,14 +1922,27 @@ export const apiService = {
   async addListupCandidates(
     campaignId: string,
     usernames: string[],
-    opts: { token?: string; note?: string } = {},
+    opts: {
+      token?: string;
+      note?: string;
+      /** 명단 전체에 같은 값을 쓸 때. */
+      quote?: Record<string, any>;
+      /** 계정별로 다른 견적을 쓸 때. 이쪽이 우선한다. */
+      quotes?: Record<string, Record<string, any>>;
+    } = {},
   ): Promise<any> {
     try {
       const res = await fetch('/api/campaign-listup', {
         method: 'POST',
         credentials: 'same-origin',
         headers: await collabHeaders(opts.token),
-        body: JSON.stringify({ campaignId, usernames, note: opts.note || '' }),
+        body: JSON.stringify({
+          campaignId,
+          usernames,
+          note: opts.note || '',
+          quote: opts.quote || undefined,
+          quotes: opts.quotes || undefined,
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '명단에 올리지 못했습니다.' };
@@ -1947,7 +1960,15 @@ export const apiService = {
    */
   async listupAction(
     id: string,
-    action: 'brand_decision' | 'send_offer' | 'withdraw_offer' | 'respond' | 'note' | 'remove',
+    action:
+      | 'brand_decision'
+      | 'send_offer'
+      | 'withdraw_offer'
+      | 'respond'
+      | 'note'
+      | 'quote'
+      | 'favorite'
+      | 'remove',
     payload: Record<string, any> = {},
     token?: string,
   ): Promise<any> {
@@ -1966,6 +1987,204 @@ export const apiService = {
       return { error: '네트워크 오류' };
     }
   },
+
+  /**
+   * 브랜드가 명단을 한 번에 확정한다("인플루언서 모두 선택 완료").
+   *
+   * 고른 사람은 진행 요청, 나머지는 넘김으로 함께 기록된다. 한 건씩 보내면 중간에
+   * 끊겼을 때 절반만 확정된 명단이 남고, 브랜드 화면에서는 그게 보이지 않는다.
+   */
+  async confirmListupSelection(
+    campaignId: string,
+    ids: string[],
+    token?: string,
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/campaign-listup', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ action: 'brand_decision_bulk', campaignId, ids }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '확정에 실패했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to confirm listup selection:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  // ───────────────────── 담당자 계정 · 담당자 대시보드 ─────────────────────
+
+  /**
+   * 내가 담당자인가.
+   *
+   * 로그인 직후 어느 화면을 띄울지 정하려면 이 한 번의 확인이 필요하다. 실패하면
+   * 담당자가 아닌 것으로 본다 — 여는 쪽으로 실패하면 권한 없는 사람에게 담당자
+   * 화면이 열린다.
+   */
+  async getMyManagerStatus(): Promise<{
+    isManager: boolean;
+    isAdmin?: boolean;
+    username?: string;
+    displayName?: string;
+  }> {
+    try {
+      const res = await fetch('/api/managers?me=1', {
+        credentials: 'same-origin',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { isManager: false };
+      return json;
+    } catch {
+      return { isManager: false };
+    }
+  },
+
+  /** 담당자 목록(운영자). */
+  async getManagers(token?: string): Promise<{ managers?: any[]; error?: string }> {
+    try {
+      const res = await fetch('/api/managers', {
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { managers: [], error: json?.error || '담당자 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get managers:', e);
+      return { managers: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 일반 계정을 담당자로 배정한다(운영자). 이미 있는 계정이면 다시 활성화된다. */
+  async assignManager(
+    payload: { username: string; displayName?: string; email?: string; note?: string },
+    token?: string,
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/managers', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '담당자로 배정하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to assign manager:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 담당자 권한 해제·복구(운영자). 행은 남으므로 지난 배정 이력이 사라지지 않는다. */
+  async setManagerActive(username: string, active: boolean, token?: string): Promise<any> {
+    try {
+      const res = await fetch('/api/managers', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ username, active }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '담당자 상태를 바꾸지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to change manager state:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 픽스폴리오 인플루언서 명부(담당자). 카테고리 집계까지 함께 온다. */
+  async getManagerInfluencers(
+    opts: { q?: string; category?: string; token?: string } = {},
+  ): Promise<{ influencers?: any[]; categories?: any[]; total?: number; error?: string }> {
+    try {
+      const params = new URLSearchParams();
+      if (opts.q) params.set('q', opts.q);
+      if (opts.category) params.set('category', opts.category);
+      const qs = params.toString();
+      const res = await fetch(`/api/manager-influencers${qs ? `?${qs}` : ''}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { influencers: [], categories: [], error: json?.error || '인플루언서 명부를 불러오지 못했습니다.' };
+      }
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get manager influencers:', e);
+      return { influencers: [], categories: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 담당자가 보는 브랜드 캠페인 목록. 진행 숫자가 함께 온다. */
+  async getManagerCampaigns(
+    opts: { mine?: boolean; token?: string } = {},
+  ): Promise<{ campaigns?: any[]; managerUsername?: string; error?: string }> {
+    try {
+      const res = await fetch(`/api/manager-campaigns${opts.mine ? '?mine=1' : ''}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { campaigns: [], error: json?.error || '캠페인을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get manager campaigns:', e);
+      return { campaigns: [], error: '네트워크 오류' };
+    }
+  },
+
+  /** 캠페인 맡기 · 놓기 · 명단 공개(담당자). */
+  async managerCampaignAction(
+    campaignId: string,
+    action: 'claim' | 'release' | 'publish_listup' | 'clear_due',
+    payload: Record<string, any> = {},
+    token?: string,
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/manager-campaigns', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ campaignId, action, ...payload }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '처리에 실패했습니다.' };
+      return json;
+    } catch (e) {
+      console.error(`[API] Manager campaign action failed (${action}):`, e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 대화방 목록. 담당자는 `type='manager'` 로 배정된 협업의 두 채널을 함께 본다. */
+  async getTimelineList(
+    username: string,
+    type: 'influencer' | 'business' | 'manager' = 'influencer',
+    opts: { mine?: boolean; token?: string } = {},
+  ): Promise<{ timelines?: any[]; error?: string }> {
+    try {
+      const params = new URLSearchParams({ type });
+      if (opts.mine) params.set('mine', '1');
+      const res = await fetch(
+        `/api/timeline/list/${encodeURIComponent(username)}?${params.toString()}`,
+        { credentials: 'same-origin', headers: await collabHeaders(opts.token) },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { timelines: [], error: json?.error || '대화 목록을 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get timeline list:', e);
+      return { timelines: [], error: '네트워크 오류' };
+    }
+  },
+
 
   // ───────────────────── 인플루언서 채널(인스타 계정) 등록 ─────────────────────
 

@@ -12,6 +12,12 @@
  * (api-timeline-*)를 그대로 쓴다. 그래서 두 경로 중 **어느 쪽으로든** 관리자임이
  * 확인되면 담당자로 인정한다. 한쪽만 보면 같은 사람이 화면에 따라 권한을 잃는다.
  *
+ * 여기에 세 번째 경로가 붙는다. 운영자가 일반 계정을 담당자로 배정하는 경로다
+ * (platform_managers). 관리자 권한 없이 담당자 일만 하는 사람이 있어야 한다 —
+ * 담당자를 늘리려고 매출·정산·회원 정보까지 열어 주는 관리자 계정을 찍어낼 수는 없다.
+ * 이 경로로 들어온 사람은 관리자가 아니므로, 화면 범위를 정할 때 구분할 수 있도록
+ * via 에 "assigned" 를 남긴다.
+ *
  * 담당자 개인을 구분하는 값(managerUsername)은 큐 배정과 표시에 쓰고, 권한
  * 판정에는 쓰지 않는다. 담당자가 휴가·퇴사로 자리를 비웠을 때 다른 담당자가 손을
  * 댈 수 없으면 협업이 그대로 멈추기 때문이다 — 누가 처리했는지는 이벤트 원장에
@@ -22,7 +28,7 @@ import { requireAdmin } from "./admin-auth.mts";
 import { requireSignedInUser } from "./user-auth.mts";
 
 export type ManagerAuth =
-  | { ok: true; managerUsername: string; via: "identity" | "supabase" }
+  | { ok: true; managerUsername: string; via: "identity" | "supabase" | "assigned"; isAdmin: boolean }
   | { ok: false; response: Response };
 
 const norm = (raw: unknown) =>
@@ -38,7 +44,28 @@ const forbidden = () =>
   );
 
 /**
- * 담당자 권한이 필요한 요청에 쓴다. 두 인증 경로를 차례로 시도한다.
+ * 운영자가 배정한 담당자인지 확인한다.
+ *
+ * 표가 아직 없는 환경(마이그레이션 전 프리뷰)에서도 관리자 경로는 살아 있어야
+ * 하므로, 조회가 실패하면 "담당자 아님"으로만 처리하고 오류를 올리지 않는다.
+ */
+export async function isAssignedManager(username: string): Promise<boolean> {
+  const uname = norm(username);
+  if (!uname) return false;
+  try {
+    const { getDatabase } = await import("@picks/netlify-database");
+    const db = getDatabase();
+    const rows = (await db.sql`
+      SELECT 1 FROM platform_managers WHERE username = ${uname} AND active LIMIT 1
+    `) as any[];
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 담당자 권한이 필요한 요청에 쓴다. 세 인증 경로를 차례로 시도한다.
  * 실패 응답은 마지막으로 시도한 경로의 것이 아니라 담당자 전용 메시지로 통일한다 —
  * 호출자는 "관리자 로그인이 필요하다"는 사실만 알면 되고, 어떤 인증 체계를 쓰는지는
  * 알 필요가 없다.
@@ -47,15 +74,45 @@ export async function requireManager(req: Request): Promise<ManagerAuth> {
   const identity = await requireAdmin(req);
   if (identity.ok) {
     const email = (identity.user as any)?.email || "";
-    return { ok: true, managerUsername: usernameFromEmail(email), via: "identity" };
+    return { ok: true, managerUsername: usernameFromEmail(email), via: "identity", isAdmin: true };
   }
 
   const supabase = await requireSignedInUser(req);
-  if (supabase.ok && supabase.isAdmin) {
-    return { ok: true, managerUsername: supabase.username, via: "supabase" };
+  if (supabase.ok) {
+    if (supabase.isAdmin) {
+      return { ok: true, managerUsername: supabase.username, via: "supabase", isAdmin: true };
+    }
+    if (await isAssignedManager(supabase.username)) {
+      return { ok: true, managerUsername: supabase.username, via: "assigned", isAdmin: false };
+    }
   }
 
   return { ok: false, response: forbidden() };
+}
+
+/**
+ * 운영자(관리자)만 통과시킨다. 담당자 배정·해제처럼 담당자 자신이 해서는 안 되는
+ * 일에 쓴다 — 담당자가 스스로를 해제하거나 동료를 배정할 수 있으면 배정 이력이
+ * 권한의 근거가 되지 못한다.
+ */
+export async function requireOperator(
+  req: Request,
+): Promise<{ ok: true; username: string } | { ok: false; response: Response }> {
+  const identity = await requireAdmin(req);
+  if (identity.ok) {
+    return { ok: true, username: usernameFromEmail((identity.user as any)?.email || "") };
+  }
+  const supabase = await requireSignedInUser(req);
+  if (supabase.ok && supabase.isAdmin) {
+    return { ok: true, username: supabase.username };
+  }
+  return {
+    ok: false,
+    response: Response.json(
+      { error: "운영자만 처리할 수 있습니다.", code: "OPERATOR_REQUIRED" },
+      { status: 403 },
+    ),
+  };
 }
 
 /**
