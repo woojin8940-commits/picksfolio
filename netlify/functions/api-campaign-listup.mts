@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireAccountOwner, requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { newId, norm } from "./_shared/collab-workflow.mts";
+import { isManagerListupMode } from "./_shared/reward-mode.mts";
 import {
   acceptListup,
   buildSnapshot,
@@ -79,6 +80,9 @@ const shapeCampaign = (c: any) => ({
   secondUseFee: Number(c.second_use_fee || 0),
   // 담당자 리스트업 화면이 후보를 고를 때 쓰는 조건.
   rewardMode: c.reward_mode || "paid",
+  // 이 캠페인에 담당자 리스트업이 붙는지. 담당자 화면이 이 값으로 후보 등록 자리를
+  // 감춘다 — 서버가 어차피 막으므로, 눌러 본 뒤에 거절당하는 일이 없게 한다.
+  managerListup: isManagerListupMode(c.reward_mode),
   // 규모별 모집 인원. 'nano:10,micro:3' 형태 그대로 넘겨 화면에서 풀어 읽는다.
   tierCounts: c.tier_counts || "",
   packageTier: c.package_tier || "full",
@@ -349,6 +353,17 @@ export default async (req: Request) => {
       const campaign = await loadCampaign(db, campaignId);
       if (!campaign) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
+      }
+      // 제품 협찬형은 지원자만 받는다. 브랜드 화면에 리스트업 자리가 없으므로 여기서
+      // 후보가 올라가면 아무도 보지 못하는 명단이 쌓인다.
+      if (!isManagerListupMode(campaign.reward_mode)) {
+        return Response.json(
+          {
+            error: "제품 협찬형 캠페인은 지원자만 받습니다. 리스트업 없이 지원자 명단에서 골라 주세요.",
+            code: "LISTUP_NOT_ALLOWED",
+          },
+          { status: 409 },
+        );
       }
 
       const applicants = await db.sql`

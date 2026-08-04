@@ -30,3 +30,19 @@ export const OPEN_APPLY_MODES: RewardModeValue[] = ["barter", "groupbuy"];
 
 export const isOpenApplyMode = (raw: unknown): boolean =>
   OPEN_APPLY_MODES.includes(normalizeRewardMode(raw));
+
+/**
+ * 담당자가 후보 명단(리스트업)을 만들어 주는 방식.
+ *
+ * OPEN_APPLY_MODES 의 여집합이 아니다. 공동구매는 목록에 걸어 지원을 받으면서 동시에
+ * 담당자가 판매력 있는 후보를 찾아 올린다 — 두 목록에 모두 들어간다. 제품 협찬형만
+ * 빠진다: 광고비가 없는 협업은 제안 성사율이 낮아 담당자 시간을 쓰지 않고 지원자만
+ * 받는다.
+ *
+ * 화면에서만 감추면 브랜드 눈에는 리스트업 자리가 없는데 후보는 계속 올라갈 수 있다.
+ * 그래서 명단 등록(POST) 도 이 목록으로 막는다.
+ */
+export const MANAGER_LISTUP_MODES: RewardModeValue[] = ["paid", "groupbuy"];
+
+export const isManagerListupMode = (raw: unknown): boolean =>
+  MANAGER_LISTUP_MODES.includes(normalizeRewardMode(raw));

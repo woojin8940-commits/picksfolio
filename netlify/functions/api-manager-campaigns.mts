@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
+import { isManagerListupMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 
 /**
  * 담당자가 보는 브랜드 캠페인 목록.
@@ -42,6 +43,10 @@ const shape = (row: any) => ({
   endDate: row.end_date || "",
   status: row.status || "",
   managerUsername: norm(row.manager_username),
+  // 진행 방식과, 여기에 담당자 리스트업이 붙는지. 제품 협찬형은 지원자만 받으므로
+  // 담당자 화면이 이 값으로 명단 관련 자리를 감춘다.
+  rewardMode: normalizeRewardMode(row.reward_mode),
+  managerListup: isManagerListupMode(row.reward_mode),
   approvedAt: row.admin_approved_at || null,
   createdAt: row.created_at,
   listupConfirmDue: row.listup_confirm_due || null,

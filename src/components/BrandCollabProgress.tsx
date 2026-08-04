@@ -199,7 +199,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
     <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
       <h3 className="text-lg font-black text-slate-900 mb-1">협업 진행 현황 ({collabs.length}건)</h3>
       <p className="text-[11px] text-slate-400 font-medium mb-5">
-        단계 승인과 마감 관리는 담당자가 진행합니다. 의견은 담당자에게 전달됩니다.
+        인플루언서별로 한 줄씩 표시됩니다. 이름을 누르면 그 인플루언서에게 공유된 가이드라인과
+        단계별 진행을 확인할 수 있습니다. 단계 승인과 마감 관리는 담당자가 진행하고, 의견은
+        담당자에게 전달됩니다.
       </p>
 
       <div className="space-y-3">
@@ -214,9 +216,18 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
             <div key={c.id} className="border border-slate-100 rounded-xl overflow-hidden">
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  {/* 인플루언서 이름 자체가 들어가는 문이다. '자세히' 버튼만 두면 이름을
+                      눌러 보고 아무 일도 없는 것을 먼저 겪는다. */}
+                  <button
+                    type="button"
+                    onClick={() => openDetail(c.id)}
+                    aria-expanded={isOpen}
+                    className="min-w-0 text-left"
+                  >
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="font-black text-sm text-slate-900">@{c.creatorUsername}</span>
+                      <span className="font-black text-sm text-slate-900 hover:text-blue-600 transition-colors">
+                        @{c.creatorUsername}
+                      </span>
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${badge.cls}`}>{badge.label}</span>
                       {c.openFeedbackCount > 0 && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 text-amber-600">
@@ -225,7 +236,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                       )}
                     </div>
                     <p className="text-xs text-slate-500 font-bold truncate">{c.campaignTitle}</p>
-                  </div>
+                  </button>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button
                       onClick={() => openManagerThread(c.id)}
@@ -237,7 +248,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                       onClick={() => openDetail(c.id)}
                       className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black hover:bg-slate-200 transition-colors"
                     >
-                      {isOpen ? '접기' : '자세히'}
+                      {isOpen ? '접기' : '가이드라인 · 진행'}
                     </button>
                   </div>
                 </div>
@@ -350,6 +361,64 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                           </p>
                         </div>
                       )}
+
+                      {/* 공유한 가이드라인 — 이 인플루언서에게 실제로 전달된 내용.
+                          캠페인에 적어 둔 원문이 아니라 협업 조건(collab_terms)에 복사된
+                          값을 읽는다. 담당자가 이 인플루언서에게 맞춰 고쳐 보내는 경우가
+                          있어서, 캠페인 브리프를 그대로 보여 주면 브랜드와 인플루언서가
+                          서로 다른 가이드를 보고 이야기하게 된다.
+                          '가이드 전달' 단계 상태를 함께 붙여 두면 이미 갔는지 아직인지가
+                          한 줄에서 끝난다. */}
+                      {(() => {
+                        const guideStage = (detail.stages || []).find((s: any) => s.stageKey === 'guide');
+                        const guideNote = String(detail.terms?.guideNote || '').trim();
+                        const guideUrl = String(detail.terms?.guideUrl || '').trim();
+                        const gb = guideStage
+                          ? STAGE_STATUS_LABEL[guideStage.status] || { label: guideStage.status, cls: 'bg-slate-100 text-slate-500' }
+                          : null;
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <p className="text-[9px] text-slate-400 font-black uppercase">공유한 가이드라인</p>
+                              {gb && (
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${gb.cls}`}>
+                                  {guideStage.title} · {gb.label}
+                                </span>
+                              )}
+                            </div>
+                            {guideNote || guideUrl ? (
+                              <>
+                                {guideNote && (
+                                  <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                                    {guideNote}
+                                  </p>
+                                )}
+                                {guideUrl && (
+                                  <a
+                                    href={guideUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={`inline-block text-xs text-blue-600 font-bold hover:underline break-all ${
+                                      guideNote ? 'mt-2' : ''
+                                    }`}
+                                  >
+                                    가이드 문서 열기
+                                  </a>
+                                )}
+                                <p className="text-[10px] text-slate-400 font-medium mt-2">
+                                  담당자가 이 인플루언서에게 전달한 가이드입니다. 고칠 내용은 아래 의견으로
+                                  남겨 주세요.
+                                </p>
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 font-medium">
+                                아직 전달된 가이드라인이 없습니다. 캠페인에 적어 둔 가이드를 담당자가 이
+                                인플루언서에게 맞춰 정리한 뒤 이 자리에 표시됩니다.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* 전체 프로세스 — 어디까지 왔는지 한눈에.
                           단계 상태를 배지로만 보여 주면 여덟 줄을 다 읽어야 현재 위치를

@@ -37,6 +37,16 @@ const DRAFT_KEY = 'picks_collab_match_draft';
 /** 복귀 시 이 모달을 다시 열어야 한다는 표시. */
 const RETURN_FLAG = 'collab_match';
 
+/**
+ * 접수 후 보여 줄 한 줄 안내. 키는 collab_directory_applications.status 값이다.
+ * 'archived' 는 여기에 없다 — 보관 처리된 등록서는 다시 낼 수 있게 버튼을 되살린다.
+ */
+const SUBMITTED_NOTE: Record<string, string> = {
+  pending: '운영자 검토 후 연락드릴 예정입니다. 추가로 입력할 정보는 없습니다.',
+  reviewed: '운영자가 등록 정보를 확인했습니다. 조건에 맞는 제안이 생기면 연락드립니다.',
+  contacted: '담당자가 연락드렸습니다. 진행 중인 내용은 담당자와 이어서 확인해 주세요.',
+};
+
 interface InfluencerChannel {
   connected: boolean;
   handle: string;
@@ -82,6 +92,16 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   // 인스타 연동 상태 — 연동 여부와 픽스폴리오가 보관 중인 지표.
   const [channel, setChannel] = useState<InfluencerChannel>(emptyChannel);
   const [channelLoading, setChannelLoading] = useState(false);
+
+  /**
+   * 이미 등록서를 낸 계정인지. null = 아직 확인 중.
+   *
+   * 낸 사람에게는 등록 버튼을 보여 주지 않는다 — 같은 정보를 또 받으면 운영자 목록에
+   * 같은 사람이 두 줄로 쌓이고, 본인은 어느 쪽이 반영된 건지 알 수 없다. 확인 중에는
+   * 버튼 자리를 비워 둔다: 버튼이 떴다가 사라지면 눌렀다 실패한 것처럼 보인다.
+   */
+  const [submitted, setSubmitted] = useState<boolean | null>(null);
+  const [submittedStatus, setSubmittedStatus] = useState('');
   const [linking, setLinking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -107,6 +127,25 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       syncedAt: String(c.syncedAt || ''),
     });
   }, [applicantUsername, isInfluencer]);
+
+  // 이미 접수한 등록서가 있는지 한 번 확인한다. 로그인 정보가 없으면 확인할 방법이
+  // 없으므로 버튼을 그대로 둔다 — 제출 단계에서 걸러진다.
+  useEffect(() => {
+    let alive = true;
+    if (!applicantUsername) {
+      setSubmitted(false);
+      return;
+    }
+    (async () => {
+      const res = await apiService.getMyCollabDirectory(variant, applicantUsername);
+      if (!alive) return;
+      // 보관 처리된 등록서는 없는 것으로 본다. 운영자가 접어 둔 사람이 영원히 다시
+      // 등록할 수 없게 되면, 문의할 곳이 없는 막힌 화면이 된다.
+      setSubmitted(!!res.submitted && res.status !== 'archived');
+      setSubmittedStatus(res.status || '');
+    })();
+    return () => { alive = false; };
+  }, [applicantUsername, variant]);
 
   // 연동 후 복귀 — 임시 저장한 등록서를 되살리고 모달을 다시 연다.
   useEffect(() => {
@@ -237,6 +276,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setOpen(false);
         reset();
         setNotice(null);
+        // 서버에 다시 물어보지 않고 바로 감춘다. 접수는 방금 성공했고, 이 화면에
+        // 버튼이 한 번 더 남아 있으면 같은 등록서를 두 번 내게 된다.
+        setSubmitted(true);
+        setSubmittedStatus('pending');
         alert('접수되었습니다. 운영자 검토 후 연락드립니다!');
       } else {
         setNotice({ type: 'err', text: result.error });
@@ -250,13 +293,24 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className={buttonClassName ?? 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_12px_26px_-8px_rgba(37,99,235,0.65)] hover:shadow-[0_16px_32px_-8px_rgba(37,99,235,0.75)] hover:-translate-y-0.5 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] active:translate-y-0 transition-all'}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-        {copy.title}
-      </button>
+      {submitted === false && (
+        <button
+          onClick={() => setOpen(true)}
+          className={buttonClassName ?? 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_12px_26px_-8px_rgba(37,99,235,0.65)] hover:shadow-[0_16px_32px_-8px_rgba(37,99,235,0.75)] hover:-translate-y-0.5 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] active:translate-y-0 transition-all'}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+          {copy.title}
+        </button>
+      )}
+
+      {/* 이미 낸 사람에게는 버튼 대신 접수 상태만 보여 준다. 버튼만 조용히 사라지면
+          등록이 취소된 것으로 읽힌다. */}
+      {submitted === true && !open && (
+        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+          <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
+          <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+        </div>
+      )}
 
       {open && (
         <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={() => !submitting && setOpen(false)}>

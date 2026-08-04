@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
-import CollabMatchRegister from './CollabMatchRegister';
 import BrandCollabProgress from './BrandCollabProgress';
 import CampaignRegisterWizard from './collab/CampaignRegisterWizard';
 import CampaignListupBoard from './collab/CampaignListupBoard';
@@ -174,9 +173,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // 가 따로 읽고, 여기서는 건수만 쓴다.
   const [collabSummary, setCollabSummary] = useState<Array<{ id: string; uploadUrl: string; confirmedAt: string | null }>>([]);
   const [activeTypeFilter, setActiveTypeFilter] = useState('');
-  const [viewMode, setViewMode] = useState<'mine' | 'all'>('mine');
-  const [allCampaigns, setAllCampaigns] = useState<Campaign[]>([]);
-  const [allLoading, setAllLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
@@ -197,23 +193,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   useEffect(() => {
     fetchCampaigns();
   }, [fetchCampaigns]);
-
-  const fetchAllCampaigns = useCallback(async () => {
-    setAllLoading(true);
-    try {
-      const res = await fetch('/api/campaigns?status=active');
-      const data = await res.json();
-      setAllCampaigns(data.campaigns || []);
-    } catch {
-      console.error('Failed to fetch all campaigns');
-    } finally {
-      setAllLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (viewMode === 'all') fetchAllCampaigns();
-  }, [viewMode, fetchAllCampaigns]);
 
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);
@@ -296,8 +275,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
+  /**
+   * 캠페인 삭제. 지원 기록과 협업까지 함께 지워지므로(서버가 같은 요청에서 지운다)
+   * 무엇이 사라지는지 제목과 함께 확인받는다. "정말 삭제하시겠습니까?"만 띄우면
+   * 지원자 명단이 함께 없어지는 것을 모른 채 누르게 된다.
+   */
+  const handleDelete = async (campaign: Campaign | string) => {
+    const target = typeof campaign === 'string' ? campaigns.find(c => c.id === campaign) : campaign;
+    const id = typeof campaign === 'string' ? campaign : campaign.id;
+    const title = target?.title || '이 캠페인';
+    const applicants = Number(target?.application_count || 0);
+    if (
+      !confirm(
+        `'${title}' 캠페인을 삭제합니다.\n\n` +
+          (applicants > 0 ? `지원자 ${applicants}명의 지원 기록과 ` : '') +
+          '진행 기록이 함께 지워지고 되돌릴 수 없습니다.\n계속하시겠습니까?',
+      )
+    ) {
+      return;
+    }
     try {
       const res = await fetch(`/api/campaigns?id=${id}&business=${businessUsername}`, {
         method: 'DELETE',
@@ -420,6 +416,21 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     return statusBadge(campaign.status);
   };
 
+  /**
+   * 마감된 캠페인인지. 삭제 버튼을 어디에 내놓을지가 이 값으로 갈린다.
+   *
+   * 직접 마감한 것(inactive)과 종료일이 지난 것을 함께 본다. 브랜드에게는 둘 다 "끝난
+   * 캠페인"이고, 화면에도 같은 '마감 / 기간 종료' 배지로 나간다. 승인 거절도 여기에
+   * 넣는다 — 되살릴 수 없는 캠페인이 목록에 계속 남아 있을 이유가 없다.
+   *
+   * 모집중인 캠페인은 뺀다. 지원자가 들어오고 있는 캠페인을 한 번의 클릭으로 지우면
+   * 지원 기록과 협업까지 함께 사라진다.
+   */
+  const isClosedCampaign = (campaign: Campaign) =>
+    campaign.status === 'inactive' ||
+    campaign.status === 'admin_rejected' ||
+    (campaign.status === 'active' && isPastDeadline(campaign.end_date));
+
   const typeLabel = (type: string) => {
     const m: Record<string, string> = { ad_collab: '광고 협업', group_buy: '공동구매', other: '기타', collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
     return m[type] || type;
@@ -445,20 +456,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     />
   );
 
-  const sourceCampaigns = viewMode === 'all' ? allCampaigns : campaigns;  const listLoading = viewMode === 'all' ? allLoading : loading;
+  // 목록은 언제나 내가 올린 캠페인뿐이다. 다른 브랜드의 캠페인은 여기서 볼 일이 없고,
+  // 남의 캠페인이 섞이면 지원자·정산 화면으로 들어갔을 때 권한 오류만 보게 된다.
   const filteredCampaigns = activeTypeFilter
-    ? sourceCampaigns.filter(c => c.type === activeTypeFilter)
-    : sourceCampaigns;
+    ? campaigns.filter(c => c.type === activeTypeFilter)
+    : campaigns;
 
   // --- Campaign Detail View ---
   if (selectedCampaign) {
+    // 목록에 내 캠페인만 담기므로 여기서는 늘 true 다. 그래도 지우지 않는 이유는
+    // localStorage 캐시다 — 계정을 바꿔 로그인했을 때 이전 캐시가 한 번 그려질 수 있고,
+    // 그 화면에서 지원자 연락처가 보이면 안 된다.
     const isOwner = normalizeUser(selectedCampaign.business_username) === normalizeUser(businessUsername);
     // 진행 방식이 없던 시절 캠페인은 모두 광고비를 지급했다 — rewardModeOf 가 'paid'
     // 로 되돌려 준다.
     const mode = rewardModeOf(selectedCampaign.reward_mode);
     const isBarter = mode.value === 'barter';
     const isGroupBuy = mode.value === 'groupbuy';
-    // 지원을 받아 브랜드가 고르는 방식인지. 담당자 리스트업이 붙는지가 여기서 갈린다.
+    // 지원을 받아 브랜드가 고르는 방식인지. 리스트업 유무는 mode.managerListup 이
+    // 따로 정한다(공동구매는 지원도 받고 리스트업도 받는다).
     const openApply = mode.openApply;
     // 브랜드가 직접 수락하는 캠페인인지. 실제 권한 판단은 서버(selectionBy)가 하고,
     // 목록을 읽어 오는 동안에는 진행 방식으로 안내 문구만 미리 맞춰 둔다(그 사이에는
@@ -550,6 +566,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   {selectedCampaign.status !== 'pending_approval' && selectedCampaign.status !== 'admin_rejected' && (
                     <button onClick={() => handleToggleStatus(selectedCampaign)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-black text-slate-600 transition-colors">
                       {selectedCampaign.status === 'active' ? '마감' : '재개'}
+                    </button>
+                  )}
+                  {/* 마감된 캠페인만 여기서 지울 수 있다. 모집중인 캠페인 옆에 삭제
+                      버튼을 두면 '마감' 대신 눌러 지원자 기록까지 날리게 된다. */}
+                  {isClosedCampaign(selectedCampaign) && (
+                    <button
+                      onClick={() => handleDelete(selectedCampaign)}
+                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 rounded-xl text-xs font-black text-red-500 transition-colors"
+                    >
+                      삭제
                     </button>
                   )}
                 </div>
@@ -794,10 +820,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           isOwner ? (
             <div className="space-y-4">
               {/* 담당자가 올린 후보 명단. 지원을 기다리는 것과 별개로 진행되는 길이므로
-                  지원자 목록보다 위에 둔다 — 대부분의 캠페인은 이 명단에서 시작한다.
-                  지원을 받아 고르는 방식(제품 협찬형·공동구매)에는 리스트업이 없다.
-                  빈 명단을 띄워 두면 "담당자가 아직 안 올려 줬나"로 읽힌다. */}
-              {!openApply && <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />}
+                  지원자 목록보다 위에 둔다 — 광고비 지급형은 이 명단에서 시작하고,
+                  공동구매는 지원과 명단이 함께 온다.
+                  제품 협찬형에는 리스트업이 없다(지원자만 받는다). 빈 명단을 띄워 두면
+                  "담당자가 아직 안 올려 줬나"로 읽혀 오지 않을 명단을 기다리게 된다. */}
+              {mode.managerListup && <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />}
 
               <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
                 <h3 className="text-lg font-black text-slate-900 mb-2">지원자 목록 ({applicants.length}명)</h3>
@@ -1117,20 +1144,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
-            {viewMode === 'mine'
-              ? '내가 등록한 캠페인을 관리하고 지원자를 확인하세요'
-              : '캠페인 협업에 올라와 있는 캠페인을 둘러보세요'}
+            내가 등록한 캠페인을 관리하고 지원자를 확인하세요
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="w-auto">
-            {/* 인플루언서 매칭 받기 — 브랜드(광고주)로 지원(역할 고정) */}
-            <CollabMatchRegister
-              variant="brand"
-              applicantUsername={businessUsername}
-              buttonClassName="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-5 py-2.5 rounded-xl font-black text-sm transition-all shadow-lg shadow-indigo-600/20"
-            />
-          </div>
           <button
             onClick={() => setShowForm(true)}
             className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-black text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
@@ -1140,26 +1157,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           </button>
         </div>
       </header>
-
-      {/* View Mode Toggle: 내 캠페인 / 전체 캠페인 */}
-      <div className="inline-flex items-center bg-slate-100 rounded-xl p-1 mb-4">
-        <button
-          onClick={() => setViewMode('mine')}
-          className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${
-            viewMode === 'mine' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          내 캠페인
-        </button>
-        <button
-          onClick={() => setViewMode('all')}
-          className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${
-            viewMode === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          전체 캠페인
-        </button>
-      </div>
 
       {/* Type Filter Tabs */}
       <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1 scrollbar-hide">
@@ -1181,7 +1178,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       </div>
 
-      {listLoading ? (
+      {loading ? (
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-sm text-slate-400 font-bold">캠페인 불러오는 중...</p>
@@ -1194,24 +1191,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             </svg>
           </div>
           <h3 className="text-lg font-black text-slate-900 mb-2">등록된 캠페인이 없습니다</h3>
-          {viewMode === 'mine' ? (
-            <>
-              <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
-              <button
-                onClick={() => setShowForm(true)}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
-              >
-                첫 캠페인 등록하기
-              </button>
-            </>
-          ) : (
-            <p className="text-sm text-slate-500 font-medium mb-6">현재 모집중인 캠페인이 없습니다</p>
-          )}
+          <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
+          >
+            첫 캠페인 등록하기
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
           {filteredCampaigns.map(campaign => {
             const deadline = deadlineInfo(campaign.end_date);
+            const closed = isClosedCampaign(campaign);
             return (
               <div
                 key={campaign.id}
@@ -1232,26 +1224,28 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   {/* Badges overlay */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     {campaignStatusBadge(campaign)}
-                    {viewMode === 'all' && normalizeUser(campaign.business_username) === normalizeUser(businessUsername) && (
-                      <span className="bg-blue-600 text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">내 캠페인</span>
-                    )}
                     {deadline && campaign.status === 'active' && (
                       <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
                         {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
                       </span>
                     )}
                   </div>
-                  {/* Edit/Delete overlay — only on own campaigns */}
-                  {normalizeUser(campaign.business_username) === normalizeUser(businessUsername) && (
-                  <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                  {/* 수정·삭제. 마감된 캠페인의 삭제 버튼은 계속 보이게 둔다 — 손댈 일이
+                      끝난 캠페인을 정리하려면 커서를 올려야 나타나는 버튼을 먼저 찾아내야
+                      하는데, 모바일에서는 hover 가 없어 아예 닿지 않는다. */}
+                  <div
+                    className={`absolute top-2.5 right-2.5 flex gap-1 transition-opacity ${
+                      closed ? '' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                    onClick={e => e.stopPropagation()}
+                  >
                     <button onClick={() => handleEdit(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-white rounded-lg transition-colors shadow-sm" title="수정">
                       <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </button>
-                    <button onClick={() => handleDelete(campaign.id)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-red-50 rounded-lg transition-colors shadow-sm" title="삭제">
+                    <button onClick={() => handleDelete(campaign)} className="p-1.5 bg-white/90 backdrop-blur-sm hover:bg-red-50 rounded-lg transition-colors shadow-sm" title="삭제">
                       <svg className="w-3.5 h-3.5 text-slate-500 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
-                  )}
                 </div>
 
                 {/* Content */}
