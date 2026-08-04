@@ -53,6 +53,11 @@ export type RewardModeDef = {
    * 걸어 두면 지원해도 그 지원이 섭외로 이어지지 않는다. 그래서 노출하지 않는다.
    * 제품 협찬형과 공동구매는 반대다 — 지원한 사람 중에서 브랜드가 고르는 방식이므로
    * 목록에 보여야 지원이 들어온다.
+   *
+   * 브랜드 상세 화면의 지원자 목록 자리도 이 값이 정한다. 지원을 받지 않는 방식에서
+   * 빈 지원자 목록을 띄워 두면 브랜드는 오지 않을 지원을 기다리고, 담당자가 올린
+   * 명단이 화면의 곁가지처럼 보인다 — 광고비 지급형에서 사람을 고르는 자리는
+   * 리스트업 하나뿐이어야 한다.
    */
   openApply: boolean;
   /**
@@ -75,6 +80,15 @@ export type RewardModeDef = {
    * 누가 지원할지 모르는 상태에서 정한 구성은 지킬 수 없는 약속이 된다.
    */
   pickInfluencer: boolean;
+  /**
+   * 정산이 붙는 방식인지.
+   *
+   * 제품 협찬형은 지급할 돈이 없다 — 광고비도, 판매 수수료도 없다. 그런 캠페인에
+   * 정산 탭을 열어 두면 브랜드는 "언젠가 채워지는 칸"으로 읽고 지급 일정을 기다리게
+   * 된다. 협업 단계에도 정산 단계가 없으므로(netlify/functions/_shared/collab-workflow.mts
+   * 의 BARTER) 화면에서도 자리를 두지 않는다. stageMarksFor() 의 정산 줄과 짝이다.
+   */
+  hasSettlement: boolean;
   /** 지원/모집 인원 칸에 붙는 이름. 진행 방식마다 세는 대상이 다르다. */
   headcountLabel: string;
   /** 캠페인 유형(type) 컬럼에 저장할 값. 협업 단계 묶음이 이 값으로 갈린다. */
@@ -91,6 +105,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: false,
     managerListup: true,
     pickInfluencer: true,
+    hasSettlement: true,
     headcountLabel: '모집 인원',
     campaignType: 'ad_collab',
   },
@@ -103,6 +118,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: true,
     managerListup: false,
     pickInfluencer: false,
+    hasSettlement: false,
     headcountLabel: '협찬 인원',
     campaignType: 'ad_collab',
   },
@@ -115,6 +131,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: true,
     managerListup: true,
     pickInfluencer: false,
+    hasSettlement: true,
     headcountLabel: '모집 인원',
     campaignType: 'group_buy',
   },
@@ -329,7 +346,7 @@ export const stageMarksFor = (mode: RewardMode): StageMark[] => {
     { label: '구성안 검수', included: mode === 'paid' },
     { label: '콘텐츠 검수', included: mode === 'paid' },
     { label: '업로드 확인', included: true },
-    { label: '광고비 정산', included: mode === 'paid' },
+    { label: '광고비 정산', included: rewardModeOf(mode).hasSettlement },
   ];
 };
 
