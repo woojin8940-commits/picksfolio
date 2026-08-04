@@ -2,6 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { isPastDeadline } from "./_shared/campaign-recruit.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { isOpenApplyMode } from "./_shared/reward-mode.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -62,6 +63,16 @@ export default async (req: Request) => {
       // 직접 호출로 지원이 들어올 수 있으므로 서버에서도 막는다.
       if (isPastDeadline(camp.end_date)) {
         return Response.json({ error: "모집이 마감된 캠페인입니다." }, { status: 400 });
+      }
+
+      // 지원을 받지 않는 진행 방식(광고비 지급형)에는 지원 행을 만들지 않는다.
+      // 브랜드 화면에 지원자 목록이 없어(담당자 리스트업만 있다) 여기서 받아 두면
+      // 아무도 보지 않는 지원이 쌓이고, 지원한 사람은 답을 기다리게 된다.
+      if (!isOpenApplyMode(camp.reward_mode)) {
+        return Response.json(
+          { error: "담당자가 조건에 맞는 후보를 찾아 제안하는 캠페인입니다. 지원을 받지 않습니다." },
+          { status: 400 },
+        );
       }
 
       // 모집 인원(max_applicants)이 다 차도 지원은 계속 받는다.
