@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import { formatNumberWithCommas, formatSignedKRW } from '../../utils/formatters';
 import InfluencerCandidateCard from './InfluencerCandidateCard';
 
 /**
@@ -78,8 +78,23 @@ const asForm = (raw: any): OfferForm => ({
   respondBy: raw?.respondBy || '',
 });
 
-/** 브랜드 카드에 찍히는 값. 제안 조건과 시점도 뜻도 다르다. */
-const emptyQuote = { fee: '', secondUseFee: '', guaranteedViews: '', badge: '', profileLine: '' };
+/**
+ * 브랜드 카드에 찍히는 값 + 인플루언서에게 줄 금액.
+ *
+ * 두 금액을 한 폼에 둔 이유는 우리 수익이 그 차액이라는 점이다. 단가 100만원인
+ * 사람을 110만원으로 넘기면 10만원이 우리 몫인데, 지급액을 제안 보낼 때 따로 적게
+ * 하면 명단을 만드는 자리에서는 그 10만원이 보이지 않는다. 그래서 여기서 함께 적고
+ * 차액을 바로 보여 준다.
+ */
+const emptyQuote = {
+  fee: '',
+  secondUseFee: '',
+  guaranteedViews: '',
+  badge: '',
+  profileLine: '',
+  payoutFee: '',
+  payoutSecondUseFee: '',
+};
 type QuoteForm = typeof emptyQuote;
 
 const quoteFrom = (c: any): QuoteForm => ({
@@ -88,6 +103,20 @@ const quoteFrom = (c: any): QuoteForm => ({
   guaranteedViews: c?.guaranteedViews ? String(c.guaranteedViews) : '',
   badge: c?.badge || '',
   profileLine: c?.profileLine || '',
+  payoutFee: c?.payoutFee ? String(c.payoutFee) : '',
+  payoutSecondUseFee: c?.payoutSecondUseFee ? String(c.payoutSecondUseFee) : '',
+});
+
+/** 서버로 보내는 두 덩어리. 견적은 컬럼으로, 지급액은 제안 초안으로 들어간다. */
+const quotePayload = (q: QuoteForm) => ({
+  quote: {
+    fee: q.fee,
+    secondUseFee: q.secondUseFee,
+    guaranteedViews: q.guaranteedViews,
+    badge: q.badge,
+    profileLine: q.profileLine,
+  },
+  payout: { fee: q.payoutFee, secondUseFee: q.payoutSecondUseFee },
 });
 
 /** 브랜드 카드 입력 한 벌. 명단에 올릴 때와 올린 뒤 고칠 때 같은 폼을 쓴다. */
@@ -95,7 +124,9 @@ const QuoteFields: React.FC<{
   value: QuoteForm;
   onChange: (next: QuoteForm) => void;
   hint?: string;
-}> = ({ value, onChange, hint }) => {
+  /** 이미 제안을 보낸 후보. 지급액은 회수 전까지 고칠 수 없다. */
+  payoutLocked?: boolean;
+}> = ({ value, onChange, hint, payoutLocked }) => {
   const set = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [key]: e.target.value });
   const cls =
@@ -105,54 +136,125 @@ const QuoteFields: React.FC<{
       ? Math.round(Number(value.fee) / Number(value.guaranteedViews))
       : 0;
 
+  const brandAmount = Number(value.fee || 0) + Number(value.secondUseFee || 0);
+  const payoutAmount = Number(value.payoutFee || 0) + Number(value.payoutSecondUseFee || 0);
+  // 두 값이 모두 있을 때만 차액을 말한다. 지급액이 비어 있는데 차액을 보여 주면
+  // 제시가 전액이 우리 수익으로 읽힌다.
+  const margin = brandAmount > 0 && payoutAmount > 0 ? brandAmount - payoutAmount : null;
+  const rate = margin !== null && brandAmount > 0 ? Math.round((margin / brandAmount) * 100) : 0;
+
   return (
-    <div>
-      <div className="grid grid-cols-3 gap-2">
-        <div>
-          <label className="block text-[10px] text-slate-400 font-black mb-1">광고비(원)</label>
-          <input type="number" value={value.fee} onChange={set('fee')} className={cls} />
+    <div className="space-y-2">
+      {/* 인플루언서에게 줄 금액 — 우리가 원가로 쓰는 값 */}
+      <div className="bg-white/70 border border-slate-200 rounded-xl p-2.5">
+        <p className="text-[10px] font-black text-slate-500 mb-1.5">
+          인플루언서 지급 단가 <span className="text-slate-300 font-bold">· 브랜드에게 보이지 않습니다</span>
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">지급 단가(원)</label>
+            <input
+              type="number"
+              value={value.payoutFee}
+              onChange={set('payoutFee')}
+              disabled={payoutLocked}
+              placeholder="1000000"
+              className={`${cls} disabled:bg-slate-50 disabled:text-slate-400`}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">2차 활용 지급(원)</label>
+            <input
+              type="number"
+              value={value.payoutSecondUseFee}
+              onChange={set('payoutSecondUseFee')}
+              disabled={payoutLocked}
+              className={`${cls} disabled:bg-slate-50 disabled:text-slate-400`}
+            />
+          </div>
         </div>
-        <div>
-          <label className="block text-[10px] text-slate-400 font-black mb-1">2차 활용(원)</label>
-          <input
-            type="number"
-            value={value.secondUseFee}
-            onChange={set('secondUseFee')}
-            className={cls}
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] text-slate-400 font-black mb-1">보장 조회수</label>
-          <input
-            type="number"
-            value={value.guaranteedViews}
-            onChange={set('guaranteedViews')}
-            className={cls}
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] text-slate-400 font-black mb-1">배지</label>
-          <input
-            type="text"
-            value={value.badge}
-            onChange={set('badge')}
-            placeholder="인기"
-            className={cls}
-          />
-        </div>
-        <div className="col-span-2">
-          <label className="block text-[10px] text-slate-400 font-black mb-1">한 줄 소개</label>
-          <input
-            type="text"
-            value={value.profileLine}
-            onChange={set('profileLine')}
-            placeholder="뷰티 · 20대 · 여성"
-            className={cls}
-          />
+        {payoutLocked && (
+          <p className="text-[10px] font-bold text-amber-600 mt-1.5">
+            이미 보낸 제안입니다. 지급 단가는 제안을 회수한 뒤 고칠 수 있습니다.
+          </p>
+        )}
+      </div>
+
+      {/* 브랜드에게 제시할 금액 — 지급 단가에 우리 수익을 붙인 값 */}
+      <div className="bg-white/70 border border-blue-200 rounded-xl p-2.5">
+        <p className="text-[10px] font-black text-blue-600 mb-1.5">
+          브랜드 제시가 <span className="text-blue-300 font-bold">· 브랜드 카드에 찍히는 금액</span>
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">제시 광고비(원)</label>
+            <input type="number" value={value.fee} onChange={set('fee')} placeholder="1100000" className={cls} />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">2차 활용(원)</label>
+            <input
+              type="number"
+              value={value.secondUseFee}
+              onChange={set('secondUseFee')}
+              className={cls}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">보장 조회수</label>
+            <input
+              type="number"
+              value={value.guaranteedViews}
+              onChange={set('guaranteedViews')}
+              className={cls}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 font-black mb-1">배지</label>
+            <input
+              type="text"
+              value={value.badge}
+              onChange={set('badge')}
+              placeholder="인기"
+              className={cls}
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[10px] text-slate-400 font-black mb-1">한 줄 소개</label>
+            <input
+              type="text"
+              value={value.profileLine}
+              onChange={set('profileLine')}
+              placeholder="뷰티 · 20대 · 여성"
+              className={cls}
+            />
+          </div>
         </div>
       </div>
-      <p className="text-[10px] text-slate-400 font-bold mt-1.5">
-        {cpv > 0 ? `CPV ${formatNumberWithCommas(cpv)}원으로 표시됩니다.` : hint || ''}
+
+      {/* 차액 = 우리 수익 */}
+      <div
+        className={`rounded-xl px-3 py-2 flex items-center justify-between gap-2 ${
+          margin === null
+            ? 'bg-slate-100'
+            : margin > 0
+              ? 'bg-emerald-50 border border-emerald-100'
+              : 'bg-red-50 border border-red-100'
+        }`}
+      >
+        <span className="text-[10px] font-black text-slate-500">우리 수익 (제시가 − 지급액)</span>
+        {margin === null ? (
+          <span className="text-[11px] font-black text-slate-400">두 금액을 모두 입력하면 계산됩니다</span>
+        ) : (
+          <span className={`text-[13px] font-black ${margin > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+            {formatSignedKRW(margin)}
+            <span className="text-[10px] font-bold ml-1 opacity-70">마진율 {rate}%</span>
+          </span>
+        )}
+      </div>
+
+      <p className="text-[10px] text-slate-400 font-bold">
+        {cpv > 0 ? `CPV ${formatNumberWithCommas(cpv)}원으로 표시됩니다. ` : ''}
+        {hint || ''}
       </p>
     </div>
   );
@@ -225,7 +327,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     const res = await apiService.addListupCandidates(campaignId, picked, {
       token,
       note: addNote,
-      quote: addQuote,
+      ...quotePayload(addQuote),
     });
     setBusy(false);
     if (res.error) {
@@ -436,6 +538,14 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 const decision = DECISION_BADGE[c.brandDecision] || DECISION_BADGE.pending;
                 const outreach = OUTREACH_BADGE[c.outreachStatus] || OUTREACH_BADGE.not_sent;
                 const canSend = c.brandDecision === 'pick' && c.outreachStatus !== 'accepted';
+                // 제안 폼에 지금 적혀 있는 단가로 계산한 차액. 저장된 값이 아니라 입력 중인
+                // 값을 써야 보내기 전에 손해를 알아챌 수 있다.
+                const offerBrandAmount = Number(c.quotedFee || 0) + Number(c.quotedSecondUseFee || 0);
+                const offerPayAmount = Number(offer.fee || 0) + Number(offer.secondUseFee || 0);
+                const offerMargin =
+                  offerFor === c.id && offerBrandAmount > 0 && offerPayAmount > 0
+                    ? offerBrandAmount - offerPayAmount
+                    : null;
                 return (
                   <InfluencerCandidateCard
                     key={c.id}
@@ -457,13 +567,29 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                       </>
                     }
                   >
-                    {/* 브랜드가 지금 보고 있는 값. 담당자 화면에도 같이 띄우지 않으면
-                        "브랜드가 얼마를 보고 고른 건지"를 다시 물어봐야 한다. */}
+                    {/* 브랜드가 지금 보고 있는 값과 우리가 남기는 차액. 담당자 화면에도
+                        같이 띄우지 않으면 "브랜드가 얼마를 보고 고른 건지"와 "이 건이
+                        얼마를 남기는지"를 다시 물어봐야 한다. */}
                     <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 mb-2 flex flex-wrap gap-x-4 gap-y-0.5">
                       <span className="text-[11px] text-slate-700 font-bold">
-                        브랜드 카드 · 광고비{' '}
+                        브랜드 제시가{' '}
                         {c.quotedFee ? `${formatNumberWithCommas(c.quotedFee)}원` : '협의'}
                       </span>
+                      <span className="text-[11px] text-slate-500 font-bold">
+                        지급 단가{' '}
+                        {c.payoutFee ? `${formatNumberWithCommas(c.payoutFee)}원` : '미입력'}
+                      </span>
+                      {c.margin === null || c.margin === undefined ? (
+                        <span className="text-[11px] text-slate-400 font-bold">마진 미확정</span>
+                      ) : (
+                        <span
+                          className={`text-[11px] font-black ${
+                            c.margin > 0 ? 'text-emerald-600' : 'text-red-500'
+                          }`}
+                        >
+                          차액 {formatSignedKRW(c.margin)}
+                        </span>
+                      )}
                       {c.guaranteedViews ? (
                         <span className="text-[11px] text-slate-500 font-bold">
                           보장 조회수 {formatNumberWithCommas(c.guaranteedViews)}
@@ -517,7 +643,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                             }}
                             className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 rounded-lg text-[10px] font-black hover:bg-slate-50"
                           >
-                            브랜드 카드
+                            단가·마진
                           </button>
                           <button
                             onClick={() => {
@@ -544,15 +670,19 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                             <QuoteFields
                               value={quoteDraft}
                               onChange={setQuoteDraft}
-                              hint="보장 조회수를 비우면 채널 평균 조회수로 채워집니다."
+                              payoutLocked={c.outreachStatus !== 'not_sent'}
+                              hint="보장 조회수를 비우면 채널 평균 조회수로 채워집니다. 지급 단가는 제안을 보낼 때 그대로 채워집니다."
                             />
                             <div className="flex justify-end mt-2">
                               <button
                                 onClick={async () => {
-                                  const res = await act(c.id, 'quote', { quote: quoteDraft });
+                                  const res = await act(c.id, 'quote', quotePayload(quoteDraft));
                                   if (res) {
                                     setQuoteFor('');
-                                    notify('브랜드 카드 값을 저장했습니다.');
+                                    notify(
+                                      res.warning || '제시가와 지급 단가를 저장했습니다.',
+                                      res.warning ? 'error' : 'success',
+                                    );
                                   }
                                 }}
                                 disabled={busy}
@@ -595,8 +725,38 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                             <p className="text-[10px] text-slate-400 font-black uppercase mb-2">
                               제안 조건 — 인플루언서가 이 내용을 그대로 봅니다
                             </p>
+                            {/* 여기 적는 단가가 인플루언서에게 나가는 금액이다. 브랜드에게
+                                제시한 금액을 나란히 보여 주지 않으면, 제시가보다 높은 단가를
+                                적어 손해가 나는 것을 보낸 뒤에야 알게 된다. */}
+                            <div
+                              className={`rounded-lg px-3 py-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 ${
+                                offerMargin === null
+                                  ? 'bg-slate-50'
+                                  : offerMargin > 0
+                                    ? 'bg-emerald-50'
+                                    : 'bg-red-50'
+                              }`}
+                            >
+                              <span className="text-[10px] font-black text-slate-500">
+                                브랜드 제시가{' '}
+                                {c.quotedFee ? `${formatNumberWithCommas(c.quotedFee)}원` : '미입력'}
+                              </span>
+                              {offerMargin === null ? (
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  제시가와 단가가 모두 있어야 차액이 계산됩니다
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-[11px] font-black ${
+                                    offerMargin > 0 ? 'text-emerald-600' : 'text-red-500'
+                                  }`}
+                                >
+                                  우리 수익 {formatSignedKRW(offerMargin)}
+                                </span>
+                              )}
+                            </div>
                             <div className="grid grid-cols-2 gap-2">
-                              {field('fee', '단가(원)')}
+                              {field('fee', '지급 단가(원)')}
                               {field('secondUseFee', '2차 활용(원)')}
                               {field('startDate', '진행 시작일', 'date')}
                               {field('respondBy', '응답 기한', 'date')}

@@ -32,6 +32,31 @@ const splitCategories = (raw: unknown): string[] =>
     .map((c) => c.trim())
     .filter((c) => c.length > 0 && c.length <= 20);
 
+const average = (values: number[]): number => {
+  const valid = values.filter((v) => Number.isFinite(v) && v >= 0);
+  if (!valid.length) return 0;
+  return Math.round(valid.reduce((sum, v) => sum + v, 0) / valid.length);
+};
+
+/**
+ * 최근 릴스 동향. 최근 3개의 평균 조회수를 그 이전 3개와 비교한다.
+ *
+ * 팔로워 수만 보면 지금 이 계정이 뜨고 있는지 식고 있는지 알 수 없다. 팔로워는
+ * 한번 쌓이면 잘 줄지 않지만 조회수는 즉시 반응하기 때문이다. 비교할 이전 구간이
+ * 없으면(릴스가 3개 이하) 0% 가 아니라 null 을 준다 — 0% 는 "변화 없음"이라는
+ * 뜻이고, 여기서 필요한 말은 "아직 알 수 없음"이다.
+ */
+const reelTrend = (reels: any[]) => {
+  const views = (Array.isArray(reels) ? reels : []).slice(0, 6).map((r) => Number(r?.views || 0));
+  const recent = average(views.slice(0, 3));
+  const previous = average(views.slice(3, 6));
+  return {
+    recentAvgViews: recent,
+    previousAvgViews: previous,
+    trendPercent: previous > 0 ? Math.round(((recent - previous) / previous) * 100) : null,
+  };
+};
+
 export default async (req: Request) => {
   const manager = await requireManager(req);
   if (!manager.ok) return manager.response;
@@ -98,10 +123,15 @@ export default async (req: Request) => {
           instagramHandle: "",
           instagramUrl: "",
           followers: 0,
+          following: 0,
           avgViews: 0,
           avgLikes: 0,
           avgComments: 0,
           reelsCount: 0,
+          engagementRate: 0,
+          recentAvgViews: 0,
+          previousAvgViews: 0,
+          reelTrendPercent: null as number | null,
           metricsSource: "",
           connected: false,
           recentReels: [],
@@ -146,12 +176,23 @@ export default async (req: Request) => {
       item.instagramHandle = shaped.instagramHandle;
       item.instagramUrl = shaped.instagramUrl || item.instagramUrl;
       item.followers = shaped.followers || item.followers;
+      item.following = shaped.following;
       item.avgViews = shaped.avgViews;
       item.avgLikes = shaped.avgLikes;
       item.avgComments = shaped.avgComments;
       item.reelsCount = shaped.reelsCount;
       item.metricsSource = shaped.metricsSource;
       item.connected = shaped.connected;
+      // 동향은 6개까지 보고 계산한 뒤, 화면에 실을 썸네일만 3개로 줄인다.
+      const trend = reelTrend(shaped.recentReels);
+      item.recentAvgViews = trend.recentAvgViews;
+      item.previousAvgViews = trend.previousAvgViews;
+      item.reelTrendPercent = trend.trendPercent;
+      // 참여율은 팔로워 대비 평균 반응(좋아요+댓글)이다. 팔로워가 많아도 반응이
+      // 없는 계정을 팔로워 순 목록에서 걸러 내는 데 쓴다.
+      item.engagementRate = shaped.followers > 0
+        ? Math.round(((shaped.avgLikes + shaped.avgComments) / shaped.followers) * 1000) / 10
+        : 0;
       item.recentReels = shaped.recentReels.slice(0, 3);
       item.syncedAt = shaped.syncedAt;
       item.intro = shaped.intro;

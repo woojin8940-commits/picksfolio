@@ -2,22 +2,48 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
-import { formatKRW, todayInSeoul } from '../utils/formatters';
+import { formatKRW } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
-import AdminLiveConsole from './admin/AdminLiveConsole';
-import AdminWorkflowConsole from './admin/AdminWorkflowConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
+import AdminOperatorOverview from './admin/AdminOperatorOverview';
 import AdminCampaignApproval from './admin/AdminCampaignApproval';
 import AdminCampaignListup from './admin/AdminCampaignListup';
+import AdminCampaignBoard from './admin/AdminCampaignBoard';
 import AdminCollabManagerConsole from './admin/AdminCollabManagerConsole';
-import AdminSellerVerifications from './admin/AdminSellerVerifications';
 import AdminRevenueCards from './admin/AdminRevenueCards';
 import AdminCollabDirectory from './admin/AdminCollabDirectory';
+import AdminInfluencerDatabase from './admin/AdminInfluencerDatabase';
 import AdminManagerAccounts from './admin/AdminManagerAccounts';
 import { isTestProposal } from '../utils/testData';
 
-type OperatorTab = 'overview' | 'influencer' | 'calendar' | 'users' | 'settlement' | 'live' | 'workflow' | 'campaigns' | 'listup' | 'collabs' | 'sellers' | 'directory' | 'managers';
+/**
+ * 운영자 대시보드 — 탭을 일하는 순서대로 묶는다.
+ *
+ * 탭이 13개까지 늘어나 두 줄로 접히면서, 무엇이 매일 보는 화면이고 무엇이 어쩌다
+ * 한 번 여는 화면인지 구분이 사라졌다. 그래서 네 묶음으로 나눴다.
+ *
+ *   현황     — 전체 현황 (하루를 여기서 시작한다)
+ *   캠페인   — 승인 → 리스트업 → 캠페인 관리 (돈이 흐르는 순서 그대로)
+ *   인플루언서 — 인플루언서 DB, 브랜드 매칭 지원자
+ *   운영     — 회원 관리, 담당자 계정, 정산·매출
+ *
+ * 준비중이거나 다른 탭과 겹치던 화면(라이브 운영·라이브 승인·제안 워크플로·
+ * 인플루언서별·일정 캘린더)은 없앴다. 1:1 다이렉트 제안은 전체 현황 아래의 목록에서
+ * 그대로 볼 수 있으므로 별도 탭이 필요하지 않다.
+ */
+
+type OperatorTab =
+  | 'overview'
+  | 'campaigns'
+  | 'listup'
+  | 'collabs'
+  | 'influencerdb'
+  | 'directory'
+  | 'users'
+  | 'managers'
+  | 'settlement';
+
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
 interface AdminStats {
@@ -29,20 +55,6 @@ interface AdminStats {
   rejected: number;
 }
 
-// A settlement row as returned by /api/admin/settlements-overview.
-interface SettlementRow {
-  id: string;
-  proposal_id: string;
-  influencer_username: string;
-  business_username: string;
-  company_name?: string;
-  title: string;
-  amount: number;
-  scheduled_date: string;
-  status: 'scheduled' | 'pending' | 'completed';
-  completed_at?: string | null;
-}
-
 interface SettlementSummary {
   total: number;
   scheduled: number;
@@ -51,17 +63,6 @@ interface SettlementSummary {
   totalAmount: number;
   paidAmount: number;
   pendingAmount: number;
-}
-
-// Unified calendar event spanning collab proposals and settlement due-dates.
-interface CalEvent {
-  id: string;
-  kind: 'proposal' | 'settlement';
-  username: string;
-  title: string;
-  company: string;
-  amount: number;
-  status: string;
 }
 
 interface AdminNotification {
@@ -82,21 +83,16 @@ interface OperatorDashboardProps {
 
 const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
   const [proposals, setProposals] = useState<(BusinessProposal & { _username: string })[]>([]);
-  const [influencers, setInfluencers] = useState<string[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
-  const [settlements, setSettlements] = useState<SettlementRow[]>([]);
   const [settlementSummary, setSettlementSummary] = useState<SettlementSummary | null>(null);
-  // 라이브 승인 대기(사업자등록증 심사 대기) 건수 — 탭 배지로 노출한다.
-  const [sellerPendingCount, setSellerPendingCount] = useState(0);
+  // /api/admin/operator-overview 집계. 전체 현황과 순수익 카드가 같은 응답을 쓴다.
+  const [overview, setOverview] = useState<any | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<OperatorTab>('overview');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [selectedInfluencer, setSelectedInfluencer] = useState<string | null>(null);
-  const [influencerSearch, setInfluencerSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   // Operators work against real accounts by default; seed/QA data is hidden
   // until this toggle is flipped on.
   const [showTestData, setShowTestData] = useState(false);
@@ -155,7 +151,6 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       }
       const data = await res.json();
       setProposals(data.proposals || []);
-      setInfluencers(data.influencers || []);
       setStats(data.stats || null);
 
       // Mark admin as authenticated so sub-panels render. Use the bearer token
@@ -168,22 +163,17 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       setNotifications(notifData.notifications || []);
       setUnreadCount(notifData.unreadCount || 0);
 
-      // 라이브 승인 대기 건수를 받아 탭 배지로 표시한다.
-      try {
-        const sellerData = await apiService.getAdminSellerVerifications(token, 'pending');
-        setSellerPendingCount(sellerData.pendingCount || 0);
-      } catch {
-        setSellerPendingCount(0);
-      }
+      // 전체 현황 집계(가입 계정·브랜드 매칭 지원·캠페인 예산/마진·AI 수익).
+      setOverviewLoading(true);
+      const overviewData = await apiService.getAdminOperatorOverview(token);
+      setOverview(overviewData && !overviewData.error ? overviewData : null);
+      setOverviewLoading(false);
 
-      // Pull settlement data so the calendar deadlines and the overview revenue
-      // summary share the same source as the 정산·매출 tab.
+      // 정산 요약은 순수익 카드의 거래 현황과 정산 탭이 함께 쓴다.
       try {
         const settlementData = await apiService.getAdminSettlementsOverview(token);
-        setSettlements(settlementData.settlements || []);
         setSettlementSummary(settlementData.summary || null);
       } catch {
-        setSettlements([]);
         setSettlementSummary(null);
       }
     } catch {
@@ -209,7 +199,6 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     setUnreadCount(0);
   };
 
-  // Filter proposals by status + influencer
   const filteredProposals = useMemo(() => {
     let filtered = proposals;
     if (!showTestData) {
@@ -218,180 +207,13 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     if (statusFilter !== 'all') {
       filtered = filtered.filter(p => p.status === statusFilter);
     }
-    if (selectedInfluencer) {
-      filtered = filtered.filter(p => p._username === selectedInfluencer);
-    }
     return filtered;
-  }, [proposals, statusFilter, selectedInfluencer, showTestData]);
+  }, [proposals, statusFilter, showTestData]);
 
   const hiddenTestCount = useMemo(
     () => proposals.filter(p => isTestProposal(p)).length,
     [proposals]
   );
-
-  // Calendar helpers
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = todayInSeoul();
-
-  const getDateStr = (day: number) =>
-    `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-  const calendarProposals = useMemo(
-    () => proposals.filter(p =>
-      (p.status === 'accepted' || p.status === 'completed') && (showTestData || !isTestProposal(p))
-    ),
-    [proposals, showTestData]
-  );
-
-  // Settlement rows that carry a scheduled due-date — these drive the calendar
-  // markers and the "다가오는 마감" list alongside collab proposals.
-  const calendarSettlements = useMemo(
-    () => settlements.filter(s =>
-      s.scheduled_date && (showTestData || !isTestProposal({
-        influencer_username: s.influencer_username,
-        business_username: s.business_username,
-        company_name: s.company_name,
-        title: s.title,
-      }))
-    ),
-    [settlements, showTestData]
-  );
-
-  const eventsMap = useMemo(() => {
-    const map: Record<string, CalEvent[]> = {};
-    const push = (key: string, ev: CalEvent) => {
-      if (!map[key]) map[key] = [];
-      map[key].push(ev);
-    };
-    // Collab proposals span every day between start and end.
-    calendarProposals.forEach(p => {
-      if (!p.start_date || !p.end_date) return;
-      const start = new Date(p.start_date);
-      const end = new Date(p.end_date);
-      const cursor = new Date(start);
-      while (cursor <= end) {
-        const key = cursor.toISOString().split('T')[0];
-        push(key, {
-          id: `p_${p.id}`,
-          kind: 'proposal',
-          username: p._username,
-          title: p.title,
-          company: p.company_name,
-          amount: p.fee || 0,
-          status: p.status,
-        });
-        cursor.setDate(cursor.getDate() + 1);
-      }
-    });
-    // Settlements land on their scheduled due-date.
-    calendarSettlements.forEach(s => {
-      const key = (s.scheduled_date || '').split('T')[0];
-      if (!key) return;
-      push(key, {
-        id: `s_${s.id}`,
-        kind: 'settlement',
-        username: s.influencer_username,
-        title: `정산 · ${s.title}`,
-        company: s.company_name || s.business_username || '',
-        amount: s.amount || 0,
-        status: s.status,
-      });
-    });
-    return map;
-  }, [calendarProposals, calendarSettlements]);
-
-  const selectedEvents = selectedDate ? (eventsMap[selectedDate] || []) : [];
-
-  // Total distinct calendar events (used to keep "전체 일정 현황" in sync with
-  // what is actually plotted on the grid).
-  const calendarEventTotal = useMemo(() => {
-    const ids = new Set<string>();
-    Object.values(eventsMap).forEach(list => list.forEach(ev => ids.add(ev.id)));
-    return ids.size;
-  }, [eventsMap]);
-
-  // 현재 보고 있는 달(year/month)의 협업/정산 금액 합계. 캘린더 사이드바에 노출해
-  // 운영자가 월 단위 거래 규모를 한눈에 볼 수 있게 한다.
-  const monthSummary = useMemo(() => {
-    const monthStart = new Date(year, month, 1).getTime();
-    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59).getTime();
-    let collabAmount = 0;
-    let collabCount = 0;
-    calendarProposals.forEach(p => {
-      if (!p.start_date || !p.end_date) return;
-      const start = new Date(p.start_date).getTime();
-      const end = new Date(p.end_date).getTime();
-      // 협업 기간이 이번 달과 겹치면 포함.
-      if (start <= monthEnd && end >= monthStart) {
-        collabAmount += p.fee || 0;
-        collabCount++;
-      }
-    });
-    let settlementAmount = 0;
-    let settlementCount = 0;
-    calendarSettlements.forEach(s => {
-      const d = new Date((s.scheduled_date || '').split('T')[0]).getTime();
-      if (d >= monthStart && d <= monthEnd) {
-        settlementAmount += s.amount || 0;
-        settlementCount++;
-      }
-    });
-    return { collabAmount, collabCount, settlementAmount, settlementCount, total: collabAmount + settlementAmount };
-  }, [calendarProposals, calendarSettlements, year, month]);
-
-  const isCurrentMonth = useMemo(() => {
-    const now = new Date();
-    return now.getFullYear() === year && now.getMonth() === month;
-  }, [year, month]);
-
-  // "다가오는 마감" merges collab end-dates with settlement due-dates. Unpaid
-  // settlements are always included (even if overdue) because they remain
-  // actionable for the operator until they are completed.
-  const upcomingDeadlines = useMemo(() => {
-    const now = Date.now();
-    type Deadline = { id: string; date: string; username: string; title: string; sub: string; kind: 'proposal' | 'settlement' };
-    const items: Deadline[] = [];
-    calendarProposals.forEach(p => {
-      if (p.status !== 'accepted' || !p.end_date) return;
-      if (new Date(p.end_date).getTime() < now) return;
-      items.push({ id: `p_${p.id}`, date: p.end_date, username: p._username, title: p.title, sub: p.company_name, kind: 'proposal' });
-    });
-    calendarSettlements.forEach(s => {
-      if (s.status === 'completed' || !s.scheduled_date) return;
-      items.push({ id: `s_${s.id}`, date: s.scheduled_date, username: s.influencer_username, title: `정산 · ${s.title}`, sub: s.company_name || s.business_username || '', kind: 'settlement' });
-    });
-    return items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 8);
-  }, [calendarProposals, calendarSettlements]);
-
-  // Per-influencer stats. `revenue` counts only proposals the influencer
-  // approved (accepted/completed) — pending and rejected proposals are excluded
-  // from revenue. `totalFee` keeps the gross of all proposals for reference.
-  const influencerStats = useMemo(() => {
-    const map: Record<string, { total: number; pending: number; accepted: number; completed: number; rejected: number; totalFee: number; revenue: number }> = {};
-    proposals.forEach(p => {
-      const u = p._username;
-      if (!map[u]) map[u] = { total: 0, pending: 0, accepted: 0, completed: 0, rejected: 0, totalFee: 0, revenue: 0 };
-      map[u].total++;
-      if (p.status === 'pending') map[u].pending++;
-      if (p.status === 'accepted') map[u].accepted++;
-      if (p.status === 'completed') map[u].completed++;
-      if (p.status === 'rejected') map[u].rejected++;
-      map[u].totalFee += p.fee || 0;
-      if (p.status === 'accepted' || p.status === 'completed') map[u].revenue += p.fee || 0;
-    });
-    return map;
-  }, [proposals]);
-
-  // 인플루언서별 탭: 검색어로 필터링하고 매출(승인된 제안 금액) 높은 순으로 정렬.
-  const sortedInfluencers = useMemo(() => {
-    const q = influencerSearch.trim().toLowerCase();
-    return influencers
-      .filter(u => !q || u.toLowerCase().includes(q))
-      .sort((a, b) => (influencerStats[b]?.revenue || 0) - (influencerStats[a]?.revenue || 0));
-  }, [influencers, influencerSearch, influencerStats]);
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -416,15 +238,6 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     }
   };
 
-  // Calendar marker color: settlements are visually distinct from collabs so an
-  // operator can tell a payout due-date from an active collaboration at a glance.
-  const eventColor = (ev: CalEvent) => {
-    if (ev.kind === 'settlement') {
-      return ev.status === 'completed' ? 'bg-indigo-500' : 'bg-amber-500';
-    }
-    return ev.status === 'completed' ? 'bg-blue-500' : 'bg-green-500';
-  };
-
   const getDaysLeft = (endDate: string) => {
     if (!endDate) return null;
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -445,7 +258,36 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     return `${days}일 전`;
   };
 
-  const weekDays = ['일', '월', '화', '수', '목', '금', '토'];
+  // 탭 묶음. 배지는 "지금 손이 필요한 건수"만 붙인다 — 모든 탭에 숫자를 붙이면
+  // 급한 것이 무엇인지 다시 알 수 없게 된다.
+  const pendingCampaigns = overview?.campaigns?.pendingApproval || 0;
+  const pendingDirectory = overview?.directory?.influencer?.pending || 0;
+  const navGroups: { group: string; tabs: { key: OperatorTab; label: string; badge?: number }[] }[] = [
+    { group: '현황', tabs: [{ key: 'overview', label: '전체 현황' }] },
+    {
+      group: '캠페인',
+      tabs: [
+        { key: 'campaigns', label: '1. 캠페인 승인', badge: pendingCampaigns },
+        { key: 'listup', label: '2. 인플루언서 리스트업' },
+        { key: 'collabs', label: '3. 캠페인 관리' },
+      ],
+    },
+    {
+      group: '인플루언서',
+      tabs: [
+        { key: 'influencerdb', label: '인플루언서 DB' },
+        { key: 'directory', label: '브랜드 매칭 지원자', badge: pendingDirectory },
+      ],
+    },
+    {
+      group: '운영',
+      tabs: [
+        { key: 'users', label: '회원 관리' },
+        { key: 'managers', label: '담당자 계정' },
+        { key: 'settlement', label: '정산·매출' },
+      ],
+    },
+  ];
 
   if (loading) {
     return (
@@ -570,607 +412,196 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-6">
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6 flex-wrap">
-          {[
-            { key: 'overview' as OperatorTab, label: '전체 현황' },
-            { key: 'campaigns' as OperatorTab, label: '1. 캠페인 승인' },
-            { key: 'listup' as OperatorTab, label: '2. 인플루언서 리스트업' },
-            { key: 'collabs' as OperatorTab, label: '3. 선정 인플루언서 관리' },
-            { key: 'directory' as OperatorTab, label: '브랜드 매칭 지원자' },
-            { key: 'sellers' as OperatorTab, label: '라이브 승인', badge: sellerPendingCount > 0 ? String(sellerPendingCount) : undefined },
-            { key: 'users' as OperatorTab, label: '회원 관리' },
-            { key: 'managers' as OperatorTab, label: '담당자 계정' },
-            { key: 'settlement' as OperatorTab, label: '정산·매출' },
-            { key: 'live' as OperatorTab, label: '라이브 운영', badge: '준비중' },
-            { key: 'workflow' as OperatorTab, label: '제안 워크플로' },
-            { key: 'influencer' as OperatorTab, label: '인플루언서별' },
-            { key: 'calendar' as OperatorTab, label: '일정 캘린더' },
-          ].map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setSelectedInfluencer(null); setSelectedDate(null); setStatusFilter('all'); }}
-              className={`px-4 py-2.5 rounded-xl font-black text-sm transition-all flex items-center gap-1.5 ${
-                activeTab === tab.key
-                  ? 'bg-slate-900 text-white shadow-lg'
-                  : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              {tab.label}
-              {tab.badge && (
-                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${
-                  activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'
-                }`}>
-                  {tab.badge}
-                </span>
-              )}
-            </button>
+        {/* Tab Navigation — 일하는 순서대로 묶어 둔다. */}
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
+          {navGroups.map((group, gi) => (
+            <React.Fragment key={group.group}>
+              {gi > 0 && <div className="hidden md:block w-px h-8 bg-slate-200" />}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest mr-0.5">{group.group}</span>
+                {group.tabs.map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => { setActiveTab(tab.key); setStatusFilter('all'); setExpandedId(null); }}
+                    className={`px-3.5 py-2 rounded-xl font-black text-[13px] transition-all flex items-center gap-1.5 ${
+                      activeTab === tab.key
+                        ? 'bg-slate-900 text-white shadow-lg'
+                        : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {tab.label}
+                    {!!tab.badge && tab.badge > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${
+                        activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'
+                      }`}>
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </React.Fragment>
           ))}
         </div>
 
-        {/* Overview Tab */}
-        {activeTab === 'overview' && !stats && (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-12 text-center">
-            <p className="text-slate-400 font-bold text-sm">아직 데이터가 없습니다.</p>
-            <p className="text-slate-300 font-bold text-xs mt-1">제안이 접수되면 여기에 현황이 표시됩니다.</p>
-          </div>
-        )}
-        {activeTab === 'overview' && stats && (
+        {/* 전체 현황 */}
+        {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Growth metrics */}
+            <AdminOperatorOverview
+              data={overview}
+              loading={overviewLoading}
+              onNavigate={(tab) => setActiveTab(tab as OperatorTab)}
+            />
+
+            {/* 순수익 — 멤버십 / 캠페인 마진 / AI */}
+            {adminToken && (
+              <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} overview={overview} />
+            )}
+
+            {/* 활동 지표 */}
             {adminToken && <AdminGrowthCards token={adminToken} />}
-            {/* Revenue summary (same source as 정산·매출 tab) */}
-            {adminToken && <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} />}
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">인플루언서</p>
-                <p className="text-2xl font-black text-slate-900">{stats.totalInfluencers}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">전체 제안</p>
-                <p className="text-2xl font-black text-slate-900">{stats.totalProposals}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">대기중</p>
-                <p className="text-2xl font-black text-amber-600">{stats.pending}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">수락됨</p>
-                <p className="text-2xl font-black text-green-600">{stats.accepted}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">완료</p>
-                <p className="text-2xl font-black text-blue-600">{stats.completed}</p>
-              </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">거절됨</p>
-                <p className="text-2xl font-black text-red-500">{stats.rejected}</p>
-              </div>
-            </div>
 
-            {/* Status Filter Tabs */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {[
-                { key: 'all' as StatusFilter, label: '전체', count: stats.totalProposals },
-                { key: 'pending' as StatusFilter, label: '대기중', count: stats.pending, color: 'amber' },
-                { key: 'accepted' as StatusFilter, label: '수락됨', count: stats.accepted, color: 'green' },
-                { key: 'rejected' as StatusFilter, label: '거절됨', count: stats.rejected, color: 'red' },
-                { key: 'completed' as StatusFilter, label: '완료', count: stats.completed, color: 'blue' },
-              ].map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setStatusFilter(f.key)}
-                  className={`px-3 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-1.5 ${
-                    statusFilter === f.key
-                      ? 'bg-slate-900 text-white shadow-lg'
-                      : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  {f.label}
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${
-                    statusFilter === f.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {f.count}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* Enhanced Proposal List - One-Line Format */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="font-black text-slate-900">
-                  {statusFilter === 'all' ? '전체 제안 목록' : `${statusFilter === 'pending' ? '대기중' : statusFilter === 'accepted' ? '수락됨' : statusFilter === 'rejected' ? '거절됨' : '완료'} 제안`}
-                </h3>
-                <div className="flex items-center gap-3">
-                  {hiddenTestCount > 0 && (
-                    <button
-                      onClick={() => setShowTestData(v => !v)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition-all ${
-                        showTestData ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                      }`}
-                      title="testuser, 더미 제안 등 운영과 무관한 데이터를 숨기거나 표시합니다."
-                    >
-                      {showTestData ? `테스트 데이터 표시중 (${hiddenTestCount})` : `테스트 데이터 ${hiddenTestCount}건 숨김`}
-                    </button>
-                  )}
-                  <span className="text-xs font-bold text-slate-400">{filteredProposals.length}건</span>
+            {/* 1:1 다이렉트 제안 — 광고주가 특정 인플루언서에게 직접 보낸 제안 */}
+            <div className="space-y-3">
+              <div className="flex items-end justify-between gap-2 flex-wrap">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">1:1 다이렉트 제안</h3>
+                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+                    광고주가 특정 인플루언서에게 직접 보낸 제안입니다. 공개 모집 캠페인은 캠페인 탭에서 처리합니다.
+                  </p>
                 </div>
-              </div>
-
-              {/* Table Header */}
-              <div className="hidden md:grid grid-cols-12 gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-                <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">광고주</div>
-                <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">제안 내용</div>
-                <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">대상 인플루언서</div>
-                <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">금액 / 기간</div>
-                <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">상태</div>
-              </div>
-
-              <div className="divide-y divide-slate-50">
-                {filteredProposals.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <p className="text-slate-400 font-bold">해당 상태의 제안이 없습니다.</p>
-                  </div>
-                ) : (
-                  filteredProposals.map(proposal => (
-                    <div key={proposal.id}>
-                      {/* Desktop: One-line row */}
-                      <div
-                        className="hidden md:grid grid-cols-12 gap-2 px-5 py-3.5 items-center hover:bg-slate-50/50 transition-all cursor-pointer"
-                        onClick={() => setExpandedId(expandedId === proposal.id ? null : proposal.id)}
-                      >
-                        {/* Advertiser */}
-                        <div className="col-span-2 min-w-0">
-                          <p className="font-black text-slate-900 text-sm truncate">{proposal.company_name}</p>
-                          <p className="text-[10px] font-bold text-slate-400 truncate">{proposal.contact_person}</p>
-                        </div>
-                        {/* Proposal Content */}
-                        <div className="col-span-3 min-w-0">
-                          <p className="font-bold text-slate-700 text-sm truncate">{proposal.title}</p>
-                          <p className="text-[10px] font-bold text-slate-300 truncate">{proposal.category} · {proposal.content?.slice(0, 40)}{(proposal.content?.length || 0) > 40 ? '...' : ''}</p>
-                        </div>
-                        {/* Target Influencer */}
-                        <div className="col-span-3 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shrink-0">
-                              <span className="text-[10px] font-black text-white">{proposal._username.slice(0, 1).toUpperCase()}</span>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-black text-blue-600 text-xs truncate">@{proposal._username}</p>
-                              <p className="text-[10px] font-bold text-slate-400 truncate">
-                                {proposal.contact_email}{proposal.contact_phone ? ` · ${proposal.contact_phone}` : ''}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Fee / Period */}
-                        <div className="col-span-2">
-                          <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
-                          <p className="text-[9px] font-bold text-slate-300">
-                            {formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}
-                          </p>
-                        </div>
-                        {/* Status */}
-                        <div className="col-span-2 flex items-center gap-2">
-                          {getStatusBadge(proposal.status)}
-                          {getDaysLeft(proposal.end_date)}
-                        </div>
-                      </div>
-
-                      {/* Mobile: Card layout */}
-                      <div
-                        className="md:hidden p-4 hover:bg-slate-50/50 transition-all cursor-pointer"
-                        onClick={() => setExpandedId(expandedId === proposal.id ? null : proposal.id)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                            <span className="text-xs font-black text-blue-600">
-                              {proposal._username.slice(0, 2).toUpperCase()}
-                            </span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              {getStatusBadge(proposal.status)}
-                              <span className="text-[10px] font-bold text-slate-300">@{proposal._username}</span>
-                              {getDaysLeft(proposal.end_date)}
-                            </div>
-                            <p className="font-bold text-slate-900 text-sm truncate">{proposal.title}</p>
-                            <p className="text-[10px] font-bold text-slate-400">{proposal.company_name} · {proposal.contact_person}</p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Expanded Detail */}
-                      {expandedId === proposal.id && (
-                        <div className="px-5 pb-4 border-t border-slate-100 pt-4 space-y-3 animate-in fade-in duration-200">
-                          <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap">{proposal.content}</p>
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">회사명</p>
-                              <p className="text-xs font-bold text-slate-900">{proposal.company_name}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">담당자</p>
-                              <p className="text-xs font-bold text-slate-900">{proposal.contact_person}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">인플루언서</p>
-                              <p className="text-xs font-bold text-blue-600">@{proposal._username}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">이메일</p>
-                              <p className="text-xs font-bold text-slate-900 truncate">{proposal.contact_email}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">연락처</p>
-                              <p className="text-xs font-bold text-slate-900">{proposal.contact_phone || '-'}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">카테고리</p>
-                              <p className="text-xs font-bold text-slate-900">{proposal.category}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-2.5">
-                              <p className="text-[9px] font-black text-slate-400">접수일</p>
-                              <p className="text-xs font-bold text-slate-900">{formatDate(proposal.created_at)}</p>
-                            </div>
-                          </div>
-                          {proposal.revenue_share != null && proposal.revenue_share > 0 && (
-                            <p className="text-xs font-bold text-slate-500">수익 배분: {proposal.revenue_share}%</p>
-                          )}
-                          {proposal.reference_links && proposal.reference_links.length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">레퍼런스 링크</p>
-                              <div className="space-y-1">
-                                {proposal.reference_links.map((link, idx) => (
-                                  <a
-                                    key={idx}
-                                    href={link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block text-xs text-blue-600 font-bold hover:underline truncate"
-                                  >
-                                    {link}
-                                  </a>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {proposal.attachments && proposal.attachments.length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">첨부 파일</p>
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                {proposal.attachments.map((url, idx) => {
-                                  const ext = url.split('.').pop()?.toLowerCase() || '';
-                                  const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext);
-                                  const fileLabel: Record<string, string> = {
-                                    pdf: 'PDF', doc: 'DOC', docx: 'DOCX', xls: 'XLS', xlsx: 'XLSX',
-                                    ppt: 'PPT', pptx: 'PPTX', txt: 'TXT', zip: 'ZIP',
-                                  };
-                                  return (
-                                    <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="block">
-                                      {isImage ? (
-                                        <img
-                                          src={url}
-                                          alt={`첨부 ${idx + 1}`}
-                                          className="w-full h-24 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all"
-                                        />
-                                      ) : (
-                                        <div className="w-full h-24 rounded-lg border border-slate-200 bg-slate-50 hover:border-blue-400 transition-all flex flex-col items-center justify-center gap-1">
-                                          <span className="text-lg">
-                                            {ext === 'pdf' ? '📄' : ['doc', 'docx'].includes(ext) ? '📝' : ['xls', 'xlsx'].includes(ext) ? '📊' : ['ppt', 'pptx'].includes(ext) ? '📑' : ext === 'zip' ? '📦' : '📎'}
-                                          </span>
-                                          <span className="text-[10px] font-black text-slate-500">{fileLabel[ext] || ext.toUpperCase()}</span>
-                                        </div>
-                                      )}
-                                    </a>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          {proposal.status === 'rejected' && proposal.rejection_reason && (
-                            <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-                              <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">거절 사유</p>
-                              <p className="text-sm text-red-700 font-medium">{proposal.rejection_reason}</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))
+                {hiddenTestCount > 0 && (
+                  <button
+                    onClick={() => setShowTestData(v => !v)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition-all ${
+                      showTestData ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                    title="testuser, 더미 제안 등 운영과 무관한 데이터를 숨기거나 표시합니다."
+                  >
+                    {showTestData ? `테스트 데이터 표시중 (${hiddenTestCount})` : `테스트 데이터 ${hiddenTestCount}건 숨김`}
+                  </button>
                 )}
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Influencer Management Tab */}
-        {activeTab === 'users' && (
-          adminToken
-            ? <AdminInfluencersPanel token={adminToken} />
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 데이터가 표시됩니다." />
-        )}
-
-        {/* 담당자 계정 — 일반 계정에 담당자 권한을 주고 내린다. */}
-        {activeTab === 'managers' && (
-          adminToken
-            ? <AdminManagerAccounts token={adminToken} />
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 담당자 목록이 표시됩니다." />
-        )}
-
-        {/* Settlement Console Tab */}
-        {activeTab === 'settlement' && (
-          adminToken
-            ? <AdminSettlementConsole token={adminToken} />
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 정산 데이터가 표시됩니다." />
-        )}
-
-        {/* Live Commerce Console Tab */}
-        {activeTab === 'live' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="amber"
-                  title="라이브 운영 · 준비중"
-                  body="라이브 커머스 기능은 정식 출시 전 단계입니다. 아래 콘솔(진행 중 방송·사후 리포트·송출 시간·채팅 모더레이션)은 실데이터가 쌓이면 자동으로 채워집니다."
-                />
-                <AdminLiveConsole token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 데이터가 표시됩니다." />
-        )}
-
-        {/* Workflow Console Tab */}
-        {activeTab === 'workflow' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="제안 워크플로 · 1:1 다이렉트 제안 분석"
-                  body="광고주가 특정 인플루언서에게 직접 보낸 협업 제안의 수락/거절·카테고리·금액·거절 사유를 분석합니다. (공개 모집형 캠페인 승인은 '캠페인 승인' 탭에서 처리합니다.)"
-                />
-                <AdminWorkflowConsole token={adminToken} proposals={proposals} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 워크플로 분석이 표시됩니다." />
-        )}
-
-        {/* Campaign Approval Tab */}
-        {activeTab === 'campaigns' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="캠페인 승인 · 공개 모집형 캠페인 심사"
-                  body="광고주가 등록한 공개 모집 캠페인(여러 인플루언서가 지원)을 노출 전에 승인/거절합니다. (특정 인플루언서 대상 1:1 제안 분석은 '제안 워크플로' 탭에 있습니다.)"
-                />
-                <AdminCampaignApproval token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
-        )}
-
-        {/* Campaign influencer listup Tab */}
-        {activeTab === 'listup' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="인플루언서 리스트업 · 승인 캠페인 후보 추천"
-                  body="승인된 캠페인을 선택해 지원자와 등록 인플루언서 풀을 함께 검토하고, 브랜드에 제안할 후보 명단을 만듭니다. 브랜드가 진행 요청한 후보에게 담당자가 조건을 보내고, 수락되면 협업 관리 단계로 자동 전환됩니다."
-                />
-                <AdminCampaignListup token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 리스트업이 표시됩니다." />
-        )}
-
-        {/* 협업 담당(브랜드↔인플루언서 중간 관리) Tab */}
-        {activeTab === 'collabs' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="선정 인플루언서 관리 · 협업 생성부터 정산 예약까지"
-                  body="리스트업 제안을 수락했거나 지원자 중 선정된 인플루언서를 담당자가 관리합니다. 협업 조건 확정, 제출물 검수, 브랜드 의견 전달, 일정 변경과 정산 예약을 한곳에서 처리합니다."
-                />
-                <AdminCollabManagerConsole token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 협업 담당 관리가 표시됩니다." />
-        )}
-
-        {/* 캠페인 리스트 등록(인플루언서/브랜드 지원) Tab */}
-        {activeTab === 'directory' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="브랜드 매칭 지원자 · 인플루언서 채널 검토"
-                  body="브랜드 매칭 받기에 지원한 인플루언서를 팔로워 구간별로 확인합니다. 연결된 Instagram Meta 계정에서 팔로워·팔로잉, 최근 릴스 3개와 최근 3개 대비 이전 3개의 평균 조회수 동향을 갱신해 검토할 수 있습니다."
-                />
-                <AdminCollabDirectory token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
-        )}
-
-        {/* Seller Business Verification Tab */}
-        {activeTab === 'sellers' && (
-          adminToken
-            ? (
-              <div className="space-y-4">
-                <TabIntro
-                  tone="blue"
-                  title="라이브 승인 심사 · 사업자등록증 수동 확인"
-                  body="셀러가 제출한 사업자등록증 이미지를 직접 확인하고 라이브 송출을 승인/거절합니다. 승인한 셀러만 라이브 커머스 송출이 가능합니다."
-                />
-                <AdminSellerVerifications token={adminToken} />
-              </div>
-            )
-            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 라이브 승인 심사가 표시됩니다." />
-        )}
-
-        {/* Influencer Tab */}
-        {activeTab === 'influencer' && (
-          <div className="flex flex-col lg:flex-row gap-6">
-            {/* Influencer List */}
-            <div className="lg:w-80 shrink-0">
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-                <div className="p-4 border-b border-slate-100 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-slate-900 text-sm">인플루언서 목록 ({sortedInfluencers.length})</h3>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">매출순</span>
-                  </div>
-                  <div className="relative">
-                    <svg className="w-4 h-4 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                    <input
-                      type="text"
-                      value={influencerSearch}
-                      onChange={(e) => setInfluencerSearch(e.target.value)}
-                      placeholder="인플루언서 검색 (@아이디)"
-                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
+              {stats && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { key: 'all' as StatusFilter, label: '전체', count: stats.totalProposals },
+                    { key: 'pending' as StatusFilter, label: '대기중', count: stats.pending },
+                    { key: 'accepted' as StatusFilter, label: '수락됨', count: stats.accepted },
+                    { key: 'rejected' as StatusFilter, label: '거절됨', count: stats.rejected },
+                    { key: 'completed' as StatusFilter, label: '완료', count: stats.completed },
+                  ].map(f => (
+                    <button
+                      key={f.key}
+                      onClick={() => setStatusFilter(f.key)}
+                      className={`px-3 py-1.5 rounded-lg font-black text-[11px] transition-all flex items-center gap-1.5 ${
+                        statusFilter === f.key
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {f.label}
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${
+                        statusFilter === f.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        {f.count}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                <div className="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
-                  {sortedInfluencers.map((username, idx) => {
-                    const s = influencerStats[username];
-                    const isActive = selectedInfluencer === username;
-                    return (
-                      <button
-                        key={username}
-                        onClick={() => setSelectedInfluencer(isActive ? null : username)}
-                        className={`w-full p-4 text-left hover:bg-slate-50 transition-all ${isActive ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0 relative">
-                            <span className="text-sm font-black text-white">{username.slice(0, 1).toUpperCase()}</span>
-                            {idx < 3 && (s?.revenue || 0) > 0 && (
-                              <span className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-amber-400 text-white text-[9px] font-black rounded-full flex items-center justify-center">{idx + 1}</span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-black text-slate-900 text-sm">@{username}</p>
-                            <div className="flex gap-2 mt-1">
-                              <span className="text-[9px] font-bold text-slate-400">제안 {s?.total || 0}</span>
-                              {(s?.pending || 0) > 0 && (
-                                <span className="text-[9px] font-black text-amber-600">대기 {s.pending}</span>
-                              )}
-                              {(s?.accepted || 0) > 0 && (
-                                <span className="text-[9px] font-black text-green-600">진행 {s.accepted}</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs font-black text-blue-600">{formatFee(s?.revenue || 0)}</p>
-                            <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">매출</p>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {sortedInfluencers.length === 0 && (
-                    <div className="p-8 text-center">
-                      <p className="text-slate-400 text-sm font-bold">{influencerSearch ? '검색 결과가 없습니다.' : '등록된 인플루언서가 없습니다.'}</p>
-                    </div>
-                  )}
+              )}
+
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+                  <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">광고주</div>
+                  <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">제안 내용</div>
+                  <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">대상 인플루언서</div>
+                  <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">금액 / 기간</div>
+                  <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">상태</div>
                 </div>
-              </div>
-            </div>
 
-            {/* Proposals for Selected Influencer */}
-            <div className="flex-1">
-              {selectedInfluencer ? (
-                <div className="space-y-4">
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <h3 className="font-black text-slate-900 text-lg mb-1">@{selectedInfluencer}</h3>
-                      <div className="text-right">
-                        <p className="text-xl font-black text-blue-600">{formatFee(influencerStats[selectedInfluencer]?.revenue || 0)}</p>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">승인 제안 매출</p>
-                      </div>
+                <div className="divide-y divide-slate-50">
+                  {filteredProposals.length === 0 ? (
+                    <div className="p-10 text-center">
+                      <p className="text-slate-400 font-bold text-sm">해당 상태의 제안이 없습니다.</p>
                     </div>
-                    <div className="grid grid-cols-4 gap-3 mt-4">
-                      <div className="bg-slate-50 rounded-xl p-3 text-center">
-                        <p className="text-lg font-black text-slate-900">{influencerStats[selectedInfluencer]?.total || 0}</p>
-                        <p className="text-[9px] font-bold text-slate-400">전체</p>
-                      </div>
-                      <div className="bg-amber-50 rounded-xl p-3 text-center">
-                        <p className="text-lg font-black text-amber-600">{influencerStats[selectedInfluencer]?.pending || 0}</p>
-                        <p className="text-[9px] font-bold text-amber-500">대기</p>
-                      </div>
-                      <div className="bg-green-50 rounded-xl p-3 text-center">
-                        <p className="text-lg font-black text-green-600">{influencerStats[selectedInfluencer]?.accepted || 0}</p>
-                        <p className="text-[9px] font-bold text-green-500">진행</p>
-                      </div>
-                      <div className="bg-blue-50 rounded-xl p-3 text-center">
-                        <p className="text-lg font-black text-blue-600">{influencerStats[selectedInfluencer]?.completed || 0}</p>
-                        <p className="text-[9px] font-bold text-blue-500">완료</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {filteredProposals.map(proposal => (
-                      <div key={proposal.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+                  ) : (
+                    filteredProposals.map(proposal => (
+                      <div key={proposal.id}>
+                        {/* Desktop: 한 줄 */}
                         <div
-                          className="p-4 flex items-center gap-3 cursor-pointer"
+                          className="hidden md:grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-slate-50/50 transition-all cursor-pointer"
                           onClick={() => setExpandedId(expandedId === proposal.id ? null : proposal.id)}
                         >
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              {getStatusBadge(proposal.status)}
-                              <span className="text-[10px] font-bold text-slate-300">{proposal.category}</span>
-                              {getDaysLeft(proposal.end_date)}
-                            </div>
-                            <p className="font-black text-slate-900 text-sm truncate">{proposal.title}</p>
-                            <p className="text-[10px] font-bold text-slate-400">{proposal.company_name} · {proposal.contact_person}</p>
+                          <div className="col-span-2 min-w-0">
+                            <p className="font-black text-slate-900 text-[12px] truncate">{proposal.company_name}</p>
+                            <p className="text-[10px] font-bold text-slate-400 truncate">{proposal.contact_person}</p>
                           </div>
-                          <div className="text-right shrink-0">
-                            <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
+                          <div className="col-span-3 min-w-0">
+                            <p className="font-bold text-slate-700 text-[12px] truncate">{proposal.title}</p>
+                            <p className="text-[10px] font-bold text-slate-300 truncate">
+                              {proposal.category} · {proposal.content?.slice(0, 40)}{(proposal.content?.length || 0) > 40 ? '...' : ''}
+                            </p>
+                          </div>
+                          <div className="col-span-3 min-w-0">
+                            <p className="font-black text-blue-600 text-[11px] truncate">@{proposal._username}</p>
+                            <p className="text-[10px] font-bold text-slate-400 truncate">
+                              {proposal.contact_email}{proposal.contact_phone ? ` · ${proposal.contact_phone}` : ''}
+                            </p>
+                          </div>
+                          <div className="col-span-2">
+                            <p className="font-black text-blue-600 text-[12px]">{formatFee(proposal.fee)}</p>
                             <p className="text-[9px] font-bold text-slate-300">
                               {formatDate(proposal.start_date)} ~ {formatDate(proposal.end_date)}
                             </p>
                           </div>
+                          <div className="col-span-2 flex items-center gap-2">
+                            {getStatusBadge(proposal.status)}
+                            {getDaysLeft(proposal.end_date)}
+                          </div>
                         </div>
+
+                        {/* Mobile: 카드 */}
+                        <div
+                          className="md:hidden p-4 hover:bg-slate-50/50 transition-all cursor-pointer"
+                          onClick={() => setExpandedId(expandedId === proposal.id ? null : proposal.id)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                {getStatusBadge(proposal.status)}
+                                <span className="text-[10px] font-bold text-slate-300">@{proposal._username}</span>
+                                {getDaysLeft(proposal.end_date)}
+                              </div>
+                              <p className="font-bold text-slate-900 text-sm truncate">{proposal.title}</p>
+                              <p className="text-[10px] font-bold text-slate-400">{proposal.company_name} · {proposal.contact_person}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-black text-blue-600 text-sm">{formatFee(proposal.fee)}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 상세 */}
                         {expandedId === proposal.id && (
                           <div className="px-4 pb-4 border-t border-slate-100 pt-3 space-y-3 animate-in fade-in duration-200">
-                            <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap">{proposal.content}</p>
+                            <p className="text-[13px] text-slate-600 font-medium whitespace-pre-wrap">{proposal.content}</p>
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                              <div className="bg-slate-50 rounded-lg p-2.5">
-                                <p className="text-[9px] font-black text-slate-400">회사명</p>
-                                <p className="text-xs font-bold text-slate-900">{proposal.company_name}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-lg p-2.5">
-                                <p className="text-[9px] font-black text-slate-400">담당자</p>
-                                <p className="text-xs font-bold text-slate-900">{proposal.contact_person}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-lg p-2.5">
-                                <p className="text-[9px] font-black text-slate-400">이메일</p>
-                                <p className="text-xs font-bold text-slate-900 truncate">{proposal.contact_email}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-lg p-2.5">
-                                <p className="text-[9px] font-black text-slate-400">연락처</p>
-                                <p className="text-xs font-bold text-slate-900">{proposal.contact_phone || '-'}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-lg p-2.5">
-                                <p className="text-[9px] font-black text-slate-400">접수일</p>
-                                <p className="text-xs font-bold text-slate-900">{formatDate(proposal.created_at)}</p>
-                              </div>
+                              {[
+                                { k: '회사명', v: proposal.company_name },
+                                { k: '담당자', v: proposal.contact_person },
+                                { k: '인플루언서', v: `@${proposal._username}` },
+                                { k: '이메일', v: proposal.contact_email },
+                                { k: '연락처', v: proposal.contact_phone || '-' },
+                                { k: '카테고리', v: proposal.category },
+                                { k: '접수일', v: formatDate(proposal.created_at) },
+                              ].map(item => (
+                                <div key={item.k} className="bg-slate-50 rounded-lg p-2.5">
+                                  <p className="text-[9px] font-black text-slate-400">{item.k}</p>
+                                  <p className="text-[11px] font-bold text-slate-900 truncate">{item.v}</p>
+                                </div>
+                              ))}
                             </div>
                             {proposal.revenue_share != null && proposal.revenue_share > 0 && (
                               <p className="text-xs font-bold text-slate-500">수익 배분: {proposal.revenue_share}%</p>
@@ -1229,251 +660,127 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                             {proposal.status === 'rejected' && proposal.rejection_reason && (
                               <div className="bg-red-50 border border-red-100 rounded-xl p-3">
                                 <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">거절 사유</p>
-                                <p className="text-sm text-red-700 font-medium">{proposal.rejection_reason}</p>
+                                <p className="text-[13px] text-red-700 font-medium">{proposal.rejection_reason}</p>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
-                    ))}
-                  </div>
+                    ))
+                  )}
                 </div>
-              ) : (
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-12 text-center">
-                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  </div>
-                  <h4 className="font-black text-slate-900 text-lg mb-1">인플루언서를 선택해주세요</h4>
-                  <p className="text-slate-400 text-sm font-bold">왼쪽 목록에서 인플루언서를 선택하면 상세 정보를 확인할 수 있습니다.</p>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Calendar Tab */}
-        {activeTab === 'calendar' && (
-          <div className="flex flex-col xl:flex-row gap-6">
-            <div className="flex-1">
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between p-5 md:p-8 border-b border-slate-100">
-                  <button
-                    onClick={() => setCurrentDate(new Date(year, month - 1, 1))}
-                    className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <h3 className="text-xl md:text-2xl font-black text-slate-900">{year}년 {month + 1}월</h3>
-                  <div className="flex items-center gap-2">
-                    {!isCurrentMonth && (
-                      <button
-                        onClick={() => { setCurrentDate(new Date()); setSelectedDate(null); }}
-                        className="px-3 h-12 rounded-xl bg-slate-900 text-white text-xs font-black hover:bg-slate-800 transition-all"
-                      >
-                        오늘
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
-                      className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center hover:bg-slate-100 transition-all"
-                    >
-                      <svg className="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
+        {/* 1. 캠페인 승인 */}
+        {activeTab === 'campaigns' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="캠페인 승인 · 공개 모집형 캠페인 심사"
+                  body="광고주가 등록한 공개 모집 캠페인을 노출 전에 승인/거절합니다. 한 줄에 브랜드·단가·예산·모집·기간·담당자가 모두 보이며, 설명과 지원 조건은 '상세'를 눌러 확인합니다."
+                />
+                <AdminCampaignApproval token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 승인 관리가 표시됩니다." />
+        )}
 
-                <div className="grid grid-cols-7">
-                  {weekDays.map(day => (
-                    <div key={day} className="p-2.5 text-center text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
-                      {day}
-                    </div>
-                  ))}
-                </div>
+        {/* 2. 인플루언서 리스트업 */}
+        {activeTab === 'listup' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="인플루언서 리스트업 · 후보 명단과 단가 책정"
+                  body="승인된 캠페인을 골라 지원자와 등록 인플루언서 풀을 함께 검토하고, 브랜드에 제안할 후보 명단을 만듭니다. 후보마다 인플루언서 단가와 브랜드 제시가를 함께 입력하면 그 차액이 우리 수익으로 집계됩니다."
+                />
+                <AdminCampaignListup token={adminToken} />
+              </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 리스트업이 표시됩니다." />
+        )}
 
-                <div className="grid grid-cols-7">
-                  {Array.from({ length: firstDay }).map((_, i) => (
-                    <div key={`e-${i}`} className="p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50" />
-                  ))}
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1;
-                    const dateStr = getDateStr(day);
-                    const events = eventsMap[dateStr] || [];
-                    const isToday = dateStr === today;
-                    const isSelected = dateStr === selectedDate;
-                    const dayOfWeek = (firstDay + i) % 7;
-
-                    return (
-                      <div
-                        key={day}
-                        onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                        className={`p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
-                          isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
-                        }`}
-                      >
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black ${
-                          isToday ? 'bg-slate-900 text-white'
-                          : dayOfWeek === 0 ? 'text-red-400'
-                          : dayOfWeek === 6 ? 'text-blue-400'
-                          : 'text-slate-700'
-                        }`}>
-                          {day}
-                        </span>
-                        <div className="mt-1 space-y-0.5">
-                          {events.slice(0, 2).map(ev => (
-                            <div
-                              key={ev.id}
-                              className={`${eventColor(ev)} text-white text-[10px] font-bold px-1 py-0.5 rounded truncate leading-tight`}
-                            >
-                              <span className="opacity-70">{ev.kind === 'settlement' ? '💰' : `@${ev.username}`}</span> {ev.title}
-                            </div>
-                          ))}
-                          {events.length > 2 && (
-                            <p className="text-[10px] font-bold text-slate-400 px-1">+{events.length - 2}건</p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+        {/* 3. 캠페인 관리 */}
+        {activeTab === 'collabs' && (
+          adminToken
+            ? (
+              <div className="space-y-5">
+                <TabIntro
+                  title="캠페인 관리 · 전체 진행과 담당자 배정"
+                  body="모든 캠페인이 어느 단계에서 멈춰 있고 누가 맡고 있는지 한 표로 봅니다. 담당자를 바로 바꿀 수 있고, 아래 협업 콘솔에서는 조건 확정·제출물 검수·정산 예약을 처리합니다."
+                />
+                <AdminCampaignBoard token={adminToken} />
+                <div className="pt-1">
+                  <h3 className="text-sm font-black text-slate-900 mb-2">선정 인플루언서 협업 관리</h3>
+                  <AdminCollabManagerConsole token={adminToken} />
                 </div>
               </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 캠페인 관리가 표시됩니다." />
+        )}
 
-              {selectedDate && (
-                <div className="mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <h4 className="font-black text-slate-900 mb-4">{formatDate(selectedDate)} 일정</h4>
-                  {selectedEvents.length === 0 ? (
-                    <p className="text-slate-400 text-sm font-bold">이 날짜에 예정된 일정이 없습니다.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {selectedEvents.map(ev => {
-                        const statusLabel = ev.kind === 'settlement'
-                          ? (ev.status === 'completed' ? '정산 완료' : ev.status === 'pending' ? '정산 진행' : '정산 예정')
-                          : (ev.status === 'completed' ? '완료' : '진행중');
-                        const statusClass = ev.kind === 'settlement'
-                          ? (ev.status === 'completed' ? 'text-indigo-500' : 'text-amber-500')
-                          : (ev.status === 'completed' ? 'text-blue-500' : 'text-green-500');
-                        return (
-                          <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                            <div className={`w-2 h-12 rounded-full shrink-0 ${eventColor(ev)}`} />
-                            <div className="flex-1 min-w-0">
-                              <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
-                              <p className="text-xs font-bold text-slate-400">@{ev.username} · {ev.company} · {formatFee(ev.amount)}</p>
-                            </div>
-                            <span className={`text-xs font-black ${statusClass}`}>
-                              {statusLabel}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Calendar Sidebar */}
-            <div className="xl:w-80 shrink-0 space-y-4">
-              <div className="bg-gradient-to-br from-slate-900 to-slate-700 rounded-2xl shadow-sm p-5 text-white">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-black text-white/60 uppercase tracking-widest">{month + 1}월 거래액</h4>
-                  <span className="text-[10px] font-bold text-white/50">{monthSummary.collabCount + monthSummary.settlementCount}건</span>
-                </div>
-                <p className="text-3xl font-black mb-3">{formatFee(monthSummary.total)}</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-white/10 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold text-white/50 uppercase tracking-widest">협업</p>
-                    <p className="text-sm font-black">{formatFee(monthSummary.collabAmount)}</p>
-                    <p className="text-[9px] font-bold text-white/40">{monthSummary.collabCount}건</p>
-                  </div>
-                  <div className="bg-white/10 rounded-xl p-2.5">
-                    <p className="text-[9px] font-bold text-white/50 uppercase tracking-widest">정산</p>
-                    <p className="text-sm font-black">{formatFee(monthSummary.settlementAmount)}</p>
-                    <p className="text-[9px] font-bold text-white/40">{monthSummary.settlementCount}건</p>
-                  </div>
-                </div>
+        {/* 인플루언서 DB */}
+        {activeTab === 'influencerdb' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="인플루언서 DB · 팔로워 · 팔로잉 · 릴스 동향"
+                  body="픽스폴리오에 등록된 인플루언서를 한 표로 정리해 둡니다. 팔로워와 팔로잉, 최근 릴스 3개 평균 조회수를 그 이전 3개와 비교한 동향, 참여율로 정렬해 지금 뜨는 계정을 찾을 수 있습니다."
+                />
+                <AdminInfluencerDatabase token={adminToken} />
               </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 DB가 표시됩니다." />
+        )}
 
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">전체 일정 현황</h4>
-                  <span className="text-[10px] font-bold text-slate-400">{calendarEventTotal}건</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-green-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-black text-green-600">{calendarProposals.filter(p => p.status === 'accepted').length}</p>
-                    <p className="text-[10px] font-bold text-green-500">협업 진행중</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-black text-blue-600">{calendarProposals.filter(p => p.status === 'completed').length}</p>
-                    <p className="text-[10px] font-bold text-blue-500">협업 완료</p>
-                  </div>
-                  <div className="bg-amber-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-black text-amber-600">{calendarSettlements.filter(s => s.status !== 'completed').length}</p>
-                    <p className="text-[10px] font-bold text-amber-500">정산 예정</p>
-                  </div>
-                  <div className="bg-indigo-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-black text-indigo-600">{calendarSettlements.filter(s => s.status === 'completed').length}</p>
-                    <p className="text-[10px] font-bold text-indigo-500">정산 완료</p>
-                  </div>
-                </div>
+        {/* 브랜드 매칭 지원자 */}
+        {activeTab === 'directory' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="브랜드 매칭 지원자 · 인플루언서 채널 검토"
+                  body="브랜드 매칭 받기에 지원한 인플루언서를 팔로워 구간별로 확인합니다. 연결된 Instagram Meta 계정에서 팔로워·팔로잉, 최근 릴스 3개와 최근 3개 대비 이전 3개의 평균 조회수 동향을 갱신해 검토할 수 있습니다."
+                />
+                <AdminCollabDirectory token={adminToken} />
               </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 지원자 목록이 표시됩니다." />
+        )}
 
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">다가오는 마감</h4>
-                <div className="space-y-3">
-                  {upcomingDeadlines.length === 0 ? (
-                    <p className="text-slate-400 text-xs font-bold text-center py-2">예정된 마감/정산 일정이 없습니다.</p>
-                  ) : (
-                    upcomingDeadlines.map(d => {
-                      const diff = Math.ceil((new Date(d.date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                      const isOverdue = diff < 0;
-                      const isUrgent = diff >= 0 && diff <= 3;
-                      const accent = d.kind === 'settlement' ? 'text-amber-600' : 'text-slate-400';
-                      return (
-                        <div key={d.id} className={`p-3 rounded-xl border ${isOverdue ? 'border-red-300 bg-red-50' : isUrgent ? 'border-red-200 bg-red-50/50' : 'border-slate-100 bg-slate-50'}`}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={`text-xs font-black ${isOverdue || isUrgent ? 'text-red-500' : accent}`}>
-                              {d.kind === 'settlement' ? '💰 ' : ''}{isOverdue ? `지연 ${Math.abs(diff)}일` : diff === 0 ? 'D-Day' : `D-${diff}`}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-300">@{d.username}</span>
-                          </div>
-                          <p className="font-black text-slate-900 text-sm truncate">{d.title}</p>
-                          <p className="text-xs font-bold text-slate-400 mt-0.5">{d.sub}</p>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+        {/* 회원 관리 */}
+        {activeTab === 'users' && (
+          adminToken
+            ? <AdminInfluencersPanel token={adminToken} />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 인플루언서 데이터가 표시됩니다." />
+        )}
 
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-green-500" />
-                    <span className="text-sm font-bold text-slate-600">협업 진행중 (수락됨)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-500" />
-                    <span className="text-sm font-bold text-slate-600">협업 완료</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-amber-500" />
-                    <span className="text-sm font-bold text-slate-600">정산 예정 (미지급)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-indigo-500" />
-                    <span className="text-sm font-bold text-slate-600">정산 완료</span>
-                  </div>
-                </div>
+        {/* 담당자 계정 */}
+        {activeTab === 'managers' && (
+          adminToken
+            ? <AdminManagerAccounts token={adminToken} />
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 담당자 목록이 표시됩니다." />
+        )}
+
+        {/* 정산·매출 */}
+        {activeTab === 'settlement' && (
+          adminToken
+            ? (
+              <div className="space-y-4">
+                <TabIntro
+                  title="정산·매출 · 세 수익원의 순수익"
+                  body="멤버십 구독료, 캠페인 마진(브랜드 제시가 − 인플루언서 단가), AI 사용 순수익을 나눠 봅니다. 아래 정산 콘솔에서 인플루언서 지급 예약과 완료 처리를 합니다."
+                />
+                <AdminRevenueCards token={adminToken} settlementSummary={settlementSummary} overview={overview} />
+                <AdminSettlementConsole token={adminToken} />
               </div>
-            </div>
-          </div>
+            )
+            : <EmptyTabState message="아직 데이터가 없습니다." subMessage="관리자 인증이 완료되면 정산 데이터가 표시됩니다." />
         )}
       </div>
 
@@ -1492,8 +799,8 @@ const EmptyTabState: React.FC<{ message: string; subMessage?: string }> = ({ mes
   </div>
 );
 
-// Short explainer banner shown at the top of a tab to clarify its purpose and
-// keep overlapping tabs (캠페인 승인 vs 제안 워크플로) clearly distinct.
+// 탭 상단 설명. 겹쳐 보이는 화면(캠페인 승인 vs 리스트업 vs 캠페인 관리)이
+// 각각 무엇을 하는 곳인지 한 문장으로 구분해 준다.
 const TabIntro: React.FC<{ title: string; body: string; tone?: 'blue' | 'amber' }> = ({ title, body, tone = 'blue' }) => {
   const palette = tone === 'amber'
     ? 'bg-amber-50/70 border-amber-100'

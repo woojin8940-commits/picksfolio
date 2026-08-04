@@ -1683,6 +1683,25 @@ export const apiService = {
     }
   },
 
+  // ───────────────────── Admin: Operator overview ─────────────────────
+  /**
+   * 운영자 전체 현황. 가입 계정 수, 브랜드 매칭 지원자 현황, 캠페인 예산과
+   * 캠페인·AI 순수익을 서버에서 한 번에 집계해 온다. 실패하면 null 을 주고
+   * 화면은 나머지 카드만 그린다 — 한 집계가 막혀도 대시보드는 열려야 한다.
+   */
+  async getAdminOperatorOverview(token: string): Promise<any> {
+    try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/operator-overview', { credentials: 'same-origin', headers });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.error('[API] Failed to get operator overview:', e);
+      return null;
+    }
+  },
+
   // ───────────────────── Admin: Campaign approval ─────────────────────
   async getAdminCampaigns(token: string, status?: string): Promise<{ campaigns: any[]; pendingCount: number }> {
     try {
@@ -1975,6 +1994,10 @@ export const apiService = {
       quote?: Record<string, any>;
       /** 계정별로 다른 견적을 쓸 때. 이쪽이 우선한다. */
       quotes?: Record<string, Record<string, any>>;
+      /** 인플루언서에게 지급할 금액. 제시가와의 차액이 우리 수익이 된다. */
+      payout?: Record<string, any>;
+      /** 계정별 지급액. 이쪽이 우선한다. */
+      payouts?: Record<string, Record<string, any>>;
     } = {},
   ): Promise<any> {
     try {
@@ -1988,6 +2011,8 @@ export const apiService = {
           note: opts.note || '',
           quote: opts.quote || undefined,
           quotes: opts.quotes || undefined,
+          payout: opts.payout || undefined,
+          payouts: opts.payouts || undefined,
         }),
       });
       const json = await res.json().catch(() => ({}));
