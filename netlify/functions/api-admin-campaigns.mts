@@ -53,18 +53,96 @@ export default async (req: Request, context: Context) => {
     try {
       const status = url.searchParams.get("status");
 
+      // 운영자 화면은 캠페인 한 줄에서 "어디까지 진행됐고 누가 맡았고 우리 수익이
+      // 얼마인지"를 함께 읽어야 한다. 목록을 받은 뒤 캠페인마다 추가 요청을 보내면
+      // 캠페인 수만큼 왕복이 생기고, 승인 대기 목록을 훑는 동안 화면이 계속 흔들린다.
+      // 그래서 진행 숫자와 마진을 서브쿼리로 함께 내려준다.
+      //
+      // 마진은 브랜드 제시가(quoted_fee) − 인플루언서 지급가(offer.fee)다. 둘 다
+      // 채워진 행만 세는 이유는, 견적을 아직 적지 않은 행을 함께 더하면 마진이
+      // 인플루언서 단가만큼 마이너스로 찍혀 이익이 나는 캠페인이 손실로 보이기 때문이다.
+      // offer JSONB 금액은 폼을 거쳐 들어오므로 숫자일 때만 더한다 — 문자열 한 개가
+      // ::numeric 캐스팅에서 터지면 목록 전체가 500 이 된다.
       let result;
       if (status) {
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*,
+                 (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count,
+                 lc.listed_count, lc.picked_count, lc.sent_count, lc.accepted_count, lc.declined_count,
+                 mg.priced_count, mg.brand_amount, mg.influencer_cost, mg.margin_amount,
+                 cb.collab_count, cb.collab_running, cb.collab_done, cb.collab_manager
           FROM campaigns c
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS listed_count,
+                   COUNT(*) FILTER (WHERE l.brand_decision = 'pick')::int AS picked_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'sent')::int AS sent_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'accepted')::int AS accepted_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'declined')::int AS declined_count
+            FROM campaign_listups l WHERE l.campaign_id = c.id
+          ) lc ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE p.brand_amount > 0 AND p.offer_fee > 0)::int AS priced_count,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.brand_amount ELSE 0 END), 0)::bigint AS brand_amount,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.offer_fee + p.offer_second_fee ELSE 0 END), 0)::bigint AS influencer_cost,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.brand_amount - (p.offer_fee + p.offer_second_fee) ELSE 0 END), 0)::bigint AS margin_amount
+            FROM (
+              SELECT COALESCE(l.quoted_fee, 0) + COALESCE(l.quoted_second_use_fee, 0) AS brand_amount,
+                     CASE WHEN jsonb_typeof(l.offer->'fee') = 'number' THEN (l.offer->>'fee')::numeric
+                          WHEN l.offer->>'fee' ~ '^[0-9]+$' THEN (l.offer->>'fee')::numeric ELSE 0 END AS offer_fee,
+                     CASE WHEN jsonb_typeof(l.offer->'secondUseFee') = 'number' THEN (l.offer->>'secondUseFee')::numeric
+                          WHEN l.offer->>'secondUseFee' ~ '^[0-9]+$' THEN (l.offer->>'secondUseFee')::numeric ELSE 0 END AS offer_second_fee
+              FROM campaign_listups l
+              WHERE l.campaign_id = c.id AND l.outreach_status = 'accepted'
+            ) p
+          ) mg ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS collab_count,
+                   COUNT(*) FILTER (WHERE cc.status = 'in_progress')::int AS collab_running,
+                   COUNT(*) FILTER (WHERE cc.status = 'completed')::int AS collab_done,
+                   MAX(cc.manager_username) AS collab_manager
+            FROM campaign_collabs cc WHERE cc.campaign_id = c.id
+          ) cb ON TRUE
           WHERE c.status = ${status}
           ORDER BY c.created_at DESC
         `;
       } else {
         result = await db.sql`
-          SELECT c.*, (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count
+          SELECT c.*,
+                 (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = c.id) as application_count,
+                 lc.listed_count, lc.picked_count, lc.sent_count, lc.accepted_count, lc.declined_count,
+                 mg.priced_count, mg.brand_amount, mg.influencer_cost, mg.margin_amount,
+                 cb.collab_count, cb.collab_running, cb.collab_done, cb.collab_manager
           FROM campaigns c
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS listed_count,
+                   COUNT(*) FILTER (WHERE l.brand_decision = 'pick')::int AS picked_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'sent')::int AS sent_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'accepted')::int AS accepted_count,
+                   COUNT(*) FILTER (WHERE l.outreach_status = 'declined')::int AS declined_count
+            FROM campaign_listups l WHERE l.campaign_id = c.id
+          ) lc ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE p.brand_amount > 0 AND p.offer_fee > 0)::int AS priced_count,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.brand_amount ELSE 0 END), 0)::bigint AS brand_amount,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.offer_fee + p.offer_second_fee ELSE 0 END), 0)::bigint AS influencer_cost,
+                   COALESCE(SUM(CASE WHEN p.brand_amount > 0 AND p.offer_fee > 0 THEN p.brand_amount - (p.offer_fee + p.offer_second_fee) ELSE 0 END), 0)::bigint AS margin_amount
+            FROM (
+              SELECT COALESCE(l.quoted_fee, 0) + COALESCE(l.quoted_second_use_fee, 0) AS brand_amount,
+                     CASE WHEN jsonb_typeof(l.offer->'fee') = 'number' THEN (l.offer->>'fee')::numeric
+                          WHEN l.offer->>'fee' ~ '^[0-9]+$' THEN (l.offer->>'fee')::numeric ELSE 0 END AS offer_fee,
+                     CASE WHEN jsonb_typeof(l.offer->'secondUseFee') = 'number' THEN (l.offer->>'secondUseFee')::numeric
+                          WHEN l.offer->>'secondUseFee' ~ '^[0-9]+$' THEN (l.offer->>'secondUseFee')::numeric ELSE 0 END AS offer_second_fee
+              FROM campaign_listups l
+              WHERE l.campaign_id = c.id AND l.outreach_status = 'accepted'
+            ) p
+          ) mg ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS collab_count,
+                   COUNT(*) FILTER (WHERE cc.status = 'in_progress')::int AS collab_running,
+                   COUNT(*) FILTER (WHERE cc.status = 'completed')::int AS collab_done,
+                   MAX(cc.manager_username) AS collab_manager
+            FROM campaign_collabs cc WHERE cc.campaign_id = c.id
+          ) cb ON TRUE
           ORDER BY c.created_at DESC
         `;
       }

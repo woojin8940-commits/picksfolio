@@ -88,6 +88,36 @@ export type ListupQuote = {
   profileLine: string;
 };
 
+export type ListupPayout = { fee: number; secondUseFee: number };
+
+/**
+ * 인플루언서에게 지급할 금액. 견적(브랜드에게 제시할 금액)과 쌍으로 적는다.
+ *
+ * 우리 수익은 이 둘의 차액이다 — 단가 100만원인 사람을 110만원으로 넘기면 10만원이
+ * 우리 몫이다. 그래서 지급액을 제안을 보내는 시점까지 미뤄 두면, 명단을 만든 담당자도
+ * 운영자도 그 명단이 남기는 수익을 모른 채 브랜드에게 금액을 제시하게 된다.
+ *
+ * 저장 위치를 새로 만들지 않고 offer.fee 를 그대로 쓴다. 제안을 보낼 때 인플루언서가
+ * 받는 금액이 바로 이 값이므로, 따로 칸을 만들면 두 값이 어긋날 자리가 생긴다.
+ */
+export function normalizePayout(raw: any): ListupPayout {
+  const p = raw && typeof raw === "object" ? raw : {};
+  return { fee: money(p.fee), secondUseFee: money(p.secondUseFee) };
+}
+
+/**
+ * 지급액을 제안 초안에 합친다. 일정·가이드처럼 이미 적어 둔 값은 건드리지 않는다.
+ * 아직 보내지 않은 제안에만 쓴다 — 보낸 뒤에 금액이 바뀌면 인플루언서가 본 조건과
+ * 우리 기록이 달라진다.
+ */
+export function mergePayoutIntoOffer(existing: any, payout: ListupPayout): ListupOffer {
+  return normalizeOffer({
+    ...normalizeOffer(existing),
+    fee: payout.fee,
+    secondUseFee: payout.secondUseFee,
+  });
+}
+
 /**
  * 브랜드에게 보여 줄 견적을 정규화한다.
  *
@@ -327,6 +357,11 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     };
   }
 
+  const payoutFee = Number(offer.fee || 0);
+  const payoutSecondUseFee = Number(offer.secondUseFee || 0);
+  const brandAmount = quotedFee + Number(row.quoted_second_use_fee || 0);
+  const payoutAmount = payoutFee + payoutSecondUseFee;
+
   return {
     ...base,
     listedBy: row.listed_by || "",
@@ -336,6 +371,9 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
           // 계정 이름도 신원이다. 이름만 가리고 아이디를 남기면 가린 뜻이 없다.
           influencerUsername: base.outreachStatus === "accepted" ? base.influencerUsername : "",
           snapshot: maskSnapshot(snapshot, base.outreachStatus),
+          // 지급액은 브랜드에게 나가지 않는다. 브랜드가 제시가와 지급액을 나란히 보면
+          // 우리 마진이 그대로 드러나고, 그 자리에서 값을 깎는 협상이 시작된다.
+          offer: { ...offer, fee: 0, secondUseFee: 0 },
         }
       : {}),
     ...(viewer === "manager"
@@ -344,6 +382,12 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
           brandName: row.brand_name || "",
           businessUsername: row.business_username || "",
           managerUsername: row.manager_username || "",
+          // 인플루언서에게 줄 금액과 그 차액. 화면마다 다시 빼면 "제시가만 있고
+          // 지급액이 빈 후보"를 마진 0원이 아니라 손해로 잘못 그리게 된다.
+          payoutFee,
+          payoutSecondUseFee,
+          // 두 값이 모두 있을 때만 숫자를 준다. null 은 "아직 모름"이고 0 과 다르다.
+          margin: brandAmount > 0 && payoutFee > 0 ? brandAmount - payoutAmount : null,
         }
       : {}),
   };

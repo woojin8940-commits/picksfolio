@@ -25,6 +25,18 @@ export const formatKRW = (value: number | string | null | undefined): string => 
   return `${formatNumberWithCommas(num)}원`;
 };
 
+/**
+ * 부호를 살린 금액. 마진처럼 음수가 나올 수 있는 값에 쓴다.
+ *
+ * formatKRW 는 숫자만 남기고 부호를 버리므로 -50000 이 "50,000원"으로 찍힌다.
+ * 손해가 이익으로 보이는 자리라서, 그 자리만은 부호를 직접 붙인다.
+ */
+export const formatSignedKRW = (value: number | null | undefined): string => {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num === 0) return '0원';
+  return `${num < 0 ? '-' : '+'}${formatNumberWithCommas(Math.abs(Math.round(num)))}원`;
+};
+
 // PortOne V2 requires paymentId / issueId / customerId to contain ASCII characters only.
 // Korean (or any non-ASCII) usernames must be encoded before embedding in those IDs.
 export const toAsciiSafeId = (s: string): string =>

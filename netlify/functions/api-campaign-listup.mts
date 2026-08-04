@@ -6,7 +6,9 @@ import { newId, norm } from "./_shared/collab-workflow.mts";
 import {
   acceptListup,
   buildSnapshot,
+  mergePayoutIntoOffer,
   normalizeOffer,
+  normalizePayout,
   normalizeQuote,
   offerFromCampaign,
   shapeChannel,
@@ -331,6 +333,15 @@ export default async (req: Request) => {
           quoteByUser[norm(key)] = normalizeQuote(value);
         }
       }
+      // 인플루언서에게 줄 금액. 제시가와 함께 적어 두면 명단을 만든 그 자리에서
+      // 차액(우리 수익)이 계산된다. 비워 두면 제안을 보낼 때 채운다.
+      const payoutDefaults = normalizePayout(body.payout);
+      const payoutByUser: Record<string, ReturnType<typeof normalizePayout>> = {};
+      if (body.payouts && typeof body.payouts === "object") {
+        for (const [key, value] of Object.entries(body.payouts)) {
+          payoutByUser[norm(key)] = normalizePayout(value);
+        }
+      }
 
       if (!campaignId || usernames.length === 0) {
         return Response.json({ error: "캠페인과 인플루언서를 지정해 주세요." }, { status: 400 });
@@ -359,16 +370,22 @@ export default async (req: Request) => {
         // 고를 때 CPV 칸이 비어 있으면 금액만 보고 고르게 되는데, 그 판단은
         // 팔로워가 많은 쪽으로만 쏠린다.
         const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
+        // 지급액은 아직 보내지 않은 제안 초안(offer)에 담는다. 제안 폼이 이 초안을
+        // 그대로 불러오므로 담당자가 같은 금액을 두 번 적지 않는다.
+        const payout = payoutByUser[username] || payoutDefaults;
+        const offerDraft = mergePayoutIntoOffer(offerFromCampaign(campaign), payout);
         const res = await db.sql`
           INSERT INTO campaign_listups (
             id, campaign_id, influencer_username, source, snapshot, snapshot_at,
             manager_note, listed_by,
-            quoted_fee, quoted_second_use_fee, guaranteed_views, badge, profile_line
+            quoted_fee, quoted_second_use_fee, guaranteed_views, badge, profile_line,
+            offer
           ) VALUES (
             ${newId("lst")}, ${campaignId}, ${username}, ${source},
             ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername},
             ${quote.fee}, ${quote.secondUseFee}, ${guaranteedViews}, ${quote.badge},
-            ${quote.profileLine}
+            ${quote.profileLine},
+            ${JSON.stringify(offerDraft)}
           )
           ON CONFLICT (campaign_id, influencer_username) DO NOTHING
           RETURNING id
@@ -538,6 +555,27 @@ export default async (req: Request) => {
               updated_at = NOW()
           WHERE id = ${id}
         `;
+        // 지급액을 함께 보냈으면 제안 초안도 고친다. 이미 보낸 제안은 손대지 않는다 —
+        // 인플루언서가 읽은 금액과 우리 기록이 달라지면 어느 쪽이 약속인지 알 수 없다.
+        if (body.payout !== undefined) {
+          if (listup.outreach_status === "not_sent") {
+            const payout = normalizePayout(body.payout);
+            const nextOffer = mergePayoutIntoOffer(listup.offer, payout);
+            await db.sql`
+              UPDATE campaign_listups
+              SET offer = ${JSON.stringify(nextOffer)}, updated_at = NOW()
+              WHERE id = ${id}
+            `;
+          } else {
+            return Response.json(
+              {
+                success: true,
+                warning: "제시가는 저장했습니다. 이미 보낸 제안의 지급 단가는 제안을 회수한 뒤 고칠 수 있습니다.",
+                listup: await reload("manager"),
+              },
+            );
+          }
+        }
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
