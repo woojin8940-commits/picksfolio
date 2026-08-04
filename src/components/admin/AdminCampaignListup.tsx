@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
+import { isManagerListupMode, rewardModeOf } from '../../utils/campaignBrief';
 import ListupWorkspace from '../collab/ListupWorkspace';
 
 /**
@@ -24,11 +25,15 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
 
   // 승인된 캠페인만 리스트업 대상으로 노출한다. 승인 전 후보를 먼저 만들면
   // 브랜드가 볼 수 없는 캠페인에 운영 작업이 쌓이므로 승인과 리스트업 순서를 고정한다.
+  //
+  // 제품 협찬형은 목록에서 아예 뺀다. 지원자만 받는 방식이라 리스트업 자리가 없고,
+  // 골라 들어가도 후보를 올릴 수 없다 — 고를 수 있는데 아무것도 못 하는 선택지는
+  // 담당자가 서버 거절을 보고 나서야 이유를 알게 된다.
   useEffect(() => {
     (async () => {
       const res = await apiService.getAdminCampaigns(token);
       const list = (res.campaigns || [])
-        .filter((c: any) => c.status === 'active')
+        .filter((c: any) => c.status === 'active' && isManagerListupMode(c.reward_mode))
         .sort((a: any, b: any) => {
           const aAssigned = a.manager_username ? 1 : 0;
           const bAssigned = b.manager_username ? 1 : 0;
@@ -59,6 +64,7 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
             </div>
             <p className="text-[11px] text-slate-400 font-medium mt-0.5">
               캠페인을 고르면 후보 풀에서 명단을 만들고, 브랜드가 고른 후보에게 조건을 담아 제안합니다.
+              제품 협찬형은 지원자만 받으므로 목록에 없습니다.
             </p>
           </div>
           <select
@@ -78,6 +84,9 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
 
         {selected && (
           <div className="mt-3 bg-slate-50 rounded-xl px-4 py-3 flex flex-wrap gap-x-5 gap-y-1">
+            <span className="text-[11px] text-slate-600 font-bold">
+              진행 방식 {rewardModeOf(selected.reward_mode).label}
+            </span>
             <span className="text-[11px] text-slate-600 font-bold">
               보상 {selected.reward_amount ? formatKoreanWon(selected.reward_amount) : '미정'}
             </span>
@@ -105,7 +114,7 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
           <p className="mt-1 text-[11px] font-medium text-slate-400">
             {campaigns.length > 0
               ? '담당자가 없는 캠페인은 목록 위쪽에 표시됩니다.'
-              : '먼저 캠페인 승인 탭에서 캠페인을 승인하고 담당자를 배정해 주세요.'}
+              : '광고비 지급형·공동구매형 캠페인을 승인하면 이 목록에 올라옵니다.'}
           </p>
         </div>
       ) : (

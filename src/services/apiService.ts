@@ -2300,6 +2300,34 @@ export const apiService = {
     }
   },
 
+  /**
+   * 내가 이미 매칭 등록서를 냈는지.
+   *
+   * 등록 버튼을 감출지 정하는 데만 쓴다. 서버는 접수 여부와 상태·접수 시각만 돌려주고
+   * 등록서 내용은 담지 않는다 — 화면이 쓰지 않는 값이다. 응답을 못 받으면
+   * submitted:false 로 둔다: 이미 낸 사람에게 버튼이 한 번 더 보이는 것이,
+   * 아직 안 낸 사람에게 버튼이 사라지는 것보다 낫다.
+   */
+  async getMyCollabDirectory(
+    variant: 'influencer' | 'brand',
+    username?: string,
+  ): Promise<{ submitted: boolean; status?: string; createdAt?: string | null; error?: string }> {
+    try {
+      const params = new URLSearchParams({ mine: '1', role: variant });
+      if (username) params.set('username', username);
+      const res = await fetch(`/api/collab-directory?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { submitted: false, error: json?.error || '확인하지 못했습니다.' };
+      return { submitted: !!json.submitted, status: json.status || '', createdAt: json.createdAt || null };
+    } catch (e) {
+      console.error('[API] Failed to check collab directory submission:', e);
+      return { submitted: false, error: '네트워크 오류' };
+    }
+  },
+
   async getCreatorChannel(username: string, token?: string): Promise<any> {
     try {
       const res = await fetch(`/api/creator-channel?username=${encodeURIComponent(username)}`, {

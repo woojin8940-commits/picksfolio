@@ -262,6 +262,8 @@ const QuoteFields: React.FC<{
 
 const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, onNotify }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
+  // 캠페인 한 건. 진행 방식에 따라 리스트업 자리 자체가 사라지므로 화면이 이 값을 읽는다.
+  const [campaign, setCampaign] = useState<any>(null);
   const [pool, setPool] = useState<any[]>([]);
   const [offerDraft, setOfferDraft] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -307,6 +309,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
         return;
       }
       setCandidates(res.candidates || []);
+      setCampaign(res.campaign || null);
       setPool(res.pool || []);
       setOfferDraft(res.offerDraft || null);
     },
@@ -407,6 +410,11 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     );
   }
 
+  // 서버가 내려 주는 값을 그대로 쓴다. 진행 방식 목록을 화면에서 다시 판단하면 서버가
+  // 막는 캠페인에 후보 풀이 열려 있는 상태가 생긴다. 값이 없던 시절의 응답에서는
+  // 열어 둔다 — 담당자 작업을 막는 쪽으로 기울면 진행 중인 캠페인이 멈춘다.
+  const listupAllowed = campaign ? campaign.managerListup !== false : true;
+
   return (
     <div className="space-y-4">
       {message && (
@@ -419,8 +427,26 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {/* 제품 협찬형 안내. 후보 풀을 감추는 것만으로는 "왜 없지?"가 되므로 이유를 적어 둔다.
+          이미 올라간 명단은 그대로 보여 준다 — 진행 방식이 바뀌기 전에 만든 후보가 화면에서
+          사라지면 제안을 받은 인플루언서를 담당자가 찾을 수 없다. */}
+      {campaign && !listupAllowed && (
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+          <p className="text-[12px] font-black text-amber-700">
+            제품 협찬형 캠페인은 지원자만 받습니다
+          </p>
+          <p className="mt-0.5 text-[11px] font-medium text-amber-600">
+            광고비가 없는 협업은 제안 성사율이 낮아 담당자 리스트업을 붙이지 않습니다. 지원자
+            명단에서 브랜드가 직접 고르는 방식이라 후보 풀은 표시하지 않습니다.
+          </p>
+        </div>
+      )}
+
+      <div
+        className={`grid grid-cols-1 gap-4 ${listupAllowed ? 'xl:grid-cols-2' : ''}`}
+      >
         {/* 후보 풀 */}
+        {listupAllowed && (
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <div className="px-4 py-3.5 border-b border-slate-100">
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -518,6 +544,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
             )}
           </div>
         </div>
+        )}
 
         {/* 명단 */}
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
@@ -531,7 +558,9 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
           <div className="p-3 space-y-2.5 max-h-[720px] overflow-y-auto bg-slate-50/60">
             {candidates.length === 0 ? (
               <p className="text-[11px] text-slate-400 font-bold text-center py-8">
-                아직 명단이 비어 있습니다. 왼쪽에서 후보를 골라 올려 주세요.
+                {listupAllowed
+                  ? '아직 명단이 비어 있습니다. 왼쪽에서 후보를 골라 올려 주세요.'
+                  : '지원자만 받는 캠페인입니다. 명단은 만들지 않습니다.'}
               </p>
             ) : (
               candidates.map((c) => {

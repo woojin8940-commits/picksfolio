@@ -56,6 +56,19 @@ export type RewardModeDef = {
    */
   openApply: boolean;
   /**
+   * 담당자가 인플루언서 후보 명단(리스트업)을 만들어 주는 방식인지.
+   *
+   * openApply 와 반대말이 아니다. 공동구매는 목록에 걸어 두고 지원을 받으면서
+   * 동시에 담당자가 판매력 있는 후보를 찾아 올린다 — 둘 다 켜져 있다. 제품 협찬형은
+   * 지원자만 받는다: 광고비가 없는 협업에 담당자가 후보를 찾아 제안하면 성사율이
+   * 낮고, 그 시간은 광고비가 걸린 캠페인에 써야 한다.
+   *
+   * 이 값이 꺼진 진행 방식에서는 브랜드 화면에 리스트업 자리가 아예 없어야 한다.
+   * 비어 있는 리스트업 칸은 "담당자가 아직 안 올렸다"로 읽히고, 브랜드는 오지 않을
+   * 명단을 기다리게 된다.
+   */
+  managerListup: boolean;
+  /**
    * 희망 인플루언서(규모별 인원 배분)를 브랜드가 직접 정하는지.
    *
    * 지원을 받아 고르는 방식에서는 나노·매크로처럼 규모를 미리 못 박을 수 없다.
@@ -76,6 +89,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     lines: ['광고비를 지급하고 콘텐츠를 의뢰합니다.', '담당자가 조건에 맞는 후보를 찾아 드립니다.'],
     secondUseNote: '2차 활용 범위는 담당자와 협의합니다',
     openApply: false,
+    managerListup: true,
     pickInfluencer: true,
     headcountLabel: '모집 인원',
     campaignType: 'ad_collab',
@@ -87,6 +101,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     lines: ['광고비 없이 제품 협찬만으로 진행합니다.', '지원한 인플루언서 중에서 골라 진행합니다.'],
     secondUseNote: '2차 활용은 별도 동의가 필요합니다',
     openApply: true,
+    managerListup: false,
     pickInfluencer: false,
     headcountLabel: '협찬 인원',
     campaignType: 'ad_collab',
@@ -98,6 +113,7 @@ export const REWARD_MODES: RewardModeDef[] = [
     lines: ['제품을 함께 팔고 판매 수수료를 지급합니다.', '지원한 인플루언서 중에서 골라 진행합니다.'],
     secondUseNote: '판매 기간과 수수료 지급은 담당자가 정리합니다',
     openApply: true,
+    managerListup: true,
     pickInfluencer: false,
     headcountLabel: '모집 인원',
     campaignType: 'group_buy',
@@ -113,6 +129,18 @@ export const normalizeRewardMode = (value: unknown): RewardMode =>
 
 /** 캠페인 협업 목록에 노출되는 진행 방식들. 서버 필터와 짝이다. */
 export const OPEN_APPLY_MODES: RewardMode[] = REWARD_MODES.filter(m => m.openApply).map(m => m.value);
+
+/**
+ * 담당자 리스트업이 붙는 진행 방식들. 서버(_shared/reward-mode.mts) 의 같은 이름과 짝이다.
+ *
+ * 화면에서만 감추면 리스트업 자리는 사라지지만 후보는 그대로 올라갈 수 있다.
+ * 그래서 서버도 같은 목록으로 명단 등록을 막는다.
+ */
+export const MANAGER_LISTUP_MODES: RewardMode[] = REWARD_MODES.filter(m => m.managerListup).map(m => m.value);
+
+/** 이 캠페인에 담당자 리스트업이 붙는지. reward_mode 값을 그대로 넘겨도 된다. */
+export const isManagerListupMode = (value: unknown): boolean =>
+  rewardModeOf(typeof value === 'string' ? value : '').managerListup;
 
 /** 공동구매 판매 수수료(%) 의 허용 범위. */
 export const COMMISSION_RANGE = { min: 1, max: 90 } as const;

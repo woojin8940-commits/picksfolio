@@ -204,7 +204,9 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
           )}
 
           {/* 확정 기한. 브랜드 화면의 남은 시간이 이 값을 읽는다. 기한을 정하지
-              않아도 명단은 이미 브랜드에게 보인다 — 여기서 정하는 것은 표시뿐이다. */}
+              않아도 명단은 이미 브랜드에게 보인다 — 여기서 정하는 것은 표시뿐이다.
+              제품 협찬형에는 명단이 없으므로 이 줄도 없다. */}
+          {open.managerListup !== false && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <label className="text-[10px] text-slate-400 font-black">브랜드 확정 기한</label>
             <input
@@ -235,6 +237,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
               </button>
             )}
           </div>
+          )}
         </div>
 
         <ListupWorkspace campaignId={open.id} onNotify={onNotify} />

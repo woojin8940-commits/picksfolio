@@ -103,6 +103,10 @@ async function loadLinkedChannel(db: any, req: Request, applicantUsername: strin
   }
 }
 
+/** 계정 이름 비교용 정규화. 비즈니스 계정의 'biz/' 접두사를 떼고 소문자로 맞춘다. */
+const norm = (raw: unknown) =>
+  String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
+
 function parseJsonArray(raw: unknown): any[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw !== "string" || !raw) return [];
@@ -270,6 +274,51 @@ export default async (req: Request) => {
            ${(b.note || "").toString()})
       `;
       return Response.json({ success: true, id });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
+    }
+  }
+
+  // ── 본인 접수 여부 확인(로그인 사용자) ─────────────────────────────
+  //
+  // 화면이 "이미 등록했는지"만 알면 매칭 등록 버튼을 감출 수 있다. 그 판단에 남의
+  // 등록서를 읽을 필요는 없으므로, 여기서 돌려주는 것은 접수 여부와 상태·접수 시각뿐이다.
+  // 이름·연락처·단가는 담지 않는다 — 운영자 화면이 볼 값이고, 화면이 쓰지 않는 값을
+  // 실어 보내면 그만큼 새어 나갈 자리가 늘어난다.
+  //
+  // 관리자 확인(requireAdmin)보다 앞에 둔다. 인플루언서는 관리자가 아니고, 뒤에 두면
+  // 여기 닿기 전에 403 이 나간다. 본인 확인은 callerIsAnyOf 로 한다 — 쿼리로 넘어온
+  // 계정 이름을 그대로 믿으면 남의 접수 여부를 조회할 수 있다.
+  if (req.method === "GET" && url.searchParams.get("mine") === "1") {
+    try {
+      const caller = await requireSignedInUser(req);
+      if (!caller.ok) return caller.response;
+      const role = url.searchParams.get("role") === "brand" ? "brand" : "influencer";
+      const requested = norm(url.searchParams.get("username") || "");
+      const username = requested || norm(caller.username);
+      if (!username) {
+        return Response.json({ error: "계정을 확인할 수 없습니다." }, { status: 400 });
+      }
+      if (!callerIsAnyOf(caller, [username])) {
+        return Response.json({ error: "본인 계정만 확인할 수 있습니다." }, { status: 403 });
+      }
+
+      const rows = (await db.sql`
+        SELECT id, status, created_at
+        FROM collab_directory_applications
+        WHERE role = ${role}
+          AND LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')) = ${username}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `) as any[];
+      const row = rows?.[0];
+
+      return Response.json({
+        submitted: !!row,
+        role,
+        status: row?.status || "",
+        createdAt: row?.created_at || null,
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }
