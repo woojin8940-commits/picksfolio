@@ -6,8 +6,20 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import {
   addSettlementForProposal,
   parseAmount,
+  removeCollabScheduleRecord,
   removeSettlementsForProposal,
+  upsertCollabScheduleRecord,
 } from "./_shared/collab-records.mts";
+
+/** YYYY-MM-DD 만 통과시킨다. 빈 값·타임스탬프·잘못된 문자열은 빈 문자열. */
+const ymd = (value: unknown): string => {
+  const s = String(value ?? "").trim().split("T")[0];
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+};
+
+/** 협업 내역 상태 판정 기준일. 서버 시각이 UTC 라서 한국 날짜로 맞춘다. */
+const todayInSeoul = (): string =>
+  new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split("T")[0];
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -102,6 +114,43 @@ export default async (req: Request, context: Context) => {
         console.error("Failed to create timeline on accept:", e);
       }
 
+      // 협업일정 등록 — 비즈니스 제안으로 성사된 협업도 협업 내역(캘린더)에 올린다.
+      //
+      // 담당자 리스트업으로 진행되는 캠페인 협업은 담당자가 일정을 체크하면
+      // (api-collab-workflow 의 confirm_schedule) 그 즉시 협업 내역에 한 줄이
+      // 생긴다. 반면 비즈니스 제안으로 성사된 협업은 campaign_collabs 행이 없어
+      // 체크할 화면 자체가 없었고, 업로드 확인 뒤 정산 항목이 생기기 전까지
+      // 인플루언서 캘린더에 그 협업이 존재하지 않았다. 두 경로 전부 일정이
+      // 잡히도록, 제안은 수락 시점에 제안서에 적힌 기간으로 자동 등록한다.
+      //
+      // collab_id 를 `proposal_<제안ID>` 로 두면 캠페인 협업 id 와 섞이지 않고,
+      // 나중에 업체가 기간·금액을 고쳐도 같은 줄이 갱신된다(줄이 늘지 않는다).
+      try {
+        const startDate = ymd(updatedProposal.start_date) || todayInSeoul();
+        const endDate = ymd(updatedProposal.end_date);
+        const today = todayInSeoul();
+        await upsertCollabScheduleRecord({
+          collabId: `proposal_${proposalId}`,
+          influencerUsername: username,
+          title: updatedProposal.title || "협업 프로젝트",
+          companyName: updatedProposal.company_name || "",
+          // 제안 분류(광고 / 커머스)는 협업 내역 분류와 같은 값을 쓴다.
+          category: updatedProposal.category === "커머스" ? "커머스" : "광고",
+          date: startDate,
+          endDate,
+          fee: parseAmount(updatedProposal.fee),
+          status: endDate && endDate < today ? "completed" : startDate <= today ? "in_progress" : "scheduled",
+          memo: "비즈니스 제안 수락 시 자동 등록",
+          source: "business_proposal",
+          // 제안은 담당자가 아니라 인플루언서 본인의 수락으로 확정된다.
+          confirmedBy: username,
+        });
+      } catch (schErr) {
+        // 일정 등록에 실패해도 수락 자체는 되돌리지 않는다. 협업 내역에 한 줄이
+        // 늦게 생기는 것보다, 수락이 실패한 것처럼 보이는 쪽이 더 나쁘다.
+        console.error("[api-proposal-item] Failed to register collab schedule:", schErr);
+      }
+
       // Auto-create settlement record for accepted proposal
       try {
         const stlId = `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -188,6 +237,13 @@ export default async (req: Request, context: Context) => {
         await removeSettlementsForProposal(proposalId, bizUsername, username);
       } catch (stlErr) {
         console.error("[api-proposal-item] Failed to remove linked settlements:", stlErr);
+      }
+
+      // 수락 시 자동 등록된 협업일정도 같이 지운다(사람이 직접 적은 줄은 남는다).
+      try {
+        await removeCollabScheduleRecord(`proposal_${proposalId}`, username);
+      } catch (schErr) {
+        console.error("[api-proposal-item] Failed to remove linked collab schedule:", schErr);
       }
     }
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
+import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 /**
  * 브랜드가 보는 리스트업 — 담당자가 올린 추천 조합.
@@ -188,7 +189,12 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
           <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-2 gap-3">
             {[...openList, ...runningList].map((c) => {
               const snap = c.snapshot || {};
-              const reels = (Array.isArray(snap.recentReels) ? snap.recentReels : []).slice(0, 3);
+              const allReels = Array.isArray(snap.recentReels) ? snap.recentReels : [];
+              const reels = allReels.slice(0, 3);
+              const trend = reelTrendOf(allReels);
+              // 피드 9칸은 톤을 보는 자리다. 수락 전에는 서버가 permalink 를 지우므로
+              // 그림만 오고, 그래도 판단에 필요한 것은 다 온다.
+              const feed = (Array.isArray(snap.recentFeed) ? snap.recentFeed : []).slice(0, 9);
               const outreach = OUTREACH_BADGE[c.outreachStatus] || OUTREACH_BADGE.not_sent;
               const locked = c.outreachStatus === 'accepted';
               const inList = selected.has(c.id);
@@ -253,28 +259,82 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                   </div>
 
                   {reels.length > 0 && (
-                    <div className="grid grid-cols-3 gap-1.5 mt-3">
-                      {reels.map((r: any, i: number) => (
-                        <div key={r?.id || i}>
-                          {r?.thumbnailUrl ? (
-                            <img
-                              src={r.thumbnailUrl}
-                              alt=""
-                              loading="lazy"
-                              className="w-full aspect-[9/16] object-cover rounded-lg bg-slate-100"
-                            />
-                          ) : (
-                            <div className="w-full aspect-[9/16] rounded-lg bg-slate-100 flex items-center justify-center">
-                              <span className="text-[10px] text-slate-300 font-bold">영상</span>
-                            </div>
-                          )}
-                          {r?.views ? (
-                            <p className="text-[10px] text-slate-400 font-bold mt-0.5 truncate">
-                              조회 {formatNumberWithCommas(r.views)}
-                            </p>
-                          ) : null}
-                        </div>
-                      ))}
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-[9px] text-slate-400 font-black">최근 릴스 동향</p>
+                        {trend && trend.percent !== null && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
+                          >
+                            {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                            {trend.percent}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {reels.map((r: any, i: number) => (
+                          <div key={r?.id || i}>
+                            {r?.thumbnailUrl ? (
+                              <img
+                                src={r.thumbnailUrl}
+                                alt=""
+                                loading="lazy"
+                                className="w-full aspect-[9/16] object-cover rounded-lg bg-slate-100"
+                              />
+                            ) : (
+                              <div className="w-full aspect-[9/16] rounded-lg bg-slate-100 flex items-center justify-center">
+                                <span className="text-[10px] text-slate-300 font-bold">영상</span>
+                              </div>
+                            )}
+                            {r?.views ? (
+                              <p className="text-[10px] text-slate-400 font-bold mt-0.5 truncate">
+                                조회 {formatNumberWithCommas(r.views)}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                      {trend ? (
+                        <p className="text-[10px] text-slate-400 font-medium mt-1 leading-relaxed">
+                          최근 {formatNumberWithCommas(trend.recent)}회
+                          {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
+                          {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
+                          {formatNumberWithCommas(trend.worst)}
+                          {trendIsVolatile(trend) ? ' · 편차가 큰 계정입니다' : ''}
+                        </p>
+                      ) : (
+                        // 조회수 권한을 못 받은 계정. "0회"로 적으면 아무도 안 본 영상이 된다.
+                        <p className="text-[10px] text-slate-400 font-medium mt-1">조회수 비공개 · 동향 집계 전</p>
+                      )}
+                    </div>
+                  )}
+
+                  {feed.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[9px] text-slate-400 font-black mb-1">최근 피드 {feed.length}개</p>
+                      <div className="grid grid-cols-3 gap-1">
+                        {feed.map((f: any, i: number) => (
+                          <div key={f?.id || i} className="relative">
+                            {f?.thumbnailUrl ? (
+                              <img
+                                src={f.thumbnailUrl}
+                                alt=""
+                                loading="lazy"
+                                className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                              />
+                            ) : (
+                              // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
+                              // "게시물이 없는 계정"과 구분된다.
+                              <div className="w-full aspect-square rounded-md bg-slate-100" />
+                            )}
+                            {String(f?.mediaType || '').toUpperCase() === 'VIDEO' && (
+                              <span className="absolute bottom-1 right-1 text-[8px] font-black text-white bg-black/50 rounded px-1">
+                                영상
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatNumberWithCommas } from '../../utils/formatters';
+import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 /**
  * 인플루언서 후보 카드.
@@ -12,28 +13,26 @@ import { formatNumberWithCommas } from '../../utils/formatters';
  * 수도 있고 메타 API 로 받아온 값일 수도 있다. 둘을 같은 굵기로 보여주면 브랜드는
  * 어느 숫자도 믿지 않게 된다.
  *
- * ── 아직 만들지 않은 것: 피드 분위기 · 릴스 동향 (메타 API 심사 통과 후) ──
+ * ── 피드 분위기 · 릴스 동향 ──
  *
  * 브랜드가 후보를 고를 때 실제로 확인하고 싶은 것은 평균 숫자가 아니라 "이 계정 톤이
- * 우리 브랜드와 맞는가"다. 그래서 아래 두 가지를 이 카드에 붙일 예정이다.
+ * 우리 브랜드와 맞는가"다. 그래서 두 가지를 함께 싣는다.
  *
  *  1. 피드 9개 그리드 — 최근 게시물 정사각 썸네일 딱 9칸(3×3). 개수를 9로 못 박는
  *     이유는 분위기 판단에 그 정도면 충분하고, 더 늘리면 카드가 프로필 페이지처럼
  *     길어져 후보끼리 비교하기 어려워지기 때문이다. 스크롤 없이 한 눈에 3줄.
- *  2. 최근 릴스 동향 — 지금은 최근 릴스 3개의 조회수만 나열한다. 여기에 회차별
- *     조회수 추이(올라가는 계정인지 내려가는 계정인지)와 평균 대비 최고/최저를
- *     더한다. 조회수 하나만 보면 터진 영상 한 개로 계정 전체를 잘못 판단한다.
+ *  2. 릴스 동향 — 조회수 하나만 보면 터진 영상 한 개로 계정 전체를 잘못 판단한다.
+ *     그래서 최근 3편과 그 이전 3편의 평균을 비교해 올라가는 계정인지 내려가는
+ *     계정인지 보여주고, 평균 대비 최고·최저를 같이 적는다. 최고와 최저가 몇 배씩
+ *     벌어지는 계정은 평균 조회수를 그대로 믿을 수 없다는 뜻이다.
  *
- * 필요한 데이터 경로는 이미 깔려 있다: netlify/functions/_shared/instagram-metrics.mts
- * 가 릴스를 받아 creator_channels.recent_reels 에 저장하고, campaign-listup.mts 가
- * 명단 snapshot 으로 복사한다. 추가할 것은 (a) 릴스가 아닌 일반 피드 미디어 9개를
- * 함께 받아 recent_feed 로 저장하는 것, (b) 그 값을 snapshot 과 metricsFrom 에
- * 통과시키는 것뿐이다.
+ * 두 값 모두 메타 API 로만 채워진다(recent_feed / recent_reels). 그래서 본인 입력
+ * 계정에서는 이 영역이 아예 나오지 않는다 — 빈 칸을 그려 두면 "활동을 안 하는
+ * 사람"으로 잘못 읽히므로, 데이터가 없으면 영역을 접는다.
  *
- * 착수 조건: 메타 앱 심사(instagram_basic / instagram_manage_insights)가 끝나야
- * 한다. 심사 전 토큰으로는 본인 계정 외의 미디어를 읽을 수 없어, 화면을 먼저
- * 만들어 두면 대부분의 후보에게서 빈 칸만 보인다 — 데이터 없는 자리는 "이 사람은
- * 활동을 안 한다"로 잘못 읽힌다. 그래서 화면도 그때 함께 붙인다.
+ * 명단에 올리기 전(제안 수락 전)에는 서버가 permalink 와 캡션을 지우고 썸네일만
+ * 내려보낸다(campaign-listup.mts 의 maskSnapshot). 그래서 썸네일에 링크가 없는
+ * 경우가 정상이고, 카드는 링크 없이도 그림이 보이게 그린다.
  */
 
 export type CandidateMetrics = {
@@ -48,6 +47,7 @@ export type CandidateMetrics = {
   reelsCount?: number;
   metricsSource?: string;
   recentReels?: any[];
+  recentFeed?: any[];
   syncedAt?: string;
   intro?: string;
   categories?: string;
@@ -74,6 +74,11 @@ export const metricsFrom = (raw: any): CandidateMetrics => {
       ? snap.recentReels
       : Array.isArray(raw?.recentReels)
         ? raw.recentReels
+        : [],
+    recentFeed: Array.isArray(snap.recentFeed)
+      ? snap.recentFeed
+      : Array.isArray(raw?.recentFeed)
+        ? raw.recentFeed
         : [],
     syncedAt: snap.syncedAt || raw?.syncedAt || '',
     intro: snap.intro || raw?.intro || '',
@@ -118,7 +123,10 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 }) => {
   const m = metricsFrom(data);
   const source = SOURCE_BADGE[m.metricsSource || 'none'] || SOURCE_BADGE.none;
-  const reels = (m.recentReels || []).slice(0, 3);
+  const allReels = m.recentReels || [];
+  const reels = allReels.slice(0, 3);
+  const trend = reelTrendOf(allReels);
+  const feed = (m.recentFeed || []).slice(0, 9);
   const priceLine = [
     m.adPrice ? `광고 ${m.adPrice}` : '',
     m.shortPrice ? `숏폼 ${m.shortPrice}` : '',
@@ -164,7 +172,15 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 
       {reels.length > 0 && (
         <div className="mb-3">
-          <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">최근 릴스</p>
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-[9px] text-slate-400 font-black uppercase">최근 릴스 동향</p>
+            {trend && trend.percent !== null && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}>
+                {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                {trend.percent}%
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {reels.map((r: any, i: number) => {
               const views = Number(r?.views || 0);
@@ -199,6 +215,62 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
                 </a>
               ) : (
                 <div key={r?.id || i}>{inner}</div>
+              );
+            })}
+          </div>
+          {trend ? (
+            <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+              최근 {formatNumberWithCommas(trend.recent)}회
+              {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
+              {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저 {formatNumberWithCommas(trend.worst)}
+              {trendIsVolatile(trend)
+                ? ' · 편차가 커서 평균보다 최저값을 기준으로 보는 편이 안전합니다'
+                : ''}
+            </p>
+          ) : (
+            // 연동은 됐지만 조회수 권한을 못 받은 계정. "0회"로 적으면 안 본 영상이 된다.
+            <p className="text-[10px] text-slate-400 font-medium mt-1.5">조회수 비공개 계정으로 동향은 집계 전입니다</p>
+          )}
+        </div>
+      )}
+
+      {feed.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">최근 피드 {feed.length}개</p>
+          <div className="grid grid-cols-3 gap-1">
+            {feed.map((f: any, i: number) => {
+              const isVideo = String(f?.mediaType || '').toUpperCase() === 'VIDEO';
+              const inner = f?.thumbnailUrl ? (
+                <div className="relative">
+                  <img
+                    src={f.thumbnailUrl}
+                    alt=""
+                    loading="lazy"
+                    className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                  />
+                  {isVideo && (
+                    <span className="absolute bottom-1 right-1 text-[8px] font-black text-white bg-black/50 rounded px-1">
+                      영상
+                    </span>
+                  )}
+                </div>
+              ) : (
+                // 메타의 미디어 URL 은 만료된다. 지난번에 받아 둔 주소가 죽었을 뿐이니
+                // 빈 칸을 회색 자리로 그려 "게시물이 없는 계정"과 구분한다.
+                <div className="w-full aspect-square rounded-md bg-slate-100" />
+              );
+              return f?.permalink ? (
+                <a
+                  key={f.id || i}
+                  href={f.permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block hover:opacity-80"
+                >
+                  {inner}
+                </a>
+              ) : (
+                <div key={f?.id || i}>{inner}</div>
               );
             })}
           </div>

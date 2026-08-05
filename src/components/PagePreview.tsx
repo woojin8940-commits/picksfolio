@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ExternalLink, ChevronRight, Briefcase, Bell } from 'lucide-react';
+import { ExternalLink, ChevronRight, Briefcase } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
+import { enabledDefaultButtons } from '../utils/pageButtons';
 
 type ThemePreset = 'midnight' | 'white';
 type LayoutTemplate = 'grid' | 'list';
@@ -88,15 +89,17 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       </div>
 
       {/* Contact / action buttons — must mirror the real personal page exactly.
-          The public page renders ONLY the business-proposal, live-notify and the
-          user's custom buttons here (it does NOT show standalone social-network
-          badges), so the preview shows the same set and nothing the user hasn't
-          actually enabled. */}
+          The public page renders ONLY the business-proposal button, the default
+          buttons (kakao / youtube / tiktok / naver — shown when the user filled in
+          a URL) and the user's custom buttons here (it does NOT show standalone
+          social-network badges), so the preview shows the same set and nothing the
+          user hasn't actually enabled. */}
       {(() => {
         const customButtons = (socials.customButtons || []).filter(
           (b: any) => b.label?.trim() && b.url?.trim()
         );
-        const hasAny = socials.businessProposal || socials.liveNotify || customButtons.length > 0;
+        const defaultButtons = enabledDefaultButtons(socials);
+        const hasAny = socials.businessProposal || defaultButtons.length > 0 || customButtons.length > 0;
         if (!hasAny) return null;
         return (
           <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
@@ -106,12 +109,18 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                 비즈니스 제안
               </span>
             )}
-            {socials.liveNotify && (
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold bg-[#2563EB] text-white whitespace-nowrap">
-                <Bell size={5} strokeWidth={2.5} />
-                라이브 알림받기
+            {defaultButtons.map(btn => (
+              <span
+                key={btn.key}
+                className={`flex items-center px-1.5 py-0.5 rounded-md text-[5px] font-bold whitespace-nowrap border ${
+                  themePreset === 'white'
+                    ? 'bg-white border-slate-200 text-slate-700'
+                    : 'bg-white/10 border-white/15 text-white'
+                }`}
+              >
+                {btn.label}
               </span>
-            )}
+            ))}
             {customButtons.map((btn: any) => (
               <span key={btn.id} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: btn.color || '#2563EB' }}>
                 <ExternalLink size={5} strokeWidth={2.5} />

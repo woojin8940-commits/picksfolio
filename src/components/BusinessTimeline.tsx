@@ -66,9 +66,59 @@ interface TimelineData {
   kind?: string;
   managerUsername?: string;
   collabId?: string;
+  /**
+   * 이 대화가 어느 경로로 시작된 협업인지 (서버가 계산해서 내려준다).
+   *
+   *   business_proposal : 비즈니스 제안 → 인플루언서 수락
+   *   manager_collab    : 담당자가 리스트업/선정해 진행하는 캠페인 협업
+   *   campaign          : 담당자 중개 이전에 열린 캠페인 직접 대화방(예전 건)
+   */
+  source?: 'business_proposal' | 'manager_collab' | 'campaign';
+  /** 제안 경로일 때의 제안 상태(pending / accepted / rejected). 모르면 없음. */
+  proposalStatus?: string | null;
 }
 
 const MANAGER_THREAD_KINDS = ['influencer_support', 'brand_support'];
+
+/**
+ * 협업 대화는 두 경로에서 생긴다 — 비즈니스 제안을 수락한 건과, 담당자가
+ * 리스트업해서 진행하는 캠페인 건. 둘이 한 목록에 섞여 있으면 지금 마주 앉은
+ * 상대가 브랜드인지 담당자인지, 이 건이 어떻게 시작됐는지 알 수 없다. 방마다
+ * 출처를 한 칸 붙여 준다.
+ */
+const SOURCE_LABEL: Record<string, { label: string; cls: string }> = {
+  business_proposal: { label: '비즈니스 제안', cls: 'bg-blue-50 text-blue-600' },
+  manager_collab: { label: '담당자 협업', cls: 'bg-slate-900 text-white' },
+  campaign: { label: '캠페인 협업', cls: 'bg-emerald-50 text-emerald-600' },
+};
+
+/** 제안 경로일 때만 쓰는 진행 표시. 수락 전과 후는 대화의 성격이 다르다. */
+const PROPOSAL_STAGE_LABEL: Record<string, { label: string; cls: string }> = {
+  pending: { label: '제안 검토 중', cls: 'bg-amber-50 text-amber-600' },
+  accepted: { label: '협업 진행', cls: 'bg-emerald-50 text-emerald-600' },
+  rejected: { label: '제안 거절', cls: 'bg-slate-100 text-slate-400' },
+  completed: { label: '협업 완료', cls: 'bg-slate-100 text-slate-500' },
+};
+
+/**
+ * 방의 경로. 서버가 내려준 값을 쓰고, 예전 캐시에는 없는 칸이라 방 종류로
+ * 되짚어 본다 — 배지가 통째로 비는 것보다 낫다.
+ */
+const sourceOfTimeline = (t: TimelineData): 'business_proposal' | 'manager_collab' | 'campaign' => {
+  if (t.source) return t.source;
+  if (t.kind && MANAGER_THREAD_KINDS.includes(t.kind)) return 'manager_collab';
+  if ((t.proposalId || '').startsWith('campaign_')) return 'campaign';
+  return 'business_proposal';
+};
+
+/** 목록 위 탭. 담당자 협업 탭에는 예전 캠페인 직접 대화방도 함께 담는다. */
+type TimelineSourceFilter = '' | 'business_proposal' | 'collab';
+
+const matchesSourceFilter = (t: TimelineData, filter: TimelineSourceFilter): boolean => {
+  if (!filter) return true;
+  const source = sourceOfTimeline(t);
+  return filter === 'business_proposal' ? source === 'business_proposal' : source !== 'business_proposal';
+};
 
 /** 이 방에서 내가 마주 앉은 상대의 이름. 담당자 채널이면 담당자다. */
 const counterpartOf = (t: TimelineData | null, userType: string): string => {
@@ -114,6 +164,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [loading, setLoading] = useState(initialTimelines.length === 0);
   const [showList, setShowList] = useState(!initialProposalId);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<TimelineSourceFilter>('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [windowFocused, setWindowFocused] = useState(true);
@@ -362,6 +413,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   }, [normalizedUserName, userType, cacheKey]);
 
   const fetchTimelineDetail = useCallback(async (proposalId: string, showCachedImmediately = false) => {
+    // 목록에만 있는 값(경로·제안 상태)은 상세 응답에 없다. 상세로 갈아끼울 때
+    // 이 두 칸을 챙겨 두지 않으면 방을 열자마자 배지가 사라진다.
+    const listEntry = timelines.find(t => t.proposalId === proposalId);
+    const carryOver = {
+      ...(listEntry?.source ? { source: listEntry.source } : {}),
+      ...(listEntry?.proposalStatus !== undefined ? { proposalStatus: listEntry.proposalStatus } : {}),
+    };
     if (showCachedImmediately) {
       const cached = (() => {
         try {
@@ -371,7 +429,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       })();
       const fromList = timelines.find(t => t.proposalId === proposalId);
       if (cached) {
-        setSelectedTimeline(cached);
+        setSelectedTimeline({ ...cached, ...carryOver });
         lastMessageCountRef.current = cached.comments?.length || 0;
       } else if (fromList && fromList.comments) {
         setSelectedTimeline(fromList);
@@ -394,10 +452,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               return prev;
             }
             lastMessageCountRef.current = serverCount;
-            return { ...data.timeline, comments: [...(data.timeline.comments || []), ...stillPending] };
+            return { ...data.timeline, ...carryOver, comments: [...(data.timeline.comments || []), ...stillPending] };
           }
           lastMessageCountRef.current = serverCount;
-          return data.timeline;
+          return { ...data.timeline, ...carryOver };
         });
         try { localStorage.setItem(detailCacheKey(proposalId), JSON.stringify(data.timeline)); } catch {}
         fetch(`/api/timeline/read/${proposalId}`, {
@@ -701,6 +759,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const totalUnread = timelines.reduce((sum, t) => sum + (t.unreadCount || 0), 0);
 
   const filteredTimelines = timelines.filter(t => {
+    if (!matchesSourceFilter(t, sourceFilter)) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -709,6 +768,22 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       t.proposalTitle.toLowerCase().includes(q)
     );
   });
+
+  // 탭 개수는 검색과 무관하게 전체 기준으로 센다 — 검색 중에 개수가 흔들리면
+  // 그 경로의 협업이 사라진 것처럼 보인다.
+  const SOURCE_TABS: Array<{ value: TimelineSourceFilter; label: string; count: number }> = [
+    { value: '', label: '전체', count: timelines.length },
+    {
+      value: 'business_proposal',
+      label: '비즈니스 제안',
+      count: timelines.filter(t => matchesSourceFilter(t, 'business_proposal')).length,
+    },
+    {
+      value: 'collab',
+      label: '담당자 협업',
+      count: timelines.filter(t => matchesSourceFilter(t, 'collab')).length,
+    },
+  ];
 
   // Sidebar conversation list
   const renderSidebar = () => (
@@ -743,6 +818,28 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/30 transition-all shadow-[0_3px_10px_-6px_rgba(15,23,42,0.4)]"
           />
+        </div>
+
+        {/* 경로별 보기 — 비즈니스 제안으로 성사된 협업과 담당자가 리스트업해
+            진행하는 협업이 같은 목록에 함께 온다. 둘 다 여기서 대화하지만,
+            상대(브랜드 / 담당자)와 진행 방식이 달라 섞여 보이면 찾기 어렵다. */}
+        <div className="flex gap-1.5 mt-2.5">
+          {SOURCE_TABS.map(tab => (
+            <button
+              key={tab.value || 'all'}
+              onClick={() => setSourceFilter(tab.value)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                sourceFilter === tab.value
+                  ? 'bg-blue-500 text-white shadow-[0_4px_10px_-4px_rgba(37,99,235,0.6)]'
+                  : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-1 ${sourceFilter === tab.value ? 'text-white/70' : 'text-gray-400'}`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -790,12 +887,20 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               </svg>
             </div>
             <p className="text-xs font-semibold text-gray-400">
-              {searchQuery ? '검색 결과가 없습니다' : '아직 대화가 없습니다'}
+              {searchQuery ? '검색 결과가 없습니다' : sourceFilter ? '이 경로의 대화가 없습니다' : '아직 대화가 없습니다'}
             </p>
-            {!searchQuery && (
+            {!searchQuery && !sourceFilter && (
               <p className="text-[11px] text-gray-400 mt-1">
-                제안이 수락되면 여기에 표시됩니다
+                비즈니스 제안이 도착하거나 담당자가 협업을 시작하면 여기에 표시됩니다
               </p>
+            )}
+            {!searchQuery && sourceFilter && (
+              <button
+                onClick={() => setSourceFilter('')}
+                className="mt-2 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-[11px] font-bold text-gray-500 hover:bg-gray-100"
+              >
+                전체 보기
+              </button>
             )}
           </div>
         ) : (
@@ -808,6 +913,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               const isUnread = (timeline.unreadCount || 0) > 0;
               const isActive = selectedTimeline?.proposalId === timeline.proposalId;
               const displayName = counterpartOf(timeline, userType);
+              const sourceBadge = SOURCE_LABEL[sourceOfTimeline(timeline)];
+              const stageBadge = sourceOfTimeline(timeline) === 'business_proposal' && timeline.proposalStatus
+                ? PROPOSAL_STAGE_LABEL[timeline.proposalStatus]
+                : undefined;
 
               return (
                 <button
@@ -852,6 +961,18 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                       <p className="text-[11px] md:text-xs text-blue-600 font-semibold truncate mb-0.5 md:mb-1">
                         # {timeline.proposalTitle}
                       </p>
+                      <div className="flex items-center gap-1 mb-0.5 md:mb-1">
+                        {sourceBadge && (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-black shrink-0 ${sourceBadge.cls}`}>
+                            {sourceBadge.label}
+                          </span>
+                        )}
+                        {stageBadge && (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-black shrink-0 ${stageBadge.cls}`}>
+                            {stageBadge.label}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between gap-2">
                         <p className={`text-[11px] md:text-xs truncate ${
                           isUnread ? 'text-gray-600 font-semibold' : 'text-gray-400 font-medium'
@@ -1001,6 +1122,17 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 {userType === 'influencer'
                   ? '이 채널은 담당자와 1:1입니다. 브랜드는 이 대화를 볼 수 없고, 전달이 필요한 내용은 담당자가 정리해 옮깁니다.'
                   : '이 채널은 담당자와 1:1입니다. 인플루언서는 이 대화를 볼 수 없고, 수정 요청이나 의견은 담당자가 정리해 전달합니다.'}
+              </p>
+            )}
+            {/* 제안 경로는 브랜드와 직접 대화한다 — 담당자 채널과 성격이 달라
+                어느 쪽인지 방을 열자마자 알 수 있어야 한다. */}
+            {!isManagerThread && sourceOfTimeline(selectedTimeline) === 'business_proposal' && (
+              <p className="text-[11px] md:text-xs text-gray-400 font-medium mt-1 leading-relaxed">
+                {selectedTimeline.proposalStatus === 'accepted'
+                  ? '비즈니스 제안을 수락해 진행 중인 협업입니다. 조건과 일정은 이 대화에서 직접 정리합니다.'
+                  : selectedTimeline.proposalStatus === 'rejected'
+                    ? '거절한 제안입니다. 지난 대화는 그대로 남아 있습니다.'
+                    : '받은 비즈니스 제안입니다. 수락 전에도 금액·일정·산출물 범위를 먼저 물어볼 수 있습니다.'}
               </p>
             )}
             <div className="mt-2 md:mt-3 inline-flex items-center gap-1.5 md:gap-2 bg-gray-50 border border-gray-200 rounded-md px-2 md:px-3 py-1 md:py-1.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.5)]">

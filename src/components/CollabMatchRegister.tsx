@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiService } from '../services/apiService';
+import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/creatorCategories';
 
 // 캠페인 협업 "매칭 받기" 등록 버튼 + 모달.
 // variant 로 역할을 고정한다:
@@ -104,9 +105,30 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   const [submittedStatus, setSubmittedStatus] = useState('');
   const [linking, setLinking] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  /** 목록에 없는 분야를 직접 적는 칸. 추가하면 infForm.category 로 들어가고 비워진다. */
+  const [customCategory, setCustomCategory] = useState('');
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const isInfluencer = variant === 'influencer';
+
+  // 고른 카테고리는 infForm.category 문자열 한 칸이 원본이다. 별도 상태로 두면
+  // 임시 저장(연동 후 복귀)과 초기화에서 두 값이 어긋난다.
+  const selectedCategories = parseCategoryList(infForm.category);
+
+  const toggleCategory = (name: string) => {
+    const next = selectedCategories.includes(name)
+      ? selectedCategories.filter(c => c !== name)
+      : [...selectedCategories, name];
+    setInfForm(f => ({ ...f, category: joinCategoryList(next) }));
+  };
+
+  const addCustomCategory = () => {
+    // 쉼표는 저장 구분자다. 한 번에 여러 개를 붙여 넣어도 각각으로 갈라 준다.
+    const added = parseCategoryList(customCategory);
+    if (added.length === 0) return;
+    setInfForm(f => ({ ...f, category: joinCategoryList([...parseCategoryList(f.category), ...added]) }));
+    setCustomCategory('');
+  };
 
   const loadChannel = useCallback(async () => {
     if (!isInfluencer || !applicantUsername) return;
@@ -193,6 +215,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       name: '', contact: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
       tiktok_url: '', tiktok_followers: '', naver_blog_url: '', post_price: '', short_price: '', category: '',
     });
+    setCustomCategory('');
     setBrandForm({
       name: '', contact: '', brand_homepage: '', brand_instagram: '', desired_count: '',
       desired_followers: '', budget_text: '', desired_schedule: '', desired_category: '', note: '',
@@ -268,6 +291,13 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       // 계정을 연동하면 인스타 링크는 연동 정보에서 채워지므로 직접 입력하지 않아도 된다.
       if (variant === 'influencer' && !channel.connected && !infForm.instagram_url.trim()) {
         setNotice({ type: 'err', text: '인스타그램 계정을 연동하거나 프로필 링크를 입력해 주세요.' });
+        setSubmitting(false);
+        return;
+      }
+      // 분야가 비어 있으면 캠페인 후보로 추려지지 않는다. 등록만 되고 아무 연락도
+      // 오지 않는 상태를 만들지 않으려면 여기서 막는 편이 낫다.
+      if (variant === 'influencer' && selectedCategories.length === 0) {
+        setNotice({ type: 'err', text: '카테고리를 최소 1개 골라 주세요. 캠페인은 분야로 인플루언서를 찾습니다.' });
         setSubmitting(false);
         return;
       }
@@ -409,7 +439,74 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                     </div>
                   </div>
 
-                  <Field label="카테고리" value={infForm.category} onChange={v => setInfForm(f => ({ ...f, category: v }))} placeholder="뷰티, 패션 등" />
+                  {/* 카테고리 — 눌러서 고르고, 없는 분야는 직접 추가한다.
+                      담당자가 캠페인에 맞는 사람을 추릴 때 쓰는 값이라 여러 개를
+                      고를 수 있어야 한다(한 분야만 하는 인플루언서는 드물다).
+
+                      최소 1개는 반드시 받는다. 캠페인은 "뷰티 인플루언서 5명" 같은
+                      형태로 들어오므로, 분야가 비어 있으면 그 사람은 어느 캠페인
+                      후보에도 걸리지 않는다 — 등록은 했는데 아무 연락도 오지 않는
+                      상태가 된다. 운영자가 나중에 한 명씩 물어보게 만들지 않으려면
+                      접수 시점에 받아 두는 편이 낫다. */}
+                  <div className="pt-1">
+                    <p className="text-xs font-black text-slate-500 mb-1">
+                      내 카테고리<span className="text-rose-500 ml-0.5">*</span>
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-medium mb-2">
+                      최소 1개는 골라 주세요. 여러 개 고를 수 있고, 목록에 없는 분야는 아래에서 직접 추가하세요.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {categoryOptions(selectedCategories).map(name => {
+                        const on = selectedCategories.includes(name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => toggleCategory(name)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                              on
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-[0_6px_14px_-6px_rgba(37,99,235,0.7)]'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex gap-2 mt-2.5">
+                      <input
+                        type="text"
+                        value={customCategory}
+                        onChange={e => setCustomCategory(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            // 이 입력칸은 모달 안에 있다. 기본 동작을 막지 않으면
+                            // 엔터가 접수 버튼까지 눌러 등록서가 바로 넘어간다.
+                            e.preventDefault();
+                            addCustomCategory();
+                          }
+                        }}
+                        placeholder="직접 추가 (예: 홈카페)"
+                        className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={addCustomCategory}
+                        disabled={!customCategory.trim()}
+                        className="shrink-0 px-4 rounded-xl bg-slate-100 text-slate-600 text-xs font-black hover:bg-slate-200 disabled:opacity-40"
+                      >
+                        추가
+                      </button>
+                    </div>
+                    {/* 접수 버튼을 눌러 봐야 알게 되면 이미 한 번 막힌 것이다.
+                        비어 있는 동안 미리 말해 둔다. */}
+                    {selectedCategories.length === 0 && (
+                      <p className="text-[11px] text-rose-500 font-bold mt-2">
+                        카테고리를 최소 1개 골라 주세요.
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">

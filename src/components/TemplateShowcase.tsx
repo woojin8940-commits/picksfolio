@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Grid, List, Briefcase, Bell, ExternalLink } from 'lucide-react';
+import { Grid, List, Briefcase, ExternalLink } from 'lucide-react';
 
 interface TemplateShowcaseProps {
   onSignup: () => void;
@@ -123,10 +123,15 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                     <Briefcase size={9} strokeWidth={2.5} />
                     비즈니스 제안
                   </span>
-                  <span className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-blue-primary">
-                    <Bell size={9} strokeWidth={2.5} />
-                    라이브 알림받기
-                  </span>
+                  {/* 기본 버튼 — 주소를 넣은 것만 나오지만, 소개용 목업이라 네 개를 모두 보여준다. */}
+                  {['카카오톡', '유튜브', '틱톡', '네이버'].map((label) => (
+                    <span
+                      key={label}
+                      className="flex items-center px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-white/10 border border-white/15"
+                    >
+                      {label}
+                    </span>
+                  ))}
                 </div>
 
                 {/* Curation Section Header */}

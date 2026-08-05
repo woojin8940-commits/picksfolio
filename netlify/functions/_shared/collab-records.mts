@@ -149,6 +149,13 @@ export type CollabScheduleRecordInput = {
   status: "scheduled" | "in_progress" | "completed" | "cancelled";
   memo?: string;
   confirmedBy: string;
+  /**
+   * 이 일정이 어느 경로에서 왔는지. 담당자 리스트업/지원으로 진행되는 캠페인
+   * 협업은 "campaign_collab", 비즈니스 제안 수락으로 성사된 협업은
+   * "business_proposal". 화면은 CollabRecord 필드만 읽으므로 표시에는 영향이
+   * 없고, 나중에 어느 경로가 일정을 만들었는지 확인할 때 쓴다.
+   */
+  source?: "campaign_collab" | "business_proposal";
 };
 
 export async function upsertCollabScheduleRecord(
@@ -180,7 +187,7 @@ export async function upsertCollabScheduleRecord(
       // 출처 표시. 협업 내역 화면은 CollabRecord 필드만 읽으므로 화면에는 영향이
       // 없고, 담당자가 다시 체크할 때 같은 줄을 찾는 근거가 된다.
       collab_id: input.collabId,
-      source: "campaign_collab",
+      source: input.source || "campaign_collab",
       schedule_confirmed_by: input.confirmedBy,
       schedule_confirmed_at: now,
       created_at: base?.created_at || base?.createdAt || now,
@@ -195,5 +202,24 @@ export async function upsertCollabScheduleRecord(
   });
 
   return saved ? { record: saved, created } : null;
+}
+
+/**
+ * 자동 등록된 일정을 지운다(제안이 삭제될 때).
+ *
+ * 사람이 직접 적은 협업 내역은 절대 건드리지 않는다 — collab_id 가 붙은 줄,
+ * 즉 이 함수/`upsertCollabScheduleRecord` 가 만든 줄만 찾아서 지운다.
+ */
+export async function removeCollabScheduleRecord(
+  collabId: string,
+  influencerUsername: string,
+): Promise<void> {
+  const username = influencerUsername.toLowerCase().replace(/^biz\//, "");
+  if (!username || !collabId) return;
+
+  await mutateRecords(COLLABS_STORE, collabsKey(username), (records) => {
+    const next = records.filter((r: any) => r?.collab_id !== collabId);
+    return next.length === records.length ? null : next;
+  });
 }
 

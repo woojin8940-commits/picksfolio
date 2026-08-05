@@ -41,6 +41,37 @@ const csv = (raw: unknown): string => {
  */
 const rewardMode = (raw: unknown): string => normalizeRewardMode(raw);
 
+/**
+ * 공개 목록에서 빼는 값. 공동구매 판매 수수료는 브랜드가 등록할 때 적어 두는
+ * 희망 비율이고, 최종 비율은 담당자가 인플루언서와 이야기하며 정한다. 응답에
+ * 남겨 두면 화면에서 지웠어도 값은 계속 내려가므로, 브랜드 자신의 관리 화면이
+ * 아닌 조회에서는 응답 단계에서 떼어 낸다.
+ */
+const stripPrivateFields = (rows: any[]) =>
+  rows.map(({ groupbuy_commission_rate: _rate, ...rest }) => rest);
+
+/**
+ * 목록 페이지 나누기. 캠페인이 쌓이면 한 번에 다 내려보내는 것이 무의미해진다
+ * (화면도 무한 스크롤이 아니라 페이지 버튼을 쓴다).
+ *
+ * SQL LIMIT/OFFSET 이 아니라 걸러 낸 뒤 자르는 이유: 공개 목록은 아래에서
+ * recruit_closed 와 진행 방식으로 한 번 더 거른다. 이 두 조건은 SQL 로 표현되어
+ * 있지 않아서, DB 에서 20개를 잘라 오면 그중 절반이 걸러져 페이지마다 개수가
+ * 들쭉날쭉해지고 마지막 페이지가 비기도 한다. 총 개수(total)도 걸러 낸 다음
+ * 세어야 화면의 "N개"와 페이지 수가 맞는다.
+ */
+const paginate = <T,>(rows: T[], pageRaw: string, limitRaw: string) => {
+  const limit = Math.min(60, Math.max(1, Number(limitRaw) || 0));
+  const total = rows.length;
+  if (!limitRaw || !Number.isFinite(limit)) {
+    return { rows, total, page: 1, limit: total, total_pages: 1 };
+  }
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(totalPages, Math.max(1, Number(pageRaw) || 1));
+  const start = (page - 1) * limit;
+  return { rows: rows.slice(start, start + limit), total, page, limit, total_pages: totalPages };
+};
+
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
@@ -59,7 +90,9 @@ export default async (req: Request) => {
         if (result.length === 0) {
           return Response.json({ error: "Campaign not found" }, { status: 404 });
         }
-        return Response.json({ campaign: withRecruitState(result)[0] });
+        const one = withRecruitState(result);
+        const forOwner = url.searchParams.get("business") === String((result[0] as any).business_username || "");
+        return Response.json({ campaign: forOwner ? one[0] : stripPrivateFields(one)[0] });
       }
 
       const type = url.searchParams.get("type") || "";
@@ -88,6 +121,8 @@ export default async (req: Request) => {
       `;
 
       const campaigns = withRecruitState(result as any[]);
+      const pageParam = url.searchParams.get("page") || "";
+      const limitParam = url.searchParams.get("limit") || "";
 
       // 공개 목록(브랜드 자신의 관리 화면이 아닌 경우)에서는 모집이 끝난 캠페인을
       // 제외한다. 브랜드가 "마감"을 누르지 않았더라도 종료일이 지난 캠페인은
@@ -97,12 +132,25 @@ export default async (req: Request) => {
       // 브랜드 관리 화면(business 파라미터)에서는 마감된 캠페인도, 광고비 지급형도
       // 그대로 보여 준다 — 수정·재개·삭제해야 하므로.
       if (!business) {
+        const open = campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode));
+        const paged = paginate(stripPrivateFields(open), pageParam, limitParam);
         return Response.json({
-          campaigns: campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode)),
+          campaigns: paged.rows,
+          total: paged.total,
+          page: paged.page,
+          limit: paged.limit,
+          total_pages: paged.total_pages,
         });
       }
 
-      return Response.json({ campaigns });
+      const paged = paginate(campaigns, pageParam, limitParam);
+      return Response.json({
+        campaigns: paged.rows,
+        total: paged.total,
+        page: paged.page,
+        limit: paged.limit,
+        total_pages: paged.total_pages,
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }
