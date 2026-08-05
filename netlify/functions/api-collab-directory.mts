@@ -124,6 +124,22 @@ function average(values: number[]): number {
   return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length);
 }
 
+/**
+ * 카테고리 문자열을 개별 태그로 쪼갠다.
+ *
+ * 등록 경로마다 구분자가 다르다("뷰티·패션", "뷰티, 패션", "뷰티/패션"). 한 곳에서
+ * 통일하지 않으면 운영자 화면의 카테고리 목록에 같은 분야가 여러 번 나온다.
+ * 담당자 명부(api-manager-influencers)와 같은 규칙을 쓴다 — 두 화면이 같은
+ * 카테고리를 다르게 쪼개면 어느 쪽 숫자가 맞는지 알 수 없다.
+ */
+function splitCategories(raw: unknown): string[] {
+  const tags = String(raw || "")
+    .split(/[·,/|]|\s{2,}/)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && c.length <= 20);
+  return Array.from(new Set(tags));
+}
+
 function shapeInfluencerApplication(row: any) {
   const recentReels = parseJsonArray(row.instagram_recent_reels).slice(0, 6);
   const recentAverage = average(recentReels.slice(0, 3).map((reel) => Number(reel?.views || 0)));
@@ -146,6 +162,10 @@ function shapeInfluencerApplication(row: any) {
     instagram_reel_trend_percent: trendPercent,
     instagram_recent_average_views: recentAverage,
     instagram_previous_average_views: previousAverage,
+    // 브랜드 매칭 등록에서 본인이 고른 분야. 등록서의 값을 먼저 쓰고, 없으면
+    // 채널에 남아 있는 값으로 채운다 — 카테고리 선택이 생기기 전에 접수된
+    // 지원자는 등록서 칸이 비어 있어서, 그것만 보면 전부 미분류로 뭉개진다.
+    category_tags: splitCategories(row.category || row.channel_categories),
   };
 }
 
@@ -176,6 +196,17 @@ export default async (req: Request) => {
       const id = genId();
 
       if (role === "influencer") {
+        // 분야는 최소 1개를 받는다. 캠페인은 "뷰티 인플루언서 5명" 형태로 들어오고
+        // 후보 추리기는 이 값으로 한다 — 비어 있으면 등록은 됐는데 어느 캠페인
+        // 후보에도 걸리지 않는 사람이 되고, 운영자가 나중에 한 명씩 물어봐야 한다.
+        // 화면에서도 막고 있지만, 접수 경로는 로그인 없이도 열려 있어 여기서도 본다.
+        if (splitCategories(b.category).length === 0) {
+          return Response.json(
+            { error: "카테고리를 최소 1개 골라 주세요. 캠페인은 분야로 인플루언서를 찾습니다." },
+            { status: 400 },
+          );
+        }
+
         const applicantUsername = (b.applicant_username || "").toString();
         // 메타 연동을 마친 계정이면 인스타 정보는 검증된 값(creator_channels)을 쓴다.
         // 자기 입력값과 섞으면 브랜드가 명단의 어느 숫자도 믿지 않게 된다.
@@ -248,6 +279,33 @@ export default async (req: Request) => {
              ${ad_price}, ${post_price}, ${short_price}, ${(b.category || "").toString()},
              ${follower_count}, ${follower_source}, ${(b.note || "").toString()})
         `;
+
+        // 고른 카테고리는 채널 정보(creator_channels)에도 남긴다.
+        //
+        // 등록서(collab_directory_applications)는 접수된 서류라 담당자 명부에서만
+        // 읽는다. 반면 캠페인 리스트업 카드와 카테고리 필터는 creator_channels 를
+        // 본다 — 여기에 옮겨 두지 않으면 본인이 고른 분야가 정작 브랜드에게
+        // 추천될 때는 빈칸으로 남는다.
+        //
+        // 빈 값일 때는 쓰지 않는다. 예전에 채워 둔 카테고리를 이번 등록서에
+        // 카테고리를 안 골랐다는 이유로 지워 버릴 이유가 없다.
+        // 키는 소문자다(creator_channels.username 은 어디서나 소문자로 읽는다).
+        const chosenCategories = (b.category || "").toString().trim();
+        const channelKey = applicantUsername.trim().toLowerCase();
+        if (chosenCategories && channelKey) {
+          try {
+            await db.sql`
+              INSERT INTO creator_channels (username, categories)
+              VALUES (${channelKey}, ${chosenCategories})
+              ON CONFLICT (username) DO UPDATE
+                SET categories = EXCLUDED.categories, updated_at = NOW()
+            `;
+          } catch (chErr) {
+            // 접수 자체는 이미 끝났다. 카테고리 반영에 실패해도 등록을 되돌리지 않는다.
+            console.error("[collab-directory] 채널 카테고리 반영 실패:", chErr);
+          }
+        }
+
         return Response.json({
           success: true,
           id,
@@ -354,6 +412,7 @@ export default async (req: Request) => {
               c.avg_comments AS instagram_avg_comments,
               c.metrics_source AS instagram_metrics_source,
               c.recent_reels AS instagram_recent_reels,
+              c.categories AS channel_categories,
               c.synced_at AS instagram_synced_at
             FROM collab_directory_applications a
             LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)
@@ -371,6 +430,7 @@ export default async (req: Request) => {
               c.avg_comments AS instagram_avg_comments,
               c.metrics_source AS instagram_metrics_source,
               c.recent_reels AS instagram_recent_reels,
+              c.categories AS channel_categories,
               c.synced_at AS instagram_synced_at
             FROM collab_directory_applications a
             LEFT JOIN creator_channels c ON LOWER(c.username) = LOWER(a.applicant_username)

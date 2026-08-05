@@ -242,6 +242,7 @@ export default async (req: Request) => {
               metricsSource: "",
               connected: false,
               recentReels: [],
+              recentFeed: [],
               syncedAt: "",
               directoryId: "",
             });
@@ -278,7 +279,17 @@ export default async (req: Request) => {
           item.reelsCount = shaped.reelsCount;
           item.metricsSource = shaped.metricsSource;
           item.connected = shaped.connected;
-          item.recentReels = shaped.recentReels.slice(0, 3);
+          // 동향(최근 절반 대 이전 절반)을 화면에서 계산하므로 릴스는 줄이지 않고
+          // 저장된 만큼 그대로 보낸다(최대 6개). 3개만 보내면 추이가 나오지 않는다.
+          item.recentReels = shaped.recentReels;
+          // 피드 9칸은 그림만 필요하다. 캡션·좋아요까지 실으면 후보 60명 분량이
+          // 목록 응답을 몇 배로 불린다 — 카드가 쓰지 않는 값은 보내지 않는다.
+          item.recentFeed = (shaped.recentFeed || []).slice(0, 9).map((f: any) => ({
+            id: f?.id || "",
+            permalink: f?.permalink || "",
+            thumbnailUrl: f?.thumbnailUrl || "",
+            mediaType: f?.mediaType || "",
+          }));
           item.syncedAt = shaped.syncedAt;
           item.intro = shaped.intro;
           item.categories = item.categories || shaped.categories;

@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Bell, Hash } from 'lucide-react';
+import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Hash } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
 import { supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
+import { enabledDefaultButtons } from '../utils/pageButtons';
 import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
@@ -84,6 +85,9 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   });
 
   const [socials, setSocials] = useState(() => {
+    // liveNotify 는 남겨 둔다 — 예전에 저장된 socials 에 들어 있는 값이라, 없애도
+    // 화면에 영향이 없지만 저장된 JSON 을 덮어쓸 때 키가 사라지는 것을 막기 위해
+    // 기본값에는 그대로 둔다. 라이브 알림 버튼 자체는 더 이상 그리지 않는다.
     const defaultSocials = { instagram: '', youtube: '', tiktok: '', phone: '', kakao: '', naver: '', businessProposal: false, liveNotify: false };
     try {
       if (!normalizedUsername) return defaultSocials;
@@ -147,21 +151,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     viewerCount: 0
   });
 
-  // Live notification subscription state
-  const [showNotifyModal, setShowNotifyModal] = useState(false);
-  const [, setNotifyPhone] = useState('');
-  const [notifySubscribed, setNotifySubscribed] = useState(false);
-  const [notifyLoading, setNotifyLoading] = useState(false);
-  const [notifyError, setNotifyError] = useState('');
-  const [notifyConsentRequired, setNotifyConsentRequired] = useState(false);
-  const [notifyConsentPrivacy, setNotifyConsentPrivacy] = useState(false);
-  const [notifyConsentMarketing, setNotifyConsentMarketing] = useState(false);
-  const [showConsentDetail, setShowConsentDetail] = useState<null | 'privacy' | 'marketing'>(null);
-  const [notifyShowConsent, setNotifyShowConsent] = useState(false);
-  const [notifyPhoneInputMode, setNotifyPhoneInputMode] = useState(false);
-  const [notifyPhoneInput, setNotifyPhoneInput] = useState('');
-  const [notifyPendingNickname, setNotifyPendingNickname] = useState('');
-  const [showUnsubscribeConfirm, setShowUnsubscribeConfirm] = useState(false);
 
 
   useEffect(() => {
@@ -777,285 +766,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     }
   };
 
-  // Subscription is per-influencer; the button reflects backend state for
-  // THIS influencer. `picks_notify_phone` is the shared phone the viewer
-  // last subscribed with, used to verify status on first visit to another
-  // influencer page.
-  useEffect(() => {
-    let cancelled = false;
-    const perInfluencerPhone = localStorage.getItem(`picks_notify_phone_${normalizedUsername}`);
-    const sharedPhone = localStorage.getItem('picks_notify_phone') || '';
-    const phoneToCheck = perInfluencerPhone || sharedPhone;
-
-    if (perInfluencerPhone) {
-      setNotifySubscribed(true);
-      setNotifyPhone(perInfluencerPhone);
-    }
-
-    if (!phoneToCheck) return;
-
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/live-notify?influencer=${encodeURIComponent(normalizedUsername)}&phone=${encodeURIComponent(phoneToCheck)}`
-        );
-        const data = await res.json();
-        if (cancelled) return;
-        if (data?.subscribed) {
-          setNotifySubscribed(true);
-          setNotifyPhone(phoneToCheck);
-          localStorage.setItem(`picks_notify_phone_${normalizedUsername}`, phoneToCheck);
-        } else {
-          setNotifySubscribed(false);
-          if (perInfluencerPhone) {
-            localStorage.removeItem(`picks_notify_phone_${normalizedUsername}`);
-          }
-        }
-      } catch {}
-    })();
-
-    return () => { cancelled = true; };
-  }, [normalizedUsername]);
-
-  const handleNotifyClick = () => {
-    if (notifySubscribed) {
-      // Already subscribed - show confirmation before unsubscribing
-      setShowUnsubscribeConfirm(true);
-      return;
-    }
-    // Go directly to Kakao OAuth - Kakao's own consent screen handles the agreement UI
-    setNotifyError('');
-    setNotifyConsentRequired(false);
-    setNotifyConsentPrivacy(true);
-    setNotifyConsentMarketing(true);
-    setNotifyShowConsent(false);
-    handleNotifyKakaoLogin();
-  };
-
-  const handleNotifyKakaoLogin = async () => {
-    setNotifyConsentRequired(false);
-    setNotifyError('');
-    if (!supabase) {
-      setNotifyError('서비스가 초기화되지 않았습니다.');
-      setShowNotifyModal(true);
-      return;
-    }
-    try {
-      localStorage.setItem('picks_notify_kakao_redirect', normalizedUsername);
-      localStorage.setItem(
-        'picks_notify_consent',
-        JSON.stringify({
-          privacy: true,
-          marketing: true,
-          at: new Date().toISOString(),
-        })
-      );
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-          redirectTo: window.location.origin + '/' + normalizedUsername,
-          scopes: 'openid profile_nickname account_email phone_number name',
-          queryParams: {
-            prompt: 'login',
-            auth_type: 'reauthenticate',
-          },
-        },
-      });
-      if (error) {
-        localStorage.removeItem('picks_notify_kakao_redirect');
-        setNotifyError('카카오 로그인 실패: ' + error.message);
-        setShowNotifyModal(true);
-      }
-    } catch (e: any) {
-      localStorage.removeItem('picks_notify_kakao_redirect');
-      setNotifyError('카카오 로그인 중 오류가 발생했습니다.');
-      setShowNotifyModal(true);
-    }
-  };
-
-  const handleNotifyUnsubscribe = async () => {
-    const phone = localStorage.getItem(`picks_notify_phone_${normalizedUsername}`);
-    if (!phone) {
-      setShowUnsubscribeConfirm(false);
-      return;
-    }
-    setNotifyLoading(true);
-    try {
-      await fetch(`/api/live-notify?influencer=${normalizedUsername}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      });
-      setNotifySubscribed(false);
-      localStorage.removeItem(`picks_notify_phone_${normalizedUsername}`);
-    } catch {} finally {
-      setNotifyLoading(false);
-      setShowUnsubscribeConfirm(false);
-    }
-  };
-
-  // Subscribe a viewer to live notifications. Used by both the auto-subscribe
-  // path (after Kakao login when phone is available) and the manual phone-input
-  // fallback path (when Kakao does not return a phone number).
-  const submitNotifySubscribe = async (phone: string, nickname: string): Promise<boolean> => {
-    try {
-      const res = await fetch(`/api/live-notify?influencer=${normalizedUsername}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, nickname }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setNotifySubscribed(true);
-        if (phone) {
-          localStorage.setItem(`picks_notify_phone_${normalizedUsername}`, phone);
-          localStorage.setItem('picks_notify_phone', phone);
-          setNotifyPhone(phone);
-        }
-        if (nickname) {
-          localStorage.setItem('picks_kakao_user', JSON.stringify({ nickname }));
-        }
-        setShowNotifyModal(false);
-        setNotifyPhoneInputMode(false);
-        setNotifyError('');
-        return true;
-      }
-      setNotifyError(data.error || '알림 등록에 실패했습니다.');
-      return false;
-    } catch {
-      setNotifyError('네트워크 오류가 발생했습니다.');
-      return false;
-    }
-  };
-
-  // Handle Kakao OAuth callback for notification signup - auto-subscribe with Kakao phone
-  useEffect(() => {
-    const redirectUsername = localStorage.getItem('picks_notify_kakao_redirect');
-    if (!redirectUsername || redirectUsername.toLowerCase() !== normalizedUsername) return;
-    if (!supabase) {
-      localStorage.removeItem('picks_notify_kakao_redirect');
-      return;
-    }
-
-    let cancelled = false;
-    let unsub: (() => void) | null = null;
-
-    const extractFromSession = (user: any) => {
-      const meta = user?.user_metadata || {};
-      const identities = user?.identities || [];
-      const kakaoIdentity = identities.find((i: any) => i.provider === 'kakao');
-      const idData = kakaoIdentity?.identity_data || {};
-      const rawPhone =
-        meta?.phone_number || meta?.phone ||
-        meta?.kakao_account?.phone_number ||
-        idData?.phone_number || idData?.kakao_account?.phone_number || '';
-      const phone = rawPhone ? rawPhone.replace(/[^0-9]/g, '').replace(/^82/, '0') : '';
-      const nickname =
-        meta?.full_name || meta?.name || meta?.preferred_username ||
-        idData?.name || idData?.full_name || idData?.kakao_account?.profile?.nickname || '카카오 사용자';
-      return { phone, nickname };
-    };
-
-    const handleSession = async (user: any, session: any = null) => {
-      if (cancelled) return;
-      localStorage.removeItem('picks_notify_kakao_redirect');
-      let { phone, nickname } = extractFromSession(user);
-      setNotifyPendingNickname(nickname);
-
-      setNotifyLoading(true);
-      try {
-        // If Kakao did not surface phone via OIDC claims/user_metadata,
-        // ask the server to resolve it (provider_token → Kakao API, with
-        // KAKAO_ADMIN_KEY fallback). This mirrors the main app login path
-        // and avoids forcing the viewer to re-enter a phone they already
-        // consented to share through Kakao's own consent screen.
-        if (!phone) {
-          try {
-            const providerToken =
-              session?.provider_token ||
-              sessionStorage.getItem('kakao_provider_token') ||
-              '';
-            const setupRes = await fetch('/.netlify/functions/kakao-profile-setup', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                user_id: user.id,
-                user_metadata: user.user_metadata || {},
-                identities: user.identities || [],
-                email: user.email || '',
-                provider_token: providerToken,
-              }),
-            });
-            const setupJson = await setupRes.json();
-            const fetchedPhone = setupJson?.profile?.phone || '';
-            if (fetchedPhone) {
-              phone = fetchedPhone.replace(/[^0-9]/g, '').replace(/^82/, '0');
-            }
-            if (!nickname || nickname === '카카오 사용자') {
-              const fetchedName = setupJson?.profile?.full_name;
-              if (fetchedName) {
-                nickname = fetchedName;
-                setNotifyPendingNickname(fetchedName);
-              }
-            }
-          } catch (e) {
-            console.warn('[UserPage] kakao-profile-setup fallback failed:', e);
-          }
-        }
-
-        if (phone) {
-          const ok = await submitNotifySubscribe(phone, nickname);
-          if (!ok) {
-            // Auto-subscribe failed (e.g. invalid phone) — fall back to manual entry
-            setNotifyPhoneInputMode(true);
-            setShowNotifyModal(true);
-          }
-        } else {
-          // Kakao did not return a phone number (common when the Kakao app
-          // hasn't been granted phone_number scope). Ask the viewer to enter
-          // their phone manually so they actually receive alimtalk.
-          setNotifyPhoneInputMode(true);
-          setShowNotifyModal(true);
-        }
-      } finally {
-        setNotifyLoading(false);
-      }
-
-      // Clean up the viewer's Supabase session so it doesn't interfere with
-      // a subsequent admin login on the same device.
-      try { await supabase!.auth.signOut(); } catch {}
-    };
-
-    const init = async () => {
-      // The OAuth code exchange may not have completed yet when this effect
-      // runs. Poll for an active session for up to ~5s, then fall back to
-      // listening for a SIGNED_IN event.
-      for (let i = 0; i < 25 && !cancelled; i++) {
-        const { data } = await supabase!.auth.getSession();
-        if (data.session?.user) {
-          await handleSession(data.session.user, data.session);
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      if (cancelled) return;
-      const { data: { subscription } } = supabase!.auth.onAuthStateChange(async (event, session) => {
-        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
-          subscription.unsubscribe();
-          await handleSession(session.user, session);
-        }
-      });
-      unsub = () => subscription.unsubscribe();
-    };
-
-    init();
-
-    return () => {
-      cancelled = true;
-      if (unsub) unsub();
-    };
-  }, [normalizedUsername]);
 
   const getFontStyle = () => {
     if (design.fontFamily === 'Serif') return 'font-serif tracking-tight';
@@ -1070,6 +780,31 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
   const isDark = design.theme === 'midnight' || design.theme === 'custom';
   const textColor = isDark ? 'text-white' : 'text-slate-900';
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
+
+  /**
+   * 기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버).
+   *
+   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다 — 예전에 버튼 줄을 두 곳에
+   * 따로 적어 두었더니 한쪽만 고쳐져서 레이아웃을 바꾸면 버튼이 달라지는 일이 있었다.
+   *
+   * 디자인은 일부러 심심하게 둔다. 강조색(accentColor)은 비즈니스 제안 버튼 하나만
+   * 쓰고, 기본 버튼은 테마에 맞춘 흰/투명 배경 + 얇은 선으로만 구분한다. 브랜드
+   * 색(카카오 노랑 · 유튜브 빨강)을 그대로 쓰면 버튼 줄이 알록달록해져서 정작 눌러야
+   * 하는 비즈니스 제안 버튼이 묻힌다.
+   */
+  const defaultButtonsBlock = enabledDefaultButtons(socials).map(btn => (
+    <button
+      key={btn.key}
+      onClick={() => openLink(btn.url)}
+      className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 ${
+        isDark
+          ? 'bg-white/10 border-white/15 text-white hover:bg-white/15'
+          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+      }`}
+    >
+      {btn.label}
+    </button>
+  ));
 
   const visibleAboutSections = (profile?.aboutSections || []).filter(
     s => (s.title || '').trim() || (s.content || '').trim()
@@ -1197,20 +932,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     비즈니스 제안
                   </button>
                 )}
-                {socials.liveNotify && (
-                <button
-                  onClick={handleNotifyClick}
-                  disabled={notifyLoading}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm whitespace-nowrap shrink-0 ${
-                    notifySubscribed
-                      ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                      : 'bg-blue-primary text-white hover:bg-blue-secondary'
-                  }`}
-                >
-                  <Bell size={14} strokeWidth={2.5} />
-                  {notifySubscribed ? '구독중' : '라이브 알림받기'}
-                </button>
-                )}
+                {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
                   <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
@@ -1547,20 +1269,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                     비즈니스 제안
                   </button>
                 )}
-                {socials.liveNotify && (
-                <button
-                  onClick={handleNotifyClick}
-                  disabled={notifyLoading}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm whitespace-nowrap shrink-0 ${
-                    notifySubscribed
-                      ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                      : 'bg-blue-primary text-white hover:bg-blue-secondary'
-                  }`}
-                >
-                  <Bell size={14} strokeWidth={2.5} />
-                  {notifySubscribed ? '구독중' : '라이브 알림받기'}
-                </button>
-                )}
+                {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
                   <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
@@ -1976,240 +1685,6 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
           )}
         </AnimatePresence>
 
-        {/* Live Notification Error Modal */}
-        {showUnsubscribeConfirm && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => !notifyLoading && setShowUnsubscribeConfirm(false)}
-            ></div>
-            <div className="relative bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center animate-in fade-in zoom-in-95 duration-300">
-              <button
-                onClick={() => setShowUnsubscribeConfirm(false)}
-                disabled={notifyLoading}
-                className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-xl font-bold disabled:opacity-40"
-              >
-                ×
-              </button>
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Bell size={28} className="text-slate-500" />
-              </div>
-              <h3 className="text-xl font-black text-slate-900 mb-2">알림 받기 해지</h3>
-              <p className="text-slate-500 text-sm font-medium mb-6">
-                이제 알림 안 받으시겠습니까?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowUnsubscribeConfirm(false)}
-                  disabled={notifyLoading}
-                  className="flex-1 py-3 rounded-2xl font-black text-base bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleNotifyUnsubscribe}
-                  disabled={notifyLoading}
-                  className="flex-1 py-3 rounded-2xl font-black text-base bg-red-500 text-white hover:bg-red-600 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {notifyLoading ? '해지 중...' : '해지'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showNotifyModal && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowNotifyModal(false)}></div>
-            <div className="relative bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center animate-in fade-in zoom-in-95 duration-300">
-              <button onClick={() => setShowNotifyModal(false)} className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-xl font-bold">×</button>
-              <div className="w-16 h-16 bg-[#FEE500] rounded-full flex items-center justify-center mx-auto mb-4">
-                <Bell size={28} className="text-[#3C1E1E]" />
-              </div>
-
-              {notifyPhoneInputMode ? (
-                <>
-                  <h3 className="text-xl font-black text-slate-900 mb-2">전화번호 입력</h3>
-                  <p className="text-slate-500 text-sm font-medium mb-6">
-                    카카오에서 전화번호를 받지 못했습니다.<br />
-                    알림톡을 받을 휴대폰 번호를 입력해주세요.
-                  </p>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    autoComplete="tel"
-                    placeholder="010-1234-5678"
-                    value={notifyPhoneInput}
-                    onChange={(e) => setNotifyPhoneInput(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-primary focus:ring-2 focus:ring-blue-primary/20 outline-none text-center text-base font-bold text-slate-900 mb-3"
-                  />
-
-                  {notifyError && (
-                    <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 rounded-xl py-2 px-3">{notifyError}</p>
-                  )}
-
-                  <button
-                    onClick={async () => {
-                      const cleaned = notifyPhoneInput.replace(/[^0-9]/g, '');
-                      if (cleaned.length < 10) {
-                        setNotifyError('올바른 휴대폰 번호를 입력해주세요.');
-                        return;
-                      }
-                      setNotifyError('');
-                      setNotifyLoading(true);
-                      try {
-                        await submitNotifySubscribe(cleaned, notifyPendingNickname || '카카오 사용자');
-                      } finally {
-                        setNotifyLoading(false);
-                      }
-                    }}
-                    disabled={notifyLoading || notifyPhoneInput.replace(/[^0-9]/g, '').length < 10}
-                    className="w-full py-4 rounded-2xl font-black text-base bg-blue-primary text-white hover:bg-blue-secondary transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {notifyLoading ? '등록 중...' : '알림 받기'}
-                  </button>
-
-                  <button
-                    onClick={() => setShowNotifyModal(false)}
-                    className="w-full text-slate-400 font-bold text-sm py-2 mt-3 hover:text-slate-600 transition-all"
-                  >
-                    닫기
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-xl font-black text-slate-900 mb-2">카카오 로그인</h3>
-                  <p className="text-slate-500 text-sm font-medium mb-6">라이브 알림을 받으려면<br />카카오 로그인이 필요합니다.</p>
-
-              {/* Consent items */}
-              {notifyShowConsent && (
-              <div className={`mb-4 rounded-xl border text-left ${notifyConsentRequired && !notifyConsentPrivacy ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'} p-3 space-y-2`}>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={notifyConsentPrivacy && notifyConsentMarketing}
-                    onChange={(e) => {
-                      setNotifyConsentPrivacy(e.target.checked);
-                      setNotifyConsentMarketing(e.target.checked);
-                      if (e.target.checked) setNotifyConsentRequired(false);
-                    }}
-                    className="mt-0.5 w-4 h-4 accent-yellow-500"
-                  />
-                  <span className="text-sm font-bold text-slate-900">전체 동의하기</span>
-                </label>
-                <div className="border-t border-slate-200 my-1"></div>
-                <div className="flex items-start gap-2">
-                  <label className="flex items-start gap-2 cursor-pointer flex-1">
-                    <input
-                      type="checkbox"
-                      checked={notifyConsentPrivacy}
-                      onChange={(e) => {
-                        setNotifyConsentPrivacy(e.target.checked);
-                        if (e.target.checked) setNotifyConsentRequired(false);
-                      }}
-                      className="mt-0.5 w-4 h-4 accent-yellow-500"
-                    />
-                    <span className="text-xs text-slate-700">
-                      <span className="font-bold text-yellow-600">[필수]</span> 개인정보 수집·이용 동의 (닉네임, 전화번호)
-                    </span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowConsentDetail('privacy')}
-                    className="text-xs text-slate-400 underline shrink-0"
-                  >
-                    보기
-                  </button>
-                </div>
-                <div className="flex items-start gap-2">
-                  <label className="flex items-start gap-2 cursor-pointer flex-1">
-                    <input
-                      type="checkbox"
-                      checked={notifyConsentMarketing}
-                      onChange={(e) => setNotifyConsentMarketing(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 accent-yellow-500"
-                    />
-                    <span className="text-xs text-slate-700">
-                      <span className="font-bold text-slate-500">[선택]</span> 라이브 알림톡 수신 동의
-                    </span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowConsentDetail('marketing')}
-                    className="text-xs text-slate-400 underline shrink-0"
-                  >
-                    보기
-                  </button>
-                </div>
-              </div>
-              )}
-
-              {notifyError && (
-                <p className="text-red-500 text-xs font-bold mb-4 bg-red-50 rounded-xl py-2 px-3">{notifyError}</p>
-              )}
-
-              <button
-                onClick={() => {
-                  if (!notifyShowConsent) {
-                    setNotifyError('');
-                    setNotifyConsentRequired(false);
-                    setNotifyShowConsent(true);
-                    return;
-                  }
-                  handleNotifyKakaoLogin();
-                }}
-                disabled={notifyLoading || (notifyShowConsent && !notifyConsentPrivacy)}
-                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-black text-base hover:opacity-90 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#FEE500', color: '#000000' }}
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 3C6.48 3 2 6.36 2 10.44c0 2.62 1.72 4.92 4.32 6.24-.14.52-.92 3.36-.96 3.58 0 0-.02.16.08.22.1.06.22.02.22.02.3-.04 3.44-2.26 3.98-2.64.76.1 1.56.16 2.36.16 5.52 0 10-3.36 10-7.58C22 6.36 17.52 3 12 3z" fill="#000000"/>
-                </svg>
-                {notifyLoading ? '등록 중...' : (notifyShowConsent ? '동의하고 카카오로 시작하기' : '카카오로 가입하기')}
-              </button>
-
-              <button
-                onClick={() => setShowNotifyModal(false)}
-                className="w-full text-slate-400 font-bold text-sm py-2 mt-3 hover:text-slate-600 transition-all"
-              >
-                닫기
-              </button>
-                </>
-              )}
-            </div>
-
-            {/* Consent detail sub-modal */}
-            {showConsentDetail && (
-              <div className="fixed inset-0 z-[210] flex items-center justify-center p-4">
-                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowConsentDetail(null)}></div>
-                <div className="relative bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[80vh] overflow-y-auto text-left">
-                  <button onClick={() => setShowConsentDetail(null)} className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-xl font-bold">×</button>
-                  {showConsentDetail === 'privacy' ? (
-                    <div>
-                      <h4 className="text-base font-black text-slate-900 mb-3">개인정보 수집·이용 동의 (필수)</h4>
-                      <div className="text-xs text-slate-700 space-y-2 leading-relaxed">
-                        <p><span className="font-bold">수집 항목:</span> 카카오 닉네임, 전화번호</p>
-                        <p><span className="font-bold">수집 목적:</span> 라이브 방송 시작 시 카카오 알림톡 발송</p>
-                        <p><span className="font-bold">보유 기간:</span> 알림 수신 해지 시까지</p>
-                        <p className="text-slate-500">동의를 거부할 권리가 있으며, 거부 시 라이브 알림 서비스를 이용할 수 없습니다.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <h4 className="text-base font-black text-slate-900 mb-3">라이브 알림톡 수신 동의 (선택)</h4>
-                      <div className="text-xs text-slate-700 space-y-2 leading-relaxed">
-                        <p><span className="font-bold">수신 채널:</span> 카카오 알림톡</p>
-                        <p><span className="font-bold">발송 내용:</span> 구독한 인플루언서의 라이브 시작 알림</p>
-                        <p><span className="font-bold">철회 방법:</span> 라이브 알림받기 버튼을 다시 눌러 해지</p>
-                        <p className="text-slate-500">선택 동의 항목으로, 거부하셔도 라이브 알림 서비스 이용이 가능합니다.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         </div>
       </div>

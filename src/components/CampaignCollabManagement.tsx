@@ -180,6 +180,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // 가 따로 읽고, 여기서는 건수만 쓴다.
   const [collabSummary, setCollabSummary] = useState<Array<{ id: string; uploadUrl: string; confirmedAt: string | null }>>([]);
   const [activeTypeFilter, setActiveTypeFilter] = useState('');
+  // 카테고리·모집 상태 필터. 캠페인이 쌓이면 진행 방식만으로는 원하는 캠페인을 찾을
+  // 수 없다("지난달 뷰티 캠페인 중 마감된 것"처럼 두 조건이 겹친다).
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState('');
+  const [activeStatusFilter, setActiveStatusFilter] = useState<'' | 'open' | 'closed'>('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
@@ -468,9 +472,41 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   // 목록은 언제나 내가 올린 캠페인뿐이다. 다른 브랜드의 캠페인은 여기서 볼 일이 없고,
   // 남의 캠페인이 섞이면 지원자·정산 화면으로 들어갔을 때 권한 오류만 보게 된다.
-  const filteredCampaigns = activeTypeFilter
-    ? campaigns.filter(c => c.type === activeTypeFilter)
-    : campaigns;
+  //
+  // 세 조건(진행 방식 · 카테고리 · 모집 상태)은 겹쳐서 걸린다. 조건마다 목록을 따로
+  // 만들면 "뷰티 + 마감"처럼 겹쳐 보는 조합이 빠지기 때문이다.
+  //
+  // 모집 상태를 서버 status 그대로 쓰지 않는 이유: 브랜드가 마감을 누르지 않아도
+  // 종료일이 지나면 지원을 받을 수 없다. 화면의 배지도 그렇게 나가므로(마감 / 기간
+  // 종료) 필터도 같은 기준을 봐야 한다. 승인 대기는 아직 모집도 마감도 아니어서
+  // 따로 둔다 — '모집중'에 섞으면 지원자가 들어올 것처럼 보인다.
+  const recruitStateOf = (c: Campaign): 'open' | 'closed' | 'pending' => {
+    if (c.status === 'pending_approval') return 'pending';
+    if (isClosedCampaign(c)) return 'closed';
+    return c.status === 'active' ? 'open' : 'closed';
+  };
+
+  const filteredCampaigns = campaigns.filter(c => {
+    if (activeTypeFilter && c.type !== activeTypeFilter) return false;
+    if (activeCategoryFilter && (c.category || '') !== activeCategoryFilter) return false;
+    if (activeStatusFilter && recruitStateOf(c) !== activeStatusFilter) return false;
+    return true;
+  });
+
+  /** 상태 필터 칩에 붙는 개수. 고른 조건과 무관하게 늘 전체 기준으로 센다. */
+  const statusCounts = campaigns.reduce(
+    (acc, c) => {
+      acc[recruitStateOf(c)] += 1;
+      return acc;
+    },
+    { open: 0, closed: 0, pending: 0 } as Record<'open' | 'closed' | 'pending', number>,
+  );
+
+  const STATUS_FILTERS: Array<{ value: '' | 'open' | 'closed'; label: string; count: number }> = [
+    { value: '', label: '전체', count: campaigns.length },
+    { value: 'open', label: '모집중', count: statusCounts.open },
+    { value: 'closed', label: '마감', count: statusCounts.closed },
+  ];
 
   // --- Campaign Detail View ---
   if (selectedCampaign) {
@@ -643,11 +679,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     </p>
                   </div>
                 ) : isGroupBuy ? (
+                  /* 브랜드가 등록 때 적은 희망 비율이다. 인플루언서 화면에는
+                     숫자가 나가지 않고 "담당자와 협의"로만 표시된다. 최종 수수료는
+                     담당자가 인플루언서와 조율해 정한다. */
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">판매 수수료</p>
+                    <p className="text-[9px] text-slate-400 font-black uppercase">희망 수수료</p>
                     <p className="text-sm font-black text-slate-900">
                       {commissionRate > 0 ? `${commissionRate}%` : '담당자 조율'}
                     </p>
+                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">담당자 협의 후 확정</p>
                   </div>
                 ) : (
                   <div className="bg-slate-50 rounded-xl p-3">
@@ -1125,7 +1165,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   {isBarter
                     ? barterHeadcount > 0 && ` · 협찬 ${barterHeadcount}명`
                     : isGroupBuy
-                      ? commissionRate > 0 && ` · 수수료 ${commissionRate}%`
+                      ? ' · 수수료 담당자 협의'
                       : budget > 0 && ` · ${formatKoreanWon(budget)}`}
                 </p>
               </div>
@@ -1192,7 +1232,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       </header>
 
       {/* Type Filter Tabs */}
-      <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex items-center gap-1 mb-2.5 overflow-x-auto pb-1 scrollbar-hide">
         {CAMPAIGN_TYPES.map(ct => (
           <button
             key={ct.value}
@@ -1211,6 +1251,44 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         </div>
       </div>
 
+      {/* 모집 상태. 개수를 함께 적는다 — 마감이 몇 건 쌓였는지가 눌러 보기 전에 보인다. */}
+      <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1 scrollbar-hide">
+        {STATUS_FILTERS.map(sf => (
+          <button
+            key={sf.value || 'all'}
+            onClick={() => setActiveStatusFilter(sf.value)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all border ${
+              activeStatusFilter === sf.value
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            {sf.label}
+            <span className={`ml-1 ${activeStatusFilter === sf.value ? 'text-white/70' : 'text-slate-400'}`}>
+              {sf.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* 카테고리. 등록할 때 고른 값 그대로다(CATEGORIES 첫 항목은 등록 폼용 안내
+          문구라 '전체 카테고리'로 바꿔 낸다). */}
+      <div className="flex items-center gap-1.5 mb-6 overflow-x-auto pb-1 scrollbar-hide">
+        {CATEGORIES.map(cat => (
+          <button
+            key={cat.value || 'all'}
+            onClick={() => setActiveCategoryFilter(cat.value)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${
+              activeCategoryFilter === cat.value
+                ? 'bg-slate-900 border-slate-900 text-white'
+                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            {cat.value === '' ? '전체 카테고리' : cat.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
@@ -1223,14 +1301,31 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
             </svg>
           </div>
-          <h3 className="text-lg font-black text-slate-900 mb-2">등록된 캠페인이 없습니다</h3>
-          <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
-          >
-            첫 캠페인 등록하기
-          </button>
+          {campaigns.length > 0 ? (
+            /* 캠페인은 있는데 조건에 걸린 경우. "등록된 캠페인이 없습니다"를 그대로
+               보여 주면 필터 때문인 줄 모르고 등록을 다시 하게 된다. */
+            <>
+              <h3 className="text-lg font-black text-slate-900 mb-2">조건에 맞는 캠페인이 없습니다</h3>
+              <p className="text-sm text-slate-500 font-medium mb-6">고른 진행 방식 · 상태 · 카테고리를 바꿔 보세요</p>
+              <button
+                onClick={() => { setActiveTypeFilter(''); setActiveStatusFilter(''); setActiveCategoryFilter(''); }}
+                className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-black text-sm transition-all"
+              >
+                조건 모두 해제
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-black text-slate-900 mb-2">등록된 캠페인이 없습니다</h3>
+              <p className="text-sm text-slate-500 font-medium mb-6">새 캠페인을 등록하여 크리에이터의 지원을 받아보세요</p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg"
+              >
+                첫 캠페인 등록하기
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">

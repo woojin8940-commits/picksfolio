@@ -18,15 +18,19 @@ import { getStore } from "@netlify/blobs";
  * "받을 수 있는 것만 받고, 못 받은 항목은 기존 값을 남긴다". 조회수를 못 받는다고
  * 릴스 목록이나 팔로워 수까지 포기할 이유는 없다.
  *
- * 심사가 끝나면 여기에 일반 피드 미디어 9개(recent_feed)와 릴스 회차별 조회수 추이를
- * 더한다 — 브랜드 명단에서 피드 분위기를 보게 하려는 것이고, 화면 쪽 계획은
- * src/components/collab/InfluencerCandidateCard.tsx 머리말에 적어 두었다.
+ * 릴스와 별개로 일반 피드 미디어 9개(recent_feed)도 함께 받는다. 브랜드가 후보를
+ * 고를 때 확인하는 것은 평균 숫자가 아니라 계정의 톤이고, 릴스는 그 계정에서 가장
+ * 힘을 준 콘텐츠라 평소 피드와 다르게 생기는 경우가 많다. 릴스 배열과 컬럼을 나눠
+ * 두는 이유는 평균 계산이다 — 조회수가 없는 사진 게시물을 같은 배열에 섞으면
+ * "평균 조회수"가 무슨 숫자인지 알 수 없어진다.
  */
 
 /** 평균을 낼 때 볼 최근 릴스 개수. 오래된 영상까지 섞으면 지금 실력이 흐려진다. */
 export const SAMPLE_SIZE = 12;
-/** 화면에 보여줄 최근 릴스 개수. */
+/** 화면에 보여줄 최근 릴스 개수. 동향(최근 절반 vs 이전 절반)을 내려면 3개로는 부족하다. */
 export const SHOW_SIZE = 6;
+/** 화면에 보여줄 최근 피드 개수. 3×3 한 화면에 들어가는 만큼만. */
+export const FEED_SIZE = 9;
 
 export interface MetaLink {
   accessToken?: string;
@@ -49,6 +53,18 @@ export interface RecentReel {
   source: string;
 }
 
+export interface RecentFeedItem {
+  id: string;
+  permalink: string;
+  thumbnailUrl: string;
+  /** IMAGE · VIDEO · CAROUSEL_ALBUM. 화면에서 영상 칸에만 재생 표시를 붙인다. */
+  mediaType: string;
+  caption: string;
+  likes: number;
+  comments: number;
+  timestamp: string;
+}
+
 export interface MetaMetrics {
   igUsername: string;
   followers: number | null;
@@ -58,6 +74,8 @@ export interface MetaMetrics {
   avgComments: number;
   reelsCount: number;
   recentReels: RecentReel[];
+  /** 릴스를 뺀 것이 아니라, 릴스를 포함한 최근 게시물 9개(피드 분위기용). */
+  recentFeed: RecentFeedItem[];
   /** 조회수 필드를 실제로 받았는지 — 화면이 "연동됐지만 조회수는 비공개"를 말할 수 있어야 한다. */
   viewsAvailable: boolean;
 }
@@ -149,6 +167,23 @@ export async function fetchInstagramMetrics(
     )
     .slice(0, SAMPLE_SIZE);
 
+  // 피드는 거르지 않고 최근 순서 그대로 9개를 남긴다. 사진·캐러셀·릴스가 섞인
+  // 그대로가 이 계정의 실제 화면이고, 그걸 보려고 받는 값이다.
+  const feed: RecentFeedItem[] = items.slice(0, FEED_SIZE).map((m) => ({
+    id: String(m?.id || ""),
+    permalink: String(m?.permalink || ""),
+    // 영상은 media_url 이 동영상 파일이라 썸네일을 먼저 쓴다. 사진은 그 반대.
+    thumbnailUrl:
+      String(m?.media_type || "").toUpperCase() === "VIDEO"
+        ? String(m?.thumbnail_url || m?.media_url || "")
+        : String(m?.media_url || m?.thumbnail_url || ""),
+    mediaType: String(m?.media_type || ""),
+    caption: String(m?.caption || "").slice(0, 200),
+    likes: intOf(m?.like_count),
+    comments: intOf(m?.comments_count),
+    timestamp: String(m?.timestamp || ""),
+  }));
+
   // 팔로워·팔로잉은 프로필 필드로 별도 조회한다.
   let igUsername = String(link.igUsername || "");
   let followers: number | null = null;
@@ -189,6 +224,7 @@ export async function fetchInstagramMetrics(
         timestamp: String(m?.timestamp || ""),
         source: "meta_api",
       })),
+      recentFeed: feed,
       viewsAvailable,
     },
   };
@@ -223,6 +259,13 @@ export async function persistMetrics(
     : Array.isArray(existing?.recent_reels)
       ? existing.recent_reels
       : [];
+  // 피드도 같은 규칙이다. 이번 응답이 빈 배열이면(권한 거부·일시 오류) 지난번에
+  // 받아 둔 9칸을 지우지 않는다. 빈 그리드는 "게시물이 없는 계정"으로 읽힌다.
+  const recentFeed = metrics.recentFeed.length
+    ? metrics.recentFeed
+    : Array.isArray(existing?.recent_feed)
+      ? existing.recent_feed
+      : [];
 
   const handle = metrics.igUsername || String(existing?.instagram_handle || "");
   const igUrl =
@@ -232,12 +275,12 @@ export async function persistMetrics(
   await db.sql`
     INSERT INTO creator_channels (
       username, instagram_handle, instagram_url, connected, followers, following, avg_views,
-      avg_likes, avg_comments, reels_count, metrics_source, recent_reels, synced_at,
+      avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed, synced_at,
       intro, categories
     ) VALUES (
       ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
       ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
-      ${JSON.stringify(recentReels)}, NOW(),
+      ${JSON.stringify(recentReels)}, ${JSON.stringify(recentFeed)}, NOW(),
       ${String(existing?.intro || "")}, ${String(existing?.categories || "")}
     )
     ON CONFLICT (username) DO UPDATE SET
@@ -252,6 +295,7 @@ export async function persistMetrics(
       reels_count = EXCLUDED.reels_count,
       metrics_source = 'meta_api',
       recent_reels = EXCLUDED.recent_reels,
+      recent_feed = EXCLUDED.recent_feed,
       synced_at = NOW(),
       updated_at = NOW()
   `;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatNumberWithCommas } from '../../utils/formatters';
+import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
 
 /**
  * 인플루언서 DB — 우리에게 누가 있는지 한 표로 정리해 둔다.
@@ -13,13 +14,18 @@ import { formatNumberWithCommas } from '../../utils/formatters';
  * 없다 — 팔로워는 한번 쌓이면 잘 줄지 않지만 조회수는 즉시 반응한다. 최근 릴스 3개
  * 평균 조회수를 그 이전 3개와 비교한 값(동향)이 그 신호다. 비교할 이전 구간이 없으면
  * 0%가 아니라 '—'로 둔다 — 0%는 "변화 없음"이고, 여기서 필요한 말은 "아직 모름"이다.
+ *
+ * 인사이트 열은 그 여러 신호(조회율·반응률·동향)를 한 숫자로 합친 것이다. 지표를
+ * 하나씩 비교하는 것도 필요하지만, 명단을 처음 훑을 때는 "잘 되는 사람부터" 한 번에
+ * 줄 세울 수 있어야 한다. 그래서 팔로워 바로 옆에 두고 정렬도 붙였다 — 두 정렬이
+ * 이 화면의 두 관점이다.
  */
 
 interface Props {
   token: string;
 }
 
-type SortKey = 'followers' | 'following' | 'avgViews' | 'trend' | 'engagement' | 'running';
+type SortKey = 'followers' | 'insight' | 'following' | 'avgViews' | 'trend' | 'engagement' | 'running';
 
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   meta_api: { label: '메타 연동', cls: 'bg-emerald-50 text-emerald-600' },
@@ -94,7 +100,20 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
   }, [rows]);
 
   const visible = useMemo(() => {
-    const list = onlyConnected ? rows.filter(r => r.registered || r.followers > 0) : rows.slice();
+    const base = onlyConnected ? rows.filter(r => r.registered || r.followers > 0) : rows;
+    // 인사이트 점수는 한 번만 계산해 행에 붙인다 — 정렬과 화면에 찍히는 숫자가
+    // 같은 값을 보게 하려면 계산이 한 곳이어야 한다.
+    const list = base.map(r => ({
+      ...r,
+      insight: insightScoreOf({
+        followers: r.followers,
+        avgViews: r.avgViews,
+        avgLikes: r.avgLikes,
+        avgComments: r.avgComments,
+        trendPercent: r.reelTrendPercent,
+        metricsSource: r.metricsSource,
+      }) as InsightScore | null,
+    }));
     const value = (r: any) => {
       switch (sortKey) {
         case 'following': return Number(r.following || 0);
@@ -103,22 +122,32 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
         case 'trend': return typeof r.reelTrendPercent === 'number' ? r.reelTrendPercent : -Infinity;
         case 'engagement': return Number(r.engagementRate || 0);
         case 'running': return Number(r.runningCollabs || 0);
+        // 점수를 계산할 수 없는 계정은 0점 계정보다도 아래에 둔다(0점은 계산된
+        // 결과이고, 지표 미연동은 아직 계산할 수 없다는 뜻이다).
+        case 'insight': return r.insight ? r.insight.score : -1;
         default: return Number(r.followers || 0);
       }
     };
-    return list.sort((a, b) => value(b) - value(a));
+    return list.sort((a, b) => value(b) - value(a) || Number(b.followers || 0) - Number(a.followers || 0));
   }, [rows, sortKey, onlyConnected]);
 
   const open = visible.find(r => r.username === openUser) || null;
 
   const columns: { key: SortKey; label: string }[] = [
     { key: 'followers', label: '팔로워' },
+    { key: 'insight', label: '인사이트' },
     { key: 'following', label: '팔로잉' },
     { key: 'avgViews', label: '평균 조회수' },
     { key: 'trend', label: '릴스 동향' },
     { key: 'engagement', label: '참여율' },
     { key: 'running', label: '진행' },
   ];
+
+  /**
+   * 표의 열 너비. 머리글과 각 줄이 같은 값을 써야 열이 어긋나지 않으므로 한 곳에
+   * 둔다(두 곳에 적어 두면 열을 하나 더할 때 반드시 한쪽을 잊는다).
+   */
+  const GRID = 'lg:grid-cols-[minmax(0,2.1fr)_minmax(0,1.1fr)_66px_74px_62px_80px_84px_56px_52px_54px]';
 
   return (
     <div className="space-y-3">
@@ -173,7 +202,7 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
               지표 있는 계정만
             </button>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">정렬</span>
             {columns.map(c => (
               <button
@@ -189,7 +218,12 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        {sortKey === 'insight' && (
+          <p className="text-[10px] font-bold text-slate-400">{INSIGHT_HINT}</p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-0.5">카테고리</span>
           <button
             onClick={() => setCategory('')}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
@@ -230,7 +264,7 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-          <div className="hidden lg:grid grid-cols-[minmax(0,2.4fr)_minmax(0,1.3fr)_72px_72px_88px_92px_66px_60px_64px] gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
+          <div className={`hidden lg:grid ${GRID} gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100`}>
             <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">인플루언서</div>
             <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">카테고리</div>
             {columns.map(c => (
@@ -250,10 +284,11 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
           <div className="divide-y divide-slate-50">
             {visible.map(p => {
               const source = SOURCE_BADGE[p.metricsSource || 'none'] || SOURCE_BADGE.none;
+              const grade = p.insight ? insightGrade(p.insight.score) : null;
               return (
                 <div
                   key={p.username}
-                  className="lg:grid lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.3fr)_72px_72px_88px_92px_66px_60px_64px] gap-2 px-3 py-2 items-center hover:bg-slate-50/60 cursor-pointer"
+                  className={`lg:grid ${GRID} gap-2 px-3 py-2 items-center hover:bg-slate-50/60 cursor-pointer`}
                   onClick={() => setOpenUser(p.username)}
                 >
                   <div className="min-w-0 flex items-center gap-2">
@@ -277,6 +312,22 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                   </div>
 
                   <div className="hidden lg:block text-right text-[11px] font-black text-slate-900">{compact(p.followers)}</div>
+                  {/* 인사이트 — 지표가 없으면 0점이 아니라 '집계 전'이다. 성과가
+                      낮은 계정과 아직 연동하지 않은 계정은 해야 할 일이 다르다. */}
+                  <div className="hidden lg:block text-right">
+                    {p.insight && grade ? (
+                      <>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${grade.cls}`}>
+                          {p.insight.score} {grade.label}
+                        </span>
+                        {!p.insight.verified && (
+                          <p className="text-[9px] font-bold text-slate-300 mt-0.5">자기입력</p>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-300">집계 전</span>
+                    )}
+                  </div>
                   <div className="hidden lg:block text-right text-[11px] font-bold text-slate-500">{compact(p.following)}</div>
                   <div className="hidden lg:block text-right">
                     <p className="text-[11px] font-black text-slate-900">{compact(p.avgViews)}</p>
@@ -312,7 +363,13 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                   {/* 모바일: 열이 접히므로 핵심 지표만 한 줄로 */}
                   <div className="lg:hidden mt-1 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-black text-slate-700">팔로워 {compact(p.followers)}</span>
-                    <span className="text-[10px] font-bold text-slate-400">팔로잉 {compact(p.following)}</span>
+                    {p.insight && grade ? (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${grade.cls}`}>
+                        인사이트 {p.insight.score}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-300">인사이트 집계 전</span>
+                    )}
                     <span className="text-[10px] font-bold text-slate-400">조회수 {compact(p.avgViews)}</span>
                     <TrendBadge percent={p.reelTrendPercent} />
                   </div>
@@ -344,6 +401,7 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { k: '팔로워', v: compact(open.followers) },
+                  { k: '인사이트', v: open.insight ? `${open.insight.score}점 · ${insightGrade(open.insight.score).label}` : '집계 전' },
                   { k: '팔로잉', v: compact(open.following) },
                   { k: '평균 조회수', v: compact(open.avgViews) },
                   { k: '평균 좋아요', v: compact(open.avgLikes) },
@@ -355,6 +413,32 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                     <p className="text-[12px] font-black text-slate-900">{item.v}</p>
                   </div>
                 ))}
+              </div>
+
+              {/* 점수를 그대로 믿으라고 하지 않는다. 무엇으로 계산했는지 같은
+                  화면에 남겨 두면 운영자가 직접 판단할 수 있다. */}
+              <div className="bg-slate-50 rounded-xl p-3">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">인사이트 계산 근거</p>
+                {open.insight ? (
+                  <>
+                    <p className="text-[11px] font-bold text-slate-600">
+                      조회율 {open.insight.viewRate}% · 반응률 {open.insight.engagementRate}%
+                      {open.insight.trendPercent !== null
+                        ? ` · 동향 ${open.insight.trendPercent > 0 ? '+' : ''}${open.insight.trendPercent}%`
+                        : ' · 동향 미집계'}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">{INSIGHT_HINT}</p>
+                    {!open.insight.verified && (
+                      <p className="text-[10px] font-bold text-amber-600 mt-1">
+                        본인이 입력한 지표로 계산한 점수입니다. Meta 연동 계정과 같은 기준으로 비교할 수 없습니다.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[11px] font-bold text-slate-500">
+                    채널 지표가 없어 점수를 계산하지 못했습니다. Meta 연동 후 다시 확인해 주세요.
+                  </p>
+                )}
               </div>
 
               <div className="bg-slate-50 rounded-xl p-3">

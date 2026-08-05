@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, Bell, User, Eye } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, User, Eye } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -10,6 +10,7 @@ import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
+import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
 
 const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
 const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
@@ -215,6 +216,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       return saved ? JSON.parse(saved) : {};
     } catch { return {}; }
   });
+
+  /**
+   * 편집 화면에서 펼쳐 둔 기본 버튼 칸.
+   *
+   * 저장되는 값은 주소(socials.kakao 등)뿐이다. 이 목록은 "주소를 아직 안 넣었지만
+   * 입력칸은 열어 둔" 상태만 담는다 — 저장하지 않는 이유는, 주소가 비어 있는 버튼은
+   * 공개 페이지에 나오지 않으므로 저장할 내용이 없기 때문이다.
+   */
+  const [openDefaultButtons, setOpenDefaultButtons] = useState<DefaultButtonKey[]>([]);
 
   // Mobile Preview State
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'block' | 'category', id: string } | null>(null);
@@ -756,7 +766,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       portfolioHeaderImagePosition: coverPosition,
     };
 
-    // 버튼(커스텀 버튼 + 비즈니스 제안/라이브 알림)은 socials 에 저장된다. 빈 버튼은 제외.
+    // 버튼(비즈니스 제안 · 기본 버튼 · 커스텀 버튼)은 모두 socials 에 저장된다. 빈 버튼은 제외.
     const cleanedSocials = {
       ...socials,
       customButtons: (socials.customButtons || []).filter((b: any) => (b.label || '').trim() && (b.url || '').trim()),
@@ -1539,7 +1549,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 </div>
               </section>
 
-              {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 라이브 알림 / 커스텀 버튼. */}
+              {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 기본 버튼 / 커스텀 버튼.
+                  기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버)은 주소만 넣으면 나온다.
+                  이름과 디자인은 플랫폼이 정해 두었다 — utils/pageButtons.ts 주석 참고. */}
               <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">버튼</h3>
@@ -1553,13 +1565,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
                   </div>
                 )}
-                {socials.liveNotify && (
-                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3">
-                    <Bell size={16} className="text-blue-600 shrink-0" />
-                    <span className="flex-1 font-bold text-sm text-blue-700">라이브 알림 버튼</span>
-                    <button onClick={() => setSocials({ ...socials, liveNotify: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+
+                {/* 기본 버튼. 주소가 들어 있으면(= 공개 페이지에 나오면) 늘 펼쳐 두고,
+                    비어 있는 것은 아래 추가 버튼을 눌렀을 때만 입력칸을 낸다 — 네 개를
+                    항상 펼쳐 두면 쓰지 않는 칸이 편집 화면을 채운다.
+                    지우기는 값을 비우는 것이다. 값이 없으면 버튼도 사라지므로 별도의
+                    on/off 상태를 두지 않는다. */}
+                {DEFAULT_BUTTONS.filter(def => (socials[def.key] || '').trim() || openDefaultButtons.includes(def.key)).map(def => (
+                  <div key={def.key} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className="text-slate-400 shrink-0" />
+                      <span className="flex-1 font-bold text-sm text-slate-700">{def.label}</span>
+                      <button
+                        onClick={() => {
+                          setSocials({ ...socials, [def.key]: '' });
+                          setOpenDefaultButtons(openDefaultButtons.filter(k => k !== def.key));
+                        }}
+                        className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={socials[def.key] || ''}
+                      onChange={(e) => setSocials({ ...socials, [def.key]: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
+                      placeholder={def.placeholder}
+                    />
                   </div>
-                )}
+                ))}
 
                 {(socials.customButtons || []).map((btn: any, idx: number) => (
                   <div key={btn.id || idx} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2">
@@ -1619,11 +1654,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       <Plus size={12} /> <Briefcase size={12} /> 비즈니스 제안
                     </button>
                   )}
-                  {!socials.liveNotify && (
-                    <button onClick={() => setSocials({ ...socials, liveNotify: true })} className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-blue-300 text-blue-600 text-[11px] font-bold hover:bg-blue-50 transition-all">
-                      <Plus size={12} /> <Bell size={12} /> 라이브 알림
+                  {DEFAULT_BUTTONS.filter(def => !(socials[def.key] || '').trim() && !openDefaultButtons.includes(def.key)).map(def => (
+                    <button
+                      key={def.key}
+                      onClick={() => setOpenDefaultButtons([...openDefaultButtons, def.key])}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[11px] font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
+                    >
+                      <Plus size={12} /> {def.label}
                     </button>
-                  )}
+                  ))}
                   <button
                     onClick={() => setSocials({ ...socials, customButtons: [...(socials.customButtons || []), { id: Date.now().toString(), label: '', url: '', color: '#2563EB' }] })}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[11px] font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all"

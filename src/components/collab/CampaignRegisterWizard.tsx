@@ -484,7 +484,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         styles: form.influencer_styles,
         excludes: form.exclude_keywords,
         headcount: applyHeadcount,
-        commissionRate,
         channel: form.upload_channel,
       });
 
@@ -970,9 +969,13 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               )}
 
+              {/* 수수료율은 담당자에게만 전달되는 값이다. 인플루언서 화면에는
+                  "담당자와 협의"로만 나가고 숫자는 노출되지 않는다 — 실제 수수료는
+                  담당자가 인플루언서와 이야기하며 정하기 때문에, 먼저 보여 준
+                  숫자가 확정 조건처럼 읽히면 조율이 어려워진다. */}
               {isGroupBuy && (
                 <div>
-                  <label className={LABEL}>판매 수수료 *</label>
+                  <label className={LABEL}>희망 판매 수수료 *</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="text"
@@ -986,6 +989,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   </div>
                   <p className={`text-[11px] font-medium mt-1.5 ${badCommission && form.commission_rate ? 'text-rose-500 font-black' : 'text-slate-400'}`}>
                     판매 금액에서 인플루언서에게 지급할 비율입니다. {COMMISSION_RANGE.min}% ~ {COMMISSION_RANGE.max}% 사이로 적어 주세요.
+                    <br />
+                    이 비율은 담당자에게만 전달되고 캠페인 화면에는 노출되지 않습니다. 최종 수수료는 담당자가 인플루언서와 협의해 정합니다.
                   </p>
                 </div>
               )}
@@ -1320,8 +1325,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 <>
                   {isGroupBuy && (
                     <div className="flex items-center justify-between">
-                      <span className="text-white/50">판매 수수료</span>
-                      <span>{commissionRate > 0 ? `${commissionRate}%` : '-'}</span>
+                      <span className="text-white/50">희망 판매 수수료</span>
+                      <span>{commissionRate > 0 ? `${commissionRate}% (담당자 전달용)` : '-'}</span>
                     </div>
                   )}
                   <div className="flex items-center justify-between">

@@ -729,8 +729,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
             ? (
               <div className="space-y-4">
                 <TabIntro
-                  title="인플루언서 DB · 팔로워 · 팔로잉 · 릴스 동향"
-                  body="픽스폴리오에 등록된 인플루언서를 한 표로 정리해 둡니다. 팔로워와 팔로잉, 최근 릴스 3개 평균 조회수를 그 이전 3개와 비교한 동향, 참여율로 정렬해 지금 뜨는 계정을 찾을 수 있습니다."
+                  title="인플루언서 DB · 카테고리 · 팔로워 · 인사이트"
+                  body="픽스폴리오에 등록된 인플루언서를 한 표로 정리해 둡니다. 인플루언서가 브랜드 매칭 등록에서 직접 고른 분야로 추린 뒤, 팔로워 많은 순과 인사이트 좋은 순으로 나란히 볼 수 있습니다. 인사이트는 조회율·반응률·최근 릴스 동향을 합친 점수로, 팔로워 규모와 무관하게 콘텐츠 성과만 봅니다."
                 />
                 <AdminInfluencerDatabase token={adminToken} />
               </div>
@@ -745,7 +745,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
               <div className="space-y-4">
                 <TabIntro
                   title="브랜드 매칭 지원자 · 인플루언서 채널 검토"
-                  body="브랜드 매칭 받기에 지원한 인플루언서를 팔로워 구간별로 확인합니다. 연결된 Instagram Meta 계정에서 팔로워·팔로잉, 최근 릴스 3개와 최근 3개 대비 이전 3개의 평균 조회수 동향을 갱신해 검토할 수 있습니다."
+                  body="브랜드 매칭 받기에 지원한 인플루언서를 지원자가 직접 고른 분야별로, 그리고 팔로워 구간별로 확인합니다. 팔로워 많은 순과 인사이트(조회율·반응률·릴스 동향) 좋은 순으로 정렬을 바꿔 볼 수 있고, 연결된 Instagram Meta 계정에서 팔로워·팔로잉과 최근 릴스 성과를 갱신해 검토할 수 있습니다."
                 />
                 <AdminCollabDirectory token={adminToken} />
               </div>

@@ -169,6 +169,8 @@ export type ChannelSnapshot = {
   metricsSource: string;
   connected: boolean;
   recentReels: any[];
+  /** 최근 게시물 9개(3×3 그리드용). 릴스와 달리 조회수가 없어 평균 계산에는 쓰지 않는다. */
+  recentFeed: any[];
   syncedAt: string;
   intro: string;
   categories: string;
@@ -192,6 +194,7 @@ const emptySnapshot = (): ChannelSnapshot => ({
   metricsSource: "",
   connected: false,
   recentReels: [],
+  recentFeed: [],
   syncedAt: "",
   intro: "",
   categories: "",
@@ -219,6 +222,7 @@ export function shapeChannel(row: any): ChannelSnapshot {
     metricsSource: row.metrics_source || "self",
     connected: !!row.connected,
     recentReels: Array.isArray(row.recent_reels) ? row.recent_reels : [],
+    recentFeed: Array.isArray(row.recent_feed) ? row.recent_feed : [],
     syncedAt: row.synced_at ? new Date(row.synced_at).toISOString() : "",
     intro: row.intro || "",
     categories: row.categories || "",
@@ -408,6 +412,7 @@ function maskSnapshot(snapshot: any, outreachStatus: string) {
   if (outreachStatus === "accepted") return snapshot;
   const name = String(snapshot?.name || "");
   const reels = Array.isArray(snapshot?.recentReels) ? snapshot.recentReels : [];
+  const feed = Array.isArray(snapshot?.recentFeed) ? snapshot.recentFeed : [];
   return {
     ...snapshot,
     name: maskName(name),
@@ -418,6 +423,14 @@ function maskSnapshot(snapshot: any, outreachStatus: string) {
       id: r?.id || "",
       thumbnailUrl: r?.thumbnailUrl || "",
       views: Number(r?.views || 0),
+    })),
+    // 피드 9칸도 썸네일만 남긴다. permalink 하나면 계정을 찾아갈 수 있고, 캡션에는
+    // 계정 아이디나 협업 문의 연락처가 적혀 있는 경우가 많다. 분위기를 보는 데
+    // 필요한 것은 그림이지 링크가 아니다.
+    recentFeed: feed.map((f: any) => ({
+      id: f?.id || "",
+      thumbnailUrl: f?.thumbnailUrl || "",
+      mediaType: f?.mediaType || "",
     })),
   };
 }

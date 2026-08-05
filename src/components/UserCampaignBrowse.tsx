@@ -31,8 +31,6 @@ interface Campaign {
   reward_mode?: string;
   /** 제품 협찬형의 협찬 인원. max_applicants 와 같은 값이지만 예전 캠페인은 이쪽만 있다. */
   seeding_count?: number;
-  /** 공동구매형의 판매 수수료(%). */
-  groupbuy_commission_rate?: number;
 }
 
 interface UserCampaignBrowseProps {
@@ -61,6 +59,16 @@ const CATEGORIES: Record<string, string> = {
   entertainment: '엔터테인먼트', education: '교육', other: '기타',
 };
 
+/**
+ * 한 페이지에 그리는 캠페인 수.
+ *
+ * 12로 잡은 이유는 그리드 칼럼 수(모바일 2 · 데스크톱 3)로 둘 다 나누어떨어져
+ * 마지막 줄이 비지 않기 때문이다. 예전에는 모집중인 캠페인을 전부 한 번에 받아
+ * 그렸는데, 캠페인이 쌓이면 첫 화면에서 스크롤이 끝나지 않고 아래쪽 캠페인은
+ * 사실상 아무도 보지 않게 된다.
+ */
+const PAGE_SIZE = 12;
+
 const TYPE_LABELS: Record<string, string> = {
   ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
   collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트',
@@ -87,11 +95,16 @@ const modeBadge = (c: Campaign): string => {
  *
  *   제품 협찬형  받는 것이 제품이라 금액이 없다. 예전에는 reward_amount 가 비어
  *                리워드 카드가 아예 사라졌고, 목록 카드에서는 빈자리로 보였다.
- *   공동구매형   판매 수수료율. 등록 시점에는 판매량이 정해지지 않아 금액이 없다.
+ *   공동구매형   "판매 수수료 협의" 한 줄만. 수치는 넣지 않는다(아래 참고).
  *   광고비 지급형 금액 그대로. 지금은 이 목록에 노출되지 않지만, 예전 캠페인이
  *                남아 있을 수 있어 계산은 남겨 둔다.
  *
  * short 는 목록 카드용 짧은 표기다(카드 너비가 두 줄을 못 받는다).
+ *
+ * 공동구매 수수료율을 화면에 쓰지 않는 이유: 실제 수수료는 담당자가 인플루언서와
+ * 이야기하며 정한다. 브랜드가 등록 때 적어 둔 숫자를 먼저 보여 주면 그 값이 확정처럼
+ * 읽히고, 담당자가 조율한 결과가 그보다 낮을 때 "말이 바뀌었다"가 된다. 그래서
+ * groupbuy_commission_rate 는 저장은 하되 인플루언서 화면에서는 노출하지 않는다.
  */
 const rewardText = (c: Campaign): { headline: string; caption: string; short: string } | null => {
   const mode = rewardModeOf(c.reward_mode);
@@ -103,11 +116,10 @@ const rewardText = (c: Campaign): { headline: string; caption: string; short: st
     };
   }
   if (mode.value === 'groupbuy') {
-    const rate = Number(c.groupbuy_commission_rate || 0);
     return {
-      headline: rate > 0 ? `판매 수수료 ${rate}%` : '판매 수수료 협의',
+      headline: '판매 수수료 협의',
       caption: '함께 판매하고 판매 금액의 일부를 수수료로 받아요',
-      short: rate > 0 ? `수수료 ${rate}%` : '수수료 협의',
+      short: '수수료 협의',
     };
   }
   if (!c.reward_amount) return null;
@@ -124,6 +136,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
+  const [activeCategory, setActiveCategory] = useState('');
+  // 페이지는 1부터. total/totalPages 는 서버가 걸러 낸 뒤 세어 준 값을 그대로 쓴다
+  // (모집 마감·진행 방식 필터가 서버에 있어, 화면에서 다시 세면 개수가 어긋난다).
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [applying, setApplying] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
@@ -137,19 +155,30 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
     try {
-      let url = '/api/campaigns?status=active';
-      if (activeFilter) url += `&type=${activeFilter}`;
-      if (searchQuery.trim()) url = `/api/campaigns?status=active&search=${encodeURIComponent(searchQuery.trim())}`;
-      if (activeFilter && searchQuery.trim()) url += `&type=${activeFilter}`;
-      const res = await fetch(url);
+      // 조건을 문자열로 이어 붙이다 보니 예전에는 검색어가 들어오면 진행 방식 조건이
+      // 통째로 날아가는 조합이 있었다. URLSearchParams 로 한 번에 모아 만든다.
+      const params = new URLSearchParams({
+        status: 'active',
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      });
+      if (activeFilter) params.set('type', activeFilter);
+      if (activeCategory) params.set('category', activeCategory);
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      const res = await fetch(`/api/campaigns?${params.toString()}`);
       const data = await res.json();
       setCampaigns(data.campaigns || []);
+      setTotal(Number(data.total || 0));
+      setTotalPages(Math.max(1, Number(data.total_pages || 1)));
+      // 마지막 페이지를 보다가 캠페인이 마감되어 페이지가 줄면 서버가 마지막 페이지로
+      // 접어 준다. 화면의 page 도 같이 맞춰야 버튼 강조가 실제 목록과 어긋나지 않는다.
+      if (data.page && Number(data.page) !== page) setPage(Number(data.page));
     } catch {
       console.error('Failed to fetch campaigns');
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, searchQuery]);
+  }, [activeFilter, activeCategory, searchQuery, page]);
 
   useEffect(() => {
     fetchCampaigns();
@@ -189,7 +218,26 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchCampaigns();
+    // 2페이지에서 검색하면 결과가 1페이지밖에 없어도 빈 화면이 나온다. 항상 1페이지부터.
+    if (page !== 1) setPage(1);
+    else fetchCampaigns();
+  };
+
+  /** 조건을 바꾸면 페이지를 처음으로 되돌린다(fetch 는 page 변화로 다시 돈다). */
+  const changeFilter = (next: string) => {
+    setActiveFilter(next);
+    setPage(1);
+  };
+
+  const changeCategory = (next: string) => {
+    setActiveCategory(next);
+    setPage(1);
+  };
+
+  /** 페이지를 넘길 때는 목록 맨 위로 올린다 — 안 올리면 다음 페이지 중간부터 보인다. */
+  const goToPage = (next: number) => {
+    setPage(Math.min(totalPages, Math.max(1, next)));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleApply = async () => {
@@ -262,7 +310,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     const mode = rewardModeOf(selectedCampaign.reward_mode);
     const reward = rewardText(selectedCampaign);
     const headcount = headcountOf(selectedCampaign);
-    const commissionRate = Number(selectedCampaign.groupbuy_commission_rate || 0);
     const applicantPercent = headcount > 0
       ? Math.min(100, Math.round((selectedCampaign.application_count / headcount) * 100))
       : 0;
@@ -537,12 +584,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     <span className="text-sm text-blue-700 font-black">{formatKoreanWon(selectedCampaign.reward_amount)}</span>
                   </div>
                 )}
+                {/* 공동구매 수수료율은 화면에 쓰지 않는다. 실제 수치는 담당자가
+                    인플루언서와 조율해 정하므로, 등록 시 적힌 값을 먼저 보여 주면
+                    확정 조건처럼 읽힌다(rewardText 주석 참고). */}
                 {mode.value === 'groupbuy' && (
                   <div className="flex items-center px-5 py-3.5">
                     <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">판매 수수료</span>
-                    <span className="text-sm text-blue-700 font-black">
-                      {commissionRate > 0 ? `${commissionRate}%` : '담당자와 협의'}
-                    </span>
+                    <span className="text-sm text-blue-700 font-black">담당자와 협의</span>
                   </div>
                 )}
                 <div className="flex items-center px-5 py-3.5">
@@ -780,7 +828,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           {REWARD_FILTERS.map(f => (
             <button
               key={f.value}
-              onClick={() => setActiveFilter(f.value)}
+              onClick={() => changeFilter(f.value)}
               className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all ${
                 activeFilter === f.value
                   ? 'bg-slate-900 text-white shadow-[0_6px_14px_-6px_rgba(15,23,42,0.85)] -translate-y-px'
@@ -790,7 +838,36 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               {f.label}
             </button>
           ))}
-          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{filteredCampaigns.length}개</span>
+          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}개</span>
+        </div>
+
+        {/* 카테고리 줄. 진행 방식 줄과 따로 두는 이유는 두 조건이 서로를 대체하지
+            않기 때문이다(공동구매 + 뷰티처럼 겹쳐 쓴다). 카테고리는 14개라 한 줄에
+            들어가지 않아 가로 스크롤로 두고, 고른 것이 있으면 옆에 해제 버튼을 붙인다. */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+          <button
+            onClick={() => changeCategory('')}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${
+              activeCategory === ''
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            전체 카테고리
+          </button>
+          {Object.entries(CATEGORIES).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => changeCategory(value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${
+                activeCategory === value
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정).
@@ -810,8 +887,24 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
             <span className="text-2xl">📢</span>
           </div>
-          <h3 className="text-base font-black text-slate-900 mb-1">모집중인 캠페인이 없습니다</h3>
-          <p className="text-sm text-slate-400 font-medium">새로운 캠페인이 등록되면 여기에 표시됩니다</p>
+          <h3 className="text-base font-black text-slate-900 mb-1">
+            {activeCategory || activeFilter || searchQuery.trim()
+              ? '조건에 맞는 캠페인이 없습니다'
+              : '모집중인 캠페인이 없습니다'}
+          </h3>
+          <p className="text-sm text-slate-400 font-medium">
+            {activeCategory || activeFilter || searchQuery.trim()
+              ? '카테고리나 진행 방식을 바꿔 보세요'
+              : '새로운 캠페인이 등록되면 여기에 표시됩니다'}
+          </p>
+          {(activeCategory || activeFilter) && (
+            <button
+              onClick={() => { changeFilter(''); changeCategory(''); }}
+              className="mt-4 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black"
+            >
+              조건 모두 해제
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5 md:gap-5 py-1">
@@ -891,6 +984,48 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 페이지 버튼. 총 페이지가 1이면 그리지 않는다.
+          숫자 버튼은 현재 페이지 주변 다섯 개만 낸다 — 캠페인이 수백 개가 되어도
+          버튼 줄이 화면을 넘기지 않게. 처음/끝으로 가는 길은 이전·다음이 아니라
+          첫 페이지 · 마지막 페이지 숫자가 항상 보이도록 범위를 잡아 해결한다. */}
+      {!loading && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1.5 mt-8">
+          <button
+            onClick={() => goToPage(page - 1)}
+            disabled={page <= 1}
+            className="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
+          >
+            이전
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(n => n === 1 || n === totalPages || Math.abs(n - page) <= 1)
+            .map((n, idx, arr) => (
+              <React.Fragment key={n}>
+                {idx > 0 && n - arr[idx - 1] > 1 && (
+                  <span className="px-1 text-xs font-black text-slate-300">…</span>
+                )}
+                <button
+                  onClick={() => goToPage(n)}
+                  className={`min-w-[36px] px-2.5 py-2 rounded-xl text-xs font-black transition-all ${
+                    n === page
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  {n}
+                </button>
+              </React.Fragment>
+            ))}
+          <button
+            onClick={() => goToPage(page + 1)}
+            disabled={page >= totalPages}
+            className="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
+          >
+            다음
+          </button>
         </div>
       )}
 

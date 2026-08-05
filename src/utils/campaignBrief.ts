@@ -464,8 +464,6 @@ export const derivedRequirements = (input: {
   excludes: string[];
   /** 지원을 받아 고르는 방식의 모집·협찬 인원. */
   headcount?: number;
-  /** 공동구매 판매 수수료(%). */
-  commissionRate?: number;
   /** 업로드 채널. 지원 전에 알아야 하는 조건이다. */
   channel?: string;
 }): string => {
@@ -478,8 +476,11 @@ export const derivedRequirements = (input: {
     if (input.headcount && input.headcount > 0) {
       lines.push(`${def.headcountLabel}: ${input.headcount}명`);
     }
-    if (input.mode === 'groupbuy' && input.commissionRate && input.commissionRate > 0) {
-      lines.push(`판매 수수료: ${input.commissionRate}%`);
+    // 공동구매 수수료율은 요구사항 문구에 넣지 않는다. 이 문구는 캠페인 상세에
+    // 그대로 박히는데, 실제 수수료는 담당자가 인플루언서와 조율해 정한다. 등록 시
+    // 적힌 숫자가 먼저 박히면 조율 결과가 그와 달라졌을 때 말이 바뀐 것이 된다.
+    if (input.mode === 'groupbuy') {
+      lines.push('판매 수수료: 담당자와 협의');
     }
     lines.push('지원해 주신 인플루언서 중에서 브랜드가 함께할 분을 고릅니다.');
     return lines.join('\n');
