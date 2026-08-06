@@ -109,7 +109,15 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
                   </p>
                   {s.memo && <p className="text-[11px] text-slate-400 font-medium mt-1">{s.memo}</p>}
                 </div>
-                <p className="text-sm font-black text-slate-900 flex-shrink-0">{formatKoreanWon(s.amount)}</p>
+                <p className="text-sm font-black text-slate-900 flex-shrink-0">
+                  {s.amount_pending && !Number(s.amount || 0) ? (
+                    /* 공동구매 수수료처럼 담당자가 조율 중인 금액. 0원으로 그리면
+                       지급할 것이 없는 협업으로 읽힌다. */
+                    <span className="text-amber-600">협의중</span>
+                  ) : (
+                    formatKoreanWon(s.amount)
+                  )}
+                </p>
               </div>
             );
           })}

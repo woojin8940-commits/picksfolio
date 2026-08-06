@@ -39,12 +39,21 @@ function parseLocalDate(value?: string): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
+/**
+ * 금액이 아직 정해지지 않은 정산인지.
+ *
+ * 공동구매는 판매 수수료를 담당자가 인플루언서와 조율해 정한다 — 그 전까지는 지급될
+ * 금액이 없는 것이 아니라 "아직 정해지지 않은" 상태다. 0원으로 그리면 무보수 협업으로
+ * 읽히므로, 담당자가 금액을 넣기 전에는 협의중으로만 보여 준다.
+ */
+function isAmountPending(s: Settlement): boolean {
+  return !!s.amount_pending && !Number(s.amount || 0);
+}
+
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  // Inline editing of the settlement amount. The influencer can adjust the
-  // figure the business proposed when the agreed payout differs.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -172,6 +181,9 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   const totalAmount = settlements.reduce((sum, s) => sum + s.amount, 0);
   const completedAmount = completedSettlements.reduce((sum, s) => sum + s.amount, 0);
   const pendingAmount = totalAmount - completedAmount;
+  // 담당자가 아직 금액을 확정하지 않은 협업(공동구매 수수료 등). 합계에는 0원으로
+  // 들어가므로, 몇 건이 협의중인지 따로 알려 주지 않으면 합계가 틀린 것처럼 보인다.
+  const negotiatingCount = settlements.filter(isAmountPending).length;
 
   const formatDate = (dateStr: string) => {
     const d = parseLocalDate(dateStr);
@@ -210,7 +222,9 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-100 p-4 md:p-5">
           <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">총 정산 금액</p>
           <p className="text-base md:text-2xl font-black text-blue-700">{formatFee(totalAmount)}</p>
-          <p className="text-[10px] font-bold text-blue-400 mt-1">{settlements.length}건</p>
+          <p className="text-[10px] font-bold text-blue-400 mt-1">
+            {settlements.length}건{negotiatingCount > 0 && ` · 협의중 ${negotiatingCount}건`}
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">정산 완료</p>
@@ -233,7 +247,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
         <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-12 text-center">
           <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">💰</div>
           <h3 className="font-black text-slate-900 text-lg mb-2">정산 내역이 없습니다</h3>
-          <p className="text-slate-400 text-sm font-medium">비즈니스 제안을 수락하면 정산이 자동으로 등록됩니다.</p>
+          <p className="text-slate-400 text-sm font-medium">협업이 확정되면 정산이 자동으로 정리됩니다.</p>
         </div>
       ) : (
         <>
@@ -258,11 +272,19 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                         </div>
                         <div>
                           <p className="font-black text-slate-900 text-sm">{s.title}</p>
-                          <p className="text-slate-400 text-[10px] font-bold">{s.company_name}</p>
+                          <p className="text-slate-400 text-[10px] font-bold mt-0.5">{s.company_name}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        {editingId === s.id ? (
+                        {isAmountPending(s) ? (
+                          /* 담당자가 금액을 확정하기 전. 0원으로 그리면 무보수 협업으로
+                             읽히고, 여기서 인플루언서가 임의로 금액을 적으면 담당자가
+                             조율 중인 금액과 어긋난다 — 수정 칸도 열지 않는다. */
+                          <>
+                            <p className="font-black text-amber-600 text-base">협의중</p>
+                            <p className="text-[10px] font-bold text-slate-400 mt-0.5">담당자 확정 후 표시</p>
+                          </>
+                        ) : editingId === s.id ? (
                           <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-1">
                               <input
@@ -326,13 +348,21 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                     {s.memo && (
                       <p className="text-[11px] text-slate-500 font-medium mt-2 pl-1">{s.memo}</p>
                     )}
-                    <button
-                      onClick={() => handleComplete(s.id)}
-                      disabled={updatingId === s.id}
-                      className="gradient-btn-fix w-full mt-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
-                    >
-                      {updatingId === s.id ? '처리 중...' : '정산 완료 처리'}
-                    </button>
+                    {isAmountPending(s) ? (
+                      /* 금액이 없으면 완료 처리할 것도 없다. 눌러서 0원 정산이
+                         완료로 남으면 나중에 실제 지급액을 되짚을 수 없다. */
+                      <p className="w-full mt-3 bg-amber-50 text-amber-700 py-2.5 rounded-xl font-black text-xs text-center">
+                        담당자가 정산 금액을 조율하고 있습니다
+                      </p>
+                    ) : (
+                      <button
+                        onClick={() => handleComplete(s.id)}
+                        disabled={updatingId === s.id}
+                        className="gradient-btn-fix w-full mt-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
+                      >
+                        {updatingId === s.id ? '처리 중...' : '정산 완료 처리'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -361,7 +391,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                       </div>
                       <div>
                         <p className="font-bold text-slate-800 text-sm">{s.title}</p>
-                        <p className="text-slate-400 text-[10px] font-bold">
+                        <p className="text-slate-400 text-[10px] font-bold mt-0.5">
                           {s.company_name} · 완료일: {formatDate(s.completed_at || s.updated_at || '')}
                         </p>
                       </div>

@@ -9,6 +9,28 @@ import {
   settlementBizKey,
   settlementInfKey,
 } from "./_shared/collab-records.mts";
+import { normalizeRewardMode } from "./_shared/reward-mode.mts";
+
+/**
+ * 캠페인 협업의 정산 금액은 담당자가 확정한 조건(collab_terms.fee)에서 온다.
+ *
+ * 공동구매는 등록 때 금액이 정해지지 않는다 — 브랜드가 적는 것은 희망 수수료율이고,
+ * 실제로 지급할 금액은 담당자가 인플루언서와 판매 조건을 조율한 뒤에야 정해진다.
+ * 그래서 담당자가 금액을 넣기 전까지는 0원이 아니라 "협의중"으로 보여야 한다.
+ * 광고비 지급형은 캠페인에 적힌 금액(reward_amount)을 그대로 쓰되, 담당자가 조건을
+ * 다시 확정했다면 그 값이 우선한다.
+ */
+function derivedAmount(row: any): { amount: number; pending: boolean } {
+  const managerFee = parseAmount(row?.manager_fee || 0);
+  if (managerFee > 0) return { amount: managerFee, pending: false };
+
+  const mode = normalizeRewardMode(row?.reward_mode);
+  if (mode === "groupbuy") return { amount: 0, pending: true };
+
+  const rewardAmount = parseAmount(row?.reward_amount || 0);
+  return { amount: rewardAmount, pending: rewardAmount <= 0 };
+}
+
 
 export default async (req: Request) => {
   const url = new URL(req.url);
@@ -32,8 +54,176 @@ export default async (req: Request) => {
 
   try {
     if (req.method === "GET") {
-      const records = await readRecords(SETTLEMENTS_STORE, role === "business" ? bizKey : infKey);
-      return Response.json({ settlements: records });
+      const explicitRecords = await readRecords(SETTLEMENTS_STORE, role === "business" ? bizKey : infKey);
+      const seenProposalIds = new Set<string>();
+      for (const s of explicitRecords || []) {
+        if (s.proposal_id) seenProposalIds.add(s.proposal_id);
+        if (s.id) seenProposalIds.add(s.id);
+      }
+
+      const autoDerivedSettlements: any[] = [];
+      let dbInstance: any = null;
+      try {
+        const { getDatabase } = await import("@picks/netlify-database");
+        dbInstance = getDatabase();
+      } catch {}
+
+      if (role === "influencer") {
+        const [sqlProposals, campaignRows] = await Promise.all([
+          dbInstance ? (async () => {
+            try {
+              return await dbInstance.sql`
+                SELECT id, business_username, company_name, title, fee, start_date, end_date, status, created_at
+                FROM proposals
+                WHERE LOWER(influencer_username) = ${username}
+                  AND status IN ('accepted', 'completed')
+              ` as any[];
+            } catch { return []; }
+          })() : Promise.resolve([]),
+          dbInstance ? (async () => {
+            try {
+              return await dbInstance.sql`
+                SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
+                       c.business_username as biz_user, c.brand_name, c.title as campaign_title,
+                       c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
+                       ct.fee as manager_fee
+                FROM campaign_applications ca
+                JOIN campaigns c ON c.id = ca.campaign_id
+                LEFT JOIN campaign_collabs cc
+                  ON cc.campaign_id = ca.campaign_id
+                 AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+                LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+                WHERE ca.status = 'accepted'
+                  AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+                  AND LOWER(ca.applicant_username) = ${username}
+              ` as any[];
+            } catch { return []; }
+          })() : Promise.resolve([]),
+        ]);
+
+        for (const row of sqlProposals || []) {
+          const propId = row.id || `prop_${Date.now()}`;
+          if (seenProposalIds.has(propId)) continue;
+          seenProposalIds.add(propId);
+          autoDerivedSettlements.push({
+            id: `stl_derived_${propId}`,
+            proposal_id: propId,
+            influencer_username: username,
+            business_username: (row.business_username || '').toLowerCase().replace(/^biz\//, ''),
+            company_name: row.company_name || '비즈니스 제안',
+            title: row.title || '비즈니스 제안 협업',
+            amount: parseAmount(row.fee || 0),
+            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            status: row.status === 'completed' ? 'completed' : 'scheduled',
+            memo: '비즈니스 제안 협업',
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.created_at || new Date().toISOString(),
+          });
+        }
+
+        for (const row of campaignRows || []) {
+          const propId = `campaign_${row.campaign_id}_${username}`;
+          if (seenProposalIds.has(propId)) continue;
+          seenProposalIds.add(propId);
+          const isListup = row.source === 'listup';
+          const { amount, pending } = derivedAmount(row);
+          autoDerivedSettlements.push({
+            id: `stl_derived_${propId}`,
+            proposal_id: propId,
+            influencer_username: username,
+            business_username: (row.biz_user || '').toLowerCase().replace(/^biz\//, ''),
+            company_name: row.brand_name || '브랜드 협업',
+            title: row.campaign_title || '캠페인 협업',
+            amount,
+            amount_pending: pending,
+            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            status: 'scheduled',
+            memo: isListup ? '담당자 리스트업' : '캠페인 협업',
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.created_at || new Date().toISOString(),
+          });
+        }
+      } else {
+        // role === "business"
+        const [sqlProposals, campaignRows] = await Promise.all([
+          dbInstance ? (async () => {
+            try {
+              return await dbInstance.sql`
+                SELECT id, influencer_username, company_name, title, fee, start_date, end_date, status, created_at
+                FROM proposals
+                WHERE LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
+                  AND status IN ('accepted', 'completed')
+              ` as any[];
+            } catch { return []; }
+          })() : Promise.resolve([]),
+          dbInstance ? (async () => {
+            try {
+              return await dbInstance.sql`
+                SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
+                       c.business_username as biz_user, c.brand_name, c.title as campaign_title,
+                       c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
+                       ct.fee as manager_fee
+                FROM campaign_applications ca
+                JOIN campaigns c ON c.id = ca.campaign_id
+                LEFT JOIN campaign_collabs cc
+                  ON cc.campaign_id = ca.campaign_id
+                 AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+                LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+                WHERE ca.status = 'accepted'
+                  AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+                  AND LOWER(REGEXP_REPLACE(COALESCE(c.business_username, ''), '^biz/', '')) = ${username}
+              ` as any[];
+            } catch { return []; }
+          })() : Promise.resolve([]),
+        ]);
+
+        for (const row of sqlProposals || []) {
+          const propId = row.id || `prop_${Date.now()}`;
+          if (seenProposalIds.has(propId)) continue;
+          seenProposalIds.add(propId);
+          autoDerivedSettlements.push({
+            id: `stl_derived_${propId}`,
+            proposal_id: propId,
+            influencer_username: (row.influencer_username || '').toLowerCase(),
+            business_username: username,
+            company_name: row.company_name || '비즈니스 제안',
+            title: row.title || '비즈니스 제안 협업',
+            amount: parseAmount(row.fee || 0),
+            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            status: row.status === 'completed' ? 'completed' : 'scheduled',
+            memo: '비즈니스 제안 협업',
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.created_at || new Date().toISOString(),
+          });
+        }
+
+        for (const row of campaignRows || []) {
+          const infUser = (row.applicant_username || '').toLowerCase();
+          const propId = `campaign_${row.campaign_id}_${infUser}`;
+          if (seenProposalIds.has(propId)) continue;
+          seenProposalIds.add(propId);
+          const isListup = row.source === 'listup';
+          const { amount, pending } = derivedAmount(row);
+          autoDerivedSettlements.push({
+            id: `stl_derived_${propId}`,
+            proposal_id: propId,
+            influencer_username: infUser,
+            business_username: username,
+            company_name: row.brand_name || '브랜드 협업',
+            title: row.campaign_title || '캠페인 협업',
+            amount,
+            amount_pending: pending,
+            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            status: 'scheduled',
+            memo: isListup ? '담당자 리스트업' : '캠페인 협업',
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.created_at || new Date().toISOString(),
+          });
+        }
+      }
+
+      const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements];
+      return Response.json({ settlements: combinedSettlements });
     }
 
     if (req.method === "POST" && role === "business") {
@@ -98,18 +288,38 @@ export default async (req: Request) => {
 
       await mutateRecords(SETTLEMENTS_STORE, primaryKey, (records) => {
         const idx = records.findIndex((s: any) => s.id === settlementId);
-        if (idx === -1) {
-          notFound = true;
-          return null;
+        if (idx !== -1) {
+          notFound = false;
+          updated = { ...records[idx], ...patch, updated_at: now };
+          if (patch.status === "completed" && !updated.completed_at) {
+            updated.completed_at = now;
+          }
+          const next = [...records];
+          next[idx] = updated;
+          return next;
+        } else {
+          // Derived settlement being patched for the first time
+          notFound = false;
+          updated = {
+            id: settlementId,
+            proposal_id: body.proposal_id || (settlementId.startsWith("stl_derived_") ? settlementId.replace("stl_derived_", "") : ""),
+            influencer_username: (body.influencer_username || (role === "influencer" ? username : "")).toLowerCase(),
+            business_username: (body.business_username || (role === "business" ? username : "")).toLowerCase(),
+            company_name: body.company_name || "",
+            title: body.title || "협업 정산",
+            amount: parseAmount(body.amount),
+            scheduled_date: body.scheduled_date || now.split("T")[0],
+            status: body.status || "scheduled",
+            memo: body.memo || "",
+            created_at: now,
+            updated_at: now,
+            ...patch,
+          };
+          if (patch.status === "completed" && !updated.completed_at) {
+            updated.completed_at = now;
+          }
+          return [...records, updated];
         }
-        notFound = false;
-        updated = { ...records[idx], ...patch, updated_at: now };
-        if (patch.status === "completed" && !updated.completed_at) {
-          updated.completed_at = now;
-        }
-        const next = [...records];
-        next[idx] = updated;
-        return next;
       });
 
       if (notFound || !updated) {

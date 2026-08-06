@@ -187,7 +187,7 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
       <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
         <h3 className="text-base font-black text-slate-900 mb-1">진행 중인 협업</h3>
         <p className="text-xs text-slate-400 font-medium">
-          캠페인에 지원하면 담당자가 검토 후 연락드립니다. 선정되면 이곳에서 단계별로 진행하실 수 있습니다.
+          캠페인에 지원하고 선정되면 이곳에서 단계별로 진행하실 수 있습니다.
         </p>
       </div>
     );

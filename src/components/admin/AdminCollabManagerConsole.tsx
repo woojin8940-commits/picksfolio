@@ -745,7 +745,9 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                               <label className="block">
-                                <span className="text-[10px] text-slate-400 font-bold">보수 (원)</span>
+                                <span className="text-[10px] text-slate-400 font-bold">
+                                  {detail.collab?.campaignType === 'group_buy' ? '판매 수수료 정산액 (원)' : '보수 (원)'}
+                                </span>
                                 <input
                                   type="number"
                                   value={terms.fee}
@@ -797,9 +799,16 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                               placeholder="가이드 요약 · 필수 표기 사항"
                               className="w-full mt-2 text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 resize-none focus:outline-none focus:border-blue-400"
                             />
-                            {detail.terms?.fee > 0 && (
+                            {detail.terms?.fee > 0 ? (
                               <p className="text-[10px] text-slate-400 font-bold mt-2">
                                 세후 지급 예상 {formatKoreanWon(detail.terms.netFee)} (원천징수 3.3%)
+                              </p>
+                            ) : (
+                              /* 금액을 넣기 전까지 인플루언서·브랜드 정산 화면에는
+                                 "협의중"으로만 표시된다. 특히 공동구매는 등록 때 금액이
+                                 정해지지 않아, 이 칸이 곧 정산 예정 금액이다. */
+                              <p className="text-[10px] text-amber-600 font-bold mt-2">
+                                금액을 저장하면 인플루언서 정산 예정 금액에 바로 표시됩니다. 저장 전에는 양쪽 모두 "협의중"으로 보입니다.
                               </p>
                             )}
                             <div className="flex justify-end gap-1.5 mt-2">

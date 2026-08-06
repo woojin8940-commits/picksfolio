@@ -31,8 +31,8 @@ export default async (req: Request) => {
       );
     }
 
-    // 남의 아이디로 호출하면 그 사람의 빌링키가 내 것으로 덮어써지고(=이후 자동결제가
-    // 내 카드로 나감) 응답으로 그 사람의 정산 계좌·사업자 정보까지 돌아왔다.
+    // 남의 아이디로 호출하면 그 사람의 빌링키가 내 것으로 덮어써진다
+    // (= 이후 자동결제가 내 카드로 나간다).
     const auth = await requireAccountOwner(req, String(username));
     if (!auth.ok) return auth.response;
 

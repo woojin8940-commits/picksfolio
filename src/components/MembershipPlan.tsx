@@ -25,9 +25,6 @@ import {
 } from '../utils/membershipTiers';
 import type { SellerVerification } from '../types';
 
-// 업로드된 사업자등록증이 PDF 인지 판별한다(이미지가 아니면 미리보기 대신 PDF 카드로 노출).
-const isPdfUrl = (url: string) => /\.pdf(\?|$)/i.test(url);
-
 interface MembershipPlanProps {
   userName: string;
 }
@@ -43,57 +40,12 @@ interface MembershipPlanProps {
 const ACTIVATION_PRICE_KRW = 9900;
 const ACTIVATION_GRANT_CREDITS = 3000;
 
-const BANKS = [
-  'KB국민은행',
-  '신한은행',
-  '우리은행',
-  '하나은행',
-  'NH농협은행',
-  'IBK기업은행',
-  'SC제일은행',
-  '케이뱅크',
-  '카카오뱅크',
-  '토스뱅크',
-  '새마을금고',
-  '신협',
-  '우체국',
-  '수협은행',
-  '부산은행',
-  '대구은행',
-  '광주은행',
-  '전북은행',
-  '경남은행',
-  '제주은행',
-];
-
-const formatBusinessNumber = (raw: string) => {
-  const digits = raw.replace(/[^0-9]/g, '').slice(0, 10);
-  if (digits.length < 4) return digits;
-  if (digits.length < 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
-};
-
-const formatPhone = (raw: string) => {
-  const digits = raw.replace(/[^0-9]/g, '').slice(0, 11);
-  if (digits.length < 4) return digits;
-  if (digits.length < 8) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-};
-
-const maskAccountNumber = (n: string) => {
-  if (!n) return '';
-  if (n.length <= 4) return n;
-  return `${n.slice(0, 2)}${'*'.repeat(Math.max(n.length - 4, 0))}${n.slice(-2)}`;
-};
-
 const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const normalizedUserName = userName.replace(/^biz\//, '');
   const [verification, setVerification] = useState<SellerVerification | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bizEditing, setBizEditing] = useState(false);
-  const [acctEditing, setAcctEditing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
@@ -115,50 +67,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [claudeRefunded, setClaudeRefunded] = useState(0);
   const [claudeSyncing, setClaudeSyncing] = useState(false);
 
-  // 사업자등록증 이미지 업로드 — 관리자가 이미지를 직접 확인하고 수락해야 인증이 완료된다.
-  const [bizImageUploading, setBizImageUploading] = useState(false);
-  const [bizImageError, setBizImageError] = useState('');
-
-  const [biz, setBiz] = useState({
-    company_name: '',
-    business_number: '',
-    representative_name: '',
-    contact_phone: '',
-    business_type: '',
-    business_item: '',
-    business_address: '',
-    registration_image_url: '',
-  });
-
-  const [acct, setAcct] = useState({
-    bank_name: BANKS[0],
-    account_number: '',
-    account_holder: '',
-  });
-
   const loadVerification = useCallback(async () => {
     setLoading(true);
     const data = await apiService.getSellerVerification(normalizedUserName);
     setVerification(data);
-    if (data?.business) {
-      setBiz({
-        company_name: data.business.company_name || '',
-        business_number: data.business.business_number || '',
-        representative_name: data.business.representative_name || '',
-        contact_phone: data.business.contact_phone || '',
-        business_type: data.business.business_type || '',
-        business_item: data.business.business_item || '',
-        business_address: data.business.business_address || '',
-        registration_image_url: data.business.registration_image_url || '',
-      });
-    }
-    if (data?.settlement) {
-      setAcct({
-        bank_name: data.settlement.bank_name || BANKS[0],
-        account_number: data.settlement.account_number || '',
-        account_holder: data.settlement.account_holder || '',
-      });
-    }
     setLoading(false);
   }, [normalizedUserName]);
 
@@ -213,103 +125,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
   };
 
-  const businessVerified = !!verification?.business_verified;
-  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 사업자 인증이 완료된 것으로 본다.
-  const businessReviewStatus: 'pending' | 'approved' | 'rejected' | null =
-    verification?.business_review_status
-    || (businessVerified ? 'approved' : (verification?.business ? 'pending' : null));
-  const businessRejectReason = verification?.business_review_reason || '';
-  const settlementRegistered = !!verification?.settlement_registered;
   const membershipActive = !!verification?.membership_active;
 
   const flashSuccess = (msg: string) => {
     setSuccessMsg(msg);
     window.setTimeout(() => setSuccessMsg(null), 2500);
-  };
-
-  // 사업자등록증 이미지 업로드. 업로드된 이미지는 관리자 심사 콘솔에 노출된다.
-  const handleBizImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    const isImage = file.type.startsWith('image/');
-    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-    if (!isImage && !isPdf) {
-      setBizImageError('이미지 또는 PDF 파일만 업로드할 수 있습니다.');
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setBizImageError('파일 용량은 10MB 이하여야 합니다.');
-      return;
-    }
-    setBizImageError('');
-    setBizImageUploading(true);
-    try {
-      const url = await apiService.uploadImage(`biz-${normalizedUserName}`, file, file.name);
-      if (url) {
-        setBiz((prev) => ({ ...prev, registration_image_url: url }));
-      } else {
-        setBizImageError('이미지 업로드에 실패했습니다. 다시 시도해 주세요.');
-      }
-    } catch {
-      setBizImageError('이미지 업로드 중 오류가 발생했습니다.');
-    } finally {
-      setBizImageUploading(false);
-    }
-  };
-
-  const submitBusiness = async () => {
-    setError(null);
-    if (!biz.company_name.trim() || !biz.business_number.trim() || !biz.representative_name.trim() || !biz.contact_phone.trim()) {
-      setError('상호/사업자등록번호/대표자명/연락처는 필수입니다.');
-      return;
-    }
-    const digits = biz.business_number.replace(/[^0-9]/g, '');
-    if (digits.length !== 10) {
-      setError('사업자등록번호는 10자리 숫자여야 합니다.');
-      return;
-    }
-    if (!biz.registration_image_url) {
-      setError('사업자등록증(이미지 또는 PDF)을 첨부해 주세요. 관리자가 직접 확인 후 수락합니다.');
-      return;
-    }
-    setSaving(true);
-    const res = await apiService.saveSellerVerification(normalizedUserName, {
-      business: { ...biz },
-    });
-    setSaving(false);
-    if (!res.success) {
-      setError(res.error || '저장 중 오류가 발생했습니다.');
-      return;
-    }
-    if (res.data) setVerification(res.data);
-    setBizEditing(false);
-    flashSuccess('사업자등록증이 제출되었습니다. 관리자 확인 후 수락되면 사업자 인증이 완료됩니다.');
-  };
-
-  const submitSettlement = async () => {
-    setError(null);
-    if (!acct.bank_name || !acct.account_number.trim() || !acct.account_holder.trim()) {
-      setError('은행/계좌번호/예금주명은 필수입니다.');
-      return;
-    }
-    const cleanNum = acct.account_number.replace(/[^0-9-]/g, '');
-    if (cleanNum.length < 6) {
-      setError('계좌번호가 너무 짧습니다.');
-      return;
-    }
-    setSaving(true);
-    const res = await apiService.saveSellerVerification(normalizedUserName, {
-      settlement: { ...acct, account_number: cleanNum },
-    });
-    setSaving(false);
-    if (!res.success) {
-      setError(res.error || '저장 중 오류가 발생했습니다.');
-      return;
-    }
-    if (res.data) setVerification(res.data);
-    setAcctEditing(false);
-    flashSuccess('정산 계좌가 저장되었습니다.');
   };
 
   const handleStartSubscribe = (tier: MembershipTier) => {
@@ -424,8 +244,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         ...easyPayParam(ppMethod),
         customer: {
           customerId: safeUserName,
-          fullName: verification?.business?.representative_name || verification?.business?.company_name || undefined,
-          phoneNumber: verification?.business?.contact_phone || undefined,
         },
       });
 
@@ -761,249 +579,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </div>
       </section>
 
-      {/* Business Verification */}
-      <section className="mb-10 max-w-2xl">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg md:text-xl font-bold text-slate-800 flex items-center gap-2">
-            <span className="text-xl">🧾</span> 사업자 인증
-            {businessReviewStatus === 'approved' && (
-              <span className="text-[10px] font-black text-green-700 bg-green-100 border border-green-200 px-2 py-0.5 rounded-full">인증됨</span>
-            )}
-            {businessReviewStatus === 'pending' && (
-              <span className="text-[10px] font-black text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded-full">심사 중</span>
-            )}
-            {businessReviewStatus === 'rejected' && (
-              <span className="text-[10px] font-black text-red-700 bg-red-100 border border-red-200 px-2 py-0.5 rounded-full">거절됨</span>
-            )}
-          </h3>
-          {!bizEditing && (
-            <button
-              type="button"
-              onClick={() => { setError(null); setBizEditing(true); }}
-              className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50"
-            >
-              {verification?.business ? '수정' : '등록하기'}
-            </button>
-          )}
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5">
-          {bizEditing ? (
-            <div className="space-y-3">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
-                  {error}
-                </div>
-              )}
-              <Field label="상호(사업자명) *" value={biz.company_name} onChange={(v) => setBiz({ ...biz, company_name: v })} placeholder="픽스폴리오" />
-              <div>
-                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록번호 *</label>
-                <input
-                  type="text"
-                  value={biz.business_number}
-                  onChange={(e) => setBiz({ ...biz, business_number: formatBusinessNumber(e.target.value) })}
-                  placeholder="000-00-00000"
-                  inputMode="numeric"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
-                />
-              </div>
-              <Field label="대표자명 *" value={biz.representative_name} onChange={(v) => setBiz({ ...biz, representative_name: v })} placeholder="홍길동" />
-              <Field label="연락처 *" value={biz.contact_phone} onChange={(v) => setBiz({ ...biz, contact_phone: formatPhone(v) })} placeholder="010-0000-0000" inputMode="tel" />
-              <Field label="업태" value={biz.business_type} onChange={(v) => setBiz({ ...biz, business_type: v })} placeholder="소매업" />
-              <Field label="종목" value={biz.business_item} onChange={(v) => setBiz({ ...biz, business_item: v })} placeholder="전자상거래" />
-              <Field label="사업장 주소" value={biz.business_address} onChange={(v) => setBiz({ ...biz, business_address: v })} placeholder="서울특별시 ..." />
-
-              {/* 사업자등록증 이미지 업로드 */}
-              <div>
-                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">사업자등록증 (이미지 또는 PDF) *</label>
-                {biz.registration_image_url ? (
-                  <div className="space-y-2">
-                    <a href={biz.registration_image_url} target="_blank" rel="noreferrer" className="block">
-                      {isPdfUrl(biz.registration_image_url) ? (
-                        <div className="flex items-center gap-3 w-full px-4 py-5 rounded-xl border border-slate-200 bg-slate-50">
-                          <span className="text-2xl">📄</span>
-                          <span className="text-sm font-bold text-slate-600">사업자등록증 PDF · 새 창에서 보기</span>
-                        </div>
-                      ) : (
-                        <img
-                          src={biz.registration_image_url}
-                          alt="사업자등록증"
-                          className="w-full max-h-[320px] object-contain rounded-xl border border-slate-200 bg-slate-50"
-                        />
-                      )}
-                    </a>
-                    <label className="inline-block text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer">
-                      {bizImageUploading ? '업로드 중...' : '다른 파일로 변경'}
-                      <input type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
-                    </label>
-                  </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center gap-1.5 w-full py-8 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
-                    <span className="text-2xl">📎</span>
-                    <span className="text-xs font-bold text-slate-500">
-                      {bizImageUploading ? '업로드 중...' : '사업자등록증 첨부 (JPG·PNG·PDF, 10MB 이하)'}
-                    </span>
-                    <input type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleBizImageUpload} disabled={bizImageUploading} />
-                  </label>
-                )}
-                {bizImageError && <p className="text-[11px] text-red-500 font-bold mt-1.5">{bizImageError}</p>}
-                <p className="text-[10px] text-slate-400 font-bold mt-1.5">제출하신 사업자등록증은 관리자가 직접 확인 후 수락합니다. 심사에는 보통 1~2일 정도 소요됩니다.</p>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setBizEditing(false); setError(null); }}
-                  disabled={saving}
-                  className="px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  onClick={submitBusiness}
-                  disabled={saving || bizImageUploading || !biz.registration_image_url}
-                  title={!biz.registration_image_url ? '사업자등록증(이미지 또는 PDF)을 먼저 첨부해 주세요.' : undefined}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
-                >
-                  {saving ? '제출 중...' : '제출하기'}
-                </button>
-              </div>
-            </div>
-          ) : verification?.business ? (
-            <div className="space-y-3">
-              {businessReviewStatus === 'pending' && (
-                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-xs font-bold text-orange-700">
-                  ⏳ 관리자 확인 대기 중입니다. 사업자등록증 검토 후 수락되면 사업자 인증이 완료됩니다. 심사에는 보통 1~2일 정도 소요됩니다.
-                </div>
-              )}
-              {businessReviewStatus === 'rejected' && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs font-bold text-red-700">
-                  사업자 인증이 거절되었습니다{businessRejectReason ? ` · ${businessRejectReason}` : ''}. 정보를 수정해 다시 제출해 주세요.
-                </div>
-              )}
-              {(verification.business.company_name
-                || verification.business.representative_name
-                || verification.business.business_number
-                || verification.business.contact_phone
-                || verification.business.business_type
-                || verification.business.business_item
-                || verification.business.business_address) && (
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-                  {verification.business.company_name && <div><span className="text-slate-400">상호</span> · {verification.business.company_name}</div>}
-                  {verification.business.representative_name && <div><span className="text-slate-400">대표자</span> · {verification.business.representative_name}</div>}
-                  {verification.business.business_number && <div><span className="text-slate-400">등록번호</span> · {verification.business.business_number}</div>}
-                  {verification.business.contact_phone && <div><span className="text-slate-400">연락처</span> · {verification.business.contact_phone}</div>}
-                  {verification.business.business_type && <div><span className="text-slate-400">업태</span> · {verification.business.business_type}</div>}
-                  {verification.business.business_item && <div><span className="text-slate-400">종목</span> · {verification.business.business_item}</div>}
-                  {verification.business.business_address && <div className="col-span-2"><span className="text-slate-400">주소</span> · {verification.business.business_address}</div>}
-                </div>
-              )}
-              {verification.business.registration_image_url && (
-                <a href={verification.business.registration_image_url} target="_blank" rel="noreferrer" className="block">
-                  {isPdfUrl(verification.business.registration_image_url) ? (
-                    <div className="flex items-center gap-3 w-full px-4 py-5 rounded-xl border border-slate-200 bg-slate-50">
-                      <span className="text-2xl">📄</span>
-                      <span className="text-sm font-bold text-slate-600">사업자등록증 PDF · 새 창에서 보기</span>
-                    </div>
-                  ) : (
-                    <img
-                      src={verification.business.registration_image_url}
-                      alt="사업자등록증"
-                      className="w-full max-h-[280px] object-contain rounded-xl border border-slate-200 bg-slate-50"
-                    />
-                  )}
-                </a>
-              )}
-              {businessReviewStatus === 'approved' && (
-                <div><span className="text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">✓ 관리자 확인 완료 · 인증됨</span></div>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">
-              사업자 인증을 위해 사업자등록증(이미지 또는 PDF)을 제출해 주세요. 관리자 확인 후 수락되면 인증이 완료됩니다.
-              <span className="block text-[11px] text-slate-400 font-bold mt-1">※ 심사에는 보통 1~2일 정도 소요됩니다.</span>
-            </p>
-          )}
-        </div>
-      </section>
-
-      {/* Settlement Account */}
-      <section className="mb-12 max-w-2xl">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg md:text-xl font-bold text-slate-800 flex items-center gap-2">
-            <span className="text-xl">🏦</span> 정산 계좌 등록
-            {settlementRegistered && (
-              <span className="text-[10px] font-black text-green-700 bg-green-100 border border-green-200 px-2 py-0.5 rounded-full">등록됨</span>
-            )}
-          </h3>
-          {!acctEditing && (
-            <button
-              type="button"
-              onClick={() => { setError(null); setAcctEditing(true); }}
-              className="text-xs font-bold text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50"
-            >
-              {settlementRegistered ? '수정' : '등록하기'}
-            </button>
-          )}
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5">
-          {acctEditing ? (
-            <div className="space-y-3">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
-                  {error}
-                </div>
-              )}
-              <div>
-                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">은행 *</label>
-                <select
-                  value={acct.bank_name}
-                  onChange={(e) => setAcct({ ...acct, bank_name: e.target.value })}
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
-                >
-                  {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-              <Field label="계좌번호 * (숫자/하이픈만)" value={acct.account_number} onChange={(v) => setAcct({ ...acct, account_number: v.replace(/[^0-9-]/g, '') })} placeholder="00000000000000" inputMode="numeric" />
-              <Field label="예금주명 *" value={acct.account_holder} onChange={(v) => setAcct({ ...acct, account_holder: v })} placeholder="사업자 대표자명과 동일해야 합니다" />
-              <p className="text-[11px] text-slate-400 font-medium">※ 예금주명은 사업자등록증상의 대표자명 또는 법인명과 일치해야 정산이 정상 처리됩니다.</p>
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setAcctEditing(false); setError(null); }}
-                  disabled={saving}
-                  className="px-4 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  onClick={submitSettlement}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600 disabled:opacity-50"
-                >
-                  {saving ? '저장 중...' : '저장'}
-                </button>
-              </div>
-            </div>
-          ) : settlementRegistered && verification?.settlement ? (
-            <div className="text-sm text-slate-600">
-              <span className="font-bold text-slate-700">{verification.settlement.bank_name}</span>
-              <span className="mx-2 text-slate-300">·</span>
-              <span className="font-mono">{maskAccountNumber(verification.settlement.account_number)}</span>
-              <span className="mx-2 text-slate-300">·</span>
-              <span>{verification.settlement.account_holder}</span>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">
-              판매 수익이 입금될 정산 계좌를 등록해 주세요. 예금주명은 사업자 대표자와 일치해야 합니다.
-            </p>
-          )}
-        </div>
-      </section>
-
       <section className="max-w-2xl">
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 md:p-6">
           <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
@@ -1015,7 +590,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
             <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 AI 협업 멤버십({STANDARD_AI_PRICE.toLocaleString()}원) 이상에 포함됩니다. 스탠다드 멤버십({STANDARD_PRICE.toLocaleString()}원)에는 포함되지 않습니다.</li>
             <li>프로 플랜은 스탠다드 · AI 협업 멤버십 혜택을 포함하며, 인스타그램 디엠 자동화는 프로 플랜에서만 이용할 수 있습니다.</li>
-            <li>등록된 정산 계좌로 판매 수익이 입금되며, 계좌 예금주명은 사업자 대표자와 일치해야 합니다.</li>
           </ul>
         </div>
       </section>
@@ -1261,25 +835,5 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     </main>
   );
 };
-
-const Field: React.FC<{
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
-}> = ({ label, value, onChange, placeholder, inputMode }) => (
-  <div>
-    <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</label>
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      inputMode={inputMode}
-      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-blue-400"
-    />
-  </div>
-);
 
 export default MembershipPlan;

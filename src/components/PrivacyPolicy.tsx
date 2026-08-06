@@ -46,7 +46,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
             <li><span className="text-slate-300 font-bold">회원관리 및 이용자 식별:</span> 회원 가입의사 확인, 카카오 로그인을 통한 본인 식별, 멤버십 구독 서비스 제공 및 유지관리</li>
             <li><span className="text-slate-300 font-bold">라이브 커머스 운영(셀러):</span> 라이브 방송 송출, 방송 알림톡 발송, 인스타그램 자동 DM 전송, 장바구니 및 주문 내역 관리, 일괄 결제 처리</li>
             <li><span className="text-slate-300 font-bold">상품 구매 및 배송 지원(시청자):</span> 시청자(구매자)의 상품 주문 접수, 결제 처리, 배송지 확인 및 판매자에게 주문 정보 제공</li>
-            <li><span className="text-slate-300 font-bold">거래 및 정산:</span> 유료 구독료 결제, 시청자 상품 대금의 결제대행(PG) 처리, 멤버십 회원(셀러) 정산 계좌 입금 및 세무 신고</li>
+            <li><span className="text-slate-300 font-bold">거래 및 정산:</span> 유료 구독료 결제 및 멤버십 서비스 제공</li>
             <li><span className="text-slate-300 font-bold">고객지원:</span> 민원 사항 확인 및 사실 조사를 위한 연락, 처리 결과 통보</li>
             <li><span className="text-slate-300 font-bold">마케팅 및 품질 개선:</span> 신규 기능 개발, 서비스 이용 패턴 분석, 광고성 정보(이벤트 등) 제공(마케팅 수신은 별도 동의를 받아 처리)</li>
           </ul>
@@ -77,7 +77,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
           <div className="mb-6">
             <h3 className="text-lg font-bold text-white mb-3">멤버십 구독 및 정산 시 (셀러)</h3>
             <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
-              <li><span className="text-slate-300 font-bold">필수:</span> 이름, 사업자 정보(사업자등록번호·상호·대표자명·업태·종목·사업장 주소), 계좌번호, 예금주명, 이메일 주소, 연락처</li>
+              <li><span className="text-slate-300 font-bold">필수:</span> 이름, 이메일 주소, 연락처</li>
               <li><span className="text-slate-300 font-bold">세무 신고용:</span> 주민등록번호(원천징수 의무 이행 등 법령에 근거하여 수집하는 경우에 한함)</li>
               <li><span className="text-slate-300 font-bold">결제 정보:</span> 구독료 결제를 위한 카드/간편결제 식별값(결제대행사 보관, 회사는 직접 보관하지 않음)</li>
             </ul>

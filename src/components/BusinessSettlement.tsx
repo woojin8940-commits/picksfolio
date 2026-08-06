@@ -23,6 +23,16 @@ async function readSettlementError(res: Response, fallback: string): Promise<str
   }
 }
 
+/**
+ * 금액이 아직 정해지지 않은 정산인지.
+ *
+ * 공동구매 수수료처럼 담당자가 인플루언서와 조율해 정하는 금액은, 확정 전에 0원으로
+ * 그리면 지급할 것이 없는 협업으로 읽힌다. 확정 전에는 협의중으로만 보여 준다.
+ */
+function isAmountPending(s: Settlement): boolean {
+  return !!s.amount_pending && !Number(s.amount || 0);
+}
+
 const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsername, companyName, embedded = false }) => {
   const cleanBusinessUsername = businessUsername.replace(/^biz\//, '');
   const settlementsBaseUrl = `/api/settlements/${encodeURIComponent(cleanBusinessUsername)}`;
@@ -321,13 +331,22 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
                     <div className="grid grid-cols-2 gap-3 mb-3">
                       <div className="bg-slate-50 rounded-xl p-3">
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-1">정산 금액</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-black text-blue-600">{formatFee(s.amount)}</p>
-                          <button
-                            onClick={() => setEditing({ id: s.id, field: 'amount', value: String(s.amount) })}
-                            className="text-[9px] text-slate-400 hover:text-blue-500 font-bold underline"
-                          >수정</button>
-                        </div>
+                        {isAmountPending(s) ? (
+                          /* 담당자가 인플루언서와 조율 중인 금액이다. 여기서 브랜드가
+                             먼저 적어 넣으면 담당자가 확정한 금액과 어긋난다. */
+                          <div>
+                            <p className="text-sm font-black text-amber-600">협의중</p>
+                            <p className="text-[9px] text-slate-400 font-bold mt-0.5">담당자 확정 후 표시</p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-black text-blue-600">{formatFee(s.amount)}</p>
+                            <button
+                              onClick={() => setEditing({ id: s.id, field: 'amount', value: String(s.amount) })}
+                              className="text-[9px] text-slate-400 hover:text-blue-500 font-bold underline"
+                            >수정</button>
+                          </div>
+                        )}
                       </div>
                       <div className="bg-slate-50 rounded-xl p-3">
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-1">정산 예정일</p>
@@ -344,10 +363,10 @@ const BusinessSettlement: React.FC<BusinessSettlementProps> = ({ businessUsernam
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleComplete(s.id)}
-                        disabled={updatingId === s.id}
+                        disabled={updatingId === s.id || isAmountPending(s)}
                         className="gradient-btn-fix flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2.5 rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:shadow-green-500/40 transition-all disabled:opacity-60"
                       >
-                        {updatingId === s.id ? '처리 중...' : '정산 완료'}
+                        {updatingId === s.id ? '처리 중...' : isAmountPending(s) ? '금액 협의중' : '정산 완료'}
                       </button>
                       <button
                         onClick={() => handleDelete(s.id)}

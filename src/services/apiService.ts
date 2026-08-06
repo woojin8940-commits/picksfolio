@@ -622,13 +622,13 @@ export const apiService = {
   },
 
   // AWS IVS Stream Key API
-  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily' | 'exhausted'; gate?: 'membership' | 'verification'; error?: string } | null> {
+  async getStreamKey(username: string): Promise<{ ingestServer: string; streamKey: string; playbackUrl: string; rtmpUrl: string; capReached?: 'monthly' | 'daily' | 'exhausted'; gate?: 'membership'; error?: string } | null> {
     try {
       const res = await fetch(`/api/stream-key/${encodeURIComponent(username.toLowerCase())}`, {
         headers: await authHeaders(),
       });
       if (res.status === 403) {
-        // 한도 초과이거나 라이브 자격(멤버십 · 사업자 인증) 미충족 — 구조화된 응답을
+        // 한도 초과이거나 라이브 자격(멤버십) 미충족 — 구조화된 응답을
         // 그대로 넘겨 UI 가 "월 50시간 도달" / "라이브 멤버십 필요"를 구분해 보여준다.
         try { return await res.json(); } catch { return null; }
       }
@@ -1111,7 +1111,7 @@ export const apiService = {
     }
   },
 
-  // Seller verification (business registration + settlement account + membership)
+  // Seller record (membership + billing state)
   // Returns the last-known value synchronously (from memory, then localStorage)
   // so gated screens can render their real state on the first paint instead of
   // flashing the "멤버십 인증 필요" gate while the network request is in flight.
@@ -2328,6 +2328,30 @@ export const apiService = {
     }
   },
 
+  /**
+   * 내 매칭 등록서 취소/삭제.
+   */
+  async cancelMyCollabDirectory(
+    variant: 'influencer' | 'brand',
+    username?: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const params = new URLSearchParams({ mine: '1', role: variant });
+      if (username) params.set('username', username);
+      const res = await fetch(`/api/collab-directory?${params.toString()}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { success: false, error: json?.error || '취소하지 못했습니다.' };
+      return { success: true };
+    } catch (e) {
+      console.error('[API] Failed to cancel collab directory submission:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
   async getCreatorChannel(username: string, token?: string): Promise<any> {
     try {
       const res = await fetch(`/api/creator-channel?username=${encodeURIComponent(username)}`, {
@@ -2376,41 +2400,6 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to sync creator channel:', e);
       return { error: '네트워크 오류' };
-    }
-  },
-
-  // ─── 셀러 사업자등록증 수동 심사 (관리자) ──────────────────────────────────
-
-  async getAdminSellerVerifications(token: string, status?: string): Promise<{ items: any[]; pendingCount: number }> {
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const qs = status ? `?status=${status}` : '';
-      const res = await fetch(`/api/admin/seller-verifications${qs}`, { credentials: 'same-origin', headers });
-      if (!res.ok) return { items: [], pendingCount: 0 };
-      return await res.json();
-    } catch (e) {
-      console.error('[API] Failed to get admin seller verifications:', e);
-      return { items: [], pendingCount: 0 };
-    }
-  },
-
-  async adminSellerVerificationAction(token: string, username: string, action: 'approve' | 'reject', reason?: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/admin/seller-verifications', {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers,
-        body: JSON.stringify({ username: username.toLowerCase(), action, reason }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { success: false, error: json?.error };
-      return { success: true };
-    } catch (e) {
-      console.error('[API] Failed to perform admin seller verification action:', e);
-      return { success: false, error: '네트워크 오류' };
     }
   },
 
