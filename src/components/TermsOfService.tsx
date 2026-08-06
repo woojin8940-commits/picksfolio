@@ -84,8 +84,7 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
             <h3 className="text-lg font-bold text-white mb-3">제 5조 (장바구니 및 일괄 결제 시스템)</h3>
             <ul className="space-y-4 text-slate-400 text-sm leading-relaxed">
               <li>회사는 시청자(구매자)가 방송 중 담은 상품을 방송 종료 후 한 번에 결제할 수 있는 일괄 결제 시스템을 제공합니다.</li>
-              <li>결제 대금은 결제대행사(PG)를 통해 처리되며, 회사는 약정된 정산 주기에 따라 판매 대금을 멤버십 회원(셀러)의 등록된 정산 계좌로 입금합니다.</li>
-              <li>멤버십 회원(셀러)이 라이브 방송을 송출하고 판매 대금을 정산받기 위해서는 사업자 정보 및 정산 계좌 등록을 완료해야 하며, 관련 법령상 필요한 경우 세무 신고를 위한 정보를 추가로 제공할 수 있습니다.</li>
+              <li>결제 대금은 결제대행사(PG)를 통해 처리됩니다.</li>
             </ul>
           </div>
 
@@ -173,8 +172,8 @@ const TermsOfService: React.FC<TermsOfServiceProps> = ({ onNavigateHome }) => {
             <h3 className="text-lg font-bold text-white mb-3">제 11조 (이용계약의 체결)</h3>
             <ul className="space-y-4 text-slate-400 text-sm leading-relaxed">
               <li>서비스 이용계약은 서비스를 이용하려는 자가 본 약관 및 개인정보처리방침에 동의하고 회사가 정한 양식에 따라 가입을 신청한 후, 회사가 이를 승낙함으로써 성립합니다.</li>
-              <li>멤버십 회원(셀러)의 경우 라이브 커머스 이용에 필요한 사업자 정보, 정산 계좌 및 정산에 필요한 세무 정보를 회사가 요청하는 바에 따라 제공해야 하며, 회사는 해당 정보의 확인 절차를 거친 후 이용 승낙 여부를 결정합니다.</li>
-              <li>회사는 다음 각 호에 해당하는 경우 이용 신청에 대한 승낙을 거부하거나 사후 이용계약을 해지할 수 있습니다.
+              <li>
+                회사는 다음 각 호에 해당하는 경우 이용 신청에 대한 승낙을 거부하거나 사후 이용계약을 해지할 수 있습니다.
                 <ul className="mt-2 ml-4 space-y-2">
                   <li>타인의 정보를 도용하거나 허위 정보를 기재한 경우</li>
                   <li>과거 본 약관 위반 등의 사유로 회원 자격을 상실한 이력이 있는 경우</li>

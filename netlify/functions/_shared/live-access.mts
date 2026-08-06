@@ -6,8 +6,11 @@
  * ingest + stream key)을 받아갈 수 있었다. 이 모듈이 그 판정을 서버로 옮긴다.
  *
  * 송출하려면(둘 중 하나):
- *   1) 라이브 커머스 멤버십(별도 구독) 또는 기존 커머스 멤버십 + 사업자 인증 + 정산 등록
+ *   1) 라이브 커머스 멤버십(별도 구독) 또는 기존 커머스 멤버십
  *   2) 다른 호스트의 "함께 방송하기" 초대를 수락한 게스트 (accepted / live 세션 보유)
+ *
+ * 예전에는 여기에 사업자 인증 + 정산 계좌 등록도 함께 요구했다. 두 절차는 라이브
+ * 커머스 전용이었고 서비스에서 없앴으므로, 이제 판정에 쓰지 않는다.
  *
  * 2번은 클라이언트 게이트의 `&& !coBroadcastActive` 예외와 같은 규칙이다. 게스트는 자기
  * 멤버십 없이도 초대받은 합동방송에는 참여할 수 있어야 한다.
@@ -22,9 +25,6 @@ import { hasLiveCommerceAccess } from './membership-billing.mts'
 // 가격을 안내하지 않고 이용할 수 없다는 사실만 알린다(기존 구독자는 계속 통과).
 export const LIVE_MEMBERSHIP_REQUIRED_MESSAGE =
   '라이브 커머스 기능은 현재 제공되지 않습니다.'
-
-export const LIVE_VERIFICATION_REQUIRED_MESSAGE =
-  '사업자 인증과 정산 계좌 등록을 마쳐야 라이브를 시작할 수 있어요.'
 
 const cleanName = (username: string) => username.toLowerCase().trim().replace(/^biz\//, '')
 
@@ -53,7 +53,7 @@ async function hasActiveCoBroadcast(username: string): Promise<boolean> {
 export interface LiveAccessResult {
   allowed: boolean
   /** 거부 사유 코드 — 클라이언트가 안내 문구를 고르는 데 쓴다. */
-  reason?: 'membership' | 'verification'
+  reason?: 'membership'
   message?: string
 }
 
@@ -80,15 +80,11 @@ export async function checkLiveBroadcastAccess(
   }
 
   const membershipOk = hasLiveCommerceAccess(record)
-  const verifiedOk = Boolean(record?.business_verified) && Boolean(record?.settlement_registered)
 
-  if (membershipOk && verifiedOk) return { allowed: true }
+  if (membershipOk) return { allowed: true }
 
   // 합동방송 게스트 예외 — 초대받은 방송에는 자기 멤버십 없이도 참여할 수 있다.
   if (await hasActiveCoBroadcast(username)) return { allowed: true }
 
-  if (!membershipOk) {
-    return { allowed: false, reason: 'membership', message: LIVE_MEMBERSHIP_REQUIRED_MESSAGE }
-  }
-  return { allowed: false, reason: 'verification', message: LIVE_VERIFICATION_REQUIRED_MESSAGE }
+  return { allowed: false, reason: 'membership', message: LIVE_MEMBERSHIP_REQUIRED_MESSAGE }
 }

@@ -153,38 +153,10 @@ export interface BusinessAccount {
   updated_at?: string;
 }
 
-export interface SellerBusinessVerification {
-  // 사업자등록증 이미지 (관리자 수동 심사용) — 제출 시 받는 핵심 항목
-  registration_image_url?: string;
-  // 아래 텍스트 항목은 더 이상 셀러가 직접 입력하지 않는다(관리자가 이미지로 확인). 과거 제출 기록 호환용.
-  company_name?: string;
-  business_number?: string;
-  representative_name?: string;
-  contact_phone?: string;
-  business_type?: string;
-  business_item?: string;
-  business_address?: string;
-  // 국세청(NTS) 사업자등록정보 상태조회 결과 (구 자동 검증 방식 — 호환용)
-  nts_verified?: boolean;
-  nts_status?: string;
-}
-
-export interface SellerSettlementAccount {
-  bank_name: string;
-  account_number: string;
-  account_holder: string;
-}
-
+// 셀러 레코드 — 지금은 멤버십·정기결제 상태만 담는다.
+// 사업자등록증 심사와 정산 계좌 등록은 라이브 커머스 전용 절차였고, 라이브 커머스를
+// 접으면서 함께 없앴다(예전 제출 기록은 서버 응답에서 걸러진다).
 export interface SellerVerification {
-  business?: SellerBusinessVerification | null;
-  settlement?: SellerSettlementAccount | null;
-  business_verified?: boolean;
-  // 사업자등록증 수동 심사 상태. 'approved' 일 때만 사업자 인증이 완료된 것으로 본다.
-  business_review_status?: 'pending' | 'approved' | 'rejected';
-  business_review_reason?: string;
-  business_submitted_at?: string | null;
-  business_reviewed_at?: string | null;
-  settlement_registered?: boolean;
   membership_active?: boolean;
   membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live' | null;
   membership_started_at?: string | null;
@@ -230,6 +202,12 @@ export interface Settlement {
   company_name: string;
   title: string;
   amount: number;
+  /**
+   * 아직 금액이 정해지지 않은 정산. 공동구매처럼 담당자가 인플루언서와 조율해
+   * 금액을 확정하는 협업은 담당자가 값을 넣기 전까지 0원이 아니라 "협의중"으로
+   * 보여야 한다.
+   */
+  amount_pending?: boolean;
   scheduled_date: string;
   status: SettlementStatus;
   completed_at?: string;

@@ -222,14 +222,6 @@ export default async (req: Request) => {
         const youtube_url = (b.youtube_url || "").toString().trim();
         const naver_blog_url = (b.naver_blog_url || "").toString().trim();
 
-        // 연동한 사람은 인스타 링크를 손으로 적을 필요가 없다(위에서 채워진다).
-        if (!instagram_url) {
-          return Response.json(
-            { error: "인스타그램 계정을 연동하거나 프로필 링크를 입력해 주세요." },
-            { status: 400 },
-          );
-        }
-
         // 채널별 수기 입력 팔로워 수. 인스타는 연동값이 있으면 그것을 우선한다.
         const metaFollowers = linked ? Math.max(0, Number(linked.followers || 0)) : 0;
         const instagram_followers =
@@ -377,6 +369,33 @@ export default async (req: Request) => {
         status: row?.status || "",
         createdAt: row?.created_at || null,
       });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
+    }
+  }
+
+  // ── 본인 접수 취소(로그인 사용자) ─────────────────────────────
+  if (req.method === "DELETE" && url.searchParams.get("mine") === "1") {
+    try {
+      const caller = await requireSignedInUser(req);
+      if (!caller.ok) return caller.response;
+      const role = url.searchParams.get("role") === "brand" ? "brand" : "influencer";
+      const requested = norm(url.searchParams.get("username") || "");
+      const username = requested || norm(caller.username);
+      if (!username) {
+        return Response.json({ error: "계정을 확인할 수 없습니다." }, { status: 400 });
+      }
+      if (!callerIsAnyOf(caller, [username])) {
+        return Response.json({ error: "본인 계정만 취소할 수 있습니다." }, { status: 403 });
+      }
+
+      await db.sql`
+        DELETE FROM collab_directory_applications
+        WHERE role = ${role}
+          AND LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')) = ${username}
+      `;
+
+      return Response.json({ success: true, cancelled: true });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }

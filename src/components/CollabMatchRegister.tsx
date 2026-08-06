@@ -43,9 +43,9 @@ const RETURN_FLAG = 'collab_match';
  * 'archived' 는 여기에 없다 — 보관 처리된 등록서는 다시 낼 수 있게 버튼을 되살린다.
  */
 const SUBMITTED_NOTE: Record<string, string> = {
-  pending: '운영자 검토 후 연락드릴 예정입니다. 추가로 입력할 정보는 없습니다.',
-  reviewed: '운영자가 등록 정보를 확인했습니다. 조건에 맞는 제안이 생기면 연락드립니다.',
-  contacted: '담당자가 연락드렸습니다. 진행 중인 내용은 담당자와 이어서 확인해 주세요.',
+  pending: '등록이 완료되었습니다.',
+  reviewed: '등록 정보를 확인했습니다.',
+  contacted: '진행 중인 내용은 담당자와 확인해 주세요.',
 };
 
 interface InfluencerChannel {
@@ -103,6 +103,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
    */
   const [submitted, setSubmitted] = useState<boolean | null>(null);
   const [submittedStatus, setSubmittedStatus] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [linking, setLinking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   /** 목록에 없는 분야를 직접 적는 칸. 추가하면 infForm.category 로 들어가고 비워진다. */
@@ -288,12 +289,6 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
-      // 계정을 연동하면 인스타 링크는 연동 정보에서 채워지므로 직접 입력하지 않아도 된다.
-      if (variant === 'influencer' && !channel.connected && !infForm.instagram_url.trim()) {
-        setNotice({ type: 'err', text: '인스타그램 계정을 연동하거나 프로필 링크를 입력해 주세요.' });
-        setSubmitting(false);
-        return;
-      }
       // 분야가 비어 있으면 캠페인 후보로 추려지지 않는다. 등록만 되고 아무 연락도
       // 오지 않는 상태를 만들지 않으려면 여기서 막는 편이 낫다.
       if (variant === 'influencer' && selectedCategories.length === 0) {
@@ -310,7 +305,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         // 버튼이 한 번 더 남아 있으면 같은 등록서를 두 번 내게 된다.
         setSubmitted(true);
         setSubmittedStatus('pending');
-        alert('접수되었습니다. 운영자 검토 후 연락드립니다!');
+        alert('접수되었습니다.');
       } else {
         setNotice({ type: 'err', text: result.error });
       }
@@ -318,6 +313,21 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       setNotice({ type: 'err', text: '서버 오류가 발생했습니다.' });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleCancelSubmission = async () => {
+    if (!confirm(`${copy.title} 접수를 취소하시겠습니까?`)) return;
+    setCancelling(true);
+    const res = await apiService.cancelMyCollabDirectory(variant, applicantUsername);
+    setCancelling(false);
+    if (res.success) {
+      setSubmitted(false);
+      setSubmittedStatus('');
+      setNotice({ type: 'ok', text: `${copy.title} 접수가 취소되었습니다.` });
+      alert(`${copy.title} 접수가 취소되었습니다.`);
+    } else {
+      alert(res.error || '취소하지 못했습니다.');
     }
   };
 
@@ -333,12 +343,21 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         </button>
       )}
 
-      {/* 이미 낸 사람에게는 버튼 대신 접수 상태만 보여 준다. 버튼만 조용히 사라지면
-          등록이 취소된 것으로 읽힌다. */}
+      {/* 이미 낸 사람에게는 버튼 대신 접수 상태와 취소 버튼을 함께 보여 준다. */}
       {submitted === true && !open && (
-        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-          <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
-          <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
+            <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleCancelSubmission}
+            disabled={cancelling}
+            className="shrink-0 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+          >
+            {cancelling ? '취소 중...' : '취소하기'}
+          </button>
         </div>
       )}
 
@@ -391,7 +410,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                   </div>
 
                   <div className="pt-1">
-                    <p className="text-xs font-black text-slate-500 mb-2">내 채널 · 팔로워 수</p>
+                    <p className="text-xs font-black text-slate-500 mb-2">유튜브 · 틱톡 추가 가능 (선택사항)</p>
                     <div className="space-y-2.5">
                       {channel.connected ? (
                         // 연동을 마쳤으면 인스타 항목은 손으로 적게 하지 않는다.
@@ -407,27 +426,27 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                         </div>
                       ) : (
                         <ChannelRow
-                          label="인스타그램" urlPlaceholder="https://instagram.com/..."
+                          label="인스타그램 프로필 (선택)" urlPlaceholder="https://instagram.com/..."
                           url={infForm.instagram_url} onUrl={v => setInfForm(f => ({ ...f, instagram_url: v }))}
                           followers={infForm.instagram_followers} onFollowers={v => setInfForm(f => ({ ...f, instagram_followers: v }))}
                         />
                       )}
                       <ChannelRow
-                        label="유튜브" urlPlaceholder="https://youtube.com/@..." followerPlaceholder="구독자"
+                        label="유튜브 (선택사항)" urlPlaceholder="https://youtube.com/@..." followerPlaceholder="구독자"
                         url={infForm.youtube_url} onUrl={v => setInfForm(f => ({ ...f, youtube_url: v }))}
                         followers={infForm.youtube_followers} onFollowers={v => setInfForm(f => ({ ...f, youtube_followers: v }))}
                       />
                       <ChannelRow
-                        label="틱톡" urlPlaceholder="https://tiktok.com/@..."
+                        label="틱톡 (선택사항)" urlPlaceholder="https://tiktok.com/@..."
                         url={infForm.tiktok_url} onUrl={v => setInfForm(f => ({ ...f, tiktok_url: v }))}
                         followers={infForm.tiktok_followers} onFollowers={v => setInfForm(f => ({ ...f, tiktok_followers: v }))}
                       />
-                      <Field label="네이버 블로그" value={infForm.naver_blog_url} onChange={v => setInfForm(f => ({ ...f, naver_blog_url: v }))} placeholder="https://blog.naver.com/..." />
+                      <Field label="네이버 블로그 (선택사항)" value={infForm.naver_blog_url} onChange={v => setInfForm(f => ({ ...f, naver_blog_url: v }))} placeholder="https://blog.naver.com/..." />
                     </div>
                     <p className="text-[11px] text-slate-400 font-medium leading-relaxed mt-2">
                       {channel.connected
-                        ? '인스타그램은 연동된 계정에서 팔로워·팔로잉과 최근 릴스 성과를 직접 확인합니다. 다른 채널은 직접 입력해 주세요.'
-                        : '인스타그램 계정을 연동하면 팔로워·팔로잉과 릴스 평균 조회수를 자동으로 확인합니다. 연동 전에는 입력한 팔로워 수를 임시값으로 사용합니다.'}
+                        ? '인스타그램은 연동된 계정에서 정보를 확인합니다. 유튜브나 틱톡 등 추가 채널이 있다면 선택사항으로 입력하세요.'
+                        : '인스타그램 연동으로 채널 정보가 연동됩니다. 유튜브나 틱톡은 필요 시 선택사항으로 추가 입력해 주세요.'}
                     </p>
                   </div>
 
