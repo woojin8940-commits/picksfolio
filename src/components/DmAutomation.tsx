@@ -1193,7 +1193,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                           setManualModalOpen(true);
                         }}
                         disabled={!entitled}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-slate-900 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-800 disabled:opacity-40"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-pink-600 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-pink-700 disabled:opacity-40"
                       >
                         <Send size={11} /> 수동발송
                       </button>
@@ -1223,18 +1223,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           </div>
           {connected && (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setManualModalRule(null);
-                  setManualModalOpen(true);
-                }}
-                disabled={!entitled}
-                title={entitled ? undefined : t('common.proPlanNotice', '디엠 자동화는 프로 플랜 전용 기능이에요.', 'DM Automation is a Pro Plan exclusive feature.')}
-                className="flex items-center gap-1.5 bg-slate-900 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
-                <Send size={15} /> {t('dm.manualSend', '수동 DM 발송', 'Manual DM Send')}
-              </button>
               <button
                 type="button"
                 onClick={() => setEditing(blankAutomation())}

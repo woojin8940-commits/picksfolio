@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, MessageSquare } from 'lucide-react';
+import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, MessageSquare, Image as ImageIcon } from 'lucide-react';
 import { apiService, DmAutomationItem, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -28,7 +28,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 }) => {
   const { t } = useLanguage();
 
-  const [targetMediaId, setTargetMediaId] = useState<string>('all');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('custom');
   const [messageType, setMessageType] = useState<'text' | 'carousel'>('text');
   const [message, setMessage] = useState('안녕하세요! 요청하신 안내 링크입니다 😊');
@@ -44,15 +43,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(initialAutomation.message || '');
       setMessageType(initialAutomation.messageType || 'text');
       setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
-
-      if (initialAutomation.mediaScope === 'selected' && initialAutomation.mediaIds?.length) {
-        setTargetMediaId(initialAutomation.mediaIds[0]);
-      } else {
-        setTargetMediaId('all');
-      }
     } else {
       setSelectedRuleId('custom');
-      setTargetMediaId('all');
     }
   }, [initialAutomation, isOpen]);
 
@@ -69,9 +61,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(found.message || '');
       setMessageType(found.messageType || 'text');
       setButtons(found.buttons ? [...found.buttons] : []);
-      if (found.mediaScope === 'selected' && found.mediaIds?.length) {
-        setTargetMediaId(found.mediaIds[0]);
-      }
     }
   };
 
@@ -88,6 +77,14 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     setButtons(buttons.filter((b) => b.id !== id));
   };
 
+  const selectedRule = automations.find((a) => a.id === selectedRuleId);
+  const activeMediaScope = selectedRule ? selectedRule.mediaScope : initialAutomation?.mediaScope;
+  const activeMediaIds = selectedRule ? selectedRule.mediaIds : initialAutomation?.mediaIds;
+
+  const effectiveMediaIds = activeMediaScope === 'selected' && activeMediaIds?.length ? activeMediaIds : undefined;
+  const effectiveMediaId = effectiveMediaIds && effectiveMediaIds.length === 1 ? effectiveMediaIds[0] : undefined;
+  const targetMediaPost = effectiveMediaId ? media.find((m) => m.id === effectiveMediaId) : null;
+
   const handleSend = async () => {
     if (!message.trim()) {
       setResult({
@@ -102,16 +99,15 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
     try {
       const validButtons = buttons.filter((b) => b.label.trim());
-      const selectedRule = automations.find((a) => a.id === selectedRuleId);
 
       const res = await apiService.sendInstagramDm({
         username: userName,
-        mediaId: targetMediaId !== 'all' ? targetMediaId : undefined,
-        mediaIds: targetMediaId === 'all' && selectedRule?.mediaIds?.length ? selectedRule.mediaIds : undefined,
+        mediaId: effectiveMediaId,
+        mediaIds: effectiveMediaIds,
         message: message.trim(),
         messageType,
         buttons: validButtons,
-        cards: selectedRule?.cards,
+        cards: selectedRule?.cards || initialAutomation?.cards,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
@@ -195,26 +191,40 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
           )}
 
-          {/* 발송 대상 게시물 선택 */}
-          <div>
-            <label className="block text-xs font-black text-slate-700 mb-1.5">
-              {t('dm.targetMediaLabel', '발송 대상 게시물', 'Target Post')}
-            </label>
-            <select
-              value={targetMediaId}
-              onChange={(e) => setTargetMediaId(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500 bg-white"
-            >
-              <option value="all">
-                {t('dm.allPostsOption', '최근 게시물 전체 댓글 작성자', 'Commenters on All Recent Posts')}
-              </option>
-              {media.map((m) => (
-                <option key={m.id} value={m.id}>
-                  📷 [게시물] {m.caption ? m.caption.slice(0, 35) + '...' : `게시물 ID: ${m.id}`}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* 발송 대상 게시물 정보 */}
+          {targetMediaPost ? (
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-3">
+              {targetMediaPost.mediaUrl ? (
+                <img src={targetMediaPost.mediaUrl} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0 border border-slate-200" />
+              ) : (
+                <div className="w-11 h-11 rounded-xl bg-slate-200 flex items-center justify-center shrink-0 text-slate-400">
+                  <ImageIcon size={18} />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <span className="inline-block px-2 py-0.5 rounded-md bg-pink-100 text-pink-700 text-[10px] font-black mb-0.5">
+                  발송 대상 게시물
+                </span>
+                <p className="text-xs font-bold text-slate-800 truncate">
+                  {targetMediaPost.caption ? targetMediaPost.caption.slice(0, 45) : `게시물 ID: ${targetMediaPost.id}`}
+                </p>
+              </div>
+            </div>
+          ) : effectiveMediaIds && effectiveMediaIds.length > 1 ? (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-slate-700">
+              <span className="px-2 py-0.5 rounded-md bg-pink-100 text-pink-700 text-[10px] font-black">
+                발송 대상
+              </span>
+              <span>선택된 게시물 {effectiveMediaIds.length}개 댓글 작성자</span>
+            </div>
+          ) : (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-slate-700">
+              <span className="px-2 py-0.5 rounded-md bg-pink-100 text-pink-700 text-[10px] font-black">
+                발송 대상
+              </span>
+              <span>모든 최근 게시물 댓글 작성자</span>
+            </div>
+          )}
 
           {/* 템플릿 불러오기 */}
           {automations.length > 0 && (
