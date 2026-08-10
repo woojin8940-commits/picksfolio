@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import PlatformLanguageBridge from '../components/PlatformLanguageBridge';
+import { platformTextPatterns } from './platformTextPatterns';
+import { platformTextTranslations } from './platformTextTranslations';
 
 export type Language = 'ko' | 'en';
 
@@ -7,6 +10,7 @@ interface LanguageContextType {
   setLanguage: (lang: Language) => void;
   toggleLanguage: () => void;
   t: (key: string, defaultKo?: string, defaultEn?: string) => string;
+  translatePlatformText: (value: string) => string;
 }
 
 const translations: Record<string, { ko: string; en: string }> = {
@@ -103,6 +107,11 @@ const translations: Record<string, { ko: string; en: string }> = {
   'common.items': { ko: '개', en: 'items' },
 };
 
+const compiledPlatformTextPatterns = platformTextPatterns.map(pattern => ({
+  expression: new RegExp(pattern.source),
+  replacement: pattern.replacement,
+}));
+
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -111,17 +120,16 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return (saved === 'en' || saved === 'ko') ? saved : 'ko';
   });
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem('picks_language', lang);
-  };
+  }, []);
 
-  const toggleLanguage = () => {
-    const nextLang = language === 'ko' ? 'en' : 'ko';
-    setLanguage(nextLang);
-  };
+  const toggleLanguage = useCallback(() => {
+    setLanguage(language === 'ko' ? 'en' : 'ko');
+  }, [language, setLanguage]);
 
-  const t = (key: string, defaultKo?: string, defaultEn?: string): string => {
+  const t = useCallback((key: string, defaultKo?: string, defaultEn?: string): string => {
     const entry = translations[key];
     if (entry) {
       return language === 'en' ? entry.en : entry.ko;
@@ -130,10 +138,33 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return defaultEn || defaultKo || key;
     }
     return defaultKo || defaultEn || key;
-  };
+  }, [language]);
+
+  const translatePlatformText = useCallback((value: string): string => {
+    if (language !== 'en' || !/[가-힣]/.test(value)) return value;
+    const leadingWhitespace = value.match(/^\s*/)?.[0] ?? '';
+    const trailingWhitespace = value.match(/\s*$/)?.[0] ?? '';
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    const translated = platformTextTranslations[normalized];
+    if (translated) return `${leadingWhitespace}${translated}${trailingWhitespace}`;
+    for (const pattern of compiledPlatformTextPatterns) {
+      if (!pattern.expression.test(normalized)) continue;
+      return `${leadingWhitespace}${normalized.replace(pattern.expression, pattern.replacement)}${trailingWhitespace}`;
+    }
+    return value;
+  }, [language]);
+
+  const contextValue = useMemo(() => ({
+    language,
+    setLanguage,
+    toggleLanguage,
+    t,
+    translatePlatformText,
+  }), [language, setLanguage, t, toggleLanguage, translatePlatformText]);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, toggleLanguage, t }}>
+    <LanguageContext.Provider value={contextValue}>
+      <PlatformLanguageBridge language={language} translatePlatformText={translatePlatformText} />
       {children}
     </LanguageContext.Provider>
   );
@@ -148,6 +179,7 @@ export const useLanguage = (): LanguageContextType => {
       setLanguage: () => {},
       toggleLanguage: () => {},
       t: (key, defaultKo, defaultEn) => defaultKo || defaultEn || key,
+      translatePlatformText: value => value,
     };
   }
   return context;
