@@ -1,5 +1,6 @@
-
 import React from 'react';
+import LanguageSwitcher from './LanguageSwitcher';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface HeaderProps {
   onNavigateHome: () => void;
@@ -17,6 +18,8 @@ const SiteHeader: React.FC<HeaderProps> = ({
   onLogout,
   isLoggedIn 
 }) => {
+  const { t } = useLanguage();
+
   return (
     <header className="fixed top-0 left-0 w-full h-14 md:h-[4.5rem] z-[1000] bg-gradient-to-r from-[#1e3a8a]/90 via-blue-primary/85 to-blue-secondary/85 backdrop-blur-2xl border-b border-blue-secondary/30 flex items-center justify-between px-4 md:px-12 transition-all">
       <div
@@ -26,14 +29,14 @@ const SiteHeader: React.FC<HeaderProps> = ({
         PICKS
       </div>
 
-      <nav className="hidden md:flex items-center space-x-6 text-sm font-bold text-blue-100 uppercase tracking-widest">
+      <nav className="hidden md:flex items-center space-x-4 text-sm font-bold text-blue-100 uppercase tracking-widest">
         {isLoggedIn ? (
           <>
             <button
               onClick={onNavigateDashboard}
               className="bg-white/5 hover:bg-white/10 text-white px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold border border-white/10 text-sm"
             >
-              대시보드
+              {t('nav.dashboard', '대시보드', 'Dashboard')}
             </button>
             <button
               type="button"
@@ -43,7 +46,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
               }}
               className="bg-white hover:opacity-90 text-blue-primary px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 cursor-pointer text-sm"
             >
-              로그아웃
+              {t('nav.logout', '로그아웃', 'Log Out')}
             </button>
           </>
         ) : (
@@ -51,9 +54,10 @@ const SiteHeader: React.FC<HeaderProps> = ({
             onClick={onNavigateLogin}
             className="bg-white hover:opacity-90 text-blue-primary px-6 py-2.5 rounded-full transition-all active:scale-95 font-bold shadow-lg shadow-blue-900/20 text-sm"
           >
-            로그인
+            {t('nav.login', '로그인', 'Log In')}
           </button>
         )}
+        <LanguageSwitcher />
       </nav>
 
       <div className="md:hidden flex items-center gap-2">
@@ -61,9 +65,9 @@ const SiteHeader: React.FC<HeaderProps> = ({
           <>
             <button 
               onClick={onNavigateDashboard}
-              className="text-white px-4 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest bg-white/5 border border-white/10"
+              className="text-white px-3 py-2 rounded-full text-xs font-bold uppercase tracking-widest bg-white/5 border border-white/10"
             >
-              대시보드
+              {t('nav.dashboard', '대시보드', 'Dashboard')}
             </button>
             <button 
               type="button"
@@ -71,19 +75,20 @@ const SiteHeader: React.FC<HeaderProps> = ({
                 console.log('Mobile header logout button clicked');
                 onLogout();
               }}
-              className="bg-white text-blue-primary px-5 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest cursor-pointer"
+              className="bg-white text-blue-primary px-3.5 py-2 rounded-full text-xs font-bold uppercase tracking-widest cursor-pointer"
             >
-              로그아웃
+              {t('nav.logout', '로그아웃', 'Log Out')}
             </button>
           </>
         ) : (
           <button
             onClick={onNavigateLogin}
-            className="bg-white text-blue-primary px-7 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest"
+            className="bg-white text-blue-primary px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest"
           >
-            로그인
+            {t('nav.login', '로그인', 'Log In')}
           </button>
         )}
+        <LanguageSwitcher variant="compact" />
       </div>
     </header>
   );

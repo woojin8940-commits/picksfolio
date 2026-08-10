@@ -8,7 +8,8 @@ import { isNativeApp } from '../utils/appEnv';
 import { todayInSeoul } from '../utils/formatters';
 import { Block } from '../types';
 import AITrendAnalysis from './AITrendAnalysis';
-
+import LanguageSwitcher from './LanguageSwitcher';
+import { useLanguage } from '../contexts/LanguageContext';
 
 import ErrorBoundary from './ErrorBoundary';
 
@@ -43,6 +44,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateCampaigns,
   children
 }) => {
+  const { t } = useLanguage();
   const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
@@ -197,52 +199,52 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <nav className="flex-1 space-y-1">
           <NavItem 
             icon="🏠" 
-            label="대시보드" 
+            label={t('nav.dashboard', '대시보드', 'Dashboard')} 
             active={currentSubView === 'dashboard'} 
             onClick={onNavigateDashboard}
           />
           <NavItem
             icon="🔗"
-            label="링크 관리"
+            label={t('nav.links', '링크 관리', 'Links')}
             active={currentSubView === 'links'}
             onClick={onNavigateLinks}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
           <NavItem
             icon="📩"
-            label="DM 자동화"
+            label={t('nav.dmAutomation', 'DM 자동화', 'DM Automation')}
             active={currentSubView === 'dm-automation'}
             onClick={onNavigateDmAutomation}
           />
           <div className="my-3 border-t border-white/10" />
           <NavItem
             icon="📢"
-            label="캠페인 협업"
+            label={t('nav.campaigns', '캠페인 협업', 'Campaigns')}
             active={currentSubView === 'campaigns'}
             onClick={onNavigateCampaigns}
           />
           <NavItem
             icon="📨"
-            label="비즈니스 수신함"
+            label={t('nav.inbox', '비즈니스 수신함', 'Inbox')}
             active={currentSubView === 'business'}
             onClick={onNavigateBusiness}
           />
           <NavItem
             icon="💬"
-            label="협업 타임라인"
+            label={t('nav.timeline', '협업 타임라인', 'Timeline')}
             active={currentSubView === 'timeline'}
             onClick={onNavigateTimeline}
             badge={timelineUnread}
           />
           <NavItem
             icon="📅"
-            label="협업 현황"
+            label={t('nav.calendar', '협업 현황', 'Calendar')}
             active={currentSubView === 'calendar'}
             onClick={onNavigateCalendar}
           />
           <NavItem
             icon="🗓️"
-            label="오픈 일정"
+            label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')}
             active={currentSubView === 'open-schedule'}
             onClick={onNavigateOpenSchedule}
           />
@@ -252,7 +254,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {!isNativeApp() && (
             <NavItem
               icon="💎"
-              label="멤버십 플랜"
+              label={t('nav.membership', '멤버십 플랜', 'Membership')}
               active={currentSubView === 'membership'}
               onClick={onNavigateMembership}
             />
@@ -266,7 +268,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
           >
             <span>👤</span>
-            <span>로그아웃</span>
+            <span>{t('nav.logout', '로그아웃', 'Log Out')}</span>
           </button>
         </div>
       </aside>
@@ -356,7 +358,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-6 md:mb-10">
               <div className="flex items-center justify-between w-full md:w-auto">
                 <h2 className="text-base md:text-3xl font-black text-slate-900 whitespace-nowrap">
-                  반가워요, <span className="text-blue-600">{userName}</span>님!
+                  {t('dash.welcome', '반가워요,', 'Welcome,')} <span className="text-blue-600">{userName}</span>{t('dash.welcomeSuffix', '님!', '!')}
                 </h2>
                 <button
                   onClick={() => setIsMobileMenuOpen(true)}
@@ -367,7 +369,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                 <div className="flex items-center gap-2 bg-white px-3 py-1.5 md:px-4 md:py-2 rounded-xl border border-slate-100 shadow-sm">
-                  <span className="hidden md:inline text-[10px] font-black text-slate-400 uppercase tracking-widest">기간</span>
+                  <span className="hidden md:inline text-[10px] font-black text-slate-400 uppercase tracking-widest">{t('dash.period', '기간', 'Period')}</span>
                   <input
                     type="date"
                     value={startDate}
@@ -389,10 +391,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   }}
                   className="bg-slate-900 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-black text-[10px] md:text-sm hover:bg-slate-800 transition-all shadow-lg flex items-center gap-2"
                 >
-                  <span className="hidden md:inline">내 페이지 보기</span>
-                  <span className="md:hidden">내 링크</span>
+                  <span className="hidden md:inline">{t('nav.myPage', '내 페이지 보기', 'View My Page')}</span>
+                  <span className="md:hidden">{t('nav.myLink', '내 링크', 'My Link')}</span>
                   <svg className="w-3 h-3 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                 </button>
+                <LanguageSwitcher className="bg-slate-900/10 border-slate-200" />
               </div>
             </header>
 
