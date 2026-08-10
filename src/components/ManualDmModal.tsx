@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Link2, Sparkles, MessageCircle } from 'lucide-react';
-import { apiService, DmAutomationItem, DmMessageButton, DmCarouselCard } from '../services/apiService';
+import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, MessageSquare } from 'lucide-react';
+import { apiService, DmAutomationItem, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface ManualDmModalProps {
@@ -11,6 +11,7 @@ interface ManualDmModalProps {
   automations: DmAutomationItem[];
   initialAutomation?: DmAutomationItem | null;
   entitled: boolean;
+  media?: InstagramMedia[];
 }
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -23,10 +24,11 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   automations,
   initialAutomation,
   entitled,
+  media = [],
 }) => {
   const { t } = useLanguage();
 
-  const [recipientId, setRecipientId] = useState('');
+  const [targetMediaId, setTargetMediaId] = useState<string>('all');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('custom');
   const [messageType, setMessageType] = useState<'text' | 'carousel'>('text');
   const [message, setMessage] = useState('안녕하세요! 요청하신 안내 링크입니다 😊');
@@ -42,8 +44,15 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(initialAutomation.message || '');
       setMessageType(initialAutomation.messageType || 'text');
       setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
+
+      if (initialAutomation.mediaScope === 'selected' && initialAutomation.mediaIds?.length) {
+        setTargetMediaId(initialAutomation.mediaIds[0]);
+      } else {
+        setTargetMediaId('all');
+      }
     } else {
       setSelectedRuleId('custom');
+      setTargetMediaId('all');
     }
   }, [initialAutomation, isOpen]);
 
@@ -60,6 +69,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(found.message || '');
       setMessageType(found.messageType || 'text');
       setButtons(found.buttons ? [...found.buttons] : []);
+      if (found.mediaScope === 'selected' && found.mediaIds?.length) {
+        setTargetMediaId(found.mediaIds[0]);
+      }
     }
   };
 
@@ -77,14 +89,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   };
 
   const handleSend = async () => {
-    if (!recipientId.trim()) {
-      setResult({
-        success: false,
-        message: t('dm.recipientRequired', '수신자 IGSID (Instagram-scoped ID)를 입력해주세요.', 'Recipient IGSID is required.'),
-      });
-      return;
-    }
-
     if (!message.trim()) {
       setResult({
         success: false,
@@ -98,12 +102,16 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
     try {
       const validButtons = buttons.filter((b) => b.label.trim());
+      const selectedRule = automations.find((a) => a.id === selectedRuleId);
+
       const res = await apiService.sendInstagramDm({
         username: userName,
-        recipientId: recipientId.trim(),
+        mediaId: targetMediaId !== 'all' ? targetMediaId : undefined,
+        mediaIds: targetMediaId === 'all' && selectedRule?.mediaIds?.length ? selectedRule.mediaIds : undefined,
         message: message.trim(),
         messageType,
         buttons: validButtons,
+        cards: selectedRule?.cards,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
@@ -111,12 +119,12 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       if (res.success) {
         setResult({
           success: true,
-          message: t('dm.sendSuccess', 'DM이 성공적으로 발송되었습니다!', 'DM sent successfully!'),
+          message: res.message || t('dm.sendSuccessBatch', '댓글 작성자 모두에게 DM이 성공적으로 발송되었습니다!', 'DM sent successfully to commenters!'),
         });
         setTimeout(() => {
           setResult(null);
           onClose();
-        }, 1800);
+        }, 2200);
       } else {
         setResult({
           success: false,
@@ -146,7 +154,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-base md:text-lg">
-                {t('dm.manualModalTitle', '수동 DM 발송하기', 'Send DM Manually')}
+                {t('dm.manualModalTitleBatch', '댓글 단 사람 모두에게 수동 DM 발송', 'Send DM to All Commenters')}
               </h3>
               <p className="text-[11px] text-slate-300 font-medium">
                 @{igUsername || userName} {t('dm.accountLabel', '계정으로 발송', 'Account')}
@@ -163,6 +171,17 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
         {/* Content */}
         <div className="p-5 md:p-6 overflow-y-auto space-y-4 flex-1">
+          {/* Notice Banner */}
+          <div className="p-3.5 bg-pink-50/80 border border-pink-100 rounded-2xl flex items-start gap-2.5 text-xs text-pink-900 font-medium leading-relaxed">
+            <MessageSquare size={16} className="text-pink-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold text-pink-700">댓글 작성자 전원 발송</span>
+              <p className="text-[11px] text-pink-600/90 mt-0.5">
+                선택한 게시물에 댓글을 작성한 모든 사람을 자동으로 수집하여 메시지를 일괄 발송합니다.
+              </p>
+            </div>
+          </div>
+
           {result && (
             <div
               className={`p-4 rounded-2xl flex items-start gap-2 text-xs font-bold ${
@@ -176,25 +195,25 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
           )}
 
-          {/* 수신자 IGSID */}
+          {/* 발송 대상 게시물 선택 */}
           <div>
             <label className="block text-xs font-black text-slate-700 mb-1.5">
-              {t('dm.recipientLabel', '수신자 IGSID (Instagram User ID)', 'Recipient IGSID')} <span className="text-red-500">*</span>
+              {t('dm.targetMediaLabel', '발송 대상 게시물', 'Target Post')}
             </label>
-            <input
-              type="text"
-              value={recipientId}
-              onChange={(e) => setRecipientId(e.target.value)}
-              placeholder={t('dm.recipientPlaceholder', '예: 123456789012345', 'e.g. 123456789012345')}
-              className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20"
-            />
-            <p className="text-[11px] text-slate-400 font-medium mt-1">
-              {t(
-                'dm.recipientNotice',
-                '인스타그램 정책상 수신자가 먼저 메시지를 보낸 24시간 이내에만 수동 DM 발송이 가능합니다.',
-                'According to Instagram policy, manual DMs can only be sent within 24 hours after the user messages you.'
-              )}
-            </p>
+            <select
+              value={targetMediaId}
+              onChange={(e) => setTargetMediaId(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500 bg-white"
+            >
+              <option value="all">
+                {t('dm.allPostsOption', '최근 게시물 전체 댓글 작성자', 'Commenters on All Recent Posts')}
+              </option>
+              {media.map((m) => (
+                <option key={m.id} value={m.id}>
+                  📷 [게시물] {m.caption ? m.caption.slice(0, 35) + '...' : `게시물 ID: ${m.id}`}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* 템플릿 불러오기 */}
@@ -303,7 +322,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             ) : (
               <>
                 <Send size={14} />
-                <span>{t('dm.sendNow', '수동 발송하기', 'Send DM Now')}</span>
+                <span>{t('dm.sendToCommenters', '댓글 작성자 모두에게 발송', 'Send to All Commenters')}</span>
               </>
             )}
           </button>

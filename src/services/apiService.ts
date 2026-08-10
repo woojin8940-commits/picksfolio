@@ -2665,7 +2665,18 @@ export const apiService = {
     }
   },
 
-  async sendInstagramDm(payload: { username: string; recipientId: string; message: string; buttons?: DmMessageButton[]; ruleId?: string; test?: boolean }): Promise<{ success: boolean; connected?: boolean; message?: string }> {
+  async sendInstagramDm(payload: {
+    username: string;
+    recipientId?: string;
+    mediaId?: string;
+    mediaIds?: string[];
+    message: string;
+    messageType?: 'text' | 'carousel';
+    buttons?: DmMessageButton[];
+    cards?: DmCarouselCard[];
+    ruleId?: string;
+    test?: boolean;
+  }): Promise<{ success: boolean; connected?: boolean; count?: number; total?: number; message?: string }> {
     try {
       const res = await fetch('/api/send-instagram-dm', {
         method: 'POST',

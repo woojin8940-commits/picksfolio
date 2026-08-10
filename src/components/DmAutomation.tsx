@@ -1177,23 +1177,36 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               </p>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                 {media.map((m) => (
-                  <button
+                  <div
                     key={m.id}
-                    type="button"
-                    onClick={() => setEditing({ ...blankAutomation(), mediaScope: 'selected', mediaIds: [m.id] })}
-                    disabled={!entitled}
-                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100 disabled:cursor-not-allowed"
-                    title={entitled ? '이 게시물로 자동화 만들기' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
+                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100"
+                    title={entitled ? '이 게시물의 댓글 단 사람에게 수동 DM 발송 또는 자동화 설정' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
                   >
                     {m.mediaUrl
                       ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
                       : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
-                    <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/40 transition-colors flex items-center justify-center">
-                      <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow">
-                        <Plus size={12} /> 자동화
-                      </span>
+                    <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/60 transition-colors flex flex-col items-center justify-center gap-1.5 p-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualModalRule({ ...blankAutomation(), name: m.caption ? m.caption.slice(0, 20) : '선택한 게시물', mediaScope: 'selected', mediaIds: [m.id] });
+                          setManualModalOpen(true);
+                        }}
+                        disabled={!entitled}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-slate-900 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-800 disabled:opacity-40"
+                      >
+                        <Send size={11} /> 수동발송
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ ...blankAutomation(), mediaScope: 'selected', mediaIds: [m.id] })}
+                        disabled={!entitled}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <Plus size={11} /> 자동화
+                      </button>
                     </span>
-                  </button>
+                  </div>
                 ))}
               </div>
             </>
@@ -1374,6 +1387,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         automations={automations}
         initialAutomation={manualModalRule}
         entitled={entitled}
+        media={media}
       />
     </div>
   );
