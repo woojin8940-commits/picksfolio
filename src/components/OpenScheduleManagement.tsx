@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
 import { OpenScheduleItem } from '../types';
 import { apiService } from '../services/apiService';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface OpenScheduleManagementProps {
   userName: string;
 }
 
 const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userName }) => {
+  const { language, t } = useLanguage();
   const [schedules, setSchedules] = useState<OpenScheduleItem[]>(() => {
     try {
       const saved = localStorage.getItem(`picks_schedule_${(userName || '').toLowerCase()}`);
@@ -125,9 +127,11 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
         <header className="mb-6 md:mb-10">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
-              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">오픈 일정 관리</h1>
+              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">{t('nav.openSchedule', '오픈 일정 관리', 'Open Schedule')}</h1>
               <p className="text-[#64748B] font-medium text-xs md:text-base">
-                오픈 일정을 등록하면 개인 페이지에서 팔로워들에게 자동으로 노출됩니다.
+                {language === 'en'
+                  ? 'Registered open schedules will automatically be shown to followers on your profile.'
+                  : '오픈 일정을 등록하면 개인 페이지에서 팔로워들에게 자동으로 노출됩니다.'}
               </p>
             </div>
             <button
@@ -135,14 +139,14 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
               className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all shadow-lg self-start md:self-auto"
             >
               <Plus size={16} />
-              새 일정 추가
+              {language === 'en' ? 'Add Schedule' : '새 일정 추가'}
             </button>
           </div>
         </header>
 
         {isSaved && (
           <div className="fixed top-6 right-6 bg-green-500 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-2xl z-[300] animate-in fade-in slide-in-from-top-4 duration-300">
-            <CheckCircle2 size={16} /> 저장 완료!
+            <CheckCircle2 size={16} /> {language === 'en' ? 'Saved!' : '저장 완료!'}
           </div>
         )}
 
@@ -151,10 +155,12 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
           {schedules.length === 0 ? (
             <div className="bg-white rounded-3xl border border-[#E2E8F0] p-12 text-center">
               <div className="text-4xl mb-4">📅</div>
-              <h3 className="text-lg font-black text-[#1E1E2E] mb-2">등록된 오픈 일정이 없습니다</h3>
-              <p className="text-sm text-[#64748B] font-medium mb-6">새 일정을 추가하여 팔로워들에게 오픈 소식을 알려보세요.</p>
+              <h3 className="text-lg font-black text-[#1E1E2E] mb-2">{language === 'en' ? 'No open schedules registered' : '등록된 오픈 일정이 없습니다'}</h3>
+              <p className="text-sm text-[#64748B] font-medium mb-6">
+                {language === 'en' ? 'Add a new schedule to share launch events with your followers.' : '새 일정을 추가하여 팔로워들에게 오픈 소식을 알려보세요.'}
+              </p>
               <button onClick={handleAdd} className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all">
-                <Plus size={14} className="inline mr-1" /> 첫 일정 등록하기
+                <Plus size={14} className="inline mr-1" /> {language === 'en' ? 'Register First Schedule' : '첫 일정 등록하기'}
               </button>
             </div>
           ) : (
@@ -164,11 +170,11 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       {item.isActive && isUpcoming(item.date) ? (
-                        <span className="bg-blue-600 text-white text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">예정</span>
+                        <span className="bg-blue-600 text-white text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">{language === 'en' ? 'UPCOMING' : '예정'}</span>
                       ) : !isUpcoming(item.date) ? (
-                        <span className="bg-slate-200 text-slate-500 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">종료</span>
+                        <span className="bg-slate-200 text-slate-500 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">{language === 'en' ? 'ENDED' : '종료'}</span>
                       ) : (
-                        <span className="bg-slate-100 text-slate-400 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">비활성</span>
+                        <span className="bg-slate-100 text-slate-400 text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">{language === 'en' ? 'INACTIVE' : '비활성'}</span>
                       )}
                       <span className="text-xs font-black text-[#64748B]">{formatDate(item.date)}</span>
                       {item.time && <span className="text-xs font-bold text-[#94A3B8]">{item.time}</span>}
@@ -205,21 +211,21 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
         {showForm && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
             <div className="bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-black text-[#1E1E2E] mb-6">{editingId ? '일정 수정' : '새 오픈 일정'}</h3>
+              <h3 className="text-xl font-black text-[#1E1E2E] mb-6">{editingId ? (language === 'en' ? 'Edit Schedule' : '일정 수정') : (language === 'en' ? 'New Schedule' : '새 오픈 일정')}</h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">일정 제목 *</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{language === 'en' ? 'Title *' : '일정 제목 *'}</label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={e => setForm({ ...form, title: e.target.value })}
-                    placeholder="예: 봄 신상 오픈, 한정판 발매"
+                    placeholder={language === 'en' ? 'e.g. Spring Collection Launch' : '예: 봄 신상 오픈, 한정판 발매'}
                     className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">날짜 *</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{language === 'en' ? 'Date *' : '날짜 *'}</label>
                     <input
                       type="date"
                       value={form.date}
@@ -228,7 +234,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">시간 (선택)</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{language === 'en' ? 'Time (Optional)' : '시간 (선택)'}</label>
                     <input
                       type="time"
                       value={form.time}
@@ -238,17 +244,17 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">설명 (선택)</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{language === 'en' ? 'Description (Optional)' : '설명 (선택)'}</label>
                   <textarea
                     value={form.description}
                     onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="일정에 대한 간단한 설명"
+                    placeholder={language === 'en' ? 'Brief description about the schedule' : '일정에 대한 간단한 설명'}
                     rows={3}
                     className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-bold focus:border-blue-600 transition-all resize-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">관련 링크 (선택)</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{language === 'en' ? 'Link (Optional)' : '관련 링크 (선택)'}</label>
                   <input
                     type="url"
                     value={form.link}
@@ -260,7 +266,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
               </div>
               <div className="flex gap-3 mt-8">
                 <button onClick={() => setShowForm(false)} className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-600 font-black text-sm hover:bg-slate-200 transition-all">
-                  취소
+                  {t('dm.cancel', '취소', 'Cancel')}
                 </button>
                 <button
                   onClick={handleSave}
@@ -268,7 +274,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                   className="flex-1 py-4 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {editingId ? '수정' : '등록'}
+                  {editingId ? (language === 'en' ? 'Save' : '수정') : (language === 'en' ? 'Register' : '등록')}
                 </button>
               </div>
             </div>

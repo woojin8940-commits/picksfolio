@@ -2,32 +2,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Grid, List, Briefcase, ExternalLink } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TemplateShowcaseProps {
-  onSignup: () => void;
-  userName: string;
+  onSignup?: () => void;
+  userName?: string;
 }
-
-const templates = [
-  {
-    id: 'shoppable',
-    name: '쇼퍼블 그리드',
-    icon: Grid,
-    description: '인스타그램 피드와 상품 정보를 하나로',
-    title: '쇼퍼블 그리드',
-    subtitle: '인스타그램 피드와 동일한 경험을 제공합니다. 클릭 시 상품 정보가 하단에서 스윽 올라옵니다.',
-    features: ['인스타 피드 동기화', '상품 정보 오버레이', '끊김 없는 쇼핑 경험']
-  },
-  {
-    id: 'minimal',
-    name: '미니멀 브랜드',
-    icon: List,
-    description: '깔끔하고 정돈된 브랜드 아이덴티티',
-    title: '미니멀 브랜드',
-    subtitle: '브랜드 공식 사이트와 동일한 경험을 제공합니다. 클릭 시 브랜드 스토리가 하단에서 스윽 올라옵니다.',
-    features: ['미니멀 디자인', '브랜드 스토리텔링', '깔끔한 상품 목록']
-  },
-];
 
 const ACCENT = '#2563EB';
 const SCREEN_BG = '#1E1E2E';
@@ -49,20 +29,42 @@ const minimalItems = [
   { seed: 'pfm5', name: 'Leather Card Wallet' },
 ];
 
-const categories = ['전체', 'FASHION', 'BEAUTY', 'LIFE'];
-
 const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
+  const { language, t } = useLanguage();
   const [activeTab, setActiveTab] = useState('shoppable');
+
+  const templates = [
+    {
+      id: 'shoppable',
+      name: language === 'en' ? 'Shoppable Grid' : '쇼퍼블 그리드',
+      icon: Grid,
+      description: language === 'en' ? 'Instagram feed & products all in one' : '인스타그램 피드와 상품 정보를 하나로',
+      title: language === 'en' ? 'Shoppable Grid' : '쇼퍼블 그리드',
+      subtitle: language === 'en' ? 'Seamless Instagram-like feed. Clicking brings product info sliding up.' : '인스타그램 피드와 동일한 경험을 제공합니다. 클릭 시 상품 정보가 하단에서 스윽 올라옵니다.',
+      features: language === 'en' ? ['Insta Feed Sync', 'Product Overlay', 'Seamless Shopping'] : ['인스타 피드 동기화', '상품 정보 오버레이', '끊김 없는 쇼핑 경험']
+    },
+    {
+      id: 'minimal',
+      name: language === 'en' ? 'Minimal Brand' : '미니멀 브랜드',
+      icon: List,
+      description: language === 'en' ? 'Clean & organized brand identity' : '깔끔하고 정돈된 브랜드 아이덴티티',
+      title: language === 'en' ? 'Minimal Brand' : '미니멀 브랜드',
+      subtitle: language === 'en' ? 'Official site experience. Clicking brings brand story sliding up.' : '브랜드 공식 사이트와 동일한 경험을 제공합니다. 클릭 시 브랜드 스토리가 하단에서 스윽 올라옵니다.',
+      features: language === 'en' ? ['Minimal Design', 'Brand Storytelling', 'Clean Product List'] : ['미니멀 디자인', '브랜드 스토리텔링', '깔끔한 상품 목록']
+    },
+  ];
+
+  const categories = [language === 'en' ? 'ALL' : '전체', 'FASHION', 'BEAUTY', 'LIFE'];
 
   return (
     <section className="py-8 md:py-16 bg-background">
       <div className="container mx-auto px-4 sm:px-6">
         <div className="text-center mb-6 md:mb-10">
           <h2 className="text-xl md:text-5xl font-black text-white mb-3 md:mb-6 font-display tracking-tighter">
-            당신의 무드에 맞는 2가지 템플릿
+            {language === 'en' ? '2 Grid Templates to Match Your Vibe' : '당신의 무드에 맞는 2가지 템플릿'}
           </h2>
           <p className="text-sm md:text-base text-slate-400 font-medium">
-            콘텐츠 성격에 따라 가장 효과적인 레이아웃을 선택하세요.
+            {language === 'en' ? 'Choose the most effective layout for your content.' : '콘텐츠 성격에 따라 가장 효과적인 레이아웃을 선택하세요.'}
           </p>
         </div>
 
@@ -121,10 +123,10 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                     style={{ backgroundColor: ACCENT }}
                   >
                     <Briefcase size={9} strokeWidth={2.5} />
-                    비즈니스 제안
+                    {language === 'en' ? 'Business Inquiry' : '비즈니스 제안'}
                   </span>
                   {/* 기본 버튼 — 주소를 넣은 것만 나오지만, 소개용 목업이라 네 개를 모두 보여준다. */}
-                  {['카카오톡', '유튜브', '틱톡', '네이버'].map((label) => (
+                  {(language === 'en' ? ['KakaoTalk', 'YouTube', 'TikTok', 'Naver'] : ['카카오톡', '유튜브', '틱톡', '네이버']).map((label) => (
                     <span
                       key={label}
                       className="flex items-center px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-white/10 border border-white/15"

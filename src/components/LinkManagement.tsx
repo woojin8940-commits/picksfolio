@@ -11,6 +11,7 @@ import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
 import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
 const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
@@ -52,6 +53,7 @@ if (typeof window !== 'undefined') {
 }
 
 const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMembership }) => {
+  const { language, t } = useLanguage();
   useEffect(() => {
     // window.alert('픽스폴리오 새 코드가 적용되었습니다!');
   }, []);
@@ -1253,13 +1255,21 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           <header className="mb-6 md:mb-10">
           <div className="flex flex-col gap-4 mb-6">
             <div>
-              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">링크 관리</h1>
-              <p className="text-[#64748B] font-medium text-xs md:text-base">상품·이미지·영상·텍스트와 프로필·커버·버튼을 한 곳에서 관리하고, 개인페이지에 보이는 그대로 미리볼 수 있어요.</p>
+              <h1 className="text-xl md:text-4xl font-black text-[#1E1E2E] mb-1 md:mb-2">{t('nav.links', '링크 관리', 'Link Management')}</h1>
+              <p className="text-[#64748B] font-medium text-xs md:text-base">
+                {language === 'en'
+                  ? 'Manage products, images, videos, text, profile, cover, and buttons in one place with real-time preview.'
+                  : '상품·이미지·영상·텍스트와 프로필·커버·버튼을 한 곳에서 관리하고, 개인페이지에 보이는 그대로 미리볼 수 있어요.'}
+              </p>
             </div>
 
             <div className="flex w-full bg-white p-1 rounded-2xl border border-[#E2E8F0]">
-              <button onClick={() => setActiveTab('posts')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'posts' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>포스트 관리</button>
-              <button onClick={() => setActiveTab('design')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>프로필 · 디자인</button>
+              <button onClick={() => setActiveTab('posts')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'posts' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>
+                {language === 'en' ? 'Post Management' : '포스트 관리'}
+              </button>
+              <button onClick={() => setActiveTab('design')} className={`flex-1 px-4 py-3 rounded-xl text-sm font-black transition-all ${activeTab === 'design' ? 'bg-[#1E1E2E] text-white shadow-lg' : 'text-[#64748B] hover:bg-slate-50'}`}>
+                {language === 'en' ? 'Profile · Design' : '프로필 · 디자인'}
+              </button>
             </div>
           </div>
         </header>
@@ -1271,27 +1281,30 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide items-center">
                   {(() => {
                     const cats = ['전체', ...managedCategories];
-                    return cats.map(cat => (
-                      <button key={cat} onClick={() => setSelectedFolderId(cat === '전체' ? null : cat)} className={`px-5 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${(cat === '전체' && !selectedFolderId) || selectedFolderId === cat ? 'bg-[#1E1E2E] text-white shadow-lg' : 'bg-white text-[#64748B] border border-[#E2E8F0] hover:border-blue-300'}`}>
-                        {cat}
-                      </button>
-                    ));
+                    return cats.map(cat => {
+                      const displayCat = cat === '전체' ? (language === 'en' ? 'ALL' : '전체') : cat;
+                      return (
+                        <button key={cat} onClick={() => setSelectedFolderId(cat === '전체' ? null : cat)} className={`px-5 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${(cat === '전체' && !selectedFolderId) || selectedFolderId === cat ? 'bg-[#1E1E2E] text-white shadow-lg' : 'bg-white text-[#64748B] border border-[#E2E8F0] hover:border-blue-300'}`}>
+                          {displayCat}
+                        </button>
+                      );
+                    });
                   })()}
                 </div>
-                <SaveButton onClick={handleSaveBlocks} disabled={isLoading} label="저장하기" />
+                <SaveButton onClick={handleSaveBlocks} disabled={isLoading} label={t('common.save', '저장하기', 'Save Changes')} />
               </div>
 
 
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-sm md:text-base font-black text-[#64748B]">
-                  {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : `전체 리스트 (${blocks.length})`}
+                  {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : (language === 'en' ? `All Items (${blocks.length})` : `전체 리스트 (${blocks.length})`)}
                 </h2>
                 <div className="flex items-center gap-3">
                   <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-blue-300">
-                    <Plus size={14} /> 카테고리 관리
+                    <Plus size={14} /> {language === 'en' ? 'Manage Categories' : '카테고리 관리'}
                   </button>
                   <button onClick={handleAddBlock} className="text-white bg-blue-600 font-black text-xs md:text-sm flex items-center gap-1 hover:bg-blue-700 transition-all px-3.5 py-1.5 rounded-full shadow-sm">
-                    <Plus size={14} /> 콘텐츠 추가
+                    <Plus size={14} /> {language === 'en' ? 'Add Content' : '콘텐츠 추가'}
                   </button>
                 </div>
               </div>
@@ -1302,16 +1315,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <div key={group.category || '__uncategorized'} className="rounded-2xl border border-[#E2E8F0] overflow-hidden bg-slate-50/50">
                       <div className="flex items-center justify-between px-4 md:px-6 py-3 bg-white border-b border-[#E2E8F0]">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || '미분류'}</span>
-                          <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}개</span>
+                          <span className="text-xs md:text-sm font-black text-[#1E1E2E] uppercase tracking-wider">{group.category || (language === 'en' ? 'Uncategorized' : '미분류')}</span>
+                          <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}{language === 'en' ? ' items' : '개'}</span>
                         </div>
                         <div className="flex items-center gap-1.5 bg-slate-100 rounded-xl px-1.5 py-1 border border-slate-200">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">순서</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">{language === 'en' ? 'ORDER' : '순서'}</span>
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'up')}
                             disabled={groupIndex === 0}
                             className="p-1.5 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
-                            title="카테고리 위로 이동"
+                            title={language === 'en' ? 'Move Category Up' : '카테고리 위로 이동'}
                           >
                             <ChevronUp size={16} strokeWidth={2.5} />
                           </button>
