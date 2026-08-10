@@ -13,7 +13,7 @@ import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import MediaAuto from './MediaAuto';
 import LiveStream from './LiveStream';
 import { renderPortfolioHtml } from './richText';
-
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserPageProps {
   username: string;
@@ -43,6 +43,7 @@ interface LinkData {
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 
 const UserPage: React.FC<UserPageProps> = ({ username }) => {
+  const { language, t } = useLanguage();
   const normalizedUsername = useMemo(() => (username || '').toLowerCase(), [username]);
 
   const [blocks, setBlocks] = useState<Block[]>(() => {
@@ -929,7 +930,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 {socials.businessProposal && (
                   <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
-                    비즈니스 제안
+                    {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
                   </button>
                 )}
                 {defaultButtonsBlock}
@@ -1266,7 +1267,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                 {socials.businessProposal && (
                   <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
-                    비즈니스 제안
+                    {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
                   </button>
                 )}
                 {defaultButtonsBlock}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Clock, BarChart3 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface RankingItem {
   rank: number;
@@ -32,6 +33,7 @@ const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 const DISPLAY_CIDS = ['50000000', '50000002', '50000003', '50000004', '50000006', '50000008'];
 
 const DataBoardSection: React.FC = () => {
+  const { language } = useLanguage();
   const [categories, setCategories] = useState<CategoryBlock[]>(FALLBACK_CATEGORIES);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,18 +74,18 @@ const DataBoardSection: React.FC = () => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="text-center mb-8 md:mb-12">
           <h2 className="text-xl md:text-5xl font-black text-white mb-3 md:mb-6 font-display tracking-tighter">
-            실시간 트렌드 보드
+            {language === 'en' ? 'Real-Time Trend Board' : '실시간 트렌드 보드'}
           </h2>
           <p className="text-sm md:text-base text-slate-400 font-medium mb-3">
-            네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5
+            {language === 'en' ? 'Naver DataLab Shopping Insights Top 5 Search Keywords' : '네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5'}
           </p>
           <div className="flex items-center justify-center gap-3 flex-wrap">
             <span className="flex items-center gap-1.5 bg-blue-500/20 text-blue-300 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
-              <Clock size={12} /> 매일 오후 2시 업데이트
+              <Clock size={12} /> {language === 'en' ? 'Updated daily at 2 PM' : '매일 오후 2시 업데이트'}
             </span>
             {updatedAt && (
               <span className="flex items-center gap-1.5 bg-white/10 text-slate-400 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
-                <Clock size={12} /> {formatTime(updatedAt)} 기준
+                <Clock size={12} /> {language === 'en' ? `As of ${formatTime(updatedAt)}` : `${formatTime(updatedAt)} 기준`}
               </span>
             )}
           </div>
@@ -92,11 +94,11 @@ const DataBoardSection: React.FC = () => {
         <div className="max-w-6xl mx-auto grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
           {loading ? (
             <div className="col-span-full bg-surface rounded-2xl border border-white/5 p-8 text-center">
-              <p className="text-slate-500 font-bold text-sm">데이터를 불러오는 중...</p>
+              <p className="text-slate-500 font-bold text-sm">{language === 'en' ? 'Loading trend data...' : '데이터를 불러오는 중...'}</p>
             </div>
           ) : categories.length === 0 ? (
             <div className="col-span-full bg-surface rounded-2xl border border-white/5 p-8 text-center">
-              <p className="text-slate-500 font-bold text-sm">트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.</p>
+              <p className="text-slate-500 font-bold text-sm">{language === 'en' ? 'Trend data not collected yet. Updated daily at 2 PM.' : '트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.'}</p>
             </div>
           ) : (
             categories.map((cat, catIdx) => {

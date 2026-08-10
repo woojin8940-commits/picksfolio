@@ -276,18 +276,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 w-full bg-[#0b1221] text-white z-[100] border-t border-white/10 fixed-bottom-nav">
         <div className="grid grid-cols-4 px-1 py-2 gap-0.5">
-          <MobileNavItem icon="🏠" label="홈" active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
+          <MobileNavItem icon="🏠" label={t('nav.home', '홈', 'Home')} active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem
             icon="🔗"
-            label="관리"
+            label={t('nav.manage', '관리', 'Manage')}
             active={currentSubView === 'links'}
             onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
-          <MobileNavItem icon="📨" label="수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+          <MobileNavItem icon="📨" label={t('nav.inbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem
             icon="⋯"
-            label="더보기"
+            label={t('nav.more', '더보기', 'More')}
             active={['timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
             badge={timelineUnread}
@@ -306,7 +306,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <button
                 type="button"
-                aria-label="닫기"
+                aria-label={t('common.close', '닫기', 'Close')}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-white/5 hover:text-white"
               >
@@ -314,25 +314,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
             <nav className="flex-1 space-y-1">
-              <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🏠" label={t('nav.dashboard', '대시보드', 'Dashboard')} active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
               <NavItem
                 icon="🔗"
-                label="링크 관리"
+                label={t('nav.links', '링크 관리', 'Links')}
                 active={currentSubView === 'links'}
                 onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
-              <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📩" label={t('nav.dmAutomation', 'DM 자동화', 'DM Automation')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
-              <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="📨" label="비즈니스 수신함" active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
-              <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🗓️" label="오픈 일정" active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📢" label={t('nav.campaigns', '캠페인 협업', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="💬" label={t('nav.timeline', '협업 타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
+              <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
             </nav>
             <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
               {!isNativeApp() && (
-                <NavItem icon="💎" label="멤버십 플랜" active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
+                <NavItem icon="💎" label={t('nav.membership', '멤버십 플랜', 'Membership')} active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
               )}
               <button
                 type="button"
@@ -343,7 +343,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 font-bold hover:bg-white/5 hover:text-white transition-all text-sm cursor-pointer"
               >
                 <span>👤</span>
-                <span>로그아웃</span>
+                <span>{t('nav.logout', '로그아웃', 'Log Out')}</span>
               </button>
             </div>
           </aside>
@@ -404,20 +404,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* Stats Row */}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 mb-6 md:mb-8">
               <StatCard
-                label="방문자 수"
+                label={t('dash.visitors', '방문자 수', 'Visitors')}
                 value={stats.views.toLocaleString()}
-                trend={startDate === endDate && startDate === todayInSeoul() ? '실시간' : undefined}
+                trend={startDate === endDate && startDate === todayInSeoul() ? t('dash.realtime', '실시간', 'Real-time') : undefined}
               />
               <StatCard
-                label="링크 클릭률"
+                label={t('dash.ctrLabel', '링크 클릭률', 'Click Through Rate')}
                 value={`${stats.ctr}%`}
-                trend={startDate === endDate && startDate === todayInSeoul() ? '실시간' : undefined}
+                trend={startDate === endDate && startDate === todayInSeoul() ? t('dash.realtime', '실시간', 'Real-time') : undefined}
               />
 
               <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm col-span-2 lg:col-span-1">
-                <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-3">클릭 TOP 3</p>
+                <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-3">{t('dash.top3', '클릭 TOP 3', 'Top 3 Clicks')}</p>
                 {displayTopItems.length === 0 ? (
-                  <p className="text-xs text-slate-300 font-bold">데이터 수집 중</p>
+                  <p className="text-xs text-slate-300 font-bold">{t('dash.collecting', '데이터 수집 중', 'Collecting data...')}</p>
                 ) : (
                   <div className="space-y-2.5">
                     {displayTopItems.map((item) => (
@@ -437,7 +437,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               onClick={onNavigateLinks}
               className="w-full bg-blue-600 text-white py-3 md:py-5 rounded-2xl font-black text-xs md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:bg-blue-500 transition-all active:scale-[0.99]"
             >
-              + 새로운 포스트 & 링크 등록
+              {t('dash.addPostLink', '+ 새로운 포스트 & 링크 등록', '+ Add New Post & Link')}
             </button>
 
             {/* AI Trend */}
@@ -451,23 +451,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3"
             >
               <span className="text-xl">🤝</span>
-              캠페인 협업하기
+              {t('dash.collabCTA', '캠페인 협업하기', 'Collaborate on Campaigns')}
               <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-              <QuickCard icon="🔗" label="링크 관리" onClick={onNavigateLinks} />
-              <QuickCard icon="📨" label="비즈니스 수신함" onClick={onNavigateBusiness} />
-              <QuickCard icon="📅" label="협업 현황" onClick={onNavigateCalendar} />
+              <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
+              <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />
+              <QuickCard icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} onClick={onNavigateCalendar} />
             </div>
 
             {/* Data Overview */}
             <div className="mb-6 md:mb-8">
-              <h4 className="text-sm md:text-lg font-black text-slate-900 mb-3 md:mb-4">내 데이터 현황</h4>
+              <h4 className="text-sm md:text-lg font-black text-slate-900 mb-3 md:mb-4">{t('dash.dataOverview', '내 데이터 현황', 'My Data Overview')}</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-4">
-                <DataCard icon="🔗" label="상품 블록" count={previewBlocks.length} onClick={onNavigateLinks} />
-                <DataCard icon="🗓️" label="오픈 일정" count={previewSchedule.filter((s: any) => s.isActive).length} onClick={onNavigateOpenSchedule} />
+                <DataCard icon="🔗" label={t('dash.productBlocks', '상품 블록', 'Product Blocks')} count={previewBlocks.length} onClick={onNavigateLinks} />
+                <DataCard icon="🗓️" label={t('nav.openSchedule', '오픈 일정', 'Open Schedule')} count={previewSchedule.filter((s: any) => s.isActive).length} onClick={onNavigateOpenSchedule} />
               </div>
             </div>
             </div>
@@ -536,12 +536,15 @@ const QuickCard: React.FC<{ icon: string; label: string; onClick?: () => void }>
   </button>
 );
 
-const DataCard: React.FC<{ icon: string; label: string; count: number; onClick?: () => void }> = ({ icon, label, count, onClick }) => (
-  <div onClick={onClick} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:border-blue-300 transition-all">
-    <span className="text-base md:text-xl block mb-1">{icon}</span>
-    <p className="text-slate-400 text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-0.5">{label}</p>
-    <p className="text-lg md:text-xl font-black text-slate-900">{count}<span className="text-xs text-slate-400 ml-1">개</span></p>
-  </div>
-);
+const DataCard: React.FC<{ icon: string; label: string; count: number; onClick?: () => void }> = ({ icon, label, count, onClick }) => {
+  const { t } = useLanguage();
+  return (
+    <div onClick={onClick} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:border-blue-300 transition-all">
+      <span className="text-base md:text-xl block mb-1">{icon}</span>
+      <p className="text-slate-400 text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-0.5">{label}</p>
+      <p className="text-lg md:text-xl font-black text-slate-900">{count}<span className="text-xs text-slate-400 ml-1">{t('common.items', '개', 'items')}</span></p>
+    </div>
+  );
+};
 
 export default AdminDashboard;

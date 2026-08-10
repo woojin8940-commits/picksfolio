@@ -14,6 +14,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'nav.home': { ko: '홈', en: 'Home' },
   'nav.dashboard': { ko: '대시보드', en: 'Dashboard' },
   'nav.links': { ko: '링크 관리', en: 'Links' },
+  'nav.manage': { ko: '관리', en: 'Manage' },
   'nav.dmAutomation': { ko: 'DM 자동화', en: 'DM Automation' },
   'nav.campaigns': { ko: '캠페인 협업', en: 'Campaigns' },
   'nav.inbox': { ko: '비즈니스 수신함', en: 'Inbox' },
@@ -31,10 +32,20 @@ const translations: Record<string, { ko: string; en: string }> = {
 
   // Dashboard Overview
   'dash.welcome': { ko: '반가워요,', en: 'Welcome back,' },
+  'dash.welcomeSuffix': { ko: '님!', en: '!' },
   'dash.period': { ko: '기간', en: 'Period' },
   'dash.views': { ko: '조회수', en: 'Views' },
   'dash.clicks': { ko: '클릭수', en: 'Clicks' },
   'dash.ctr': { ko: '클릭률', en: 'CTR' },
+  'dash.visitors': { ko: '방문자 수', en: 'Visitors' },
+  'dash.ctrLabel': { ko: '링크 클릭률', en: 'Click Through Rate' },
+  'dash.realtime': { ko: '실시간', en: 'Real-time' },
+  'dash.top3': { ko: '클릭 TOP 3', en: 'Top 3 Clicks' },
+  'dash.collecting': { ko: '데이터 수집 중', en: 'Collecting data...' },
+  'dash.addPostLink': { ko: '+ 새로운 포스트 & 링크 등록', en: '+ Add New Post & Link' },
+  'dash.collabCTA': { ko: '🤝 캠페인 협업하기', en: '🤝 Collaborate on Campaigns' },
+  'dash.dataOverview': { ko: '내 데이터 현황', en: 'My Data Overview' },
+  'dash.productBlocks': { ko: '상품 블록', en: 'Product Blocks' },
   'dash.aiTrend': { ko: 'AI 트렌드 분석', en: 'AI Trend Analysis' },
 
   // DM Automation
@@ -70,6 +81,16 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dm.sendSuccess': { ko: 'DM이 성공적으로 발송되었습니다!', en: 'DM sent successfully!' },
   'dm.sendFailed': { ko: 'DM 발송에 실패했습니다.', en: 'Failed to send DM.' },
 
+  // Link Management
+  'links.title': { ko: '포스트 & 상품 링크', en: 'Posts & Product Links' },
+  'links.designTab': { ko: '디자인 & 블록', en: 'Design & Blocks' },
+  'links.postsTab': { ko: '포스트 & 상품 링크', en: 'Posts & Product Links' },
+  'links.addBlock': { ko: '+ 새 블록 추가', en: '+ Add New Block' },
+  'links.manageFolders': { ko: '폴더 관리', en: 'Manage Folders' },
+  'links.saveChanges': { ko: '변경사항 저장', en: 'Save Changes' },
+  'links.preview': { ko: '미리보기', en: 'Preview' },
+  'links.noBlocks': { ko: '등록된 링크가 없습니다. 새 블록을 추가해보세요!', en: 'No links registered yet. Add a new block!' },
+
   // General Buttons & Status
   'common.save': { ko: '저장', en: 'Save' },
   'common.close': { ko: '닫기', en: 'Close' },
@@ -79,6 +100,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'common.inactive': { ko: '중지됨', en: 'Inactive' },
   'common.proPlanNotice': { ko: '디엠 자동화는 프로 플랜 전용 기능이에요.', en: 'DM Automation is a Pro Plan exclusive feature.' },
   'common.language': { ko: '언어', en: 'Language' },
+  'common.items': { ko: '개', en: 'items' },
 };
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);

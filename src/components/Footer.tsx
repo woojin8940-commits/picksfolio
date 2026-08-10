@@ -43,19 +43,19 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) =
         <div className="border-t border-white/5 pt-8">
           <div className="space-y-2">
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">상호명</span> 픽스폴리오(Picksfolio) | <span className="text-slate-400 font-black">대표자</span> 신우진
+              <span className="text-slate-400 font-black">{language === 'en' ? 'Company Name' : '상호명'}</span> {language === 'en' ? 'Picksfolio' : '픽스폴리오(Picksfolio)'} | <span className="text-slate-400 font-black">{language === 'en' ? 'CEO' : '대표자'}</span> {language === 'en' ? 'Woojin Shin' : '신우진'}
             </p>
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">사업자등록번호</span> 220-26-01995
+              <span className="text-slate-400 font-black">{language === 'en' ? 'Business Registration No.' : '사업자등록번호'}</span> 220-26-01995
             </p>
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">통신판매업신고번호</span> 제 2026-부천원미-0846 호
+              <span className="text-slate-400 font-black">{language === 'en' ? 'E-Commerce Permit No.' : '통신판매업신고번호'}</span> {language === 'en' ? '2026-Bucheon Wonmi-0846' : '제 2026-부천원미-0846 호'}
             </p>
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">사업장 주소</span> 경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)
+              <span className="text-slate-400 font-black">{language === 'en' ? 'Address' : '사업장 주소'}</span> {language === 'en' ? '7F #2, 26 Buil-ro 199beon-gil, Wonmi-gu, Bucheon-si, Gyeonggi-do, Korea' : '경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)'}
             </p>
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">고객센터</span> 010-3563-8940 | woojin8940@inplace-ad.com
+              <span className="text-slate-400 font-black">{language === 'en' ? 'Customer Support' : '고객센터'}</span> 010-3563-8940 | woojin8940@inplace-ad.com
             </p>
           </div>
           <div className="mt-4 flex gap-4">
@@ -63,14 +63,14 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) =
               onClick={onNavigateTerms}
               className="text-slate-500 hover:text-white text-sm font-bold transition-colors underline underline-offset-2"
             >
-              이용약관
+              {language === 'en' ? 'Terms of Service' : '이용약관'}
             </button>
             <span className="text-slate-600">|</span>
             <button
               onClick={onNavigatePrivacy}
               className="text-slate-500 hover:text-white text-sm font-bold transition-colors underline underline-offset-2"
             >
-              개인정보처리방침
+              {language === 'en' ? 'Privacy Policy' : '개인정보처리방침'}
             </button>
           </div>
           <p className="text-slate-600 text-xs font-bold mt-6">&copy; {new Date().getFullYear()} Picksfolio. All rights reserved.</p>

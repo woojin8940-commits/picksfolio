@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { payClaudePlan } from '../utils/claudeCharge';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
@@ -41,6 +42,7 @@ const ACTIVATION_PRICE_KRW = 9900;
 const ACTIVATION_GRANT_CREDITS = 3000;
 
 const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
+  const { language, t } = useLanguage();
   const normalizedUserName = userName.replace(/^biz\//, '');
   const [verification, setVerification] = useState<SellerVerification | null>(null);
   const [loading, setLoading] = useState(true);
@@ -337,9 +339,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   return (
     <main className="p-3 md:p-14 w-full animate-in fade-in duration-500">
       <header className="mb-8 md:mb-12">
-        <h2 className="text-xl md:text-3xl font-black text-slate-900">멤버십 플랜</h2>
+        <h2 className="text-xl md:text-3xl font-black text-slate-900">{t('nav.membership', '멤버십 플랜', 'Membership Plans')}</h2>
         <p className="text-slate-500 mt-2 text-sm md:text-base leading-relaxed max-w-3xl">
-          콘텐츠 기능이 필요하면 <strong className="text-slate-700">스탠다드</strong>, 협업 AI까지 더하려면 <strong className="text-slate-700">AI 협업</strong>, 디엠 자동화를 포함해 모든 기능을 쓰려면 <strong className="text-slate-700">프로</strong> 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있고, <strong className="text-slate-700">표시된 금액은 모두 부가세(VAT) 포함</strong>입니다.
+          {language === 'en'
+            ? 'Choose Standard for content features, AI Collaboration to add AI tools, or Pro Plan for all features including DM automation. All plans are monthly subscriptions and include VAT.'
+            : '콘텐츠 기능이 필요하면 스탠다드, 협업 AI까지 더하려면 AI 협업, 디엠 자동화를 포함해 모든 기능을 쓰려면 프로 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있고, 표시된 금액은 모두 부가세(VAT) 포함입니다.'}
         </p>
       </header>
 
@@ -356,26 +360,26 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           <div className="relative rounded-2xl border-2 border-blue-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
               <span className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                스탠다드 멤버십
+                {language === 'en' ? 'Standard Membership' : '스탠다드 멤버십'}
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">{STANDARD_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">원 / 월</span>
-              <span className="text-slate-400 text-xs mb-1.5 ml-1">부가세 포함</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">₩{STANDARD_PRICE.toLocaleString()}</span>
+              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? '/ mo' : '원 / 월'}</span>
+              <span className="text-slate-400 text-xs mb-1.5 ml-1">{language === 'en' ? 'VAT incl.' : '부가세 포함'}</span>
             </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">콘텐츠 풀 액세스</h4>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">{language === 'en' ? 'Full Content Access' : '콘텐츠 풀 액세스'}</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>영상 업로드</strong></li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 7개 이상 업로드</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>{language === 'en' ? 'Video Uploads' : '영상 업로드'}</strong></li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>{language === 'en' ? 'Upload 7+ Content Blocks' : '콘텐츠 7개 이상 업로드'}</strong></li>
             </ul>
 
             {loading ? (
-              <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
+              <div className="text-slate-400 text-sm font-bold">{t('common.loading', '상태 확인 중...', 'Checking status...')}</div>
             ) : membershipActive && currentPlan === 'standard' ? (
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                  ✓ 스탠다드 멤버십 구독 중
+                  ✓ {language === 'en' ? 'Subscribed to Standard' : '스탠다드 멤버십 구독 중'}
                 </div>
                 <button
                   type="button"
@@ -383,12 +387,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   disabled={saving}
                   className="px-4 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
                 >
-                  해지하기
+                  {language === 'en' ? 'Cancel' : '해지하기'}
                 </button>
               </div>
             ) : includedInCurrentPlan('standard') ? (
               <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
-                {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
+                {language === 'en' ? `Included in ${TIER_LABEL[currentPlan!]}` : `${TIER_LABEL[currentPlan!]}에 포함되어 있습니다`}
               </div>
             ) : (
               <button
@@ -397,7 +401,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 disabled={saving}
                 className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
               >
-                {STANDARD_PRICE.toLocaleString()}원으로 구독 시작
+                {language === 'en' ? `Subscribe for ₩${STANDARD_PRICE.toLocaleString()}` : `${STANDARD_PRICE.toLocaleString()}원으로 구독 시작`}
               </button>
             )}
           </div>
@@ -406,15 +410,15 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           <div className="relative rounded-2xl border-2 border-violet-200 bg-white p-6 md:p-8 shadow-sm">
             <div className="absolute -top-3 left-6">
               <span className="bg-gradient-to-r from-violet-500 to-blue-500 text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
-                AI 협업 멤버십 · ✨ AI
+                {language === 'en' ? 'AI Collaboration · ✨ AI' : 'AI 협업 멤버십 · ✨ AI'}
               </span>
             </div>
             <div className="flex items-end gap-1 mb-4 mt-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900">{STANDARD_AI_PRICE.toLocaleString()}</span>
-              <span className="text-slate-500 text-sm mb-1">원 / 월</span>
-              <span className="text-slate-400 text-xs mb-1.5 ml-1">부가세 포함</span>
+              <span className="text-3xl md:text-4xl font-black text-slate-900">₩{STANDARD_AI_PRICE.toLocaleString()}</span>
+              <span className="text-slate-500 text-sm mb-1">{language === 'en' ? '/ mo' : '원 / 월'}</span>
+              <span className="text-slate-400 text-xs mb-1.5 ml-1">{language === 'en' ? 'VAT incl.' : '부가세 포함'}</span>
             </div>
-            <h4 className="font-bold text-slate-800 text-lg mb-3">스탠다드 + AI 사용할 수 있는 멤버십</h4>
+            <h4 className="font-bold text-slate-800 text-lg mb-3">{language === 'en' ? 'Standard + AI Collaboration Tools' : '스탠다드 + AI 사용할 수 있는 멤버십'}</h4>
             <ul className="space-y-2 text-sm text-slate-600 mb-6">
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>

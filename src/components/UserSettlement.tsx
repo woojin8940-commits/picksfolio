@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
 import { formatKRW, stripCommas } from '../utils/formatters';
 import { authHeaders } from '../services/apiService';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserSettlementProps {
   userName: string;
@@ -51,6 +52,7 @@ function isAmountPending(s: Settlement): boolean {
 }
 
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
+  const { language, t } = useLanguage();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -202,8 +204,8 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const diff = Math.round((target.getTime() - startOfToday.getTime()) / 86400000);
-    if (diff < 0) return <span className="text-red-500 font-black text-[10px]">기한 지남</span>;
-    if (diff === 0) return <span className="text-amber-500 font-black text-[10px]">오늘</span>;
+    if (diff < 0) return <span className="text-red-500 font-black text-[10px]">{language === 'en' ? 'Overdue' : '기한 지남'}</span>;
+    if (diff === 0) return <span className="text-amber-500 font-black text-[10px]">{language === 'en' ? 'Today' : '오늘'}</span>;
     if (diff <= 7) return <span className="text-amber-500 font-black text-[10px]">D-{diff}</span>;
     return <span className="text-slate-400 font-bold text-[10px]">D-{diff}</span>;
   };
@@ -212,42 +214,44 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
     <div className={embedded ? 'w-full animate-in fade-in duration-500' : 'p-3 md:p-14 w-full animate-in fade-in duration-500'}>
       {!embedded && (
         <div className="mb-6 md:mb-10">
-          <h2 className="text-xl md:text-3xl font-black text-slate-900">정산 현황</h2>
-          <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">협업 제안이 수락되면 정산 일정이 자동으로 추가됩니다</p>
+          <h2 className="text-xl md:text-3xl font-black text-slate-900">{language === 'en' ? 'Settlement Status' : '정산 현황'}</h2>
+          <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
+            {language === 'en' ? 'Settlement schedule is automatically added when a proposal is accepted' : '협업 제안이 수락되면 정산 일정이 자동으로 추가됩니다'}
+          </p>
         </div>
       )}
 
       {/* Stats Summary */}
       <div className="grid grid-cols-3 gap-2 md:gap-4 mb-8">
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-100 p-4 md:p-5">
-          <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">총 정산 금액</p>
+          <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-1">{language === 'en' ? 'TOTAL SETTLEMENT' : '총 정산 금액'}</p>
           <p className="text-base md:text-2xl font-black text-blue-700">{formatFee(totalAmount)}</p>
           <p className="text-[10px] font-bold text-blue-400 mt-1">
-            {settlements.length}건{negotiatingCount > 0 && ` · 협의중 ${negotiatingCount}건`}
+            {settlements.length}{language === 'en' ? ' items' : '건'}{negotiatingCount > 0 && (language === 'en' ? ` · In negotiation ${negotiatingCount}` : ` · 협의중 ${negotiatingCount}건`)}
           </p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">정산 완료</p>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{language === 'en' ? 'COMPLETED' : '정산 완료'}</p>
           <p className="text-base md:text-2xl font-black text-green-600">{formatFee(completedAmount)}</p>
-          <p className="text-[10px] font-bold text-slate-400 mt-1">{completedSettlements.length}건</p>
+          <p className="text-[10px] font-bold text-slate-400 mt-1">{completedSettlements.length}{language === 'en' ? ' items' : '건'}</p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">미정산</p>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{language === 'en' ? 'PENDING' : '미정산'}</p>
           <p className="text-base md:text-2xl font-black text-amber-600">{formatFee(pendingAmount)}</p>
-          <p className="text-[10px] font-bold text-slate-400 mt-1">{scheduledSettlements.length}건</p>
+          <p className="text-[10px] font-bold text-slate-400 mt-1">{scheduledSettlements.length}{language === 'en' ? ' items' : '건'}</p>
         </div>
       </div>
 
       {loading ? (
         <div className="text-center py-20">
           <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-400 font-bold text-sm">로딩 중...</p>
+          <p className="text-slate-400 font-bold text-sm">{t('common.loading', '로딩 중...', 'Loading...')}</p>
         </div>
       ) : settlements.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-5 md:p-12 text-center">
           <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">💰</div>
-          <h3 className="font-black text-slate-900 text-lg mb-2">정산 내역이 없습니다</h3>
-          <p className="text-slate-400 text-sm font-medium">협업이 확정되면 정산이 자동으로 정리됩니다.</p>
+          <h3 className="font-black text-slate-900 text-lg mb-2">{language === 'en' ? 'No Settlement Records' : '정산 내역이 없습니다'}</h3>
+          <p className="text-slate-400 text-sm font-medium">{language === 'en' ? 'Settlement items will be organized automatically when collaborations are confirmed.' : '협업이 확정되면 정산이 자동으로 정리됩니다.'}</p>
         </div>
       ) : (
         <>

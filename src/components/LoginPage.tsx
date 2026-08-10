@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
 import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
 const ADMIN_USERNAMES = ['picksfolio'];
@@ -15,6 +16,7 @@ interface LoginPageProps {
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup, onLoginSuccess, onAdminLoginSuccess }) => {
+  const { language, t } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [showFindAccount, setShowFindAccount] = useState(false);
   const [formData, setFormData] = useState({
@@ -174,18 +176,22 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-24 sm:pt-28 pb-10 sm:pb-14 bg-midnight overflow-y-auto">
       <div className="w-full max-w-sm sm:max-w-md bg-white rounded-[22px] sm:rounded-[26px] p-6 sm:p-9 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
         <div className="text-center mb-7">
-          <h1 className="text-2xl font-black text-slate-900 mb-1">로그인</h1>
-          <p className="text-slate-500 text-sm font-medium">픽스폴리오에 다시 오신 것을 환영합니다.</p>
+          <h1 className="text-2xl font-black text-slate-900 mb-1">{t('nav.login', '로그인', 'Log In')}</h1>
+          <p className="text-slate-500 text-sm font-medium">
+            {language === 'en' ? 'Welcome back to PICKSFOLIO.' : '픽스폴리오에 다시 오신 것을 환영합니다.'}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1.5">
-            <label className="block text-sm font-black text-slate-800 ml-1">아이디 또는 이메일</label>
+            <label className="block text-sm font-black text-slate-800 ml-1">
+              {language === 'en' ? 'Username or Email' : '아이디 또는 이메일'}
+            </label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 focus-within:border-blue-500 transition-colors">
               <input
                 type="text"
                 name="id"
-                placeholder="아이디 또는 관리자 이메일을 입력해 주세요"
+                placeholder={language === 'en' ? 'Enter username or admin email' : '아이디 또는 관리자 이메일을 입력해 주세요'}
                 required
                 value={formData.id}
                 onChange={handleChange}
@@ -201,12 +207,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-sm font-black text-slate-800 ml-1">비밀번호</label>
+            <label className="block text-sm font-black text-slate-800 ml-1">
+              {language === 'en' ? 'Password' : '비밀번호'}
+            </label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 focus-within:border-blue-500 transition-colors">
               <input
                 type="password"
                 name="password"
-                placeholder="비밀번호를 입력해 주세요"
+                placeholder={language === 'en' ? 'Enter password' : '비밀번호를 입력해 주세요'}
                 required
                 value={formData.password}
                 onChange={handleChange}
@@ -217,7 +225,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
             </div>
             <div className="text-right">
               <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
-                아이디/비밀번호 찾기
+                {language === 'en' ? 'Find ID/Password' : '아이디/비밀번호 찾기'}
               </button>
             </div>
           </div>
@@ -230,17 +238,17 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
             {isLoading ? (
               <>
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                로그인 중...
+                {language === 'en' ? 'Logging in...' : '로그인 중...'}
               </>
             ) : (
-              '로그인'
+              t('nav.login', '로그인', 'Log In')
             )}
           </button>
         </form>
 
         <div className="relative my-4 flex items-center">
           <div className="flex-grow border-t border-slate-200"></div>
-          <span className="flex-shrink mx-4 text-slate-400 text-xs font-bold">또는</span>
+          <span className="flex-shrink mx-4 text-slate-400 text-xs font-bold">{language === 'en' ? 'OR' : '또는'}</span>
           <div className="flex-grow border-t border-slate-200"></div>
         </div>
 
@@ -254,11 +262,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
             <path d="M12 3C6.48 3 2 6.36 2 10.44c0 2.62 1.72 4.92 4.32 6.24-.14.52-.92 3.36-.96 3.58 0 0-.02.16.08.22.1.06.22.02.22.02.3-.04 3.44-2.26 3.98-2.64.76.1 1.56.16 2.36.16 5.52 0 10-3.36 10-7.58C22 6.36 17.52 3 12 3z" fill="#000000"/>
           </svg>
-          카카오로 1초 만에 시작하기
+          {language === 'en' ? 'Start with Kakao in 1 sec' : '카카오로 1초 만에 시작하기'}
         </button>
 
         <div className="text-center mt-4 text-slate-400 text-sm font-bold">
-          계정이 없으신가요? <button onClick={onNavigateSignup} className="text-slate-800 hover:underline" disabled={isLoading}>회원가입하기</button>
+          {language === 'en' ? "Don't have an account?" : '계정이 없으신가요?'}{' '}
+          <button onClick={onNavigateSignup} className="text-slate-800 hover:underline" disabled={isLoading}>
+            {t('nav.signup', '회원가입하기', 'Sign Up')}
+          </button>
         </div>
 
         <button
@@ -270,11 +281,13 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />
           </svg>
-          비즈니스 회원 로그인하기
+          {language === 'en' ? 'Business Login' : '비즈니스 회원 로그인하기'}
         </button>
 
         <div className="text-center mt-2.5">
-          <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">홈으로 돌아가기</button>
+          <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">
+            {language === 'en' ? 'Return to Home' : '홈으로 돌아가기'}
+          </button>
         </div>
       </div>
     </div>
