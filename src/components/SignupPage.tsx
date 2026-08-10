@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface SignupPageProps {
   initialId: string;
@@ -9,6 +10,9 @@ interface SignupPageProps {
 }
 
 const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNavigateLogin, onSignupSuccess }) => {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   const [id, setId] = useState(initialId);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -24,19 +28,18 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
 
   const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Regex for English letters and numbers only
     const regex = /^[a-zA-Z0-9]*$/;
-    
+
     if (regex.test(value)) {
       setId(value);
     } else {
-      alert('주소는 영문으로만 입력 가능합니다.');
+      alert(isEn ? 'User ID can only contain English letters and numbers.' : '주소는 영문으로만 입력 가능합니다.');
     }
   };
 
   const handleSendSMS = async () => {
     if (!phone) {
-      alert('휴대폰 번호를 입력해 주세요.');
+      alert(isEn ? 'Please enter your phone number.' : '휴대폰 번호를 입력해 주세요.');
       return;
     }
 
@@ -50,16 +53,14 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
       });
       const data = await response.json();
       if (response.ok && data.success) {
-        // The code lives only on the server; clear any previously typed value
         setVerificationCode('');
         setShowVerificationInput(true);
-        alert(isResend ? '인증번호를 재전송했습니다.' : '인증번호가 발송되었습니다.');
+        alert(isResend ? (isEn ? 'Verification code resent.' : '인증번호를 재전송했습니다.') : (isEn ? 'Verification code sent.' : '인증번호가 발송되었습니다.'));
       } else {
-        // send-sms returns its reason in `error` (e.g. rate-limit message)
-        alert(data.error || data.message || '인증번호 발송에 실패했습니다.');
+        alert(data.error || data.message || (isEn ? 'Failed to send verification code.' : '인증번호 발송에 실패했습니다.'));
       }
     } catch (error) {
-      alert('서버 오류가 발생했습니다.');
+      alert(isEn ? 'Server error occurred.' : '서버 오류가 발생했습니다.');
     } finally {
       setIsSending(false);
     }
@@ -67,7 +68,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
 
   const handleVerifySMS = async () => {
     if (!verificationCode) {
-      alert('인증번호를 입력해 주세요.');
+      alert(isEn ? 'Please enter the verification code.' : '인증번호를 입력해 주세요.');
       return;
     }
 
@@ -79,116 +80,119 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
         body: JSON.stringify({ phone, code: verificationCode, purpose: 'signup' }),
       });
       const data = await response.json();
-      if (data.success) {
-        alert('인증되었습니다.');
+      if (response.ok && data.success) {
         setIsVerified(true);
+        alert(isEn ? 'Phone verification complete.' : '휴대폰 인증이 완료되었습니다.');
       } else {
-        alert(data.error || '인증번호가 일치하지 않습니다.');
+        alert(data.error || data.message || (isEn ? 'Verification failed.' : '인증번호가 일치하지 않거나 만료되었습니다.'));
       }
     } catch (error) {
-      alert('서버 오류가 발생했습니다.');
+      alert(isEn ? 'Server error occurred.' : '서버 오류가 발생했습니다.');
     } finally {
       setIsVerifying(false);
     }
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (password !== confirmPassword) {
-      alert('비밀번호가 일치하지 않습니다.');
+      alert(isEn ? 'Passwords do not match.' : '비밀번호가 일치하지 않습니다.');
       return;
     }
-    const cleanEmail = email.trim();
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      alert('올바른 이메일을 입력해 주세요.');
-      return;
-    }
+
     if (!isVerified) {
-      alert('휴대폰 인증을 완료해 주세요.');
+      alert(isEn ? 'Please complete phone verification.' : '휴대폰 번호 인증을 완료해 주세요.');
       return;
     }
 
     setIsLoading(true);
+
     try {
-      // Use server-side signup for reliable user creation (auto-confirms email)
-      const response = await fetch('/.netlify/functions/auth-signup', {
+      const response = await fetch('/.netlify/functions/identity-signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          username: id.trim(),
+          id,
+          email,
           password,
-          email: cleanEmail,
-          phone: phone.replace(/\D/g, ''),
-          full_name: fullName.trim(),
+          fullName,
+          phone,
         }),
       });
 
-      const result = await response.json();
+      const data = await response.json();
 
-      // auth-signup always responds with HTTP 200 and signals failure via
-      // { success: false, error }. Treat anything that isn't an explicit
-      // success as a failure so the user always gets feedback.
-      if (!response.ok || !result.success) {
-        alert(result.error || '회원가입에 실패했습니다. 다시 시도해 주세요.');
-        return;
+      if (!response.ok) {
+        throw new Error(data.error || (isEn ? 'Signup failed' : '회원가입 실패'));
       }
 
-      alert('회원가입이 완료되었습니다. 로그인해주세요.');
+      alert(isEn ? 'Signup complete! Please log in.' : '회원가입이 완료되었습니다! 로그인해 주세요.');
       onSignupSuccess();
     } catch (error: any) {
-      console.error('Signup catch error:', error);
-      alert('서버 오류가 발생했습니다: ' + error.message);
+      alert(error.message || (isEn ? 'An error occurred during signup.' : '회원가입 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[100dvh] bg-midnight flex items-start justify-center p-4 sm:p-6 py-10 sm:py-16 overflow-y-auto">
-      <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/10 p-6 sm:p-8 md:p-12 rounded-[2rem] sm:rounded-[2.5rem] w-full max-w-[480px] relative shadow-2xl">
+    <div className="min-h-screen bg-midnight text-white flex flex-col justify-center items-center px-4 py-12">
+      <div className="w-full max-w-md bg-white/5 border border-white/10 rounded-[32px] p-8 md:p-10 backdrop-blur-xl relative">
         <button
           onClick={onNavigateHome}
-          className="absolute left-5 top-7 sm:left-8 sm:top-10 text-slate-500 hover:text-white transition-colors p-2 -m-2"
+          className="absolute top-8 left-8 text-slate-400 hover:text-white transition-colors flex items-center gap-2 font-bold text-sm"
         >
-          <ArrowLeft size={24} strokeWidth={3} />
+          <ArrowLeft size={18} />
+          {isEn ? 'Home' : '홈으로'}
         </button>
 
-        <div className="text-center mb-8 sm:mb-10 mt-6 sm:mt-0">
-          <h2 className="text-2xl sm:text-[30px] font-black text-white mb-3 tracking-tight">회원가입</h2>
-          <p className="text-slate-400 font-bold text-sm sm:text-base">나만의 픽스 주소를 만들고 수익을 창출하세요.</p>
+        <div className="text-center mt-6 mb-8">
+          <h1 className="text-3xl font-black mb-2">{isEn ? 'Sign Up' : '회원가입'}</h1>
+          <p className="text-slate-400 font-bold text-sm">
+            {isEn ? 'Start building your portfolio with PICKSFOLIO' : '픽스폴리오와 함께 나만의 포트폴리오를 만들어보세요'}
+          </p>
         </div>
 
-        <form onSubmit={handleSignup} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">아이디 (내 링크 주소)</label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-base">picks-folio.com/</span>
-              <input 
-                type="text" 
-                value={id} 
-                onChange={handleIdChange} 
-                className="w-full bg-white/5 border border-white/10 p-4 pl-[9.5rem] rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                placeholder=""
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">
+              {isEn ? 'Username / Handle' : '사용자 아이디 (페이지 주소)'}
+            </label>
+            <div className="relative flex items-center">
+              <input
+                type="text"
+                value={id}
+                onChange={handleIdChange}
+                className="w-full bg-white/5 border border-white/10 p-4 pr-28 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                placeholder={isEn ? 'myname' : 'myname'}
                 required
               />
+              <span className="absolute right-4 text-slate-500 font-bold text-sm pointer-events-none">
+                .picks.me
+              </span>
             </div>
-            <p className="text-[11px] text-slate-500 font-bold mt-2.5 ml-1">※ 아이디는 나중에 변경할 수 없습니다.</p>
+            <p className="text-xs text-slate-500 mt-2 font-bold ml-1">
+              {isEn ? `Your site address will be ${id || 'username'}.picks.me` : `완성될 나의 주소: ${id || 'myname'}.picks.me`}
+            </p>
           </div>
 
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">이름</label>
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Full Name' : '이름'}</label>
             <input
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-              placeholder="이름을 입력해 주세요"
+              placeholder={isEn ? 'Enter your name' : '이름을 입력해 주세요'}
               required
             />
           </div>
 
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">이메일</label>
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Email' : '이메일'}</label>
             <input
               type="email"
               value={email}
@@ -201,35 +205,35 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
           </div>
 
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">비밀번호</label>
-            <input 
-              type="password" 
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Password' : '비밀번호'}</label>
+            <input
+              type="password"
               name="password"
               autoComplete="new-password"
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
-              placeholder="비밀번호를 입력해 주세요"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              placeholder={isEn ? 'Enter password' : '비밀번호를 입력해 주세요'}
               required
             />
           </div>
 
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">비밀번호 확인</label>
-            <input 
-              type="password" 
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Confirm Password' : '비밀번호 확인'}</label>
+            <input
+              type="password"
               name="confirmPassword"
               autoComplete="new-password"
-              value={confirmPassword} 
-              onChange={(e) => setConfirmPassword(e.target.value)} 
-              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
-              placeholder="비밀번호를 다시 입력해 주세요"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              placeholder={isEn ? 'Confirm password' : '비밀번호를 다시 입력해 주세요'}
               required
             />
           </div>
 
           <div>
-            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">휴대폰 번호</label>
+            <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Phone Number' : '휴대폰 번호'}</label>
             <div className="flex gap-2">
               <input
                 type="tel"
@@ -242,27 +246,33 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                 autoComplete="tel"
                 pattern="[0-9]*"
               />
-              <button 
+              <button
                 type="button"
                 onClick={handleSendSMS}
                 disabled={isSending || isVerified}
                 className="bg-white/10 text-white px-4 rounded-2xl font-black text-[12px] hover:bg-white/20 transition-colors whitespace-nowrap border border-white/10 disabled:opacity-50 flex-shrink-0"
               >
-                {isSending ? '발송 중...' : isVerified ? '인증 완료' : showVerificationInput ? '인증번호 재전송' : '인증번호 전송'}
+                {isSending
+                  ? (isEn ? 'Sending...' : '발송 중...')
+                  : isVerified
+                  ? (isEn ? 'Verified' : '인증 완료')
+                  : showVerificationInput
+                  ? (isEn ? 'Resend' : '인증번호 재전송')
+                  : (isEn ? 'Send Code' : '인증번호 전송')}
               </button>
             </div>
           </div>
 
           {showVerificationInput && !isVerified && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-              <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">인증번호</label>
+              <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">{isEn ? 'Verification Code' : '인증번호'}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={verificationCode}
                   onChange={(e) => setVerificationCode(e.target.value)}
                   className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  placeholder="6자리 숫자 입력"
+                  placeholder={isEn ? '6-digit code' : '6자리 숫자 입력'}
                   maxLength={6}
                   inputMode="numeric"
                   autoComplete="one-time-code"
@@ -274,13 +284,13 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                   disabled={isVerifying}
                   className="bg-blue-600/20 text-blue-400 px-5 rounded-2xl font-black text-[13px] hover:bg-blue-600/30 transition-colors whitespace-nowrap border border-blue-500/30 flex-shrink-0 disabled:opacity-50"
                 >
-                  {isVerifying ? '확인 중...' : '확인'}
+                  {isVerifying ? (isEn ? 'Verifying...' : '확인 중...') : (isEn ? 'Verify' : '확인')}
                 </button>
               </div>
             </div>
           )}
 
-          <button 
+          <button
             type="submit"
             disabled={isLoading}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50 flex items-center justify-center gap-2"
@@ -288,31 +298,31 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
             {isLoading ? (
               <>
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                가입 중...
+                {isEn ? 'Signing up...' : '가입 중...'}
               </>
             ) : (
-              '회원가입'
+              isEn ? 'Sign Up' : '회원가입'
             )}
           </button>
         </form>
 
         <div className="mt-8 text-center">
           <p className="text-slate-500 font-bold text-sm">
-            이미 계정이 있으신가요?{' '}
+            {isEn ? 'Already have an account?' : '이미 계정이 있으신가요?'}{' '}
             <button
               onClick={onNavigateLogin}
               className="text-white hover:text-blue-400 hover:underline font-black ml-1 transition-colors"
             >
-              로그인
+              {isEn ? 'Log In' : '로그인'}
             </button>
           </p>
           <p className="text-slate-600 font-bold text-xs mt-3">
-            기업 회원이신가요?{' '}
+            {isEn ? 'Are you a business?' : '기업 회원이신가요?'}{' '}
             <button
               onClick={() => window.location.href = '/business-signup'}
               className="text-blue-400 hover:underline font-black transition-colors"
             >
-              비즈니스 회원가입
+              {isEn ? 'Business Sign Up' : '비즈니스 회원가입'}
             </button>
           </p>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, BarChart3, Clock } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface AITrendAnalysisProps {
   userName: string;
@@ -30,6 +31,16 @@ const CATEGORY_ACCENTS: Record<string, { dot: string; chip: string }> = {
   '50000009': { dot: 'bg-indigo-500', chip: 'bg-indigo-50 text-indigo-700' },
 };
 
+const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
+  '50000000': 'Fashion / Apparel',
+  '50000002': 'Beauty / Cosmetics',
+  '50000003': 'Digital / Appliances',
+  '50000004': 'Furniture / Interior',
+  '50000006': 'Food',
+  '50000008': 'Sports / Leisure',
+  '50000009': 'Life / Health',
+};
+
 const DEFAULT_ACCENT = { dot: 'bg-slate-500', chip: 'bg-slate-50 text-slate-700' };
 
 const FALLBACK_CATEGORIES: CategoryBlock[] = [];
@@ -37,6 +48,7 @@ const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 const DISPLAY_CIDS = ['50000000', '50000002', '50000003', '50000004', '50000006', '50000008'];
 
 const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) => {
+  const { language } = useLanguage();
   const [categories, setCategories] = useState<CategoryBlock[]>(FALLBACK_CATEGORIES);
   const [categoriesUpdatedAt, setCategoriesUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,16 +93,18 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
         <div>
           <h2 className="text-lg md:text-3xl font-black text-slate-900 mb-1 md:mb-2 flex items-center gap-2 md:gap-3">
-            AI 트렌드 분석 <Sparkles className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
+            {language === 'en' ? 'AI Trend Analysis' : 'AI 트렌드 분석'} <Sparkles className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
           </h2>
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-slate-500 font-medium text-[10px] md:text-base">카테고리별 인기 키워드 트렌드를 분석합니다.</p>
+            <p className="text-slate-500 font-medium text-[10px] md:text-base">
+              {language === 'en' ? 'Analyze top keyword trends by category.' : '카테고리별 인기 키워드 트렌드를 분석합니다.'}
+            </p>
             <span className="flex items-center gap-1 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-              <Clock size={10} /> 매일 오후 2시 업데이트
+              <Clock size={10} /> {language === 'en' ? 'Updated daily at 2 PM' : '매일 오후 2시 업데이트'}
             </span>
             {categoriesUpdatedAt && (
               <span className="flex items-center gap-1 bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                <Clock size={10} /> {formatUpdatedAt(categoriesUpdatedAt)} 기준
+                <Clock size={10} /> {language === 'en' ? `As of ${formatUpdatedAt(categoriesUpdatedAt)}` : `${formatUpdatedAt(categoriesUpdatedAt)} 기준`}
               </span>
             )}
           </div>
@@ -100,22 +114,23 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
         {loading ? (
           <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
-            카테고리 데이터를 불러오는 중...
+            {language === 'en' ? 'Loading category data...' : '카테고리 데이터를 불러오는 중...'}
           </div>
         ) : categories.length === 0 ? (
           <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
-            트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.
+            {language === 'en' ? 'Trend data not collected yet. Updated daily at 2 PM.' : '트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.'}
           </div>
         ) : null}
         {categories.map((cat) => {
           const accent = CATEGORY_ACCENTS[cat.cid] ?? DEFAULT_ACCENT;
+          const label = language === 'en' ? (CATEGORY_ENGLISH_NAMES[cat.cid] || cat.label) : cat.label;
           return (
             <div key={cat.cid} className="bg-white p-2.5 md:p-6 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-3 md:mb-4">
                 <h4 className="font-black text-slate-900 flex items-center gap-1.5 text-[11px] md:text-sm min-w-0">
                   <BarChart3 size={14} className="text-blue-600 shrink-0" />
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${accent.dot}`}></span>
-                  <span className="truncate">{cat.label}</span>
+                  <span className="truncate">{label}</span>
                 </h4>
                 <span className={`hidden md:inline text-[9px] font-black px-2 py-0.5 rounded-full ${accent.chip}`}>
                   TOP 5

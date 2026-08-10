@@ -30,7 +30,7 @@ const minimalItems = [
 ];
 
 const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
-  const { language, t } = useLanguage();
+  const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState('shoppable');
 
   const templates = [
@@ -153,13 +153,13 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
 
                 {/* Category Tabs */}
                 <div className="px-3 pb-2 flex gap-1.5 overflow-hidden flex-shrink-0">
-                  {categories.map((cat) => (
+                  {categories.map((cat, idx) => (
                     <span
                       key={cat}
                       className={`px-2 py-0.5 text-[8px] md:text-[9px] font-black whitespace-nowrap rounded-full border ${
-                        cat === '전체' ? 'text-white border-transparent' : 'bg-white/10 border-white/20 text-white/50'
+                        idx === 0 ? 'text-white border-transparent' : 'bg-white/10 border-white/20 text-white/50'
                       }`}
-                      style={cat === '전체' ? { backgroundColor: ACCENT } : {}}
+                      style={idx === 0 ? { backgroundColor: ACCENT } : {}}
                     >
                       {cat}
                     </span>

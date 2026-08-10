@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import FindAccount from './FindAccount';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface BusinessLoginPageProps {
   onNavigateHome: () => void;
@@ -8,6 +9,9 @@ interface BusinessLoginPageProps {
 }
 
 const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, onNavigateBusinessSignup, onLoginSuccess }) => {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   const [isLoading, setIsLoading] = useState(false);
   const [showFindAccount, setShowFindAccount] = useState(false);
   const [formData, setFormData] = useState({ username: '', password: '' });
@@ -28,7 +32,7 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
 
       const result = await response.json();
       if (!response.ok) {
-        alert(result.error || '로그인 실패');
+        alert(result.error || (isEn ? 'Login failed' : '로그인 실패'));
         return;
       }
 
@@ -43,10 +47,10 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
         }
         onLoginSuccess(result.username, result.company_name);
       } else {
-        alert(result.error || '로그인에 실패했습니다.');
+        alert(result.error || (isEn ? 'Failed to log in.' : '로그인에 실패했습니다.'));
       }
     } catch (error: any) {
-      alert('서버 오류가 발생했습니다: ' + error.message);
+      alert((isEn ? 'Server error: ' : '서버 오류가 발생했습니다: ') + error.message);
     } finally {
       setIsLoading(false);
     }
@@ -67,16 +71,16 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-xs font-black mb-4">
             BUSINESS
           </div>
-          <h1 className="text-3xl font-black text-slate-900 mb-2">비즈니스 로그인</h1>
-          <p className="text-slate-500 text-sm font-medium">기업 대시보드에 로그인하세요.</p>
+          <h1 className="text-3xl font-black text-slate-900 mb-2">{isEn ? 'Business Log In' : '비즈니스 로그인'}</h1>
+          <p className="text-slate-500 text-sm font-medium">{isEn ? 'Sign in to your brand dashboard' : '기업 대시보드에 로그인하세요.'}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="block text-sm font-black text-slate-800 ml-1">비즈니스 아이디</label>
+            <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Business ID' : '비즈니스 아이디'}</label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
               <input
-                type="text" name="username" placeholder="비즈니스 아이디를 입력해 주세요"
+                type="text" name="username" placeholder={isEn ? 'Enter business ID' : '비즈니스 아이디를 입력해 주세요'}
                 required value={formData.username} onChange={handleChange}
                 className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
                 disabled={isLoading}
@@ -85,10 +89,10 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-black text-slate-800 ml-1">비밀번호</label>
+            <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Password' : '비밀번호'}</label>
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
               <input
-                type="password" name="password" placeholder="비밀번호를 입력해 주세요"
+                type="password" name="password" placeholder={isEn ? 'Enter password' : '비밀번호를 입력해 주세요'}
                 required value={formData.password} onChange={handleChange}
                 className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
                 disabled={isLoading}
@@ -96,7 +100,7 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
             </div>
             <div className="text-right">
               <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
-                아이디/비밀번호 찾기
+                {isEn ? 'Find ID / Password' : '아이디/비밀번호 찾기'}
               </button>
             </div>
           </div>
@@ -108,29 +112,31 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
             {isLoading ? (
               <>
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                로그인 중...
+                {isEn ? 'Logging in...' : '로그인 중...'}
               </>
             ) : (
-              '비즈니스 로그인'
+              isEn ? 'Business Log In' : '비즈니스 로그인'
             )}
           </button>
         </form>
 
         <div className="text-center mt-8 space-y-3">
           <p className="text-slate-400 text-sm font-bold">
-            비즈니스 계정이 없으신가요?{' '}
+            {isEn ? "Don't have a business account?" : '비즈니스 계정이 없으신가요?'}{' '}
             <button onClick={onNavigateBusinessSignup} className="text-slate-800 hover:underline font-black" disabled={isLoading}>
-              회원가입하기
+              {isEn ? 'Sign Up' : '회원가입하기'}
             </button>
           </p>
           <p className="text-slate-400 text-xs font-bold">
-            인플루언서이신가요?{' '}
+            {isEn ? 'Are you an influencer?' : '인플루언서이신가요?'}{' '}
             <button onClick={onNavigateHome} className="text-slate-500 hover:text-blue-600 hover:underline" disabled={isLoading}>
-              일반 로그인
+              {isEn ? 'Creator Login' : '일반 로그인'}
             </button>
           </p>
           <div className="pt-2">
-            <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">홈으로 돌아가기</button>
+            <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">
+              {isEn ? 'Return to Home' : '홈으로 돌아가기'}
+            </button>
           </div>
         </div>
       </div>
