@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, InstagramMedia } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
+import { useLanguage } from '../contexts/LanguageContext';
+import ManualDmModal from './ManualDmModal';
 
 interface DmAutomationProps {
   userName: string;
@@ -761,6 +763,10 @@ const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md'; d
 
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
+  const { t } = useLanguage();
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [manualModalRule, setManualModalRule] = useState<DmAutomationItem | null>(null);
+
   const [loaded, setLoaded] = useState(false);
   // 설정을 받아오지 못한 상태. 예전에는 이 경우를 구분하지 않아서, 응답이 오지
   // 않으면 스피너가 그대로 남았고(화면이 "계속 로딩 중"), 응답 실패를 자격 없음으로
@@ -1197,20 +1203,35 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
       {/* 자동화 목록 */}
       <section>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="text-lg md:text-xl font-black text-slate-900">내 자동화</h3>
+            <h3 className="text-lg md:text-xl font-black text-slate-900">{t('dm.myAutomations', '내 자동화', 'My Automations')}</h3>
             <span className="text-xs font-black text-slate-400">총 {automations.length}개</span>
           </div>
           {connected && (
-            <button
-              onClick={() => setEditing(blankAutomation())}
-              disabled={!entitled}
-              title={entitled ? undefined : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Plus size={16} /> 자동화 추가하기
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualModalRule(null);
+                  setManualModalOpen(true);
+                }}
+                disabled={!entitled}
+                title={entitled ? undefined : t('common.proPlanNotice', '디엠 자동화는 프로 플랜 전용 기능이에요.', 'DM Automation is a Pro Plan exclusive feature.')}
+                className="flex items-center gap-1.5 bg-slate-900 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <Send size={15} /> {t('dm.manualSend', '수동 DM 발송', 'Manual DM Send')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(blankAutomation())}
+                disabled={!entitled}
+                title={entitled ? undefined : t('common.proPlanNotice', '디엠 자동화는 프로 플랜 전용 기능이에요.', 'DM Automation is a Pro Plan exclusive feature.')}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <Plus size={16} /> {t('dm.addAutomation', '자동화 추가하기', 'Add Automation')}
+              </button>
+            </div>
           )}
         </div>
 
@@ -1294,10 +1315,20 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                 </div>
 
                 <div className="flex gap-2">
-                  <button onClick={() => setEditing(a)} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 text-xs font-black hover:bg-slate-200">
-                    <Pencil size={13} /> 편집
+                  <button onClick={() => setEditing(a)} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 rounded-xl py-2 text-xs font-black hover:bg-slate-200 transition-colors">
+                    <Pencil size={13} /> {t('dm.edit', '편집', 'Edit')}
                   </button>
-                  <button onClick={() => deleteAutomation(a.id)} disabled={saving} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+                  <button
+                    onClick={() => {
+                      setManualModalRule(a);
+                      setManualModalOpen(true);
+                    }}
+                    disabled={!entitled}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-pink-50 text-pink-600 border border-pink-200/60 rounded-xl py-2 text-xs font-black hover:bg-pink-100 disabled:opacity-50 transition-colors"
+                  >
+                    <Send size={13} /> {t('dm.manualSend', '수동 발송', 'Send Manual')}
+                  </button>
+                  <button onClick={() => deleteAutomation(a.id)} disabled={saving} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -1311,9 +1342,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       {connected && automations.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mt-6">
           {[
-            { icon: <Send size={16} />, label: '활성 자동화', value: `${activeCount}개` },
-            { icon: <Eye size={16} />, label: '전체 자동화', value: `${automations.length}개` },
-            { icon: <MousePointerClick size={16} />, label: '상태', value: enabled ? '작동 중' : '중지됨' },
+            { icon: <Send size={16} />, label: t('dm.activeAutomation', '활성 자동화', 'Active Rules'), value: `${activeCount}개` },
+            { icon: <Eye size={16} />, label: t('dm.totalAutomation', '전체 자동화', 'Total Rules'), value: `${automations.length}개` },
+            { icon: <MousePointerClick size={16} />, label: t('dm.status', '상태', 'Status'), value: enabled ? t('common.active', '작동 중', 'Active') : t('common.inactive', '중지됨', 'Inactive') },
           ].map((s, i) => (
             <div key={i} className="bg-white rounded-2xl border border-slate-100 p-4 text-center">
               <div className="w-8 h-8 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center mx-auto mb-2">{s.icon}</div>
@@ -1334,6 +1365,16 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           onSave={saveAutomation}
         />
       )}
+
+      <ManualDmModal
+        isOpen={manualModalOpen}
+        onClose={() => setManualModalOpen(false)}
+        userName={userName}
+        igUsername={igUsername}
+        automations={automations}
+        initialAutomation={manualModalRule}
+        entitled={entitled}
+      />
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface FooterProps {
   onNavigateTerms?: () => void;
@@ -6,6 +7,7 @@ interface FooterProps {
 }
 
 const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) => {
+  const { language } = useLanguage();
   return (
     <footer className="bg-midnight pt-12 md:pt-20 pb-10 border-t border-white/5">
       <div className="container mx-auto px-4 sm:px-6">
@@ -13,7 +15,9 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) =
           <div className="max-w-xs">
             <h2 className="text-xl md:text-2xl font-black text-white mb-5 md:mb-8 tracking-tighter">PICKS</h2>
             <p className="text-slate-500 text-sm font-bold leading-relaxed">
-              일상을 큐레이션하고 스타일을 연결하는<br />자세한 소셜 커머스 링크 플랫폼.
+              {language === 'en'
+                ? 'Curating daily life and connecting style with a detailed social link platform.'
+                : '일상을 큐레이션하고 스타일을 연결하는 자세한 소셜 커머스 링크 플랫폼.'}
             </p>
           </div>
 

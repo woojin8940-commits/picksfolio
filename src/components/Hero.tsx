@@ -1,12 +1,14 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface HeroProps {
   onSignup: (id: string) => void;
 }
 
 const Hero: React.FC<HeroProps> = ({ onSignup }) => {
+  const { t, language } = useLanguage();
   const [handle, setHandle] = useState('');
 
   return (
@@ -21,12 +23,12 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
         className="max-w-5xl mx-auto"
       >
         <h1 className="text-2xl md:text-[4.5rem] font-black leading-[1.15] md:leading-[1.05] mb-4 md:mb-8 tracking-tighter text-white font-display">
-          일상을 큐레이션하다.<br />
-          <span className="text-gradient">단 하나의 링크, PICKS</span>
+          {language === 'en' ? 'Curate Your Daily Life.' : '일상을 큐레이션하다.'}<br />
+          <span className="text-gradient">{language === 'en' ? 'One Single Link, PICKS' : '단 하나의 링크, PICKS'}</span>
         </h1>
 
         <p className="text-sm md:text-lg text-slate-400 mb-6 md:mb-10 max-w-3xl mx-auto leading-relaxed font-medium">
-          데이터로 픽하고, 감각적인 그리드 템플릿으로 연결하세요.
+          {language === 'en' ? 'Pick with data, connect with stylish grid templates.' : '데이터로 픽하고, 감각적인 그리드 템플릿으로 연결하세요.'}
         </p>
 
         <div className="relative inline-flex flex-col md:flex-row items-stretch md:items-center bg-[#11141D] border border-white/5 p-2.5 md:p-3 rounded-[1.5rem] md:rounded-full w-full md:w-auto shadow-2xl backdrop-blur-xl mb-6 md:mb-10">
@@ -44,7 +46,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             onClick={() => onSignup(handle)}
             className="w-full md:w-auto bg-gradient-to-r from-blue-primary to-blue-secondary text-white hover:opacity-90 px-6 py-3 md:px-10 md:py-4 rounded-[1.2rem] md:rounded-full text-sm md:text-lg font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
           >
-            바로 만들기
+            {language === 'en' ? 'Create Now' : '바로 만들기'}
           </button>
         </div>
       </motion.div>
