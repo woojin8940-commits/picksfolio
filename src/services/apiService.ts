@@ -224,18 +224,19 @@ export async function fetchWithTimeout(
  *
  * `authHeaders()` 는 Supabase 세션 조회를 기다리는데, 탭 사이 잠금(navigator.locks)
  * 이 얽히면 드물게 아주 오래 걸린다. 여기서 막히면 요청 자체가 시작되지 않아
- * fetch 타임아웃도 소용이 없다. 시간이 지나면 헤더 없이 보내고, 서버가 401 로
- * 답하면 화면이 오류로 처리한다 — 스피너에 갇히는 것보다 낫다.
+ * fetch 타임아웃도 소용이 없다. 시간이 지나면 앞선 요청에서 확인한 세션을 재사용해
+ * 요청을 계속한다. 캐시도 없으면 서버가 401 로 답하고 화면이 재로그인을 안내한다.
  */
 async function authHeadersWithTimeout(
   extra: Record<string, string> = {},
+  opts: AuthHeaderOptions = {},
   timeoutMs = 8_000,
 ): Promise<Record<string, string>> {
   try {
-    return await withTimeout(authHeaders(extra), timeoutMs, 'authHeaders');
+    return await withTimeout(authHeaders(extra, opts), timeoutMs, 'authHeaders');
   } catch (e) {
-    console.warn('[API] 인증 헤더 준비가 지연되어 없이 요청합니다:', e);
-    return { ...extra };
+    console.warn('[API] 인증 헤더 준비가 지연되어 캐시된 세션으로 요청합니다:', e);
+    return syncAuthHeaders(extra);
   }
 }
 
@@ -2576,7 +2577,7 @@ export const apiService = {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         cache: 'no-store',
-        headers: await authHeadersWithTimeout(),
+        headers: await authHeadersWithTimeout({}, { account: username }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
@@ -2595,7 +2596,7 @@ export const apiService = {
     try {
       const res = await fetchWithTimeout(
         `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`,
-        { cache: 'no-store', headers: await authHeadersWithTimeout() },
+        { cache: 'no-store', headers: await authHeadersWithTimeout({}, { account: username }) },
         25_000,
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2614,7 +2615,10 @@ export const apiService = {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }),
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
         body: JSON.stringify(settings),
       });
       if (res.ok) return { ok: true };
@@ -2636,7 +2640,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/instagram/oauth/start', {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({ username: username.toLowerCase(), returnTo }),
       });
       const data = await res.json().catch(() => ({} as any));
@@ -2655,7 +2659,7 @@ export const apiService = {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({ action: 'disconnect' }),
       });
       return res.ok;
@@ -2680,7 +2684,10 @@ export const apiService = {
     try {
       const res = await fetch('/api/send-instagram-dm', {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        headers: await authHeaders(
+          { 'Content-Type': 'application/json' },
+          { account: payload.username },
+        ),
         body: JSON.stringify({ ...payload, username: payload.username.toLowerCase() }),
       });
       return await res.json();
