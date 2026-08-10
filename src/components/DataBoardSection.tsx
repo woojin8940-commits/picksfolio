@@ -32,6 +32,15 @@ const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
 const DISPLAY_CIDS = ['50000000', '50000002', '50000003', '50000004', '50000006', '50000008'];
 
+const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
+  '50000000': 'Fashion / Apparel',
+  '50000002': 'Beauty / Cosmetics',
+  '50000003': 'Digital / Appliances',
+  '50000004': 'Furniture / Interior',
+  '50000006': 'Food',
+  '50000008': 'Living / Health',
+};
+
 const DataBoardSection: React.FC = () => {
   const { language } = useLanguage();
   const [categories, setCategories] = useState<CategoryBlock[]>(FALLBACK_CATEGORIES);
@@ -39,9 +48,13 @@ const DataBoardSection: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const controller = new AbortController();
     const fetchData = async () => {
+      setLoading(true);
       try {
-        const res = await fetch('/.netlify/functions/api-naver-category-rankings');
+        const res = await fetch(`/.netlify/functions/api-naver-category-rankings?lang=${language}`, {
+          signal: controller.signal,
+        });
         if (res.ok) {
           const data = await res.json();
           const apiCategories: CategoryBlock[] = data.categories || [];
@@ -52,13 +65,14 @@ const DataBoardSection: React.FC = () => {
           }
         }
       } catch (err) {
-        console.error('Failed to fetch trend data for home', err);
+        if (!controller.signal.aborted) console.error('Failed to fetch trend data for home', err);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
     fetchData();
-  }, []);
+    return () => controller.abort();
+  }, [language]);
 
   const formatTime = (iso: string): string => {
     try {
@@ -103,6 +117,7 @@ const DataBoardSection: React.FC = () => {
           ) : (
             categories.map((cat, catIdx) => {
               const color = CATEGORY_COLORS[cat.cid] ?? DEFAULT_COLOR;
+              const label = language === 'en' ? (CATEGORY_ENGLISH_NAMES[cat.cid] || cat.label) : cat.label;
               return (
                 <motion.div
                   key={cat.cid}
@@ -118,7 +133,7 @@ const DataBoardSection: React.FC = () => {
                         <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl ${color.bg} flex items-center justify-center shrink-0`}>
                           <BarChart3 size={14} className={color.text} />
                         </div>
-                        <h3 className="text-white font-black text-xs md:text-base truncate">{cat.label}</h3>
+                        <h3 className="text-white font-black text-xs md:text-base truncate">{label}</h3>
                       </div>
                       <span className={`hidden md:inline text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full ${color.badge}`}>
                         TOP 5

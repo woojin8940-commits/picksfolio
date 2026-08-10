@@ -37,8 +37,8 @@ const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
   '50000003': 'Digital / Appliances',
   '50000004': 'Furniture / Interior',
   '50000006': 'Food',
-  '50000008': 'Sports / Leisure',
-  '50000009': 'Life / Health',
+  '50000008': 'Living / Health',
+  '50000009': 'Sports / Leisure',
 };
 
 const DEFAULT_ACCENT = { dot: 'bg-slate-500', chip: 'bg-slate-50 text-slate-700' };
@@ -67,9 +67,13 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
   };
 
   useEffect(() => {
+    const controller = new AbortController();
     const fetchData = async () => {
+      setLoading(true);
       try {
-        const res = await fetch('/.netlify/functions/api-naver-category-rankings');
+        const res = await fetch(`/.netlify/functions/api-naver-category-rankings?lang=${language}`, {
+          signal: controller.signal,
+        });
         if (res.ok) {
           const data = await res.json();
           const apiCategories: CategoryBlock[] = data.categories || [];
@@ -80,13 +84,14 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
           if (data.updatedAt) setCategoriesUpdatedAt(data.updatedAt);
         }
       } catch (error) {
-        console.error('Failed to fetch trend data', error);
+        if (!controller.signal.aborted) console.error('Failed to fetch trend data', error);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
     fetchData();
-  }, []);
+    return () => controller.abort();
+  }, [language]);
 
   return (
     <div className={embedded ? 'animate-in fade-in duration-500' : 'p-4 md:p-14 max-w-6xl mx-auto animate-in fade-in duration-500'}>
