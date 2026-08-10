@@ -7,6 +7,7 @@ import CollabMatchRegister from './CollabMatchRegister';
 import CreatorCollabWorkspace from './CreatorCollabWorkspace';
 import CreatorOfferInbox from './collab/CreatorOfferInbox';
 import Toast from './Toast';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface Campaign {
   id: string;
@@ -27,9 +28,7 @@ interface Campaign {
   application_count: number;
   created_at: string;
   recruit_closed?: boolean;
-  /** 진행 방식. 이 목록에 올라오는 것은 제품 협찬형·공동구매형뿐이다(서버에서 걸러 준다). */
   reward_mode?: string;
-  /** 제품 협찬형의 협찬 인원. max_applicants 와 같은 값이지만 예전 캠페인은 이쪽만 있다. */
   seeding_count?: number;
 }
 
@@ -38,283 +37,268 @@ interface UserCampaignBrowseProps {
   onBack?: () => void;
 }
 
-/**
- * 걸러 볼 수 있는 캠페인 갈래.
- *
- * 값은 캠페인 유형(type) 그대로 서버 질의에 붙는다. 이 목록에는 인플루언서가 직접
- * 지원하는 방식만 올라오므로 — 광고비 지급형은 담당자가 후보를 리스트업하는 길이라
- * 노출하지 않는다 — 실제로 보이는 유형은 제품 협찬(ad_collab)과 공동구매(group_buy)
- * 둘뿐이다. 그래서 ad_collab 의 이름표를 '광고 협업' 이 아니라 '제품 협찬' 으로 둔다.
- */
-const REWARD_FILTERS = [
-  { value: '', label: '전체' },
-  { value: 'ad_collab', label: '제품 협찬' },
-  { value: 'group_buy', label: '공동구매' },
-];
-
-const CATEGORIES: Record<string, string> = {
+const CATEGORIES_KO: Record<string, string> = {
   beauty: '뷰티', fashion: '패션', food: '식품', lifestyle: '라이프스타일',
   travel: '여행', health: '건강', tech: 'IT/테크', parenting: '육아',
   pet: '반려동물', interior: '인테리어', sports: '스포츠',
   entertainment: '엔터테인먼트', education: '교육', other: '기타',
 };
 
-/**
- * 한 페이지에 그리는 캠페인 수.
- *
- * 12로 잡은 이유는 그리드 칼럼 수(모바일 2 · 데스크톱 3)로 둘 다 나누어떨어져
- * 마지막 줄이 비지 않기 때문이다. 예전에는 모집중인 캠페인을 전부 한 번에 받아
- * 그렸는데, 캠페인이 쌓이면 첫 화면에서 스크롤이 끝나지 않고 아래쪽 캠페인은
- * 사실상 아무도 보지 않게 된다.
- */
+const CATEGORIES_EN: Record<string, string> = {
+  beauty: 'Beauty', fashion: 'Fashion', food: 'Food', lifestyle: 'Lifestyle',
+  travel: 'Travel', health: 'Health', tech: 'Tech', parenting: 'Parenting',
+  pet: 'Pets', interior: 'Interior', sports: 'Sports',
+  entertainment: 'Entertainment', education: 'Education', other: 'Other',
+};
+
 const PAGE_SIZE = 12;
 
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS_KO: Record<string, string> = {
   ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
   collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트',
 };
 
-const REWARD_LABELS: Record<string, string> = {
+const TYPE_LABELS_EN: Record<string, string> = {
+  ad_collab: 'Ad Collab', group_buy: 'Group Buy', other: 'Other',
+  collaboration: 'Collaboration', advertisement: 'Sponsorship', review: 'Review', event: 'Event',
+};
+
+const REWARD_LABELS_KO: Record<string, string> = {
   fixed: '고정 금액', product: '제품 제공', revenue_share: '수익 배분', mixed: '복합',
 };
 
-/**
- * 캠페인에 붙는 이름표. 유형(type)보다 진행 방식(reward_mode)이 먼저다.
- *
- * 제품 협찬형은 유형 컬럼에 'ad_collab' 으로 저장된다 — 협업 단계 묶음이 광고 협업과
- * 같기 때문이다. 그래서 유형을 그대로 보여 주면 광고비를 주는 캠페인처럼 읽힌다.
- * 지원할지 말지는 "돈을 받는지 제품을 받는지"에 달려 있으니, 진행 방식을 앞세운다.
- */
-const modeBadge = (c: Campaign): string => {
-  const mode = rewardModeOf(c.reward_mode);
-  return mode.openApply ? mode.label : TYPE_LABELS[c.type] || c.type;
+const REWARD_LABELS_EN: Record<string, string> = {
+  fixed: 'Fixed Payout', product: 'Product Provided', revenue_share: 'Revenue Share', mixed: 'Mixed',
 };
 
-/**
- * 리워드 한 줄. 방식마다 받는 것이 달라 금액 칸 하나로는 표현되지 않는다.
- *
- *   제품 협찬형  받는 것이 제품이라 금액이 없다. 예전에는 reward_amount 가 비어
- *                리워드 카드가 아예 사라졌고, 목록 카드에서는 빈자리로 보였다.
- *   공동구매형   "판매 수수료 협의" 한 줄만. 수치는 넣지 않는다(아래 참고).
- *   광고비 지급형 금액 그대로. 지금은 이 목록에 노출되지 않지만, 예전 캠페인이
- *                남아 있을 수 있어 계산은 남겨 둔다.
- *
- * short 는 목록 카드용 짧은 표기다(카드 너비가 두 줄을 못 받는다).
- *
- * 공동구매 수수료율을 화면에 쓰지 않는 이유: 실제 수수료는 담당자가 인플루언서와
- * 이야기하며 정한다. 브랜드가 등록 때 적어 둔 숫자를 먼저 보여 주면 그 값이 확정처럼
- * 읽히고, 담당자가 조율한 결과가 그보다 낮을 때 "말이 바뀌었다"가 된다. 그래서
- * groupbuy_commission_rate 는 저장은 하되 인플루언서 화면에서는 노출하지 않는다.
- */
-const rewardText = (c: Campaign): { headline: string; caption: string; short: string } | null => {
+const modeBadge = (c: Campaign, isEn: boolean): string => {
+  const mode = rewardModeOf(c.reward_mode);
+  if (mode.openApply) {
+    if (isEn) {
+      if (mode.value === 'barter') return 'Product Sponsorship';
+      if (mode.value === 'groupbuy') return 'Group Buy';
+    }
+    return mode.label;
+  }
+  const labels = isEn ? TYPE_LABELS_EN : TYPE_LABELS_KO;
+  return labels[c.type] || c.type;
+};
+
+const rewardText = (c: Campaign, isEn: boolean): { headline: string; caption: string; short: string } | null => {
   const mode = rewardModeOf(c.reward_mode);
   if (mode.value === 'barter') {
     return {
-      headline: '제품 협찬',
-      caption: '광고비 없이 제품을 제공받는 캠페인이에요',
-      short: '제품 협찬',
+      headline: isEn ? 'Product Sponsorship' : '제품 협찬',
+      caption: isEn ? 'Receive products provided without ad fees' : '광고비 없이 제품을 제공받는 캠페인이에요',
+      short: isEn ? 'Product Sponsor' : '제품 협찬',
     };
   }
   if (mode.value === 'groupbuy') {
     return {
-      headline: '판매 수수료 협의',
-      caption: '함께 판매하고 판매 금액의 일부를 수수료로 받아요',
-      short: '수수료 협의',
+      headline: isEn ? 'Sales Commission Negotiable' : '판매 수수료 협의',
+      caption: isEn ? 'Specific rates will be discussed with manager' : '구체적인 조건은 담당자와 상의해 결정해요',
+      short: isEn ? 'Commission' : '수수료 협의',
     };
   }
-  if (!c.reward_amount) return null;
-  const won = formatKoreanWon(c.reward_amount);
-  return { headline: won, caption: REWARD_LABELS[c.reward_type] || '', short: won };
+  if (c.reward_amount) {
+    return {
+      headline: formatKoreanWon(c.reward_amount),
+      caption: isEn ? 'Guaranteed payout upon completion' : '활동 완료 시 확정 지급',
+      short: formatKoreanWon(c.reward_amount),
+    };
+  }
+  return null;
 };
 
-/** 모집 인원. 협찬형은 seeding_count 에만 들어 있는 캠페인이 있다. */
-const headcountOf = (c: Campaign): number =>
-  Number(c.max_applicants || 0) || Number(c.seeding_count || 0);
+const headcountOf = (c: Campaign): number => {
+  const mode = rewardModeOf(c.reward_mode);
+  if (mode.value === 'barter') return c.seeding_count || c.max_applicants || 0;
+  return c.max_applicants || 0;
+};
+
+const deadlineInfo = (endDateStr: string, isEn: boolean) => {
+  if (!endDateStr) return null;
+  const days = daysUntilDeadline(endDateStr);
+  if (days === null) return null;
+  if (days < 0) return { label: isEn ? 'Ended' : '마감', urgent: false };
+  if (days === 0) return { label: 'D-Day', urgent: true };
+  if (days <= 3) return { label: isEn ? `Urgent D-${days}` : `마감임박 D-${days}`, urgent: true };
+  return { label: `D-${days}`, urgent: false };
+};
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+};
 
 const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBack }) => {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
+  const categoriesMap = isEn ? CATEGORIES_EN : CATEGORIES_KO;
+  const rewardFilters = [
+    { value: '', label: isEn ? 'All' : '전체' },
+    { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
+    { value: 'group_buy', label: isEn ? 'Group Buy' : '공동구매' },
+  ];
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+
   const [activeFilter, setActiveFilter] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
-  // 페이지는 1부터. total/totalPages 는 서버가 걸러 낸 뒤 세어 준 값을 그대로 쓴다
-  // (모집 마감·진행 방식 필터가 서버에 있어, 화면에서 다시 세면 개수가 어긋난다).
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
-  const [applying, setApplying] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
-  const [acceptedCampaigns, setAcceptedCampaigns] = useState<Map<string, string>>(new Map());
-  // 캠페인 → 협업 ID. 담당자 채널을 열 때 필요하다(협업 하나에 방이 두 개라 ID 로 찾는다).
+  const [acceptedCampaigns, setAcceptedCampaigns] = useState<Set<string>>(new Set());
   const [collabByCampaign, setCollabByCampaign] = useState<Record<string, string>>({});
+
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applyForm, setApplyForm] = useState({ contact: '', instagram_url: '', youtube_naver_url: '' });
+  const [applying, setApplying] = useState(false);
+
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const fetchCampaigns = useCallback(async () => {
+  const loadMyApplications = useCallback(async () => {
+    if (!userName) return;
+    try {
+      const res = await fetch(`/.netlify/functions/api-campaign-applications?applicant_username=${encodeURIComponent(userName)}`).then(r => r.json());
+      if (res.applications) {
+        setAppliedIds(new Set(res.applications.map((a: any) => a.campaign_id)));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [userName]);
+
+  const loadMyCollabs = useCallback(async () => {
+    if (!userName) return;
+    const res = await apiService.getCollabs('influencer');
+    const acceptedSet = new Set<string>();
+    const map: Record<string, string> = {};
+    (res.collabs || []).forEach((c: any) => {
+      if (c.campaign_id) {
+        acceptedSet.add(c.campaign_id);
+        map[c.campaign_id] = c.id;
+      }
+    });
+    setAcceptedCampaigns(acceptedSet);
+    setCollabByCampaign(map);
+  }, [userName]);
+
+  const fetchCampaignsList = useCallback(async () => {
     setLoading(true);
     try {
-      // 조건을 문자열로 이어 붙이다 보니 예전에는 검색어가 들어오면 진행 방식 조건이
-      // 통째로 날아가는 조합이 있었다. URLSearchParams 로 한 번에 모아 만든다.
-      const params = new URLSearchParams({
-        status: 'active',
-        page: String(page),
-        limit: String(PAGE_SIZE),
-      });
-      if (activeFilter) params.set('type', activeFilter);
-      if (activeCategory) params.set('category', activeCategory);
-      if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      const res = await fetch(`/api/campaigns?${params.toString()}`);
-      const data = await res.json();
-      setCampaigns(data.campaigns || []);
-      setTotal(Number(data.total || 0));
-      setTotalPages(Math.max(1, Number(data.total_pages || 1)));
-      // 마지막 페이지를 보다가 캠페인이 마감되어 페이지가 줄면 서버가 마지막 페이지로
-      // 접어 준다. 화면의 page 도 같이 맞춰야 버튼 강조가 실제 목록과 어긋나지 않는다.
-      if (data.page && Number(data.page) !== page) setPage(Number(data.page));
-    } catch {
-      console.error('Failed to fetch campaigns');
+      const params = new URLSearchParams();
+      if (activeFilter) params.append('type', activeFilter);
+      if (activeCategory) params.append('category', activeCategory);
+      if (searchQuery.trim()) params.append('search', searchQuery.trim());
+      params.append('page', String(page));
+      params.append('limit', String(PAGE_SIZE));
+
+      const res = await fetch(`/.netlify/functions/api-campaigns?${params.toString()}`).then(r => r.json());
+      setCampaigns(res.campaigns || []);
+      setTotal(res.total || 0);
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
   }, [activeFilter, activeCategory, searchQuery, page]);
 
   useEffect(() => {
-    fetchCampaigns();
-  }, [fetchCampaigns]);
+    fetchCampaignsList();
+  }, [fetchCampaignsList]);
 
   useEffect(() => {
-    const fetchApplied = async () => {
-      try {
-        const res = await fetch(`/api/campaign-applications?username=${userName}`);
-        const data = await res.json();
-        const apps = data.applications || [];
-        const ids = new Set<string>(apps.map((a: any) => a.campaign_id));
-        setAppliedIds(ids);
-        const accepted = new Map<string, string>();
-        apps.forEach((a: any) => {
-          if (a.status === 'accepted') {
-            accepted.set(a.campaign_id, a.applicant_username);
-          }
-        });
-        setAcceptedCampaigns(accepted);
-      } catch {}
-    };
-    if (userName) fetchApplied();
-  }, [userName]);
+    loadMyApplications();
+    loadMyCollabs();
+  }, [loadMyApplications, loadMyCollabs]);
 
-  useEffect(() => {
-    const fetchCollabs = async () => {
-      const res = await apiService.getCollabs('influencer');
-      const map: Record<string, string> = {};
-      (res.collabs || []).forEach((c: any) => {
-        if (c.campaignId) map[c.campaignId] = c.id;
-      });
-      setCollabByCampaign(map);
-    };
-    if (userName) fetchCollabs();
-  }, [userName]);
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    // 2페이지에서 검색하면 결과가 1페이지밖에 없어도 빈 화면이 나온다. 항상 1페이지부터.
-    if (page !== 1) setPage(1);
-    else fetchCampaigns();
-  };
-
-  /** 조건을 바꾸면 페이지를 처음으로 되돌린다(fetch 는 page 변화로 다시 돈다). */
-  const changeFilter = (next: string) => {
-    setActiveFilter(next);
-    setPage(1);
-  };
-
-  const changeCategory = (next: string) => {
-    setActiveCategory(next);
-    setPage(1);
-  };
-
-  /** 페이지를 넘길 때는 목록 맨 위로 올린다 — 안 올리면 다음 페이지 중간부터 보인다. */
-  const goToPage = (next: number) => {
-    setPage(Math.min(totalPages, Math.max(1, next)));
+  const goToPage = (p: number) => {
+    if (p < 1 || p > totalPages) return;
+    setPage(p);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const changeFilter = (f: string) => {
+    setActiveFilter(f);
+    setPage(1);
+  };
+
+  const changeCategory = (cat: string) => {
+    setActiveCategory(cat);
+    setPage(1);
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPage(1);
+  };
+
   const handleApply = async () => {
-    if (!selectedCampaign) return;
+    if (!selectedCampaign || !userName) return;
+    if (!applyForm.contact.trim() || !applyForm.instagram_url.trim()) {
+      setToast({ message: isEn ? 'Please enter contact info and Instagram link.' : '연락처와 인스타그램 링크를 입력해 주세요.', type: 'error' });
+      return;
+    }
     setApplying(true);
     try {
-      const res = await fetch('/api/campaign-applications', {
+      const res = await fetch('/.netlify/functions/api-campaign-applications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaign_id: selectedCampaign.id,
           applicant_username: userName,
-          contact: applyForm.contact,
-          instagram_url: applyForm.instagram_url,
-          youtube_naver_url: applyForm.youtube_naver_url,
+          contact: applyForm.contact.trim(),
+          instagram_url: applyForm.instagram_url.trim(),
+          youtube_naver_url: applyForm.youtube_naver_url.trim() || undefined,
         }),
-      });
-      if (res.ok) {
-        setAppliedIds(prev => new Set(prev).add(selectedCampaign.id));
-        setShowApplyForm(false);
-        setApplyForm({ contact: '', instagram_url: '', youtube_naver_url: '' });
-        setToast({ message: '지원이 완료되었습니다!', type: 'success' });
-        fetchCampaigns();
+      }).then(r => r.json());
+
+      if (res.error) {
+        setToast({ message: res.error, type: 'error' });
       } else {
-        const err = await res.json();
-        setToast({ message: err.error || '지원에 실패했습니다.', type: 'error' });
+        setToast({ message: isEn ? 'Application submitted successfully!' : '캠페인 지원이 완료되었습니다!', type: 'success' });
+        setAppliedIds(prev => new Set([...prev, selectedCampaign.id]));
+        setShowApplyForm(false);
+        setSelectedCampaign(prev => prev ? { ...prev, application_count: prev.application_count + 1 } : null);
       }
-    } catch {
-      setToast({ message: '서버 오류가 발생했습니다.', type: 'error' });
+    } catch (e: any) {
+      setToast({ message: e?.message || (isEn ? 'Error submitting application' : '지원 처리 중 오류가 발생했습니다'), type: 'error' });
     } finally {
       setApplying(false);
     }
   };
 
-  /**
-   * 마감까지 남은 기간. 한국 시간 기준으로 계산해 D-표기와 임박 여부를 함께 돌려준다.
-   * 종료일이 없거나(상시 모집) 이미 지났으면 null.
-   */
-  const deadlineInfo = (endDate?: string) => {
-    const remaining = daysUntilDeadline(endDate);
-    if (remaining === null || remaining < 0) return null;
-    return {
-      label: remaining === 0 ? 'D-Day' : `D-${remaining}`,
-      // 3일 이내면 "마감 임박"으로 강조한다.
-      urgent: remaining <= 3,
-    };
-  };
-
-  const formatDate = (d: string) => {
-    if (!d) return '';
-    const date = new Date(d);
-    return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
-  };
-
-  // 마감된 캠페인은 목록에서 제외한다. 서버에서도 걸러 주지만, 상세 화면을 열어둔
-  // 사이에 마감되는 경우가 있어 화면에서도 같은 기준으로 한 번 더 확인한다.
-  const filteredCampaigns = campaigns.filter(
-    c => c.business_username !== userName && !isCampaignClosed(c)
-  );
+  const filteredCampaigns = campaigns;
 
   // --- Campaign Detail View ---
   if (selectedCampaign) {
     const isApplied = appliedIds.has(selectedCampaign.id);
     const isClosed = isCampaignClosed(selectedCampaign);
     const closedReason = isPastDeadline(selectedCampaign.end_date)
-      ? '모집 기간이 종료되었습니다'
-      : '브랜드가 모집을 마감했습니다';
-    const deadline = deadlineInfo(selectedCampaign.end_date);
+      ? (isEn ? 'Recruitment period has ended' : '모집 기간이 종료되었습니다')
+      : (isEn ? 'Brand has closed recruitment' : '브랜드가 모집을 마감했습니다');
+    const deadline = deadlineInfo(selectedCampaign.end_date, isEn);
     const days = deadline?.label ?? null;
     const mode = rewardModeOf(selectedCampaign.reward_mode);
-    const reward = rewardText(selectedCampaign);
+    const reward = rewardText(selectedCampaign, isEn);
     const headcount = headcountOf(selectedCampaign);
     const applicantPercent = headcount > 0
       ? Math.min(100, Math.round((selectedCampaign.application_count / headcount) * 100))
       : 0;
-    // 정원이 차도 모집은 계속된다. 경쟁률이 높다는 정보로만 쓴다.
     const quotaReached = isQuotaReached(selectedCampaign);
+
+    const headcountLabel = isEn
+      ? (mode.value === 'barter' ? 'Sponsor Count' : mode.value === 'groupbuy' ? 'Target Creators' : 'Recruit Quota')
+      : mode.headcountLabel;
 
     return (
       <div className="w-full animate-in fade-in duration-300 pb-28">
@@ -329,20 +313,18 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             </button>
             <h3 className="text-sm font-black text-slate-900 truncate flex-1">{selectedCampaign.title}</h3>
             {isClosed ? (
-              <span className="bg-slate-400 text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0">마감</span>
+              <span className="bg-slate-400 text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0">
+                {isEn ? 'Closed' : '마감'}
+              </span>
             ) : deadline ? (
               <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900'} text-white px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0`}>
-                {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
+                {deadline.label}
               </span>
             ) : null}
           </div>
         </div>
 
         <div className="max-w-3xl mx-auto">
-          {/* Hero Image — keeps its 1:1 ratio but is capped in width (and therefore
-              height) so it no longer fills the whole viewport. Without the cap the
-              square grew to the full 3xl container width, pushing the campaign
-              description and info cards entirely below the fold. */}
           <div className="w-full max-w-[420px] md:max-w-[460px] mx-auto md:mt-4 aspect-square bg-slate-100 overflow-hidden relative md:rounded-3xl md:shadow-[0_20px_44px_-20px_rgba(15,23,42,0.5)]">
             {selectedCampaign.thumbnail_url ? (
               <img src={selectedCampaign.thumbnail_url} alt={selectedCampaign.title} className="w-full h-full object-cover" />
@@ -353,31 +335,29 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 </svg>
               </div>
             )}
-            {/* Gradient overlay at bottom */}
             <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/40 to-transparent" />
-            {/* Badges on image */}
             <div className="absolute top-4 left-4 flex items-center gap-2 flex-wrap">
               <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[11px] font-black shadow-lg">
-                {modeBadge(selectedCampaign)}
+                {modeBadge(selectedCampaign, isEn)}
               </span>
               {selectedCampaign.category && (
                 <span className="bg-white/90 backdrop-blur-sm text-slate-700 px-3 py-1 rounded-full text-[11px] font-bold shadow-sm">
-                  {CATEGORIES[selectedCampaign.category] || selectedCampaign.category}
+                  {categoriesMap[selectedCampaign.category] || selectedCampaign.category}
                 </span>
               )}
             </div>
             {isApplied && (
               <div className="absolute top-4 right-4">
                 <span className={`${acceptedCampaigns.has(selectedCampaign.id) ? 'bg-blue-600' : 'bg-emerald-500'} text-white px-3 py-1 rounded-full text-[11px] font-black shadow-lg`}>
-                  {acceptedCampaigns.has(selectedCampaign.id) ? '수락됨' : '지원완료'}
+                  {acceptedCampaigns.has(selectedCampaign.id)
+                    ? (isEn ? 'Accepted' : '수락됨')
+                    : (isEn ? 'Applied' : '지원완료')}
                 </span>
               </div>
             )}
           </div>
 
-          {/* Main Content */}
           <div className="px-4 md:px-8">
-            {/* Brand & Title Section */}
             <div className="pt-5 pb-4 border-b border-slate-100">
               {selectedCampaign.brand_name && (
                 <div className="flex items-center gap-2 mb-2">
@@ -389,7 +369,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               )}
               <h1 className="text-xl md:text-2xl font-black text-slate-900 leading-tight">{selectedCampaign.title}</h1>
               <div className="flex items-center gap-3 mt-3 text-xs text-slate-400 font-medium">
-                <span>등록 {formatDate(selectedCampaign.created_at)}</span>
+                <span>{isEn ? 'Posted ' : '등록 '}{formatDate(selectedCampaign.created_at)}</span>
                 {days && (
                   <>
                     <span className="text-slate-200">|</span>
@@ -399,35 +379,32 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             </div>
 
-            {/* Key Info Cards */}
             <div className="py-5 border-b border-slate-100">
               <div className="grid grid-cols-2 gap-3">
-                {/* Reward Card */}
                 {reward && (
                   <div className="col-span-2 bg-gradient-to-r from-blue-50 to-pink-50 border border-blue-100 rounded-2xl p-4 md:p-5 shadow-[0_10px_26px_-12px_rgba(37,99,235,0.45)]">
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center shadow-[0_3px_8px_-3px_rgba(37,99,235,0.5)]">
                         <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       </div>
-                      <span className="text-xs text-blue-500 font-black uppercase tracking-wider">리워드</span>
+                      <span className="text-xs text-blue-500 font-black uppercase tracking-wider">{isEn ? 'Reward' : '리워드'}</span>
                     </div>
                     <p className="text-2xl font-black text-blue-700">{reward.headline}</p>
                     <span className="text-xs font-bold text-blue-400 mt-1 inline-block">{reward.caption}</span>
                   </div>
                 )}
 
-                {/* Recruitment Card */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-7 h-7 bg-blue-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(37,99,235,0.45)]">
                       <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-black uppercase">{mode.headcountLabel}</span>
+                    <span className="text-[10px] text-slate-400 font-black uppercase">{headcountLabel}</span>
                   </div>
                   <p className="text-lg font-black text-slate-900">
                     {headcount > 0
-                      ? <><span className="text-blue-600">{selectedCampaign.application_count}</span> / {headcount}명</>
-                      : <><span className="text-blue-600">{selectedCampaign.application_count}</span>명 지원</>}
+                      ? <><span className="text-blue-600">{selectedCampaign.application_count}</span> / {headcount}{isEn ? ' people' : '명'}</>
+                      : <><span className="text-blue-600">{selectedCampaign.application_count}</span>{isEn ? ' applicants' : '명 지원'}</>}
                   </p>
                   {headcount > 0 && (
                     <div className="mt-2">
@@ -437,21 +414,21 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                           style={{ width: `${applicantPercent}%` }}
                         />
                       </div>
-                      {/* 정원이 차도 지원은 계속 받는다 — 마감이 아니라는 점을 분명히 알린다. */}
                       {quotaReached && (
-                        <p className="text-[10px] text-emerald-600 font-bold mt-1">모집 인원을 채웠지만 계속 지원할 수 있어요</p>
+                        <p className="text-[10px] text-emerald-600 font-bold mt-1">
+                          {isEn ? 'Quota reached, but applications are still open' : '모집 인원을 채웠지만 계속 지원할 수 있어요'}
+                        </p>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Period Card */}
                 <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-[0_6px_18px_-8px_rgba(15,23,42,0.22)]">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center shadow-[0_2px_6px_-2px_rgba(16,185,129,0.45)]">
                       <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-black uppercase">캠페인 기간</span>
+                    <span className="text-[10px] text-slate-400 font-black uppercase">{isEn ? 'Campaign Period' : '캠페인 기간'}</span>
                   </div>
                   {selectedCampaign.start_date ? (
                     <div>
@@ -460,22 +437,21 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     </div>
                   ) : selectedCampaign.end_date ? (
                     <div>
-                      <p className="text-[10px] text-slate-400 font-bold">마감일</p>
+                      <p className="text-[10px] text-slate-400 font-bold">{isEn ? 'Deadline' : '마감일'}</p>
                       <p className="text-sm font-black text-slate-900">{formatDate(selectedCampaign.end_date)}</p>
                     </div>
                   ) : (
-                    <p className="text-sm font-bold text-slate-400">상시 모집</p>
+                    <p className="text-sm font-bold text-slate-400">{isEn ? 'Always Open' : '상시 모집'}</p>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Campaign Progress Timeline */}
             {(selectedCampaign.start_date || selectedCampaign.end_date) && (
               <div className="py-5 border-b border-slate-100">
                 <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2">
                   <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                  캠페인 진행 일정
+                  {isEn ? 'Campaign Schedule' : '캠페인 진행 일정'}
                 </h3>
                 <div className="relative pl-6">
                   <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-slate-200" />
@@ -486,7 +462,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                       </div>
                       <div>
-                        <p className="text-xs font-black text-blue-600">캠페인 시작</p>
+                        <p className="text-xs font-black text-blue-600">{isEn ? 'Campaign Start' : '캠페인 시작'}</p>
                         <p className="text-sm font-bold text-slate-700 mt-0.5">{formatDate(selectedCampaign.start_date)}</p>
                       </div>
                     </div>
@@ -499,7 +475,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       </div>
                       <div>
                         <p className={`text-xs font-black ${days ? 'text-slate-400' : 'text-rose-500'}`}>
-                          {days ? '캠페인 마감' : '마감 완료'}
+                          {days ? (isEn ? 'Campaign Deadline' : '캠페인 마감') : (isEn ? 'Closed' : '마감 완료')}
                         </p>
                         <p className="text-sm font-bold text-slate-700 mt-0.5">{formatDate(selectedCampaign.end_date)}</p>
                       </div>
@@ -509,12 +485,11 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             )}
 
-            {/* Campaign Description */}
             {selectedCampaign.description && (
               <div className="py-5 border-b border-slate-100">
                 <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center gap-2">
                   <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                  캠페인 상세 설명
+                  {isEn ? 'Campaign Details' : '캠페인 상세 설명'}
                 </h3>
                 <div className="bg-slate-50 rounded-2xl p-5 md:p-6 border border-slate-100 shadow-[0_6px_18px_-10px_rgba(15,23,42,0.25)]">
                   <div className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-[1.8]">
@@ -524,12 +499,11 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             )}
 
-            {/* Requirements */}
             {selectedCampaign.requirements && (
               <div className="py-5 border-b border-slate-100">
                 <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center gap-2">
                   <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
-                  지원 조건
+                  {isEn ? 'Requirements' : '지원 조건'}
                 </h3>
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 md:p-6 shadow-[0_8px_22px_-12px_rgba(217,119,6,0.45)]">
                   <div className="text-sm text-amber-900 font-medium whitespace-pre-wrap leading-[1.8]">
@@ -549,72 +523,67 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               </div>
             )}
 
-            {/* Campaign Info Summary Table */}
             <div className="py-5 border-b border-slate-100">
               <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center gap-2">
                 <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                캠페인 정보
+                {isEn ? 'Campaign Info' : '캠페인 정보'}
               </h3>
               <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden divide-y divide-slate-50 shadow-[0_8px_22px_-12px_rgba(15,23,42,0.28)]">
                 <div className="flex items-center px-5 py-3.5">
-                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">유형</span>
-                  <span className="text-sm text-slate-900 font-bold">{modeBadge(selectedCampaign)}</span>
+                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Type' : '유형'}</span>
+                  <span className="text-sm text-slate-900 font-bold">{modeBadge(selectedCampaign, isEn)}</span>
                 </div>
                 {selectedCampaign.category && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">카테고리</span>
-                    <span className="text-sm text-slate-900 font-bold">{CATEGORIES[selectedCampaign.category] || selectedCampaign.category}</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Category' : '카테고리'}</span>
+                    <span className="text-sm text-slate-900 font-bold">{categoriesMap[selectedCampaign.category] || selectedCampaign.category}</span>
                   </div>
                 )}
                 {selectedCampaign.brand_name && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">브랜드</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Brand' : '브랜드'}</span>
                     <span className="text-sm text-slate-900 font-bold">{selectedCampaign.brand_name}</span>
                   </div>
                 )}
                 {selectedCampaign.reward_type && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">보상 유형</span>
-                    <span className="text-sm text-slate-900 font-bold">{REWARD_LABELS[selectedCampaign.reward_type] || selectedCampaign.reward_type}</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Reward Type' : '보상 유형'}</span>
+                    <span className="text-sm text-slate-900 font-bold">
+                      {(isEn ? REWARD_LABELS_EN : REWARD_LABELS_KO)[selectedCampaign.reward_type] || selectedCampaign.reward_type}
+                    </span>
                   </div>
                 )}
                 {selectedCampaign.reward_amount && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">보상 금액</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Reward Amount' : '보상 금액'}</span>
                     <span className="text-sm text-blue-700 font-black">{formatKoreanWon(selectedCampaign.reward_amount)}</span>
                   </div>
                 )}
-                {/* 공동구매 수수료율은 화면에 쓰지 않는다. 실제 수치는 담당자가
-                    인플루언서와 조율해 정하므로, 등록 시 적힌 값을 먼저 보여 주면
-                    확정 조건처럼 읽힌다(rewardText 주석 참고). */}
                 {mode.value === 'groupbuy' && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">판매 수수료</span>
-                    <span className="text-sm text-blue-700 font-black">담당자와 협의</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Commission' : '판매 수수료'}</span>
+                    <span className="text-sm text-blue-700 font-black">{isEn ? 'Negotiable with Manager' : '담당자와 협의'}</span>
                   </div>
                 )}
                 <div className="flex items-center px-5 py-3.5">
-                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{mode.headcountLabel}</span>
+                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{headcountLabel}</span>
                   <span className="text-sm text-slate-900 font-bold">
-                    {headcount > 0 ? `${headcount}명` : '제한 없음'}
+                    {headcount > 0 ? `${headcount}${isEn ? ' people' : '명'}` : (isEn ? 'No limit' : '제한 없음')}
                   </span>
                 </div>
-                {/* 지원해도 바로 확정이 아니라는 점을 미리 알린다 — 협찬형·공동구매형은
-                    지원자가 모인 뒤 브랜드가 고르고, 협업은 담당자가 만들어 준다. */}
                 {mode.openApply && (
                   <div className="flex items-center px-5 py-3.5">
-                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">선정 방식</span>
-                    <span className="text-sm text-slate-900 font-bold">지원자 중 브랜드가 선정</span>
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Selection' : '선정 방식'}</span>
+                    <span className="text-sm text-slate-900 font-bold">{isEn ? 'Brand selects from applicants' : '지원자 중 브랜드가 선정'}</span>
                   </div>
                 )}
                 <div className="flex items-center px-5 py-3.5">
-                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">등록일</span>
+                  <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Posted Date' : '등록일'}</span>
                   <span className="text-sm text-slate-900 font-bold">{formatDate(selectedCampaign.created_at)}</span>
                 </div>
               </div>
             </div>
 
-            {/* Apply Section (inline for accepted/applied states) */}
             {isApplied && (
               <div className="py-5">
                 {acceptedCampaigns.has(selectedCampaign.id) ? (
@@ -623,17 +592,15 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-3px_rgba(16,185,129,0.5)]">
                         <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                       </div>
-                      <p className="text-base font-black text-emerald-700">캠페인에 선정되었습니다!</p>
+                      <p className="text-base font-black text-emerald-700">{isEn ? 'You have been selected!' : '캠페인에 선정되었습니다!'}</p>
                       <p className="text-sm text-emerald-500 font-medium mt-1">
                         {collabByCampaign[selectedCampaign.id]
-                          ? '담당자가 조건과 일정을 안내드립니다. 궁금한 점은 담당자에게 물어보세요.'
-                          : '담당자가 진행을 안내드립니다.'}
+                          ? (isEn ? 'Your manager will guide terms & schedule. Feel free to ask your manager.' : '담당자가 조건과 일정을 안내드립니다. 궁금한 점은 담당자에게 물어보세요.')
+                          : (isEn ? 'Your manager will guide the process.' : '담당자가 진행을 안내드립니다.')}
                       </p>
                     </div>
                     <button
                       onClick={() => {
-                        // 담당자 중개 구조에서는 인플루언서가 브랜드와 직접 대화하지 않는다.
-                        // 협업이 있으면 담당자 채널, 예전 협업이면 기존 방을 그대로 연다.
                         const collabId = collabByCampaign[selectedCampaign.id];
                         const proposalId = collabId
                           ? `support_inf_${collabId}`
@@ -643,60 +610,53 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       className="w-full bg-slate-900 hover:bg-slate-700 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(15,23,42,0.75)] hover:shadow-[0_16px_34px_-10px_rgba(15,23,42,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                      {collabByCampaign[selectedCampaign.id] ? '담당자와 대화하기' : '대화하기'}
+                      {collabByCampaign[selectedCampaign.id] ? (isEn ? 'Chat with Manager' : '담당자와 대화하기') : (isEn ? 'Chat' : '대화하기')}
                     </button>
-                    {collabByCampaign[selectedCampaign.id] && (
-                      <p className="text-[11px] text-slate-400 font-medium text-center">
-                        단계별 제출과 마감일은 캠페인 목록 화면 상단의 진행 중인 협업에서 확인하실 수 있습니다.
-                      </p>
-                    )}
                   </div>
                 ) : (
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-center shadow-[0_10px_26px_-12px_rgba(37,99,235,0.5)]">
                     <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-3px_rgba(37,99,235,0.5)]">
                       <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
-                    <p className="text-base font-black text-blue-700">지원 완료</p>
-                    <p className="text-sm text-blue-400 font-medium mt-1">브랜드의 검토 후 결과를 안내해 드립니다</p>
+                    <p className="text-base font-black text-blue-700">{isEn ? 'Application Submitted' : '지원 완료'}</p>
+                    <p className="text-sm text-blue-400 font-medium mt-1">{isEn ? 'The brand will review and notify you of results' : '브랜드의 검토 후 결과를 안내해 드립니다'}</p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* 마감된 캠페인 — 지원 버튼 대신 마감 사유를 안내한다 */}
             {!isApplied && isClosed && (
               <div className="py-5">
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center shadow-[0_8px_22px_-12px_rgba(15,23,42,0.3)]">
                   <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.35)]">
                     <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                   </div>
-                  <p className="text-base font-black text-slate-600">마감된 캠페인</p>
+                  <p className="text-base font-black text-slate-600">{isEn ? 'Campaign Closed' : '마감된 캠페인'}</p>
                   <p className="text-sm text-slate-400 font-medium mt-1">{closedReason}</p>
                 </div>
               </div>
             )}
 
-            {/* Apply Form (inline, above fixed button) */}
             {!isApplied && !isClosed && showApplyForm && (
               <div className="py-5">
                 <div className="border border-blue-200 rounded-2xl p-5 md:p-6 bg-gradient-to-b from-blue-50/50 to-white space-y-4 shadow-[0_12px_30px_-14px_rgba(37,99,235,0.5)]">
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                     <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    캠페인 지원하기
+                    {isEn ? 'Apply for Campaign' : '캠페인 지원하기'}
                   </h3>
-                  <p className="text-xs text-slate-400 font-medium -mt-2">브랜드가 검토할 정보를 입력해 주세요</p>
+                  <p className="text-xs text-slate-400 font-medium -mt-2">{isEn ? 'Enter information for brand review' : '브랜드가 검토할 정보를 입력해 주세요'}</p>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">연락처 <span className="text-rose-500">*</span></label>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Contact Info' : '연락처'} <span className="text-rose-500">*</span></label>
                     <input
                       type="text"
                       value={applyForm.contact}
                       onChange={e => setApplyForm(p => ({ ...p, contact: e.target.value }))}
                       className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
-                      placeholder="이메일 또는 전화번호"
+                      placeholder={isEn ? 'Email or phone number' : '이메일 또는 전화번호'}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">인스타그램 링크 <span className="text-rose-500">*</span></label>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Instagram URL' : '인스타그램 링크'} <span className="text-rose-500">*</span></label>
                     <input
                       type="url"
                       value={applyForm.instagram_url}
@@ -706,13 +666,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">유튜브 / 네이버 링크 <span className="text-slate-400 font-medium">(선택)</span></label>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'YouTube / Naver URL' : '유튜브 / 네이버 링크'} <span className="text-slate-400 font-medium">({isEn ? 'Optional' : '선택'})</span></label>
                     <input
                       type="url"
                       value={applyForm.youtube_naver_url}
                       onChange={e => setApplyForm(p => ({ ...p, youtube_naver_url: e.target.value }))}
                       className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
-                      placeholder="https://youtube.com/... 또는 https://blog.naver.com/..."
+                      placeholder={isEn ? 'https://youtube.com/... or blog link' : 'https://youtube.com/... 또는 https://blog.naver.com/...'}
                     />
                   </div>
                   <div className="flex gap-2 pt-2">
@@ -722,14 +682,14 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:shadow-none shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_14px_30px_-10px_rgba(37,99,235,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       {applying ? (
-                        <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> 지원 중...</>
-                      ) : '지원하기'}
+                        <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {isEn ? 'Submitting...' : '지원 중...'}</>
+                      ) : (isEn ? 'Submit Application' : '지원하기')}
                     </button>
                     <button
                       onClick={() => setShowApplyForm(false)}
                       className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 transition-colors"
                     >
-                      취소
+                      {isEn ? 'Cancel' : '취소'}
                     </button>
                   </div>
                 </div>
@@ -738,7 +698,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           </div>
         </div>
 
-        {/* Fixed Bottom CTA */}
         {!isApplied && !isClosed && !showApplyForm && (
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.35)]">
             <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -748,8 +707,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 )}
                 {headcount > 0 && (
                   <p className="text-[11px] text-slate-400 font-bold">
-                    {selectedCampaign.application_count}/{headcount}명 지원중
-                    {quotaReached && <span className="text-emerald-600 ml-1">정원 초과 지원 가능</span>}
+                    {selectedCampaign.application_count}/{headcount}{isEn ? ' applied' : '명 지원중'}
+                    {quotaReached && <span className="text-emerald-600 ml-1">{isEn ? 'Open past quota' : '정원 초과 지원 가능'}</span>}
                   </p>
                 )}
               </div>
@@ -758,7 +717,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3.5 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(37,99,235,0.8)] hover:shadow-[0_16px_34px_-10px_rgba(37,99,235,0.9)] hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 flex-shrink-0"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                지원하기
+                {isEn ? 'Apply Now' : '지원하기'}
               </button>
             </div>
           </div>
@@ -780,26 +739,23 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       {onBack && (
         <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-700 font-bold text-sm mb-4 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-          뒤로
+          {isEn ? 'Back' : '뒤로'}
         </button>
       )}
 
-      {/* Header */}
       <div className="mb-6">
-        <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">캠페인</h2>
-        <p className="text-sm text-slate-400 font-medium">제품 협찬 · 공동구매 캠페인에 직접 지원하고 협업 기회를 잡아보세요</p>
+        <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
+        <p className="text-sm text-slate-400 font-medium">
+          {isEn ? 'Apply directly to product sponsorship & group buy campaigns to find collaboration opportunities' : '제품 협찬 · 공동구매 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
+        </p>
       </div>
 
-      {/* 선정된 협업의 작업 화면. 지원 목록보다 위에 둔다 — 마감이 있는 일이
-          새 캠페인 구경보다 먼저 보여야 한다. 협업이 없으면 그리지 않는다. */}
       {userName && (
         <div className="mb-6">
           <CreatorCollabWorkspace userName={userName} hideWhenEmpty />
         </div>
       )}
 
-      {/* 담당자가 조건까지 정리해 보낸 제안. 답을 기다리는 일이므로 진행 중 협업 다음,
-          새 캠페인 구경보다는 앞에 둔다. 받은 게 없으면 그리지 않는다. */}
       {userName && (
         <div className="mb-6">
           <CreatorOfferInbox
@@ -810,7 +766,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
-      {/* Search & Filter */}
       <div className="flex flex-col gap-3 mb-6">
         <form onSubmit={handleSearch}>
           <div className="relative">
@@ -820,12 +775,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white shadow-[0_4px_14px_-8px_rgba(15,23,42,0.35)]"
-              placeholder="캠페인 검색..."
+              placeholder={isEn ? 'Search campaigns...' : '캠페인 검색...'}
             />
           </div>
         </form>
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-          {REWARD_FILTERS.map(f => (
+          {rewardFilters.map(f => (
             <button
               key={f.value}
               onClick={() => changeFilter(f.value)}
@@ -838,12 +793,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               {f.label}
             </button>
           ))}
-          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}개</span>
+          <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}{isEn ? ' total' : '개'}</span>
         </div>
 
-        {/* 카테고리 줄. 진행 방식 줄과 따로 두는 이유는 두 조건이 서로를 대체하지
-            않기 때문이다(공동구매 + 뷰티처럼 겹쳐 쓴다). 카테고리는 14개라 한 줄에
-            들어가지 않아 가로 스크롤로 두고, 고른 것이 있으면 옆에 해제 버튼을 붙인다. */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
           <button
             onClick={() => changeCategory('')}
@@ -853,9 +805,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
             }`}
           >
-            전체 카테고리
+            {isEn ? 'All Categories' : '전체 카테고리'}
           </button>
-          {Object.entries(CATEGORIES).map(([value, label]) => (
+          {Object.entries(categoriesMap).map(([value, label]) => (
             <button
               key={value}
               onClick={() => changeCategory(value)}
@@ -870,17 +822,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           ))}
         </div>
 
-        {/* 브랜드 매칭 받기 — 인플루언서로 지원(역할 고정).
-            채널 정보(인스타 계정 · 팔로워)는 이 등록서에서 함께 받으므로 별도의
-            계정 등록 카드는 두지 않는다. */}
         <CollabMatchRegister variant="influencer" applicantUsername={userName} />
       </div>
 
-      {/* Campaign Cards */}
       {loading ? (
         <div className="text-center py-16">
           <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-400 font-bold">캠페인 불러오는 중...</p>
+          <p className="text-sm text-slate-400 font-bold">{isEn ? 'Loading campaigns...' : '캠페인 불러오는 중...'}</p>
         </div>
       ) : filteredCampaigns.length === 0 ? (
         <div className="text-center py-16">
@@ -889,20 +837,20 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           </div>
           <h3 className="text-base font-black text-slate-900 mb-1">
             {activeCategory || activeFilter || searchQuery.trim()
-              ? '조건에 맞는 캠페인이 없습니다'
-              : '모집중인 캠페인이 없습니다'}
+              ? (isEn ? 'No campaigns match your criteria' : '조건에 맞는 캠페인이 없습니다')
+              : (isEn ? 'No recruiting campaigns found' : '모집중인 캠페인이 없습니다')}
           </h3>
           <p className="text-sm text-slate-400 font-medium">
             {activeCategory || activeFilter || searchQuery.trim()
-              ? '카테고리나 진행 방식을 바꿔 보세요'
-              : '새로운 캠페인이 등록되면 여기에 표시됩니다'}
+              ? (isEn ? 'Try changing your category or filter selection' : '카테고리나 진행 방식을 바꿔 보세요')
+              : (isEn ? 'New campaigns will be listed here once registered' : '새로운 캠페인이 등록되면 여기에 표시됩니다')}
           </p>
           {(activeCategory || activeFilter) && (
             <button
               onClick={() => { changeFilter(''); changeCategory(''); }}
               className="mt-4 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black"
             >
-              조건 모두 해제
+              {isEn ? 'Reset All Filters' : '조건 모두 해제'}
             </button>
           )}
         </div>
@@ -910,8 +858,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5 md:gap-5 py-1">
           {filteredCampaigns.map(campaign => {
             const isApplied = appliedIds.has(campaign.id);
-            const deadline = deadlineInfo(campaign.end_date);
-            const reward = rewardText(campaign);
+            const deadline = deadlineInfo(campaign.end_date, isEn);
+            const reward = rewardText(campaign, isEn);
             const headcount = headcountOf(campaign);
             return (
               <div
@@ -919,7 +867,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 onClick={() => setSelectedCampaign(campaign)}
                 className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.12)] hover:border-blue-200 hover:shadow-[0_12px_28px_-6px_rgba(37,99,235,0.25)] hover:-translate-y-1 transition-all duration-300 cursor-pointer group overflow-hidden"
               >
-                {/* Thumbnail */}
                 <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                   {campaign.thumbnail_url ? (
                     <img
@@ -934,27 +881,25 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                       </svg>
                     </div>
                   )}
-                  {/* Badges overlay */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     <span className="bg-white/90 backdrop-blur-sm text-blue-700 px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm">
-                      {modeBadge(campaign)}
+                      {modeBadge(campaign, isEn)}
                     </span>
                     {deadline && (
                       <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
-                        {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
+                        {deadline.label}
                       </span>
                     )}
                   </div>
                   {isApplied && (
                     <div className="absolute top-2.5 right-2.5">
                       <span className={`${acceptedCampaigns.has(campaign.id) ? 'bg-blue-500' : 'bg-emerald-500'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
-                        {acceptedCampaigns.has(campaign.id) ? '수락됨' : '지원완료'}
+                        {acceptedCampaigns.has(campaign.id) ? (isEn ? 'Accepted' : '수락됨') : (isEn ? 'Applied' : '지원완료')}
                       </span>
                     </div>
                   )}
                 </div>
 
-                {/* Content */}
                 <div className="p-2.5 md:p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     {campaign.brand_name && (
@@ -963,7 +908,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     {campaign.category && (
                       <>
                         <span className="text-slate-200">·</span>
-                        <span className="text-[10px] text-slate-400 font-medium truncate">{CATEGORIES[campaign.category] || campaign.category}</span>
+                        <span className="text-[10px] text-slate-400 font-medium truncate">{categoriesMap[campaign.category] || campaign.category}</span>
                       </>
                     )}
                   </div>
@@ -976,8 +921,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                     ) : <span />}
                     <span className="text-[10px] text-slate-400 font-bold">
                       {headcount > 0
-                        ? `${campaign.application_count}/${headcount}명`
-                        : `${campaign.application_count}명 지원중`}
+                        ? `${campaign.application_count}/${headcount}${isEn ? ' people' : '명'}`
+                        : `${campaign.application_count}${isEn ? ' applied' : '명 지원중'}`}
                     </span>
                   </div>
                 </div>
@@ -987,10 +932,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
       )}
 
-      {/* 페이지 버튼. 총 페이지가 1이면 그리지 않는다.
-          숫자 버튼은 현재 페이지 주변 다섯 개만 낸다 — 캠페인이 수백 개가 되어도
-          버튼 줄이 화면을 넘기지 않게. 처음/끝으로 가는 길은 이전·다음이 아니라
-          첫 페이지 · 마지막 페이지 숫자가 항상 보이도록 범위를 잡아 해결한다. */}
       {!loading && totalPages > 1 && (
         <div className="flex items-center justify-center gap-1.5 mt-8">
           <button
@@ -998,7 +939,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             disabled={page <= 1}
             className="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
           >
-            이전
+            {isEn ? 'Prev' : '이전'}
           </button>
           {Array.from({ length: totalPages }, (_, i) => i + 1)
             .filter(n => n === 1 || n === totalPages || Math.abs(n - page) <= 1)
@@ -1024,7 +965,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             disabled={page >= totalPages}
             className="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
           >
-            다음
+            {isEn ? 'Next' : '다음'}
           </button>
         </div>
       )}

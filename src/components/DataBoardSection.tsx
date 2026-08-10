@@ -151,7 +151,7 @@ const DataBoardSection: React.FC = () => {
 
         <div className="text-center mt-6 md:mt-10">
           <p className="text-slate-600 text-[10px] md:text-xs font-medium">
-            출처: 네이버 데이터랩 쇼핑인사이트
+            {language === 'en' ? 'Source: Naver DataLab Shopping Insights' : '출처: 네이버 데이터랩 쇼핑인사이트'}
           </p>
         </div>
       </div>

@@ -43,7 +43,7 @@ interface LinkData {
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 
 const UserPage: React.FC<UserPageProps> = ({ username }) => {
-  const { language, t } = useLanguage();
+  const { language } = useLanguage();
   const normalizedUsername = useMemo(() => (username || '').toLowerCase(), [username]);
 
   const [blocks, setBlocks] = useState<Block[]>(() => {

@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 import type { ProposalCategory } from '../types';
 import { apiService } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface BusinessProposalFormProps {
   username: string;
 }
 
 const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username }) => {
-  // Resolve auth state synchronously from localStorage so the form can render immediately
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   const initialSession = typeof window !== 'undefined'
     ? localStorage.getItem('picks_business_session')
     : null;
@@ -19,8 +22,6 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
     try { return cachedProfileRaw ? JSON.parse(cachedProfileRaw) : null; } catch { return null; }
   })();
 
-  // Draft of the proposal — kept in sessionStorage so the content survives a
-  // login redirect (write proposal → 제안서 보내기 → login → come back with draft intact).
   const draftKey = `picks_proposal_draft_${username.toLowerCase()}`;
   const savedDraft = (() => {
     try {
@@ -54,7 +55,6 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Refresh profile in the background — never blocks rendering
   useEffect(() => {
     if (!initialSession) return;
     fetch('/.netlify/functions/business-auth', {
@@ -87,7 +87,6 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
       .catch(() => {});
   }, [initialSession]);
 
-  // Persist the draft on every change so it survives a login redirect.
   useEffect(() => {
     try {
       sessionStorage.setItem(draftKey, JSON.stringify({
@@ -104,33 +103,45 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
         attachments,
       }));
     } catch {}
-  }, [category, companyName, contactPerson, contactEmail, contactPhone, title, content, startDate, fee, revenueShare, attachments, draftKey]);
+  }, [draftKey, category, companyName, contactPerson, contactEmail, contactPhone, title, content, startDate, fee, revenueShare, attachments]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setUploadingFiles(true);
-    const newUrls: string[] = [];
+    try {
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.size > 20 * 1024 * 1024) {
+          alert(isEn ? `File ${file.name} exceeds maximum limit of 20MB.` : `파일 ${file.name}이(가) 20MB를 초과합니다.`);
+          continue;
+        }
 
-    for (const file of Array.from(files)) {
-      if (file.size > 20 * 1024 * 1024) {
-        alert(`${file.name} 파일이 너무 큽니다. 최대 20MB까지 업로드 가능합니다.`);
-        continue;
-      }
-      const url = await apiService.uploadProposalAttachment(username, file);
-      if (url) {
-        newUrls.push(url);
-      } else {
-        alert(`${file.name} 업로드에 실패했습니다.`);
-      }
-    }
+        const formData = new FormData();
+        formData.append('image', file);
 
-    if (newUrls.length > 0) {
-      setAttachments(prev => [...prev, ...newUrls]);
+        const res = await fetch('/.netlify/functions/api-upload-image', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          uploadedUrls.push(data.imageUrl);
+        } else {
+          alert(isEn ? `Failed to upload file ${file.name}.` : `파일 ${file.name} 업로드에 실패했습니다.`);
+        }
+      }
+
+      setAttachments(prev => [...prev, ...uploadedUrls]);
+    } catch {
+      alert(isEn ? 'An error occurred while uploading file.' : '파일 업로드 중 오류가 발생했습니다.');
+    } finally {
+      setUploadingFiles(false);
+      e.target.value = '';
     }
-    setUploadingFiles(false);
-    e.target.value = '';
   };
 
   const removeAttachment = (index: number) => {
@@ -139,86 +150,117 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
 
-    // Login is only required to actually send. The draft is already persisted
-    // in sessionStorage, so after logging in the user returns to a filled form.
+    if (!companyName.trim() || !contactPerson.trim() || !contactEmail.trim() || !title.trim() || !content.trim()) {
+      alert(isEn ? 'Please fill in all required fields.' : '필수 항목을 모두 입력해주세요.');
+      return;
+    }
+
+    if (!startDate) {
+      alert(isEn ? 'Please select start date.' : '시작 희망일을 선택해주세요.');
+      return;
+    }
+
+    if (!fee) {
+      alert(isEn ? 'Please enter proposed fee.' : '제시 금액을 입력해주세요.');
+      return;
+    }
+
     if (!isBusinessLoggedIn) {
-      sessionStorage.setItem('picks_business_redirect', `/${username}/proposal`);
-      window.history.pushState(null, '', '/business-login');
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      alert(isEn ? 'Business login is required to send proposal. You will be directed to login.' : '제안서를 전송하려면 비즈니스 로그인이 필요합니다. 작성하신 내용은 저장되며 로그인 페이지로 이동합니다.');
+      window.location.href = `/business-login?redirect=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
 
     setIsSubmitting(true);
 
-    const proposal = {
-      category,
-      company_name: companyName,
-      contact_person: contactPerson,
-      contact_email: contactEmail,
-      contact_phone: contactPhone,
-      title,
-      content,
-      start_date: startDate,
-      end_date: '',
-      fee: parseInt(fee) || 0,
-      revenue_share: revenueShare ? parseFloat(revenueShare) : undefined,
-      reference_links: [],
-      attachments,
-      business_username: businessUsername,
-    };
+    try {
+      const success = await apiService.submitProposal(username, {
+        business_username: businessUsername,
+        category,
+        company_name: companyName.trim(),
+        contact_person: contactPerson.trim(),
+        contact_email: contactEmail.trim(),
+        contact_phone: contactPhone.trim(),
+        title: title.trim(),
+        content: content.trim(),
+        start_date: startDate,
+        end_date: startDate,
+        fee: parseInt(fee, 10) || 0,
+        revenue_share: revenueShare ? parseFloat(revenueShare) : undefined,
+        reference_links: [],
+        attachments,
+      });
 
-    const success = await apiService.submitProposal(username, proposal);
-    setIsSubmitting(false);
-    if (success) {
-      try { sessionStorage.removeItem(draftKey); } catch {}
-      setSubmitted(true);
-    } else {
-      alert('제안 전송에 실패했습니다. 다시 시도해주세요.');
+      if (success) {
+        setSubmitted(true);
+        try { sessionStorage.removeItem(draftKey); } catch {}
+      } else {
+        alert(isEn ? 'Failed to send proposal.' : '제안서 전송에 실패했습니다.');
+      }
+    } catch {
+      alert(isEn ? 'An error occurred while sending proposal.' : '제안서 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   if (submitted) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl p-6 md:p-12 max-w-lg w-full text-center shadow-xl border border-slate-100">
-          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-            </svg>
+        <div className="bg-white rounded-3xl p-8 md:p-12 max-w-lg w-full text-center border border-slate-100 shadow-xl animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-green-100">
+            ✓
           </div>
-          <h2 className="text-2xl font-black text-slate-900 mb-3">제안이 전송되었습니다!</h2>
-          <p className="text-slate-500 font-medium text-sm leading-relaxed">
-            <span className="font-black text-blue-600">@{username}</span>님에게 비즈니스 제안이 성공적으로 전달되었습니다.
-            <br />인플루언서가 확인 후 수락/거절 여부를 결정합니다.
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3">{isEn ? 'Proposal Sent' : '제안서 전송 완료'}</h2>
+          <p className="text-slate-500 font-medium text-sm leading-relaxed mb-8">
+            <span className="font-black text-slate-900">@{username}</span>{isEn ? ' has received your proposal. You will be notified when they review it.' : '님에게 제안서가 성공적으로 전달되었습니다.\n인플루언서가 제안을 검토한 후 답변을 보내드립니다.'}
           </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => window.location.href = '/business-dashboard'}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-blue-500/30 transition-all"
+            >
+              {isEn ? 'Go to Business Dashboard' : '비즈니스 대시보드로 이동'}
+            </button>
+            <button
+              onClick={() => {
+                setSubmitted(false);
+                setTitle('');
+                setContent('');
+                setStartDate('');
+                setFee('');
+                setFeeDisplay('');
+                setRevenueShare('');
+                setAttachments([]);
+              }}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-2xl font-black text-sm transition-all"
+            >
+              {isEn ? 'Send Another Proposal' : '다른 제안서 작성하기'}
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // The form is shown to everyone; business login is only requested when the
-  // proposal is actually sent (see handleSubmit), and the draft is preserved.
   return (
     <div className="min-h-screen bg-[#f8fafc]">
-      {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white">
         <div className="max-w-3xl mx-auto px-4 py-8 md:py-12">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">📨</div>
-            <h1 className="text-2xl md:text-3xl font-black">비즈니스 제안</h1>
+            <h1 className="text-2xl md:text-3xl font-black">{isEn ? 'Business Proposal' : '비즈니스 제안'}</h1>
           </div>
           <p className="text-white/80 font-medium text-sm">
-            <span className="font-black text-white">@{username}</span>님에게 협업을 제안합니다.
+            {isEn ? <>Send a collaboration proposal to <span className="font-black text-white">@{username}</span>.</> : <><span className="font-black text-white">@{username}</span>님에게 협업을 제안합니다.</>}
           </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-        {/* Category Selection */}
         <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">카테고리 선택</label>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{isEn ? 'Select Category' : '카테고리 선택'}</label>
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -230,7 +272,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               }`}
             >
               <span className="text-2xl block mb-2">📢</span>
-              광고 / 협찬
+              {isEn ? 'Ad / Sponsor' : '광고 / 협찬'}
             </button>
             <button
               type="button"
@@ -242,39 +284,38 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               }`}
             >
               <span className="text-2xl block mb-2">🛒</span>
-              커머스 / 공구
+              {isEn ? 'Commerce / Group Buy' : '커머스 / 공구'}
             </button>
           </div>
         </div>
 
-        {/* Company Info */}
         <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">회사 / 담당자 정보</label>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{isEn ? 'Company & Contact Info' : '회사 / 담당자 정보'}</label>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">회사명 <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Company Name' : '회사명'} <span className="text-red-500">*</span></label>
             <input
               type="text"
               value={companyName}
               onChange={e => setCompanyName(e.target.value)}
               required
-              placeholder="회사명을 입력하세요"
+              placeholder={isEn ? 'Enter company name' : '회사명을 입력하세요'}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
             />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">담당자명 <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Contact Person' : '담당자명'} <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={contactPerson}
                 onChange={e => setContactPerson(e.target.value)}
                 required
-                placeholder="홍길동"
+                placeholder={isEn ? 'Name' : '홍길동'}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">이메일 <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Email' : '이메일'} <span className="text-red-500">*</span></label>
               <input
                 type="email"
                 value={contactEmail}
@@ -285,7 +326,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">연락처</label>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Phone' : '연락처'}</label>
               <input
                 type="tel"
                 value={contactPhone}
@@ -297,22 +338,25 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           </div>
         </div>
 
-        {/* Proposal Details */}
         <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">제안 내용</label>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{isEn ? 'Proposal Details' : '제안 내용'}</label>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">제안 제목 <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Title' : '제안 제목'} <span className="text-red-500">*</span></label>
             <input
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               required
-              placeholder={category === '광고' ? '예: 신제품 런칭 인스타그램 협찬 제안' : '예: 봄 시즌 공구 진행 제안'}
+              placeholder={
+                category === '광고'
+                  ? (isEn ? 'e.g. New Product Launch Instagram Sponsor Proposal' : '예: 신제품 런칭 인스타그램 협찬 제안')
+                  : (isEn ? 'e.g. Spring Season Group Buy Proposal' : '예: 봄 시즌 공구 진행 제안')
+              }
               className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">상세 내용 <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Content' : '상세 내용'} <span className="text-red-500">*</span></label>
             <textarea
               value={content}
               onChange={e => setContent(e.target.value)}
@@ -320,17 +364,16 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               rows={6}
               placeholder={
                 category === '광고'
-                  ? '제안 배경, 콘텐츠 형식(피드/릴스/스토리), 필수 포함 사항, 가이드라인 등을 상세히 작성해주세요.'
-                  : '공구 상품 소개, 진행 방식, 수수료 구조, 예상 판매량 등을 상세히 작성해주세요.'
+                  ? (isEn ? 'Please describe proposal background, content format (feed/reels/story), key guidelines, etc.' : '제안 배경, 콘텐츠 형식(피드/릴스/스토리), 필수 포함 사항, 가이드라인 등을 상세히 작성해주세요.')
+                  : (isEn ? 'Please describe product info, sales format, revenue share, target volume, etc.' : '공구 상품 소개, 진행 방식, 수수료 구조, 예상 판매량 등을 상세히 작성해주세요.')
               }
               className="w-full px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all resize-none"
             />
           </div>
 
-          {/* File Attachments */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">첨부 파일</label>
-            <p className="text-xs text-slate-400 font-medium mb-3">제안과 관련된 파일을 첨부할 수 있습니다. (최대 20MB)</p>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Attachments' : '첨부 파일'}</label>
+            <p className="text-xs text-slate-400 font-medium mb-3">{isEn ? 'Attach files related to the proposal (max 20MB).' : '제안과 관련된 파일을 첨부할 수 있습니다. (최대 20MB)'}</p>
 
             <label className={`block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${uploadingFiles ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'}`}>
               <input
@@ -344,15 +387,15 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               {uploadingFiles ? (
                 <div className="flex flex-col items-center gap-2">
                   <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm font-bold text-blue-600">업로드 중...</p>
+                  <p className="text-sm font-bold text-blue-600">{isEn ? 'Uploading...' : '업로드 중...'}</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2">
                   <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  <p className="text-sm font-bold text-slate-500">클릭하여 파일 업로드</p>
-                  <p className="text-[10px] text-slate-400">이미지, PDF, Word, Excel, PPT, TXT, ZIP (최대 20MB)</p>
+                  <p className="text-sm font-bold text-slate-500">{isEn ? 'Click to upload files' : '클릭하여 파일 업로드'}</p>
+                  <p className="text-[10px] text-slate-400">Image, PDF, Word, Excel, PPT, TXT, ZIP ({isEn ? 'Max 20MB' : '최대 20MB'})</p>
                 </div>
               )}
             </label>
@@ -371,7 +414,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
                       {isImage ? (
                         <img
                           src={url}
-                          alt={`첨부 ${idx + 1}`}
+                          alt={`Attachment ${idx + 1}`}
                           className="w-full h-24 object-cover rounded-xl border border-slate-200"
                         />
                       ) : (
@@ -397,12 +440,11 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           </div>
         </div>
 
-        {/* Schedule & Budget */}
         <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">일정 및 예산</label>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{isEn ? 'Schedule & Budget' : '일정 및 예산'}</label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="min-w-0">
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">시작 희망일 <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Target Start Date' : '시작 희망일'} <span className="text-red-500">*</span></label>
               <input
                 type="date"
                 value={startDate}
@@ -413,7 +455,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
             </div>
             <div className="min-w-0">
               <label className="block text-xs font-bold text-slate-600 mb-1.5">
-                {category === '광고' ? '제시 원고료 (원)' : '고정 수수료 (원)'}
+                {category === '광고' ? (isEn ? 'Proposed Fee (KRW)' : '제시 원고료 (원)') : (isEn ? 'Fixed Fee (KRW)' : '고정 수수료 (원)')}
                 <span className="text-red-500"> *</span>
               </label>
               <input
@@ -430,14 +472,14 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           {category === '커머스' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="min-w-0">
-                <label className="block text-xs font-bold text-slate-600 mb-1.5">수익 배분율 (%)</label>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Revenue Share (%)' : '수익 배분율 (%)'}</label>
                 <input
                   type="number"
                   value={revenueShare}
                   onChange={e => setRevenueShare(e.target.value)}
                   min="0"
                   max="100"
-                  placeholder="예: 15"
+                  placeholder={isEn ? 'e.g. 15' : '예: 15'}
                   className="w-full min-w-0 box-border px-4 py-3 rounded-xl border border-slate-200 font-medium text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all"
                 />
               </div>
@@ -445,17 +487,16 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
           )}
         </div>
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={isSubmitting}
           className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99] cursor-pointer"
         >
-          {isSubmitting ? '전송 중...' : '제안서 보내기'}
+          {isSubmitting ? (isEn ? 'Sending...' : '전송 중...') : (isEn ? 'Send Proposal' : '제안서 보내기')}
         </button>
         {!isBusinessLoggedIn && (
           <p className="text-center text-xs text-slate-400 font-bold -mt-2">
-            전송 시 비즈니스 로그인이 필요합니다. 작성하신 내용은 그대로 유지됩니다.
+            {isEn ? 'Business login required upon sending. Your input will be saved.' : '전송 시 비즈니스 로그인이 필요합니다. 작성하신 내용은 그대로 유지됩니다.'}
           </p>
         )}
       </form>
