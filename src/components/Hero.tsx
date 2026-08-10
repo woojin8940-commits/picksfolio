@@ -8,7 +8,7 @@ interface HeroProps {
 }
 
 const Hero: React.FC<HeroProps> = ({ onSignup }) => {
-  const { t, language } = useLanguage();
+  const { language } = useLanguage();
   const [handle, setHandle] = useState('');
 
   return (
