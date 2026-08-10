@@ -5,6 +5,7 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, withTimeout } from './supaba
 const BIZ_SESSION_KEY = 'picks_business_session';
 const BIZ_TOKEN_KEY = 'picks_business_access_token';
 const BIZ_REFRESH_KEY = 'picks_business_refresh_token';
+const SUPABASE_STORAGE_KEY = `sb-${SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0]}-auth-token`;
 
 /** `_shared/user-auth.mts` 의 비교 방식과 같게 맞춘다(biz/ 접두사 제거 · 소문자). */
 const normalizeAccount = (raw: string | null | undefined): string =>
@@ -17,6 +18,20 @@ const readLocal = (key: string): string => {
     return '';
   }
 };
+
+/** 브라우저에 저장된 일반 회원 Supabase 액세스 토큰. */
+function persistedSupabaseToken(): string {
+  try {
+    const raw = localStorage.getItem(SUPABASE_STORAGE_KEY);
+    if (!raw) return '';
+    const stored = JSON.parse(raw);
+    const token = String(stored?.access_token || stored?.currentSession?.access_token || '');
+    const expiresAt = tokenExpiresAt(token);
+    return token && (!expiresAt || expiresAt - Date.now() > 30_000) ? token : '';
+  } catch {
+    return '';
+  }
+}
 
 /**
  * 지금 화면이 다루고 있는 비즈니스 계정. 비즈니스 대시보드가 켜져 있는 동안만 값이 있다.
@@ -118,6 +133,21 @@ export interface AuthHeaderOptions {
   account?: string;
 }
 
+function isBusinessRequest(opts: AuthHeaderOptions): boolean {
+  const requested = normalizeAccount(opts.account);
+  const storedBusiness = normalizeAccount(readLocal(BIZ_SESSION_KEY));
+  if (!storedBusiness) return false;
+
+  if (!opts.account) return !!activeBusinessAccount && activeBusinessAccount === storedBusiness;
+
+  const explicitlyPrefixed = /^biz\//i.test(opts.account.trim());
+  const activeDashboardAccount = !!activeBusinessAccount && requested === activeBusinessAccount;
+  return requested === storedBusiness && (explicitlyPrefixed || activeDashboardAccount);
+}
+
+let lastKnownSupabaseToken = '';
+let lastKnownBusinessToken = '';
+
 /**
  * 본인 확인이 필요한 API 에 붙일 인증 헤더.
  *
@@ -133,30 +163,23 @@ export async function authHeaders(
   opts: AuthHeaderOptions = {},
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...extra };
-  let token = '';
+  const useBusinessToken = isBusinessRequest(opts);
+  let token = useBusinessToken ? await businessAccessToken() : '';
 
-  const target = normalizeAccount(opts.account) || activeBusinessAccount;
-  const businessName = normalizeAccount(readLocal(BIZ_SESSION_KEY));
-  const useBusinessToken = !!target && !!businessName && target === businessName;
-
-  if (useBusinessToken) {
-    token = await businessAccessToken();
-  }
-
-  if (!token) {
+  if (!useBusinessToken) {
     try {
       const { data } = (await supabase?.auth.getSession()) || { data: null };
       token = data?.session?.access_token || '';
     } catch {
-      // 세션 조회 실패 시 아래 비즈니스 토큰으로 폴백한다.
+      token = '';
     }
+    if (!token) token = persistedSupabaseToken();
   }
-  if (!token) {
-    token = readLocal(BIZ_TOKEN_KEY);
-  }
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-    lastKnownToken = token;
+    if (useBusinessToken) lastKnownBusinessToken = token;
+    else lastKnownSupabaseToken = token;
   }
   return headers;
 }
@@ -181,19 +204,16 @@ export async function collabHeaders(token?: string, opts: AuthHeaderOptions = {}
  * 쓸 수 없다. 그래서 평소 호출에서 얻은 토큰을 캐싱해 두고, 언로드 때는 이 값으로
  * `fetch(..., { keepalive: true })` 를 쏜다.
  */
-let lastKnownToken = '';
-
 /** 동기적으로 즉시 쓸 수 있는 인증 헤더(언로드 전용). 없으면 빈 객체. */
-export function syncAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+export function syncAuthHeaders(
+  extra: Record<string, string> = {},
+  opts: AuthHeaderOptions = {},
+): Record<string, string> {
   const headers: Record<string, string> = { ...extra };
-  let token = lastKnownToken;
-  if (!token) {
-    try {
-      token = localStorage.getItem('picks_business_access_token') || '';
-    } catch {
-      token = '';
-    }
-  }
+  const useBusinessToken = isBusinessRequest(opts);
+  const token = useBusinessToken
+    ? lastKnownBusinessToken || readLocal(BIZ_TOKEN_KEY)
+    : lastKnownSupabaseToken || persistedSupabaseToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
@@ -236,7 +256,7 @@ async function authHeadersWithTimeout(
     return await withTimeout(authHeaders(extra, opts), timeoutMs, 'authHeaders');
   } catch (e) {
     console.warn('[API] 인증 헤더 준비가 지연되어 캐시된 세션으로 요청합니다:', e);
-    return syncAuthHeaders(extra);
+    return syncAuthHeaders(extra, opts);
   }
 }
 
@@ -2575,12 +2595,35 @@ export const apiService = {
   // 실패는 loadError 로 분명히 알리고, 자격 여부는 모른다는 뜻으로 그대로 둔다.
   async getDmAutomation(username: string): Promise<DmAutomationSettings> {
     try {
-      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
-        cache: 'no-store',
-        headers: await authHeadersWithTimeout({}, { account: username }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      const account = { account: username };
+      let lastError: unknown = new Error('DM automation request failed');
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+            cache: 'no-store',
+            headers: await authHeadersWithTimeout({}, account),
+          });
+          if (res.ok) return await res.json();
+
+          lastError = new Error(`HTTP ${res.status}`);
+          const transient = res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500;
+          const refreshableAuth = res.status === 401 && !isBusinessRequest(account);
+          if (attempt > 0 || (!transient && !refreshableAuth)) throw lastError;
+
+          if (refreshableAuth && supabase) {
+            await withTimeout(supabase.auth.refreshSession(), 8_000, 'refreshSession').catch(() => undefined);
+          }
+        } catch (error) {
+          lastError = error;
+          if (error instanceof Error && /^HTTP \d+$/.test(error.message)) throw error;
+          if (attempt > 0) throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      throw lastError;
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
       return {
