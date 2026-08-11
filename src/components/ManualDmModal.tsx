@@ -124,6 +124,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       });
 
       if (res.success) {
+        window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
         setResult({
           success: true,
           message: res.message || t('dm.sendSuccessBatch', '댓글 작성자 모두에게 DM이 성공적으로 발송되었습니다!', 'DM sent successfully to commenters!'),

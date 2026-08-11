@@ -82,6 +82,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dm.sendNow': { ko: '수동 발송하기', en: 'Send DM Now' },
   'dm.cancel': { ko: '취소', en: 'Cancel' },
   'dm.sending': { ko: '발송 중...', en: 'Sending...' },
+  'dm.sentAlert': { ko: '보냈습니다!', en: 'Sent!' },
   'dm.sendSuccess': { ko: 'DM이 성공적으로 발송되었습니다!', en: 'DM sent successfully!' },
   'dm.sendFailed': { ko: 'DM 발송에 실패했습니다.', en: 'Failed to send DM.' },
 
