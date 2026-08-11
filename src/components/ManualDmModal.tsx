@@ -42,11 +42,23 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 }) => {
   const { t } = useLanguage();
 
+  /**
+   * 직접 작성 기본 문구는 화면 언어를 따라간다. 이 값은 화면 문구가 아니라 그대로
+   * 인스타그램으로 나가는 내용이라, 한국어로 고정해 두면 영어로 쓰는 사용자가
+   * 손대지 않은 기본값 그대로 한국어 DM 을 보내게 된다.
+   */
+  const defaultMessage = t(
+    'dm.manualDefaultMessage',
+    '안녕하세요! 요청하신 안내 링크입니다 😊',
+    'Hello! Here is the link you requested 😊',
+  );
+  const defaultButtonLabel = t('dm.defaultButtonLabel', '링크 바로가기', 'Open link');
+
   const [selectedRuleId, setSelectedRuleId] = useState<string>('custom');
   const [messageType, setMessageType] = useState<'text' | 'carousel'>('text');
-  const [message, setMessage] = useState('안녕하세요! 요청하신 안내 링크입니다 😊');
+  const [message, setMessage] = useState(defaultMessage);
   const [buttons, setButtons] = useState<DmMessageButton[]>([
-    { id: genId('btn'), label: '링크 바로가기', url: '' },
+    { id: genId('btn'), label: defaultButtonLabel, url: '' },
   ]);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ tone: ResultTone; message: string } | null>(null);
@@ -62,10 +74,11 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
     } else {
       setSelectedRuleId('custom');
-      setMessage('안녕하세요! 요청하신 안내 링크입니다 😊');
+      setMessage(defaultMessage);
       setMessageType('text');
-      setButtons([{ id: genId('btn'), label: '링크 바로가기', url: '' }]);
+      setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
     }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [initialAutomation, isOpen]);
 
   const handleMessageChange = (value: string) => {
@@ -76,9 +89,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const handleSelectRule = (ruleId: string) => {
     setSelectedRuleId(ruleId);
     if (ruleId === 'custom') {
-      setMessage('안녕하세요! 요청하신 안내 링크입니다 😊');
+      setMessage(defaultMessage);
       setMessageType('text');
-      setButtons([{ id: genId('btn'), label: '링크 바로가기', url: '' }]);
+      setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
       return;
     }
     const found = automations.find((a) => a.id === ruleId);
@@ -254,7 +267,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
               >
                 <option value="custom">{t('dm.customInput', '직접 작성 (Custom Message)', 'Custom Input')}</option>
                 {automations.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <option key={a.id} value={a.id} data-user-content>
                     [자동화] {a.name || '제목 없음'}
                   </option>
                 ))}
