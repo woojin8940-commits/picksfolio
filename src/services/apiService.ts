@@ -2712,6 +2712,14 @@ export const apiService = {
     }
   },
 
+  // 댓글 작성자 일괄 발송은 대상 수에 따라 오래 걸린다. 서버는 시간 예산 안에서
+  // 처리할 만큼만 보내고 남은 수(remaining)를 알려주므로, 클라이언트는 그보다
+  // 넉넉한 타임아웃을 둔다.
+  //
+  // 응답을 받지 못한 경우를 "발송 실패"로 단정하면 안 된다. 요청이 끊기기 전까지
+  // 이미 발송된 DM 이 있을 수 있고(수신자에게는 도착했다), 그때 화면이 빨간 실패를
+  // 띄우면 사용자는 도착한 DM 을 보면서 실패 안내를 읽게 된다. 결과를 알 수 없는
+  // 상태는 indeterminate 로 구분해 돌려준다.
   async sendInstagramDm(payload: {
     username: string;
     recipientId?: string;
@@ -2723,20 +2731,52 @@ export const apiService = {
     cards?: DmCarouselCard[];
     ruleId?: string;
     test?: boolean;
-  }): Promise<{ success: boolean; connected?: boolean; count?: number; total?: number; message?: string }> {
+  }): Promise<{
+    success: boolean;
+    connected?: boolean;
+    count?: number;
+    partialCount?: number;
+    alreadyCount?: number;
+    failCount?: number;
+    remaining?: number;
+    total?: number;
+    message?: string;
+    indeterminate?: boolean;
+  }> {
     try {
-      const res = await fetch('/api/send-instagram-dm', {
-        method: 'POST',
-        headers: await authHeaders(
-          { 'Content-Type': 'application/json' },
-          { account: payload.username },
-        ),
-        body: JSON.stringify({ ...payload, username: payload.username.toLowerCase() }),
-      });
-      return await res.json();
-    } catch (e) {
+      const res = await fetchWithTimeout(
+        '/api/send-instagram-dm',
+        {
+          method: 'POST',
+          headers: await authHeaders(
+            { 'Content-Type': 'application/json' },
+            { account: payload.username },
+          ),
+          body: JSON.stringify({ ...payload, username: payload.username.toLowerCase() }),
+        },
+        65_000,
+      );
+
+      const data = await res.json().catch(() => null);
+      if (data && typeof data.success === 'boolean') return data;
+
+      // 서버가 JSON 결과를 주지 못했다(504 타임아웃, 게이트웨이 오류 등).
+      return {
+        success: false,
+        indeterminate: true,
+        message:
+          '발송 요청이 시간 내에 끝나지 않았습니다. 일부는 이미 발송됐을 수 있으니, 인스타그램 DM 함을 확인한 뒤 다시 발송해 주세요. (이미 받은 사람에게는 중복 발송되지 않습니다.)',
+      };
+    } catch (e: any) {
       console.error('[API] Failed to send Instagram DM:', e);
-      return { success: false, message: '네트워크 오류로 발송에 실패했습니다.' };
+      const aborted = e?.name === 'AbortError';
+      return {
+        success: false,
+        indeterminate: true,
+        message: aborted
+          ? '발송이 아직 진행 중일 수 있습니다. 잠시 뒤 발송 버튼을 다시 누르면 남은 대상에게만 이어서 발송합니다.'
+          : '네트워크 오류로 발송 결과를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요. (이미 받은 사람에게는 중복 발송되지 않습니다.)',
+      };
     }
   },
 };

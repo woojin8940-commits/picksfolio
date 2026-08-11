@@ -1,10 +1,18 @@
 import { getStore } from "@netlify/blobs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
-import { buildDmMessages, sendDmMessages } from "./_shared/instagram-dm.mts";
+import { buildDmMessages, describeDmError, sendDmMessages } from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
+import {
+  claimIfNew,
+  contentHashOf,
+  dmContentKey,
+  privateReplyKey,
+  publicReplyKey,
+  release,
+} from "./_shared/dm-send-registry.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -20,6 +28,11 @@ import { appendDmLog } from "./_shared/dm-automation-log.mts";
  *
  * 공개 답글은 `/{comment-id}/replies` 로 보내며, 이 엣지는 `message` 를 폼
  * 파라미터로 받는다(JSON 본문은 인식하지 못한다).
+ *
+ * 멱등성: Meta 는 응답이 늦거나 실패하면 같은 이벤트를 다시 보낸다. 아무 장치가
+ * 없으면 재전송 한 번이 곧 중복 DM·중복 답글이다. 발송 대장
+ * (`_shared/dm-send-registry.mts`)에 댓글 단위로 선점 기록을 남겨 두 번째
+ * 전달분은 조용히 건너뛴다.
  */
 
 const GRAPH_VERSION = "v21.0";
@@ -233,7 +246,7 @@ export default async (req: Request, _context: Context) => {
       if (!igAccountId) continue;
 
       // 이 IG 계정이 어느 사용자 소유인지 조회
-      const username = (await index.get(`ig_${igAccountId}`)) as string | null;
+      const username = await index.get(`ig_${igAccountId}`, { type: "text" });
       if (!username) continue;
 
       const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
@@ -241,6 +254,12 @@ export default async (req: Request, _context: Context) => {
       // 디엠 자동화는 프로 플랜 전용 — 플랜이 없거나 만료된 계정은 발송하지 않는다.
       if (!(await dmAutomationAllowed(username))) continue;
       const igId = settings.igUserId || settings.igAccountId || igAccountId;
+      // 자기 자신의 댓글을 걸러낼 때 쓰는 ID 모음. 계정 연동 방식에 따라 웹훅의
+      // entry.id 와 저장된 igUserId/igAccountId 가 서로 다를 수 있어, 하나만
+      // 비교하면 계정 소유자의 댓글에 자기 자신에게 DM 을 보내려 시도한다.
+      const ownIds = new Set(
+        [igId, settings.igUserId, settings.igAccountId, igAccountId].filter(Boolean) as string[],
+      );
 
       for (const change of entry?.changes || []) {
         if (change?.field !== "comments") continue;
@@ -254,7 +273,7 @@ export default async (req: Request, _context: Context) => {
         // 달 수 없으므로, 공개 답글은 항상 최상위 댓글에 남긴다.
         const parentId = String(value?.parent_id || "");
         // 자기 자신(계정 소유자)의 댓글은 무시
-        if (!commentId || fromId === igId) continue;
+        if (!commentId || (fromId && ownIds.has(fromId))) continue;
 
         // 조건(게시물·키워드)에 맞는 자동화 후보를 모은 뒤, 팔로우 조건까지 통과하는
         // 첫 자동화를 고른다. 같은 게시물에 "팔로워용 / 비팔로워용" 자동화를 나눠
@@ -291,6 +310,9 @@ export default async (req: Request, _context: Context) => {
               recipientId: fromId,
               ruleId: automation.id,
             });
+          } else if (!(await claimIfNew(username, publicReplyKey(commentId)))) {
+            // 같은 댓글 이벤트가 재전송된 경우다. 다시 달면 답글이 두 개 붙는다.
+            console.warn("[ig-webhook] duplicate comment event — public reply skipped");
           } else {
             const reply = pool[Math.floor(Math.random() * pool.length)];
             const replyResult = await postCommentReply({
@@ -308,6 +330,9 @@ export default async (req: Request, _context: Context) => {
                 messageId: replyResult.replyId,
               });
             } else {
+              // 실패한 답글은 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
+              // 그때 한 번 더 시도할 수 있어야 한다.
+              await release(username, publicReplyKey(commentId));
               console.warn("[ig-webhook] public reply failed:", replyResult.error);
               await appendLog(username, {
                 kind: "reply",
@@ -323,17 +348,50 @@ export default async (req: Request, _context: Context) => {
         // 2) 비공개 답장(DM) — recipient.comment_id 사용. 답글만 설정한 자동화는
         //    보낼 DM 본문이 없으므로 발송을 건너뛴다(실패로 기록하지 않는다).
         if (!hasContent(automation)) continue;
+
+        const messages = buildMessagePayload(automation);
+        const contentKey = dmContentKey(commentId, contentHashOf(messages));
+        const replyKey = privateReplyKey(commentId);
+
+        // 같은 댓글에 같은 내용을 이미 보냈다면(웹훅 재전송·수동 발송과 겹침) 끝.
+        if (!(await claimIfNew(username, contentKey))) {
+          console.warn("[ig-webhook] duplicate DM suppressed for comment", commentId);
+          continue;
+        }
+
         try {
-          const result = await sendDmMessages({
-            graphHost: graphHost(settings),
-            graphVersion: GRAPH_VERSION,
-            igId,
-            accessToken: settings.accessToken,
-            recipient: { comment_id: commentId },
-            followUpRecipient: fromId ? { id: fromId } : undefined,
-            messages: buildMessagePayload(automation),
-          });
-          if (result.ok || result.partial) {
+          const replyAvailable = await claimIfNew(username, replyKey);
+          let result = replyAvailable
+            ? await sendDmMessages({
+                graphHost: graphHost(settings),
+                graphVersion: GRAPH_VERSION,
+                igId,
+                accessToken: settings.accessToken,
+                recipient: { comment_id: commentId },
+                followUpRecipient: fromId ? { id: fromId } : undefined,
+                messages,
+              })
+            : null;
+
+          if (result && !result.ok && !result.partial && result.errorKind !== "already_sent") {
+            await release(username, replyKey);
+          }
+
+          // 비공개 답장을 쓸 수 없거나 실패했다면 IGSID 직접 발송으로 한 번 더
+          // 시도한다. 수동 발송이 이미 그 댓글의 비공개 답장을 써버린 경우에도
+          // 자동 DM 이 도달할 수 있는 유일한 경로다.
+          if ((!result || (!result.ok && !result.partial)) && fromId) {
+            result = await sendDmMessages({
+              graphHost: graphHost(settings),
+              graphVersion: GRAPH_VERSION,
+              igId,
+              accessToken: settings.accessToken,
+              recipient: { id: fromId },
+              messages,
+            });
+          }
+
+          if (result && (result.ok || result.partial)) {
             // partial 은 본문이 이미 도착한 상태다. 실패로 기록하면 화면의 활동
             // 기록에서 도착한 DM 이 실패로 보인다.
             await appendLog(username, {
@@ -346,9 +404,20 @@ export default async (req: Request, _context: Context) => {
               error: result.partial ? result.error : undefined,
             });
           } else {
-            await appendLog(username, { kind: "dm", status: "failed", recipientId: fromId, ruleId: automation.id, error: result.error });
+            // 못 보냈으니 내용 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.
+            await release(username, contentKey);
+            const kind = result?.errorKind || "other";
+            await appendLog(username, {
+              kind: "dm",
+              status: "failed",
+              recipientId: fromId,
+              ruleId: automation.id,
+              error: describeDmError(kind, result?.error),
+              errorKind: kind,
+            });
           }
         } catch (e: any) {
+          await release(username, contentKey);
           await appendLog(username, { kind: "dm", status: "failed", recipientId: fromId, ruleId: automation.id, error: e?.message || "send error" });
         }
       }

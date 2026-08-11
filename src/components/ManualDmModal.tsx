@@ -16,6 +16,22 @@ interface ManualDmModalProps {
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+/**
+ * 결과 표시 색조.
+ * - success: 전원 발송 완료
+ * - warn   : 일부만 발송 / 이미 받은 사람 건너뜀 / 남은 대상 있음 / 결과 확인 불가
+ * - error  : 한 건도 못 보냄
+ *
+ * warn 을 error 로 뭉개면 "DM 은 도착했는데 화면은 실패"라는 모순이 생긴다.
+ */
+type ResultTone = 'success' | 'warn' | 'error';
+
+const TONE_STYLE: Record<ResultTone, string> = {
+  success: 'bg-green-50 text-green-700 border border-green-200',
+  warn: 'bg-amber-50 text-amber-700 border border-amber-200',
+  error: 'bg-red-50 text-red-600 border border-red-200',
+};
+
 export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   isOpen,
   onClose,
@@ -35,7 +51,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     { id: genId('btn'), label: '링크 바로가기', url: '' },
   ]);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [result, setResult] = useState<{ tone: ResultTone; message: string } | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -99,7 +115,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const handleSend = async () => {
     if (!message.trim()) {
       setResult({
-        success: false,
+        tone: 'error',
         message: t('dm.messageRequired', '발송할 DM 메시지 내용을 입력해주세요.', 'DM message content is required.'),
       });
       return;
@@ -123,25 +139,37 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         test: true,
       });
 
+      const sentCount = res.count ?? 0;
+      const remaining = res.remaining ?? 0;
+      const failCount = res.failCount ?? 0;
+
       if (res.success) {
-        window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
+        // 남은 대상이나 실패가 섞여 있으면 초록색 "완료"로 덮지 않는다. 사용자가
+        // 이어서 발송 버튼을 다시 눌러야 하는 상황이기 때문이다.
+        const clean = remaining === 0 && failCount === 0 && sentCount > 0;
         setResult({
-          success: true,
-          message: res.message || t('dm.sendSuccessBatch', '댓글 작성자 모두에게 DM이 성공적으로 발송되었습니다!', 'DM sent successfully to commenters!'),
+          tone: clean ? 'success' : 'warn',
+          message:
+            res.message ||
+            t('dm.sendSuccessBatch', '댓글 작성자 모두에게 DM이 성공적으로 발송되었습니다!', 'DM sent successfully to commenters!'),
         });
-        setTimeout(() => {
-          setResult(null);
-          onClose();
-        }, 2200);
+        if (clean) {
+          window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
+          setTimeout(() => {
+            setResult(null);
+            onClose();
+          }, 2200);
+        }
       } else {
         setResult({
-          success: false,
+          // 결과를 확인하지 못한 경우(타임아웃 등)는 실패로 단정하지 않는다.
+          tone: res.indeterminate ? 'warn' : 'error',
           message: res.message || t('dm.sendFailed', 'DM 발송에 실패했습니다.', 'Failed to send DM.'),
         });
       }
     } catch (e: any) {
       setResult({
-        success: false,
+        tone: 'error',
         message: e?.message || t('dm.sendError', '발송 중 오류가 발생했습니다.', 'An error occurred while sending.'),
       });
     } finally {
@@ -191,15 +219,13 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           </div>
 
           {result && (
-            <div
-              className={`p-4 rounded-2xl flex items-start gap-2 text-xs font-bold ${
-                result.success
-                  ? 'bg-green-50 text-green-700 border border-green-200'
-                  : 'bg-red-50 text-red-600 border border-red-200'
-              }`}
-            >
-              {result.success ? <Check size={16} className="shrink-0 mt-0.5" /> : <AlertCircle size={16} className="shrink-0 mt-0.5" />}
-              <span>{result.message}</span>
+            <div className={`p-4 rounded-2xl flex items-start gap-2 text-xs font-bold ${TONE_STYLE[result.tone]}`}>
+              {result.tone === 'success' ? (
+                <Check size={16} className="shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              )}
+              <span className="leading-relaxed">{result.message}</span>
             </div>
           )}
 
