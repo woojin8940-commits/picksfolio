@@ -20,7 +20,25 @@ const blankCard = (): DmCarouselCard => ({
   id: genId('card'), title: '', subtitle: '', imageUrl: '', buttonLabel: '', buttonUrl: '',
 });
 
-const blankAutomation = (): DmAutomationItem => ({
+/**
+ * 새 자동화의 기본 문구는 화면 언어를 따라간다.
+ *
+ * 이 값은 화면 문구가 아니라 저장돼서 그대로 인스타그램으로 나가는 내용이다.
+ * 예전에는 한국어 문장을 그대로 심어 놨는데, 영어로 쓰는 사용자는 화면 번역을
+ * 거친 영어를 읽으면서 실제로는 한국어 DM 을 저장하게 됐다. 기본 문구를 아예
+ * 언어별로 두면 "보이는 문구 = 발송될 문구"가 처음부터 맞는다.
+ */
+type TranslateFn = (key: string, defaultKo?: string, defaultEn?: string) => string;
+
+const defaultDmMessage = (t: TranslateFn) => t(
+  'dm.defaultMessage',
+  '안녕하세요! 관심 가져주셔서 감사합니다 😊 아래 링크에서 더 많은 정보를 확인해보세요.',
+  'Hello! Thank you for your interest 😊 Check out more information at the link below.',
+);
+
+const defaultButtonLabel = (t: TranslateFn) => t('dm.defaultButtonLabel', '링크 바로가기', 'Open link');
+
+const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   id: genId('auto'),
   name: '',
   enabled: true,
@@ -32,8 +50,8 @@ const blankAutomation = (): DmAutomationItem => ({
   mediaScope: 'all',
   mediaIds: [],
   messageType: 'text',
-  message: '안녕하세요! 관심 가져주셔서 감사합니다 😊 아래 링크에서 더 많은 정보를 확인해보세요.',
-  buttons: [{ id: genId('btn'), label: '링크 바로가기', url: '' }],
+  message: defaultDmMessage(t),
+  buttons: [{ id: genId('btn'), label: defaultButtonLabel(t), url: '' }],
   cards: [],
   createdAt: new Date().toISOString(),
 });
@@ -216,10 +234,12 @@ const DmPreview: React.FC<{
                       : <ImageIcon size={22} className="text-slate-300" />}
                   </div>
                   <div className="p-2.5">
-                    <p className="text-[12px] font-black text-slate-800 truncate">{c.title || '카드 제목'}</p>
-                    {c.subtitle && <p className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
+                    {c.title
+                      ? <p data-user-content className="text-[12px] font-black text-slate-800 truncate">{c.title}</p>
+                      : <p className="text-[12px] font-black text-slate-800 truncate">카드 제목</p>}
+                    {c.subtitle && <p data-user-content className="text-[11px] text-slate-500 font-medium truncate">{c.subtitle}</p>}
                     {c.buttonLabel && (
-                      <div className="mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
+                      <div data-user-content className="mt-2 text-center bg-slate-50 border border-slate-200 rounded-lg py-1.5 text-[11px] font-bold text-pink-600 truncate">
                         {c.buttonLabel}
                       </div>
                     )}
@@ -232,20 +252,35 @@ const DmPreview: React.FC<{
               {/* 버튼이 없거나 본문이 길면 본문은 별도의 텍스트 버블로 도착한다. */}
               {(validButtons.length === 0 || splitBubbles) && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                  <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                    {message || '보낼 메시지를 입력하면 여기에 표시됩니다.'}
-                  </p>
+                  {message
+                    ? (
+                      <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                        {message}
+                      </p>
+                    )
+                    : (
+                      <p className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                        보낼 메시지를 입력하면 여기에 표시됩니다.
+                      </p>
+                    )}
                 </div>
               )}
               {validButtons.length > 0 && (
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md overflow-hidden shadow-sm">
-                  <p className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
-                    {splitBubbles ? '👇 아래 버튼을 눌러주세요' : message}
-                  </p>
+                  {splitBubbles ? (
+                    <p className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                      👇 아래 버튼을 눌러주세요
+                    </p>
+                  ) : (
+                    <p data-user-content className="px-4 py-3 text-[13px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap break-words">
+                      {message}
+                    </p>
+                  )}
                   <div className="border-t border-slate-100">
                     {validButtons.map((b) => (
                       <div
                         key={b.id}
+                        data-user-content
                         className="w-full text-center border-b border-slate-100 last:border-b-0 py-2.5 text-[12px] font-bold text-pink-600 truncate px-3"
                       >
                         {b.label}
@@ -1216,7 +1251,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          setManualModalRule({ ...blankAutomation(), name: m.caption ? m.caption.slice(0, 20) : '선택한 게시물', mediaScope: 'selected', mediaIds: [m.id] });
+                          setManualModalRule({ ...blankAutomation(t), name: m.caption ? m.caption.slice(0, 20) : '선택한 게시물', mediaScope: 'selected', mediaIds: [m.id] });
                           setManualModalOpen(true);
                         }}
                         disabled={!entitled}
@@ -1226,7 +1261,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setEditing({ ...blankAutomation(), mediaScope: 'selected', mediaIds: [m.id] })}
+                        onClick={() => setEditing({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
                         disabled={!entitled}
                         className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-50 disabled:opacity-40"
                       >
@@ -1252,7 +1287,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setEditing(blankAutomation())}
+                onClick={() => setEditing(blankAutomation(t))}
                 disabled={!entitled}
                 title={entitled ? undefined : t('common.proPlanNotice', '디엠 자동화는 프로 플랜 전용 기능이에요.', 'DM Automation is a Pro Plan exclusive feature.')}
                 className="flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-orange-500 text-white rounded-xl py-2.5 px-4 text-xs md:text-sm font-black shadow-lg shadow-pink-500/25 hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
@@ -1275,7 +1310,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <p className="text-slate-600 font-black text-sm">아직 만든 자동화가 없어요</p>
             <p className="text-slate-400 text-xs mt-1 mb-5">인스타그램 자동화로 팔로워를 고객으로 전환해보세요.</p>
             <button
-              onClick={() => setEditing(blankAutomation())}
+              onClick={() => setEditing(blankAutomation(t))}
               className="inline-flex items-center gap-1.5 bg-pink-600 text-white rounded-xl py-2.5 px-5 text-sm font-black hover:bg-pink-700"
             >
               <Plus size={16} /> 첫 자동화 만들기
@@ -1290,7 +1325,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                     <div className="w-9 h-9 rounded-xl bg-pink-50 text-pink-600 flex items-center justify-center shrink-0">
                       <MessageCircle size={17} />
                     </div>
-                    <h4 className="font-black text-slate-900 text-sm md:text-base truncate">{a.name}</h4>
+                    <h4 data-user-content className="font-black text-slate-900 text-sm md:text-base truncate">{a.name}</h4>
                   </div>
                   <Toggle on={a.enabled} onClick={() => toggleAutomation(a.id)} size="sm" disabled={saving} />
                 </div>
@@ -1335,11 +1370,17 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
                 <div className="flex items-start gap-1.5 text-[12px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2.5 mb-3">
                   <CornerDownRight size={13} className="mt-0.5 shrink-0 text-slate-400" />
-                  <span className="line-clamp-2">
-                    {a.messageType === 'carousel'
-                      ? (a.cards?.find((c) => c.title)?.title || '이미지 카드 캐러셀 메시지')
-                      : a.message}
-                  </span>
+                  {a.messageType === 'carousel' && !a.cards?.find((c) => c.title) ? (
+                    <span className="line-clamp-2">이미지 카드 캐러셀 메시지</span>
+                  ) : (
+                    // 저장된 발송 문구는 사용자가 쓴 내용이다. 화면 번역이 손대면 목록에
+                    // 보이는 문구와 실제로 나가는 문구가 갈라진다.
+                    <span data-user-content className="line-clamp-2">
+                      {a.messageType === 'carousel'
+                        ? a.cards?.find((c) => c.title)?.title
+                        : a.message}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex gap-2">

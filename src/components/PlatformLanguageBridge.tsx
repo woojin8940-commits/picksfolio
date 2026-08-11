@@ -5,6 +5,18 @@ const KOREAN_PATTERN = /[가-힣]/;
 const TRANSLATABLE_ATTRIBUTES = ['placeholder', 'title', 'aria-label', 'alt', 'value', 'content'] as const;
 const PRESERVE_SELECTOR = '[data-user-content], [translate="no"], textarea, [contenteditable="true"]';
 
+/**
+ * 폼 컨트롤의 `value` 는 화면 문구가 아니라 사용자가 직접 입력한 내용이다.
+ *
+ * 이걸 번역해 버리면 화면에 보이는 값과 실제로 저장·발송되는 값이 갈라진다.
+ * 예를 들어 DM 자동화의 메시지 입력란은 여기 적힌 문장이 그대로 인스타그램으로
+ * 나가는데, 표시만 영어로 바꿔 놓으면 사용자는 영어를 읽으면서 한국어 DM 을
+ * 보내게 된다. `placeholder` 처럼 우리가 넣은 안내 문구는 계속 번역한다.
+ */
+const USER_EDITED_VALUE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+const isUserEditedValue = (element: Element, attribute: string) =>
+  attribute === 'value' && USER_EDITED_VALUE_TAGS.has(element.tagName);
+
 interface PlatformLanguageBridgeProps {
   language: Language;
   translatePlatformText: (value: string) => string;
@@ -50,6 +62,7 @@ export default function PlatformLanguageBridge({ language, translatePlatformText
     const translateElementAttributes = (element: Element) => {
       if (element.closest('[data-user-content], [translate="no"]')) return;
       TRANSLATABLE_ATTRIBUTES.forEach(attribute => {
+        if (isUserEditedValue(element, attribute)) return;
         const value = element.getAttribute(attribute);
         if (!value || !KOREAN_PATTERN.test(value)) return;
         const translated = translatePlatformText(value);
