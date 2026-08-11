@@ -330,10 +330,21 @@ export default async (req: Request, _context: Context) => {
             igId,
             accessToken: settings.accessToken,
             recipient: { comment_id: commentId },
+            followUpRecipient: fromId ? { id: fromId } : undefined,
             messages: buildMessagePayload(automation),
           });
-          if (result.ok) {
-            await appendLog(username, { kind: "dm", status: "sent", recipientId: fromId, ruleId: automation.id, messageId: result.messageId });
+          if (result.ok || result.partial) {
+            // partial 은 본문이 이미 도착한 상태다. 실패로 기록하면 화면의 활동
+            // 기록에서 도착한 DM 이 실패로 보인다.
+            await appendLog(username, {
+              kind: "dm",
+              status: "sent",
+              partial: result.partial,
+              recipientId: fromId,
+              ruleId: automation.id,
+              messageId: result.messageId,
+              error: result.partial ? result.error : undefined,
+            });
           } else {
             await appendLog(username, { kind: "dm", status: "failed", recipientId: fromId, ruleId: automation.id, error: result.error });
           }

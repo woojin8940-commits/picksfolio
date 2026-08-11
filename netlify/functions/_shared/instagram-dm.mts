@@ -158,26 +158,44 @@ export interface SendDmArgs {
   accessToken: string;
   /** `{ id: IGSID }` 또는 댓글 비공개 답장용 `{ comment_id }`. */
   recipient: Record<string, string>;
+  /**
+   * 두 번째 이후 메시지에 쓸 수신자.
+   *
+   * 비공개 답장(`comment_id`)은 댓글 한 건당 1통만 허용된다. 본문 텍스트와 링크
+   * 버튼 카드처럼 메시지가 2건인 설정을 전부 `comment_id` 로 보내면 첫 통은
+   * 도착하고 두 번째부터 거부된다. 첫 통이 대화를 열어주므로 이어지는 메시지는
+   * IGSID(`{ id }`)로 보내야 한다.
+   */
+  followUpRecipient?: Record<string, string>;
   messages: Record<string, unknown>[];
 }
 
 export interface SendDmResult {
+  /** 모든 메시지가 전송된 경우에만 true. */
   ok: boolean;
   /** 마지막으로 성공한 메시지 ID. */
   messageId?: string;
   error?: string;
   /** 실제로 전송에 성공한 메시지 수. */
   sent: number;
+  /** 보내려고 했던 메시지 수. */
+  total: number;
+  /** 첫 메시지는 도착했지만 뒤따르는 메시지가 실패한 상태. */
+  partial: boolean;
 }
 
 /**
  * 메시지 페이로드들을 순서대로 발송한다. 첫 실패에서 중단하고 오류를 돌려준다.
+ *
+ * 중단 시점까지 전송된 개수를 `sent` 로, 일부만 도착했는지를 `partial` 로 알려준다.
+ * 호출부는 `partial` 인 결과를 "발송 실패"로 다루면 안 된다. 수신자에게는 이미
+ * 메시지가 도착해 있으므로, 재시도하면 같은 본문이 두 번 도착한다.
  */
 export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
-  const { graphHost, graphVersion, igId, accessToken, recipient, messages } = args;
+  const { graphHost, graphVersion, igId, accessToken, recipient, followUpRecipient, messages } = args;
 
   if (messages.length === 0) {
-    return { ok: false, error: "보낼 메시지 내용이 없습니다.", sent: 0 };
+    return { ok: false, error: "보낼 메시지 내용이 없습니다.", sent: 0, total: 0, partial: false };
   }
 
   const url = `https://${graphHost}/${graphVersion}/${encodeURIComponent(igId)}/messages`;
@@ -185,13 +203,14 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
   let sent = 0;
 
   for (const message of messages) {
+    const to = sent === 0 ? recipient : followUpRecipient || recipient;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ recipient, message }),
+      body: JSON.stringify({ recipient: to, message }),
     });
     const result = (await res.json().catch(() => ({}))) as any;
 
@@ -200,6 +219,8 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
         ok: false,
         messageId,
         sent,
+        total: messages.length,
+        partial: sent > 0,
         error: result?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
       };
     }
@@ -208,5 +229,5 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
     sent += 1;
   }
 
-  return { ok: true, messageId, sent };
+  return { ok: true, messageId, sent, total: messages.length, partial: false };
 }
