@@ -99,7 +99,7 @@ const graphHostFor = (tokenSource?: string) =>
 /** 사용자별 인스타그램 연동 정보(디엠 자동화 블롭에 함께 보관된다). */
 export async function loadMetaLink(username: string): Promise<MetaLink | null> {
   try {
-    const store = getStore("dm-automation");
+    const store = getStore({ name: "dm-automation", consistency: "strong" });
     const settings = (await store.get(`dm_${username}`, { type: "json" })) as MetaLink | null;
     if (!settings) return null;
     return settings;

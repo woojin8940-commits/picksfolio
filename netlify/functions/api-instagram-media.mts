@@ -61,7 +61,7 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const store = getStore("dm-automation");
+  const store = getStore({ name: "dm-automation", consistency: "strong" });
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
   const igId = settings?.igUserId || settings?.igAccountId;
 
