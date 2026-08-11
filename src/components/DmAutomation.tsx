@@ -832,6 +832,15 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   // 자격이 없으면 저장·발송이 403 으로 막히므로 화면에서도 업그레이드 안내를 보여준다.
   const [entitled, setEntitled] = useState(true);
 
+  /**
+   * 이 앱이 보내지 않았는데 계정에서 나간 자동 DM.
+   *
+   * 인스타그램 자체 자동 메시지나 예전에 연결해 둔 다른 자동화 서비스가 보내는
+   * 경우다. 여기 설정과 무관하게 나가기 때문에, 문구를 바꿔도 예전 문구가 함께
+   * 도착하거나 자동 발송을 꺼도 DM 이 간다. 감지되면 끄는 방법을 안내한다.
+   */
+  const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
+
   const loadMedia = () => {
     setMediaLoading(true);
     apiService.getInstagramMedia(userName)
@@ -855,6 +864,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setTokenExpiresAt(s.tokenExpiresAt);
         setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
         setEntitled(s.entitled !== false);
+        setExternalDm(s.externalDm || null);
         setLoaded(true);
         if (s.connected) loadMedia();
       })
@@ -891,8 +901,13 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     /* eslint-disable-next-line */
   }, []);
 
-  const persist = async (next: Partial<DmAutomationSettings> & {
-    action?: 'upsertAutomation' | 'deleteAutomation';
+  /** 외부 자동 DM 안내를 닫는다. 다시 감지되면 서버가 새로 기록해 또 보여준다. */
+  const dismissExternalDm = () => {
+    setExternalDm(null);
+    apiService.dismissExternalDm(userName).catch(() => undefined);
+  };
+
+  const persist = async (next: Partial<DmAutomationSettings> & {    action?: 'upsertAutomation' | 'deleteAutomation';
     automation?: DmAutomationItem;
     id?: string;
   }) => {
@@ -948,19 +963,37 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 늦게 도착한 옛 목록이 방금 고친 메시지를 되돌려, 화면에는 새 문구가 보이는데
    * 실제 DM 은 예전 문구로 나갔다. 저장 뒤에는 서버가 돌려준 목록으로 화면을 맞춰
    * "보이는 내용 = 발송될 내용"을 보장한다.
+   *
+   * 전체 스위치(자동 발송)가 꺼져 있으면 자동화를 아무리 저장해도 댓글에 반응하지
+   * 않는다. 연동을 해제했다가 다시 연결하면 이 스위치가 꺼진 채로 남기 때문에,
+   * 사용자는 "자동화는 ON 인데 DM 이 오지 않는다"(혹은 예전에 도착한 DM 만 보인다)를
+   * 겪는다. 자동화를 켠 상태로 저장하는 건 곧 "이걸 돌려 달라"는 뜻이므로 같은
+   * 요청에서 전체 스위치도 함께 켜고, 무엇이 바뀌었는지 알려준다.
    */
   const commitAutomation = async (automation: DmAutomationItem) => {
     const prev = automations;
+    const prevEnabled = enabled;
     const exists = prev.some((x) => x.id === automation.id);
+    const turnOnMaster = automation.enabled && !enabled;
     setAutomations(exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation]);
-    const result = await persist({ action: 'upsertAutomation', automation });
+    if (turnOnMaster) setEnabled(true);
+    const result = await persist(
+      turnOnMaster
+        ? { action: 'upsertAutomation', automation, enabled: true }
+        : { action: 'upsertAutomation', automation },
+    );
     // 저장에 실패하면 서버가 최신 목록을 함께 준 경우(다른 곳에서 먼저 수정) 그 값을,
     // 아니면 직전 화면 값을 쓴다. 어느 쪽이든 화면은 실제 저장 상태를 따라간다.
     if (!result.ok) {
       setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
+      setEnabled(prevEnabled);
       return;
     }
     if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
+    if (typeof result.enabled === 'boolean') setEnabled(result.enabled);
+    if (turnOnMaster && result.enabled !== false) {
+      setBanner({ type: 'ok', text: '자동 발송이 꺼져 있어 함께 켰어요. 이제 새 댓글에 이 문구로 DM이 발송됩니다.' });
+    }
   };
 
   const saveAutomation = (a: DmAutomationItem) => {
@@ -985,6 +1018,32 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   };
 
   const activeCount = useMemo(() => automations.filter((a) => a.enabled).length, [automations]);
+
+  /**
+   * 게시물에서 "수동발송"을 누를 때 어떤 문구를 채워 넣을지 고른다.
+   *
+   * 예전에는 언제나 기본 예시 문구로 시작했다. 그래서 그 게시물에 이미 자동화를
+   * 걸어 둔 사람이 수동발송을 누르면, 방금 저장한 자기 문구가 아니라 기본 예시
+   * 문구가 채워진 채 발송돼 "설정한 메시지가 아닌 엉뚱한 메시지가 나갔다"가 됐다.
+   * 그 게시물에 걸린 자동화가 있으면 가장 최근에 설정한 것을 그대로 쓴다.
+   */
+  const configuredAt = (a: DmAutomationItem) => {
+    const ms = Date.parse(a.updatedAt || a.createdAt || '');
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+
+  const manualRuleForMedia = (mediaId: string, caption: string): DmAutomationItem => {
+    const targeting = automations
+      .filter((a) => a.mediaScope === 'selected' && (a.mediaIds || []).includes(mediaId))
+      .sort((x, y) => Number(y.enabled) - Number(x.enabled) || configuredAt(y) - configuredAt(x));
+    if (targeting.length > 0) return targeting[0];
+    return {
+      ...blankAutomation(t),
+      name: caption ? caption.slice(0, 20) : '선택한 게시물',
+      mediaScope: 'selected',
+      mediaIds: [mediaId],
+    };
+  };
 
   // 만료됐거나 임박한 토큰만 알린다. 평소에는 배지를 띄우지 않는다(하루 한 번 도는
   // scheduled-instagram-token-refresh 가 미리 갱신한다).
@@ -1205,11 +1264,59 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <div>
               <h3 className="text-base md:text-lg font-black">자동 발송 {enabled ? 'ON' : 'OFF'}</h3>
               <p className="text-[11px] md:text-sm text-slate-400 font-medium">
-                {enabled ? `${activeCount}개의 자동화가 실행 중이에요.` : '켜면 아래 자동화가 작동합니다.'}
+                {enabled
+                  ? `${activeCount}개의 자동화가 실행 중이에요.`
+                  : '꺼져 있으면 이 앱에서는 DM을 보내지 않아요. 켜면 아래 자동화가 작동합니다.'}
               </p>
             </div>
           </div>
           <Toggle on={enabled && entitled} onClick={toggleMaster} disabled={saving} />
+        </section>
+      )}
+
+      {/* 이 앱이 보내지 않은 자동 DM 감지 안내.
+          인스타그램 자체 자동 메시지나 예전에 연결해 둔 다른 자동화 서비스는 이 화면의
+          설정과 무관하게 발송된다. 그래서 문구를 바꿔도 예전 문구가 함께 도착하고,
+          자동 발송을 꺼도 DM 이 나간다. 어디서 끄는지 알려주지 않으면 사용자는 이 앱이
+          예전 메시지를 보낸다고 생각할 수밖에 없다. */}
+      {connected && externalDm && (
+        <section className="mb-6 rounded-3xl border border-red-200 bg-red-50 p-5 md:p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="text-red-500 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm md:text-base font-black text-red-800">
+                이 앱이 보내지 않은 자동 DM이 감지됐어요
+              </h3>
+              <p className="text-[12px] md:text-sm text-red-700 font-medium mt-1">
+                댓글 직후 아래 문구가 발송됐는데, 이 화면의 자동화가 보낸 메시지가 아니에요.
+                인스타그램(메타) 자체 자동 메시지이거나, 예전에 연결해 둔 다른 DM 자동화
+                서비스에서 나간 것입니다. <span className="font-black">그래서 여기서 문구를 바꾸거나
+                자동 발송을 꺼도 이 메시지는 계속 도착합니다.</span>
+              </p>
+              <blockquote className="mt-3 rounded-2xl bg-white border border-red-100 px-4 py-3 text-[12px] md:text-sm text-slate-700 font-medium whitespace-pre-wrap break-words">
+                {externalDm.text}
+              </blockquote>
+              <p className="text-[11px] text-red-600 font-bold mt-1.5">
+                마지막 감지: {externalDm.at ? new Date(externalDm.at).toLocaleString('ko-KR') : '-'}
+                {externalDm.count > 1 ? ` · ${externalDm.count}회` : ''}
+              </p>
+              <div className="mt-3 rounded-2xl bg-white/70 border border-red-100 px-4 py-3">
+                <p className="text-[12px] font-black text-red-800 mb-1.5">끄는 방법</p>
+                <ol className="text-[12px] text-red-700 font-medium space-y-1 list-decimal list-inside">
+                  <li>인스타그램 앱 → 프로페셔널 대시보드 → 자동 메시지(자동 답장)에서 위 문구를 찾아 끕니다.</li>
+                  <li>Meta Business Suite → 받은 메시지함 → 자동화에서 댓글 자동 답장을 끕니다.</li>
+                  <li>예전에 연결한 다른 DM 자동화 서비스가 있다면 인스타그램 설정 → 비즈니스 도구에서 연결을 해제합니다.</li>
+                </ol>
+              </div>
+              <button
+                type="button"
+                onClick={dismissExternalDm}
+                className="mt-3 rounded-xl bg-red-600 text-white px-3.5 py-2 text-[11px] font-black hover:bg-red-700"
+              >
+                확인했어요
+              </button>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1251,7 +1358,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          setManualModalRule({ ...blankAutomation(t), name: m.caption ? m.caption.slice(0, 20) : '선택한 게시물', mediaScope: 'selected', mediaIds: [m.id] });
+                          setManualModalRule(manualRuleForMedia(m.id, m.caption));
                           setManualModalOpen(true);
                         }}
                         disabled={!entitled}
@@ -1297,6 +1404,30 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             </div>
           )}
         </div>
+
+        {/* 전체 스위치가 꺼져 있으면 자동화 카드가 ON 으로 보여도 댓글에 반응하지 않는다.
+            (연동을 해제했다가 다시 연결하면 이 상태로 남는다.) 카드 옆에서 바로 켤 수
+            있게 안내한다 — 이걸 모르면 "예전에 받은 DM 만 보이고 새 DM 은 오지 않는"
+            상태를 "설정한 문구가 아닌 예전 문구가 나간다"로 읽게 된다. */}
+        {connected && !enabled && automations.some((a) => a.enabled) && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+            <AlertCircle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black text-amber-800">자동 발송이 꺼져 있어 DM이 나가지 않아요</p>
+              <p className="text-[11px] font-medium text-amber-700 mt-0.5">
+                아래 자동화는 켜져 있지만, 위의 <span className="font-black">자동 발송</span> 스위치가 꺼져 있으면 새 댓글에 반응하지 않습니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleMaster}
+              disabled={saving || !entitled}
+              className="shrink-0 rounded-xl bg-amber-600 text-white px-3 py-2 text-[11px] font-black hover:bg-amber-700 disabled:opacity-50"
+            >
+              지금 켜기
+            </button>
+          </div>
+        )}
 
         {!connected ? (
           <div className="text-center py-14 border border-dashed border-slate-200 rounded-3xl bg-slate-50/60">

@@ -54,6 +54,49 @@ export function contentHashOf(messages: unknown): string {
 }
 
 /**
+ * 문구 지문. 앞뒤 공백과 연속 공백 차이는 무시한다 — 인스타그램이 돌려주는
+ * 에코 본문은 우리가 보낸 문자열과 공백 처리가 다를 수 있다.
+ */
+export function textFingerprint(text: string): string {
+  const normalized = (text || "").replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+}
+
+const sentTextKey = (text: string) => `text_${textFingerprint(text)}`;
+
+/**
+ * 이 문구를 우리가 보냈다고 남긴다.
+ *
+ * 계정이 보낸 DM 에코를 웹훅으로 받았을 때 "우리가 보낸 것인지"를 판별하는 데
+ * 쓴다(`_shared/dm-foreign-dm.mts`). 발송 직전에 남겨야 한다 — 에코가 발송
+ * 응답보다 먼저 도착할 수 있다.
+ */
+export async function noteSentText(username: string, text: string): Promise<void> {
+  const body = (text || "").trim();
+  if (!username || !body) return;
+  try {
+    await store().set(
+      `${prefixFor(username)}${sentTextKey(body)}`,
+      JSON.stringify({ at: new Date().toISOString() }),
+    );
+  } catch (e) {
+    console.warn("[dm-registry] note text failed:", (e as Error)?.message);
+  }
+}
+
+/** 이 문구를 우리가 보낸 적이 있는지. 조회 실패 시 true(경고를 띄우지 않는다). */
+export async function wasSentByUs(username: string, text: string): Promise<boolean> {
+  const body = (text || "").trim();
+  if (!username || !body) return true;
+  try {
+    const found = await store().get(`${prefixFor(username)}${sentTextKey(body)}`);
+    return found !== null && found !== undefined;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * 아직 아무도 선점하지 않았다면 선점하고 true 를 돌려준다.
  * 이미 기록이 있으면 false — 호출부는 발송을 건너뛰어야 한다.
  *

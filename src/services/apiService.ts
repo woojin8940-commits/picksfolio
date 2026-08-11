@@ -307,6 +307,15 @@ export interface DmAutomationSettings {
   entitled?: boolean;
   requiredTier?: MembershipTier;
   /**
+   * 이 앱이 보내지 않은 자동 DM 이 감지된 경우의 기록.
+   *
+   * 인스타그램 계정에는 이 서비스 말고도 댓글에 자동 DM 을 보내는 경로가 있다
+   * (인스타그램/메타 자체 자동 메시지, 예전에 연결해 둔 다른 자동화 서비스).
+   * 이런 발송은 여기 설정과 무관해서, 문구를 바꾸거나 자동 발송을 꺼도 예전 문구가
+   * 계속 도착한다. 감지되면 화면에서 그 사실과 끄는 방법을 안내한다.
+   */
+  externalDm?: { text: string; at: string; count: number } | null;
+  /**
    * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면
    * 나머지 필드는 "모른다"는 뜻이므로, 화면은 설정이 아니라 재시도 안내를 보여준다.
    */
@@ -2670,7 +2679,7 @@ export const apiService = {
       automation?: DmAutomationItem;
       id?: string;
     },
-  ): Promise<{ ok: boolean; error?: string; automations?: DmAutomationItem[] }> {
+  ): Promise<{ ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean }> {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
@@ -2685,6 +2694,9 @@ export const apiService = {
         return {
           ok: true,
           automations: Array.isArray(data?.automations) ? data.automations : undefined,
+          // 서버가 확정한 전체 스위치 상태. 화면이 이 값을 따라가야 "켜져 있다고
+          // 보이는데 발송은 안 되는" 상태가 생기지 않는다.
+          enabled: typeof data?.enabled === 'boolean' ? data.enabled : undefined,
         };
       }
       // 잘못된 버튼 링크처럼 사용자가 고칠 수 있는 오류는 서버 메시지를 그대로 보여준다.
@@ -2702,8 +2714,25 @@ export const apiService = {
     }
   },
 
-  // 인스타그램 계정 연동 시작 — 인증된 요청으로 서명된 state 를 받아 authorize URL 을 얻는다.
-  // (예전처럼 GET 링크로 바로 이동하면 서명 없는 state 라 계정 연동 CSRF 가 성립한다.)
+  /** 외부에서 나간 자동 DM 안내를 확인 처리(기록 삭제)한다. */
+  async dismissExternalDm(username: string): Promise<boolean> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'dismissExternalDm' }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to dismiss external DM notice:', e);
+      return false;
+    }
+  },
+
+  // 인스타그램 계정 연동 시작 — 인증된 요청으로 서명된 state 를 받아 authorize URL 을 얻는다.  // (예전처럼 GET 링크로 바로 이동하면 서명 없는 state 라 계정 연동 CSRF 가 성립한다.)
   //
   // returnTo 는 연동을 마친 뒤 돌아올 우리 사이트 내부 경로다. 브랜드 매칭 등록처럼
   // 관리자 화면이 아닌 곳에서 연동을 시작하면 이 값을 넘겨 원래 있던 화면으로 복귀한다.
@@ -2769,6 +2798,8 @@ export const apiService = {
     remaining?: number;
     total?: number;
     message?: string;
+    /** 요청이 거절된 이유(플랜 미충족 등). `message` 가 없을 때 화면에 쓴다. */
+    error?: string;
     indeterminate?: boolean;
   }> {
     try {
