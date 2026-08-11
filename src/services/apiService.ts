@@ -348,6 +348,11 @@ export interface DmAutomationItem {
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   createdAt: string;
+  /**
+   * 이 자동화를 마지막으로 저장한 시각(서버가 찍는다). 조건이 겹치는 자동화가
+   * 여러 개일 때 발송기가 "가장 최근에 설정한 것"을 고르는 기준이다.
+   */
+  updatedAt?: string;
 }
 
 // 연동된 인스타그램 계정의 피드 게시물.
@@ -2651,10 +2656,21 @@ export const apiService = {
     }
   },
 
+  // 설정 저장.
+  //
+  // 자동화를 고칠 때는 목록 전체가 아니라 바뀐 한 건만(`action: 'upsertAutomation'`)
+  // 보낸다. 목록 전체를 보내면 저장 요청이 겹치거나 응답 순서가 뒤바뀔 때 늦게
+  // 도착한 옛 목록이 방금 고친 문구를 되돌려 놓는다(화면은 새 문구인데 DM 은 예전
+  // 문구로 나가는 원인이었다). 서버는 저장된 목록을 그대로 돌려주므로, 호출부는
+  // 그 값으로 화면 상태를 맞춰 "보이는 내용 = 발송될 내용"을 유지한다.
   async saveDmAutomation(
     username: string,
-    settings: Partial<DmAutomationSettings>,
-  ): Promise<{ ok: boolean; error?: string }> {
+    settings: Partial<DmAutomationSettings> & {
+      action?: 'upsertAutomation' | 'deleteAutomation';
+      automation?: DmAutomationItem;
+      id?: string;
+    },
+  ): Promise<{ ok: boolean; error?: string; automations?: DmAutomationItem[] }> {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
@@ -2664,10 +2680,22 @@ export const apiService = {
         ),
         body: JSON.stringify(settings),
       });
-      if (res.ok) return { ok: true };
+      if (res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        return {
+          ok: true,
+          automations: Array.isArray(data?.automations) ? data.automations : undefined,
+        };
+      }
       // 잘못된 버튼 링크처럼 사용자가 고칠 수 있는 오류는 서버 메시지를 그대로 보여준다.
+      // 다른 곳에서 먼저 수정된 경우(409 STALE_AUTOMATION)에는 서버가 최신 목록을 함께
+      // 내려주므로, 화면이 그 값으로 맞출 수 있게 전달한다.
       const data = await res.json().catch(() => ({} as any));
-      return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
+      return {
+        ok: false,
+        error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})`,
+        automations: Array.isArray(data?.automations) ? data.automations : undefined,
+      };
     } catch (e) {
       console.error('[API] Failed to save DM automation:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
