@@ -38,6 +38,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    setResult(null);
     if (initialAutomation) {
       setSelectedRuleId(initialAutomation.id);
       setMessage(initialAutomation.message || '');
@@ -45,8 +48,16 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
     } else {
       setSelectedRuleId('custom');
+      setMessage('안녕하세요! 요청하신 안내 링크입니다 😊');
+      setMessageType('text');
+      setButtons([{ id: genId('btn'), label: '링크 바로가기', url: '' }]);
     }
   }, [initialAutomation, isOpen]);
+
+  const handleMessageChange = (value: string) => {
+    setMessage(value);
+    setMessageType('text');
+  };
 
   const handleSelectRule = (ruleId: string) => {
     setSelectedRuleId(ruleId);
@@ -107,7 +118,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         message: message.trim(),
         messageType,
         buttons: validButtons,
-        cards: selectedRule?.cards || initialAutomation?.cards,
+        cards: messageType === 'carousel' ? (selectedRule?.cards || initialAutomation?.cards) : undefined,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
@@ -254,7 +265,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </label>
             <textarea
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => handleMessageChange(e.target.value)}
               rows={3}
               placeholder={t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
               className="w-full p-4 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 resize-none"

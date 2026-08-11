@@ -1369,7 +1369,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
       <ManualDmModal
         isOpen={manualModalOpen}
-        onClose={() => setManualModalOpen(false)}
+        onClose={() => {
+          setManualModalOpen(false);
+          setManualModalRule(null);
+        }}
         userName={userName}
         igUsername={igUsername}
         automations={automations}
