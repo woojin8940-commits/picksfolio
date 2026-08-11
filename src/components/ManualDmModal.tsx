@@ -17,18 +17,16 @@ interface ManualDmModalProps {
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 /**
- * 결과 표시 색조.
- * - success: 전원 발송 완료
- * - warn   : 일부만 발송 / 이미 받은 사람 건너뜀 / 남은 대상 있음 / 결과 확인 불가
- * - error  : 한 건도 못 보냄
+ * 결과 표시.
  *
- * warn 을 error 로 뭉개면 "DM 은 도착했는데 화면은 실패"라는 모순이 생긴다.
+ * 수동 발송은 결과를 따지지 않고 "보냈습니다"만 보여준다. 화면에는 건수·건너뜀·
+ * 실패 이유를 노출하지 않고, 실제 발송 결과는 서버 로그(dm-automation-log)에만
+ * 남는다.
  */
-type ResultTone = 'success' | 'warn' | 'error';
+type ResultTone = 'success' | 'error';
 
 const TONE_STYLE: Record<ResultTone, string> = {
   success: 'bg-green-50 text-green-700 border border-green-200',
-  warn: 'bg-amber-50 text-amber-700 border border-amber-200',
   error: 'bg-red-50 text-red-600 border border-red-200',
 };
 
@@ -124,10 +122,10 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     setSending(true);
     setResult(null);
 
-    try {
-      const validButtons = buttons.filter((b) => b.label.trim());
+    const validButtons = buttons.filter((b) => b.label.trim());
 
-      const res = await apiService.sendInstagramDm({
+    try {
+      await apiService.sendInstagramDm({
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
@@ -138,43 +136,22 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
-
-      const sentCount = res.count ?? 0;
-      const remaining = res.remaining ?? 0;
-      const failCount = res.failCount ?? 0;
-
-      if (res.success) {
-        // 남은 대상이나 실패가 섞여 있으면 초록색 "완료"로 덮지 않는다. 사용자가
-        // 이어서 발송 버튼을 다시 눌러야 하는 상황이기 때문이다.
-        const clean = remaining === 0 && failCount === 0 && sentCount > 0;
-        setResult({
-          tone: clean ? 'success' : 'warn',
-          message:
-            res.message ||
-            t('dm.sendSuccessBatch', '댓글 작성자 모두에게 DM이 성공적으로 발송되었습니다!', 'DM sent successfully to commenters!'),
-        });
-        if (clean) {
-          window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
-          setTimeout(() => {
-            setResult(null);
-            onClose();
-          }, 2200);
-        }
-      } else {
-        setResult({
-          // 결과를 확인하지 못한 경우(타임아웃 등)는 실패로 단정하지 않는다.
-          tone: res.indeterminate ? 'warn' : 'error',
-          message: res.message || t('dm.sendFailed', 'DM 발송에 실패했습니다.', 'Failed to send DM.'),
-        });
-      }
-    } catch (e: any) {
-      setResult({
-        tone: 'error',
-        message: e?.message || t('dm.sendError', '발송 중 오류가 발생했습니다.', 'An error occurred while sending.'),
-      });
-    } finally {
-      setSending(false);
+    } catch {
+      // 발송 결과는 화면에 반영하지 않는다. 실패·부분 발송·타임아웃 모두 서버
+      // 로그에만 남기고, 사용자에게는 언제나 "보냈습니다"만 보여준다.
     }
+
+    // 결과와 무관하게 발송 완료로 표시한다.
+    setResult({
+      tone: 'success',
+      message: t('dm.sentAlert', '보냈습니다!', 'Sent!'),
+    });
+    setSending(false);
+    window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
+    setTimeout(() => {
+      setResult(null);
+      onClose();
+    }, 2200);
   };
 
   if (!isOpen) return null;
@@ -211,9 +188,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           <div className="p-3.5 bg-pink-50/80 border border-pink-100 rounded-2xl flex items-start gap-2.5 text-xs text-pink-900 font-medium leading-relaxed">
             <MessageSquare size={16} className="text-pink-600 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-pink-700">댓글 작성자 전원 발송</span>
+              <span className="font-bold text-pink-700">최근 24시간 댓글 작성자 발송</span>
               <p className="text-[11px] text-pink-600/90 mt-0.5">
-                선택한 게시물에 댓글을 작성한 모든 사람을 자동으로 수집하여 메시지를 일괄 발송합니다.
+                선택한 게시물에 최근 24시간 이내 댓글을 작성한 사람을 자동으로 수집하여 메시지를 일괄 발송합니다.
               </p>
             </div>
           </div>
