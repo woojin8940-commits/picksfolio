@@ -48,6 +48,14 @@ const SEND_BUDGET_MS = 38_000;
 const COLLECT_BUDGET_MS = 12_000;
 /** 한 번에 댓글을 훑을 게시물 최대 개수. */
 const MAX_MEDIA = 20;
+/**
+ * 발송 대상으로 삼을 댓글의 나이 한도.
+ *
+ * 인스타그램은 마지막 상호작용 이후 24시간까지만 DM 을 허용한다. 그보다 오래된
+ * 댓글은 어차피 거부되므로, 시도해서 실패로 세는 대신 대상에서 아예 제외한다.
+ * 그러면 시간 예산이 실제로 보낼 수 있는 사람에게만 쓰인다.
+ */
+const COMMENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** 동시 발송 수. 인스타그램 발송 한도를 자극하지 않는 선에서 시간을 벌어준다. */
 const SEND_CONCURRENCY = 4;
 
@@ -78,6 +86,21 @@ interface CommenterItem {
   commentId: string;
   fromId?: string;
   username?: string;
+  /** 대상으로 고른 댓글이 달린 시각(ms). */
+  commentedAt: number;
+}
+
+/**
+ * 인스타그램 댓글 타임스탬프를 ms 로 바꾼다.
+ *
+ * 인스타그램은 "2026-08-10T12:00:00+0000" 처럼 콜론 없는 오프셋을 주므로 표준
+ * 형태로 고쳐서 넘긴다. 해석할 수 없으면 null — 나이를 확인할 수 없는 댓글은
+ * 24시간 창 안이라고 단정하지 않는다.
+ */
+function parseCommentTime(raw: unknown): number | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const ms = Date.parse(raw.trim().replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+  return Number.isNaN(ms) ? null : ms;
 }
 
 /** 대상 한 명에 대한 처리 결과. */
@@ -310,6 +333,9 @@ export default async (req: Request, context: Context) => {
   );
 
   const commentersMap = new Map<string, CommenterItem>();
+  const windowStart = Date.now() - COMMENT_WINDOW_MS;
+  /** 24시간 창을 벗어나 대상에서 빠진 댓글 수. */
+  let staleCount = 0;
 
   for (const commentsList of commentLists) {
     for (const c of commentsList) {
@@ -326,12 +352,23 @@ export default async (req: Request, context: Context) => {
         continue;
       }
 
+      // 24시간 이내에 달린 댓글만 발송 대상이다.
+      const commentedAt = parseCommentTime(c?.timestamp);
+      if (commentedAt === null || commentedAt < windowStart) {
+        staleCount += 1;
+        continue;
+      }
+
       const key = fromId || commenterUsername || commentId;
-      if (!commentersMap.has(key)) {
+      const prev = commentersMap.get(key);
+      // 같은 사람이 여러 번 달았으면 가장 최근 댓글을 쓴다. 비공개 답장 창이
+      // 마지막 상호작용 기준이라 최신 댓글일수록 발송 가능성이 높다.
+      if (!prev || commentedAt > prev.commentedAt) {
         commentersMap.set(key, {
           commentId,
           fromId: fromId || undefined,
           username: commenterUsername || undefined,
+          commentedAt,
         });
       }
     }
@@ -342,7 +379,8 @@ export default async (req: Request, context: Context) => {
   if (targetCommenters.length === 0) {
     await appendLog(username, {
       status: "skipped",
-      reason: "no_commenters",
+      reason: "no_recent_commenters",
+      staleCount,
       targetMediaIds,
       ruleId: body.ruleId,
     });
@@ -351,7 +389,7 @@ export default async (req: Request, context: Context) => {
       connected: true,
       count: 0,
       total: 0,
-      message: "선택한 게시물에 댓글을 남긴 사용자가 없습니다.",
+      message: "최근 24시간 안에 댓글을 남긴 사용자가 없습니다.",
     });
   }
 
@@ -489,6 +527,7 @@ export default async (req: Request, context: Context) => {
     failCount,
     remaining,
     totalCommenters: targetCommenters.length,
+    staleCount,
     error: failureReason,
     timedOut: stoppedForTime,
     test: Boolean(body.test),
