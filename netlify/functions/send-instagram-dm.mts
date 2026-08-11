@@ -146,7 +146,7 @@ export default async (req: Request, context: Context) => {
         messages,
       });
 
-      if (!result.ok) {
+      if (!result.ok && !result.partial) {
         await appendLog(username, {
           status: "failed",
           recipientId,
@@ -161,13 +161,24 @@ export default async (req: Request, context: Context) => {
 
       await appendLog(username, {
         status: "sent",
+        partial: result.partial,
         recipientId,
         ruleId: body.ruleId,
         messageId: result.messageId,
+        error: result.partial ? result.error : undefined,
         test: Boolean(body.test),
       });
 
-      return Response.json({ success: true, connected: true, count: 1, messageId: result.messageId });
+      return Response.json({
+        success: true,
+        connected: true,
+        count: 1,
+        messageId: result.messageId,
+        partial: result.partial,
+        message: result.partial
+          ? `DM 본문은 발송됐지만 링크 버튼 카드가 전송되지 않았습니다. (${result.error})`
+          : undefined,
+      });
     } catch (e: any) {
       const errMsg = e?.message || "발송 중 알 수 없는 오류가 발생했습니다.";
       await appendLog(username, { status: "failed", recipientId, ruleId: body.ruleId, error: errMsg });
@@ -278,21 +289,28 @@ export default async (req: Request, context: Context) => {
   }
 
   let successCount = 0;
+  let partialCount = 0;
   let failCount = 0;
+  let lastError: string | undefined;
 
   for (const commenter of targetCommenters) {
-    // 1차 시도: 댓글 ID 기반 비공개 답장
+    // 1차 시도: 댓글 ID 기반 비공개 답장.
+    // 메시지가 2건(본문 + 버튼 카드)인 설정은 두 번째부터 IGSID 로 보낸다.
+    // 비공개 답장은 댓글당 1통만 허용되기 때문이다.
     let result = await sendDmMessages({
       graphHost,
       graphVersion: GRAPH_VERSION,
       igId,
       accessToken: settings.accessToken,
       recipient: { comment_id: commenter.commentId },
+      followUpRecipient: commenter.fromId ? { id: commenter.fromId } : undefined,
       messages,
     });
 
-    // 2차 시도: IGSID 기반 직접 메시지
-    if (!result.ok && commenter.fromId) {
+    // 2차 시도: IGSID 기반 직접 메시지.
+    // 이미 일부가 도착한 경우(partial)에는 재시도하지 않는다. 재시도하면 같은
+    // 본문이 두 번 도착한다.
+    if (!result.ok && !result.partial && commenter.fromId) {
       result = await sendDmMessages({
         graphHost,
         graphVersion: GRAPH_VERSION,
@@ -305,8 +323,18 @@ export default async (req: Request, context: Context) => {
 
     if (result.ok) {
       successCount++;
+    } else if (result.partial) {
+      // 수신자에게는 본문이 도착했다. 발송 실패로 세지 않는다.
+      successCount++;
+      partialCount++;
+      lastError = result.error;
+      console.warn(
+        `[send-instagram-dm] 댓글 작성자(${commenter.username || commenter.commentId}) 일부 발송:`,
+        result.error
+      );
     } else {
       failCount++;
+      lastError = result.error;
       console.warn(
         `[send-instagram-dm] 댓글 작성자(${commenter.username || commenter.commentId}) 발송 실패:`,
         result.error
@@ -319,20 +347,33 @@ export default async (req: Request, context: Context) => {
     ruleId: body.ruleId,
     targetMediaIds,
     sentCount: successCount,
+    partialCount,
     failCount,
     totalCommenters: targetCommenters.length,
+    error: failCount > 0 || partialCount > 0 ? lastError : undefined,
     test: Boolean(body.test),
   });
+
+  let resultMessage: string;
+  if (successCount > 0) {
+    resultMessage = `댓글 작성자 ${targetCommenters.length}명 중 ${successCount}명에게 DM이 성공적으로 발송되었습니다!`;
+    if (partialCount > 0) {
+      resultMessage += ` (${partialCount}명은 본문만 도착하고 링크 버튼 카드는 전송되지 않았습니다.)`;
+    }
+  } else {
+    resultMessage = lastError
+      ? `댓글 작성자에게 DM 발송을 실패했습니다. (${lastError})`
+      : "댓글 작성자에게 DM 발송을 실패했습니다.";
+  }
 
   return Response.json({
     success: successCount > 0,
     connected: true,
     count: successCount,
+    partialCount,
+    failCount,
     total: targetCommenters.length,
-    message:
-      successCount > 0
-        ? `댓글 작성자 ${targetCommenters.length}명 중 ${successCount}명에게 DM이 성공적으로 발송되었습니다!`
-        : "댓글 작성자에게 DM 발송을 실패했습니다.",
+    message: resultMessage,
   });
 };
 
