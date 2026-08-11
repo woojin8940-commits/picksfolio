@@ -11,6 +11,7 @@ import {
   claimIfNew,
   contentHashOf,
   dmContentKey,
+  noteSentText,
   privateReplyKey,
   release,
 } from "./_shared/dm-send-registry.mts";
@@ -217,6 +218,13 @@ export default async (req: Request, context: Context) => {
   /** 같은 내용의 중복 발송을 구분하기 위한 내용 지문. */
   const contentHash = contentHashOf(messages);
 
+  // 우리가 보낸 문구로 남긴다. 인스타그램이 돌려주는 발신 에코를 웹훅이
+  // "다른 서비스가 보낸 자동 DM"으로 잘못 표시하지 않게 하는 표시다.
+  for (const payload of messages) {
+    const line = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+    if (line) await noteSentText(username, line);
+  }
+
   // 1) 특정 수신자 ID(recipientId)가 직접 전달된 경우 (단일 발송 레거시 지원)
   if (recipientId) {
     try {
@@ -414,6 +422,14 @@ export default async (req: Request, context: Context) => {
       const replyAvailable = await claimIfNew(username, replyKey);
       let lastError = "";
       let lastKind: DmErrorKind = "other";
+      /**
+       * IGSID 직접 발송을 이어서 시도해도 되는지.
+       *
+       * 비공개 답장을 아예 못 쓴 경우와, 인스타그램이 "이미 답장했다"고 명시한
+       * 경우에만 시도한다. 그 밖의 오류는 메시지가 도착했는지를 알려주지 않아서,
+       * 무조건 한 번 더 보내면 같은 문구가 두 번 도착할 수 있다.
+       */
+      let mayRetryViaIgsid = !replyAvailable;
 
       if (replyAvailable) {
         const result = await sendDmMessages({
@@ -436,12 +452,13 @@ export default async (req: Request, context: Context) => {
 
         lastError = result.error || "";
         lastKind = result.errorKind || "other";
+        mayRetryViaIgsid = lastKind === "already_sent";
         // 인스타그램이 "이미 답장했다"고 하면 기록은 유지한다(사실이므로).
         if (lastKind !== "already_sent") await release(username, replyKey);
       }
 
-      // IGSID 기반 직접 발송. 비공개 답장을 못 쓰거나 실패한 경우의 유일한 경로다.
-      if (c.fromId) {
+      // IGSID 기반 직접 발송. 비공개 답장을 못 쓰는 경우의 유일한 경로다.
+      if (mayRetryViaIgsid && c.fromId) {
         const direct = await sendDmMessages({
           graphHost,
           graphVersion: GRAPH_VERSION,

@@ -9,10 +9,13 @@ import {
   claimIfNew,
   contentHashOf,
   dmContentKey,
+  noteSentText,
   privateReplyKey,
   publicReplyKey,
   release,
+  wasSentByUs,
 } from "./_shared/dm-send-registry.mts";
+import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
@@ -82,6 +85,42 @@ function buildMessagePayload(a: DmAutomationItem) {
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "ig-webhook");
+}
+
+/**
+ * 계정이 보낸 DM 에코 이벤트를 살펴, 우리가 보내지 않은 자동 DM 이면 기록한다.
+ *
+ * 인스타그램 계정에는 이 서비스 외에도 댓글에 자동 DM 을 보내는 경로가 있다
+ * (인스타그램/메타 자체 자동 메시지, 예전에 연결해 둔 다른 자동화 서비스). 이런
+ * 발송은 우리 설정과 무관하므로 화면에서 문구를 바꾸거나 자동 발송을 꺼도 예전
+ * 문구가 계속 도착한다. 화면에 단서가 없으면 "앱이 예전 메시지를 보낸다"로 읽히기
+ * 때문에, 감지해서 설정 화면에서 알려준다.
+ *
+ * 오탐을 피하려고 두 조건을 모두 만족할 때만 기록한다.
+ *  - 댓글 이벤트를 받은 직후(10분 이내) 그 사람에게 나간 DM 일 것 — 사장님이 손으로
+ *    보낸 답장을 자동 발송으로 표시하면 안 된다.
+ *  - 우리가 보낸 적 없는 문구일 것.
+ *
+ * `is_echo` 는 이 계정이 보낸 메시지라는 뜻이다(받은 메시지에는 붙지 않는다).
+ */
+async function inspectEcho(username: string, event: any): Promise<void> {
+  const message = event?.message;
+  if (!message || message.is_echo !== true) return;
+  const text = String(message?.text || "").trim();
+  if (!text) return;
+  const recipientId = String(event?.recipient?.id || "");
+  if (!recipientId) return;
+  if (!(await commentSeenRecently(username, recipientId))) return;
+  if (await wasSentByUs(username, text)) return;
+
+  await recordForeignDm(username, text);
+  await appendLog(username, {
+    kind: "dm",
+    status: "external",
+    recipientId,
+    text: text.slice(0, 200),
+  });
+  console.warn("[ig-webhook] auto DM sent by another service detected");
 }
 
 function hasContent(a: DmAutomationItem): boolean {
@@ -288,9 +327,8 @@ export default async (req: Request, _context: Context) => {
       if (!username) continue;
 
       const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
-      if (!settings || !settings.enabled || !settings.accessToken) continue;
-      // 디엠 자동화는 프로 플랜 전용 — 플랜이 없거나 만료된 계정은 발송하지 않는다.
-      if (!(await dmAutomationAllowed(username))) continue;
+      if (!settings) continue;
+      const accessToken = settings.accessToken || "";
       const igId = settings.igUserId || settings.igAccountId || igAccountId;
       // 자기 자신의 댓글을 걸러낼 때 쓰는 ID 모음. 계정 연동 방식에 따라 웹훅의
       // entry.id 와 저장된 igUserId/igAccountId 가 서로 다를 수 있어, 하나만
@@ -298,6 +336,47 @@ export default async (req: Request, _context: Context) => {
       const ownIds = new Set(
         [igId, settings.igUserId, settings.igAccountId, igAccountId].filter(Boolean) as string[],
       );
+
+      /**
+       * 발신 메시지 에코 확인은 자동 발송 스위치와 무관하게 수행한다. "자동 발송을
+       * 꺼놨는데도 DM 이 나갔다"가 정확히 이 검사가 필요한 상황이다.
+       *
+       * 댓글 표시를 먼저 남긴다 — 댓글 이벤트와 에코가 같은 요청에 함께 오더라도
+       * "댓글 직후 나간 DM"으로 판별할 수 있어야 한다.
+       */
+      for (const change of entry?.changes || []) {
+        if (change?.field !== "comments") continue;
+        const commenterId = String(change?.value?.from?.id || "");
+        if (commenterId && !ownIds.has(commenterId)) await noteCommentSeen(username, commenterId);
+      }
+
+      /**
+       * 메시지 이벤트는 연동 방식에 따라 `entry.messaging` 또는 `entry.changes`
+       * (field: messages / message_echoes)로 온다. 양쪽 다 받는다.
+       */
+      const echoEvents = [
+        ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
+        ...(entry?.changes || [])
+          .filter((c: any) => c?.field === "messages" || c?.field === "message_echoes")
+          .map((c: any) => c?.value),
+      ];
+      for (const event of echoEvents) {
+        await inspectEcho(username, event).catch((e) =>
+          console.warn("[ig-webhook] echo check failed:", (e as Error)?.message),
+        );
+      }
+
+      /**
+       * 자동 발송이 가능한 상태인지(전체 스위치·연동 토큰·플랜). 댓글 이벤트를
+       * 실제로 처리할 때만 확인한다 — 플랜 조회는 블롭 읽기라 매 이벤트마다 하지
+       * 않는다.
+       */
+      let planAllowed: boolean | null = null;
+      const canSend = async (): Promise<boolean> => {
+        if (!settings.enabled || !accessToken) return false;
+        if (planAllowed === null) planAllowed = await dmAutomationAllowed(username);
+        return planAllowed;
+      };
 
       for (const change of entry?.changes || []) {
         if (change?.field !== "comments") continue;
@@ -313,6 +392,9 @@ export default async (req: Request, _context: Context) => {
         // 자기 자신(계정 소유자)의 댓글은 무시
         if (!commentId || (fromId && ownIds.has(fromId))) continue;
 
+        // 전체 스위치가 꺼져 있거나 플랜이 없으면 여기서 끝. 우리는 아무것도 보내지 않는다.
+        if (!(await canSend())) continue;
+
         // 조건(게시물·키워드)에 맞는 자동화 후보를 모은 뒤, 팔로우 조건까지 통과하는
         // 첫 자동화를 고른다. 같은 게시물에 "팔로워용 / 비팔로워용" 자동화를 나눠
         // 걸어둔 경우에도 각각 의도대로 동작한다. 후보가 여럿이면 좁게 지정한 것 →
@@ -327,7 +409,7 @@ export default async (req: Request, _context: Context) => {
           follows = await fetchFollowsBusiness({
             host: graphHost(settings),
             igsid: fromId,
-            accessToken: settings.accessToken,
+            accessToken,
           });
           if (follows === null) {
             console.warn("[ig-webhook] follow state unknown — sending without follow filter");
@@ -357,7 +439,7 @@ export default async (req: Request, _context: Context) => {
             const replyResult = await postCommentReply({
               host: graphHost(settings),
               commentId: parentId || commentId,
-              accessToken: settings.accessToken,
+              accessToken,
               message: reply,
             });
             if (replyResult.ok) {
@@ -389,6 +471,13 @@ export default async (req: Request, _context: Context) => {
         if (!hasContent(automation)) continue;
 
         const messages = buildMessagePayload(automation);
+        // 우리가 보낸 문구로 남긴다. 발송 직후 인스타그램이 돌려주는 발신 에코를
+        // "외부 서비스가 보낸 DM"으로 잘못 표시하지 않으려면 발송 전에 남겨야 한다
+        // (에코가 발송 응답보다 먼저 도착할 수 있다).
+        for (const payload of messages) {
+          const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+          if (body) await noteSentText(username, body);
+        }
         // 어떤 자동화의 어떤 문구가 나갔는지 기록에 남긴다. "예전 메시지가 나갔다"는
         // 신고를 받았을 때 화면의 설정과 실제 발송 내용을 맞춰볼 수 있어야 한다.
         const contentHash = contentHashOf(messages);
@@ -408,7 +497,7 @@ export default async (req: Request, _context: Context) => {
                 graphHost: graphHost(settings),
                 graphVersion: GRAPH_VERSION,
                 igId,
-                accessToken: settings.accessToken,
+                accessToken,
                 recipient: { comment_id: commentId },
                 followUpRecipient: fromId ? { id: fromId } : undefined,
                 messages,
@@ -419,15 +508,28 @@ export default async (req: Request, _context: Context) => {
             await release(username, replyKey);
           }
 
-          // 비공개 답장을 쓸 수 없거나 실패했다면 IGSID 직접 발송으로 한 번 더
-          // 시도한다. 수동 발송이 이미 그 댓글의 비공개 답장을 써버린 경우에도
-          // 자동 DM 이 도달할 수 있는 유일한 경로다.
-          if ((!result || (!result.ok && !result.partial)) && fromId) {
+          /**
+           * IGSID 직접 발송으로 한 번 더 시도할지 정한다.
+           *
+           * 비공개 답장을 아예 못 쓴 경우(수동 발송이 그 댓글의 1회를 이미 써버린
+           * 경우)와, 인스타그램이 "이미 답장했다"고 명시한 경우에만 다시 보낸다.
+           *
+           * 그 밖의 오류(대표적으로 "An unknown error has occurred.")에는 다시
+           * 보내지 않는다. 이 오류들은 메시지가 도착했는지 아닌지를 알려주지
+           * 않는데, 예전에는 무조건 IGSID 로 한 번 더 보내서 같은 문구가 두 번
+           * 도착하는 일이 생겼다. 받는 사람에게는 같은 안내가 연달아 오는 것으로
+           * 보이므로, 확실하지 않으면 다시 보내지 않고 실패로 기록한다.
+           */
+          const retryViaIgsid =
+            Boolean(fromId) &&
+            (!result || (!result.ok && !result.partial && result.errorKind === "already_sent"));
+
+          if (retryViaIgsid) {
             result = await sendDmMessages({
               graphHost: graphHost(settings),
               graphVersion: GRAPH_VERSION,
               igId,
-              accessToken: settings.accessToken,
+              accessToken,
               recipient: { id: fromId },
               messages,
             });

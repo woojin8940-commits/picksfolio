@@ -19,14 +19,18 @@ const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).sl
 /**
  * 결과 표시.
  *
- * 수동 발송은 결과를 따지지 않고 "보냈습니다"만 보여준다. 화면에는 건수·건너뜀·
- * 실패 이유를 노출하지 않고, 실제 발송 결과는 서버 로그(dm-automation-log)에만
- * 남는다.
+ * 발송 결과를 사실대로 보여준다. 예전에는 결과와 무관하게 언제나 "보냈습니다!"만
+ * 띄우고 실제 결과는 서버 로그에만 남겼는데, 인스타그램이 24시간 창·비공개 답장
+ * 1회 제한으로 발송을 거부해도 화면은 성공으로 보였다. 그러면 사용자는 새 문구가
+ * 나갔다고 믿은 채 DM 함에서 예전에 도착한 메시지만 보게 되고, 이를 "메시지를
+ * 바꿨는데 계속 예전 문구가 온다"로 읽는다. 무엇이 왜 안 나갔는지 화면에서 바로
+ * 알 수 있어야 한다.
  */
-type ResultTone = 'success' | 'error';
+type ResultTone = 'success' | 'warn' | 'error';
 
 const TONE_STYLE: Record<ResultTone, string> = {
   success: 'bg-green-50 text-green-700 border border-green-200',
+  warn: 'bg-amber-50 text-amber-700 border border-amber-200',
   error: 'bg-red-50 text-red-600 border border-red-200',
 };
 
@@ -137,8 +141,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
     const validButtons = buttons.filter((b) => b.label.trim());
 
+    let outcome: { tone: ResultTone; message: string; done: boolean };
     try {
-      await apiService.sendInstagramDm({
+      const res = await apiService.sendInstagramDm({
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
@@ -149,22 +154,75 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
-    } catch {
-      // 발송 결과는 화면에 반영하지 않는다. 실패·부분 발송·타임아웃 모두 서버
-      // 로그에만 남기고, 사용자에게는 언제나 "보냈습니다"만 보여준다.
+
+      const sentCount = res.count || 0;
+      // 서버가 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 이미 만들어 준다.
+      // (플랜 미충족처럼 요청 자체가 거절된 경우는 error 에 이유가 담긴다.)
+      const detail = res.message?.trim() || res.error?.trim();
+
+      if (res.connected === false) {
+        outcome = {
+          tone: 'error',
+          message: detail || t(
+            'dm.notConnected',
+            '인스타그램 계정이 연동되지 않아 발송하지 못했습니다.',
+            'The Instagram account is not connected, so nothing was sent.',
+          ),
+          done: false,
+        };
+      } else if (res.indeterminate) {
+        outcome = {
+          tone: 'warn',
+          message: detail || t(
+            'dm.sendIndeterminate',
+            '발송 결과를 확인하지 못했습니다. 인스타그램 DM 함을 확인한 뒤 다시 시도해 주세요.',
+            'The send result could not be confirmed. Check your Instagram inbox before retrying.',
+          ),
+          done: false,
+        };
+      } else if (sentCount > 0) {
+        // 한 건이라도 나갔으면 성공이다. 건너뛴 대상·남은 대상 안내는 함께 보여준다.
+        outcome = {
+          tone: (res.failCount || 0) > 0 || (res.remaining || 0) > 0 ? 'warn' : 'success',
+          message: detail || t('dm.sentAlert', '보냈습니다!', 'Sent!'),
+          done: (res.failCount || 0) === 0 && (res.remaining || 0) === 0,
+        };
+      } else {
+        // 한 건도 나가지 않았다. 이유(24시간 창·중복·연동 문제)를 그대로 보여준다.
+        outcome = {
+          tone: res.success ? 'warn' : 'error',
+          message: detail || t(
+            'dm.sendNothingSent',
+            '발송된 DM이 없습니다. 인스타그램 정책상 최근 24시간 안에 댓글을 남긴 사람에게만 보낼 수 있어요.',
+            'No DMs were sent. Instagram only allows messaging people who commented within the last 24 hours.',
+          ),
+          done: false,
+        };
+      }
+    } catch (e) {
+      console.error('[ManualDmModal] 발송 요청 실패:', e);
+      outcome = {
+        tone: 'error',
+        message: t(
+          'dm.sendRequestFailed',
+          '발송 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+          'The send request failed. Please try again in a moment.',
+        ),
+        done: false,
+      };
     }
 
-    // 결과와 무관하게 발송 완료로 표시한다.
-    setResult({
-      tone: 'success',
-      message: t('dm.sentAlert', '보냈습니다!', 'Sent!'),
-    });
+    setResult({ tone: outcome.tone, message: outcome.message });
     setSending(false);
-    window.alert(t('dm.sentAlert', '보냈습니다!', 'Sent!'));
-    setTimeout(() => {
-      setResult(null);
-      onClose();
-    }, 2200);
+
+    // 전부 정상 발송된 경우에만 자동으로 닫는다. 그 밖의 결과는 사용자가 읽고
+    // 조치(대상·문구·연동 확인)할 수 있게 화면에 남겨 둔다.
+    if (outcome.done) {
+      setTimeout(() => {
+        setResult(null);
+        onClose();
+      }, 2200);
+    }
   };
 
   if (!isOpen) return null;
