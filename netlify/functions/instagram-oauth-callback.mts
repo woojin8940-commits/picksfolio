@@ -140,7 +140,7 @@ export default async (req: Request, _context: Context) => {
     }
 
     // 4) 설정 블롭에 병합 저장 (기존 automations/rules 보존)
-    const store = getStore("dm-automation");
+    const store = getStore({ name: "dm-automation", consistency: "strong" });
     const key = `dm_${username}`;
     const existing = ((await store.get(key, { type: "json" })) as DmSettings) || {};
 
@@ -162,7 +162,7 @@ export default async (req: Request, _context: Context) => {
     // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스.
     try {
       if (igUserId) {
-        const index = getStore("dm-automation-index");
+        const index = getStore({ name: "dm-automation-index", consistency: "strong" });
         await index.set(`ig_${igUserId}`, username);
       }
     } catch (e) {

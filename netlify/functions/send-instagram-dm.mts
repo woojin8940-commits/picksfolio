@@ -80,7 +80,7 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const store = getStore("dm-automation");
+  const store = getStore({ name: "dm-automation", consistency: "strong" });
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
 
   // 디엠 자동화(수동 발송 포함)는 프로 플랜 전용이다.

@@ -30,7 +30,7 @@ interface DmSettings {
 }
 
 export default async () => {
-  const store = getStore("dm-automation");
+  const store = getStore({ name: "dm-automation", consistency: "strong" });
   const now = Date.now();
 
   const { blobs } = await store.list({ prefix: "dm_" });

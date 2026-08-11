@@ -223,8 +223,10 @@ export default async (req: Request, _context: Context) => {
   }
 
   try {
-    const store = getStore("dm-automation");
-    const index = getStore("dm-automation-index");
+    // 설정 저장 직후 들어온 댓글에도 방금 편집한 메시지를 사용해야 한다. 기본 eventual
+    // consistency 는 이전 설정을 최대 60초간 반환할 수 있어 자동 DM 내용이 어긋난다.
+    const store = getStore({ name: "dm-automation", consistency: "strong" });
+    const index = getStore({ name: "dm-automation-index", consistency: "strong" });
 
     for (const entry of payload?.entry || []) {
       const igAccountId = String(entry?.id || "");

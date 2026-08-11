@@ -178,7 +178,8 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const store = getStore("dm-automation");
+  // 자동화 편집 직후 댓글이 달려도 웹훅이 이전 문구를 읽지 않도록 최신 설정을 보장한다.
+  const store = getStore({ name: "dm-automation", consistency: "strong" });
   const key = `dm_${username}`;
 
   if (req.method === "GET") {
@@ -227,7 +228,7 @@ export default async (req: Request, context: Context) => {
       const staleIgId = existing.igUserId || existing.igAccountId;
       if (staleIgId) {
         try {
-          await getStore("dm-automation-index").delete(`ig_${staleIgId}`);
+          await getStore({ name: "dm-automation-index", consistency: "strong" }).delete(`ig_${staleIgId}`);
         } catch (e) {
           console.warn("[dm-automation] index cleanup failed:", (e as Error)?.message);
         }
