@@ -170,12 +170,72 @@ export interface SendDmArgs {
   messages: Record<string, unknown>[];
 }
 
+/**
+ * Graph API 오류 분류.
+ *
+ * 화면에 "실패"라고 띄우기 전에 왜 실패했는지를 구분해야 한다. 특히
+ * `already_sent`(댓글당 1회 제한)와 `outside_window`(24시간 창)는 우리 쪽 버그가
+ * 아니라 인스타그램 정책이고, 이미 DM 을 받은 사용자에게서 발생한다. 이 둘을
+ * 그냥 실패로 표시하면 "DM 은 도착했는데 화면은 실패"라는 모순이 생긴다.
+ */
+export type DmErrorKind =
+  | "already_sent"
+  | "outside_window"
+  | "permission"
+  | "rate_limit"
+  | "other";
+
+export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
+  const message = String(err?.message || "").toLowerCase();
+  const code = Number(err?.code);
+  const subcode = Number(err?.error_subcode);
+
+  // 비공개 답장은 댓글 1건당 1회. 이미 썼으면 재시도해도 거부된다.
+  // Meta 의 문구가 버전마다 조금씩 다르므로("already been replied to",
+  // "only one private reply per comment" 등) 넉넉하게 잡는다.
+  if (
+    /one private reply/.test(message) ||
+    (/already/.test(message) && /(repl|sent|private|respond)/.test(message))
+  ) {
+    return "already_sent";
+  }
+  // 표준 메시징 창(상대의 마지막 상호작용 이후 24시간) 밖.
+  if (subcode === 2534015 || /outside of allowed window|outside the allowed window|messaging window|24 hour/.test(message)) {
+    return "outside_window";
+  }
+  if (httpStatus === 429 || code === 4 || code === 17 || code === 32 || code === 613 || /rate limit|too many/.test(message)) {
+    return "rate_limit";
+  }
+  if (code === 190 || code === 200 || code === 102 || /permission|access token|expired/.test(message)) {
+    return "permission";
+  }
+  return "other";
+}
+
+/** 분류된 오류를 사용자가 읽을 수 있는 안내로 바꾼다. */
+export function describeDmError(kind: DmErrorKind, raw?: string): string {
+  switch (kind) {
+    case "already_sent":
+      return "인스타그램은 댓글 1건당 DM(비공개 답장)을 1회만 허용합니다. 이 댓글에는 이미 DM이 발송됐습니다.";
+    case "outside_window":
+      return "인스타그램 정책상 상대가 마지막으로 댓글·메시지를 보낸 뒤 24시간이 지나면 DM을 보낼 수 없습니다.";
+    case "permission":
+      return "인스타그램 연동 권한이 만료됐거나 부족합니다. DM 자동화 화면에서 계정을 다시 연동해 주세요.";
+    case "rate_limit":
+      return "인스타그램 발송 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.";
+    default:
+      return raw || "인스타그램에서 발송을 거부했습니다.";
+  }
+}
+
 export interface SendDmResult {
   /** 모든 메시지가 전송된 경우에만 true. */
   ok: boolean;
   /** 마지막으로 성공한 메시지 ID. */
   messageId?: string;
   error?: string;
+  /** 오류 분류 — 실패를 화면에 어떻게 표시할지 정하는 데 쓴다. */
+  errorKind?: DmErrorKind;
   /** 실제로 전송에 성공한 메시지 수. */
   sent: number;
   /** 보내려고 했던 메시지 수. */
@@ -204,24 +264,44 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
 
   for (const message of messages) {
     const to = sent === 0 ? recipient : followUpRecipient || recipient;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ recipient: to, message }),
-    });
-    const result = (await res.json().catch(() => ({}))) as any;
-
-    if (!res.ok) {
+    let res: Response;
+    let result: any;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ recipient: to, message }),
+      });
+      result = (await res.json().catch(() => ({}))) as any;
+    } catch (e: any) {
+      // 네트워크 오류를 예외로 던지면 일괄 발송 루프가 중간에 통째로 죽어, 이미
+      // 보낸 건수까지 함께 사라진다(화면에는 전체 실패로 보인다). 결과로 돌려준다.
       return {
         ok: false,
         messageId,
         sent,
         total: messages.length,
         partial: sent > 0,
-        error: result?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
+        error: e?.message || "인스타그램 서버 연결에 실패했습니다.",
+        errorKind: "other",
+      };
+    }
+
+    // Graph API 는 드물게 HTTP 200 으로 오류 본문을 돌려준다. 본문의 error 를
+    // 확인하지 않으면 도착하지 않은 메시지를 "발송 성공"으로 기록한다.
+    if (!res.ok || result?.error) {
+      const graphError = result?.error;
+      return {
+        ok: false,
+        messageId,
+        sent,
+        total: messages.length,
+        partial: sent > 0,
+        error: graphError?.message || `Graph API 오류 (HTTP ${res.status})`,
+        errorKind: classifyGraphError(graphError, res.status),
       };
     }
 

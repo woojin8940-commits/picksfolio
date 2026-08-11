@@ -40,9 +40,16 @@ export async function mutateBlobJSON<T>(
 
     // etag 가 있으면 "내가 읽은 그 값일 때만" 쓰고, 없으면(문서 없음)
     // "아직 없을 때만" 쓴다. 조건이 깨지면 modified=false 로 돌아온다.
+    //
+    // `setJSON` 이 아니라 `set` + 직렬화를 쓰는 이유: 현재 `@netlify/blobs`
+    // 버전의 `setJSON` 은 조건을 요청에 실어 보내지 않아 조건이 무시된 채 항상
+    // 성공한다(즉 덮어쓰기 방지가 동작하지 않는다). `set` 은 조건을 제대로
+    // 전달한다. 읽는 쪽은 `type: "json"` 으로 본문을 파싱하므로 저장 형식은
+    // 달라지지 않는다.
+    const body = JSON.stringify(next);
     const result = snapshot?.etag
-      ? await store.setJSON(key, next, { onlyIfMatch: snapshot.etag })
-      : await store.setJSON(key, next, { onlyIfNew: true });
+      ? await store.set(key, body, { onlyIfMatch: snapshot.etag })
+      : await store.set(key, body, { onlyIfNew: true });
 
     if (result.modified) return next;
   }
