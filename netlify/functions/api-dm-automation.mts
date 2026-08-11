@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { BlobWriteConflictError, mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   DM_AUTOMATION_TIER,
@@ -24,6 +25,13 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  *   - message + buttons: 실제로 보낼 DM (텍스트 + 링크 버튼)
  *
  * rules: 구버전 트리거 규칙(welcome/new_follower 등) — 하위호환 위해 보존한다.
+ *
+ * 저장은 항상 "읽고 → 고치고 → 조건부로 쓰기"(mutateBlobJSON)로 한다. 예전처럼
+ * 문서 전체를 그대로 덮어쓰면, 저장 요청 두 건이 겹치거나 응답 순서가 뒤바뀔 때
+ * 늦게 도착한 옛 스냅샷이 방금 고친 메시지를 되돌려 놓는다. 화면에는 새 문구가
+ * 남아 있으니 사용자는 "설정은 새 메시지인데 DM 은 예전 문구로 나간다"를 겪는다.
+ * 그래서 편집 화면은 바뀐 자동화 한 건만(upsertAutomation) 보내고, 서버가 최신
+ * 목록에 합친다.
  */
 
 interface DmMessageButton {
@@ -57,6 +65,13 @@ interface DmAutomationItem {
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   createdAt: string;
+  /**
+   * 이 자동화의 내용이 마지막으로 바뀐 시각.
+   *
+   * 발송기(instagram-webhook)가 조건이 겹치는 자동화 중 하나를 골라야 할 때
+   * "가장 최근에 설정한 것"을 우선하는 기준으로 쓴다.
+   */
+  updatedAt?: string;
 }
 
 interface DmSettings {
@@ -84,6 +99,9 @@ const DEFAULT_SETTINGS: DmSettings = {
   automations: [],
   rules: [],
 };
+
+/** 설정 문서를 보관하는 블롭 스토어 이름. 발송기(instagram-webhook)와 같아야 한다. */
+const STORE_NAME = "dm-automation";
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -165,7 +183,50 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     buttons,
     cards,
     createdAt: String(a?.createdAt || new Date().toISOString()),
+    updatedAt: a?.updatedAt ? String(a.updatedAt) : undefined,
   };
+}
+
+/**
+ * 내용 비교용 지문. 저장 시점에 붙는 시각 필드는 제외한다 — 같은 내용을 다시
+ * 저장했다는 이유로 "최근에 설정한 자동화"가 뒤바뀌면 안 된다.
+ */
+function contentSignature(a: DmAutomationItem): string {
+  const { updatedAt: _u, createdAt: _c, ...rest } = a;
+  return JSON.stringify(rest);
+}
+
+/** 내용이 실제로 바뀐 자동화에만 변경 시각을 새로 찍는다. */
+function stampUpdatedAt(
+  next: DmAutomationItem,
+  prev: DmAutomationItem | undefined,
+  now: string,
+): DmAutomationItem {
+  if (prev && contentSignature(prev) === contentSignature(next)) {
+    return { ...next, updatedAt: prev.updatedAt || prev.createdAt };
+  }
+  return { ...next, updatedAt: now };
+}
+
+/** 저장된 목록에 자동화 한 건을 끼워 넣거나 갈아끼운다. */
+function upsertOne(
+  existing: DmAutomationItem[],
+  item: DmAutomationItem,
+  now: string,
+): DmAutomationItem[] {
+  const prev = existing.find((a) => a.id === item.id);
+  const stamped = stampUpdatedAt(item, prev, now);
+  return prev ? existing.map((a) => (a.id === item.id ? stamped : a)) : [...existing, stamped];
+}
+
+/** 목록 전체를 갈아끼운다(구버전 클라이언트 호환). 변경된 항목만 시각을 새로 찍는다. */
+function replaceAll(
+  existing: DmAutomationItem[],
+  incoming: DmAutomationItem[],
+  now: string,
+): DmAutomationItem[] {
+  const prevById = new Map(existing.map((a) => [a.id, a]));
+  return incoming.map((a) => stampUpdatedAt(a, prevById.get(a.id), now));
 }
 
 export default async (req: Request, context: Context) => {
@@ -179,7 +240,7 @@ export default async (req: Request, context: Context) => {
   if (!auth.ok) return auth.response;
 
   // 자동화 편집 직후 댓글이 달려도 웹훅이 이전 문구를 읽지 않도록 최신 설정을 보장한다.
-  const store = getStore({ name: "dm-automation", consistency: "strong" });
+  const store = getStore({ name: STORE_NAME, consistency: "strong" });
   const key = `dm_${username}`;
 
   if (req.method === "GET") {
@@ -201,31 +262,33 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = (await req.json()) as any;
-    const existing = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
+    const now = new Date().toISOString();
 
     // 연동 해제
     if (body?.action === "disconnect") {
-      const next: DmSettings = {
-        ...DEFAULT_SETTINGS,
-        ...existing,
-        enabled: false,
-        connected: false,
-        igUserId: "",
-        igAccountId: "",
-        igUsername: "",
-        accessToken: "",
-        tokenSource: undefined,
-        tokenExpiresAt: undefined,
-        // 재연동 시 웹훅 구독을 다시 걸도록 플래그도 비운다.
-        webhookSubscribedAt: undefined,
-        automations: Array.isArray(existing.automations) ? existing.automations : [],
-        rules: Array.isArray(existing.rules) ? existing.rules : [],
-        updatedAt: new Date().toISOString(),
-      };
-      await store.setJSON(key, next);
+      let staleIgId = "";
+      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
+        const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
+        staleIgId = existing.igUserId || existing.igAccountId || "";
+        return {
+          ...existing,
+          enabled: false,
+          connected: false,
+          igUserId: "",
+          igAccountId: "",
+          igUsername: "",
+          accessToken: "",
+          tokenSource: undefined,
+          tokenExpiresAt: undefined,
+          // 재연동 시 웹훅 구독을 다시 걸도록 플래그도 비운다.
+          webhookSubscribedAt: undefined,
+          automations: Array.isArray(existing.automations) ? existing.automations : [],
+          rules: Array.isArray(existing.rules) ? existing.rules : [],
+          updatedAt: now,
+        };
+      });
       // 웹훅 역인덱스(ig_<계정ID> → 사용자명)도 함께 비운다. 남겨두면 연동을 끊은 뒤에도
       // 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다.
-      const staleIgId = existing.igUserId || existing.igAccountId;
       if (staleIgId) {
         try {
           await getStore({ name: "dm-automation-index", consistency: "strong" }).delete(`ig_${staleIgId}`);
@@ -249,13 +312,40 @@ export default async (req: Request, context: Context) => {
       );
     }
 
-    let automations: DmAutomationItem[];
+    /**
+     * 요청 종류를 먼저 해석한다.
+     *
+     * - upsertAutomation : 편집 화면이 방금 고친 자동화 한 건만 보낸다(권장 경로).
+     *   목록 전체를 보내지 않으므로, 다른 자동화를 동시에 고쳐도 서로의 변경을
+     *   되돌리지 않는다.
+     * - deleteAutomation : 자동화 한 건 삭제.
+     * - automations      : 목록 전체 교체(구버전 클라이언트 호환).
+     * - 그 외            : enabled/rules 같은 설정만 갱신.
+     *
+     * 링크 정규화는 저장 전에 끝내야 한다. 잘못된 링크는 400 으로 되돌려주고
+     * 문서는 손대지 않는다.
+     */
+    let op:
+      | { kind: "upsert"; item: DmAutomationItem }
+      | { kind: "delete"; id: string }
+      | { kind: "replace"; items: DmAutomationItem[] }
+      | { kind: "settings" };
     try {
-      automations = Array.isArray(body.automations)
-        ? body.automations.map(sanitizeAutomation)
-        : Array.isArray(existing.automations)
-        ? existing.automations
-        : [];
+      if (body?.action === "upsertAutomation" || body?.automation) {
+        const raw = body?.automation ?? body?.item;
+        if (!raw || typeof raw !== "object") {
+          return Response.json({ error: "automation 이 필요합니다." }, { status: 400 });
+        }
+        op = { kind: "upsert", item: sanitizeAutomation(raw) };
+      } else if (body?.action === "deleteAutomation") {
+        const id = String(body?.id || body?.automationId || "").trim();
+        if (!id) return Response.json({ error: "삭제할 자동화 id 가 필요합니다." }, { status: 400 });
+        op = { kind: "delete", id };
+      } else if (Array.isArray(body?.automations)) {
+        op = { kind: "replace", items: body.automations.map(sanitizeAutomation) };
+      } else {
+        op = { kind: "settings" };
+      }
     } catch (e) {
       if (e instanceof InvalidLinkError) {
         // 잘못된 링크는 발송 때 조용히 빠지므로, 저장 단계에서 되돌려준다.
@@ -267,17 +357,75 @@ export default async (req: Request, context: Context) => {
       throw e;
     }
 
-    const next: DmSettings = {
-      ...DEFAULT_SETTINGS,
-      ...existing,
-      enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
-      automations,
-      // 구버전 rules 는 전달되면 갱신, 아니면 유지
-      rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
-      updatedAt: new Date().toISOString(),
-    };
+    let saved: DmSettings | null;
+    /**
+     * 요청이 들고 온 자동화가 저장본보다 오래된 버전이면 쓰지 않고 되돌려준다.
+     *
+     * (다른 탭·다른 기기에서 먼저 고친 경우다. 그대로 쓰면 그쪽 수정이 사라지고,
+     * 사용자는 "설정한 문구가 아닌 예전 문구가 나간다"를 다시 겪는다.)
+     */
+    let staleWrite = false;
+    try {
+      saved = await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
+        const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
+        const stored: DmAutomationItem[] = Array.isArray(existing.automations)
+          ? existing.automations
+          : [];
 
-    await store.setJSON(key, next);
+        if (op.kind === "upsert") {
+          const prev = stored.find((a) => a.id === op.item.id);
+          const baseAt = Date.parse(op.item.updatedAt || "");
+          const storedAt = Date.parse(prev?.updatedAt || "");
+          if (prev && !Number.isNaN(baseAt) && !Number.isNaN(storedAt) && baseAt < storedAt) {
+            staleWrite = true;
+            return null;
+          }
+        }
+
+        let automations = stored;
+        if (op.kind === "upsert") automations = upsertOne(stored, op.item, now);
+        else if (op.kind === "delete") automations = stored.filter((a) => a.id !== op.id);
+        else if (op.kind === "replace") automations = replaceAll(stored, op.items, now);
+
+        return {
+          ...existing,
+          enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
+          automations,
+          // 구버전 rules 는 전달되면 갱신, 아니면 유지
+          rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
+          updatedAt: now,
+        };
+      });
+    } catch (e) {
+      if (e instanceof BlobWriteConflictError) {
+        // 같은 계정에서 저장이 계속 겹치는 아주 드문 경우. 아무것도 쓰지 않았으니
+        // 화면에서 다시 시도하게 안내한다(조용히 성공으로 넘기면 예전 설정이 남는다).
+        console.warn("[dm-automation] save conflict:", (e as Error)?.message);
+        return Response.json(
+          {
+            error: "다른 저장이 동시에 진행돼 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+            code: "SAVE_CONFLICT",
+          },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+
+    const next: DmSettings = { ...DEFAULT_SETTINGS, ...(saved || {}) };
+
+    if (staleWrite) {
+      // 저장본이 더 최신이다. 화면이 최신 목록으로 맞출 수 있게 함께 돌려준다.
+      return Response.json(
+        {
+          error:
+            "이 자동화가 다른 곳(다른 탭·기기)에서 먼저 수정됐습니다. 최신 설정을 불러왔으니 확인한 뒤 다시 저장해 주세요.",
+          code: "STALE_AUTOMATION",
+          automations: Array.isArray(next.automations) ? next.automations : [],
+        },
+        { status: 409 },
+      );
+    }
 
     // 이미 연동돼 있던 계정은 OAuth 콜백을 다시 거치지 않으므로, 자동화를 저장하는
     // 시점에 한 번 계정별 웹훅 구독을 채워준다. 구독이 없으면 댓글 이벤트가 도착하지
@@ -290,16 +438,24 @@ export default async (req: Request, context: Context) => {
         igId: next.igUserId || next.igAccountId,
       });
       if (sub.ok) {
-        next.webhookSubscribedAt = new Date().toISOString();
-        await store.setJSON(key, next);
+        const subscribedAt = new Date().toISOString();
+        next.webhookSubscribedAt = subscribedAt;
+        await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) =>
+          current ? { ...current, webhookSubscribedAt: subscribedAt } : null,
+        ).catch((e) => console.warn("[dm-automation] webhook flag save failed:", (e as Error)?.message));
       } else {
         console.warn("[dm-automation] webhook subscribe failed:", sub.error);
       }
     }
 
+    // 저장된 목록을 그대로 돌려준다. 화면이 이 응답으로 상태를 맞추면, 실제로
+    // 발송에 쓰일 내용과 화면에 보이는 내용이 어긋나지 않는다.
     return Response.json({
       success: true,
       connected: Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),
+      enabled: next.enabled,
+      automations: Array.isArray(next.automations) ? next.automations : [],
+      updatedAt: next.updatedAt,
     });
   }
 

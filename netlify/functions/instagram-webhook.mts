@@ -52,6 +52,9 @@ interface DmAutomationItem {
   message: string;
   buttons: DmButton[];
   cards?: DmCard[];
+  createdAt?: string;
+  /** 설정 화면에서 이 자동화를 마지막으로 고친 시각(api-dm-automation 이 찍는다). */
+  updatedAt?: string;
 }
 interface DmSettings {
   enabled: boolean;
@@ -103,6 +106,41 @@ function matchAutomation(a: DmAutomationItem, text: string, mediaId: string): bo
   if (a.commentMatch === "all") return true;
   const lower = text.toLowerCase();
   return (a.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
+}
+
+/**
+ * 조건이 겹치는 자동화 중 무엇을 쓸지 정하는 우선순위.
+ *
+ * 예전에는 "목록에서 먼저 나오는 것"(= 먼저 만든 것)을 썼다. 그래서 "모든 게시물 /
+ * 모든 댓글"로 넓게 걸어 둔 옛 자동화가 있으면, 사용자가 특정 게시물·키워드에
+ * 맞춰 새로 만들거나 방금 문구를 고친 자동화가 있어도 옛 자동화의 예전 문구가
+ * 발송됐다. 좁게 지정한 자동화를 먼저 쓰고, 범위가 같으면 가장 최근에 설정한
+ * 것을 쓴다 — 사용자가 마지막에 입력한 메시지가 나가야 한다.
+ */
+function specificityOf(a: DmAutomationItem): number {
+  let score = 0;
+  if (a.mediaScope === "selected") score += 2;
+  if (a.commentMatch === "keyword") score += 1;
+  return score;
+}
+
+function configuredAt(a: DmAutomationItem): number {
+  const ms = Date.parse(a.updatedAt || a.createdAt || "");
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** 우선순위가 높은 자동화가 앞에 오도록 정렬한다(원본 배열은 건드리지 않는다). */
+function byPriority(candidates: DmAutomationItem[]): DmAutomationItem[] {
+  return candidates
+    .map((a, index) => ({ a, index }))
+    .sort((x, y) => {
+      const spec = specificityOf(y.a) - specificityOf(x.a);
+      if (spec !== 0) return spec;
+      const recency = configuredAt(y.a) - configuredAt(x.a);
+      if (recency !== 0) return recency;
+      return x.index - y.index;
+    })
+    .map((entry) => entry.a);
 }
 
 /**
@@ -277,9 +315,10 @@ export default async (req: Request, _context: Context) => {
 
         // 조건(게시물·키워드)에 맞는 자동화 후보를 모은 뒤, 팔로우 조건까지 통과하는
         // 첫 자동화를 고른다. 같은 게시물에 "팔로워용 / 비팔로워용" 자동화를 나눠
-        // 걸어둔 경우에도 각각 의도대로 동작한다.
-        const candidates = (settings.automations || []).filter((a) =>
-          matchAutomation(a, commentText, mediaId),
+        // 걸어둔 경우에도 각각 의도대로 동작한다. 후보가 여럿이면 좁게 지정한 것 →
+        // 최근에 설정한 것 순으로 본다(byPriority).
+        const candidates = byPriority(
+          (settings.automations || []).filter((a) => matchAutomation(a, commentText, mediaId)),
         );
         if (candidates.length === 0) continue;
 
@@ -350,7 +389,10 @@ export default async (req: Request, _context: Context) => {
         if (!hasContent(automation)) continue;
 
         const messages = buildMessagePayload(automation);
-        const contentKey = dmContentKey(commentId, contentHashOf(messages));
+        // 어떤 자동화의 어떤 문구가 나갔는지 기록에 남긴다. "예전 메시지가 나갔다"는
+        // 신고를 받았을 때 화면의 설정과 실제 발송 내용을 맞춰볼 수 있어야 한다.
+        const contentHash = contentHashOf(messages);
+        const contentKey = dmContentKey(commentId, contentHash);
         const replyKey = privateReplyKey(commentId);
 
         // 같은 댓글에 같은 내용을 이미 보냈다면(웹훅 재전송·수동 발송과 겹침) 끝.
@@ -400,6 +442,9 @@ export default async (req: Request, _context: Context) => {
               partial: result.partial,
               recipientId: fromId,
               ruleId: automation.id,
+              ruleName: automation.name,
+              ruleUpdatedAt: automation.updatedAt,
+              contentHash,
               messageId: result.messageId,
               error: result.partial ? result.error : undefined,
             });
@@ -412,6 +457,9 @@ export default async (req: Request, _context: Context) => {
               status: "failed",
               recipientId: fromId,
               ruleId: automation.id,
+              ruleName: automation.name,
+              ruleUpdatedAt: automation.updatedAt,
+              contentHash,
               error: describeDmError(kind, result?.error),
               errorKind: kind,
             });

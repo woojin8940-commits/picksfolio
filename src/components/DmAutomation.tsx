@@ -856,10 +856,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     /* eslint-disable-next-line */
   }, []);
 
-  const persist = async (next: Partial<DmAutomationSettings>) => {
+  const persist = async (next: Partial<DmAutomationSettings> & {
+    action?: 'upsertAutomation' | 'deleteAutomation';
+    automation?: DmAutomationItem;
+    id?: string;
+  }) => {
     if (!entitled) {
       setBanner({ type: 'err', text: '디엠 자동화는 프로 플랜(월 18,700원) 전용 기능이에요. 멤버십에서 프로 플랜을 구독하면 바로 사용할 수 있어요.' });
-      return false;
+      return { ok: false as const };
     }
     setSaving(true);
     const result = await apiService.saveDmAutomation(userName, next);
@@ -867,10 +871,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     if (result.ok) {
       setSavedAt(Date.now());
       setTimeout(() => setSavedAt(null), 2200);
+      setBanner(null);
     } else {
       setBanner({ type: 'err', text: result.error || '저장에 실패했습니다. 다시 시도해주세요.' });
     }
-    return result.ok;
+    return result;
   };
 
   const connect = async () => {
@@ -897,29 +902,51 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const prev = enabled;
     const v = !enabled;
     setEnabled(v);
-    const ok = await persist({ enabled: v });
+    const { ok } = await persist({ enabled: v });
     if (!ok) setEnabled(prev);
   };
 
-  const commitAutomations = async (next: DmAutomationItem[]) => {
+  /**
+   * 자동화 한 건을 저장한다.
+   *
+   * 목록 전체를 보내지 않고 바뀐 한 건만 보낸다. 목록 전체를 보내면 저장이 겹칠 때
+   * 늦게 도착한 옛 목록이 방금 고친 메시지를 되돌려, 화면에는 새 문구가 보이는데
+   * 실제 DM 은 예전 문구로 나갔다. 저장 뒤에는 서버가 돌려준 목록으로 화면을 맞춰
+   * "보이는 내용 = 발송될 내용"을 보장한다.
+   */
+  const commitAutomation = async (automation: DmAutomationItem) => {
     const prev = automations;
-    setAutomations(next);
-    const ok = await persist({ automations: next });
-    if (!ok) setAutomations(prev);
+    const exists = prev.some((x) => x.id === automation.id);
+    setAutomations(exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation]);
+    const result = await persist({ action: 'upsertAutomation', automation });
+    // 저장에 실패하면 서버가 최신 목록을 함께 준 경우(다른 곳에서 먼저 수정) 그 값을,
+    // 아니면 직전 화면 값을 쓴다. 어느 쪽이든 화면은 실제 저장 상태를 따라간다.
+    if (!result.ok) {
+      setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
+      return;
+    }
+    if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
   };
 
   const saveAutomation = (a: DmAutomationItem) => {
-    const exists = automations.some((x) => x.id === a.id);
-    const next = exists ? automations.map((x) => (x.id === a.id ? a : x)) : [...automations, a];
     setEditing(null);
-    void commitAutomations(next);
+    void commitAutomation(a);
   };
   const toggleAutomation = (id: string) => {
-    void commitAutomations(automations.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)));
+    const target = automations.find((x) => x.id === id);
+    if (!target) return;
+    void commitAutomation({ ...target, enabled: !target.enabled });
   };
-  const deleteAutomation = (id: string) => {
+  const deleteAutomation = async (id: string) => {
     if (!window.confirm('이 자동화를 삭제할까요?')) return;
-    void commitAutomations(automations.filter((x) => x.id !== id));
+    const prev = automations;
+    setAutomations(prev.filter((x) => x.id !== id));
+    const result = await persist({ action: 'deleteAutomation', id });
+    if (!result.ok) {
+      setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
+      return;
+    }
+    if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
   };
 
   const activeCount = useMemo(() => automations.filter((a) => a.enabled).length, [automations]);
