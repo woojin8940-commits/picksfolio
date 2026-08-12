@@ -47,6 +47,72 @@ const DRAFT_MODE_KEY = 'picks_collab_match_draft_mode';
 /** 복귀 시 이 모달을 다시 열어야 한다는 표시. */
 const RETURN_FLAG = 'collab_match';
 
+/**
+ * 이 브라우저 세션에서 캠페인용 인스타그램 로그인을 마쳤는지 적어 두는 자리.
+ *
+ * 캠페인 등록은 "지금 이 계정으로 브랜드에게 나를 보여 준다"를 정하는 자리다. 그래서
+ * 지난번에 연동해 둔 계정이나 디엠 자동화에 붙여 둔 계정을 끌어와 이미 연동된 것처럼
+ * 보여 주지 않는다 — 등록하는 사람은 자기가 어떤 계정으로 등록되는지 고른 적이 없고,
+ * 화면에 뜬 팔로워·조회수가 언제 받아 온 숫자인지도 알 수 없다.
+ *
+ * 그래서 화면은 매번 로그인에서 시작하고, 로그인해서 방금 받아 온 숫자만 보여 준다.
+ * 값에 사용자명을 넣어 두는 이유는 같은 탭에서 계정을 바꿔 로그인하는 경우다.
+ */
+const SESSION_LINK_KEY = 'picks_collab_ig_session';
+/**
+ * 로그인하러 나가면서 적어 두는 "누가 나갔는지".
+ *
+ * 돌아왔을 때는 페이지가 새로 뜬 직후라 로그인 정보가 아직 안 실려 있을 수 있다.
+ * 그 순간의 사용자명에 기대면 연동을 마치고 왔는데도 표시가 남지 않아, 화면은
+ * 방금 로그인한 계정을 두고 또 로그인하라고 말한다.
+ */
+const SESSION_PENDING_KEY = 'picks_collab_ig_pending';
+
+const sessionLinkedFor = (username: string) => {
+  if (!username) return false;
+  try {
+    return sessionStorage.getItem(SESSION_LINK_KEY) === username;
+  } catch {
+    return false;
+  }
+};
+
+const markSessionLinked = (username: string) => {
+  if (!username) return;
+  try {
+    sessionStorage.setItem(SESSION_LINK_KEY, username);
+  } catch {
+    // 기록을 못 남기면 다음 화면에서 로그인을 한 번 더 하게 될 뿐이다.
+  }
+};
+
+const clearSessionLink = () => {
+  try {
+    sessionStorage.removeItem(SESSION_LINK_KEY);
+  } catch {
+    // 위와 같다.
+  }
+};
+
+const markPendingLink = (username: string) => {
+  try {
+    sessionStorage.setItem(SESSION_PENDING_KEY, username);
+  } catch {
+    // 위와 같다.
+  }
+};
+
+/** 나갈 때 적어 둔 사용자명을 읽고 지운다. 한 번의 복귀에 한 번만 쓰인다. */
+const consumePendingLink = () => {
+  try {
+    const who = sessionStorage.getItem(SESSION_PENDING_KEY) || '';
+    sessionStorage.removeItem(SESSION_PENDING_KEY);
+    return who;
+  } catch {
+    return '';
+  }
+};
+
 
 /**
  * 접수 후 보여 줄 한 줄 안내. 키는 collab_directory_applications.status 값이다.
@@ -67,19 +133,11 @@ interface InfluencerChannel {
   avgLikes: number;
   metricsSource: string;
   syncedAt: string;
-  /**
-   * 연동은 해 뒀지만 토큰이 죽어 다시 동의가 필요한 상태.
-   *
-   * 인스타그램 앱 권한을 지우거나 비밀번호를 바꾸면 저장해 둔 토큰이 무효가 된다.
-   * 이때 갱신을 누르면 메타는 영문 오류로 답하는데, 그 문장을 그대로 띄우면 읽는
-   * 사람은 자기가 뭘 잘못했는지 알 수 없다. 상태로 들고 있다가 "다시 연동"을 권한다.
-   */
-  needsReauth: boolean;
 }
 
 const emptyChannel: InfluencerChannel = {
   connected: false, handle: '', followers: 0, following: 0,
-  avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '', needsReauth: false,
+  avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '',
 };
 
 const compact = (n: number) => {
@@ -89,9 +147,6 @@ const compact = (n: number) => {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;
   return n.toLocaleString();
 };
-
-/** 토큰이 죽었을 때 하는 말. 카드와 안내 문구가 서로 다른 말을 하지 않도록 한 군데 둔다. */
-const RECONNECT_TEXT = '인스타그램 연동이 만료되었어요. 아래 버튼으로 다시 연동하면 이어서 불러옵니다.';
 
 /**
  * 화면에 올려도 되는 문구인지 마지막으로 거른다.
@@ -130,6 +185,14 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   // 인스타 연동 상태 — 연동 여부와 픽스폴리오가 보관 중인 지표.
   const [channel, setChannel] = useState<InfluencerChannel>(emptyChannel);
   const [channelLoading, setChannelLoading] = useState(false);
+  /**
+   * 이 화면이 떠 있는 동안 로그인을 마쳤는지.
+   *
+   * 기록은 sessionStorage 에 남기지만, 시크릿 모드나 저장이 막힌 브라우저에서는 그
+   * 기록이 남지 않는다. 그런 브라우저에서 방금 로그인하고 돌아온 사람에게 또 로그인을
+   * 시키지 않도록, 화면이 살아 있는 동안은 이 값으로도 인정한다.
+   */
+  const [linkedNow, setLinkedNow] = useState(false);
 
   /**
    * 이미 등록서를 낸 계정인지. null = 아직 확인 중.
@@ -183,14 +246,28 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   const loadChannel = useCallback(async () => {
     if (!isInfluencer || !applicantUsername) return;
+    // 이번 세션에 로그인하지 않았으면 아무 것도 불러오지 않는다. 지난번에 연동해 둔
+    // 계정의 팔로워·조회수를 그대로 띄우면, 화면은 "이미 연동됨"이라고 말하지만 그
+    // 숫자가 어느 계정의 것이고 언제 받아 온 것인지는 아무도 모른다.
+    if (!linkedNow && !sessionLinkedFor(applicantUsername)) {
+      setChannel(emptyChannel);
+      return;
+    }
     setChannelLoading(true);
     const result = await apiService.getCreatorChannel(applicantUsername);
     setChannelLoading(false);
     if (result?.error) return;
+    // metaLinked = 캠페인용으로 연동한 토큰이 살아 있다는 뜻. 끊겼으면 이 세션의
+    // 로그인도 끝난 것으로 보고 처음(로그인 버튼)으로 되돌린다.
+    if (!result?.metaLinked) {
+      clearSessionLink();
+      setLinkedNow(false);
+      setChannel(emptyChannel);
+      return;
+    }
     const c = result?.channel || {};
-    // metaLinked = 토큰이 살아 있다는 뜻. connected = 지표를 한 번이라도 받아 왔다는 뜻.
     setChannel({
-      connected: !!result?.metaLinked || !!c.connected,
+      connected: true,
       handle: String(result?.igUsername || c.instagramHandle || ''),
       followers: Number(c.followers || 0),
       following: Number(c.following || 0),
@@ -198,9 +275,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       avgLikes: Number(c.avgLikes || 0),
       metricsSource: String(c.metricsSource || ''),
       syncedAt: String(c.syncedAt || ''),
-      needsReauth: !!result?.needsReauth,
     });
-  }, [applicantUsername, isInfluencer]);
+  }, [applicantUsername, isInfluencer, linkedNow]);
 
   /** 접수한 등록서를 수정 폼으로 되살린다. 0 은 빈칸으로 둔다("0"이 적힌 칸은 오해를 부른다). */
   const prefillFrom = useCallback((app: Record<string, any>) => {
@@ -278,6 +354,9 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
     if (params.get('ig_connected')) {
       const metricsMissing = params.get('ig_metrics') === '0';
+      // 이 세션의 로그인이 끝났다. 지금부터 화면은 방금 로그인한 계정의 숫자를 보여 준다.
+      markSessionLinked(consumePendingLink());
+      setLinkedNow(true);
       // 지표를 못 받고 돌아왔으면 이 화면이 한 번 더 받아 본다. 사람에게 버튼을
       // 찾아 누르라고 하기 전에 채워 보는 편이 빠르다.
       if (metricsMissing) setPendingSync(true);
@@ -287,6 +366,9 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           : { type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' },
       );
     } else if (params.get('ig_error')) {
+      consumePendingLink();
+      clearSessionLink();
+      setLinkedNow(false);
       setNotice({ type: 'err', text: '연동에 실패했어요. 다시 시도해 주세요.' });
     }
 
@@ -354,10 +436,14 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     } catch {
       // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
     }
+    markPendingLink(applicantUsername);
     const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1`;
-    const result = await apiService.instagramConnectUrl(applicantUsername, returnTo);
+    // 'collab' — 캠페인 전용 연동이다. 디엠 자동화와 보관함이 다르고, 인스타그램
+    // 로그인 화면을 매번 새로 띄운다.
+    const result = await apiService.instagramConnectUrl(applicantUsername, returnTo, 'collab');
     if (!result.url) {
       setLinking(false);
+      consumePendingLink();
       setNotice({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
       return;
     }
@@ -376,22 +462,21 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     const result = await apiService.syncCreatorChannel(applicantUsername);
     setSyncing(false);
     if (result?.error) {
-      // 토큰이 죽은 경우다. 카드를 재연동 상태로 바꿔 주지 않으면 사람은 같은 실패를
-      // 부르는 갱신 버튼을 계속 누르게 된다. 이때는 실패가 아니라 다음 할 일을 말한다.
-      if (result.code === 'META_TOKEN_INVALID') {
-        setChannel(c => ({ ...c, needsReauth: true }));
-        if (silent) return;
-        setNotice({ type: 'err', text: RECONNECT_TEXT });
+      // 연동이 끊겼거나(토큰 만료·권한 해제) 애초에 없는 경우다. 안내 문구를 붙여
+      // 붙잡아 두지 않는다 — 여기서 할 수 있는 일은 다시 로그인하는 것 하나뿐이므로
+      // 화면을 처음(로그인 버튼)으로 되돌린다.
+      if (result.code === 'META_TOKEN_INVALID' || result.code === 'META_NOT_LINKED') {
+        clearSessionLink();
+        setLinkedNow(false);
+        setChannel(emptyChannel);
         return;
       }
       if (silent) return;
       setNotice({
         type: 'err',
-        text: result.code === 'META_NOT_LINKED'
-          ? '먼저 인스타그램 계정을 연동해 주세요.'
-          // 서버는 사람이 읽을 수 있는 문구만 내려보내지만, 예상 못 한 경로로 영문
-          // 원문이 올라오면 화면에서 한 번 더 거른다. 오류 문장은 안내가 아니다.
-          : safeNotice(result.error),
+        // 서버는 사람이 읽을 수 있는 문구만 내려보내지만, 예상 못 한 경로로 영문
+        // 원문이 올라오면 화면에서 한 번 더 거른다. 오류 문장은 안내가 아니다.
+        text: safeNotice(result.error),
       });
       return;
     }
@@ -873,58 +958,6 @@ const InstagramLinkCard: React.FC<{
   }
 
   const verified = channel.metricsSource === 'meta_api';
-
-  /**
-   * 연동은 돼 있지만 토큰이 죽은 상태.
-   *
-   * 붉은 오류 상자로 보여 주지 않는다. 사람이 뭘 잘못한 것이 아니라 인스타그램
-   * 권한이 만료된 것이고, 할 일은 버튼 하나를 다시 누르는 것뿐이다. 그리고 이미
-   * 확인해 둔 숫자는 그대로 보여 준다 — 브랜드에게 전달되는 값은 여전히 그것이고,
-   * 화면에서 지우면 연동이 통째로 사라진 것처럼 읽힌다.
-   */
-  if (channel.needsReauth) {
-    return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-4">
-        <div className="flex items-start gap-2">
-          <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v3.5m0 3.5h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-          </svg>
-          <div className="min-w-0">
-            <p className="text-sm font-black text-slate-900">
-              {channel.handle ? `@${channel.handle} 다시 연동이 필요해요` : '다시 연동이 필요해요'}
-            </p>
-            <p className="text-[11px] text-amber-800 font-medium leading-relaxed mt-1">
-              인스타그램 연동 권한이 만료되었습니다. 비밀번호를 바꿨거나 인스타그램
-              설정에서 픽스폴리오 연결을 해제하면 이렇게 됩니다. 아래 버튼으로 다시
-              연동하면 팔로워·릴스 조회수를 이어서 불러옵니다.
-            </p>
-          </div>
-        </div>
-
-        {/* 마지막으로 확인된 숫자. 새로 못 받았을 뿐 브랜드가 보는 값은 아직 이것이다. */}
-        <div className="grid grid-cols-3 gap-2 mt-3">
-          <Metric label="팔로워" value={compact(channel.followers)} />
-          <Metric label="팔로잉" value={compact(channel.following)} />
-          <Metric label="릴스 평균 조회" value={channel.avgViews ? compact(channel.avgViews) : '집계 전'} />
-        </div>
-        <p className="text-[10px] text-slate-400 font-bold mt-1.5">마지막으로 확인된 숫자입니다.</p>
-
-        <button
-          type="button"
-          onClick={onLink}
-          disabled={linking || !canLink}
-          className="mt-3 w-full rounded-xl bg-gradient-to-r from-fuchsia-600 via-rose-500 to-amber-500 text-white font-black text-sm py-3 shadow-[0_12px_26px_-10px_rgba(219,39,119,0.6)] hover:-translate-y-0.5 active:scale-[0.99] active:translate-y-0 transition-all disabled:opacity-60 disabled:shadow-none disabled:hover:translate-y-0"
-        >
-          {linking ? '연동 창으로 이동 중...' : '인스타그램 다시 연동하기'}
-        </button>
-        {!canLink && (
-          <p className="text-[11px] text-rose-500 font-bold mt-2">
-            계정 연동은 로그인 후에 할 수 있어요.
-          </p>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-4">

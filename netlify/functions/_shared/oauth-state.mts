@@ -56,6 +56,14 @@ export interface StatePayload {
    * `Response.redirect` 에 넘기면 우리가 서명해 준 오픈 리다이렉트가 된다.
    */
   r?: string
+  /**
+   * 이 연동이 무엇을 위한 것인지. 'collab' = 캠페인(브랜드 매칭) 등록 화면,
+   * 그 밖에는 디엠 자동화. 콜백이 토큰을 어느 보관함에 넣을지를 이 값으로 정한다.
+   *
+   * 클라이언트가 보낸 값이지만 서명 안에 들어가므로 발급 뒤에는 바꿀 수 없고,
+   * 발급 시점에 아는 사람은 본인뿐이다(인증된 POST 경로에서만 발급한다).
+   */
+  p?: 'collab'
 }
 
 /**
@@ -81,6 +89,7 @@ export async function issueSignedState(
   username: string,
   sessionUserId: string,
   returnTo?: string,
+  purpose?: string,
 ): Promise<{ ok: true; state: string } | { ok: false; error: string }> {
   const key = signingKey()
   if (!key) return { ok: false, error: 'missing_state_secret' }
@@ -93,6 +102,7 @@ export async function issueSignedState(
   }
   const safeReturn = sanitizeReturnPath(returnTo)
   if (safeReturn) payload.r = safeReturn
+  if (purpose === 'collab') payload.p = 'collab'
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const state = `${body}.${sign(body, key)}`
 

@@ -64,9 +64,11 @@ export default async (req: Request) => {
       }
 
       const row = await loadChannel(db, username);
-      // 메타 계정이 이미 연동돼 있으면(브랜드 매칭 등록·디엠 자동화에서 연결한 계정)
-      // sync 버튼을 켤 수 있다는 뜻이다. 토큰 자체는 절대 내려보내지 않는다.
-      const link = await loadMetaLink(username);
+      // 캠페인 등록 화면에서 직접 로그인한 연동만 본다. 디엠 자동화에 붙여 둔 계정을
+      // 여기서 같이 세면, 등록하는 사람은 고른 적 없는 계정으로 이미 연동된 화면을
+      // 보게 된다. 두 기능은 같은 인스타그램 계정을 쓰더라도 별개의 연동이다.
+      // 토큰 자체는 절대 내려보내지 않는다.
+      const link = await loadMetaLink(username, "collab");
       const metaLinked = linkIsUsable(link);
       // 토큰이 죽은 연동은 "연동 안 됨"이 아니라 "다시 동의해야 함"이다. 둘을 같은
       // 값으로 내리면 화면은 이미 받아 둔 팔로워 수를 지운 빈 카드를 보여 주게 된다.
@@ -190,7 +192,7 @@ export default async (req: Request) => {
         if (!auth.ok) return auth.response;
       }
 
-      const link = await loadMetaLink(username);
+      const link = await loadMetaLink(username, "collab");
       if (!linkIsUsable(link)) {
         // 한 번도 연동한 적 없는 경우와, 연동했는데 토큰이 죽은 경우는 할 말이 다르다.
         // 전자는 "연동해 주세요", 후자는 "다시 연동해 주세요"다. 화면이 그 둘을
@@ -207,7 +209,7 @@ export default async (req: Request) => {
         );
       }
 
-      const synced = await syncChannelFromMeta(db, username, link!);
+      const synced = await syncChannelFromMeta(db, username, link!, "collab");
       if (!synced.ok) {
         return Response.json({ error: synced.error, code: synced.code }, { status: synced.status });
       }
