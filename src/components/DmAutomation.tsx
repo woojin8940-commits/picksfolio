@@ -1410,8 +1410,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
         {/* 전체 스위치가 꺼져 있으면 자동화 카드가 ON 으로 보여도 댓글에 반응하지 않는다.
             (연동을 해제했다가 다시 연결하면 이 상태로 남는다.) 카드 옆에서 바로 켤 수
-            있게 안내한다 — 이걸 모르면 "예전에 받은 DM 만 보이고 새 DM 은 오지 않는"
-            상태를 "설정한 문구가 아닌 예전 문구가 나간다"로 읽게 된다. */}
+            있게 안내한다. 다른 서비스가 보내는 DM 에 대한 추측성 설명은 붙이지 않는다. */}
         {connected && !enabled && automations.some((a) => a.enabled) && (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
             <AlertCircle size={16} className="text-amber-600 mt-0.5 shrink-0" />
@@ -1419,7 +1418,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               <p className="text-xs font-black text-amber-800">자동 발송이 꺼져 있어 DM이 나가지 않아요</p>
               <p className="text-[11px] font-medium text-amber-700 mt-0.5">
                 아래 자동화는 켜져 있지만, 위의 <span className="font-black">자동 발송</span> 스위치가 꺼져 있으면 새 댓글에 반응하지 않습니다.
-                이 상태에서도 댓글 뒤에 DM이 계속 도착한다면 인스타그램(메타) 자체 자동 메시지이거나 예전에 연결해 둔 다른 자동화 서비스에서 나가는 것이라, 그쪽에서 꺼야 멈춥니다.
               </p>
             </div>
             <button
