@@ -1369,7 +1369,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   <div
                     key={m.id}
                     className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100"
-                    title={entitled ? '이 게시물의 댓글 단 사람에게 수동 DM 발송 또는 자동화 설정' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
+                    title={entitled ? '이 게시물의 댓글 단 사람에게 DM·답글 보내기 또는 자동화 설정' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
                   >
                     {m.mediaUrl
                       ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
@@ -1384,7 +1384,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                         disabled={!entitled}
                         className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-pink-600 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-pink-700 disabled:opacity-40"
                       >
-                        <Send size={11} /> 수동발송
+                        <Send size={11} /> 보내기
                       </button>
                       <button
                         type="button"
@@ -1522,7 +1522,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                     disabled={!entitled}
                     className="flex-1 flex items-center justify-center gap-1.5 bg-pink-50 text-pink-600 border border-pink-200/60 rounded-xl py-2 text-xs font-black hover:bg-pink-100 disabled:opacity-50 transition-colors"
                   >
-                    <Send size={13} /> {t('dm.manualSend', '수동 발송', 'Send Manual')}
+                    <Send size={13} /> {t('dm.manualSend', '보내기', 'Send')}
                   </button>
                   <button onClick={() => deleteAutomation(a.id)} disabled={saving} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                     <Trash2 size={15} />

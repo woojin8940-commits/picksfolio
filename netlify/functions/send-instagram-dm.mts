@@ -1,6 +1,11 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
-import { buildDmMessages, describeDmError, sendDmMessages } from "./_shared/instagram-dm.mts";
+import {
+  buildDmMessages,
+  describeDmError,
+  postCommentReply,
+  sendDmMessages,
+} from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard, DmErrorKind } from "./_shared/instagram-dm.mts";
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
@@ -13,15 +18,18 @@ import {
   dmContentKey,
   noteSentText,
   privateReplyKey,
+  publicReplyKey,
   release,
 } from "./_shared/dm-send-registry.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
- * 인스타그램 DM 발송.
- * - 특정 수신자 IGSID 지정 발송 및 게시물(미디어) 댓글 작성자 일괄 DM 발송 지원.
+ * 인스타그램 발송(수동).
+ * - 특정 수신자 IGSID 지정 발송 및 게시물(미디어) 댓글 작성자 일괄 발송 지원.
  * - 게시물 지정 또는 자동화 규칙 지정 시, 해당 게시물들의 댓글을 수집하고
- *   작성자 중복 및 본인 계정 댓글을 제외한 모든 댓글 작성자에게 DM을 전송한다.
+ *   작성자 중복 및 본인 계정 댓글을 제외한 모든 댓글 작성자에게 전송한다.
+ * - 답글 문구(replies)가 함께 오면 각 대상의 댓글에 공개 답글을 먼저 남기고
+ *   이어서 DM 을 보낸다. 자동 발송(웹훅)이 하는 일과 같은 순서다.
  *
  * 일괄 발송에서 지키는 세 가지.
  *
@@ -32,6 +40,7 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  *
  * 2) 중복 방지 — 누구에게 무엇을 보냈는지 발송 대장(dm-send-registry)에 기록한다.
  *    버튼을 다시 눌러도 이미 같은 내용을 받은 사람에게는 다시 보내지 않는다.
+ *    공개 답글도 댓글 1건당 1회만 달아, 버튼을 두 번 눌러도 답글이 두 개 붙지 않는다.
  *
  * 3) 실패 구분 — 인스타그램은 댓글 1건당 비공개 답장 1회, 그리고 마지막 상호작용
  *    이후 24시간까지만 DM 을 허용한다. 이 제한에 걸린 대상은 "이미 발송됨"으로
@@ -79,6 +88,11 @@ interface SendBody {
   buttons?: DmButton[];
   messageType?: "text" | "carousel";
   cards?: DmCard[];
+  /**
+   * 댓글에 남길 공개 답글 문구. 여러 개면 대상마다 하나를 무작위로 고른다
+   * (자동 발송과 같은 방식). 비어 있으면 답글을 달지 않는다.
+   */
+  replies?: string[];
   ruleId?: string;
   test?: boolean;
 }
@@ -104,11 +118,18 @@ function parseCommentTime(raw: unknown): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** 대상 한 명에 대한 처리 결과. */
+/** 대상 한 명에 대한 DM 처리 결과. */
 type Outcome =
   | { kind: "sent"; partial: boolean }
   | { kind: "already"; reason: string }
   | { kind: "failed"; error: string; errorKind: DmErrorKind };
+
+/**
+ * 대상 한 명의 댓글에 남긴 공개 답글 결과.
+ * - skipped: 답글 문구가 없어 답글 단계를 돌리지 않았다.
+ * - duplicate: 이 댓글에는 이미 답글이 달려 있다(자동 발송이 달았거나, 버튼을 다시 눌렀거나).
+ */
+type ReplyOutcome = "sent" | "duplicate" | "skipped" | "failed";
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "send-instagram-dm");
@@ -140,9 +161,18 @@ export default async (req: Request, context: Context) => {
   const username = (body.username || "").toLowerCase();
   const recipientId = (body.recipientId || "").trim();
   const message = (body.message || "").trim();
+  // 답글 문구는 사용자가 비워 둘 수 있다. 빈 줄을 그대로 보내면 인스타그램이
+  // 거절하므로 여기서 걸러 둔다.
+  const replies = (Array.isArray(body.replies) ? body.replies : [])
+    .map((r) => (typeof r === "string" ? r.trim() : ""))
+    .filter(Boolean);
 
-  if (!username || !message) {
-    return Response.json({ error: "username 과 message 는 필수입니다." }, { status: 400 });
+  // DM 본문 없이 답글만 보내는 것도 발송이다. 둘 다 비었을 때만 거절한다.
+  if (!username || (!message && replies.length === 0)) {
+    return Response.json(
+      { error: "username 과 보낼 내용(DM 본문 또는 댓글 답글)은 필수입니다." },
+      { status: 400 },
+    );
   }
 
   // 본문의 username 을 그대로 믿으면 남의 계정으로 DM 을 쏠 수 있다. 토큰으로 확인한다.
@@ -201,16 +231,18 @@ export default async (req: Request, context: Context) => {
       : "graph.facebook.com";
 
   // 메시지 구조화 (텍스트 / 링크버튼 카드 / 캐러셀)
-  const messages = buildDmMessages({
-    messageType: body.messageType,
-    message,
-    buttons: body.buttons,
-    cards: body.cards,
-  });
+  const messages = message
+    ? buildDmMessages({
+        messageType: body.messageType,
+        message,
+        buttons: body.buttons,
+        cards: body.cards,
+      })
+    : [];
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && replies.length === 0) {
     return Response.json(
-      { success: false, connected: true, message: "보낼 DM 내용이 없습니다." },
+      { success: false, connected: true, message: "보낼 내용이 없습니다." },
       { status: 200 },
     );
   }
@@ -227,6 +259,18 @@ export default async (req: Request, context: Context) => {
 
   // 1) 특정 수신자 ID(recipientId)가 직접 전달된 경우 (단일 발송 레거시 지원)
   if (recipientId) {
+    // 공개 답글은 "댓글"에 다는 것이라 수신자 ID 만 아는 이 경로에서는 달 곳이 없다.
+    if (messages.length === 0) {
+      return Response.json(
+        {
+          success: false,
+          connected: true,
+          message:
+            "댓글 답글은 댓글 작성자 대상 발송에서만 남길 수 있습니다. 수신자를 직접 지정한 발송에는 DM 본문이 필요합니다.",
+        },
+        { status: 200 },
+      );
+    }
     try {
       const result = await sendDmMessages({
         graphHost,
@@ -402,7 +446,51 @@ export default async (req: Request, context: Context) => {
   }
 
   /**
-   * 대상 한 명에게 보낸다.
+   * 대상 한 명의 댓글에 공개 답글을 남긴다.
+   *
+   * 댓글 1건당 1회만 단다. 발송 버튼을 두 번 눌러도, 자동 발송이 이미 답글을
+   * 달아 둔 댓글이어도 같은 답글이 겹쳐 달리면 안 된다. 실패하면 선점을 되돌려
+   * 다음 시도에서 다시 달 수 있게 한다.
+   */
+  async function replyToComment(c: CommenterItem): Promise<ReplyOutcome> {
+    if (replies.length === 0) return "skipped";
+    if (!(await claimIfNew(username, publicReplyKey(c.commentId)))) return "duplicate";
+
+    const text = replies[Math.floor(Math.random() * replies.length)];
+    const result = await postCommentReply({
+      host: graphHost,
+      graphVersion: GRAPH_VERSION,
+      commentId: c.commentId,
+      accessToken,
+      message: text,
+    });
+
+    if (result.ok) {
+      await appendLog(username, {
+        kind: "reply",
+        status: "sent",
+        recipientId: c.fromId,
+        ruleId: body.ruleId,
+        messageId: result.replyId,
+        manual: true,
+      });
+      return "sent";
+    }
+
+    await release(username, publicReplyKey(c.commentId));
+    await appendLog(username, {
+      kind: "reply",
+      status: "failed",
+      recipientId: c.fromId,
+      ruleId: body.ruleId,
+      error: result.error,
+      manual: true,
+    });
+    return "failed";
+  }
+
+  /**
+   * 대상 한 명에게 DM 을 보낸다.
    *
    * 순서가 중요하다. 먼저 "이 내용을 이 댓글에 이미 보냈는지"를 선점 방식으로
    * 확인해 중복을 막고, 비공개 답장 → IGSID 직접 발송 순으로 시도한다. 끝까지
@@ -501,6 +589,9 @@ export default async (req: Request, context: Context) => {
 
   const sendDeadline = Date.now() + SEND_BUDGET_MS;
   const outcomes: Outcome[] = [];
+  const replyOutcomes: ReplyOutcome[] = [];
+  /** 시간 예산 안에서 실제로 처리한 대상 수(답글만 남긴 경우도 포함). */
+  let processed = 0;
   let cursor = 0;
   let stoppedForTime = false;
 
@@ -513,8 +604,13 @@ export default async (req: Request, context: Context) => {
       const index = cursor;
       if (index >= targetCommenters.length) return;
       cursor += 1;
-      const outcome = await sendToCommenter(targetCommenters[index]);
-      outcomes.push(outcome);
+      const target = targetCommenters[index];
+      // 답글을 먼저 남기고 DM 을 보낸다. 받는 사람 입장에서 "댓글에 답이 달리고
+      // DM 이 온다"가 자연스러운 순서이고, 자동 발송도 같은 순서로 처리한다.
+      replyOutcomes.push(await replyToComment(target));
+      // DM 본문 없이 답글만 보내는 설정이면 DM 단계는 건너뛴다.
+      if (messages.length > 0) outcomes.push(await sendToCommenter(target));
+      processed += 1;
     }
   }
 
@@ -527,12 +623,21 @@ export default async (req: Request, context: Context) => {
   const alreadyCount = outcomes.filter((o) => o.kind === "already").length;
   const failures = outcomes.filter((o) => o.kind === "failed") as Extract<Outcome, { kind: "failed" }>[];
   const failCount = failures.length;
-  const remaining = Math.max(0, targetCommenters.length - outcomes.length);
+  const replyCount = replyOutcomes.filter((r) => r === "sent").length;
+  const replyFailCount = replyOutcomes.filter((r) => r === "failed").length;
+  /** 이미 답글이 달려 있어 건너뛴 댓글 수. 실패가 아니다. */
+  const replyAlreadyCount = replyOutcomes.filter((r) => r === "duplicate").length;
+  const remaining = Math.max(0, targetCommenters.length - processed);
   const failureReason = failCount > 0 ? describeDmError(failures[0].errorKind, failures[0].error) : undefined;
 
   // 보낸 게 하나라도 있거나, 못 보낸 이유가 "이미 받은 사람들"·"다음 차례"뿐이면
   // 실패가 아니다. 이걸 실패로 표시하면 도착한 DM 을 보면서 실패 안내를 읽는다.
-  const success = successCount > 0 || (failCount === 0 && (alreadyCount > 0 || remaining > 0));
+  const success =
+    successCount > 0 ||
+    replyCount > 0 ||
+    (failCount === 0 &&
+      replyFailCount === 0 &&
+      (alreadyCount > 0 || replyAlreadyCount > 0 || remaining > 0));
 
   await appendLog(username, {
     status: success ? "sent" : "failed",
@@ -542,6 +647,9 @@ export default async (req: Request, context: Context) => {
     partialCount,
     alreadyCount,
     failCount,
+    replyCount,
+    replyFailCount,
+    replyAlreadyCount,
     remaining,
     totalCommenters: targetCommenters.length,
     staleCount,
@@ -553,6 +661,15 @@ export default async (req: Request, context: Context) => {
   const parts: string[] = [];
   if (successCount > 0) {
     parts.push(`댓글 작성자 ${targetCommenters.length}명 중 ${successCount}명에게 DM을 발송했습니다.`);
+  }
+  if (replyCount > 0) {
+    parts.push(`${replyCount}개의 댓글에 답글을 남겼습니다.`);
+  }
+  if (replyFailCount > 0) {
+    parts.push(`${replyFailCount}개의 댓글에는 답글을 달지 못했습니다.`);
+  }
+  if (replyAlreadyCount > 0) {
+    parts.push(`이미 답글이 달린 댓글 ${replyAlreadyCount}개는 중복을 막기 위해 건너뛰었습니다.`);
   }
   if (partialCount > 0) {
     parts.push(`${partialCount}명은 본문만 도착하고 링크 버튼 카드는 전송되지 않았습니다.`);
@@ -579,6 +696,8 @@ export default async (req: Request, context: Context) => {
     partialCount,
     alreadyCount,
     failCount,
+    replyCount,
+    replyFailCount,
     remaining,
     total: targetCommenters.length,
     message: parts.join(" "),

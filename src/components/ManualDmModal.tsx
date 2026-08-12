@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Image as ImageIcon, CornerDownRight } from 'lucide-react';
 import { apiService, DmAutomationItem, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -64,8 +64,20 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const [buttons, setButtons] = useState<DmMessageButton[]>([
     { id: genId('btn'), label: defaultButtonLabel, url: '' },
   ]);
+  /**
+   * 댓글에 함께 남길 공개 답글 문구.
+   *
+   * 비워 두면 DM 만 나간다. 채워 두면 DM 과 같이 각 대상의 댓글에 답글이 달린다.
+   * 자동화에 답글을 설정해 둔 경우 그 문구를 그대로 불러온다 — 수동으로 보낼 때만
+   * 답글이 빠지면 "자동은 답글이 달리는데 수동은 안 달린다"가 된다.
+   */
+  const [replies, setReplies] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ tone: ResultTone; message: string } | null>(null);
+
+  /** 자동화에 설정된 답글 문구(꺼져 있으면 없는 것으로 본다). */
+  const repliesOf = (a?: DmAutomationItem | null): string[] =>
+    a?.replyEnabled ? (a.replies || []).filter((r) => r && r.trim()) : [];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,11 +88,13 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(initialAutomation.message || '');
       setMessageType(initialAutomation.messageType || 'text');
       setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
+      setReplies(repliesOf(initialAutomation));
     } else {
       setSelectedRuleId('custom');
       setMessage(defaultMessage);
       setMessageType('text');
       setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
+      setReplies([]);
     }
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [initialAutomation, isOpen]);
@@ -96,6 +110,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(defaultMessage);
       setMessageType('text');
       setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
+      setReplies([]);
       return;
     }
     const found = automations.find((a) => a.id === ruleId);
@@ -103,6 +118,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(found.message || '');
       setMessageType(found.messageType || 'text');
       setButtons(found.buttons ? [...found.buttons] : []);
+      setReplies(repliesOf(found));
     }
   };
 
@@ -119,6 +135,16 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     setButtons(buttons.filter((b) => b.id !== id));
   };
 
+  const handleAddReply = () => setReplies([...replies, '']);
+
+  const handleUpdateReply = (index: number, val: string) => {
+    setReplies(replies.map((r, i) => (i === index ? val : r)));
+  };
+
+  const handleRemoveReply = (index: number) => {
+    setReplies(replies.filter((_, i) => i !== index));
+  };
+
   const selectedRule = automations.find((a) => a.id === selectedRuleId);
   const activeMediaScope = selectedRule ? selectedRule.mediaScope : initialAutomation?.mediaScope;
   const activeMediaIds = selectedRule ? selectedRule.mediaIds : initialAutomation?.mediaIds;
@@ -128,10 +154,17 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const targetMediaPost = effectiveMediaId ? media.find((m) => m.id === effectiveMediaId) : null;
 
   const handleSend = async () => {
-    if (!message.trim()) {
+    const validReplies = replies.map((r) => r.trim()).filter(Boolean);
+
+    // DM 본문 없이 댓글 답글만 보내는 것도 발송이다. 둘 다 비었을 때만 막는다.
+    if (!message.trim() && validReplies.length === 0) {
       setResult({
         tone: 'error',
-        message: t('dm.messageRequired', '발송할 DM 메시지 내용을 입력해주세요.', 'DM message content is required.'),
+        message: t(
+          'dm.contentRequired',
+          '보낼 DM 내용이나 댓글 답글 중 하나는 입력해주세요.',
+          'Enter a DM message or a comment reply to send.',
+        ),
       });
       return;
     }
@@ -151,11 +184,14 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         messageType,
         buttons: validButtons,
         cards: messageType === 'carousel' ? (selectedRule?.cards || initialAutomation?.cards) : undefined,
+        replies: validReplies,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
       });
 
-      const sentCount = res.count || 0;
+      // DM 과 댓글 답글은 함께 나간다. 둘 중 하나라도 나갔으면 발송된 것이다.
+      const sentCount = (res.count || 0) + (res.replyCount || 0);
+      const failedCount = (res.failCount || 0) + (res.replyFailCount || 0);
       // 서버가 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 이미 만들어 준다.
       // (플랜 미충족처럼 요청 자체가 거절된 경우는 error 에 이유가 담긴다.)
       const detail = res.message?.trim() || res.error?.trim();
@@ -183,9 +219,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       } else if (sentCount > 0) {
         // 한 건이라도 나갔으면 성공이다. 건너뛴 대상·남은 대상 안내는 함께 보여준다.
         outcome = {
-          tone: (res.failCount || 0) > 0 || (res.remaining || 0) > 0 ? 'warn' : 'success',
+          tone: failedCount > 0 || (res.remaining || 0) > 0 ? 'warn' : 'success',
           message: detail || t('dm.sentAlert', '보냈습니다!', 'Sent!'),
-          done: (res.failCount || 0) === 0 && (res.remaining || 0) === 0,
+          done: failedCount === 0 && (res.remaining || 0) === 0,
         };
       } else {
         // 한 건도 나가지 않았다. 이유(24시간 창·중복·연동 문제)를 그대로 보여준다.
@@ -238,7 +274,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-base md:text-lg">
-                {t('dm.manualModalTitleBatch', '댓글 단 사람 모두에게 수동 DM 발송', 'Send DM to All Commenters')}
+                {t('dm.manualModalTitleBatch', '댓글 단 사람 모두에게 보내기', 'Send to All Commenters')}
               </h3>
               <p className="text-[11px] text-slate-300 font-medium">
                 @{igUsername || userName} {t('dm.accountLabel', '계정으로 발송', 'Account')}
@@ -325,7 +361,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           {/* DM 메시지 본문 */}
           <div>
             <label className="block text-xs font-black text-slate-700 mb-1.5">
-              {t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')} <span className="text-red-500">*</span>
+              {t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
             </label>
             <textarea
               value={message}
@@ -334,6 +370,63 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
               placeholder={t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
               className="w-full p-4 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 resize-none"
             />
+          </div>
+
+          {/* 댓글 공개 답글 — 입력해 두면 DM 과 함께 나간다 */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                <CornerDownRight size={13} className="text-slate-400" />
+                {t('dm.commentReply', '댓글 답글 (선택)', 'Comment Reply (optional)')}
+              </label>
+              <button
+                type="button"
+                onClick={handleAddReply}
+                className={`text-xs font-bold text-pink-600 hover:text-pink-700 flex items-center gap-1 ${
+                  replies.length === 0 ? 'hidden' : ''
+                }`}
+              >
+                <Plus size={13} /> {t('dm.addReply', '답글 추가', 'Add Reply')}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 font-medium mb-2">
+              {t(
+                'dm.commentReplyHint',
+                '입력해 두면 DM과 함께 각 댓글에 공개 답글이 달려요. 여러 개면 무작위로 하나가 달립니다.',
+                'If filled in, a public reply is posted on each comment along with the DM. With several, one is picked at random.',
+              )}
+            </p>
+
+            {replies.length === 0 ? (
+              <button
+                type="button"
+                onClick={handleAddReply}
+                className="w-full border border-dashed border-slate-300 rounded-2xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500 transition-colors"
+              >
+                + {t('dm.addReply', '답글 추가', 'Add Reply')}
+              </button>
+            ) : (
+              <div className="space-y-2">
+                {replies.map((r, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={r}
+                      onChange={(e) => handleUpdateReply(idx, e.target.value)}
+                      placeholder={t('dm.replyPlaceholder', '예: DM 확인해주세요! 📩', 'e.g. Check your DMs! 📩')}
+                      className="flex-1 px-4 py-2.5 rounded-2xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveReply(idx)}
+                      className="text-slate-400 hover:text-red-500 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 링크 버튼 설정 */}
@@ -407,7 +500,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             ) : (
               <>
                 <Send size={14} />
-                <span>{t('dm.sendToCommenters', '댓글 작성자 모두에게 발송', 'Send to All Commenters')}</span>
+                <span>{t('dm.send', '보내기', 'Send')}</span>
               </>
             )}
           </button>
