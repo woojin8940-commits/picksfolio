@@ -1,34 +1,44 @@
-import React from 'react';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import React, { useState } from 'react';
+import { formatCountKo, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 /**
  * 인플루언서 후보 카드.
  *
- * 리스트업 화면 세 곳(브랜드 명단 · 담당자 풀 · 담당자 명단)이 같은 카드를 쓴다.
- * 브랜드가 사람을 고를 때 보는 숫자가 화면마다 다르게 생기면, 고른 근거를 나중에
- * 맞춰 볼 수 없다.
+ * 리스트업 화면 세 곳(브랜드 명단 · 담당자 풀 · 담당자 명단)과 지원자 목록이 같은
+ * 카드를 쓴다. 브랜드가 사람을 고를 때 보는 숫자가 화면마다 다르게 생기면, 고른
+ * 근거를 나중에 맞춰 볼 수 없다.
  *
- * 이 카드의 핵심은 숫자 옆의 출처 표시다. 팔로워·평균 조회수는 본인이 적은 값일
- * 수도 있고 메타 API 로 받아온 값일 수도 있다. 둘을 같은 굵기로 보여주면 브랜드는
- * 어느 숫자도 믿지 않게 된다.
+ * ── 한 줄 카드인 이유 ──
  *
- * ── 피드 분위기 · 릴스 동향 ──
+ * 이 화면의 일은 한 사람을 자세히 읽는 것이 아니라 여러 사람을 견주는 것이다. 카드
+ * 하나가 화면을 다 차지하면 두 번째 후보를 보려고 스크롤한 순간 첫 번째 숫자가
+ * 기억에서 사라지고, 비교가 아니라 순서대로 읽기가 된다. 그래서 기본은 한 화면에
+ * 여러 명이 들어가는 접힌 줄이고, 판단에 꼭 필요한 것만 겉에 둔다.
  *
- * 브랜드가 후보를 고를 때 실제로 확인하고 싶은 것은 평균 숫자가 아니라 "이 계정 톤이
- * 우리 브랜드와 맞는가"다. 그래서 두 가지를 함께 싣는다.
+ *   겉(항상 보임): 이름·출처 배지 · 팔로워 / 평균 조회수 / 광고비 · 최근 릴스 3편 ·
+ *                  릴스 동향 배지
+ *   안(펼쳐야 보임): 릴스 동향 설명, 피드 9칸, 소개, 나머지 단가, 링크, 담당자 메모,
+ *                  그리고 부르는 쪽이 넘긴 details(연락처처럼 고른 뒤에 필요한 것)
  *
- *  1. 피드 9개 그리드 — 최근 게시물 정사각 썸네일 딱 9칸(3×3). 개수를 9로 못 박는
- *     이유는 분위기 판단에 그 정도면 충분하고, 더 늘리면 카드가 프로필 페이지처럼
- *     길어져 후보끼리 비교하기 어려워지기 때문이다. 스크롤 없이 한 눈에 3줄.
- *  2. 릴스 동향 — 조회수 하나만 보면 터진 영상 한 개로 계정 전체를 잘못 판단한다.
- *     그래서 최근 3편과 그 이전 3편의 평균을 비교해 올라가는 계정인지 내려가는
- *     계정인지 보여주고, 평균 대비 최고·최저를 같이 적는다. 최고와 최저가 몇 배씩
- *     벌어지는 계정은 평균 조회수를 그대로 믿을 수 없다는 뜻이다.
+ * 고르는 동작(children)은 접지 않는다. 수락 버튼을 펼침 안에 두면 결정한 사람이
+ * 버튼을 찾느라 한 번 더 눌러야 한다.
  *
- * 두 값 모두 메타 API 로만 채워진다(recent_feed / recent_reels). 그래서 본인 입력
- * 계정에서는 이 영역이 아예 나오지 않는다 — 빈 칸을 그려 두면 "활동을 안 하는
- * 사람"으로 잘못 읽히므로, 데이터가 없으면 영역을 접는다.
+ * ── 숫자 옆의 출처 표시 ──
+ *
+ * 팔로워·평균 조회수는 본인이 적은 값일 수도 있고 메타 API 로 받아온 값일 수도 있다.
+ * 둘을 같은 굵기로 보여주면 브랜드는 어느 숫자도 믿지 않게 된다.
+ *
+ * ── 릴스 3편과 동향 ──
+ *
+ * 조회수 하나만 보면 터진 영상 한 개로 계정 전체를 잘못 판단한다. 그래서 최근 3편을
+ * 편별 조회수와 함께 싣고, 최근 절반과 그 이전 절반을 비교한 동향을 배지로 붙인다.
+ * 최고와 최저가 몇 배씩 벌어지는 계정은 평균 조회수를 그대로 믿을 수 없다는 뜻이라
+ * 펼침 안에 그 경고를 적는다.
+ *
+ * 릴스·피드는 메타 API 로만 채워진다(recent_feed / recent_reels). 본인 입력 계정에는
+ * 이 영역이 아예 나오지 않는다 — 빈 칸을 그려 두면 "활동을 안 하는 사람"으로 잘못
+ * 읽히므로, 데이터가 없으면 자리를 접는다.
  *
  * 명단에 올리기 전(제안 수락 전)에는 서버가 permalink 와 캡션을 지우고 썸네일만
  * 내려보낸다(campaign-listup.mts 의 maskSnapshot). 그래서 썸네일에 링크가 없는
@@ -89,6 +99,12 @@ export const metricsFrom = (raw: any): CandidateMetrics => {
   };
 };
 
+/** 정렬에 쓰는 값. 목록을 정렬하는 쪽과 카드가 같은 규칙으로 숫자를 꺼내야 한다. */
+export const candidateSortValues = (raw: any) => {
+  const m = metricsFrom(raw);
+  return { followers: m.followers || 0, avgViews: m.avgViews || 0 };
+};
+
 /** 지표 출처. 클래스 이름은 문자열 조립 없이 표에서 꺼내야 Tailwind 가 살려 둔다. */
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   meta_api: { label: '메타 연동 확인', cls: 'bg-emerald-50 text-emerald-600' },
@@ -96,11 +112,24 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   none: { label: '미등록', cls: 'bg-slate-100 text-slate-400' },
 };
 
-const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
+/**
+ * 가로로 붙는 지표 칸.
+ *
+ * 값은 만 단위로 접어 짧게 적고(2.4만), 정확한 숫자는 title 로 단다. 후보를 세로로
+ * 쌓아 비교하는 자리라 자릿수보다 크기가 먼저 읽혀야 한다.
+ */
+const Stat: React.FC<{ label: string; value: string; title?: string; hint?: string }> = ({
+  label,
+  value,
+  title,
+  hint,
+}) => (
   <div className="min-w-0">
-    <p className="text-[9px] text-slate-400 font-black uppercase">{label}</p>
-    <p className="text-sm text-slate-900 font-black truncate">{value}</p>
-    {hint && <p className="text-[10px] text-slate-400 font-medium truncate">{hint}</p>}
+    <p className="text-[9px] text-slate-400 font-black uppercase truncate">{label}</p>
+    <p className="text-[13px] text-slate-900 font-black truncate" title={title}>
+      {value}
+    </p>
+    {hint ? <p className="text-[9px] text-slate-400 font-medium truncate">{hint}</p> : null}
   </div>
 );
 
@@ -109,200 +138,298 @@ interface InfluencerCandidateCardProps {
   data: any;
   /** 카드 오른쪽 위에 놓을 배지(선택 상태 · 제안 상태). */
   badges?: React.ReactNode;
-  /** 카드 아래에 놓을 동작 영역. */
+  /** 카드 아래에 놓을 동작 영역. 접히지 않는다. */
   children?: React.ReactNode;
+  /** 펼쳤을 때만 나오는 부가 정보(연락처·링크처럼 고른 뒤에 필요한 것). */
+  details?: React.ReactNode;
   /** 담당자가 붙인 추천 이유. */
   note?: string;
+  /** 처음부터 펼친 상태로 그린다. 후보가 한 명뿐인 화면에서 쓴다. */
+  defaultExpanded?: boolean;
 }
 
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   data,
   badges,
   children,
+  details,
   note,
+  defaultExpanded,
 }) => {
+  const [expanded, setExpanded] = useState(!!defaultExpanded);
   const m = metricsFrom(data);
   const source = SOURCE_BADGE[m.metricsSource || 'none'] || SOURCE_BADGE.none;
   const allReels = m.recentReels || [];
   const reels = allReels.slice(0, 3);
   const trend = reelTrendOf(allReels);
   const feed = (m.recentFeed || []).slice(0, 9);
-  const priceLine = [
-    m.adPrice ? `광고 ${m.adPrice}` : '',
-    m.shortPrice ? `숏폼 ${m.shortPrice}` : '',
-    m.postPrice ? `게시물 ${m.postPrice}` : '',
+
+  /**
+   * 단가. 겉에는 한 줄에 한 값만 둔다 — 광고·숏폼·게시물을 나란히 적으면 칸이 셋으로
+   * 쪼개져 어느 것도 안 읽힌다. 대표값은 광고비이고, 없으면 숏폼·게시물 순으로 내려
+   * 간다("미기재"로 비워 두면 단가를 안 받는 사람으로 읽힌다).
+   */
+  const prices = [
+    m.adPrice ? { label: '광고', value: m.adPrice } : null,
+    m.shortPrice ? { label: '숏폼', value: m.shortPrice } : null,
+    m.postPrice ? { label: '게시물', value: m.postPrice } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+  const mainPrice = prices[0];
+  const restPrices = prices.slice(1);
+
+  const handleLine = [
+    `@${m.username}`,
+    m.instagramHandle && m.instagramHandle !== m.username ? `인스타 @${m.instagramHandle}` : '',
+    m.categories || '',
   ]
     .filter(Boolean)
     .join(' · ');
 
-  return (
-    <div className="bg-white rounded-xl border border-slate-100 p-4">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-sm font-black text-slate-900 truncate">
-              {m.name || `@${m.username}`}
-            </span>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
-              {source.label}
-            </span>
+  // 펼침 안에 실을 것이 하나도 없으면 버튼을 만들지 않는다. 눌러도 아무 일이 없는
+  // 버튼이 목록에 줄줄이 있으면 다른 카드의 펼침까지 안 눌러 보게 된다.
+  const hasMore = !!(
+    feed.length > 0 ||
+    trend ||
+    m.intro ||
+    restPrices.length > 0 ||
+    m.instagramUrl ||
+    note ||
+    details
+  );
+
+  /**
+   * 릴스 썸네일 한 칸. 폭을 고정한다 — 칸을 늘려 채우게 두면 릴스가 한 편뿐인
+   * 계정에서 세로 9:16 그림이 카드 높이의 두 배로 자란다.
+   */
+  const reelThumb = (r: any, i: number, big?: boolean) => {
+    const views = Number(r?.views || 0);
+    const width = big ? 'w-[84px]' : 'w-8 sm:w-[42px]';
+    const inner = (
+      <>
+        {r?.thumbnailUrl ? (
+          <img
+            src={r.thumbnailUrl}
+            alt=""
+            loading="lazy"
+            className="w-full aspect-[9/16] object-cover rounded-md bg-slate-100"
+          />
+        ) : (
+          <div className="w-full aspect-[9/16] rounded-md bg-slate-100 flex items-center justify-center">
+            <span className="text-[9px] text-slate-400 font-bold">영상</span>
           </div>
-          <p className="text-[11px] text-slate-400 font-bold truncate">
-            @{m.username}
-            {m.instagramHandle && m.instagramHandle !== m.username ? ` · 인스타 @${m.instagramHandle}` : ''}
-            {m.categories ? ` · ${m.categories}` : ''}
-          </p>
-        </div>
-        {badges && <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>}
+        )}
+        <p
+          className={`${big ? 'text-[10px]' : 'text-[9px]'} text-slate-500 font-bold mt-0.5 truncate text-center`}
+          title={views ? `조회 ${formatNumberWithCommas(views)}` : '조회수 비공개'}
+        >
+          {views ? formatCountKo(views) : '비공개'}
+        </p>
+      </>
+    );
+    return r?.permalink ? (
+      <a
+        key={r.id || i}
+        href={r.permalink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`block flex-shrink-0 hover:opacity-80 ${width}`}
+      >
+        {inner}
+      </a>
+    ) : (
+      <div key={r?.id || i} className={`flex-shrink-0 ${width}`}>
+        {inner}
       </div>
+    );
+  };
 
-      {/* 좋아요는 싣지 않는다. 브랜드가 후보를 고를 때 쓰는 숫자는 도달(조회수)이고,
-          좋아요를 나란히 두면 릴스 조회수와 사진 반응이 섞여 비교 기준이 흐려진다.
-          평균 좋아요·댓글은 인사이트 점수 계산에는 그대로 쓰인다. */}
-      <div className="grid grid-cols-2 gap-2 bg-slate-50 rounded-lg px-3 py-2.5 mb-3">
-        <Stat label="팔로워" value={m.followers ? formatNumberWithCommas(m.followers) : '—'} />
-        <Stat
-          label="평균 조회수"
-          value={m.avgViews ? formatNumberWithCommas(m.avgViews) : '—'}
-          hint={m.reelsCount ? `최근 릴스 ${m.reelsCount}개 기준` : ''}
-        />
-      </div>
-
-      {reels.length > 0 && (
-        <div className="mb-3">
-          <div className="flex items-center justify-between gap-2 mb-1.5">
-            <p className="text-[9px] text-slate-400 font-black uppercase">최근 릴스 동향</p>
-            {trend && trend.percent !== null && (
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}>
-                {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
-                {trend.percent}%
-              </span>
+  return (
+    <div className="bg-white rounded-xl border border-slate-100 p-3">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          {/* 이름 · 출처 · 상태 배지를 한 줄에 둔다. 접힌 목록에서 사람을 구분하는
+              것은 이 줄 하나뿐이다. */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-sm font-black text-slate-900 truncate">
+                  {m.name || `@${m.username}`}
+                </span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
+                  {source.label}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-bold truncate">{handleLine}</p>
+            </div>
+            {badges && (
+              <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {reels.map((r: any, i: number) => {
-              const views = Number(r?.views || 0);
-              const inner = (
-                <>
-                  {r?.thumbnailUrl ? (
-                    <img
-                      src={r.thumbnailUrl}
-                      alt=""
-                      loading="lazy"
-                      className="w-full aspect-[9/16] object-cover rounded-lg bg-slate-100"
-                    />
-                  ) : (
-                    <div className="w-full aspect-[9/16] rounded-lg bg-slate-100 flex items-center justify-center">
-                      <span className="text-[10px] text-slate-400 font-bold">영상</span>
-                    </div>
-                  )}
-                  <p className="text-[10px] text-slate-500 font-bold mt-1">
-                    {views ? `조회 ${formatNumberWithCommas(views)}` : '조회수 비공개'}
-                  </p>
-                </>
-              );
-              return r?.permalink ? (
-                <a
-                  key={r.id || i}
-                  href={r.permalink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block hover:opacity-80"
-                >
-                  {inner}
-                </a>
-              ) : (
-                <div key={r?.id || i}>{inner}</div>
-              );
-            })}
-          </div>
-          {trend ? (
-            <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-              최근 {formatNumberWithCommas(trend.recent)}회
-              {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
-              {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저 {formatNumberWithCommas(trend.worst)}
-              {trendIsVolatile(trend)
-                ? ' · 편차가 커서 평균보다 최저값을 기준으로 보는 편이 안전합니다'
-                : ''}
-            </p>
-          ) : (
-            // 연동은 됐지만 조회수 권한을 못 받은 계정. "0회"로 적으면 안 본 영상이 된다.
-            <p className="text-[10px] text-slate-400 font-medium mt-1.5">조회수 비공개 계정으로 동향은 집계 전입니다</p>
-          )}
-        </div>
-      )}
 
-      {feed.length > 0 && (
-        <div className="mb-3">
-          <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">최근 피드 {feed.length}개</p>
-          <div className="grid grid-cols-3 gap-1">
-            {feed.map((f: any, i: number) => {
-              const isVideo = String(f?.mediaType || '').toUpperCase() === 'VIDEO';
-              const inner = f?.thumbnailUrl ? (
-                <div className="relative">
-                  <img
-                    src={f.thumbnailUrl}
-                    alt=""
-                    loading="lazy"
-                    className="w-full aspect-square object-cover rounded-md bg-slate-100"
-                  />
-                  {isVideo && (
-                    <span className="absolute bottom-1 right-1 text-[8px] font-black text-white bg-black/50 rounded px-1">
-                      영상
-                    </span>
-                  )}
-                </div>
-              ) : (
-                // 메타의 미디어 URL 은 만료된다. 지난번에 받아 둔 주소가 죽었을 뿐이니
-                // 빈 칸을 회색 자리로 그려 "게시물이 없는 계정"과 구분한다.
-                <div className="w-full aspect-square rounded-md bg-slate-100" />
-              );
-              return f?.permalink ? (
-                <a
-                  key={f.id || i}
-                  href={f.permalink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block hover:opacity-80"
-                >
-                  {inner}
-                </a>
-              ) : (
-                <div key={f?.id || i}>{inner}</div>
-              );
-            })}
+          {/* 좋아요는 싣지 않는다. 브랜드가 후보를 고를 때 쓰는 숫자는 도달(조회수)과
+              그 값을 사는 가격이고, 좋아요를 나란히 두면 릴스 조회수와 사진 반응이
+              섞여 비교 기준이 흐려진다. 평균 좋아요·댓글은 인사이트 점수 계산에는
+              그대로 쓰인다. */}
+          <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 mt-2">
+            <Stat
+              label="팔로워"
+              value={m.followers ? formatCountKo(m.followers) : '—'}
+              title={m.followers ? formatNumberWithCommas(m.followers) : ''}
+            />
+            <Stat
+              label="평균 조회수"
+              value={m.avgViews ? formatCountKo(m.avgViews) : '—'}
+              title={m.avgViews ? formatNumberWithCommas(m.avgViews) : ''}
+              hint={m.reelsCount ? `릴스 ${m.reelsCount}편 기준` : ''}
+            />
+            <Stat
+              label="광고비"
+              value={mainPrice ? mainPrice.value : '—'}
+              title={mainPrice ? mainPrice.value : ''}
+              hint={mainPrice ? mainPrice.label : '미기재'}
+            />
           </div>
         </div>
-      )}
 
-      {(m.intro || priceLine) && (
-        <div className="mb-3 space-y-1">
-          {m.intro && (
-            <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap line-clamp-3">{m.intro}</p>
-          )}
-          {priceLine && <p className="text-[11px] text-slate-500 font-bold">{priceLine}</p>}
-        </div>
-      )}
+        {/* 최근 릴스 3편. 숫자만으로는 톤을 알 수 없어 겉에 남긴다. */}
+        {reels.length > 0 && (
+          <div className="flex-shrink-0">
+            <div className="flex gap-1">{reels.map((r: any, i: number) => reelThumb(r, i))}</div>
+            {trend && trend.percent !== null && (
+              <div className="flex justify-center mt-1">
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-black ${trendTone(trend.percent).cls}`}
+                >
+                  {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                  {trend.percent}%
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-      {m.instagramUrl && (
-        <a
-          href={m.instagramUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px] text-blue-600 font-bold hover:underline break-all"
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          aria-expanded={expanded}
+          className="mt-2 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-600"
         >
-          {m.instagramUrl}
-        </a>
+          {expanded ? '접기' : '자세히 보기'}
+          <svg
+            className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
       )}
 
-      {note && (
-        <div className="mt-3 bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2">
-          <p className="text-[10px] text-blue-500 font-black mb-0.5">담당자 추천 이유</p>
-          <p className="text-[11px] text-blue-700 font-medium whitespace-pre-wrap">{note}</p>
+      {expanded && (
+        <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-3">
+          {reels.length > 0 && (
+            <div>
+              <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">최근 릴스 동향</p>
+              <div className="flex gap-2">
+                {reels.map((r: any, i: number) => reelThumb(r, i, true))}
+              </div>
+              {trend ? (
+                <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+                  최근 {formatNumberWithCommas(trend.recent)}회
+                  {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
+                  {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
+                  {formatNumberWithCommas(trend.worst)}
+                  {trendIsVolatile(trend)
+                    ? ' · 편차가 커서 평균보다 최저값을 기준으로 보는 편이 안전합니다'
+                    : ''}
+                </p>
+              ) : (
+                // 연동은 됐지만 조회수 권한을 못 받은 계정. "0회"로 적으면 안 본 영상이 된다.
+                <p className="text-[10px] text-slate-400 font-medium mt-1.5">
+                  조회수 비공개 계정으로 동향은 집계 전입니다
+                </p>
+              )}
+            </div>
+          )}
+
+          {feed.length > 0 && (
+            <div>
+              <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">
+                최근 피드 {feed.length}개
+              </p>
+              <div className="grid grid-cols-9 gap-1 max-w-[380px]">
+                {feed.map((f: any, i: number) => {
+                  const isVideo = String(f?.mediaType || '').toUpperCase() === 'VIDEO';
+                  const inner = f?.thumbnailUrl ? (
+                    <div className="relative">
+                      <img
+                        src={f.thumbnailUrl}
+                        alt=""
+                        loading="lazy"
+                        className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                      />
+                      {isVideo && (
+                        <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-white/80" />
+                      )}
+                    </div>
+                  ) : (
+                    // 메타의 미디어 URL 은 만료된다. 지난번에 받아 둔 주소가 죽었을 뿐이니
+                    // 빈 칸을 회색 자리로 그려 "게시물이 없는 계정"과 구분한다.
+                    <div className="w-full aspect-square rounded-md bg-slate-100" />
+                  );
+                  return f?.permalink ? (
+                    <a
+                      key={f.id || i}
+                      href={f.permalink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block hover:opacity-80"
+                    >
+                      {inner}
+                    </a>
+                  ) : (
+                    <div key={f?.id || i}>{inner}</div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {restPrices.length > 0 && (
+            <p className="text-[11px] text-slate-500 font-bold">
+              {restPrices.map(p => `${p.label} ${p.value}`).join(' · ')}
+            </p>
+          )}
+
+          {m.intro && (
+            <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap">{m.intro}</p>
+          )}
+
+          {m.instagramUrl && (
+            <a
+              href={m.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-[11px] text-blue-600 font-bold hover:underline break-all"
+            >
+              {m.instagramUrl}
+            </a>
+          )}
+
+          {note && (
+            <div className="bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2">
+              <p className="text-[10px] text-blue-500 font-black mb-0.5">담당자 추천 이유</p>
+              <p className="text-[11px] text-blue-700 font-medium whitespace-pre-wrap">{note}</p>
+            </div>
+          )}
+
+          {details}
         </div>
       )}
 
-      {children && <div className="mt-3 border-t border-slate-100 pt-3">{children}</div>}
+      {children && <div className="mt-2.5 border-t border-slate-100 pt-2.5">{children}</div>}
     </div>
   );
 };

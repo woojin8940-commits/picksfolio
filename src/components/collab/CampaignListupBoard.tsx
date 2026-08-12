@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
+import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 /**
@@ -56,6 +56,15 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
   const [busyId, setBusyId] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * 펼쳐 둔 카드. 기본은 접힘이다.
+   *
+   * 이 화면의 일은 후보를 견주는 것이라, 카드 하나가 화면을 다 차지하면 두 번째
+   * 후보를 보려고 스크롤한 순간 첫 번째 숫자가 기억에서 사라진다. 그래서 겉에는
+   * 고를 때 쓰는 것만(숫자 · 릴스 3편) 두고, 피드 · 동향 설명 · 추천 이유는 눌러서
+   * 펼치게 한다.
+   */
+  const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
   // 사용자가 화면에서 담고 있는 중이면 새로고침이 그 선택을 덮지 않게 한다.
   const touched = useRef(false);
@@ -186,7 +195,10 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
         </div>
       ) : (
         <>
-          <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-2 gap-3">
+          {/* 카드가 짧아진 만큼 넓은 화면에서는 한 줄에 셋까지 놓는다. 모바일은
+              한 줄에 하나 — 폭이 반으로 갈리면 팔로워·조회수·광고비 세 칸이 서로
+              줄바꿈돼 어느 숫자도 안 읽힌다. */}
+          <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
             {[...openList, ...runningList].map((c) => {
               const snap = c.snapshot || {};
               const allReels = Array.isArray(snap.recentReels) ? snap.recentReels : [];
@@ -199,6 +211,10 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
               const locked = c.outreachStatus === 'accepted';
               const inList = selected.has(c.id);
               const line = profileLine(c);
+              const open = openCards.has(c.id);
+              // 펼침 안에 실을 것이 없으면 버튼을 만들지 않는다. 눌러도 아무 일이
+              // 없는 버튼이 카드마다 붙어 있으면 다른 카드의 펼침도 안 눌러 보게 된다.
+              const hasMore = feed.length > 0 || !!trend || !!c.managerNote;
 
               return (
                 <div
@@ -258,109 +274,28 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </button>
                   </div>
 
-                  {reels.length > 0 && (
-                    <div className="mt-3">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <p className="text-[9px] text-slate-400 font-black">최근 릴스 동향</p>
-                        {trend && trend.percent !== null && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
-                          >
-                            {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
-                            {trend.percent}%
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {reels.map((r: any, i: number) => (
-                          <div key={r?.id || i}>
-                            {r?.thumbnailUrl ? (
-                              <img
-                                src={r.thumbnailUrl}
-                                alt=""
-                                loading="lazy"
-                                className="w-full aspect-[9/16] object-cover rounded-lg bg-slate-100"
-                              />
-                            ) : (
-                              <div className="w-full aspect-[9/16] rounded-lg bg-slate-100 flex items-center justify-center">
-                                <span className="text-[10px] text-slate-300 font-bold">영상</span>
-                              </div>
-                            )}
-                            {r?.views ? (
-                              <p className="text-[10px] text-slate-400 font-bold mt-0.5 truncate">
-                                조회 {formatNumberWithCommas(r.views)}
-                              </p>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                      {trend ? (
-                        <p className="text-[10px] text-slate-400 font-medium mt-1 leading-relaxed">
-                          최근 {formatNumberWithCommas(trend.recent)}회
-                          {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
-                          {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
-                          {formatNumberWithCommas(trend.worst)}
-                          {trendIsVolatile(trend) ? ' · 편차가 큰 계정입니다' : ''}
-                        </p>
-                      ) : (
-                        // 조회수 권한을 못 받은 계정. "0회"로 적으면 아무도 안 본 영상이 된다.
-                        <p className="text-[10px] text-slate-400 font-medium mt-1">조회수 비공개 · 동향 집계 전</p>
-                      )}
-                    </div>
-                  )}
-
-                  {feed.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-[9px] text-slate-400 font-black mb-1">최근 피드 {feed.length}개</p>
-                      <div className="grid grid-cols-3 gap-1">
-                        {feed.map((f: any, i: number) => (
-                          <div key={f?.id || i} className="relative">
-                            {f?.thumbnailUrl ? (
-                              <img
-                                src={f.thumbnailUrl}
-                                alt=""
-                                loading="lazy"
-                                className="w-full aspect-square object-cover rounded-md bg-slate-100"
-                              />
-                            ) : (
-                              // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
-                              // "게시물이 없는 계정"과 구분된다.
-                              <div className="w-full aspect-square rounded-md bg-slate-100" />
-                            )}
-                            {String(f?.mediaType || '').toUpperCase() === 'VIDEO' && (
-                              <span className="absolute bottom-1 right-1 text-[8px] font-black text-white bg-black/50 rounded px-1">
-                                영상
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {c.managerNote && (
-                    <div className="mt-3 bg-slate-50 rounded-xl px-3 py-2">
-                      <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
-                      <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap line-clamp-4">
-                        {c.managerNote}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-2 mt-3">
+                  {/* 숫자를 먼저 둔다. 후보를 견주는 화면에서 맨 먼저 읽히는 것은
+                      팔로워·조회수·가격이고, 그림은 그 뒤의 확인이다. */}
+                  <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 mt-2.5">
                     <div className="min-w-0">
                       <p className="text-[9px] text-slate-400 font-black">팔로워</p>
-                      <p className="text-[13px] text-slate-900 font-black truncate">
-                        {snap.followers ? formatNumberWithCommas(snap.followers) : '—'}
+                      <p
+                        className="text-[13px] text-slate-900 font-black truncate"
+                        title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
+                      >
+                        {snap.followers ? formatCountKo(snap.followers) : '—'}
                       </p>
                     </div>
                     <div className="min-w-0">
                       <p className="text-[9px] text-slate-400 font-black">보장 조회수</p>
-                      <p className="text-[13px] text-slate-900 font-black truncate">
-                        {c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : '—'}
+                      <p
+                        className="text-[13px] text-slate-900 font-black truncate"
+                        title={c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : ''}
+                      >
+                        {c.guaranteedViews ? formatCountKo(c.guaranteedViews) : '—'}
                       </p>
                       {c.cpv > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold">CPV {c.cpv}원</p>
+                        <p className="text-[9px] text-slate-400 font-bold truncate">CPV {c.cpv}원</p>
                       )}
                     </div>
                     <div className="min-w-0">
@@ -369,14 +304,136 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
                       </p>
                       {c.quotedSecondUseFee > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold truncate">
+                        <p className="text-[9px] text-slate-400 font-bold truncate">
                           2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
                         </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-3 border-t border-slate-100">
+                  {/* 최근 릴스 3편. 숫자만으로는 계정 톤을 알 수 없어 접지 않는다. */}
+                  {reels.length > 0 && (
+                    <div className="mt-2.5">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-[9px] text-slate-400 font-black">최근 릴스 3편</p>
+                        {trend && trend.percent !== null && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black ${trendTone(trend.percent).cls}`}
+                          >
+                            {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                            {trend.percent}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 max-w-[168px]">
+                        {reels.map((r: any, i: number) => (
+                          <div key={r?.id || i}>
+                            {r?.thumbnailUrl ? (
+                              <img
+                                src={r.thumbnailUrl}
+                                alt=""
+                                loading="lazy"
+                                className="w-full aspect-[9/16] object-cover rounded-md bg-slate-100"
+                              />
+                            ) : (
+                              <div className="w-full aspect-[9/16] rounded-md bg-slate-100 flex items-center justify-center">
+                                <span className="text-[9px] text-slate-300 font-bold">영상</span>
+                              </div>
+                            )}
+                            <p
+                              className="text-[9px] text-slate-500 font-bold mt-0.5 truncate text-center"
+                              title={r?.views ? `조회 ${formatNumberWithCommas(r.views)}` : '조회수 비공개'}
+                            >
+                              {r?.views ? formatCountKo(r.views) : '비공개'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {hasMore && (
+                    <button
+                      onClick={() =>
+                        setOpenCards((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(c.id)) next.delete(c.id);
+                          else next.add(c.id);
+                          return next;
+                        })
+                      }
+                      aria-expanded={open}
+                      className="mt-2 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-600"
+                    >
+                      {open ? '접기' : '자세히 보기'}
+                      <svg
+                        className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  )}
+
+                  {open && (
+                    <div className="mt-2 space-y-3">
+                      {reels.length > 0 &&
+                        (trend ? (
+                          <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                            최근 {formatNumberWithCommas(trend.recent)}회
+                            {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
+                            {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
+                            {formatNumberWithCommas(trend.worst)}
+                            {trendIsVolatile(trend) ? ' · 편차가 큰 계정입니다' : ''}
+                          </p>
+                        ) : (
+                          // 조회수 권한을 못 받은 계정. "0회"로 적으면 아무도 안 본 영상이 된다.
+                          <p className="text-[10px] text-slate-400 font-medium">조회수 비공개 · 동향 집계 전</p>
+                        ))}
+
+                      {feed.length > 0 && (
+                        <div>
+                          <p className="text-[9px] text-slate-400 font-black mb-1">최근 피드 {feed.length}개</p>
+                          <div className="grid grid-cols-9 gap-1">
+                            {feed.map((f: any, i: number) => (
+                              <div key={f?.id || i} className="relative">
+                                {f?.thumbnailUrl ? (
+                                  <img
+                                    src={f.thumbnailUrl}
+                                    alt=""
+                                    loading="lazy"
+                                    className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                                  />
+                                ) : (
+                                  // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
+                                  // "게시물이 없는 계정"과 구분된다.
+                                  <div className="w-full aspect-square rounded-md bg-slate-100" />
+                                )}
+                                {String(f?.mediaType || '').toUpperCase() === 'VIDEO' && (
+                                  <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-white/80" />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {c.managerNote && (
+                        <div className="bg-slate-50 rounded-xl px-3 py-2">
+                          <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
+                          <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap">
+                            {c.managerNote}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 카드 높이가 서로 다르므로 담기 버튼은 아래에 붙여 둔다. 한 줄에
+                      놓인 카드의 버튼 높이가 어긋나면 훑으면서 누르기 어렵다. */}
+                  <div className="mt-auto pt-3 border-t border-slate-100">
                     {locked ? (
                       <p className="text-[11px] text-emerald-600 font-bold text-center py-1.5">
                         협업이 시작됐습니다. 진행 상황은 아래 협업 현황에서 확인하실 수 있습니다.
