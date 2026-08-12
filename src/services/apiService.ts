@@ -2369,17 +2369,23 @@ export const apiService = {
   },
 
   /**
-   * 내가 이미 매칭 등록서를 냈는지.
+   * 내가 이미 매칭 등록서를 냈는지, 그리고 무엇을 적어 냈는지.
    *
-   * 등록 버튼을 감출지 정하는 데만 쓴다. 서버는 접수 여부와 상태·접수 시각만 돌려주고
-   * 등록서 내용은 담지 않는다 — 화면이 쓰지 않는 값이다. 응답을 못 받으면
+   * 등록 버튼을 감출지 정하고, "수정하기"에서 접수한 내용을 되살리는 데 쓴다. 서버는
+   * 본인 확인을 통과한 요청에만 등록서 내용을 실어 준다. 응답을 못 받으면
    * submitted:false 로 둔다: 이미 낸 사람에게 버튼이 한 번 더 보이는 것이,
    * 아직 안 낸 사람에게 버튼이 사라지는 것보다 낫다.
    */
   async getMyCollabDirectory(
     variant: 'influencer' | 'brand',
     username?: string,
-  ): Promise<{ submitted: boolean; status?: string; createdAt?: string | null; error?: string }> {
+  ): Promise<{
+    submitted: boolean;
+    status?: string;
+    createdAt?: string | null;
+    application?: Record<string, any> | null;
+    error?: string;
+  }> {
     try {
       const params = new URLSearchParams({ mine: '1', role: variant });
       if (username) params.set('username', username);
@@ -2389,10 +2395,45 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { submitted: false, error: json?.error || '확인하지 못했습니다.' };
-      return { submitted: !!json.submitted, status: json.status || '', createdAt: json.createdAt || null };
+      return {
+        submitted: !!json.submitted,
+        status: json.status || '',
+        createdAt: json.createdAt || null,
+        application: json.application || null,
+      };
     } catch (e) {
       console.error('[API] Failed to check collab directory submission:', e);
       return { submitted: false, error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 접수한 내 등록서 수정.
+   *
+   * 광고 단가는 접수한 뒤에도 바뀐다. 취소 후 재등록을 시키면 접수 순서를 잃고
+   * 운영자 명단에는 같은 사람이 두 번 지나간 것처럼 보이므로, 제자리에서 고친다.
+   * 보내지 않은 칸은 서버가 기존 값을 유지한다.
+   */
+  async updateMyCollabDirectory(
+    variant: 'influencer' | 'brand',
+    username: string,
+    payload: Record<string, any>,
+  ): Promise<{ success?: boolean; application?: Record<string, any> | null; error?: string }> {
+    try {
+      const params = new URLSearchParams({ mine: '1', role: variant });
+      if (username) params.set('username', username);
+      const res = await fetch(`/api/collab-directory?${params.toString()}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '수정하지 못했습니다.' };
+      return { success: true, application: json?.application || null };
+    } catch (e) {
+      console.error('[API] Failed to update collab directory application:', e);
+      return { error: '네트워크 오류' };
     }
   },
 

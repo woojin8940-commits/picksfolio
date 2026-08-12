@@ -140,6 +140,122 @@ function splitCategories(raw: unknown): string[] {
   return Array.from(new Set(tags));
 }
 
+/**
+ * 인플루언서 등록서의 파생 값(대표 팔로워 수·단가 표기)을 한 번에 계산한다.
+ *
+ * 접수(POST)와 본인 수정(PATCH)이 같은 규칙을 써야 한다. 두 곳에서 따로 계산하면
+ * 단가를 고친 순간 표기 형식이 접수 때와 달라지고("게시물 30만원 / 숏폼 50만원" vs
+ * "30만원"), 운영자 명단에서 같은 사람이 다른 규칙으로 보이게 된다.
+ */
+function deriveInfluencerFields(input: {
+  postPrice: string;
+  shortPrice: string;
+  adPriceFallback?: string;
+  instagramFollowers: number;
+  youtubeFollowers: number;
+  tiktokFollowers: number;
+  metaFollowers: number;
+  crawledFollowers: number | null;
+}) {
+  const ad_price =
+    [
+      input.postPrice && `게시물 ${input.postPrice}`,
+      input.shortPrice && `숏폼 ${input.shortPrice}`,
+    ]
+      .filter(Boolean)
+      .join(" / ") || (input.adPriceFallback || "").trim();
+
+  const manualFollowers = Math.max(
+    input.instagramFollowers,
+    input.youtubeFollowers,
+    input.tiktokFollowers,
+  );
+
+  let follower_count = manualFollowers;
+  let follower_source = "manual";
+  if (input.metaFollowers > 0) {
+    // 연동 계정의 팔로워가 다른 채널보다 적어도 검증된 값이라는 사실이 더 중요하다.
+    follower_count = Math.max(input.metaFollowers, input.youtubeFollowers, input.tiktokFollowers);
+    follower_source = "meta_api";
+  } else if (input.crawledFollowers != null) {
+    follower_count = input.crawledFollowers;
+    follower_source = "crawled";
+  }
+
+  return { ad_price, follower_count, follower_source };
+}
+
+/**
+ * 고른 카테고리를 채널 정보(creator_channels)에도 옮긴다.
+ *
+ * 등록서는 접수된 서류라 담당자 명부에서만 읽는다. 반면 캠페인 리스트업 카드와
+ * 카테고리 필터는 creator_channels 를 본다 — 옮겨 두지 않으면 본인이 고른 분야가
+ * 정작 브랜드에게 추천될 때는 빈칸으로 남는다. 실패해도 접수/수정을 되돌리지 않는다.
+ */
+async function mirrorCategories(db: any, applicantUsername: string, categories: string) {
+  const chosen = String(categories || "").trim();
+  const channelKey = String(applicantUsername || "").trim().toLowerCase();
+  if (!chosen || !channelKey) return;
+  try {
+    await db.sql`
+      INSERT INTO creator_channels (username, categories)
+      VALUES (${channelKey}, ${chosen})
+      ON CONFLICT (username) DO UPDATE
+        SET categories = EXCLUDED.categories, updated_at = NOW()
+    `;
+  } catch (chErr) {
+    console.error("[collab-directory] 채널 카테고리 반영 실패:", chErr);
+  }
+}
+
+/**
+ * 본인에게 돌려줄 등록서 내용.
+ *
+ * 수정 화면이 값을 되살리려면 접수한 내용을 그대로 받아야 한다. 본인 확인을 통과한
+ * 요청에만 실어 보내며, 운영자 메모나 다른 지원자 정보는 담지 않는다.
+ */
+function shapeOwnApplication(row: any) {
+  if (!row) return null;
+  const base = {
+    id: row.id,
+    role: row.role,
+    status: row.status || "pending",
+    name: row.name || "",
+    contact: row.contact || "",
+    note: row.note || "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+  if (row.role === "brand") {
+    return {
+      ...base,
+      brand_homepage: row.brand_homepage || "",
+      brand_instagram: row.brand_instagram || "",
+      desired_count: row.desired_count || "",
+      desired_followers: row.desired_followers || "",
+      budget_text: row.budget_text || "",
+      desired_schedule: row.desired_schedule || "",
+      desired_category: row.desired_category || "",
+    };
+  }
+  return {
+    ...base,
+    instagram_url: row.instagram_url || "",
+    youtube_url: row.youtube_url || "",
+    tiktok_url: row.tiktok_url || "",
+    naver_blog_url: row.naver_blog_url || "",
+    instagram_followers: Number(row.instagram_followers || 0),
+    youtube_followers: Number(row.youtube_followers || 0),
+    tiktok_followers: Number(row.tiktok_followers || 0),
+    post_price: row.post_price || "",
+    short_price: row.short_price || "",
+    ad_price: row.ad_price || "",
+    category: row.category || "",
+    follower_count: Number(row.follower_count || 0),
+    follower_source: row.follower_source || "manual",
+  };
+}
+
 function shapeInfluencerApplication(row: any) {
   const recentReels = parseJsonArray(row.instagram_recent_reels).slice(0, 6);
   const recentAverage = average(recentReels.slice(0, 3).map((reel) => Number(reel?.views || 0)));
@@ -228,17 +344,10 @@ export default async (req: Request) => {
           metaFollowers || Math.max(0, parseInt(b.instagram_followers, 10) || 0);
         const youtube_followers = Math.max(0, parseInt(b.youtube_followers, 10) || 0);
         const tiktok_followers = Math.max(0, parseInt(b.tiktok_followers, 10) || 0);
-        // 구간 분류/정렬용 대표 팔로워 수는 채널별 입력값 중 최대값을 사용한다.
-        const manualFollowers = Math.max(instagram_followers, youtube_followers, tiktok_followers);
 
         // 콘텐츠 유형별 단가
         const post_price = (b.post_price || "").toString().trim();
         const short_price = (b.short_price || "").toString().trim();
-        // 관리자 화면 호환을 위해 단일 ad_price 텍스트를 파생 표기로 채운다.
-        const ad_price = [
-          post_price && `게시물 ${post_price}`,
-          short_price && `숏폼 ${short_price}`,
-        ].filter(Boolean).join(" / ") || (b.ad_price || "").toString().trim();
 
         // 인스타그램 지표는 공개 HTML 크롤링 값이 아니라 Meta 연동 데이터만 검증값으로
         // 사용한다. 연동을 마쳤으면 그 숫자를 대표값으로 굳히고, 연동 전에는 수기값을
@@ -246,16 +355,18 @@ export default async (req: Request) => {
         // 틱톡은 기존 분류 호환을 위해 공개 페이지 확인을 best-effort 로 유지한다.
         const crawled = tiktok_url ? await crawlFollowers(tiktok_url) : null;
 
-        let follower_count = manualFollowers;
-        let follower_source = "manual";
-        if (metaFollowers > 0) {
-          // 연동 계정의 팔로워가 다른 채널보다 적어도 검증된 값이라는 사실이 더 중요하다.
-          follower_count = Math.max(metaFollowers, youtube_followers, tiktok_followers);
-          follower_source = "meta_api";
-        } else if (crawled != null) {
-          follower_count = crawled;
-          follower_source = "crawled";
-        }
+        // 관리자 화면 호환을 위해 단일 ad_price 텍스트를 파생 표기로 채운다.
+        // 구간 분류/정렬용 대표 팔로워 수도 여기서 정해진다.
+        const { ad_price, follower_count, follower_source } = deriveInfluencerFields({
+          postPrice: post_price,
+          shortPrice: short_price,
+          adPriceFallback: (b.ad_price || "").toString(),
+          instagramFollowers: instagram_followers,
+          youtubeFollowers: youtube_followers,
+          tiktokFollowers: tiktok_followers,
+          metaFollowers,
+          crawledFollowers: crawled,
+        });
 
         await db.sql`
           INSERT INTO collab_directory_applications
@@ -272,31 +383,9 @@ export default async (req: Request) => {
              ${follower_count}, ${follower_source}, ${(b.note || "").toString()})
         `;
 
-        // 고른 카테고리는 채널 정보(creator_channels)에도 남긴다.
-        //
-        // 등록서(collab_directory_applications)는 접수된 서류라 담당자 명부에서만
-        // 읽는다. 반면 캠페인 리스트업 카드와 카테고리 필터는 creator_channels 를
-        // 본다 — 여기에 옮겨 두지 않으면 본인이 고른 분야가 정작 브랜드에게
-        // 추천될 때는 빈칸으로 남는다.
-        //
-        // 빈 값일 때는 쓰지 않는다. 예전에 채워 둔 카테고리를 이번 등록서에
-        // 카테고리를 안 골랐다는 이유로 지워 버릴 이유가 없다.
-        // 키는 소문자다(creator_channels.username 은 어디서나 소문자로 읽는다).
-        const chosenCategories = (b.category || "").toString().trim();
-        const channelKey = applicantUsername.trim().toLowerCase();
-        if (chosenCategories && channelKey) {
-          try {
-            await db.sql`
-              INSERT INTO creator_channels (username, categories)
-              VALUES (${channelKey}, ${chosenCategories})
-              ON CONFLICT (username) DO UPDATE
-                SET categories = EXCLUDED.categories, updated_at = NOW()
-            `;
-          } catch (chErr) {
-            // 접수 자체는 이미 끝났다. 카테고리 반영에 실패해도 등록을 되돌리지 않는다.
-            console.error("[collab-directory] 채널 카테고리 반영 실패:", chErr);
-          }
-        }
+        // 고른 카테고리는 채널 정보(creator_channels)에도 남긴다. 빈 값일 때는 쓰지
+        // 않는다 — 예전에 채워 둔 카테고리를 이번 등록서가 비었다는 이유로 지울 이유가 없다.
+        await mirrorCategories(db, applicantUsername, (b.category || "").toString());
 
         return Response.json({
           success: true,
@@ -329,12 +418,12 @@ export default async (req: Request) => {
     }
   }
 
-  // ── 본인 접수 여부 확인(로그인 사용자) ─────────────────────────────
+  // ── 본인 접수 확인/조회(로그인 사용자) ─────────────────────────────
   //
-  // 화면이 "이미 등록했는지"만 알면 매칭 등록 버튼을 감출 수 있다. 그 판단에 남의
-  // 등록서를 읽을 필요는 없으므로, 여기서 돌려주는 것은 접수 여부와 상태·접수 시각뿐이다.
-  // 이름·연락처·단가는 담지 않는다 — 운영자 화면이 볼 값이고, 화면이 쓰지 않는 값을
-  // 실어 보내면 그만큼 새어 나갈 자리가 늘어난다.
+  // 화면은 두 가지를 해야 한다. 이미 등록했으면 등록 버튼을 감추고, 등록한 사람이
+  // "수정하기"를 눌렀을 때 접수한 내용을 그대로 되살려야 한다. 그래서 본인 확인을
+  // 통과한 요청에는 접수 상태와 함께 **본인이 적어 낸 등록서 내용**을 돌려준다.
+  // 운영자 메모나 다른 지원자 정보는 담지 않는다(shapeOwnApplication).
   //
   // 관리자 확인(requireAdmin)보다 앞에 둔다. 인플루언서는 관리자가 아니고, 뒤에 두면
   // 여기 닿기 전에 403 이 나간다. 본인 확인은 callerIsAnyOf 로 한다 — 쿼리로 넘어온
@@ -354,7 +443,7 @@ export default async (req: Request) => {
       }
 
       const rows = (await db.sql`
-        SELECT id, status, created_at
+        SELECT *
         FROM collab_directory_applications
         WHERE role = ${role}
           AND LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')) = ${username}
@@ -368,6 +457,157 @@ export default async (req: Request) => {
         role,
         status: row?.status || "",
         createdAt: row?.created_at || null,
+        application: shapeOwnApplication(row),
+      });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
+    }
+  }
+
+  // ── 본인 등록서 수정(로그인 사용자) ─────────────────────────────
+  //
+  // 광고 단가는 접수한 뒤에도 바뀐다(성수기·채널 성장·재계약). 고칠 방법이 취소 후
+  // 재등록뿐이면, 고친 사람은 접수 순서를 잃고 운영자 명단에서는 같은 사람이 두 번
+  // 지나간 것처럼 보인다. 그래서 접수한 등록서를 제자리에서 고친다.
+  //
+  // 보내지 않은 칸은 건드리지 않는다 — 단가만 고치러 온 요청이 이름·연락처를 빈
+  // 값으로 덮어쓰면 안 된다.
+  if (req.method === "PATCH" && url.searchParams.get("mine") === "1") {
+    try {
+      const caller = await requireSignedInUser(req);
+      if (!caller.ok) return caller.response;
+      const role = url.searchParams.get("role") === "brand" ? "brand" : "influencer";
+      const requested = norm(url.searchParams.get("username") || "");
+      const username = requested || norm(caller.username);
+      if (!username) {
+        return Response.json({ error: "계정을 확인할 수 없습니다." }, { status: 400 });
+      }
+      if (!callerIsAnyOf(caller, [username])) {
+        return Response.json({ error: "본인 등록서만 수정할 수 있습니다." }, { status: 403 });
+      }
+
+      const rows = (await db.sql`
+        SELECT *
+        FROM collab_directory_applications
+        WHERE role = ${role}
+          AND LOWER(REGEXP_REPLACE(COALESCE(applicant_username, ''), '^biz/', '')) = ${username}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `) as any[];
+      const row = rows?.[0];
+      if (!row) {
+        return Response.json({ error: "수정할 등록서가 없습니다." }, { status: 404 });
+      }
+
+      const b = await req.json();
+      /** 보내지 않은 칸은 기존 값을 그대로 둔다. */
+      const text = (key: string, fallback: unknown) =>
+        typeof b[key] === "undefined" ? String(fallback || "") : String(b[key] ?? "").trim();
+      const count = (key: string, fallback: unknown) =>
+        typeof b[key] === "undefined"
+          ? Math.max(0, Number(fallback || 0))
+          : Math.max(0, parseInt(String(b[key]).replace(/[^\d]/g, ""), 10) || 0);
+
+      const name = text("name", row.name);
+      const contact = text("contact", row.contact);
+      if (!name) return Response.json({ error: "이름을 입력해 주세요." }, { status: 400 });
+      if (!contact) return Response.json({ error: "연락처를 입력해 주세요." }, { status: 400 });
+
+      if (role === "brand") {
+        const budgetText = text("budget_text", row.budget_text);
+        const budget = Math.max(0, parseInt(budgetText.replace(/[^\d]/g, ""), 10) || 0);
+        await db.sql`
+          UPDATE collab_directory_applications SET
+            name = ${name},
+            contact = ${contact},
+            brand_homepage = ${text("brand_homepage", row.brand_homepage)},
+            brand_instagram = ${text("brand_instagram", row.brand_instagram)},
+            desired_count = ${text("desired_count", row.desired_count)},
+            desired_followers = ${text("desired_followers", row.desired_followers)},
+            budget = ${budget},
+            budget_text = ${budgetText},
+            desired_schedule = ${text("desired_schedule", row.desired_schedule)},
+            desired_category = ${text("desired_category", row.desired_category)},
+            note = ${text("note", row.note)},
+            updated_at = now()
+          WHERE id = ${row.id}
+        `;
+      } else {
+        const category = text("category", row.category);
+        // 분야가 비면 이 사람은 어느 캠페인 후보에도 걸리지 않는다. 접수 때 막는
+        // 조건이므로 수정에서도 같게 본다.
+        if (splitCategories(category).length === 0) {
+          return Response.json(
+            { error: "카테고리를 최소 1개 골라 주세요. 캠페인은 분야로 인플루언서를 찾습니다." },
+            { status: 400 },
+          );
+        }
+
+        // 연동을 마친 계정이면 인스타 팔로워는 검증된 값이 대표값이다(접수 때와 같은 규칙).
+        const linked = await loadLinkedChannel(db, req, String(row.applicant_username || username));
+        const metaFollowers = linked ? Math.max(0, Number(linked.followers || 0)) : 0;
+
+        const tiktok_url = text("tiktok_url", row.tiktok_url);
+        const instagram_url =
+          text("instagram_url", row.instagram_url) ||
+          (linked?.instagram_url ? String(linked.instagram_url) : "") ||
+          (linked?.instagram_handle ? `https://www.instagram.com/${linked.instagram_handle}/` : "");
+        const instagram_followers = metaFollowers || count("instagram_followers", row.instagram_followers);
+        const youtube_followers = count("youtube_followers", row.youtube_followers);
+        const tiktok_followers = count("tiktok_followers", row.tiktok_followers);
+        const post_price = text("post_price", row.post_price);
+        const short_price = text("short_price", row.short_price);
+
+        // 틱톡 주소가 바뀐 경우에만 공개 페이지를 다시 본다. 단가만 고치러 온 요청이
+        // 외부 사이트 응답을 기다릴 이유가 없다.
+        const crawled =
+          tiktok_url && tiktok_url !== String(row.tiktok_url || "")
+            ? await crawlFollowers(tiktok_url)
+            : null;
+
+        const { ad_price, follower_count, follower_source } = deriveInfluencerFields({
+          postPrice: post_price,
+          shortPrice: short_price,
+          adPriceFallback: text("ad_price", row.ad_price),
+          instagramFollowers: instagram_followers,
+          youtubeFollowers: youtube_followers,
+          tiktokFollowers: tiktok_followers,
+          metaFollowers,
+          crawledFollowers: crawled,
+        });
+
+        await db.sql`
+          UPDATE collab_directory_applications SET
+            name = ${name},
+            contact = ${contact},
+            instagram_url = ${instagram_url},
+            youtube_url = ${text("youtube_url", row.youtube_url)},
+            tiktok_url = ${tiktok_url},
+            naver_blog_url = ${text("naver_blog_url", row.naver_blog_url)},
+            instagram_followers = ${instagram_followers},
+            youtube_followers = ${youtube_followers},
+            tiktok_followers = ${tiktok_followers},
+            ad_price = ${ad_price},
+            post_price = ${post_price},
+            short_price = ${short_price},
+            category = ${category},
+            follower_count = ${follower_count},
+            follower_source = ${follower_source},
+            note = ${text("note", row.note)},
+            updated_at = now()
+          WHERE id = ${row.id}
+        `;
+
+        await mirrorCategories(db, String(row.applicant_username || username), category);
+      }
+
+      const updated = (await db.sql`
+        SELECT * FROM collab_directory_applications WHERE id = ${row.id}
+      `) as any[];
+
+      return Response.json({
+        success: true,
+        application: shapeOwnApplication(updated?.[0] || row),
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });

@@ -1068,9 +1068,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     /* 한 줄에 둘까지만 놓는다. 셋으로 쪼개면 카드 폭이 좁아져 릴스
                        썸네일이 알아볼 수 없는 크기가 되는데, 브랜드가 사람을 고르는
                        마지막 판단은 그림이 한다. 모바일은 한 줄에 하나 — 폭이 반으로
-                       갈리면 팔로워·조회수·광고비 세 칸이 서로 줄바꿈돼 어느 숫자도
-                       안 읽힌다. 담당자 추천 명단과 같은 배치라, 두 화면을 오가며
-                       후보를 견줘도 눈이 같은 자리에서 같은 숫자를 찾는다. */
+                       갈리면 팔로워·조회수 칸이 서로 줄바꿈돼 어느 숫자도 안 읽힌다.
+                       담당자 추천 명단과 같은 배치라, 두 화면을 오가며 후보를 견줘도
+                       눈이 같은 자리에서 같은 숫자를 찾는다. */
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
                       {visibleApplyRows.map(app => (
                         /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
