@@ -9,16 +9,21 @@ import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
  * 카드를 쓴다. 브랜드가 사람을 고를 때 보는 숫자가 화면마다 다르게 생기면, 고른
  * 근거를 나중에 맞춰 볼 수 없다.
  *
- * ── 한 줄 카드인 이유 ──
+ * ── 그림을 크게 두는 이유 ──
  *
- * 이 화면의 일은 한 사람을 자세히 읽는 것이 아니라 여러 사람을 견주는 것이다. 카드
- * 하나가 화면을 다 차지하면 두 번째 후보를 보려고 스크롤한 순간 첫 번째 숫자가
- * 기억에서 사라지고, 비교가 아니라 순서대로 읽기가 된다. 그래서 기본은 한 화면에
- * 여러 명이 들어가는 접힌 줄이고, 판단에 꼭 필요한 것만 겉에 둔다.
+ * 예전에는 카드 하나를 한 줄로 접어 두고 썸네일을 42px 조각으로 오른쪽에 붙였다.
+ * 한 화면에 여러 명을 담는 데는 좋았지만, 그 크기로는 어떤 영상인지 알아볼 수 없어
+ * 그림을 실은 뜻이 사라졌다 — 브랜드는 결국 숫자만 보고 고르거나, 계정 하나하나를
+ * 인스타그램에서 다시 열어 봐야 했다. 사람을 고르는 마지막 판단은 "이 계정 톤이
+ * 우리 제품과 맞는가"이고, 그건 숫자가 아니라 그림이 답한다.
  *
- *   겉(항상 보임): 이름·출처 배지 · 팔로워 / 평균 조회수 / 광고비 · 최근 릴스 3편 ·
- *                  릴스 동향 배지
- *   안(펼쳐야 보임): 릴스 동향 설명, 피드 9칸, 소개, 나머지 단가, 링크, 담당자 메모,
+ * 그래서 릴스 3편을 카드 폭을 셋으로 나눠 채운다. 세로 9:16 을 그대로 늘리면 카드
+ * 하나가 화면을 다 먹으므로 4:5 로 잘라, 알아볼 수 있는 크기와 여러 명을 견주는
+ * 스크롤 사이를 맞춘다.
+ *
+ *   겉(항상 보임): 이름·출처 배지 · 최근 릴스 3편(크게) · 릴스 동향 배지 ·
+ *                  담당자 추천 이유 · 팔로워 / 평균 조회수 / 광고비
+ *   안(펼쳐야 보임): 릴스 동향 설명, 피드 그림, 소개, 나머지 단가, 링크,
  *                  그리고 부르는 쪽이 넘긴 details(연락처처럼 고른 뒤에 필요한 것)
  *
  * 고르는 동작(children)은 접지 않는다. 수락 버튼을 펼침 안에 두면 결정한 사람이
@@ -125,11 +130,11 @@ const Stat: React.FC<{ label: string; value: string; title?: string; hint?: stri
   hint,
 }) => (
   <div className="min-w-0">
-    <p className="text-[9px] text-slate-400 font-black uppercase truncate">{label}</p>
-    <p className="text-[13px] text-slate-900 font-black truncate" title={title}>
+    <p className="text-[10px] text-slate-400 font-black uppercase truncate">{label}</p>
+    <p className="text-[15px] text-slate-900 font-black truncate" title={title}>
       {value}
     </p>
-    {hint ? <p className="text-[9px] text-slate-400 font-medium truncate">{hint}</p> : null}
+    {hint ? <p className="text-[10px] text-slate-400 font-medium truncate">{hint}</p> : null}
   </div>
 );
 
@@ -187,23 +192,23 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 
   // 펼침 안에 실을 것이 하나도 없으면 버튼을 만들지 않는다. 눌러도 아무 일이 없는
   // 버튼이 목록에 줄줄이 있으면 다른 카드의 펼침까지 안 눌러 보게 된다.
+  // 추천 이유(note)는 겉에 두므로 여기서 세지 않는다.
   const hasMore = !!(
     feed.length > 0 ||
     trend ||
     m.intro ||
     restPrices.length > 0 ||
     m.instagramUrl ||
-    note ||
     details
   );
 
   /**
-   * 릴스 썸네일 한 칸. 폭을 고정한다 — 칸을 늘려 채우게 두면 릴스가 한 편뿐인
-   * 계정에서 세로 9:16 그림이 카드 높이의 두 배로 자란다.
+   * 릴스 썸네일 한 칸. 폭은 카드를 셋으로 나눈 칸이 정하고, 그림은 4:5 로 자른다.
+   * 9:16 을 그대로 두면 카드 하나가 화면을 다 먹어 여러 명을 견줄 수 없고, 폭을
+   * 고정한 조각으로 두면 무슨 영상인지 알아볼 수 없다.
    */
-  const reelThumb = (r: any, i: number, big?: boolean) => {
+  const reelThumb = (r: any, i: number) => {
     const views = Number(r?.views || 0);
-    const width = big ? 'w-[84px]' : 'w-8 sm:w-[42px]';
     const inner = (
       <>
         {r?.thumbnailUrl ? (
@@ -211,18 +216,18 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
             src={r.thumbnailUrl}
             alt=""
             loading="lazy"
-            className="w-full aspect-[9/16] object-cover rounded-md bg-slate-100"
+            className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
           />
         ) : (
-          <div className="w-full aspect-[9/16] rounded-md bg-slate-100 flex items-center justify-center">
-            <span className="text-[9px] text-slate-400 font-bold">영상</span>
+          <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
+            <span className="text-[10px] text-slate-400 font-bold">영상</span>
           </div>
         )}
         <p
-          className={`${big ? 'text-[10px]' : 'text-[9px]'} text-slate-500 font-bold mt-0.5 truncate text-center`}
+          className="text-[11px] text-slate-500 font-bold mt-1 truncate text-center"
           title={views ? `조회 ${formatNumberWithCommas(views)}` : '조회수 비공개'}
         >
-          {views ? formatCountKo(views) : '비공개'}
+          {views ? `조회 ${formatCountKo(views)}` : '비공개'}
         </p>
       </>
     );
@@ -232,81 +237,91 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         href={r.permalink}
         target="_blank"
         rel="noopener noreferrer"
-        className={`block flex-shrink-0 hover:opacity-80 ${width}`}
+        className="block hover:opacity-80"
       >
         {inner}
       </a>
     ) : (
-      <div key={r?.id || i} className={`flex-shrink-0 ${width}`}>
-        {inner}
-      </div>
+      <div key={r?.id || i}>{inner}</div>
     );
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-100 p-3">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          {/* 이름 · 출처 · 상태 배지를 한 줄에 둔다. 접힌 목록에서 사람을 구분하는
-              것은 이 줄 하나뿐이다. */}
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-sm font-black text-slate-900 truncate">
-                  {m.name || `@${m.username}`}
-                </span>
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
-                  {source.label}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 font-bold truncate">{handleLine}</p>
-            </div>
-            {badges && (
-              <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>
+    <div className="bg-white rounded-xl border border-slate-100 p-3 md:p-4">
+      {/* 이름 · 출처 · 상태 배지를 한 줄에 둔다. 목록에서 사람을 구분하는 것은 이
+          줄 하나뿐이다. */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-black text-slate-900 truncate">
+              {m.name || `@${m.username}`}
+            </span>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
+              {source.label}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 font-bold truncate">{handleLine}</p>
+        </div>
+        {badges && (
+          <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>
+        )}
+      </div>
+
+      {/* 최근 릴스 3편. 카드 폭을 꽉 채운다 — 계정 톤은 숫자가 아니라 그림이 답한다. */}
+      {reels.length > 0 && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-[10px] text-slate-400 font-black uppercase">
+              최근 릴스 {reels.length}편
+            </p>
+            {trend && trend.percent !== null && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
+              >
+                {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                {trend.percent}%
+              </span>
             )}
           </div>
-
-          {/* 좋아요는 싣지 않는다. 브랜드가 후보를 고를 때 쓰는 숫자는 도달(조회수)과
-              그 값을 사는 가격이고, 좋아요를 나란히 두면 릴스 조회수와 사진 반응이
-              섞여 비교 기준이 흐려진다. 평균 좋아요·댓글은 인사이트 점수 계산에는
-              그대로 쓰인다. */}
-          <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 mt-2">
-            <Stat
-              label="팔로워"
-              value={m.followers ? formatCountKo(m.followers) : '—'}
-              title={m.followers ? formatNumberWithCommas(m.followers) : ''}
-            />
-            <Stat
-              label="평균 조회수"
-              value={m.avgViews ? formatCountKo(m.avgViews) : '—'}
-              title={m.avgViews ? formatNumberWithCommas(m.avgViews) : ''}
-              hint={m.reelsCount ? `릴스 ${m.reelsCount}편 기준` : ''}
-            />
-            <Stat
-              label="광고비"
-              value={mainPrice ? mainPrice.value : '—'}
-              title={mainPrice ? mainPrice.value : ''}
-              hint={mainPrice ? mainPrice.label : '미기재'}
-            />
+          <div className="grid grid-cols-3 gap-2">
+            {reels.map((r: any, i: number) => reelThumb(r, i))}
           </div>
         </div>
+      )}
 
-        {/* 최근 릴스 3편. 숫자만으로는 톤을 알 수 없어 겉에 남긴다. */}
-        {reels.length > 0 && (
-          <div className="flex-shrink-0">
-            <div className="flex gap-1">{reels.map((r: any, i: number) => reelThumb(r, i))}</div>
-            {trend && trend.percent !== null && (
-              <div className="flex justify-center mt-1">
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-black ${trendTone(trend.percent).cls}`}
-                >
-                  {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
-                  {trend.percent}%
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+      {/* 담당자 추천 이유는 그림 바로 아래 겉에 둔다. 왜 이 사람을 올렸는지가
+          펼침 안에 숨어 있으면 브랜드는 그 이유를 못 보고 숫자만으로 거른다. */}
+      {note && (
+        <div className="mt-3 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
+          <p className="text-[12px] text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
+            {note}
+          </p>
+        </div>
+      )}
+
+      {/* 좋아요는 싣지 않는다. 브랜드가 후보를 고를 때 쓰는 숫자는 도달(조회수)과
+          그 값을 사는 가격이고, 좋아요를 나란히 두면 릴스 조회수와 사진 반응이
+          섞여 비교 기준이 흐려진다. 평균 좋아요·댓글은 인사이트 점수 계산에는
+          그대로 쓰인다. */}
+      <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
+        <Stat
+          label="팔로워"
+          value={m.followers ? formatCountKo(m.followers) : '—'}
+          title={m.followers ? formatNumberWithCommas(m.followers) : ''}
+        />
+        <Stat
+          label="평균 조회수"
+          value={m.avgViews ? formatCountKo(m.avgViews) : '—'}
+          title={m.avgViews ? formatNumberWithCommas(m.avgViews) : ''}
+          hint={m.reelsCount ? `릴스 ${m.reelsCount}편 기준` : ''}
+        />
+        <Stat
+          label="광고비"
+          value={mainPrice ? mainPrice.value : '—'}
+          title={mainPrice ? mainPrice.value : ''}
+          hint={mainPrice ? mainPrice.label : '미기재'}
+        />
       </div>
 
       {hasMore && (
@@ -329,14 +344,12 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 
       {expanded && (
         <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-3">
+          {/* 그림은 이미 겉에 크게 실었으므로 여기서는 숫자로 읽는 동향만 적는다. */}
           {reels.length > 0 && (
             <div>
-              <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">최근 릴스 동향</p>
-              <div className="flex gap-2">
-                {reels.map((r: any, i: number) => reelThumb(r, i, true))}
-              </div>
+              <p className="text-[10px] text-slate-400 font-black uppercase mb-1">최근 릴스 동향</p>
               {trend ? (
-                <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
                   최근 {formatNumberWithCommas(trend.recent)}회
                   {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
                   {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
@@ -347,7 +360,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
                 </p>
               ) : (
                 // 연동은 됐지만 조회수 권한을 못 받은 계정. "0회"로 적으면 안 본 영상이 된다.
-                <p className="text-[10px] text-slate-400 font-medium mt-1.5">
+                <p className="text-[11px] text-slate-500 font-medium">
                   조회수 비공개 계정으로 동향은 집계 전입니다
                 </p>
               )}
@@ -356,10 +369,12 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
 
           {feed.length > 0 && (
             <div>
-              <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">
+              <p className="text-[10px] text-slate-400 font-black uppercase mb-1.5">
                 최근 피드 {feed.length}개
               </p>
-              <div className="grid grid-cols-9 gap-1 max-w-[380px]">
+              {/* 한 줄에 아홉 칸으로 늘어놓으면 칸 하나가 손톱만 해져 무엇이 찍혔는지
+                  알 수 없다. 세 칸(넓은 화면은 다섯 칸)으로 줄여 그림을 키운다. */}
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {feed.map((f: any, i: number) => {
                   const isVideo = String(f?.mediaType || '').toUpperCase() === 'VIDEO';
                   const inner = f?.thumbnailUrl ? (
@@ -368,16 +383,16 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
                         src={f.thumbnailUrl}
                         alt=""
                         loading="lazy"
-                        className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                        className="w-full aspect-square object-cover rounded-lg bg-slate-100"
                       />
                       {isVideo && (
-                        <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-white/80" />
+                        <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-white/80" />
                       )}
                     </div>
                   ) : (
                     // 메타의 미디어 URL 은 만료된다. 지난번에 받아 둔 주소가 죽었을 뿐이니
                     // 빈 칸을 회색 자리로 그려 "게시물이 없는 계정"과 구분한다.
-                    <div className="w-full aspect-square rounded-md bg-slate-100" />
+                    <div className="w-full aspect-square rounded-lg bg-slate-100" />
                   );
                   return f?.permalink ? (
                     <a
@@ -416,13 +431,6 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
             >
               {m.instagramUrl}
             </a>
-          )}
-
-          {note && (
-            <div className="bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2">
-              <p className="text-[10px] text-blue-500 font-black mb-0.5">담당자 추천 이유</p>
-              <p className="text-[11px] text-blue-700 font-medium whitespace-pre-wrap">{note}</p>
-            </div>
           )}
 
           {details}

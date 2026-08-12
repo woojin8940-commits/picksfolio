@@ -195,10 +195,11 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
         </div>
       ) : (
         <>
-          {/* 카드가 짧아진 만큼 넓은 화면에서는 한 줄에 셋까지 놓는다. 모바일은
-              한 줄에 하나 — 폭이 반으로 갈리면 팔로워·조회수·광고비 세 칸이 서로
-              줄바꿈돼 어느 숫자도 안 읽힌다. */}
-          <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {/* 넓은 화면에서도 한 줄에 둘까지만 놓는다. 셋으로 쪼개면 카드 폭이 좁아져
+              릴스 썸네일이 알아볼 수 없는 크기가 되는데, 브랜드가 사람을 고르는 마지막
+              판단은 그림이 한다. 모바일은 한 줄에 하나 — 폭이 반으로 갈리면
+              팔로워·조회수·광고비 세 칸이 서로 줄바꿈돼 어느 숫자도 안 읽힌다. */}
+          <div className="p-3 md:p-4 bg-slate-50/60 grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
             {[...openList, ...runningList].map((c) => {
               const snap = c.snapshot || {};
               const allReels = Array.isArray(snap.recentReels) ? snap.recentReels : [];
@@ -214,7 +215,8 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
               const open = openCards.has(c.id);
               // 펼침 안에 실을 것이 없으면 버튼을 만들지 않는다. 눌러도 아무 일이
               // 없는 버튼이 카드마다 붙어 있으면 다른 카드의 펼침도 안 눌러 보게 된다.
-              const hasMore = feed.length > 0 || !!trend || !!c.managerNote;
+              // 추천 이유는 겉에 두므로 여기서 세지 않는다.
+              const hasMore = feed.length > 0 || !!trend;
 
               return (
                 <div
@@ -274,58 +276,26 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </button>
                   </div>
 
-                  {/* 숫자를 먼저 둔다. 후보를 견주는 화면에서 맨 먼저 읽히는 것은
-                      팔로워·조회수·가격이고, 그림은 그 뒤의 확인이다. */}
-                  <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5 mt-2.5">
-                    <div className="min-w-0">
-                      <p className="text-[9px] text-slate-400 font-black">팔로워</p>
-                      <p
-                        className="text-[13px] text-slate-900 font-black truncate"
-                        title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
-                      >
-                        {snap.followers ? formatCountKo(snap.followers) : '—'}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[9px] text-slate-400 font-black">보장 조회수</p>
-                      <p
-                        className="text-[13px] text-slate-900 font-black truncate"
-                        title={c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : ''}
-                      >
-                        {c.guaranteedViews ? formatCountKo(c.guaranteedViews) : '—'}
-                      </p>
-                      {c.cpv > 0 && (
-                        <p className="text-[9px] text-slate-400 font-bold truncate">CPV {c.cpv}원</p>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[9px] text-slate-400 font-black">광고비</p>
-                      <p className="text-[13px] text-slate-900 font-black truncate">
-                        {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
-                      </p>
-                      {c.quotedSecondUseFee > 0 && (
-                        <p className="text-[9px] text-slate-400 font-bold truncate">
-                          2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 최근 릴스 3편. 숫자만으로는 계정 톤을 알 수 없어 접지 않는다. */}
+                  {/* 그림을 먼저 둔다. 브랜드가 후보를 거르는 첫 동작은 "이 계정 톤이
+                      우리 제품과 맞나"를 보는 것이고, 그건 숫자가 아니라 그림이 답한다.
+                      예전에는 168px 안에 셋을 욱여넣어 한 칸이 50px 남짓이었는데, 그
+                      크기로는 무엇이 찍혔는지 알 수 없어 그림을 실은 뜻이 없었다.
+                      세로 9:16 을 그대로 늘리면 카드 하나가 화면을 다 먹으므로 4:5 로
+                      자른다. */}
                   {reels.length > 0 && (
-                    <div className="mt-2.5">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <p className="text-[9px] text-slate-400 font-black">최근 릴스 3편</p>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <p className="text-[10px] text-slate-400 font-black">최근 릴스 {reels.length}편</p>
                         {trend && trend.percent !== null && (
                           <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-black ${trendTone(trend.percent).cls}`}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
                           >
                             {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
                             {trend.percent}%
                           </span>
                         )}
                       </div>
-                      <div className="grid grid-cols-3 gap-1.5 max-w-[168px]">
+                      <div className="grid grid-cols-3 gap-2">
                         {reels.map((r: any, i: number) => (
                           <div key={r?.id || i}>
                             {r?.thumbnailUrl ? (
@@ -333,24 +303,73 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                                 src={r.thumbnailUrl}
                                 alt=""
                                 loading="lazy"
-                                className="w-full aspect-[9/16] object-cover rounded-md bg-slate-100"
+                                className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
                               />
                             ) : (
-                              <div className="w-full aspect-[9/16] rounded-md bg-slate-100 flex items-center justify-center">
-                                <span className="text-[9px] text-slate-300 font-bold">영상</span>
+                              <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
+                                <span className="text-[10px] text-slate-300 font-bold">영상</span>
                               </div>
                             )}
                             <p
-                              className="text-[9px] text-slate-500 font-bold mt-0.5 truncate text-center"
+                              className="text-[11px] text-slate-500 font-bold mt-1 truncate text-center"
                               title={r?.views ? `조회 ${formatNumberWithCommas(r.views)}` : '조회수 비공개'}
                             >
-                              {r?.views ? formatCountKo(r.views) : '비공개'}
+                              {r?.views ? `조회 ${formatCountKo(r.views)}` : '비공개'}
                             </p>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
+
+                  {/* 담당자가 왜 이 사람을 골랐는지는 그림 바로 아래 겉에 둔다. 펼침
+                      안에 숨겨 두면 브랜드는 그 이유를 못 보고 숫자만으로 거른다. */}
+                  {c.managerNote && (
+                    <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                      <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
+                      <p className="text-[12px] text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
+                        {c.managerNote}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 그림으로 한 번 거르고 나면 남는 것은 값이다. 팔로워·보장 조회수·
+                      광고비를 한 줄에 나란히 둬 후보끼리 바로 견줄 수 있게 한다. */}
+                  <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">팔로워</p>
+                      <p
+                        className="text-[15px] text-slate-900 font-black truncate"
+                        title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
+                      >
+                        {snap.followers ? formatCountKo(snap.followers) : '—'}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">보장 조회수</p>
+                      <p
+                        className="text-[15px] text-slate-900 font-black truncate"
+                        title={c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : ''}
+                      >
+                        {c.guaranteedViews ? formatCountKo(c.guaranteedViews) : '—'}
+                      </p>
+                      {c.cpv > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold truncate">CPV {c.cpv}원</p>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">광고비</p>
+                      <p className="text-[15px] text-slate-900 font-black truncate">
+                        {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
+                      </p>
+                      {c.quotedSecondUseFee > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold truncate">
+                          2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
 
                   {hasMore && (
                     <button
@@ -381,7 +400,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     <div className="mt-2 space-y-3">
                       {reels.length > 0 &&
                         (trend ? (
-                          <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
                             최근 {formatNumberWithCommas(trend.recent)}회
                             {trend.previous > 0 ? ` ← 이전 ${formatNumberWithCommas(trend.previous)}회` : ''}
                             {' · '}최고 {formatNumberWithCommas(trend.best)} / 최저{' '}
@@ -390,13 +409,15 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                           </p>
                         ) : (
                           // 조회수 권한을 못 받은 계정. "0회"로 적으면 아무도 안 본 영상이 된다.
-                          <p className="text-[10px] text-slate-400 font-medium">조회수 비공개 · 동향 집계 전</p>
+                          <p className="text-[11px] text-slate-500 font-medium">조회수 비공개 · 동향 집계 전</p>
                         ))}
 
                       {feed.length > 0 && (
                         <div>
-                          <p className="text-[9px] text-slate-400 font-black mb-1">최근 피드 {feed.length}개</p>
-                          <div className="grid grid-cols-9 gap-1">
+                          <p className="text-[10px] text-slate-400 font-black mb-1.5">최근 피드 {feed.length}개</p>
+                          {/* 아홉 칸을 한 줄에 늘어놓으면 칸 하나가 손톱만 해진다.
+                              세 줄로 나눠 그림을 알아볼 수 있는 크기로 키운다. */}
+                          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                             {feed.map((f: any, i: number) => (
                               <div key={f?.id || i} className="relative">
                                 {f?.thumbnailUrl ? (
@@ -404,28 +425,19 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                                     src={f.thumbnailUrl}
                                     alt=""
                                     loading="lazy"
-                                    className="w-full aspect-square object-cover rounded-md bg-slate-100"
+                                    className="w-full aspect-square object-cover rounded-lg bg-slate-100"
                                   />
                                 ) : (
                                   // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
                                   // "게시물이 없는 계정"과 구분된다.
-                                  <div className="w-full aspect-square rounded-md bg-slate-100" />
+                                  <div className="w-full aspect-square rounded-lg bg-slate-100" />
                                 )}
                                 {String(f?.mediaType || '').toUpperCase() === 'VIDEO' && (
-                                  <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-white/80" />
+                                  <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-white/80" />
                                 )}
                               </div>
                             ))}
                           </div>
-                        </div>
-                      )}
-
-                      {c.managerNote && (
-                        <div className="bg-slate-50 rounded-xl px-3 py-2">
-                          <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
-                          <p className="text-[11px] text-slate-600 font-medium whitespace-pre-wrap">
-                            {c.managerNote}
-                          </p>
                         </div>
                       )}
                     </div>
