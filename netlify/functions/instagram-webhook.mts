@@ -1,7 +1,12 @@
 import { getStore } from "@netlify/blobs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
-import { buildDmMessages, describeDmError, sendDmMessages } from "./_shared/instagram-dm.mts";
+import {
+  buildDmMessages,
+  describeDmError,
+  postCommentReply,
+  sendDmMessages,
+} from "./_shared/instagram-dm.mts";
 import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
@@ -237,44 +242,9 @@ function verifySignature(rawBody: string, header: string | null, appSecret: stri
 }
 
 /**
- * 댓글에 공개 답글을 남긴다.
- *
- * Graph API 의 `/{comment-id}/replies` 엣지는 `message` 를 **폼 파라미터**로 받는다.
- * JSON 본문으로 보내면 파라미터를 인식하지 못해 `message is required`(code 100) 로
- * 거절되는데, 이전 구현은 JSON 으로 보내면서 응답조차 확인하지 않아 실패가 조용히
- * 묻혔다(로그에도 남지 않아 화면에서는 "답글 기능이 그냥 안 된다"로 보였다).
+ * 댓글 공개 답글은 `_shared/instagram-dm.mts` 의 postCommentReply 를 쓴다.
+ * 수동 발송(send-instagram-dm)도 같은 함수를 쓴다.
  */
-async function postCommentReply(args: {
-  host: string;
-  commentId: string;
-  accessToken: string;
-  message: string;
-}): Promise<{ ok: boolean; replyId?: string; error?: string }> {
-  const { host, commentId, accessToken, message } = args;
-  try {
-    const res = await fetch(
-      `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(commentId)}/replies`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: new URLSearchParams({ message }),
-      },
-    );
-    const data = (await res.json().catch(() => ({}))) as any;
-    if (!res.ok || data?.error) {
-      return {
-        ok: false,
-        error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
-      };
-    }
-    return { ok: true, replyId: data?.id };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || "답글 전송 중 오류" };
-  }
-}
 
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
@@ -461,6 +431,7 @@ export default async (req: Request, _context: Context) => {
             const reply = pool[Math.floor(Math.random() * pool.length)];
             const replyResult = await postCommentReply({
               host: graphHost(settings),
+              graphVersion: GRAPH_VERSION,
               commentId: parentId || commentId,
               accessToken,
               message: reply,

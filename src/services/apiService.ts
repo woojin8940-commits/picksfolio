@@ -2791,6 +2791,8 @@ export const apiService = {
     messageType?: 'text' | 'carousel';
     buttons?: DmMessageButton[];
     cards?: DmCarouselCard[];
+    /** 댓글에 함께 남길 공개 답글 문구. 비어 있으면 답글은 달지 않는다. */
+    replies?: string[];
     ruleId?: string;
     test?: boolean;
   }): Promise<{
@@ -2800,6 +2802,10 @@ export const apiService = {
     partialCount?: number;
     alreadyCount?: number;
     failCount?: number;
+    /** 공개 답글을 실제로 남긴 댓글 수. */
+    replyCount?: number;
+    /** 답글을 남기지 못한 댓글 수. */
+    replyFailCount?: number;
     remaining?: number;
     total?: number;
     message?: string;

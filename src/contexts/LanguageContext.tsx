@@ -54,8 +54,8 @@ const translations: Record<string, { ko: string; en: string }> = {
 
   // DM Automation
   'dm.title': { ko: 'DM 자동화', en: 'DM Automation' },
-  'dm.desc': { ko: '댓글 반응 자동화, 키워드 답글, 수동 DM 발송까지 스마트하게 관리하세요.', en: 'Automate comment responses, keyword replies, and send manual DMs easily.' },
-  'dm.manualSend': { ko: '수동 DM 발송', en: 'Manual DM Send' },
+  'dm.desc': { ko: '댓글 반응 자동화, 키워드 답글, 직접 보내기까지 스마트하게 관리하세요.', en: 'Automate comment responses, keyword replies, and send messages manually.' },
+  'dm.manualSend': { ko: '보내기', en: 'Send' },
   'dm.addAutomation': { ko: '자동화 추가하기', en: 'Add Automation' },
   'dm.activeAutomation': { ko: '활성 자동화', en: 'Active Rules' },
   'dm.totalAutomation': { ko: '전체 자동화', en: 'Total Rules' },
@@ -77,6 +77,19 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dm.textType': { ko: '일반 텍스트', en: 'Text Message' },
   'dm.carouselType': { ko: '카드 캐러셀', en: 'Card Carousel' },
   'dm.messageText': { ko: 'DM 메시지 내용', en: 'DM Message Content' },
+  // 수동 발송은 DM 과 댓글 답글을 함께 보낸다. 답글 문구는 선택 입력이다.
+  'dm.commentReply': { ko: '댓글 답글 (선택)', en: 'Comment Reply (optional)' },
+  'dm.addReply': { ko: '답글 추가', en: 'Add Reply' },
+  'dm.commentReplyHint': {
+    ko: '입력해 두면 DM과 함께 각 댓글에 공개 답글이 달려요. 여러 개면 무작위로 하나가 달립니다.',
+    en: 'If filled in, a public reply is posted on each comment along with the DM. With several, one is picked at random.',
+  },
+  'dm.replyPlaceholder': { ko: '예: DM 확인해주세요! 📩', en: 'e.g. Check your DMs! 📩' },
+  'dm.contentRequired': {
+    ko: '보낼 DM 내용이나 댓글 답글 중 하나는 입력해주세요.',
+    en: 'Enter a DM message or a comment reply to send.',
+  },
+  'dm.send': { ko: '보내기', en: 'Send' },
   'dm.buttons': { ko: '버튼 링크', en: 'Link Buttons' },
   'dm.addButton': { ko: '버튼 추가', en: 'Add Button' },
   'dm.sendNow': { ko: '수동 발송하기', en: 'Send DM Now' },

@@ -311,3 +311,47 @@ export async function sendDmMessages(args: SendDmArgs): Promise<SendDmResult> {
 
   return { ok: true, messageId, sent, total: messages.length, partial: false };
 }
+
+/**
+ * 댓글에 공개 답글을 남긴다.
+ *
+ * Graph API 의 `/{comment-id}/replies` 엣지는 `message` 를 **폼 파라미터**로 받는다.
+ * JSON 본문으로 보내면 파라미터를 인식하지 못해 `message is required`(code 100) 로
+ * 거절된다.
+ *
+ * 웹훅(자동 발송)과 수동 발송이 같은 경로를 쓰도록 여기에 둔다. 두 곳에 같은
+ * 요청을 따로 적어 두면 한쪽만 고쳐졌을 때 "자동은 답글이 달리는데 수동은 안
+ * 달린다" 같은 차이가 생긴다.
+ */
+export async function postCommentReply(args: {
+  host: string;
+  graphVersion: string;
+  commentId: string;
+  accessToken: string;
+  message: string;
+}): Promise<{ ok: boolean; replyId?: string; error?: string }> {
+  const { host, graphVersion, commentId, accessToken, message } = args;
+  try {
+    const res = await fetch(
+      `https://${host}/${graphVersion}/${encodeURIComponent(commentId)}/replies`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: new URLSearchParams({ message }),
+      },
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok || data?.error) {
+      return {
+        ok: false,
+        error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
+      };
+    }
+    return { ok: true, replyId: data?.id };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "답글 전송 중 오류" };
+  }
+}
