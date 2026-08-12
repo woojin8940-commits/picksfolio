@@ -1899,6 +1899,34 @@ export const apiService = {
   },
 
   /**
+   * 담당자가 지원자에게 붙이는 추천 이유.
+   *
+   * 선정과 분리된 저장이다. 브랜드가 직접 수락하는 캠페인에서는 담당자가 '선정'을
+   * 누르지 않으므로, 선정할 때만 적을 수 있게 두면 이유를 남길 자리가 사라진다.
+   * 저장한 줄은 브랜드의 지원자 카드에 그대로 보인다.
+   */
+  async setApplicantManagerNote(
+    applicantId: string,
+    managerNote: string,
+    token?: string,
+  ): Promise<{ success?: boolean; managerNote?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/campaign-applicants', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ id: applicantId, managerNote }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '추천 이유를 저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to save applicant manager note:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /**
    * 지원자 선정 · 거절.
    *
    * 토큰을 넘기면 담당자 자격으로, 넘기지 않으면 로그인한 브랜드 자격으로 간다.

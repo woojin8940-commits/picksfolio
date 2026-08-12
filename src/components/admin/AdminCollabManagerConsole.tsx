@@ -111,6 +111,15 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadDraft, setThreadDraft] = useState('');
 
+  /**
+   * 지원자마다 적는 추천 이유 초안.
+   *
+   * 저장 전까지는 화면 안에만 둔다. 큐를 새로고침해도 적던 글이 날아가지 않게
+   * 초안이 있는 항목만 이 표에 담고, 없는 항목은 서버 값(managerNote)을 그대로 쓴다.
+   */
+  const [applicantNoteDraft, setApplicantNoteDraft] = useState<Record<string, string>>({});
+  const [applicantNoteSaving, setApplicantNoteSaving] = useState('');
+
   // 조건 편집 폼
   const [terms, setTerms] = useState({ fee: '', scriptDue: '', contentDue: '', uploadDue: '', guideUrl: '', guideNote: '' });
   const [reviewNote, setReviewNote] = useState('');
@@ -249,6 +258,32 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
     } else {
       notify('거절 처리했습니다.');
     }
+    await loadQueue();
+  };
+
+  /**
+   * 추천 이유 저장.
+   *
+   * 선정과 분리된 저장이다. 브랜드가 직접 수락하는 캠페인(제품 협찬형·공동구매)에서
+   * 담당자는 '선정'을 누르지 않으므로, 선정할 때만 적을 수 있게 두면 정작 브랜드가
+   * 고르는 화면에 이유가 비어 있게 된다.
+   */
+  const saveApplicantNote = async (applicationId: string, note: string) => {
+    setApplicantNoteSaving(applicationId);
+    const res = await apiService.setApplicantManagerNote(applicationId, note, token);
+    setApplicantNoteSaving('');
+    if (res.error) {
+      notify(res.error, 'error');
+      return;
+    }
+    // 저장한 값이 곧 서버 값이므로 초안은 지운다. 남겨 두면 다른 담당자가 고친
+    // 내용이 내려와도 화면에는 내 초안이 계속 덮여 보인다.
+    setApplicantNoteDraft(prev => {
+      const next = { ...prev };
+      delete next[applicationId];
+      return next;
+    });
+    notify('추천 이유를 저장했습니다. 브랜드 지원자 카드에 바로 보입니다.');
     await loadQueue();
   };
 
@@ -533,6 +568,44 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                           </button>
                         </div>
                       </div>
+
+                      {/* 추천 이유. 브랜드의 지원자 카드에 그대로 보이는 줄이라
+                          '메모'가 아니라고 적어 둔다 — 담당자만 보는 줄로 착각하면
+                          브랜드에게 그대로 나가면 곤란한 말이 실린다. */}
+                      {(() => {
+                        const draft = applicantNoteDraft[a.id];
+                        const value = draft !== undefined ? draft : a.managerNote || '';
+                        const dirty = draft !== undefined && draft !== (a.managerNote || '');
+                        return (
+                          <div className="mt-2 pt-2 border-t border-slate-100">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <p className="text-[10px] text-slate-400 font-black">
+                                추천 이유 <span className="text-slate-300 font-bold">· 브랜드에게 그대로 보입니다</span>
+                              </p>
+                              <button
+                                onClick={() => saveApplicantNote(a.id, value)}
+                                disabled={applicantNoteSaving === a.id || !dirty}
+                                className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-30 flex-shrink-0"
+                              >
+                                {applicantNoteSaving === a.id
+                                  ? '저장 중...'
+                                  : !dirty && a.managerNote
+                                    ? '저장됨'
+                                    : '저장'}
+                              </button>
+                            </div>
+                            <textarea
+                              value={value}
+                              onChange={e =>
+                                setApplicantNoteDraft(prev => ({ ...prev, [a.id]: e.target.value }))
+                              }
+                              rows={2}
+                              placeholder="예: 클렌징 이후 마무리된 피부 표현이 가능한 순한 성분 제품 소구에 어울리는 인플루언서입니다."
+                              className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 focus:outline-none focus:border-slate-400 resize-none"
+                            />
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

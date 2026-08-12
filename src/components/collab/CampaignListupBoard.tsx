@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
+import { reelGridCols } from './InfluencerCandidateCard';
 
 /**
  * 브랜드가 보는 리스트업 — 담당자가 올린 추천 조합.
@@ -233,8 +234,10 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* 계정 아이디가 카드의 첫 줄이다. 수락 전에는 서버가 아이디를
+                            지워 보내므로 그 자리를 가려진 이름이 대신한다. */}
                         <span className="text-sm font-black text-slate-900 truncate">
-                          {snap.name || '비공개'}
+                          {snap.instagramHandle ? `@${snap.instagramHandle}` : snap.name || '비공개'}
                         </span>
                         {c.badge && (
                           <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 text-[10px] font-black">
@@ -242,6 +245,11 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                           </span>
                         )}
                       </div>
+                      {(snap.instagramHandle ? snap.name : '') && (
+                        <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">
+                          {snap.name}
+                        </p>
+                      )}
                       {line && (
                         <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">{line}</p>
                       )}
@@ -295,7 +303,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                           </span>
                         )}
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className={`grid ${reelGridCols(reels.length)} gap-2`}>
                         {reels.map((r: any, i: number) => (
                           <div key={r?.id || i}>
                             {r?.thumbnailUrl ? (
@@ -334,12 +342,13 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                   )}
 
                   {/* 그림으로 한 번 거르고 나면 남는 것은 값이다. 팔로워·보장 조회수·
-                      광고비를 한 줄에 나란히 둬 후보끼리 바로 견줄 수 있게 한다. */}
+                      광고비를 한 줄에 나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세
+                      숫자에서 멈추게 한다. */}
                   <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">팔로워</p>
                       <p
-                        className="text-[15px] text-slate-900 font-black truncate"
+                        className="text-[17px] md:text-[19px] text-orange-500 font-black truncate"
                         title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
                       >
                         {snap.followers ? formatCountKo(snap.followers) : '—'}
@@ -348,7 +357,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">보장 조회수</p>
                       <p
-                        className="text-[15px] text-slate-900 font-black truncate"
+                        className="text-[17px] md:text-[19px] text-orange-500 font-black truncate"
                         title={c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : ''}
                       >
                         {c.guaranteedViews ? formatCountKo(c.guaranteedViews) : '—'}
@@ -359,7 +368,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">광고비</p>
-                      <p className="text-[15px] text-slate-900 font-black truncate">
+                      <p className="text-[17px] md:text-[19px] text-orange-500 font-black truncate">
                         {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
                       </p>
                       {c.quotedSecondUseFee > 0 && (
