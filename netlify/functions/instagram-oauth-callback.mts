@@ -159,6 +159,10 @@ export default async (req: Request, _context: Context) => {
         : existing.tokenExpiresAt,
       updatedAt: new Date().toISOString(),
     };
+    // 방금 새 토큰을 받았다. 지난 토큰이 죽어 남겨 둔 재연동 표시를 여기서 지우지
+    // 않으면, 재연동을 마치고 돌아온 화면이 계속 "다시 연동해 주세요"라고 말한다.
+    delete (next as any).needsReauth;
+    delete (next as any).tokenInvalidAt;
     await store.setJSON(key, next);
 
     // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스.

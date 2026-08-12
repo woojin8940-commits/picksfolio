@@ -6,8 +6,10 @@ import { norm } from "./_shared/collab-workflow.mts";
 import { shapeChannel } from "./_shared/campaign-listup.mts";
 import {
   SHOW_SIZE,
+  REAUTH_MESSAGE,
   intOf,
   linkIsUsable,
+  linkNeedsReauth,
   loadMetaLink,
   syncChannelFromMeta,
 } from "./_shared/instagram-metrics.mts";
@@ -66,13 +68,18 @@ export default async (req: Request) => {
       // sync 버튼을 켤 수 있다는 뜻이다. 토큰 자체는 절대 내려보내지 않는다.
       const link = await loadMetaLink(username);
       const metaLinked = linkIsUsable(link);
+      // 토큰이 죽은 연동은 "연동 안 됨"이 아니라 "다시 동의해야 함"이다. 둘을 같은
+      // 값으로 내리면 화면은 이미 받아 둔 팔로워 수를 지운 빈 카드를 보여 주게 된다.
+      const needsReauth = linkNeedsReauth(link);
 
       return Response.json({
         registered: !!row,
         channel: shapeChannel(row),
         metaLinked,
+        needsReauth,
         // 연동한 인스타 계정을 화면에서 확인할 수 있게 아이디만 함께 내린다.
-        igUsername: metaLinked ? String(link?.igUsername || "") : "",
+        // 재연동이 필요한 상태에서도 어느 계정이었는지는 알려 준다.
+        igUsername: metaLinked || needsReauth ? String(link?.igUsername || "") : "",
       });
     } catch (err: any) {
       return Response.json({ error: err?.message || "채널 정보를 불러오지 못했습니다." }, { status: 500 });
@@ -185,19 +192,24 @@ export default async (req: Request) => {
 
       const link = await loadMetaLink(username);
       if (!linkIsUsable(link)) {
+        // 한 번도 연동한 적 없는 경우와, 연동했는데 토큰이 죽은 경우는 할 말이 다르다.
+        // 전자는 "연동해 주세요", 후자는 "다시 연동해 주세요"다. 화면이 그 둘을
+        // 구분해 안내할 수 있도록 코드를 나눠 내린다.
         return Response.json(
-          {
-            error:
-              "인스타그램 계정이 연동되어 있지 않습니다. 계정을 연동하면 최근 릴스와 조회수를 자동으로 불러옵니다.",
-            code: "META_NOT_LINKED",
-          },
+          linkNeedsReauth(link)
+            ? { error: REAUTH_MESSAGE, code: "META_TOKEN_INVALID" }
+            : {
+                error:
+                  "인스타그램 계정이 연동되어 있지 않습니다. 계정을 연동하면 최근 릴스와 조회수를 자동으로 불러옵니다.",
+                code: "META_NOT_LINKED",
+              },
           { status: 409 },
         );
       }
 
       const synced = await syncChannelFromMeta(db, username, link!);
       if (!synced.ok) {
-        return Response.json({ error: synced.error, code: "META_ERROR" }, { status: synced.status });
+        return Response.json({ error: synced.error, code: synced.code }, { status: synced.status });
       }
 
       return Response.json({
@@ -208,7 +220,13 @@ export default async (req: Request) => {
         sampled: synced.sampled,
       });
     } catch (err: any) {
-      return Response.json({ error: err?.message || "갱신에 실패했습니다." }, { status: 500 });
+      // 여기까지 온 오류는 데이터베이스·본문 파싱 쪽이다. 원문은 영문이라 화면에
+      // 그대로 올리면 읽는 사람이 할 수 있는 일이 없다. 로그로만 남긴다.
+      console.error("[creator-channel] sync 실패:", err?.message || err);
+      return Response.json(
+        { error: "정보를 갱신하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: "SYNC_FAILED" },
+        { status: 500 },
+      );
     }
   }
 

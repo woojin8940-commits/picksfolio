@@ -186,9 +186,15 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
     const result = await apiService.syncCreatorChannel(item.applicant_username, token);
     setSyncingId(null);
     if (result.error) {
-      alert(result.code === 'META_NOT_LINKED'
-        ? '지원자가 아직 Instagram Meta 계정을 연동하지 않았습니다.'
-        : result.error);
+      // 메타 원문(영문)을 그대로 띄우지 않는다. 운영자가 지원자에게 전달할 수 있는
+      // 말은 "연동을 안 했다" 또는 "다시 연동해야 한다" 둘 중 하나다.
+      if (result.code === 'META_NOT_LINKED') {
+        alert('지원자가 아직 Instagram Meta 계정을 연동하지 않았습니다.');
+      } else if (result.code === 'META_TOKEN_INVALID') {
+        alert('지원자의 Instagram 연동이 만료되었습니다. 지원자가 계정을 다시 연동해야 지표를 불러올 수 있습니다.');
+      } else {
+        alert(result.error || '지표를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      }
       return;
     }
     await fetchItems();
