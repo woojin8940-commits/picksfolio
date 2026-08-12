@@ -1056,7 +1056,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {visibleApplyRows.length === 0 && (
                         <p className="text-[11px] text-slate-400 font-bold text-center py-8">
                           이 조건에 해당하는 지원자가 없습니다.
