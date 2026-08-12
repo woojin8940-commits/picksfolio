@@ -5,7 +5,7 @@ import {
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd,
 } from 'lucide-react';
-import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, DmSendLogEntry, InstagramMedia } from '../services/apiService';
+import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, InstagramMedia } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
@@ -840,16 +840,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 도착하거나 자동 발송을 꺼도 DM 이 간다. 감지되면 끄는 방법을 안내한다.
    */
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
-  /**
-   * 이 앱이 실제로 보낸 최근 발송 기록.
-   *
-   * "설정한 문구가 아닌 예전 메시지가 도착한다"는 의심을 화면에서 직접 확인할 수
-   * 있게 하는 근거다. 여기 없는 발송은 이 앱이 한 것이 아니다.
-   */
-  const [recentSends, setRecentSends] = useState<DmSendLogEntry[]>([]);
   /** 발신 에코 구독 여부. 꺼져 있으면 외부 자동 DM 을 감지할 수 없다. */
   const [echoSubscribed, setEchoSubscribed] = useState(true);
-  const [showSendLog, setShowSendLog] = useState(false);
 
   const loadMedia = () => {
     setMediaLoading(true);
@@ -875,7 +867,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
-        setRecentSends(Array.isArray(s.recentSends) ? s.recentSends : []);
         setEchoSubscribed(s.echoSubscribed !== false);
         setLoaded(true);
         if (s.connected) loadMedia();
@@ -1335,89 +1326,17 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         </section>
       )}
 
-      {/* 이 앱이 실제로 보낸 발송 기록.
-          "설정한 문구가 아닌 예전 메시지가 도착한다"는 의심은 화면에 근거가 없으면
-          확인할 방법이 없다. 이 앱이 보낸 DM 은 빠짐없이 여기에 남으므로, 목록에 없는
-          문구가 도착했다면 그건 인스타그램 자체 자동 메시지이거나 다른 자동화
-          서비스에서 나간 것이다. */}
-      {connected && (
-        <section className="mb-6 rounded-3xl border border-slate-100 bg-white p-5 md:p-6 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setShowSendLog((v) => !v)}
-            className="flex w-full items-center justify-between gap-3 text-left"
-          >
-            <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
-              <Eye size={17} className="text-slate-400" /> 이 앱이 보낸 기록
-            </h3>
-            <span className="flex items-center gap-1.5 text-xs font-black text-slate-400 shrink-0">
-              최근 {recentSends.length}건
-              <ChevronRight size={15} className={showSendLog ? 'rotate-90 transition-transform' : 'transition-transform'} />
-            </span>
-          </button>
-          <p className="mt-1.5 text-[12px] font-medium text-slate-500">
-            이 앱이 발송한 DM·답글은 모두 여기에 남습니다.
-            <span className="font-black text-slate-700"> 목록에 없는 문구가 도착했다면 이 앱이 보낸 것이 아닙니다.</span>
+      {/* 발신 에코 구독이 아직 연결되지 않은 상태 안내.
+          이 구독이 없으면 이 앱을 거치지 않고 나간 자동 DM(인스타그램 자체 자동 메시지,
+          예전에 연결해 둔 다른 자동화 서비스)을 감지할 수 없어, 위의 "외부 자동 DM"
+          안내가 영영 뜨지 않는다. 감지가 꺼져 있다는 사실 자체를 알려줘야 한다. */}
+      {connected && !echoSubscribed && (
+        <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6">
+          <p className="text-[12px] md:text-sm font-bold text-amber-800">
+            인스타그램 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을 거치지
+            않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 자동화를 한 번 저장하면 다시 연결을
+            시도합니다.
           </p>
-
-          {!echoSubscribed && (
-            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-[12px] font-bold text-amber-800">
-                인스타그램에서 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을
-                거치지 않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 자동화를 한 번 저장하면 다시
-                연결을 시도합니다.
-              </p>
-            </div>
-          )}
-
-          {showSendLog && (
-            recentSends.length === 0 ? (
-              <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-6 text-center text-[12px] font-bold text-slate-400">
-                이 앱이 보낸 기록이 아직 없습니다.
-              </p>
-            ) : (
-              <ul className="mt-4 space-y-2">
-                {recentSends.map((entry, i) => {
-                  const failed = entry.status === 'failed';
-                  const skipped = entry.status === 'skipped';
-                  return (
-                    <li
-                      key={`${entry.at}_${i}`}
-                      className="rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`rounded-lg px-2 py-0.5 text-[10px] font-black ${
-                            failed
-                              ? 'bg-red-100 text-red-700'
-                              : skipped
-                                ? 'bg-slate-200 text-slate-600'
-                                : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {failed ? '실패' : skipped ? '보내지 않음' : '발송'}
-                        </span>
-                        <span className="text-[11px] font-black text-slate-600">
-                          {entry.kind === 'reply' ? '공개 답글' : entry.kind === 'dm' ? '자동 DM' : '수동 발송'}
-                        </span>
-                        {entry.ruleName && (
-                          <span className="text-[11px] font-bold text-slate-400 truncate">· {entry.ruleName}</span>
-                        )}
-                        <span className="ml-auto text-[10px] font-bold text-slate-400">
-                          {entry.at ? new Date(entry.at).toLocaleString('ko-KR') : '-'}
-                        </span>
-                      </div>
-                      {(entry.error || entry.reason) && (
-                        <p className="mt-1.5 text-[11px] font-medium text-slate-500 break-words">
-                          {entry.error || entry.reason}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )
-          )}
         </section>
       )}
 

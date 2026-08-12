@@ -8,7 +8,6 @@ import {
 } from "./_shared/dm-automation-access.mts";
 import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
-import { readDmLog } from "./_shared/dm-automation-log.mts";
 import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
@@ -281,25 +280,14 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     const data = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
     const { accessToken, ...safe } = data;
-    /**
-     * 이 앱이 실제로 보낸 기록을 함께 내려준다.
-     *
-     * "설정한 문구가 아닌 예전 메시지가 도착한다"는 신고는 화면에 근거가 없으면
-     * 끝없이 반복된다. 발송 기록은 블롭에 계속 쌓이고 있었지만 어디에서도 읽지
-     * 않아, 이 앱이 무엇을 보냈는지 확인할 방법이 아예 없었다. 최근 기록을 함께
-     * 내려주면 "우리가 보낸 것" 과 "밖에서 나간 것" 을 화면에서 구분할 수 있다.
-     */
-    const recentSends = await readDmLog(username, 20).catch((e) => {
-      console.warn("[dm-automation] log read failed:", (e as Error)?.message);
-      return [];
-    });
+    // 발송 로그(dm-automation-log)는 화면에서 보여주지 않으므로 응답에 싣지 않는다.
+    // 장애 조사용으로 블롭에는 계속 최근 50건이 쌓인다.
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
       automations: Array.isArray(data.automations) ? data.automations : [],
       connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
-      recentSends,
       /**
        * 발신 에코(`message_echoes`) 구독 여부. 구독돼 있지 않으면 이 앱을 거치지
        * 않고 나간 자동 DM 을 감지할 수 없으므로, 화면에서 그 한계를 알려준다.

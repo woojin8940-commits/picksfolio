@@ -291,26 +291,6 @@ export interface DmRule {
   enabled: boolean;
 }
 
-/**
- * 이 앱이 남긴 DM 발송 기록 한 건.
- *
- * `kind` 는 'dm'(비공개 답장) / 'reply'(공개 답글), 값이 없으면 수동 일괄 발송이다.
- * 서버가 상황에 따라 다른 필드를 덧붙이므로 나머지는 느슨하게 받는다.
- */
-export interface DmSendLogEntry {
-  at: string;
-  kind?: 'dm' | 'reply';
-  status?: 'sent' | 'failed' | 'skipped' | 'external';
-  ruleId?: string;
-  ruleName?: string;
-  recipientId?: string;
-  error?: string;
-  reason?: string;
-  sentCount?: number;
-  failCount?: number;
-  [k: string]: unknown;
-}
-
 export interface DmAutomationSettings {
   enabled: boolean;
   connected: boolean;
@@ -335,13 +315,6 @@ export interface DmAutomationSettings {
    * 계속 도착한다. 감지되면 화면에서 그 사실과 끄는 방법을 안내한다.
    */
   externalDm?: { text: string; at: string; count: number } | null;
-  /**
-   * 이 앱이 실제로 보낸 최근 발송 기록.
-   *
-   * "설정한 문구가 아닌 예전 메시지가 도착한다"를 화면에서 확인할 수 있게 하는
-   * 근거다. 여기에 없는 문구는 이 앱이 보낸 것이 아니다.
-   */
-  recentSends?: DmSendLogEntry[];
   /**
    * 발신 에코(`message_echoes`) 웹훅 구독 여부. false 면 이 앱을 거치지 않고
    * 나간 자동 DM 을 감지할 수 없다.
