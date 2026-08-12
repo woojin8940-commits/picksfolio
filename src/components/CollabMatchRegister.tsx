@@ -265,8 +265,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     await loadChannel();
     setNotice({
       type: 'ok',
+      // 조회수 권한(인사이트)은 연동할 때 함께 받는다. 권한이 추가되기 전에 연동해 둔
+      // 계정은 토큰에 그 권한이 없으므로, 다시 연동하라고 말해 주어야 값이 채워진다.
       text: result?.viewsAvailable === false
-        ? '최신 정보를 불러왔어요. 조회수는 계정 설정상 비공개일 수 있습니다.'
+        ? '최신 정보를 불러왔어요. 릴스 조회수가 비어 있으면 계정을 다시 연동해 조회수 권한을 허용해 주세요.'
         : '최신 팔로워·릴스 정보를 불러왔어요.',
     });
   };
@@ -654,12 +656,14 @@ const InstagramLinkCard: React.FC<{
       <div className="grid grid-cols-3 gap-2 mt-3">
         <Metric label="팔로워" value={compact(channel.followers)} />
         <Metric label="팔로잉" value={compact(channel.following)} />
-        <Metric label="릴스 평균 조회" value={compact(channel.avgViews)} />
+        {/* 아직 못 받은 조회수를 "0" 으로 적으면 아무도 안 본 계정으로 읽힌다. */}
+        <Metric label="릴스 평균 조회" value={channel.avgViews ? compact(channel.avgViews) : '집계 전'} />
       </div>
       {verified && channel.avgViews === 0 && (
         <p className="text-[11px] text-slate-500 font-medium mt-2 leading-relaxed">
-          릴스 조회수는 계정 설정이나 앱 권한에 따라 비공개일 수 있습니다. 팔로워 수는
-          정상적으로 확인되었습니다.
+          릴스 조회수를 아직 받지 못했습니다. "새로 불러오기"를 눌러도 비어 있으면 계정을
+          다시 연동해 조회수(인사이트) 권한을 허용해 주세요. 팔로워 수는 정상적으로
+          확인되었습니다.
         </p>
       )}
     </div>

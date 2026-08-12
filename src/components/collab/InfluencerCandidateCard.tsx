@@ -156,17 +156,15 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         {badges && <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2.5 mb-3">
+      {/* 좋아요는 싣지 않는다. 브랜드가 후보를 고를 때 쓰는 숫자는 도달(조회수)이고,
+          좋아요를 나란히 두면 릴스 조회수와 사진 반응이 섞여 비교 기준이 흐려진다.
+          평균 좋아요·댓글은 인사이트 점수 계산에는 그대로 쓰인다. */}
+      <div className="grid grid-cols-2 gap-2 bg-slate-50 rounded-lg px-3 py-2.5 mb-3">
         <Stat label="팔로워" value={m.followers ? formatNumberWithCommas(m.followers) : '—'} />
         <Stat
           label="평균 조회수"
           value={m.avgViews ? formatNumberWithCommas(m.avgViews) : '—'}
           hint={m.reelsCount ? `최근 릴스 ${m.reelsCount}개 기준` : ''}
-        />
-        <Stat
-          label="평균 좋아요"
-          value={m.avgLikes ? formatNumberWithCommas(m.avgLikes) : '—'}
-          hint={m.avgComments ? `댓글 ${formatNumberWithCommas(m.avgComments)}` : ''}
         />
       </div>
 

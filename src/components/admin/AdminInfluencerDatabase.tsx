@@ -404,7 +404,6 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                   { k: '인사이트', v: open.insight ? `${open.insight.score}점 · ${insightGrade(open.insight.score).label}` : '집계 전' },
                   { k: '팔로잉', v: compact(open.following) },
                   { k: '평균 조회수', v: compact(open.avgViews) },
-                  { k: '평균 좋아요', v: compact(open.avgLikes) },
                   { k: '평균 댓글', v: compact(open.avgComments) },
                   { k: '참여율', v: open.engagementRate ? `${open.engagementRate}%` : '—' },
                 ].map(item => (

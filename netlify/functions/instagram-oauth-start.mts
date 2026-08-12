@@ -23,10 +23,19 @@ import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts"
  * URL 로 스스로 이동한다. GET 은 더 이상 지원하지 않는다.
  */
 
+/**
+ * 요청 권한.
+ *
+ * instagram_business_manage_insights 는 릴스 조회수를 받기 위한 것이다. 조회수는
+ * 미디어 일반 필드가 아니라 인사이트 지표라서, 이 권한 없이는 팔로워·릴스 목록만
+ * 오고 평균 조회수가 0 으로 남는다(브랜드 매칭 명단에서 가장 중요한 숫자다).
+ * 메타 앱 심사에서 이 권한이 승인돼야 실제 사용자 계정에서도 값이 내려온다.
+ */
 const SCOPES = [
   "instagram_business_basic",
   "instagram_business_manage_messages",
   "instagram_business_manage_comments",
+  "instagram_business_manage_insights",
 ].join(",");
 
 export default async (req: Request, _context: Context) => {
