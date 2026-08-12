@@ -48,6 +48,20 @@ export const publicReplyKey = (commentId: string) => `pubreply_${commentId}`;
 export const dmContentKey = (commentId: string, contentHash: string) =>
   `dm_${commentId}_${contentHash}`;
 
+/**
+ * 이 댓글에 자동 DM 을 이미 한 번 보냈는지 표시하는 키(내용과 무관).
+ *
+ * 내용해시 키만으로는 막지 못하는 구멍이 있다. Meta 는 응답이 늦으면 같은 댓글
+ * 이벤트를 몇 시간 뒤까지 다시 보내는데, 그 사이 사용자가 문구를 고쳤다면
+ * 내용해시가 달라져 선점이 통과된다. 게다가 비공개 답장은 이미 써버린 상태라
+ * IGSID 직접 발송으로 넘어가므로 인스타그램의 "댓글당 1회" 제한에도 걸리지
+ * 않는다. 결과는 댓글 하나에 예전 문구와 새 문구가 나란히 도착하는 것이다.
+ *
+ * 댓글 하나가 만들어 낼 수 있는 자동 DM 은 어떤 경우에도 1통이므로, 내용과
+ * 무관한 댓글 단위 선점으로 막는다.
+ */
+export const commentDmKey = (commentId: string) => `cdm_${commentId}`;
+
 /** 보낼 메시지 페이로드로부터 내용 해시를 만든다. */
 export function contentHashOf(messages: unknown): string {
   return createHash("sha256").update(JSON.stringify(messages ?? null)).digest("hex").slice(0, 12);
