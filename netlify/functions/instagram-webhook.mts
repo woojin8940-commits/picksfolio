@@ -7,6 +7,7 @@ import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
   claimIfNew,
+  commentDmKey,
   contentHashOf,
   dmContentKey,
   noteSentText,
@@ -504,9 +505,25 @@ export default async (req: Request, _context: Context) => {
         // 신고를 받았을 때 화면의 설정과 실제 발송 내용을 맞춰볼 수 있어야 한다.
         const contentHash = contentHashOf(messages);
         const contentKey = dmContentKey(commentId, contentHash);
+        const commentKey = commentDmKey(commentId);
         const replyKey = privateReplyKey(commentId);
 
+        /**
+         * 댓글 하나가 만들어 낼 자동 DM 은 1통이다.
+         *
+         * 내용해시 키보다 먼저 확인해야 한다. Meta 가 같은 댓글 이벤트를 나중에
+         * 다시 보냈고 그 사이 문구가 바뀌었다면 내용해시 키는 새 값이라 통과하는데,
+         * 그러면 이 댓글 작성자에게 예전 문구에 이어 새 문구까지 도착한다
+         * ("hello 만 가야 하는데 예전 메시지도 왔다"가 정확히 이 상황이다).
+         */
+        if (!(await claimIfNew(username, commentKey))) {
+          console.warn("[ig-webhook] comment already auto-DMed — skipped", commentId);
+          continue;
+        }
+
         // 같은 댓글에 같은 내용을 이미 보냈다면(웹훅 재전송·수동 발송과 겹침) 끝.
+        // 댓글 단위 선점은 되돌리지 않는다 — 이 댓글에는 이미 DM 이 나갔으므로,
+        // 나중에 문구가 바뀐 재전송이 들어와도 다시 보내면 안 된다.
         if (!(await claimIfNew(username, contentKey))) {
           console.warn("[ig-webhook] duplicate DM suppressed for comment", commentId);
           continue;
@@ -573,8 +590,9 @@ export default async (req: Request, _context: Context) => {
               error: result.partial ? result.error : undefined,
             });
           } else {
-            // 못 보냈으니 내용 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.
+            // 못 보냈으니 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.
             await release(username, contentKey);
+            await release(username, commentKey);
             const kind = result?.errorKind || "other";
             await appendLog(username, {
               kind: "dm",
@@ -590,6 +608,7 @@ export default async (req: Request, _context: Context) => {
           }
         } catch (e: any) {
           await release(username, contentKey);
+          await release(username, commentKey);
           await appendLog(username, { kind: "dm", status: "failed", recipientId: fromId, ruleId: automation.id, error: e?.message || "send error" });
         }
       }

@@ -316,6 +316,11 @@ export interface DmAutomationSettings {
    */
   externalDm?: { text: string; at: string; count: number } | null;
   /**
+   * 발신 에코(`message_echoes`) 웹훅 구독 여부. false 면 이 앱을 거치지 않고
+   * 나간 자동 DM 을 감지할 수 없다.
+   */
+  echoSubscribed?: boolean;
+  /**
    * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면
    * 나머지 필드는 "모른다"는 뜻이므로, 화면은 설정이 아니라 재시도 안내를 보여준다.
    */

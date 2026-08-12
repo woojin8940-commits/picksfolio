@@ -840,6 +840,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 도착하거나 자동 발송을 꺼도 DM 이 간다. 감지되면 끄는 방법을 안내한다.
    */
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
+  /** 발신 에코 구독 여부. 꺼져 있으면 외부 자동 DM 을 감지할 수 없다. */
+  const [echoSubscribed, setEchoSubscribed] = useState(true);
 
   const loadMedia = () => {
     setMediaLoading(true);
@@ -865,6 +867,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
+        setEchoSubscribed(s.echoSubscribed !== false);
         setLoaded(true);
         if (s.connected) loadMedia();
       })
@@ -1320,6 +1323,20 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               </button>
             </div>
           </div>
+        </section>
+      )}
+
+      {/* 발신 에코 구독이 아직 연결되지 않은 상태 안내.
+          이 구독이 없으면 이 앱을 거치지 않고 나간 자동 DM(인스타그램 자체 자동 메시지,
+          예전에 연결해 둔 다른 자동화 서비스)을 감지할 수 없어, 위의 "외부 자동 DM"
+          안내가 영영 뜨지 않는다. 감지가 꺼져 있다는 사실 자체를 알려줘야 한다. */}
+      {connected && !echoSubscribed && (
+        <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6">
+          <p className="text-[12px] md:text-sm font-bold text-amber-800">
+            인스타그램 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을 거치지
+            않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 자동화를 한 번 저장하면 다시 연결을
+            시도합니다.
+          </p>
         </section>
       )}
 

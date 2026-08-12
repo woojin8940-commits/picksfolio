@@ -280,14 +280,19 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     const data = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
     const { accessToken, ...safe } = data;
-    // 발송 로그(dm-automation-log)는 화면에서 더 이상 보여주지 않으므로 응답에 싣지
-    // 않는다. 장애 조사용으로 블롭에는 계속 최근 50건이 쌓인다.
+    // 발송 로그(dm-automation-log)는 화면에서 보여주지 않으므로 응답에 싣지 않는다.
+    // 장애 조사용으로 블롭에는 계속 최근 50건이 쌓인다.
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
       automations: Array.isArray(data.automations) ? data.automations : [],
       connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
+      /**
+       * 발신 에코(`message_echoes`) 구독 여부. 구독돼 있지 않으면 이 앱을 거치지
+       * 않고 나간 자동 DM 을 감지할 수 없으므로, 화면에서 그 한계를 알려준다.
+       */
+      echoSubscribed: String(data.webhookFields || "").includes("message_echoes"),
       // 이 앱이 보내지 않은 자동 DM(인스타그램 자체 자동 메시지·다른 자동화 서비스)이
       // 감지됐다면 함께 내려준다. 화면에서 "왜 설정과 다른 문구가 오는지" 안내한다.
       externalDm: await readForeignDm(username),
@@ -501,14 +506,21 @@ export default async (req: Request, context: Context) => {
       });
       if (sub.ok) {
         const subscribedAt = new Date().toISOString();
+        const achieved = sub.fields || WEBHOOK_FIELDS;
         next.webhookSubscribedAt = subscribedAt;
-        // 시도한 목록을 기록한다(에코가 거절돼 기본 필드로 내려앉은 경우까지 포함).
-        // 실제 구독본이 아니라 "이 세대의 구독을 마쳤다"는 표시라, 저장할 때마다
-        // 다시 구독 요청을 보내지 않는다.
-        next.webhookFields = WEBHOOK_FIELDS;
+        /**
+         * 실제로 구독에 성공한 목록을 기록한다.
+         *
+         * 예전에는 시도한 목록(WEBHOOK_FIELDS)을 그대로 찍었다. 그래서 에코 필드가
+         * 거절돼 `comments,messages` 로 내려앉은 계정도 "최신 목록으로 구독 완료"로
+         * 표시됐고, 다시 구독을 걸어보는 일이 영영 없었다. 발신 에코를 못 받으면
+         * 이 앱을 거치지 않고 나간 자동 DM 을 감지할 수 없어, 사용자는 예전 문구가
+         * 어디서 오는지 확인할 방법이 없다.
+         */
+        next.webhookFields = achieved;
         await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) =>
           current
-            ? { ...current, webhookSubscribedAt: subscribedAt, webhookFields: WEBHOOK_FIELDS }
+            ? { ...current, webhookSubscribedAt: subscribedAt, webhookFields: achieved }
             : null,
         ).catch((e) => console.warn("[dm-automation] webhook flag save failed:", (e as Error)?.message));
       } else {
