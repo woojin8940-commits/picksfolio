@@ -964,35 +964,38 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 실제 DM 은 예전 문구로 나갔다. 저장 뒤에는 서버가 돌려준 목록으로 화면을 맞춰
    * "보이는 내용 = 발송될 내용"을 보장한다.
    *
-   * 전체 스위치(자동 발송)가 꺼져 있으면 자동화를 아무리 저장해도 댓글에 반응하지
-   * 않는다. 연동을 해제했다가 다시 연결하면 이 스위치가 꺼진 채로 남기 때문에,
-   * 사용자는 "자동화는 ON 인데 DM 이 오지 않는다"(혹은 예전에 도착한 DM 만 보인다)를
-   * 겪는다. 자동화를 켠 상태로 저장하는 건 곧 "이걸 돌려 달라"는 뜻이므로 같은
-   * 요청에서 전체 스위치도 함께 켜고, 무엇이 바뀌었는지 알려준다.
+   * 전체 스위치(자동 발송)는 여기서 절대 건드리지 않는다.
+   *
+   * 예전에는 켜진 자동화를 저장하면 "이걸 돌려 달라는 뜻"으로 보고 전체 스위치까지
+   * 같이 켰다. 그런데 새 자동화는 항상 켜진 상태로 만들어지기 때문에, 자동 발송을
+   * 일부러 꺼 둔 사람이 문구를 다듬거나 자동화 하나를 켜기만 해도 전체 스위치가
+   * 조용히 다시 켜졌다. 사용자 입장에서는 "발송 버튼은 꺼 놨는데 댓글이 달리니 예전에
+   * 설정해 둔 메시지가 나갔다"가 된다. 끄는 건 사용자의 명시적인 의사이므로, 다시
+   * 켜는 것도 사용자가 스위치를 눌렀을 때만 일어나야 한다.
+   *
+   * 대신 전체 스위치가 꺼진 채로 자동화를 저장하면 "지금은 작동하지 않는다"를 알려
+   * 준다. 목록 위의 안내 배너에서 바로 켤 수 있다.
    */
   const commitAutomation = async (automation: DmAutomationItem) => {
     const prev = automations;
-    const prevEnabled = enabled;
     const exists = prev.some((x) => x.id === automation.id);
-    const turnOnMaster = automation.enabled && !enabled;
     setAutomations(exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation]);
-    if (turnOnMaster) setEnabled(true);
-    const result = await persist(
-      turnOnMaster
-        ? { action: 'upsertAutomation', automation, enabled: true }
-        : { action: 'upsertAutomation', automation },
-    );
+    const result = await persist({ action: 'upsertAutomation', automation });
     // 저장에 실패하면 서버가 최신 목록을 함께 준 경우(다른 곳에서 먼저 수정) 그 값을,
     // 아니면 직전 화면 값을 쓴다. 어느 쪽이든 화면은 실제 저장 상태를 따라간다.
     if (!result.ok) {
       setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
-      setEnabled(prevEnabled);
       return;
     }
     if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
+    // 서버가 확정한 전체 스위치 상태를 그대로 따른다(저장 요청은 이 값을 바꾸지 않는다).
+    const masterOn = typeof result.enabled === 'boolean' ? result.enabled : enabled;
     if (typeof result.enabled === 'boolean') setEnabled(result.enabled);
-    if (turnOnMaster && result.enabled !== false) {
-      setBanner({ type: 'ok', text: '자동 발송이 꺼져 있어 함께 켰어요. 이제 새 댓글에 이 문구로 DM이 발송됩니다.' });
+    if (automation.enabled && !masterOn) {
+      setBanner({
+        type: 'ok',
+        text: '저장했어요. 다만 자동 발송 스위치가 꺼져 있어 새 댓글에는 아직 DM이 나가지 않습니다. 발송하려면 위의 자동 발송을 켜주세요.',
+      });
     }
   };
 
@@ -1416,6 +1419,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
               <p className="text-xs font-black text-amber-800">자동 발송이 꺼져 있어 DM이 나가지 않아요</p>
               <p className="text-[11px] font-medium text-amber-700 mt-0.5">
                 아래 자동화는 켜져 있지만, 위의 <span className="font-black">자동 발송</span> 스위치가 꺼져 있으면 새 댓글에 반응하지 않습니다.
+                이 상태에서도 댓글 뒤에 DM이 계속 도착한다면 인스타그램(메타) 자체 자동 메시지이거나 예전에 연결해 둔 다른 자동화 서비스에서 나가는 것이라, 그쪽에서 꺼야 멈춥니다.
               </p>
             </div>
             <button

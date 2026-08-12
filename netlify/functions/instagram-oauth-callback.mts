@@ -1,6 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
-import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
+import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
 import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
 import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 
@@ -34,6 +34,8 @@ interface DmSettings {
   updatedAt?: string;
   /** 계정별 웹훅(`subscribed_apps`) 구독을 마친 시각. */
   webhookSubscribedAt?: string;
+  /** 마지막으로 구독을 건 필드 목록. 목록이 바뀌면 한 번 더 구독한다. */
+  webhookFields?: string;
 }
 
 export default async (req: Request, _context: Context) => {
@@ -180,7 +182,11 @@ export default async (req: Request, _context: Context) => {
     });
     if (sub.ok) {
       try {
-        await store.setJSON(key, { ...next, webhookSubscribedAt: new Date().toISOString() });
+        await store.setJSON(key, {
+          ...next,
+          webhookSubscribedAt: new Date().toISOString(),
+          webhookFields: WEBHOOK_FIELDS,
+        });
       } catch (e) {
         console.warn("[ig-oauth] subscribe flag write failed:", e);
       }
