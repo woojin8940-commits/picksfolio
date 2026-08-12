@@ -21,7 +21,7 @@ import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
  * 하나가 화면을 다 먹으므로 4:5 로 잘라, 알아볼 수 있는 크기와 여러 명을 견주는
  * 스크롤 사이를 맞춘다.
  *
- *   겉(항상 보임): 이름·출처 배지 · 최근 릴스 3편(크게) · 릴스 동향 배지 ·
+ *   겉(항상 보임): 인스타 아이디·출처 배지 · 최근 릴스 3편(크게) · 릴스 동향 배지 ·
  *                  담당자 추천 이유 · 팔로워 / 평균 조회수 / 광고비
  *   안(펼쳐야 보임): 릴스 동향 설명, 피드 그림, 소개, 나머지 단가, 링크,
  *                  그리고 부르는 쪽이 넘긴 details(연락처처럼 고른 뒤에 필요한 것)
@@ -110,6 +110,18 @@ export const candidateSortValues = (raw: any) => {
   return { followers: m.followers || 0, avgViews: m.avgViews || 0 };
 };
 
+/**
+ * 릴스 칸 수. Tailwind 는 클래스 문자열을 빌드 시점에 훑으므로 `grid-cols-${n}` 조립은
+ * 사라진다 — 표에서 꺼낸다.
+ *
+ * 연동한 지 얼마 안 된 계정은 릴스가 한두 편만 온다. 그때도 칸을 셋으로 나눠 두면
+ * 그림 하나가 카드 구석의 조각으로 남아 무엇이 찍혔는지 알 수 없다. 대신 한 편일 때도
+ * 폭을 다 주지는 않는다 — 4:5 그림 하나가 카드 높이를 다 먹으면 아래 숫자가 화면 밖으로
+ * 밀린다.
+ */
+export const reelGridCols = (count: number) =>
+  count <= 2 ? 'grid-cols-2' : 'grid-cols-3';
+
 /** 지표 출처. 클래스 이름은 문자열 조립 없이 표에서 꺼내야 Tailwind 가 살려 둔다. */
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   meta_api: { label: '메타 연동 확인', cls: 'bg-emerald-50 text-emerald-600' },
@@ -120,8 +132,10 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
 /**
  * 가로로 붙는 지표 칸.
  *
- * 값은 만 단위로 접어 짧게 적고(2.4만), 정확한 숫자는 title 로 단다. 후보를 세로로
- * 쌓아 비교하는 자리라 자릿수보다 크기가 먼저 읽혀야 한다.
+ * 값은 만 단위로 접어 짧게 적고(2.4만), 정확한 숫자는 title 로 단다. 후보를 나란히
+ * 놓고 비교하는 자리라 자릿수보다 크기가 먼저 읽혀야 한다. 값에 색을 주는 이유도
+ * 같다 — 카드를 훑을 때 눈이 먼저 닿는 곳이 팔로워·조회수·광고비 세 숫자여야
+ * 한다.
  */
 const Stat: React.FC<{ label: string; value: string; title?: string; hint?: string }> = ({
   label,
@@ -131,7 +145,7 @@ const Stat: React.FC<{ label: string; value: string; title?: string; hint?: stri
 }) => (
   <div className="min-w-0">
     <p className="text-[10px] text-slate-400 font-black uppercase truncate">{label}</p>
-    <p className="text-[15px] text-slate-900 font-black truncate" title={title}>
+    <p className="text-[17px] md:text-[19px] text-orange-500 font-black truncate" title={title}>
       {value}
     </p>
     {hint ? <p className="text-[10px] text-slate-400 font-medium truncate">{hint}</p> : null}
@@ -182,9 +196,21 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   const mainPrice = prices[0];
   const restPrices = prices.slice(1);
 
-  const handleLine = [
-    `@${m.username}`,
-    m.instagramHandle && m.instagramHandle !== m.username ? `인스타 @${m.instagramHandle}` : '',
+  /**
+   * 카드 맨 위 한 줄은 인스타 아이디다.
+   *
+   * 예전에는 등록 이름을 먼저 뒀는데, 브랜드가 이 사람을 다시 찾아보는 단서는
+   * 이름이 아니라 계정이다("김하실"로는 아무 데서도 못 찾는다). 그래서 아이디를
+   * 크게 올리고, 이름·카테고리는 그 아래 한 줄로 접는다. 리스트업처럼 서버가
+   * 아이디를 지워 보내는 화면에서는 가려진 이름이 그 자리를 대신한다.
+   */
+  const handle = m.instagramHandle || m.username;
+  const idLine = handle ? `@${handle}` : m.name || '비공개';
+  const subLine = [
+    m.name && handle ? m.name : '',
+    m.instagramHandle && m.username && m.instagramHandle !== m.username
+      ? `픽스폴리오 @${m.username}`
+      : '',
     m.categories || '',
   ]
     .filter(Boolean)
@@ -247,20 +273,32 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-100 p-3 md:p-4">
-      {/* 이름 · 출처 · 상태 배지를 한 줄에 둔다. 목록에서 사람을 구분하는 것은 이
-          줄 하나뿐이다. */}
+    <div className="bg-white rounded-xl border border-slate-100 p-3 md:p-4 flex flex-col h-full">
+      {/* 인스타 아이디 · 출처 · 상태 배지를 한 줄에 둔다. 목록에서 사람을 구분하는
+          것은 이 줄 하나뿐이고, 그 구분자는 계정 아이디다. */}
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-sm font-black text-slate-900 truncate">
-              {m.name || `@${m.username}`}
-            </span>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
-              {source.label}
-            </span>
+        <div className="flex items-start gap-2.5 min-w-0">
+          {/* 프로필 사진은 받아 두지 않는다. 아이디 첫 글자로 자리를 채워 카드마다
+              같은 위치에서 시선이 시작되게 한다. */}
+          <div className="w-9 h-9 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
+            {String(handle || m.name || '?')
+              .replace('@', '')
+              .slice(0, 1)
+              .toUpperCase()}
           </div>
-          <p className="text-[11px] text-slate-400 font-bold truncate">{handleLine}</p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-sm font-black text-slate-900 truncate" title={idLine}>
+                {idLine}
+              </span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${source.cls}`}>
+                {source.label}
+              </span>
+            </div>
+            {subLine && (
+              <p className="text-[11px] text-slate-400 font-bold truncate">{subLine}</p>
+            )}
+          </div>
         </div>
         {badges && (
           <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">{badges}</div>
@@ -283,7 +321,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               </span>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className={`grid ${reelGridCols(reels.length)} gap-2`}>
             {reels.map((r: any, i: number) => reelThumb(r, i))}
           </div>
         </div>
@@ -437,7 +475,13 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         </div>
       )}
 
-      {children && <div className="mt-2.5 border-t border-slate-100 pt-2.5">{children}</div>}
+      {/* 카드 높이는 한 줄에 놓인 옆 카드에 따라 달라진다. 고르는 버튼을 카드 아래에
+          붙여 두지 않으면 두 카드의 버튼 높이가 어긋나 훑으면서 누르기 어렵다. */}
+      {children && (
+        <div className="mt-auto">
+          <div className="mt-2.5 border-t border-slate-100 pt-2.5">{children}</div>
+        </div>
+      )}
     </div>
   );
 };

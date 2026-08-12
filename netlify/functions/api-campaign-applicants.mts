@@ -101,6 +101,9 @@ export default async (req: Request) => {
       const status = (body as any).status ? String((body as any).status) : "";
       const hasPreference = (body as any).brandPreference !== undefined;
       const preference = hasPreference ? String((body as any).brandPreference || "") : "";
+      // 추천 이유만 고치는 요청. 지우는 것("")도 정상이므로 값이 비었는지가 아니라
+      // 필드가 왔는지로 가른다.
+      const hasManagerNote = (body as any).managerNote !== undefined;
 
       if (!id) {
         return Response.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });
@@ -142,6 +145,24 @@ export default async (req: Request) => {
           WHERE id = ${id}
         `;
         return Response.json({ success: true, brandPreference: preference });
+      }
+
+      // --- 담당자 추천 이유 (선정과 분리) ---------------------------------
+      // 브랜드 카드에 그대로 보이는 줄이다. 선정할 때만 적을 수 있게 두면, 브랜드가
+      // 고르는 캠페인에서는 담당자가 이유를 남길 자리가 아예 없어진다 — 정작 그
+      // 화면이 이유를 가장 필요로 한다.
+      if (!status && !hasPreference && hasManagerNote) {
+        const manager = await requireManager(req);
+        if (!manager.ok) return manager.response;
+
+        const note = String((body as any).managerNote || "").slice(0, 2000);
+        await db.sql`
+          UPDATE campaign_applications
+          SET manager_note = ${note},
+              updated_at = NOW()
+          WHERE id = ${id}
+        `;
+        return Response.json({ success: true, managerNote: note });
       }
 
       if (!status) {

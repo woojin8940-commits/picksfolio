@@ -92,6 +92,11 @@ interface Applicant {
   // 브랜드가 남기는 의견. 선정 권한과 분리된 값이라 status 와 다른 컬럼에 있다.
   brand_preference?: string;
   brand_preference_note?: string;
+  /**
+   * 담당자가 이 지원자에 대해 적어 둔 추천 이유. 담당자 콘솔에서 쓰고 브랜드 카드에
+   * 그대로 보인다 — 담당자만 보는 메모가 아니다.
+   */
+  manager_note?: string;
   // 수락한 뒤 만들어지는 협업 본체. 만드는 사람은 진행 방식에 따라 브랜드일 수도,
   // 담당자일 수도 있다.
   collab_id?: string;
@@ -1055,13 +1060,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         )}
                       </p>
                     </div>
+                  ) : visibleApplyRows.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+                      이 조건에 해당하는 지원자가 없습니다.
+                    </p>
                   ) : (
-                    <div className="space-y-3">
-                      {visibleApplyRows.length === 0 && (
-                        <p className="text-[11px] text-slate-400 font-bold text-center py-8">
-                          이 조건에 해당하는 지원자가 없습니다.
-                        </p>
-                      )}
+                    /* 한 줄에 둘까지만 놓는다. 셋으로 쪼개면 카드 폭이 좁아져 릴스
+                       썸네일이 알아볼 수 없는 크기가 되는데, 브랜드가 사람을 고르는
+                       마지막 판단은 그림이 한다. 모바일은 한 줄에 하나 — 폭이 반으로
+                       갈리면 팔로워·조회수·광고비 세 칸이 서로 줄바꿈돼 어느 숫자도
+                       안 읽힌다. 담당자 추천 명단과 같은 배치라, 두 화면을 오가며
+                       후보를 견줘도 눈이 같은 자리에서 같은 숫자를 찾는다. */
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
                       {visibleApplyRows.map(app => (
                         /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
                            화면이 두 곳(담당자 명단 · 지원자 목록)인데 숫자가 다르게 생기면
@@ -1085,6 +1095,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                               </span>
                             </>
                           }
+                          /* 담당자가 이 지원자를 왜 권하는지. 지원자가 스스로 적어 낸
+                             지원 메시지와 달리, 이 줄은 캠페인을 아는 담당자가 붙인
+                             판단이라 카드 겉에 둔다 — 펼침 안에 숨기면 브랜드는 숫자만
+                             보고 거르게 된다. */
+                          note={app.manager_note}
                           /* 지원 메시지와 연락처는 펼쳤을 때만 보여 준다. 고를 때
                              필요한 것은 숫자와 릴스이고, 연락처는 고른 뒤에 쓰는
                              값이다 — 겉에 두면 카드 하나가 화면을 다 차지해 후보를

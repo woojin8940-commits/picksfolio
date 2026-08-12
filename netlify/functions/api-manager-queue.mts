@@ -47,7 +47,8 @@ export default async (req: Request) => {
 
         db.sql`
           SELECT ca.id, ca.campaign_id, ca.applicant_username, ca.message, ca.contact,
-                 ca.portfolio_url, ca.brand_preference, ca.brand_preference_note, ca.created_at,
+                 ca.portfolio_url, ca.brand_preference, ca.brand_preference_note,
+                 ca.manager_note, ca.created_at,
                  c.title AS campaign_title, c.brand_name, c.manager_username, c.reward_amount,
                  c.type, c.reward_mode
           FROM campaign_applications ca
@@ -143,6 +144,9 @@ export default async (req: Request) => {
         portfolioUrl: a.portfolio_url || "",
         brandPreference: a.brand_preference || "",
         brandPreferenceNote: a.brand_preference_note || "",
+        // 담당자가 적어 둔 추천 이유. 브랜드의 지원자 카드에 그대로 보이는 줄이라
+        // 큐에서도 지금 뭐라고 적혀 있는지 보여야 고쳐 쓸 수 있다.
+        managerNote: a.manager_note || "",
         rewardAmount: a.reward_amount || "",
         campaignType: a.type || "",
         rewardMode: normalizeRewardMode(a.reward_mode),
