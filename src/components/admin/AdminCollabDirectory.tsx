@@ -478,8 +478,9 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                               )}
                             </div>
                             <div className="p-2">
-                              <p className="text-[10px] font-black text-slate-700">조회 {(reel.views || 0).toLocaleString()}</p>
-                              <p className="mt-0.5 text-[9px] font-bold text-slate-400">좋아요 {(reel.likes || 0).toLocaleString()}</p>
+                              <p className="text-[10px] font-black text-slate-700">
+                                {reel.views ? `조회 ${reel.views.toLocaleString()}` : '조회수 집계 전'}
+                              </p>
                             </div>
                           </a>
                         ))}

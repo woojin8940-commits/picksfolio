@@ -14,9 +14,24 @@ import { getStore } from "@netlify/blobs";
  * 생긴다. 연동 시점에 한 번 채워 두면 운영자가 sync 를 누르기 전에도 명단이
  * 비어 보이지 않는다.
  *
- * 메타 앱 심사 범위에 따라 조회수(view_count)가 거부될 수 있다. 그래서 여기서는
- * "받을 수 있는 것만 받고, 못 받은 항목은 기존 값을 남긴다". 조회수를 못 받는다고
- * 릴스 목록이나 팔로워 수까지 포기할 이유는 없다.
+ * 메타 앱 심사 범위에 따라 조회수가 거부될 수 있다. 그래서 여기서는 "받을 수 있는
+ * 것만 받고, 못 받은 항목은 기존 값을 남긴다". 조회수를 못 받는다고 릴스 목록이나
+ * 팔로워 수까지 포기할 이유는 없다.
+ *
+ * ── 조회수를 어디서 받는가 ──
+ *
+ * 조회수는 미디어의 일반 필드가 아니다. `view_count` 는 비즈니스 디스커버리(남의
+ * 계정 조회) 전용 필드라 본인 계정 토큰(/me/media)으로 부르면 그 요청 전체가 실패한다.
+ * 실패하면 조회수만 빠지는 게 아니라 릴스 목록까지 통째로 날아가므로, 일반 필드로는
+ * 부르지 않는다.
+ *
+ * 대신 인사이트에서 받는다. 2025년 4월부터 메타가 plays·video_views·impressions 를
+ * 없애고 `views` 하나로 합쳤으므로 지표 이름은 `views` 다.
+ *   1) 목록 요청에 `insights.metric(views)` 를 필드 확장으로 붙여 한 번에 받는다.
+ *   2) 확장이 막히면(권한·버전 문제) 릴스별 insights 엔드포인트를 따로 부른다.
+ *   3) 그래도 못 받으면 viewsAvailable=false 로 내려 화면이 "조회수 비공개"를 말한다.
+ * 이 값을 받으려면 앱에 instagram_business_manage_insights 권한이 있어야 한다
+ * (instagram-oauth-start.mts 의 SCOPES).
  *
  * 릴스와 별개로 일반 피드 미디어 9개(recent_feed)도 함께 받는다. 브랜드가 후보를
  * 고를 때 확인하는 것은 평균 숫자가 아니라 계정의 톤이고, 릴스는 그 계정에서 가장
@@ -96,6 +111,56 @@ const avg = (nums: number[]) => {
 const graphHostFor = (tokenSource?: string) =>
   tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
 
+/** 미디어 목록에서 항상 받을 수 있는 필드들. 조회수는 여기 넣지 않는다(위 주석 참고). */
+const MEDIA_FIELDS =
+  "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
+  "like_count,comments_count";
+
+/** 조회수를 목록 요청 한 번으로 받기 위한 필드 확장. */
+const VIEWS_EXPANSION = "insights.metric(views)";
+
+/**
+ * 인사이트 응답에서 숫자를 꺼낸다.
+ * 응답 모양이 { data: [{ name, values: [{ value }] }] } 이고, 필드 확장으로 붙이면
+ * 그 덩어리가 미디어 안의 insights 로 들어온다.
+ */
+const insightValue = (payload: any): number | null => {
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  for (const row of rows) {
+    const value = Array.isArray(row?.values) ? row.values[0]?.value : row?.value;
+    if (typeof value !== "undefined" && value !== null) return intOf(value);
+  }
+  return null;
+};
+
+/** 미디어 항목에 이미 실려 온 조회수(필드 확장 성공 시). 없으면 null. */
+const viewsFromMedia = (media: any): number | null => {
+  const expanded = insightValue(media?.insights);
+  if (expanded !== null) return expanded;
+  // 비즈니스 디스커버리 응답 등 일반 필드로 오는 경우도 받아 둔다.
+  if (typeof media?.view_count !== "undefined") return intOf(media.view_count);
+  return null;
+};
+
+/**
+ * 릴스 하나의 조회수를 인사이트 엔드포인트로 받아 온다.
+ * 실패는 조용히 0 으로 둔다 — 한 편이 막혔다고 나머지 릴스까지 버릴 이유가 없다.
+ */
+async function fetchReelViews(graphHost: string, token: string, mediaId: string): Promise<number> {
+  if (!mediaId) return 0;
+  try {
+    const res = await fetch(
+      `https://${graphHost}/${encodeURIComponent(mediaId)}/insights?metric=views` +
+        `&access_token=${encodeURIComponent(token)}`,
+    );
+    if (!res.ok) return 0;
+    const data = (await res.json().catch(() => ({}))) as any;
+    return insightValue(data) ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** 사용자별 인스타그램 연동 정보(디엠 자동화 블롭에 함께 보관된다). */
 export async function loadMetaLink(username: string): Promise<MetaLink | null> {
   try {
@@ -126,13 +191,6 @@ export async function fetchInstagramMetrics(
 
   const graphHost = graphHostFor(link.tokenSource);
 
-  const withViews =
-    "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
-    "like_count,comments_count,view_count";
-  const withoutViews =
-    "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
-    "like_count,comments_count";
-
   const fetchMedia = async (fields: string) => {
     const endpoint =
       `https://${graphHost}/me/media?fields=${encodeURIComponent(fields)}` +
@@ -142,13 +200,10 @@ export async function fetchInstagramMetrics(
     return { ok: res.ok, status: res.status, data };
   };
 
-  let viewsAvailable = true;
-  let result = await fetchMedia(withViews);
-  if (!result.ok) {
-    // 조회수 권한이 없으면 그 필드만 빼고 한 번 더 부른다.
-    viewsAvailable = false;
-    result = await fetchMedia(withoutViews);
-  }
+  // 조회수(인사이트)를 붙인 요청부터 시도한다. 막히면 나머지 값이라도 받아 두고
+  // 조회수는 릴스별로 따로 부른다 — 목록 자체를 놓치면 카드가 빈 화면이 된다.
+  let result = await fetchMedia(`${MEDIA_FIELDS},${VIEWS_EXPANSION}`);
+  if (!result.ok) result = await fetchMedia(MEDIA_FIELDS);
   if (!result.ok) {
     return {
       ok: false,
@@ -166,6 +221,18 @@ export async function fetchInstagramMetrics(
         String(m?.media_type || "").toUpperCase() === "VIDEO",
     )
     .slice(0, SAMPLE_SIZE);
+
+  // 릴스별 조회수. 목록 요청에 인사이트가 실려 왔으면 그대로 쓰고, 하나도 못 받았으면
+  // 릴스별 인사이트를 병렬로 부른다. 일부라도 실려 왔다면(권한은 있는데 특정 영상만
+  // 빠진 경우) 다시 부르지 않는다 — 그 영상은 실제로 집계 전일 수 있다.
+  let reelViews = reels.map((m) => viewsFromMedia(m) ?? 0);
+  if (reels.length > 0 && reelViews.every((v) => v <= 0)) {
+    reelViews = await Promise.all(
+      reels.map((m) => fetchReelViews(graphHost, token, String(m?.id || ""))),
+    );
+  }
+  // 조회수를 한 편이라도 받았는지. 화면이 "연동됐지만 조회수는 비공개"를 말할 근거다.
+  const viewsAvailable = reelViews.some((v) => v > 0);
 
   // 피드는 거르지 않고 최근 순서 그대로 9개를 남긴다. 사진·캐러셀·릴스가 섞인
   // 그대로가 이 계정의 실제 화면이고, 그걸 보려고 받는 값이다.
@@ -209,16 +276,16 @@ export async function fetchInstagramMetrics(
       igUsername,
       followers,
       following,
-      avgViews: avg(reels.map((m) => intOf(m?.view_count))),
+      avgViews: avg(reelViews),
       avgLikes: avg(reels.map((m) => intOf(m?.like_count))),
       avgComments: avg(reels.map((m) => intOf(m?.comments_count))),
       reelsCount: reels.length,
-      recentReels: reels.slice(0, SHOW_SIZE).map((m) => ({
+      recentReels: reels.slice(0, SHOW_SIZE).map((m, i) => ({
         id: String(m?.id || ""),
         permalink: String(m?.permalink || ""),
         thumbnailUrl: String(m?.thumbnail_url || m?.media_url || ""),
         caption: String(m?.caption || "").slice(0, 200),
-        views: intOf(m?.view_count),
+        views: reelViews[i] || 0,
         likes: intOf(m?.like_count),
         comments: intOf(m?.comments_count),
         timestamp: String(m?.timestamp || ""),
