@@ -1425,29 +1425,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           )}
         </div>
 
-        {/* 전체 스위치가 꺼져 있으면 자동화 카드가 ON 으로 보여도 댓글에 반응하지 않는다.
-            (연동을 해제했다가 다시 연결하면 이 상태로 남는다.) 카드 옆에서 바로 켤 수
-            있게 안내한다. 다른 서비스가 보내는 DM 에 대한 추측성 설명은 붙이지 않는다. */}
-        {connected && !enabled && automations.some((a) => a.enabled) && (
-          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
-            <AlertCircle size={16} className="text-amber-600 mt-0.5 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-black text-amber-800">자동 발송이 꺼져 있어 DM이 나가지 않아요</p>
-              <p className="text-[11px] font-medium text-amber-700 mt-0.5">
-                아래 자동화는 켜져 있지만, 위의 <span className="font-black">자동 발송</span> 스위치가 꺼져 있으면 새 댓글에 반응하지 않습니다.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={toggleMaster}
-              disabled={saving || !entitled}
-              className="shrink-0 rounded-xl bg-amber-600 text-white px-3 py-2 text-[11px] font-black hover:bg-amber-700 disabled:opacity-50"
-            >
-              지금 켜기
-            </button>
-          </div>
-        )}
-
         {!connected ? (
           <div className="text-center py-14 border border-dashed border-slate-200 rounded-3xl bg-slate-50/60">
             <Instagram size={30} className="text-slate-300 mx-auto mb-3" />

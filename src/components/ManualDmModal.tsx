@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, MessageSquare, Image as ImageIcon } from 'lucide-react';
+import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Image as ImageIcon } from 'lucide-react';
 import { apiService, DmAutomationItem, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -255,17 +255,6 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
         {/* Content */}
         <div className="p-5 md:p-6 overflow-y-auto space-y-4 flex-1">
-          {/* Notice Banner */}
-          <div className="p-3.5 bg-pink-50/80 border border-pink-100 rounded-2xl flex items-start gap-2.5 text-xs text-pink-900 font-medium leading-relaxed">
-            <MessageSquare size={16} className="text-pink-600 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold text-pink-700">최근 24시간 댓글 작성자 발송</span>
-              <p className="text-[11px] text-pink-600/90 mt-0.5">
-                선택한 게시물에 최근 24시간 이내 댓글을 작성한 사람을 자동으로 수집하여 메시지를 일괄 발송합니다.
-              </p>
-            </div>
-          </div>
-
           {result && (
             <div className={`p-4 rounded-2xl flex items-start gap-2 text-xs font-bold ${TONE_STYLE[result.tone]}`}>
               {result.tone === 'success' ? (
