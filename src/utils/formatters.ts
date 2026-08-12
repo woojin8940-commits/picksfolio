@@ -37,6 +37,25 @@ export const formatSignedKRW = (value: number | null | undefined): string => {
   return `${num < 0 ? '-' : '+'}${formatNumberWithCommas(Math.abs(Math.round(num)))}원`;
 };
 
+/**
+ * 사람 수·조회수를 짧게 줄인 표기(1,395 → 1,395 / 24,300 → 2.4만).
+ *
+ * 후보를 한 줄씩 쌓아 놓고 비교하는 목록에서 쓴다. 자릿수가 다른 숫자가 세로로
+ * 늘어서면 "458"과 "45,800"이 같은 길이로 보여 한 눈에 크기 비교가 안 된다.
+ * 만 단위로 접으면 자릿수 대신 단위가 보이므로 훑어 읽을 수 있다.
+ *
+ * 만 미만은 그대로 둔다 — 소수로 접어 봐야 짧아지지도 않고 정확도만 잃는다.
+ * 접은 값은 어림수이므로, 쓰는 쪽에서 정확한 값을 title 로 함께 달아 준다.
+ */
+export const formatCountKo = (value: number | string | null | undefined): string => {
+  const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return '0';
+  const short = (n: number) => (n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
+  if (num >= 100000000) return `${short(num / 100000000)}억`;
+  if (num >= 10000) return `${short(num / 10000)}만`;
+  return formatNumberWithCommas(num);
+};
+
 // PortOne V2 requires paymentId / issueId / customerId to contain ASCII characters only.
 // Korean (or any non-ASCII) usernames must be encoded before embedding in those IDs.
 export const toAsciiSafeId = (s: string): string =>

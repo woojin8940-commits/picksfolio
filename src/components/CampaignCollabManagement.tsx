@@ -8,7 +8,7 @@ import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
-import InfluencerCandidateCard from './collab/InfluencerCandidateCard';
+import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
   parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor,
@@ -171,6 +171,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
    */
   const [selectionBy, setSelectionBy] = useState<'brand' | 'manager'>('manager');
   const [accepting, setAccepting] = useState('');
+  /**
+   * 지원자 목록의 보기 방식.
+   *
+   * 지원자가 수십 명이 되면 "누가 지원했나"보다 "이 중에 누구를 볼 것인가"가 먼저다.
+   * 정렬은 브랜드가 실제로 쓰는 기준 셋만 둔다 — 최신순(기본), 팔로워순, 평균
+   * 조회수순. 광고비순은 넣지 않는다: 단가가 자유 입력 문자열이라("200만원",
+   * "협의 후 결정") 크기로 줄을 세우면 협의로 적은 사람이 늘 맨 아래로 밀린다.
+   *
+   * 거른 상태는 목록에서 지우지 않고 개수를 함께 적는다. "보류" 탭이 비어 있는 것과
+   * 보류한 사람이 없는 것은 다른 이야기다.
+   */
+  const [applicantSort, setApplicantSort] = useState<'recent' | 'followers' | 'views'>('recent');
+  const [applicantView, setApplicantView] = useState<'' | 'pending' | 'accepted' | 'pass'>('');
   // 상세 화면의 탭. 캠페인 하나에 붙는 정보가 네 갈래(누가 하는지 / 어디까지 왔는지 /
   // 성과 / 지급)로 늘어나 한 화면에 세로로 쌓으면 아래쪽은 아무도 보지 않는다.
   const [detailTab, setDetailTab] = useState<'influencer' | 'progress' | 'insight' | 'settlement'>('influencer');
@@ -225,6 +238,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     setDetailTab('influencer');
     setShowBrief(false);
     setCollabSummary([]);
+    // 지원자 보기 방식은 캠페인마다 새로 시작한다. 앞 캠페인에서 "보류"만 보던
+    // 상태가 그대로 넘어오면 지원자가 있는 캠페인이 빈 목록으로 열린다.
+    setApplicantView('');
+    setApplicantSort('recent');
     if (normalizeUser(campaign.business_username) === normalizeUser(businessUsername)) {
       setApplicants([]);
       fetchApplicants(campaign.id);
@@ -528,6 +545,36 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
      * 두 목록에 겹쳐 있으면 브랜드는 "지원자가 한 명 더 있다"로 세게 된다.
      */
     const applyRows = applicants.filter(a => (a.source || 'apply') !== 'listup');
+    /**
+     * 화면에 실제로 그리는 지원자. 거르기와 정렬을 여기서 한 번에 끝낸다.
+     *
+     * 보류(brand_preference==='pass')는 상태가 아니라 브랜드가 남긴 표시라서
+     * status 와 따로 본다 — 보류해 둔 사람도 status 는 계속 'pending' 이다.
+     */
+    const applyCounts = {
+      all: applyRows.length,
+      pending: applyRows.filter(a => a.status === 'pending' && a.brand_preference !== 'pass').length,
+      accepted: applyRows.filter(a => a.status === 'accepted').length,
+      pass: applyRows.filter(a => a.brand_preference === 'pass').length,
+    };
+    const visibleApplyRows = applyRows
+      .filter(a => {
+        if (applicantView === 'pending') return a.status === 'pending' && a.brand_preference !== 'pass';
+        if (applicantView === 'accepted') return a.status === 'accepted';
+        if (applicantView === 'pass') return a.brand_preference === 'pass';
+        return true;
+      })
+      .sort((a, b) => {
+        if (applicantSort === 'followers') {
+          return candidateSortValues(b.insights || {}).followers - candidateSortValues(a.insights || {}).followers;
+        }
+        if (applicantSort === 'views') {
+          return candidateSortValues(b.insights || {}).avgViews - candidateSortValues(a.insights || {}).avgViews;
+        }
+        // 서버가 이미 최신순으로 주지만, 정렬을 되돌렸을 때도 같은 순서가 되도록
+        // 화면에서 한 번 더 맞춘다.
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
     // 브랜드가 직접 수락하는 캠페인인지. 실제 권한 판단은 서버(selectionBy)가 하고,
     // 목록을 읽어 오는 동안에는 진행 방식으로 안내 문구만 미리 맞춰 둔다(그 사이에는
     // 버튼이 그려지지 않는다).
@@ -939,6 +986,53 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       <span className="font-black text-amber-600"> 본인 입력</span>은 인플루언서가 적어 낸 값입니다.
                     </p>
                   </div>
+                  {/* 목록을 훑는 도구. 지원자가 늘어나면 "누가 지원했나"보다 "이 중
+                      누구를 볼 것인가"가 먼저가 된다. 상태로 한 번 좁히고, 브랜드가
+                      실제로 쓰는 기준(팔로워 · 평균 조회수)으로 줄을 세운다. */}
+                  {applyRows.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {([
+                          { value: '' as const, label: '전체', count: applyCounts.all },
+                          { value: 'pending' as const, label: '검토 대기', count: applyCounts.pending },
+                          { value: 'accepted' as const, label: '수락함', count: applyCounts.accepted },
+                          { value: 'pass' as const, label: '보류', count: applyCounts.pass },
+                        ]).map(v => (
+                          <button
+                            key={v.value || 'all'}
+                            onClick={() => setApplicantView(v.value)}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                              applicantView === v.value
+                                ? 'bg-slate-900 text-white'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            {v.label} {v.count}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-400 font-black mr-0.5">정렬</span>
+                        {([
+                          { value: 'recent' as const, label: '최신순' },
+                          { value: 'followers' as const, label: '팔로워순' },
+                          { value: 'views' as const, label: '조회수순' },
+                        ]).map(s => (
+                          <button
+                            key={s.value}
+                            onClick={() => setApplicantSort(s.value)}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                              applicantSort === s.value
+                                ? 'bg-blue-50 text-blue-600'
+                                : 'text-slate-400 hover:bg-slate-50'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {applicantsLoading ? (
                     <div className="text-center py-12">
                       <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
@@ -962,8 +1056,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {applyRows.map(app => (
+                    <div className="space-y-2">
+                      {visibleApplyRows.length === 0 && (
+                        <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+                          이 조건에 해당하는 지원자가 없습니다.
+                        </p>
+                      )}
+                      {visibleApplyRows.map(app => (
                         /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
                            화면이 두 곳(담당자 명단 · 지원자 목록)인데 숫자가 다르게 생기면
                            고른 근거를 나중에 맞춰 볼 수 없다. 지원서에 적어 낸 인스타 주소는
@@ -986,8 +1085,54 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                               </span>
                             </>
                           }
+                          /* 지원 메시지와 연락처는 펼쳤을 때만 보여 준다. 고를 때
+                             필요한 것은 숫자와 릴스이고, 연락처는 고른 뒤에 쓰는
+                             값이다 — 겉에 두면 카드 하나가 화면을 다 차지해 후보를
+                             나란히 비교할 수 없다. */
+                          details={
+                            <div className="space-y-2.5">
+                              {app.message && (
+                                <div>
+                                  <p className="text-[9px] text-slate-400 font-black uppercase mb-1">지원 메시지</p>
+                                  <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{app.message}</p>
+                                </div>
+                              )}
+                              <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                                {app.contact && (
+                                  <div className="flex items-center gap-2">
+                                    <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                                    <span className="text-xs text-slate-700 font-bold">{app.contact}</span>
+                                  </div>
+                                )}
+                                {app.instagram_url && (
+                                  <div className="flex items-center gap-2">
+                                    <svg className="w-3.5 h-3.5 text-pink-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" /></svg>
+                                    <a href={app.instagram_url} target="_blank" rel="noopener noreferrer" className="text-xs text-pink-600 font-bold hover:underline truncate">{app.instagram_url}</a>
+                                  </div>
+                                )}
+                                {app.youtube_naver_url && (
+                                  <div className="flex items-center gap-2">
+                                    <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
+                                    <a href={app.youtube_naver_url} target="_blank" rel="noopener noreferrer" className="text-xs text-red-600 font-bold hover:underline truncate">{app.youtube_naver_url}</a>
+                                  </div>
+                                )}
+                                {app.portfolio_url && (
+                                  <div className="flex items-center gap-2">
+                                    <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                    <a href={app.portfolio_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline truncate">{app.portfolio_url}</a>
+                                  </div>
+                                )}
+                                {!app.contact && !app.instagram_url && !app.youtube_naver_url && !app.portfolio_url && (
+                                  <p className="text-[11px] text-slate-400 font-medium">등록된 연락처/링크가 없습니다</p>
+                                )}
+                              </div>
+                            </div>
+                          }
+                          /* 지원자가 한 명뿐이면 접어 둘 이유가 없다 — 비교할 상대가
+                             없으니 바로 다 보여 주는 편이 빠르다. */
+                          defaultExpanded={visibleApplyRows.length === 1}
                         >
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {app.status === 'pending' && (
                               <div className="flex flex-wrap gap-1.5">
                                 {brandSelects ? (
@@ -1059,40 +1204,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             {app.status === 'pending' && !brandSelects && app.brand_preference === 'shortlist' && (
                               <p className="text-[11px] text-blue-600 font-bold">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
                             )}
-                            {app.message && (
-                              <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{app.message}</p>
-                            )}
-
-                            {/* Contact & Links */}
-                            <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                              {app.contact && (
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                                  <span className="text-xs text-slate-700 font-bold">{app.contact}</span>
-                                </div>
-                              )}
-                              {app.instagram_url && (
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3.5 h-3.5 text-pink-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" /></svg>
-                                  <a href={app.instagram_url} target="_blank" rel="noopener noreferrer" className="text-xs text-pink-600 font-bold hover:underline truncate">{app.instagram_url}</a>
-                                </div>
-                              )}
-                              {app.youtube_naver_url && (
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
-                                  <a href={app.youtube_naver_url} target="_blank" rel="noopener noreferrer" className="text-xs text-red-600 font-bold hover:underline truncate">{app.youtube_naver_url}</a>
-                                </div>
-                              )}
-                              {app.portfolio_url && (
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                                  <a href={app.portfolio_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline truncate">{app.portfolio_url}</a>
-                                </div>
-                              )}
-                              {!app.contact && !app.instagram_url && !app.youtube_naver_url && !app.portfolio_url && (
-                                <p className="text-[11px] text-slate-400 font-medium">등록된 연락처/링크가 없습니다</p>
-                              )}
-                            </div>
                           </div>
                         </InfluencerCandidateCard>
                       ))}
