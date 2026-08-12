@@ -368,11 +368,14 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">광고비</p>
-                      <p className="text-[17px] md:text-[19px] text-orange-500 font-black truncate">
+                      {/* 값을 자르지 않는다. "1억2,000만원"처럼 자릿수가 커질수록 문자열이
+                          길어지는데, 브랜드가 이 카드에서 마지막으로 확인하는 값이 이것이라
+                          말줄임으로 끊기면 카드를 열어 봐야 알 수 있게 된다. */}
+                      <p className="text-[16px] md:text-[18px] text-orange-500 font-black leading-snug break-keep">
                         {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
                       </p>
                       {c.quotedSecondUseFee > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold truncate">
+                        <p className="text-[10px] text-slate-400 font-bold break-keep leading-snug">
                           2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
                         </p>
                       )}

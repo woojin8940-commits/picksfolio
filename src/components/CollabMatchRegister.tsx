@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/apiService';
 import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/creatorCategories';
 
@@ -13,11 +13,18 @@ import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/c
 // 인플루언서 등록은 이름·연락처를 받은 뒤 본인 인스타 계정을 연동하게 한다.
 // 연동해 두면 팔로워·팔로잉과 최근 릴스 평균 조회수를 픽스폴리오가 직접 보관하므로,
 // 브랜드가 명단에서 보는 숫자가 자기 입력값이 아니라 메타에서 확인한 값이 된다.
+//
+// 접수한 뒤에도 이 자리에서 두 가지를 계속 할 수 있어야 한다.
+//  1) 연동한 계정의 팔로워·릴스 평균 조회수 확인(브랜드에게 전달되는 숫자다).
+//  2) 광고 단가 수정 — 단가는 접수한 뒤에도 바뀐다(성수기·채널 성장·재계약).
+//     고칠 방법이 "취소 후 재등록"뿐이면 접수 순서를 잃고, 운영자 명단에는 같은
+//     사람이 두 번 지나간 것처럼 보인다. 그래서 접수한 등록서를 제자리에서 고친다.
 interface Props {
   variant: 'influencer' | 'brand';
   applicantUsername: string;
   buttonClassName?: string;
 }
+
 
 const COPY = {
   influencer: {
@@ -35,8 +42,11 @@ const COPY = {
  * 작성 중이던 등록서를 잃지 않도록 나가기 전에 임시 저장하고, 돌아오면 복원한다.
  */
 const DRAFT_KEY = 'picks_collab_match_draft';
+/** 나가기 전에 수정 중이었는지. 돌아왔을 때 접수 화면 대신 수정 화면으로 되돌린다. */
+const DRAFT_MODE_KEY = 'picks_collab_match_draft_mode';
 /** 복귀 시 이 모달을 다시 열어야 한다는 표시. */
 const RETURN_FLAG = 'collab_match';
+
 
 /**
  * 접수 후 보여 줄 한 줄 안내. 키는 collab_directory_applications.status 값이다.
@@ -103,9 +113,22 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
    */
   const [submitted, setSubmitted] = useState<boolean | null>(null);
   const [submittedStatus, setSubmittedStatus] = useState('');
+  /** 접수한 등록서 내용. 수정 화면이 값을 되살리는 원본이다. */
+  const [application, setApplication] = useState<Record<string, any> | null>(null);
+  /** 접수한 등록서를 고치는 중인지. 켜져 있으면 모달이 접수 대신 수정으로 동작한다. */
+  const [editing, setEditing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [linking, setLinking] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  /**
+   * 연동 직후 지표를 못 받고 돌아온 경우(ig_metrics=0) 한 번 더 받아 오기 위한 표시.
+   * 연동은 끝났는데 팔로워·조회수가 비어 있으면 "연동이 안 됐다"로 읽히므로,
+   * 사람이 버튼을 찾아 누르기 전에 화면이 먼저 채워 본다.
+   */
+  const [pendingSync, setPendingSync] = useState(false);
+  /** 임시 저장(연동 후 복귀)으로 폼을 되살렸는지. 되살린 값을 접수 내용으로 덮지 않는다. */
+  const draftRestored = useRef(false);
+
   /** 목록에 없는 분야를 직접 적는 칸. 추가하면 infForm.category 로 들어가고 비워진다. */
   const [customCategory, setCustomCategory] = useState('');
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -151,6 +174,41 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     });
   }, [applicantUsername, isInfluencer]);
 
+  /** 접수한 등록서를 수정 폼으로 되살린다. 0 은 빈칸으로 둔다("0"이 적힌 칸은 오해를 부른다). */
+  const prefillFrom = useCallback((app: Record<string, any>) => {
+    const num = (v: unknown) => (Number(v || 0) > 0 ? String(Number(v)) : '');
+    if (variant === 'influencer') {
+      setInfForm({
+        name: String(app.name || ''),
+        contact: String(app.contact || ''),
+        instagram_url: String(app.instagram_url || ''),
+        instagram_followers: num(app.instagram_followers),
+        youtube_url: String(app.youtube_url || ''),
+        youtube_followers: num(app.youtube_followers),
+        tiktok_url: String(app.tiktok_url || ''),
+        tiktok_followers: num(app.tiktok_followers),
+        naver_blog_url: String(app.naver_blog_url || ''),
+        post_price: String(app.post_price || ''),
+        short_price: String(app.short_price || ''),
+        category: String(app.category || ''),
+      });
+      setCustomCategory('');
+    } else {
+      setBrandForm({
+        name: String(app.name || ''),
+        contact: String(app.contact || ''),
+        brand_homepage: String(app.brand_homepage || ''),
+        brand_instagram: String(app.brand_instagram || ''),
+        desired_count: String(app.desired_count || ''),
+        desired_followers: String(app.desired_followers || ''),
+        budget_text: String(app.budget_text || ''),
+        desired_schedule: String(app.desired_schedule || ''),
+        desired_category: String(app.desired_category || ''),
+        note: String(app.note || ''),
+      });
+    }
+  }, [variant]);
+
   // 이미 접수한 등록서가 있는지 한 번 확인한다. 로그인 정보가 없으면 확인할 방법이
   // 없으므로 버튼을 그대로 둔다 — 제출 단계에서 걸러진다.
   useEffect(() => {
@@ -166,6 +224,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       // 등록할 수 없게 되면, 문의할 곳이 없는 막힌 화면이 된다.
       setSubmitted(!!res.submitted && res.status !== 'archived');
       setSubmittedStatus(res.status || '');
+      setApplication(res.application || null);
     })();
     return () => { alive = false; };
   }, [applicantUsername, variant]);
@@ -178,16 +237,25 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
     try {
       const raw = sessionStorage.getItem(DRAFT_KEY);
-      if (raw) setInfForm(f => ({ ...f, ...JSON.parse(raw) }));
+      if (raw) {
+        setInfForm(f => ({ ...f, ...JSON.parse(raw) }));
+        draftRestored.current = true;
+      }
+      if (sessionStorage.getItem(DRAFT_MODE_KEY) === 'edit') setEditing(true);
       sessionStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem(DRAFT_MODE_KEY);
     } catch {
       // 임시 저장이 없거나 깨졌으면 빈 폼으로 이어간다.
     }
 
     if (params.get('ig_connected')) {
+      const metricsMissing = params.get('ig_metrics') === '0';
+      // 지표를 못 받고 돌아왔으면 이 화면이 한 번 더 받아 본다. 사람에게 버튼을
+      // 찾아 누르라고 하기 전에 채워 보는 편이 빠르다.
+      if (metricsMissing) setPendingSync(true);
       setNotice(
-        params.get('ig_metrics') === '0'
-          ? { type: 'ok', text: '계정이 연동되었습니다. 지표는 잠시 후 자동으로 채워집니다.' }
+        metricsMissing
+          ? { type: 'ok', text: '계정이 연동되었습니다. 팔로워·릴스 조회수를 불러오는 중입니다.' }
           : { type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' },
       );
     } else if (params.get('ig_error')) {
@@ -207,9 +275,24 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   }, []);
 
   // 모달을 열 때마다 연동 상태를 다시 확인한다(다른 화면에서 연동했을 수 있다).
+  // 접수를 마친 사람에게도 확인한다 — 접수 카드가 팔로워·릴스 평균 조회수를 그대로
+  // 보여 주기 때문이다. 브랜드에게 전달되는 숫자를 본인이 볼 수 있어야 한다.
   useEffect(() => {
-    if (open) loadChannel();
-  }, [open, loadChannel]);
+    if (open || (isInfluencer && submitted === true)) loadChannel();
+  }, [open, submitted, isInfluencer, loadChannel]);
+
+  // 이미 접수한 사람이 모달을 열었다면 그것은 수정이다. 접수 화면으로 두면 같은
+  // 등록서가 한 장 더 쌓인다(연동 후 복귀처럼 버튼을 거치지 않고 열리는 길이 있다).
+  useEffect(() => {
+    if (open && submitted === true && !editing) setEditing(true);
+  }, [open, submitted, editing]);
+
+  // 수정 화면은 접수한 내용에서 시작한다. 연동하러 나갔다 돌아오며 되살린 값이
+  // 있으면 그것이 더 최신이므로 덮지 않는다.
+  useEffect(() => {
+    if (!editing || !application || draftRestored.current) return;
+    prefillFrom(application);
+  }, [editing, application, prefillFrom]);
 
   const reset = () => {
     setInfForm({
@@ -231,8 +314,15 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     }
     setLinking(true);
     setNotice(null);
+    // 접수 카드에서 바로 연동하러 나간 경우에는 작성 중인 폼이 없다. 빈 폼을 임시
+    // 저장해 두면 돌아와서 그 빈 값이 접수 내용을 덮어쓸 수 있으므로 지운다.
+    const fromSubmittedCard = submitted === true && !editing;
     try {
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(infForm));
+      if (fromSubmittedCard) sessionStorage.removeItem(DRAFT_KEY);
+      else sessionStorage.setItem(DRAFT_KEY, JSON.stringify(infForm));
+      // 수정 중(또는 이미 접수한 상태)에 연동하러 나갔다면 돌아와서도 수정이어야
+      // 한다. 접수 화면으로 돌아오면 같은 등록서가 한 장 더 접수된다.
+      sessionStorage.setItem(DRAFT_MODE_KEY, editing || submitted === true ? 'edit' : 'new');
     } catch {
       // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
     }
@@ -246,14 +336,19 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     window.location.href = result.url;
   };
 
-  /** 이미 연동된 계정의 지표를 다시 받아온다. */
-  const resyncInstagram = async () => {
+  /**
+   * 이미 연동된 계정의 지표를 다시 받아온다.
+   * silent = 화면이 스스로 시도한 경우. 누르지도 않은 버튼의 결과 문구가 뜨면
+   * 사람이 방금 뭘 잘못했나 되짚게 되므로, 성공/실패 안내를 띄우지 않는다.
+   */
+  const resyncInstagram = useCallback(async (silent = false) => {
     if (!applicantUsername) return;
     setSyncing(true);
-    setNotice(null);
+    if (!silent) setNotice(null);
     const result = await apiService.syncCreatorChannel(applicantUsername);
     setSyncing(false);
     if (result?.error) {
+      if (silent) return;
       setNotice({
         type: 'err',
         text: result.code === 'META_NOT_LINKED'
@@ -263,6 +358,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       return;
     }
     await loadChannel();
+    if (silent) return;
     setNotice({
       type: 'ok',
       // 조회수 권한(인사이트)은 연동할 때 함께 받는다. 권한이 추가되기 전에 연동해 둔
@@ -271,7 +367,18 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         ? '최신 정보를 불러왔어요. 릴스 조회수가 비어 있으면 계정을 다시 연동해 조회수 권한을 허용해 주세요.'
         : '최신 팔로워·릴스 정보를 불러왔어요.',
     });
-  };
+  }, [applicantUsername, loadChannel]);
+
+  // 연동은 됐는데 지표를 못 받고 돌아온 경우 화면이 한 번 더 받아 본다.
+  // 메타 쪽 계정 정보가 연동 직후 잠깐 준비되지 않는 경우가 있어, 두 번째 호출에서
+  // 채워지는 일이 흔하다.
+  useEffect(() => {
+    if (!pendingSync) return;
+    setPendingSync(false);
+    (async () => {
+      await resyncInstagram(true);
+    })();
+  }, [pendingSync, resyncInstagram]);
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -298,16 +405,30 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
-      const result = await apiService.submitCollabDirectory(payload);
+      const result = editing
+        ? await apiService.updateMyCollabDirectory(variant, applicantUsername, payload)
+        : await apiService.submitCollabDirectory(payload);
       if (!result?.error) {
         setOpen(false);
-        reset();
         setNotice(null);
+        draftRestored.current = false;
         // 서버에 다시 물어보지 않고 바로 감춘다. 접수는 방금 성공했고, 이 화면에
         // 버튼이 한 번 더 남아 있으면 같은 등록서를 두 번 내게 된다.
         setSubmitted(true);
-        setSubmittedStatus('pending');
-        alert('접수되었습니다.');
+        if (editing) {
+          // 수정은 접수 상태를 건드리지 않는다. 검토 중이던 등록서가 수정했다고
+          // 다시 대기로 돌아가면, 본인은 순서를 잃은 것처럼 보인다.
+          setApplication((result as { application?: Record<string, any> | null }).application || null);
+          setEditing(false);
+          alert('수정되었습니다.');
+        } else {
+          reset();
+          setSubmittedStatus('pending');
+          // 접수 카드가 방금 낸 단가를 그대로 보여 줄 수 있게 내용을 한 번 받아 온다.
+          const fresh = await apiService.getMyCollabDirectory(variant, applicantUsername);
+          setApplication(fresh.application || null);
+          alert('접수되었습니다.');
+        }
       } else {
         setNotice({ type: 'err', text: result.error });
       }
@@ -326,11 +447,25 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     if (res.success) {
       setSubmitted(false);
       setSubmittedStatus('');
+      setApplication(null);
+      setEditing(false);
       setNotice({ type: 'ok', text: `${copy.title} 접수가 취소되었습니다.` });
       alert(`${copy.title} 접수가 취소되었습니다.`);
     } else {
       alert(res.error || '취소하지 못했습니다.');
     }
+  };
+
+  /** 모달 닫기 — 수정 화면이었다면 접수 카드로 돌아간다. */
+  const closeModal = () => {
+    if (submitting) return;
+    setOpen(false);
+    setEditing(false);
+    setNotice(null);
+    draftRestored.current = false;
+    // 수정을 도중에 접었으면 고치던 값은 버린다. 다음에 열 때 접수된 내용에서
+    // 다시 시작해야 화면이 실제 접수 상태와 같아진다.
+    if (submitted === true) reset();
   };
 
   return (
@@ -345,26 +480,87 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         </button>
       )}
 
-      {/* 이미 낸 사람에게는 버튼 대신 접수 상태와 취소 버튼을 함께 보여 준다. */}
+      {/* 접수한 뒤에도 이 자리에서 계속 확인하고 고칠 수 있어야 한다.
+          - 인플루언서: 연동 계정의 팔로워·릴스 평균 조회수(브랜드가 보는 숫자)
+          - 공통: 단가·조건 수정. 단가는 접수 뒤에도 바뀐다. */}
       {submitted === true && !open && (
-        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
-            <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
+              <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+            </div>
+            <div className="shrink-0 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setNotice(null); setEditing(true); setOpen(true); }}
+                className="text-xs font-bold text-blue-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                수정하기
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelSubmission}
+                disabled={cancelling}
+                className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+              >
+                {cancelling ? '취소 중...' : '취소하기'}
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={handleCancelSubmission}
-            disabled={cancelling}
-            className="shrink-0 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
-          >
-            {cancelling ? '취소 중...' : '취소하기'}
-          </button>
+
+          {/* 연동한 계정에서 확인된 숫자. 접수하고 나면 볼 곳이 없어서 "연동이 된 건가"
+              하고 다시 연동하러 가는 일이 생긴다. 여기서 바로 보여 준다. */}
+          {isInfluencer && (
+            <div className="mt-3">
+              <InstagramLinkCard
+                channel={channel}
+                loading={channelLoading}
+                linking={linking}
+                syncing={syncing}
+                canLink={!!applicantUsername}
+                onLink={linkInstagram}
+                onResync={() => resyncInstagram()}
+              />
+            </div>
+          )}
+
+          {/* 접수된 단가를 그대로 보여 준다 — 브랜드에게 전달되는 값이 무엇인지 알아야
+              고칠지 말지 판단할 수 있다. */}
+          {isInfluencer && application && (application.post_price || application.short_price || application.ad_price) && (
+            <div className="mt-2.5 rounded-xl border border-blue-100 bg-white px-3.5 py-2.5">
+              <p className="text-[10px] font-black text-slate-400">접수된 광고 단가</p>
+              <div className="mt-1 space-y-0.5">
+                {application.post_price ? (
+                  <p className="text-xs font-bold text-slate-700 break-words">게시물 <span className="text-slate-900 font-black">{application.post_price}</span></p>
+                ) : null}
+                {application.short_price ? (
+                  <p className="text-xs font-bold text-slate-700 break-words">숏폼 <span className="text-slate-900 font-black">{application.short_price}</span></p>
+                ) : null}
+                {!application.post_price && !application.short_price && application.ad_price ? (
+                  <p className="text-xs font-black text-slate-900 break-words">{application.ad_price}</p>
+                ) : null}
+              </div>
+              <p className="text-[11px] text-slate-400 font-medium mt-1.5">단가가 바뀌었다면 "수정하기"로 고쳐 주세요.</p>
+            </div>
+          )}
+
+          {notice && (
+            <div
+              className={`mt-2.5 rounded-xl px-3.5 py-2.5 text-xs font-bold ${
+                notice.type === 'ok'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                  : 'bg-rose-50 text-rose-700 border border-rose-100'
+              }`}
+            >
+              {notice.text}
+            </div>
+          )}
         </div>
       )}
 
       {open && (
-        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={() => !submitting && setOpen(false)}>
+        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={closeModal}>
           <div
             className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom md:fade-in duration-300 shadow-[0_-16px_40px_-16px_rgba(15,23,42,0.5)] md:shadow-[0_28px_60px_-20px_rgba(15,23,42,0.6)]"
             onClick={e => e.stopPropagation()}
@@ -372,10 +568,12 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
             {/* Header */}
             <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between z-10">
               <div>
-                <h3 className="text-base font-black text-slate-900">{copy.title}</h3>
-                <p className="text-[11px] text-slate-400 font-medium mt-0.5">{copy.subtitle}</p>
+                <h3 className="text-base font-black text-slate-900">{editing ? '등록 정보 수정' : copy.title}</h3>
+                <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                  {editing ? '광고 단가 등 바뀐 내용을 고치고 저장하면 접수 순서는 그대로 유지됩니다.' : copy.subtitle}
+                </p>
               </div>
-              <button onClick={() => !submitting && setOpen(false)} className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center shrink-0">
+              <button onClick={closeModal} className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center shrink-0">
                 <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
@@ -407,7 +605,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                       syncing={syncing}
                       canLink={!!applicantUsername}
                       onLink={linkInstagram}
-                      onResync={resyncInstagram}
+                      onResync={() => resyncInstagram()}
                     />
                   </div>
 
@@ -562,8 +760,18 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                 disabled={submitting}
                 className="w-full mt-5 rounded-xl bg-blue-600 text-white font-black text-sm py-3.5 shadow-[0_12px_26px_-10px_rgba(37,99,235,0.7)] hover:bg-blue-700 hover:shadow-[0_16px_32px_-10px_rgba(37,99,235,0.8)] active:scale-[0.99] transition-all disabled:opacity-60 disabled:shadow-none"
               >
-                {submitting ? '접수 중...' : '지원하기'}
+                {submitting ? (editing ? '저장 중...' : '접수 중...') : (editing ? '수정 저장하기' : '지원하기')}
               </button>
+              {editing && (
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  disabled={submitting}
+                  className="w-full mt-2 rounded-xl border border-slate-200 bg-white text-slate-500 font-bold text-sm py-3 hover:bg-slate-50 transition-colors disabled:opacity-60"
+                >
+                  수정 취소
+                </button>
+              )}
             </div>
           </div>
         </div>

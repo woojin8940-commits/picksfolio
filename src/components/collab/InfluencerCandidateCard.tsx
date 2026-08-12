@@ -134,8 +134,10 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
  *
  * 값은 만 단위로 접어 짧게 적고(2.4만), 정확한 숫자는 title 로 단다. 후보를 나란히
  * 놓고 비교하는 자리라 자릿수보다 크기가 먼저 읽혀야 한다. 값에 색을 주는 이유도
- * 같다 — 카드를 훑을 때 눈이 먼저 닿는 곳이 팔로워·조회수·광고비 세 숫자여야
- * 한다.
+ * 같다 — 카드를 훑을 때 눈이 먼저 닿는 곳이 팔로워·조회수여야 한다.
+ *
+ * 여기에는 자릿수가 정해진 숫자만 넣는다. 광고비처럼 길이를 알 수 없는 자유 문장은
+ * 이 칸에 넣으면 잘리므로 아래 폭 전체 줄에 따로 적는다.
  */
 const Stat: React.FC<{ label: string; value: string; title?: string; hint?: string }> = ({
   label,
@@ -184,17 +186,35 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   const feed = (m.recentFeed || []).slice(0, 9);
 
   /**
-   * 단가. 겉에는 한 줄에 한 값만 둔다 — 광고·숏폼·게시물을 나란히 적으면 칸이 셋으로
-   * 쪼개져 어느 것도 안 읽힌다. 대표값은 광고비이고, 없으면 숏폼·게시물 순으로 내려
-   * 간다("미기재"로 비워 두면 단가를 안 받는 사람으로 읽힌다).
+   * 단가.
+   *
+   * 브랜드가 후보를 고를 때 마지막으로 보는 값이라 잘려서는 안 된다. 예전에는
+   * 팔로워·조회수와 나란히 3분할 칸에 넣고 넘치면 말줄임(...)으로 잘랐는데,
+   * 단가는 "게시물 30만원 / 숏폼 50만원" 같은 자유 문장이라 실제로는 대부분
+   * 잘려 나갔다 — 값이 있는데 못 읽는 상태가 제일 나쁘다. 그래서 단가는 숫자 칸에서
+   * 빼내 아래 한 줄(폭 전체)로 내리고, 항목마다 줄을 나눠 전부 적는다.
+   *
+   * 게시물·숏폼 단가가 따로 있으면 그것이 원본이고, 광고비(ad_price)는 그 둘을
+   * 합쳐 만든 문장이므로 같이 적지 않는다(같은 값이 두 번 보인다). 둘 다 없을 때만
+   * 광고비 문장을 '/' 로 갈라 줄별로 적는다.
    */
-  const prices = [
-    m.adPrice ? { label: '광고', value: m.adPrice } : null,
-    m.shortPrice ? { label: '숏폼', value: m.shortPrice } : null,
-    m.postPrice ? { label: '게시물', value: m.postPrice } : null,
-  ].filter(Boolean) as Array<{ label: string; value: string }>;
-  const mainPrice = prices[0];
-  const restPrices = prices.slice(1);
+  const priceLines: Array<{ label: string; value: string }> =
+    m.postPrice || m.shortPrice
+      ? ([
+          m.postPrice ? { label: '게시물', value: m.postPrice } : null,
+          m.shortPrice ? { label: '숏폼', value: m.shortPrice } : null,
+        ].filter(Boolean) as Array<{ label: string; value: string }>)
+      : String(m.adPrice || '')
+          .split('/')
+          .map(part => part.trim())
+          .filter(Boolean)
+          .map(part => {
+            // "게시물 30만원" 처럼 앞에 항목 이름이 붙어 오면 그대로 라벨로 쓴다.
+            const matched = part.match(/^(게시물|숏폼|릴스|스토리|영상|광고)\s+(.+)$/);
+            return matched
+              ? { label: matched[1], value: matched[2] }
+              : { label: '광고', value: part };
+          });
 
   /**
    * 카드 맨 위 한 줄은 인스타 아이디다.
@@ -223,7 +243,6 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
     feed.length > 0 ||
     trend ||
     m.intro ||
-    restPrices.length > 0 ||
     m.instagramUrl ||
     details
   );
@@ -342,24 +361,40 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
           그 값을 사는 가격이고, 좋아요를 나란히 두면 릴스 조회수와 사진 반응이
           섞여 비교 기준이 흐려진다. 평균 좋아요·댓글은 인사이트 점수 계산에는
           그대로 쓰인다. */}
-      <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
-        <Stat
-          label="팔로워"
-          value={m.followers ? formatCountKo(m.followers) : '—'}
-          title={m.followers ? formatNumberWithCommas(m.followers) : ''}
-        />
-        <Stat
-          label="평균 조회수"
-          value={m.avgViews ? formatCountKo(m.avgViews) : '—'}
-          title={m.avgViews ? formatNumberWithCommas(m.avgViews) : ''}
-          hint={m.reelsCount ? `릴스 ${m.reelsCount}편 기준` : ''}
-        />
-        <Stat
-          label="광고비"
-          value={mainPrice ? mainPrice.value : '—'}
-          title={mainPrice ? mainPrice.value : ''}
-          hint={mainPrice ? mainPrice.label : '미기재'}
-        />
+      <div className="bg-slate-50 rounded-lg px-3 py-2 mt-3">
+        <div className="grid grid-cols-2 gap-2">
+          <Stat
+            label="팔로워"
+            value={m.followers ? formatCountKo(m.followers) : '—'}
+            title={m.followers ? formatNumberWithCommas(m.followers) : ''}
+          />
+          <Stat
+            label="평균 조회수"
+            value={m.avgViews ? formatCountKo(m.avgViews) : '—'}
+            title={m.avgViews ? formatNumberWithCommas(m.avgViews) : ''}
+            hint={m.reelsCount ? `릴스 ${m.reelsCount}편 기준` : ''}
+          />
+        </div>
+
+        {/* 광고비는 폭 전체를 쓴다. 자유 문장이라 길이를 정할 수 없으므로 자르지 않고
+            줄을 늘린다 — 단가를 못 읽으면 브랜드는 이 카드에서 결정을 못 한다. */}
+        <div className="mt-2 pt-2 border-t border-slate-200/70">
+          <p className="text-[10px] text-slate-400 font-black uppercase">광고비</p>
+          {priceLines.length > 0 ? (
+            <div className="mt-0.5 space-y-0.5">
+              {priceLines.map((p, i) => (
+                <div key={`${p.label}-${i}`} className="flex items-baseline gap-1.5">
+                  <span className="shrink-0 text-[10px] text-slate-400 font-black">{p.label}</span>
+                  <span className="text-[15px] md:text-[17px] text-orange-500 font-black break-keep leading-snug">
+                    {p.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[15px] md:text-[17px] text-slate-300 font-black">미기재</p>
+          )}
+        </div>
       </div>
 
       {hasMore && (
@@ -448,12 +483,6 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
                 })}
               </div>
             </div>
-          )}
-
-          {restPrices.length > 0 && (
-            <p className="text-[11px] text-slate-500 font-bold">
-              {restPrices.map(p => `${p.label} ${p.value}`).join(' · ')}
-            </p>
           )}
 
           {m.intro && (
