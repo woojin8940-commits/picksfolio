@@ -59,6 +59,25 @@ export interface MetaLink {
   tokenInvalidAt?: string;
 }
 
+/**
+ * 연동을 어디에 보관하는가.
+ *
+ * 같은 인스타그램 계정이라도 "디엠 자동화용 연동"과 "캠페인(브랜드 매칭)용 연동"은
+ * 서로 다른 것으로 다룬다. 디엠 자동화에 계정을 붙여 뒀다고 캠페인 등록서가 그 계정을
+ * 자기 것처럼 쓰기 시작하면, 등록하는 사람은 자기가 어떤 계정을 브랜드에게 보여 주고
+ * 있는지 고른 적이 없다. 캠페인은 그 자리에서 직접 로그인한 계정만 쓴다.
+ *
+ *   dm     — dm-automation 블롭. 자동 응답 규칙과 함께 보관된다.
+ *   collab — collab-instagram 블롭. 캠페인 등록 화면에서 로그인한 계정만 들어온다.
+ */
+export type MetaLinkScope = "dm" | "collab";
+
+/** 스코프별 보관 위치. 두 스코프가 같은 키를 건드리면 한쪽 연동 해제가 다른 쪽을 끊는다. */
+const linkLocation = (scope: MetaLinkScope, username: string) =>
+  scope === "collab"
+    ? { store: "collab-instagram", key: `ig_${username}` }
+    : { store: "dm-automation", key: `dm_${username}` };
+
 /** 토큰이 죽었을 때 화면이 쓰는 문구. 여러 곳에서 같은 말을 하도록 한 군데 둔다. */
 export const REAUTH_MESSAGE =
   "인스타그램 연동이 만료되었습니다. 계정을 다시 연동하면 팔로워·릴스 조회수를 이어서 불러옵니다.";
@@ -171,11 +190,15 @@ async function fetchReelViews(graphHost: string, token: string, mediaId: string)
   }
 }
 
-/** 사용자별 인스타그램 연동 정보(디엠 자동화 블롭에 함께 보관된다). */
-export async function loadMetaLink(username: string): Promise<MetaLink | null> {
+/** 사용자별 인스타그램 연동 정보. 스코프에 따라 보관 위치가 다르다(linkLocation 참고). */
+export async function loadMetaLink(
+  username: string,
+  scope: MetaLinkScope = "dm",
+): Promise<MetaLink | null> {
   try {
-    const store = getStore({ name: "dm-automation", consistency: "strong" });
-    const settings = (await store.get(`dm_${username}`, { type: "json" })) as MetaLink | null;
+    const at = linkLocation(scope, username);
+    const store = getStore({ name: at.store, consistency: "strong" });
+    const settings = (await store.get(at.key, { type: "json" })) as MetaLink | null;
     if (!settings) return null;
     return settings;
   } catch {
@@ -220,10 +243,14 @@ export const isTokenInvalidError = (payload: any): boolean => {
  * 기록해 두면 다음 화면부터는 버튼을 눌러 보기 전에 상태를 알 수 있다 — 실패할 것이
  * 확실한 버튼을 눌러 보게 하고 영문 오류를 보여 주는 대신, 처음부터 재연동을 권한다.
  */
-export async function markLinkNeedsReauth(username: string): Promise<void> {
+export async function markLinkNeedsReauth(
+  username: string,
+  scope: MetaLinkScope = "dm",
+): Promise<void> {
   try {
-    const store = getStore({ name: "dm-automation", consistency: "strong" });
-    const key = `dm_${username}`;
+    const at = linkLocation(scope, username);
+    const store = getStore({ name: at.store, consistency: "strong" });
+    const key = at.key;
     const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
     if (!latest || latest.needsReauth) return;
     await store.setJSON(key, {
@@ -238,10 +265,14 @@ export async function markLinkNeedsReauth(username: string): Promise<void> {
 }
 
 /** 토큰이 다시 살아 있는 것이 확인되면 표시를 지운다(재연동 직후·일시 오류였던 경우). */
-export async function clearLinkReauthFlag(username: string): Promise<void> {
+export async function clearLinkReauthFlag(
+  username: string,
+  scope: MetaLinkScope = "dm",
+): Promise<void> {
   try {
-    const store = getStore({ name: "dm-automation", consistency: "strong" });
-    const key = `dm_${username}`;
+    const at = linkLocation(scope, username);
+    const store = getStore({ name: at.store, consistency: "strong" });
+    const key = at.key;
     const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
     if (!latest?.needsReauth) return;
     const { needsReauth, tokenInvalidAt, ...rest } = latest;
@@ -410,6 +441,10 @@ async function loadChannel(db: any, username: string) {
  *
  * 못 받은 항목(권한 거부 등)은 기존 값을 유지한다. 연동 후 첫 저장이라 기존 값이
  * 없으면 0 이 되지만, 그건 "아직 못 받았다"와 같은 뜻이라 문제되지 않는다.
+ *
+ * 단, 그 규칙은 **같은 계정**일 때만 맞다. 다른 인스타그램 계정으로 다시 연동했는데
+ * 지난 계정의 평균 조회수·릴스를 물려받으면, 브랜드는 이 사람의 것이 아닌 숫자를
+ * 보게 된다. 계정이 바뀌면 물려받지 않고 이번에 받아 온 값만 남긴다.
  */
 export async function persistMetrics(
   db: any,
@@ -418,29 +453,37 @@ export async function persistMetrics(
 ): Promise<any> {
   const existing = await loadChannel(db, username);
 
-  const followers = metrics.followers ?? Number(existing?.followers || 0);
-  const following = metrics.following ?? Number(existing?.following || 0);
-  const avgViews = metrics.avgViews || Number(existing?.avg_views || 0);
-  const avgLikes = metrics.avgLikes || Number(existing?.avg_likes || 0);
-  const avgComments = metrics.avgComments || Number(existing?.avg_comments || 0);
-  const reelsCount = metrics.reelsCount || Number(existing?.reels_count || 0);
+  // 계정이 바뀌었는지. 아이디를 못 받았거나 처음 저장이면 판단할 근거가 없으므로
+  // 지금까지처럼 기존 값을 이어 쓴다(같은 계정의 권한 문제일 가능성이 높다).
+  const priorHandle = String(existing?.instagram_handle || "").toLowerCase();
+  const sameAccount =
+    !metrics.igUsername || !priorHandle || priorHandle === metrics.igUsername.toLowerCase();
+  const prior = sameAccount ? existing : null;
+
+  const followers = metrics.followers ?? Number(prior?.followers || 0);
+  const following = metrics.following ?? Number(prior?.following || 0);
+  const avgViews = metrics.avgViews || Number(prior?.avg_views || 0);
+  const avgLikes = metrics.avgLikes || Number(prior?.avg_likes || 0);
+  const avgComments = metrics.avgComments || Number(prior?.avg_comments || 0);
+  const reelsCount = metrics.reelsCount || Number(prior?.reels_count || 0);
   const recentReels = metrics.recentReels.length
     ? metrics.recentReels
-    : Array.isArray(existing?.recent_reels)
-      ? existing.recent_reels
+    : Array.isArray(prior?.recent_reels)
+      ? prior.recent_reels
       : [];
   // 피드도 같은 규칙이다. 이번 응답이 빈 배열이면(권한 거부·일시 오류) 지난번에
   // 받아 둔 9칸을 지우지 않는다. 빈 그리드는 "게시물이 없는 계정"으로 읽힌다.
   const recentFeed = metrics.recentFeed.length
     ? metrics.recentFeed
-    : Array.isArray(existing?.recent_feed)
-      ? existing.recent_feed
+    : Array.isArray(prior?.recent_feed)
+      ? prior.recent_feed
       : [];
 
   const handle = metrics.igUsername || String(existing?.instagram_handle || "");
+  // 프로필 주소도 계정을 따라간다. 바뀐 계정에 옛 주소가 남으면 브랜드가 다른 사람의
+  // 프로필을 열어 보게 된다.
   const igUrl =
-    String(existing?.instagram_url || "") ||
-    (handle ? `https://www.instagram.com/${handle}/` : "");
+    String(prior?.instagram_url || "") || (handle ? `https://www.instagram.com/${handle}/` : "");
 
   await db.sql`
     INSERT INTO creator_channels (
@@ -485,17 +528,18 @@ export async function syncChannelFromMeta(
   db: any,
   username: string,
   link: MetaLink,
+  scope: MetaLinkScope = "dm",
 ): Promise<
   | { ok: true; row: any; viewsAvailable: boolean; sampled: number }
   | { ok: false; error: string; status: number; code: MetaFailureCode }
 > {
   const fetched = await fetchInstagramMetrics(link);
   if (!fetched.ok) {
-    if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username);
+    if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope);
     return fetched;
   }
   // 토큰이 살아 있는 것이 확인됐다. 지난번 일시 오류로 남은 표시가 있으면 지운다.
-  if (link.needsReauth) await clearLinkReauthFlag(username);
+  if (link.needsReauth) await clearLinkReauthFlag(username, scope);
   const row = await persistMetrics(db, username, fetched.metrics);
   return {
     ok: true,

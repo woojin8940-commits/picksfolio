@@ -7,8 +7,11 @@ import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 /**
  * 인스타그램 계정 연동 콜백.
  * - authorize 후 돌아온 code 를 단기 토큰 → 장기 토큰(60일)으로 교환한다.
- * - 연동한 계정의 user_id / username 을 조회해 사용자별 DM 자동화 설정
- *   (dm-automation 블롭)에 병합 저장한다. 기존 automations/rules 는 보존한다.
+ * - 연동한 계정의 user_id / username 을 조회해 사용자별 보관함에 저장한다.
+ *   보관함은 연동을 시작한 화면에 따라 갈린다(state 의 `p`).
+ *     · 디엠 자동화  → dm-automation 블롭. 기존 automations/rules 는 보존한다.
+ *     · 캠페인 등록  → collab-instagram 블롭. 캠페인 화면에서 직접 로그인한 계정만
+ *       들어가고, 디엠 자동화 연동과 서로를 건드리지 않는다.
  * - 이어서 팔로워·팔로잉과 최근 릴스 평균 조회수를 받아 creator_channels 에 채운다.
  *   연동의 목적이 "픽스폴리오가 그 숫자를 갖고 있는 것"이므로, 동의한 순간 한 번은
  *   받아 둔다. 나중에 누가 갱신 버튼을 눌러 줄 때까지 명단이 비어 있으면 브랜드
@@ -79,6 +82,8 @@ export default async (req: Request, _context: Context) => {
   if (!username) return fail("bad_state");
   // 복귀 경로는 발급 때 검증했지만, 서명된 값이라고 그대로 믿지 않고 다시 통과시킨다.
   returnPath = sanitizeReturnPath(verified.payload.r) || returnPath;
+  // 캠페인 등록 화면에서 시작한 연동인지. 아래 저장 위치가 이 값으로 갈린다.
+  const isCollab = verified.payload.p === "collab";
 
   const appId = process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
@@ -141,10 +146,18 @@ export default async (req: Request, _context: Context) => {
       console.warn("[ig-oauth] profile fetch failed:", e);
     }
 
-    // 4) 설정 블롭에 병합 저장 (기존 automations/rules 보존)
-    const store = getStore({ name: "dm-automation", consistency: "strong" });
-    const key = `dm_${username}`;
-    const existing = ((await store.get(key, { type: "json" })) as DmSettings) || {};
+    // 4) 보관함에 저장
+    //
+    // 캠페인 연동은 방금 로그인한 계정 하나만 담는다. 지난 연동 정보를 물려받으면
+    // 전에 붙여 뒀던 계정의 흔적(아이디·만료 표시)이 새 연동에 섞여, 화면이 지금
+    // 로그인한 계정이 아닌 값을 보여 주게 된다. 디엠 자동화는 반대로 병합해야 한다 —
+    // 그쪽 블롭에는 사람이 만들어 둔 자동 응답 규칙이 함께 들어 있다.
+    const storeName = isCollab ? "collab-instagram" : "dm-automation";
+    const key = isCollab ? `ig_${username}` : `dm_${username}`;
+    const store = getStore({ name: storeName, consistency: "strong" });
+    const existing = isCollab
+      ? ({} as DmSettings)
+      : ((await store.get(key, { type: "json" })) as DmSettings) || {};
 
     const next: DmSettings = {
       ...existing,
@@ -165,37 +178,41 @@ export default async (req: Request, _context: Context) => {
     delete (next as any).tokenInvalidAt;
     await store.setJSON(key, next);
 
-    // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스.
-    try {
-      if (igUserId) {
-        const index = getStore({ name: "dm-automation-index", consistency: "strong" });
-        await index.set(`ig_${igUserId}`, username);
-      }
-    } catch (e) {
-      console.warn("[ig-oauth] index write failed:", e);
-    }
-
-    // 이 계정을 앱 웹훅에 구독시킨다. Meta 앱 대시보드에 콜백 URL 을 등록하는 것만으로는
-    // 개별 계정의 이벤트가 오지 않고, 계정별로 `subscribed_apps` 를 호출해야 comments /
-    // messages 이벤트가 실제로 전달된다. 이 호출이 빠지면 댓글 자동 DM·자동 답글이
-    // 트리거 자체를 받지 못한다. 연동 자체를 막지는 않도록 실패는 경고로만 남긴다.
-    const sub = await subscribeInstagramWebhooks({
-      accessToken: longToken,
-      tokenSource: "instagram_login",
-      igId: igUserId,
-    });
-    if (sub.ok) {
+    // 웹훅 구독과 역추적 인덱스는 디엠 자동화(댓글·메시지 이벤트)를 위한 것이다.
+    // 캠페인 연동은 지표를 읽기만 하므로 계정에 아무 것도 걸지 않는다.
+    if (!isCollab) {
+      // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스.
       try {
-        await store.setJSON(key, {
-          ...next,
-          webhookSubscribedAt: new Date().toISOString(),
-          webhookFields: WEBHOOK_FIELDS,
-        });
+        if (igUserId) {
+          const index = getStore({ name: "dm-automation-index", consistency: "strong" });
+          await index.set(`ig_${igUserId}`, username);
+        }
       } catch (e) {
-        console.warn("[ig-oauth] subscribe flag write failed:", e);
+        console.warn("[ig-oauth] index write failed:", e);
       }
-    } else {
-      console.warn("[ig-oauth] webhook subscribe failed:", sub.error);
+
+      // 이 계정을 앱 웹훅에 구독시킨다. Meta 앱 대시보드에 콜백 URL 을 등록하는 것만으로는
+      // 개별 계정의 이벤트가 오지 않고, 계정별로 `subscribed_apps` 를 호출해야 comments /
+      // messages 이벤트가 실제로 전달된다. 이 호출이 빠지면 댓글 자동 DM·자동 답글이
+      // 트리거 자체를 받지 못한다. 연동 자체를 막지는 않도록 실패는 경고로만 남긴다.
+      const sub = await subscribeInstagramWebhooks({
+        accessToken: longToken,
+        tokenSource: "instagram_login",
+        igId: igUserId,
+      });
+      if (sub.ok) {
+        try {
+          await store.setJSON(key, {
+            ...next,
+            webhookSubscribedAt: new Date().toISOString(),
+            webhookFields: WEBHOOK_FIELDS,
+          });
+        } catch (e) {
+          console.warn("[ig-oauth] subscribe flag write failed:", e);
+        }
+      } else {
+        console.warn("[ig-oauth] webhook subscribe failed:", sub.error);
+      }
     }
 
     // 동의한 순간 팔로워·팔로잉과 최근 릴스 평균 조회수를 한 번 받아 둔다.
@@ -208,7 +225,12 @@ export default async (req: Request, _context: Context) => {
     let metricsSynced = false;
     try {
       const { getDatabase } = await import("@picks/netlify-database");
-      const synced = await syncChannelFromMeta(getDatabase(), username, next);
+      const synced = await syncChannelFromMeta(
+        getDatabase(),
+        username,
+        next,
+        isCollab ? "collab" : "dm",
+      );
       if (synced.ok) {
         metricsSynced = true;
       } else {

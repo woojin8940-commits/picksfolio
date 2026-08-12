@@ -15,7 +15,17 @@ import type { Config } from "@netlify/functions";
  *   - 이미 만료된 토큰은 갱신할 수 없다 → 사용자가 재연동해야 한다.
  *
  * 구 페이지 토큰(tokenSource ≠ instagram_login)은 만료가 없어 대상에서 제외한다.
+ *
+ * 보관함이 두 곳이다. 디엠 자동화(dm-automation)와 캠페인 등록(collab-instagram)은
+ * 각자 따로 연동하므로 토큰도 따로 들고 있고, 갱신 규칙은 같다. 캠페인 쪽을 빼 두면
+ * 두 달 뒤 브랜드 명단의 팔로워·조회수가 갱신되지 않기 시작한다.
  */
+
+/** 갱신 대상 보관함. 이름과 키 접두사만 다르고 처리 방법은 같다. */
+const SOURCES = [
+  { store: "dm-automation", prefix: "dm_" },
+  { store: "collab-instagram", prefix: "ig_" },
+] as const;
 
 /** 만료까지 이 일수 이하로 남으면 갱신한다(하루 한 번 실행이므로 넉넉히 잡는다). */
 const REFRESH_WINDOW_DAYS = 14;
@@ -52,12 +62,18 @@ async function markNeedsReauth(store: any, key: string): Promise<void> {
 }
 
 export default async () => {
-  const store = getStore({ name: "dm-automation", consistency: "strong" });
+  for (const source of SOURCES) {
+    await refreshStore(source.store, source.prefix);
+  }
+};
+
+async function refreshStore(storeName: string, prefix: string) {
+  const store = getStore({ name: storeName, consistency: "strong" });
   const now = Date.now();
 
-  const { blobs } = await store.list({ prefix: "dm_" });
+  const { blobs } = await store.list({ prefix });
   if (blobs.length === 0) {
-    console.log("[ig-token] No DM automation records");
+    console.log(`[ig-token] ${storeName}: no records`);
     return;
   }
 
@@ -141,9 +157,10 @@ export default async () => {
   }
 
   console.log(
-    `[ig-token] Done — refreshed ${refreshed}, expired ${expired}, failed ${failed}, skipped ${skipped} of ${blobs.length}`,
+    `[ig-token] ${storeName} done — refreshed ${refreshed}, expired ${expired}, ` +
+      `failed ${failed}, skipped ${skipped} of ${blobs.length}`,
   );
-};
+}
 
 export const config: Config = {
   // 하루 한 번. 만료 14일 전부터 매일 시도하므로 하루 실패해도 여유가 있다.

@@ -2810,12 +2810,19 @@ export const apiService = {
   //
   // returnTo 는 연동을 마친 뒤 돌아올 우리 사이트 내부 경로다. 브랜드 매칭 등록처럼
   // 관리자 화면이 아닌 곳에서 연동을 시작하면 이 값을 넘겨 원래 있던 화면으로 복귀한다.
-  async instagramConnectUrl(username: string, returnTo?: string): Promise<{ url?: string; error?: string }> {
+  //
+  // purpose 는 이 연동이 어느 기능의 것인지다. 'collab'(캠페인 등록)로 시작한 연동은
+  // 디엠 자동화와 다른 보관함에 저장되고, 인스타그램 로그인도 매번 새로 받는다.
+  async instagramConnectUrl(
+    username: string,
+    returnTo?: string,
+    purpose?: 'collab',
+  ): Promise<{ url?: string; error?: string }> {
     try {
       const res = await fetch('/api/instagram/oauth/start', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
-        body: JSON.stringify({ username: username.toLowerCase(), returnTo }),
+        body: JSON.stringify({ username: username.toLowerCase(), returnTo, purpose }),
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok || !data?.url) {
