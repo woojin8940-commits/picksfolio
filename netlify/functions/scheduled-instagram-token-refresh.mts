@@ -26,7 +26,29 @@ interface DmSettings {
   tokenSource?: string;
   tokenExpiresAt?: string;
   igUsername?: string;
+  needsReauth?: boolean;
   [k: string]: unknown;
+}
+
+/**
+ * 되살릴 수 없는 토큰에 재연동 표시를 남긴다.
+ *
+ * 표시가 없으면 화면은 계속 "연동됨"으로 보이고, 사람은 갱신 버튼을 눌러서야
+ * 영문 오류로 사실을 알게 된다. 밤사이에 미리 표시해 두면 다음에 화면을 여는
+ * 순간부터 "다시 연동해 주세요"가 보인다.
+ */
+async function markNeedsReauth(store: any, key: string): Promise<void> {
+  try {
+    const latest = ((await store.get(key, { type: "json" })) as DmSettings) || null;
+    if (!latest || latest.needsReauth) return;
+    await store.setJSON(key, {
+      ...latest,
+      needsReauth: true,
+      tokenInvalidAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn(`[ig-token] ${key} 재연동 표시 실패:`, (e as Error)?.message);
+  }
 }
 
 export default async () => {
@@ -59,9 +81,10 @@ export default async () => {
       // 만료 시각을 모르는(구 데이터) 토큰도 한 번 갱신해 만료 시각을 채워준다.
       if (Number.isFinite(expiresAt)) {
         if (expiresAt <= now) {
-          // 만료된 토큰은 갱신 자체가 불가능하다. 재연동 안내를 위해 남겨만 둔다.
+          // 만료된 토큰은 갱신 자체가 불가능하다. 재연동만이 길이므로 표시를 남긴다.
           expired++;
           console.warn(`[ig-token] ${blob.key} token already expired — reconnect required`);
+          await markNeedsReauth(store, blob.key);
           continue;
         }
         if (expiresAt - now > REFRESH_WINDOW_DAYS * DAY_MS) {
@@ -81,14 +104,28 @@ export default async () => {
         console.error(
           `[ig-token] refresh failed for ${blob.key}: ${data?.error?.message || `HTTP ${res.status}`}`,
         );
+        // 권한이 해제됐거나 토큰이 무효면 내일 다시 시도해도 같은 실패다. 그런
+        // 경우에만 표시를 남긴다 — 일시적인 네트워크 오류로 멀쩡한 연동을 끊으면
+        // 사람은 필요 없는 재연동을 하게 된다.
+        const err = data?.error;
+        const msg = String(err?.message || "").toLowerCase();
+        const tokenDead =
+          Number(err?.code) === 190 ||
+          String(err?.type || "") === "OAuthException" ||
+          msg.includes("has not authorized application") ||
+          msg.includes("error validating access token") ||
+          msg.includes("session has expired");
+        if (tokenDead) await markNeedsReauth(store, blob.key);
         continue;
       }
 
       const expiresIn = Number(data.expires_in || 0);
       // 갱신 중에 사용자가 설정을 바꿨을 수 있으므로 최신 레코드를 다시 읽어 토큰만 덮어쓴다.
       const latest = ((await store.get(blob.key, { type: "json" })) as DmSettings) || settings;
+      // 새 토큰을 받았으니 지난번에 남긴 재연동 표시는 사실이 아니게 됐다.
+      const { needsReauth, tokenInvalidAt, ...rest } = latest;
       await store.setJSON(blob.key, {
-        ...latest,
+        ...rest,
         accessToken: data.access_token,
         tokenExpiresAt: expiresIn
           ? new Date(now + expiresIn * 1000).toISOString()

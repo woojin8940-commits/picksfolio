@@ -67,11 +67,19 @@ interface InfluencerChannel {
   avgLikes: number;
   metricsSource: string;
   syncedAt: string;
+  /**
+   * 연동은 해 뒀지만 토큰이 죽어 다시 동의가 필요한 상태.
+   *
+   * 인스타그램 앱 권한을 지우거나 비밀번호를 바꾸면 저장해 둔 토큰이 무효가 된다.
+   * 이때 갱신을 누르면 메타는 영문 오류로 답하는데, 그 문장을 그대로 띄우면 읽는
+   * 사람은 자기가 뭘 잘못했는지 알 수 없다. 상태로 들고 있다가 "다시 연동"을 권한다.
+   */
+  needsReauth: boolean;
 }
 
 const emptyChannel: InfluencerChannel = {
   connected: false, handle: '', followers: 0, following: 0,
-  avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '',
+  avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '', needsReauth: false,
 };
 
 const compact = (n: number) => {
@@ -80,6 +88,25 @@ const compact = (n: number) => {
   if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}만`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;
   return n.toLocaleString();
+};
+
+/** 토큰이 죽었을 때 하는 말. 카드와 안내 문구가 서로 다른 말을 하지 않도록 한 군데 둔다. */
+const RECONNECT_TEXT = '인스타그램 연동이 만료되었어요. 아래 버튼으로 다시 연동하면 이어서 불러옵니다.';
+
+/**
+ * 화면에 올려도 되는 문구인지 마지막으로 거른다.
+ *
+ * 메타·네트워크 계층의 오류 원문은 영문이고, 앱 ID 같은 내부 값이 섞여 있다
+ * ("Error validating access token: The user has not authorized application 45144…").
+ * 그 문장은 읽는 사람에게 아무 것도 알려 주지 못하면서 화면만 고장 난 것처럼
+ * 보이게 한다. 한글이 한 글자도 없으면 안내로 쓰지 않는다.
+ */
+const safeNotice = (raw: unknown) => {
+  const text = String(raw || '').trim();
+  if (!text || !/[가-힣]/.test(text)) {
+    return '정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+  }
+  return text;
 };
 
 const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName }) => {
@@ -171,6 +198,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       avgLikes: Number(c.avgLikes || 0),
       metricsSource: String(c.metricsSource || ''),
       syncedAt: String(c.syncedAt || ''),
+      needsReauth: !!result?.needsReauth,
     });
   }, [applicantUsername, isInfluencer]);
 
@@ -348,12 +376,22 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     const result = await apiService.syncCreatorChannel(applicantUsername);
     setSyncing(false);
     if (result?.error) {
+      // 토큰이 죽은 경우다. 카드를 재연동 상태로 바꿔 주지 않으면 사람은 같은 실패를
+      // 부르는 갱신 버튼을 계속 누르게 된다. 이때는 실패가 아니라 다음 할 일을 말한다.
+      if (result.code === 'META_TOKEN_INVALID') {
+        setChannel(c => ({ ...c, needsReauth: true }));
+        if (silent) return;
+        setNotice({ type: 'err', text: RECONNECT_TEXT });
+        return;
+      }
       if (silent) return;
       setNotice({
         type: 'err',
         text: result.code === 'META_NOT_LINKED'
           ? '먼저 인스타그램 계정을 연동해 주세요.'
-          : result.error,
+          // 서버는 사람이 읽을 수 있는 문구만 내려보내지만, 예상 못 한 경로로 영문
+          // 원문이 올라오면 화면에서 한 번 더 거른다. 오류 문장은 안내가 아니다.
+          : safeNotice(result.error),
       });
       return;
     }
@@ -835,6 +873,59 @@ const InstagramLinkCard: React.FC<{
   }
 
   const verified = channel.metricsSource === 'meta_api';
+
+  /**
+   * 연동은 돼 있지만 토큰이 죽은 상태.
+   *
+   * 붉은 오류 상자로 보여 주지 않는다. 사람이 뭘 잘못한 것이 아니라 인스타그램
+   * 권한이 만료된 것이고, 할 일은 버튼 하나를 다시 누르는 것뿐이다. 그리고 이미
+   * 확인해 둔 숫자는 그대로 보여 준다 — 브랜드에게 전달되는 값은 여전히 그것이고,
+   * 화면에서 지우면 연동이 통째로 사라진 것처럼 읽힌다.
+   */
+  if (channel.needsReauth) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-4">
+        <div className="flex items-start gap-2">
+          <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v3.5m0 3.5h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <div className="min-w-0">
+            <p className="text-sm font-black text-slate-900">
+              {channel.handle ? `@${channel.handle} 다시 연동이 필요해요` : '다시 연동이 필요해요'}
+            </p>
+            <p className="text-[11px] text-amber-800 font-medium leading-relaxed mt-1">
+              인스타그램 연동 권한이 만료되었습니다. 비밀번호를 바꿨거나 인스타그램
+              설정에서 픽스폴리오 연결을 해제하면 이렇게 됩니다. 아래 버튼으로 다시
+              연동하면 팔로워·릴스 조회수를 이어서 불러옵니다.
+            </p>
+          </div>
+        </div>
+
+        {/* 마지막으로 확인된 숫자. 새로 못 받았을 뿐 브랜드가 보는 값은 아직 이것이다. */}
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <Metric label="팔로워" value={compact(channel.followers)} />
+          <Metric label="팔로잉" value={compact(channel.following)} />
+          <Metric label="릴스 평균 조회" value={channel.avgViews ? compact(channel.avgViews) : '집계 전'} />
+        </div>
+        <p className="text-[10px] text-slate-400 font-bold mt-1.5">마지막으로 확인된 숫자입니다.</p>
+
+        <button
+          type="button"
+          onClick={onLink}
+          disabled={linking || !canLink}
+          className="mt-3 w-full rounded-xl bg-gradient-to-r from-fuchsia-600 via-rose-500 to-amber-500 text-white font-black text-sm py-3 shadow-[0_12px_26px_-10px_rgba(219,39,119,0.6)] hover:-translate-y-0.5 active:scale-[0.99] active:translate-y-0 transition-all disabled:opacity-60 disabled:shadow-none disabled:hover:translate-y-0"
+        >
+          {linking ? '연동 창으로 이동 중...' : '인스타그램 다시 연동하기'}
+        </button>
+        {!canLink && (
+          <p className="text-[11px] text-rose-500 font-bold mt-2">
+            계정 연동은 로그인 후에 할 수 있어요.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-4">
       <div className="flex items-start justify-between gap-3">

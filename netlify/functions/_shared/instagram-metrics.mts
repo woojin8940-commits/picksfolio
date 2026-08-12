@@ -54,7 +54,17 @@ export interface MetaLink {
   igAccountId?: string;
   igUsername?: string;
   username?: string;
+  /** 토큰이 죽은 것이 확인된 연동. 사람이 다시 동의해 주기 전에는 어떤 호출도 성공하지 않는다. */
+  needsReauth?: boolean;
+  tokenInvalidAt?: string;
 }
+
+/** 토큰이 죽었을 때 화면이 쓰는 문구. 여러 곳에서 같은 말을 하도록 한 군데 둔다. */
+export const REAUTH_MESSAGE =
+  "인스타그램 연동이 만료되었습니다. 계정을 다시 연동하면 팔로워·릴스 조회수를 이어서 불러옵니다.";
+
+/** 지표를 못 받았을 때 화면에 그대로 쓸 수 있는 코드. 메타 원문은 이 뒤로 넘기지 않는다. */
+export type MetaFailureCode = "META_TOKEN_INVALID" | "META_ERROR";
 
 export interface RecentReel {
   id: string;
@@ -173,8 +183,86 @@ export async function loadMetaLink(username: string): Promise<MetaLink | null> {
   }
 }
 
+/**
+ * 메타가 "이 토큰은 더 이상 쓸 수 없다"고 답한 경우인지.
+ *
+ * 사람이 앱 권한을 지웠거나(설정 → 비즈니스 통합에서 삭제), 비밀번호를 바꿨거나,
+ * 60일 장기 토큰이 갱신되지 못한 채 만료된 경우가 전부 여기로 온다. 메타는 이걸
+ * OAuthException(code 190)으로 답하고, 본문 문구는 상황마다 다르다
+ * ("The user has not authorized application …", "Session has expired …").
+ *
+ * 이 구분이 필요한 이유는 사람에게 할 말이 다르기 때문이다. 일시적인 오류라면
+ * "잠시 후 다시" 이지만, 토큰이 죽었으면 다시 눌러도 영원히 같은 실패가 난다 —
+ * 재연동만이 유일한 길이므로 화면은 갱신 버튼이 아니라 연동 버튼을 보여야 한다.
+ */
+export const isTokenInvalidError = (payload: any): boolean => {
+  const err = payload?.error ?? payload;
+  if (Number(err?.code) === 190) return true;
+  if (String(err?.type || "") === "OAuthException") return true;
+  // 재동의가 필요한 하위 코드: 앱 권한 삭제(458), 비밀번호 변경(460), 만료(463), 무효(467).
+  if ([458, 459, 460, 463, 464, 467, 492].includes(Number(err?.error_subcode))) return true;
+  const msg = String(err?.message || "").toLowerCase();
+  return (
+    msg.includes("has not authorized application") ||
+    msg.includes("error validating access token") ||
+    msg.includes("session has expired") ||
+    (msg.includes("access token") && msg.includes("invalid"))
+  );
+};
+
+/**
+ * 죽은 토큰을 연동 정보에 기록한다.
+ *
+ * 블롭을 지우지 않는 이유는 여기에 디엠 자동화 규칙이 함께 들어 있기 때문이다.
+ * 토큰이 만료됐다고 사람이 만들어 둔 자동 응답 문구까지 사라지면, 재연동한 뒤에
+ * 그걸 처음부터 다시 만들어야 한다. 표시만 남기고 내용은 그대로 둔다.
+ *
+ * 기록해 두면 다음 화면부터는 버튼을 눌러 보기 전에 상태를 알 수 있다 — 실패할 것이
+ * 확실한 버튼을 눌러 보게 하고 영문 오류를 보여 주는 대신, 처음부터 재연동을 권한다.
+ */
+export async function markLinkNeedsReauth(username: string): Promise<void> {
+  try {
+    const store = getStore({ name: "dm-automation", consistency: "strong" });
+    const key = `dm_${username}`;
+    const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
+    if (!latest || latest.needsReauth) return;
+    await store.setJSON(key, {
+      ...latest,
+      needsReauth: true,
+      tokenInvalidAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // 표시를 못 남겨도 이번 호출의 안내는 이미 정확하다. 다음 호출에서 다시 시도된다.
+    console.warn("[ig-metrics] 재연동 표시 저장 실패:", (e as Error)?.message);
+  }
+}
+
+/** 토큰이 다시 살아 있는 것이 확인되면 표시를 지운다(재연동 직후·일시 오류였던 경우). */
+export async function clearLinkReauthFlag(username: string): Promise<void> {
+  try {
+    const store = getStore({ name: "dm-automation", consistency: "strong" });
+    const key = `dm_${username}`;
+    const latest = (await store.get(key, { type: "json" })) as MetaLink | null;
+    if (!latest?.needsReauth) return;
+    const { needsReauth, tokenInvalidAt, ...rest } = latest;
+    await store.setJSON(key, rest);
+  } catch (e) {
+    console.warn("[ig-metrics] 재연동 표시 해제 실패:", (e as Error)?.message);
+  }
+}
+
+/**
+ * 갱신 버튼을 켜도 되는 연동인지.
+ *
+ * 토큰 문자열이 남아 있다는 것과 그 토큰이 살아 있다는 것은 다르다. 죽은 것이
+ * 확인된 연동을 "연동됨"으로 세면, 화면은 멀쩡한 갱신 버튼을 보여 주고 사람은
+ * 누를 때마다 같은 실패를 다시 만난다.
+ */
 export const linkIsUsable = (link: MetaLink | null): boolean =>
-  !!(link?.accessToken && (link?.igUserId || link?.igAccountId));
+  !!(link?.accessToken && (link?.igUserId || link?.igAccountId) && !link?.needsReauth);
+
+/** 연동은 돼 있으나 토큰이 죽어 다시 동의가 필요한 상태. 화면이 연동 버튼을 보여줄 근거다. */
+export const linkNeedsReauth = (link: MetaLink | null): boolean => !!link?.needsReauth;
 
 /**
  * 연동된 계정의 프로필(팔로워·팔로잉)과 최근 릴스 성과를 읽어 온다.
@@ -185,9 +273,14 @@ export const linkIsUsable = (link: MetaLink | null): boolean =>
  */
 export async function fetchInstagramMetrics(
   link: MetaLink,
-): Promise<{ ok: true; metrics: MetaMetrics } | { ok: false; error: string; status: number }> {
+): Promise<
+  | { ok: true; metrics: MetaMetrics }
+  | { ok: false; error: string; status: number; code: MetaFailureCode }
+> {
   const token = String(link.accessToken || "");
-  if (!token) return { ok: false, error: "액세스 토큰이 없습니다.", status: 409 };
+  if (!token) {
+    return { ok: false, error: REAUTH_MESSAGE, status: 409, code: "META_TOKEN_INVALID" };
+  }
 
   const graphHost = graphHostFor(link.tokenSource);
 
@@ -203,12 +296,22 @@ export async function fetchInstagramMetrics(
   // 조회수(인사이트)를 붙인 요청부터 시도한다. 막히면 나머지 값이라도 받아 두고
   // 조회수는 릴스별로 따로 부른다 — 목록 자체를 놓치면 카드가 빈 화면이 된다.
   let result = await fetchMedia(`${MEDIA_FIELDS},${VIEWS_EXPANSION}`);
-  if (!result.ok) result = await fetchMedia(MEDIA_FIELDS);
+  // 토큰이 죽었으면 필드를 줄여 다시 불러도 같은 실패다. 두 번째 호출을 아낀다.
+  if (!result.ok && !isTokenInvalidError(result.data)) result = await fetchMedia(MEDIA_FIELDS);
   if (!result.ok) {
+    // 메타 원문은 로그에만 남긴다. 영문 오류 문장을 화면에 그대로 올리면 사람은
+    // 무엇이 잘못됐는지도, 무엇을 해야 하는지도 알 수 없다.
+    const raw = result.data?.error?.message || `HTTP ${result.status}`;
+    if (isTokenInvalidError(result.data)) {
+      console.warn(`[ig-metrics] 토큰 만료/권한 해제 (${link.igUsername || "?"}): ${raw}`);
+      return { ok: false, error: REAUTH_MESSAGE, status: 409, code: "META_TOKEN_INVALID" };
+    }
+    console.warn(`[ig-metrics] 메타 API 오류 (${link.igUsername || "?"}): ${raw}`);
     return {
       ok: false,
-      error: result.data?.error?.message || `메타 API 오류 (HTTP ${result.status})`,
+      error: "인스타그램에서 정보를 받지 못했습니다. 잠시 후 다시 시도해 주세요.",
       status: 502,
+      code: "META_ERROR",
     };
   }
 
@@ -373,6 +476,10 @@ export async function persistMetrics(
 /**
  * 연동 정보로 지표를 받아 바로 저장하는 한 번의 동작.
  * 연동 직후 콜백과 수동 sync 가 같은 결과를 남기도록 여기 한 군데만 쓴다.
+ *
+ * 토큰이 죽은 것이 확인되면 연동 정보에도 표시를 남긴다. 그래야 다음에 화면을 열
+ * 때 갱신 버튼 대신 재연동 안내가 먼저 보인다 — 실패가 예정된 버튼을 사람이 다시
+ * 누르지 않도록.
  */
 export async function syncChannelFromMeta(
   db: any,
@@ -380,10 +487,15 @@ export async function syncChannelFromMeta(
   link: MetaLink,
 ): Promise<
   | { ok: true; row: any; viewsAvailable: boolean; sampled: number }
-  | { ok: false; error: string; status: number }
+  | { ok: false; error: string; status: number; code: MetaFailureCode }
 > {
   const fetched = await fetchInstagramMetrics(link);
-  if (!fetched.ok) return fetched;
+  if (!fetched.ok) {
+    if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username);
+    return fetched;
+  }
+  // 토큰이 살아 있는 것이 확인됐다. 지난번 일시 오류로 남은 표시가 있으면 지운다.
+  if (link.needsReauth) await clearLinkReauthFlag(username);
   const row = await persistMetrics(db, username, fetched.metrics);
   return {
     ok: true,
