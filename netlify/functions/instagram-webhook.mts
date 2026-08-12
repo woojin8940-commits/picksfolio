@@ -367,15 +367,17 @@ export default async (req: Request, _context: Context) => {
       }
 
       /**
-       * 자동 발송이 가능한 상태인지(전체 스위치·연동 토큰·플랜). 댓글 이벤트를
-       * 실제로 처리할 때만 확인한다 — 플랜 조회는 블롭 읽기라 매 이벤트마다 하지
-       * 않는다.
+       * 자동 발송이 가능한 상태인지(전체 스위치·연동 토큰·플랜). 막혀 있으면 그
+       * 이유를 돌려준다. 댓글 이벤트를 실제로 처리할 때만 확인한다 — 플랜 조회는
+       * 블롭 읽기라 매 이벤트마다 하지 않는다.
        */
       let planAllowed: boolean | null = null;
-      const canSend = async (): Promise<boolean> => {
-        if (!settings.enabled || !accessToken) return false;
+      type SendBlock = "switch_off" | "not_connected" | "plan_required";
+      const sendBlockedReason = async (): Promise<SendBlock | null> => {
+        if (!settings.enabled) return "switch_off";
+        if (!accessToken) return "not_connected";
         if (planAllowed === null) planAllowed = await dmAutomationAllowed(username);
-        return planAllowed;
+        return planAllowed ? null : "plan_required";
       };
 
       for (const change of entry?.changes || []) {
@@ -393,7 +395,27 @@ export default async (req: Request, _context: Context) => {
         if (!commentId || (fromId && ownIds.has(fromId))) continue;
 
         // 전체 스위치가 꺼져 있거나 플랜이 없으면 여기서 끝. 우리는 아무것도 보내지 않는다.
-        if (!(await canSend())) continue;
+        const blocked = await sendBlockedReason();
+        if (blocked) {
+          /**
+           * 조건에 맞는 자동화가 있었는데도 보내지 않았다는 사실을 남긴다.
+           *
+           * "발송을 꺼놨는데 댓글 달자마자 DM 이 갔다"는 신고가 들어왔을 때, 이 기록이
+           * 곧 근거가 된다. 여기 skipped 만 남아 있다면 그 DM 은 이 앱이 보낸 것이
+           * 아니다(인스타그램 자체 자동 메시지이거나 예전에 연결해 둔 다른 자동화
+           * 서비스다 — 화면의 '외부 자동 DM' 안내가 그 경우를 알려준다).
+           */
+          if ((settings.automations || []).some((a) => matchAutomation(a, commentText, mediaId))) {
+            await appendLog(username, {
+              kind: "dm",
+              status: "skipped",
+              reason: blocked,
+              recipientId: fromId,
+              commentId,
+            });
+          }
+          continue;
+        }
 
         // 조건(게시물·키워드)에 맞는 자동화 후보를 모은 뒤, 팔로우 조건까지 통과하는
         // 첫 자동화를 고른다. 같은 게시물에 "팔로워용 / 비팔로워용" 자동화를 나눠

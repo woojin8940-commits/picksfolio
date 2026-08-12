@@ -8,7 +8,7 @@ import {
 } from "./_shared/dm-automation-access.mts";
 import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
-import { subscribeInstagramWebhooks } from "./_shared/instagram-webhook-subscribe.mts";
+import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -89,6 +89,8 @@ interface DmSettings {
   updatedAt?: string;
   /** 계정별 웹훅(`subscribed_apps`) 구독을 마친 시각. */
   webhookSubscribedAt?: string;
+  /** 마지막으로 구독을 건 필드 목록. 목록이 바뀌면 한 번 더 구독한다. */
+  webhookFields?: string;
 }
 
 const DEFAULT_SETTINGS: DmSettings = {
@@ -209,25 +211,56 @@ function stampUpdatedAt(
   return { ...next, updatedAt: now };
 }
 
+/**
+ * 요청이 들고 온 자동화 한 건.
+ *
+ * `enabled` 를 명시했는지 따로 기억한다. sanitizeAutomation 은 값이 없으면 켜짐으로
+ * 보는데(새로 만드는 자동화의 기본값), 그 규칙을 수정 요청에도 그대로 적용하면
+ * 필드를 싣지 않은 요청 한 번이 꺼 둔 자동화를 되살린다. 저장돼 있던 상태를 그대로
+ * 두는 쪽이 안전하다 — 켜는 건 사용자가 스위치를 눌렀을 때만 일어나야 한다.
+ */
+interface IncomingAutomation {
+  item: DmAutomationItem;
+  enabledExplicit: boolean;
+}
+
+function readIncoming(a: any): IncomingAutomation {
+  return { item: sanitizeAutomation(a), enabledExplicit: typeof a?.enabled === "boolean" };
+}
+
+/** 요청이 켜짐/꺼짐을 말하지 않았으면 저장본의 값을 유지한다. */
+function resolveEnabled(
+  incoming: IncomingAutomation,
+  prev: DmAutomationItem | undefined,
+): DmAutomationItem {
+  if (incoming.enabledExplicit || !prev) return incoming.item;
+  return { ...incoming.item, enabled: prev.enabled };
+}
+
 /** 저장된 목록에 자동화 한 건을 끼워 넣거나 갈아끼운다. */
 function upsertOne(
   existing: DmAutomationItem[],
-  item: DmAutomationItem,
+  incoming: IncomingAutomation,
   now: string,
 ): DmAutomationItem[] {
-  const prev = existing.find((a) => a.id === item.id);
-  const stamped = stampUpdatedAt(item, prev, now);
-  return prev ? existing.map((a) => (a.id === item.id ? stamped : a)) : [...existing, stamped];
+  const prev = existing.find((a) => a.id === incoming.item.id);
+  const stamped = stampUpdatedAt(resolveEnabled(incoming, prev), prev, now);
+  return prev
+    ? existing.map((a) => (a.id === incoming.item.id ? stamped : a))
+    : [...existing, stamped];
 }
 
 /** 목록 전체를 갈아끼운다(구버전 클라이언트 호환). 변경된 항목만 시각을 새로 찍는다. */
 function replaceAll(
   existing: DmAutomationItem[],
-  incoming: DmAutomationItem[],
+  incoming: IncomingAutomation[],
   now: string,
 ): DmAutomationItem[] {
   const prevById = new Map(existing.map((a) => [a.id, a]));
-  return incoming.map((a) => stampUpdatedAt(a, prevById.get(a.id), now));
+  return incoming.map((entry) => {
+    const prev = prevById.get(entry.item.id);
+    return stampUpdatedAt(resolveEnabled(entry, prev), prev, now);
+  });
 }
 
 export default async (req: Request, context: Context) => {
@@ -337,9 +370,9 @@ export default async (req: Request, context: Context) => {
      * 문서는 손대지 않는다.
      */
     let op:
-      | { kind: "upsert"; item: DmAutomationItem }
+      | { kind: "upsert"; incoming: IncomingAutomation }
       | { kind: "delete"; id: string }
-      | { kind: "replace"; items: DmAutomationItem[] }
+      | { kind: "replace"; incoming: IncomingAutomation[] }
       | { kind: "settings" };
     try {
       if (body?.action === "upsertAutomation" || body?.automation) {
@@ -347,13 +380,13 @@ export default async (req: Request, context: Context) => {
         if (!raw || typeof raw !== "object") {
           return Response.json({ error: "automation 이 필요합니다." }, { status: 400 });
         }
-        op = { kind: "upsert", item: sanitizeAutomation(raw) };
+        op = { kind: "upsert", incoming: readIncoming(raw) };
       } else if (body?.action === "deleteAutomation") {
         const id = String(body?.id || body?.automationId || "").trim();
         if (!id) return Response.json({ error: "삭제할 자동화 id 가 필요합니다." }, { status: 400 });
         op = { kind: "delete", id };
       } else if (Array.isArray(body?.automations)) {
-        op = { kind: "replace", items: body.automations.map(sanitizeAutomation) };
+        op = { kind: "replace", incoming: body.automations.map(readIncoming) };
       } else {
         op = { kind: "settings" };
       }
@@ -384,8 +417,8 @@ export default async (req: Request, context: Context) => {
           : [];
 
         if (op.kind === "upsert") {
-          const prev = stored.find((a) => a.id === op.item.id);
-          const baseAt = Date.parse(op.item.updatedAt || "");
+          const prev = stored.find((a) => a.id === op.incoming.item.id);
+          const baseAt = Date.parse(op.incoming.item.updatedAt || "");
           const storedAt = Date.parse(prev?.updatedAt || "");
           if (prev && !Number.isNaN(baseAt) && !Number.isNaN(storedAt) && baseAt < storedAt) {
             staleWrite = true;
@@ -394,13 +427,28 @@ export default async (req: Request, context: Context) => {
         }
 
         let automations = stored;
-        if (op.kind === "upsert") automations = upsertOne(stored, op.item, now);
+        if (op.kind === "upsert") automations = upsertOne(stored, op.incoming, now);
         else if (op.kind === "delete") automations = stored.filter((a) => a.id !== op.id);
-        else if (op.kind === "replace") automations = replaceAll(stored, op.items, now);
+        else if (op.kind === "replace") automations = replaceAll(stored, op.incoming, now);
+
+        /**
+         * 전체 스위치는 "자동 발송" 토글이 보낸 요청에서만 켠다.
+         *
+         * 예전 화면(그리고 브라우저에 캐시된 옛 번들)은 자동화를 저장하면서
+         * `enabled: true` 를 함께 실어 보냈다. 그래서 자동 발송을 일부러 꺼 둔
+         * 사람이 문구를 다듬거나 자동화 하나를 켜기만 해도 전체 스위치가 조용히
+         * 다시 켜졌고, 다음 댓글에 예전에 설정해 둔 메시지가 나갔다. 끄는 요청은
+         * 언제나 받아들이고, 켜는 요청은 자동화 저장에 곁들여 온 것이면 무시한다.
+         */
+        const wanted = typeof body.enabled === "boolean" ? body.enabled : null;
+        const enabled =
+          wanted === null || (wanted === true && op.kind !== "settings")
+            ? existing.enabled
+            : wanted;
 
         return {
           ...existing,
-          enabled: typeof body.enabled === "boolean" ? body.enabled : existing.enabled,
+          enabled,
           automations,
           // 구버전 rules 는 전달되면 갱신, 아니면 유지
           rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
@@ -442,7 +490,10 @@ export default async (req: Request, context: Context) => {
     // 시점에 한 번 계정별 웹훅 구독을 채워준다. 구독이 없으면 댓글 이벤트가 도착하지
     // 않아 자동 DM·자동 답글이 트리거되지 않는다. 성공하면 시각을 기록해 매번
     // 호출하지 않는다.
-    if (next.accessToken && !next.webhookSubscribedAt) {
+    //
+    // 구독 필드 목록이 바뀌었을 때도 한 번 더 건다. 예전에 연동한 계정은 발신 메시지
+    // 에코를 구독하지 않은 상태라, 이 앱을 거치지 않고 나간 자동 DM 을 감지하지 못한다.
+    if (next.accessToken && (!next.webhookSubscribedAt || next.webhookFields !== WEBHOOK_FIELDS)) {
       const sub = await subscribeInstagramWebhooks({
         accessToken: next.accessToken,
         tokenSource: next.tokenSource,
@@ -451,8 +502,14 @@ export default async (req: Request, context: Context) => {
       if (sub.ok) {
         const subscribedAt = new Date().toISOString();
         next.webhookSubscribedAt = subscribedAt;
+        // 시도한 목록을 기록한다(에코가 거절돼 기본 필드로 내려앉은 경우까지 포함).
+        // 실제 구독본이 아니라 "이 세대의 구독을 마쳤다"는 표시라, 저장할 때마다
+        // 다시 구독 요청을 보내지 않는다.
+        next.webhookFields = WEBHOOK_FIELDS;
         await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) =>
-          current ? { ...current, webhookSubscribedAt: subscribedAt } : null,
+          current
+            ? { ...current, webhookSubscribedAt: subscribedAt, webhookFields: WEBHOOK_FIELDS }
+            : null,
         ).catch((e) => console.warn("[dm-automation] webhook flag save failed:", (e as Error)?.message));
       } else {
         console.warn("[dm-automation] webhook subscribe failed:", sub.error);
