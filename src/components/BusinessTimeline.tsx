@@ -81,6 +81,50 @@ interface TimelineData {
 const MANAGER_THREAD_KINDS = ['influencer_support', 'brand_support'];
 
 /**
+ * AI 어시스턴트를 처음 열었을 때 보여줄 예시 질문.
+ *
+ * "무엇이든 물어보세요"만 띄워 두면 대부분 아무것도 묻지 못하고 닫는다. 그래서 이
+ * 어시스턴트로 실제로 하는 일을 칩으로 앞에 내놓는다 — 콘텐츠 초안(인스타 광고 캡션 ·
+ * 숏폼 대본)과 담당자에게 보낼 메시지 초안이 먼저 오고, 협업 현황 파악은 뒤에 둔다.
+ */
+const AI_QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string }> = [
+  {
+    icon: '📸',
+    label: '인스타 광고 캡션 초안',
+    prompt:
+      '협업 제품으로 올릴 인스타그램 광고 캡션 초안을 톤이 다른 3가지 버전으로 써 주세요. ' +
+      '해시태그와 광고 표시 문구도 함께 넣어 주세요.',
+  },
+  {
+    icon: '🎬',
+    label: '숏폼 대본 · 자막 가이드',
+    prompt:
+      '협업 제품으로 찍을 숏폼(릴스) 촬영 가이드를 써 주세요. 컷 번호를 붙이고 각 컷마다 ' +
+      '영상(장면 설명)과 자막(화면에 올릴 문구)을 나눠서 마지막 CTA까지 정리해 주세요. ' +
+      '어떤 무드로 갈지도 함께 제안해 주세요.',
+  },
+  {
+    icon: '✉️',
+    label: '담당자에게 보낼 메시지',
+    prompt:
+      '픽스폴리오 담당자에게 보낼 메시지 초안을 써 주세요. 지금 진행 상황에 맞게 쓰고, ' +
+      '함께 물어보면 좋을 내용도 정리해 주세요.',
+  },
+  {
+    icon: '📋',
+    label: '협업 전 확인할 것',
+    prompt:
+      '이 협업을 진행하기 전에 확인해야 할 항목을 정리해 주세요. (마감일, 2차 활용 범위, ' +
+      '필수 문구, 수정 횟수, 정산 시점·방식 등)',
+  },
+  {
+    icon: '📊',
+    label: '내 협업 현황',
+    prompt: '지금 대화 중인 업체와 협업 현황을 정리해 주세요. 답장이 필요한 곳부터 알려 주세요.',
+  },
+];
+
+/**
  * 협업 대화는 두 경로에서 생긴다 — 비즈니스 제안을 수락한 건과, 담당자가
  * 리스트업해서 진행하는 캠페인 건. 둘이 한 목록에 섞여 있으면 지금 마주 앉은
  * 상대가 브랜드인지 담당자인지, 이 건이 어떻게 시작됐는지 알 수 없다. 방마다
@@ -88,7 +132,7 @@ const MANAGER_THREAD_KINDS = ['influencer_support', 'brand_support'];
  */
 const SOURCE_LABEL: Record<string, { label: string; cls: string }> = {
   business_proposal: { label: '비즈니스 제안', cls: 'bg-blue-50 text-blue-600' },
-  manager_collab: { label: '담당자 협업', cls: 'bg-slate-900 text-white' },
+  manager_collab: { label: '픽스폴리오 협업', cls: 'bg-slate-900 text-white' },
   campaign: { label: '캠페인 협업', cls: 'bg-emerald-50 text-emerald-600' },
 };
 
@@ -111,7 +155,7 @@ const sourceOfTimeline = (t: TimelineData): 'business_proposal' | 'manager_colla
   return 'business_proposal';
 };
 
-/** 목록 위 탭. 담당자 협업 탭에는 예전 캠페인 직접 대화방도 함께 담는다. */
+/** 목록 위 탭. 픽스폴리오 협업 탭에는 예전 캠페인 직접 대화방도 함께 담는다. */
 type TimelineSourceFilter = '' | 'business_proposal' | 'collab';
 
 const matchesSourceFilter = (t: TimelineData, filter: TimelineSourceFilter): boolean => {
@@ -165,6 +209,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [showList, setShowList] = useState(!initialProposalId);
   const [searchQuery, setSearchQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<TimelineSourceFilter>('');
+  // 대화 삭제 — 목록에서 내린 직후의 "되돌리기" 안내와, 실패했을 때의 알림.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [recentlyDeleted, setRecentlyDeleted] = useState<TimelineData | null>(null);
+  const [listNotice, setListNotice] = useState<string>('');
+  // 방금 내린 대화. 삭제가 서버에 반영되기 전에 목록 폴링(15초)이 돌면 지운 줄이
+  // 잠깐 되살아나 깜빡인다. 서버 응답에 반영될 때까지 여기서 걸러낸다.
+  const locallyHiddenRef = useRef<Map<string, 'pending' | 'confirmed'>>(new Map());
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [windowFocused, setWindowFocused] = useState(true);
@@ -402,8 +453,16 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       });
       const data = await res.json();
       if (data.timelines) {
-        setTimelines(data.timelines);
-        try { localStorage.setItem(cacheKey, JSON.stringify(data.timelines)); } catch {}
+        // 방금 삭제한 대화는 서버 응답이 그 삭제를 반영할 때까지 걸러낸다. 걸러낸
+        // 뒤에 '확인됨' 표시를 지우는 순서가 중요하다 — 서버가 걸러 주기 시작하면
+        // 로컬 필터를 놓아 줘야 상대가 새 메시지를 보내 되살아난 대화가 다시 보인다.
+        const hiddenLocal = locallyHiddenRef.current;
+        const list = (data.timelines as TimelineData[]).filter(t => !hiddenLocal.has(t.proposalId));
+        hiddenLocal.forEach((state, id) => {
+          if (state === 'confirmed') hiddenLocal.delete(id);
+        });
+        setTimelines(list);
+        try { localStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
       }
     } catch (e) {
       console.error('Failed to fetch timelines:', e);
@@ -411,6 +470,81 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       setLoading(false);
     }
   }, [normalizedUserName, userType, cacheKey]);
+
+  /** 목록과 로컬 캐시를 한 번에 갈아끼운다(삭제·되돌리기에서 함께 쓴다). */
+  const writeTimelines = useCallback((next: TimelineData[]) => {
+    setTimelines(next);
+    try { localStorage.setItem(cacheKey, JSON.stringify(next)); } catch {}
+  }, [cacheKey]);
+
+  /**
+   * 대화를 내 목록에서 삭제한다.
+   *
+   * 대화방 자체는 지우지 않는다 — 상대(그리고 담당자)와 함께 쓰는 기록이라 한쪽이
+   * 지우면 상대의 대화 내역까지 사라진다. 내 목록에서만 내리고, 삭제한 뒤 상대가
+   * 새 메시지를 보내면 서버가 다시 올려 준다. 그래서 확인 문구에 그 사실을 적는다.
+   */
+  const handleDeleteTimeline = async (timeline: TimelineData) => {
+    if (deletingId) return;
+    const name = counterpartOf(timeline, userType) || timeline.proposalTitle || '이 대화';
+    const ok = window.confirm(
+      `'${name}' 대화를 목록에서 삭제할까요?\n\n` +
+      `대화 내용은 상대방에게 그대로 남습니다. 상대가 새 메시지를 보내면 다시 나타납니다.`,
+    );
+    if (!ok) return;
+
+    const proposalId = timeline.proposalId;
+    const snapshot = timelines;
+    setDeletingId(proposalId);
+    setListNotice('');
+    // 낙관적 제거 — 누르는 즉시 목록에서 사라져야 지워졌다는 것이 보인다.
+    locallyHiddenRef.current.set(proposalId, 'pending');
+    writeTimelines(snapshot.filter(t => t.proposalId !== proposalId));
+    if (selectedTimeline?.proposalId === proposalId) {
+      setSelectedTimeline(null);
+      setShowList(true);
+    }
+    try { localStorage.removeItem(detailCacheKey(proposalId)); } catch {}
+
+    const res = await apiService.hideTimeline(proposalId);
+    setDeletingId(null);
+    if (res.error) {
+      locallyHiddenRef.current.delete(proposalId);
+      writeTimelines(snapshot);
+      setListNotice(res.error);
+      return;
+    }
+    locallyHiddenRef.current.set(proposalId, 'confirmed');
+    setRecentlyDeleted(timeline);
+  };
+
+  /** 방금 삭제한 대화를 되돌린다. 서버 기록을 지우고 목록을 다시 받아온다. */
+  const handleUndoDelete = async () => {
+    const timeline = recentlyDeleted;
+    if (!timeline) return;
+    setRecentlyDeleted(null);
+    setListNotice('');
+    locallyHiddenRef.current.delete(timeline.proposalId);
+    const res = await apiService.restoreTimeline(timeline.proposalId);
+    if (res.error) {
+      setListNotice(res.error);
+      return;
+    }
+    fetchTimelines();
+  };
+
+  // 되돌리기 안내는 잠깐만 띄운다. 계속 남아 있으면 목록 맨 위 한 줄을 영구히 잡아먹는다.
+  useEffect(() => {
+    if (!recentlyDeleted) return;
+    const timer = setTimeout(() => setRecentlyDeleted(null), 10000);
+    return () => clearTimeout(timer);
+  }, [recentlyDeleted]);
+
+  useEffect(() => {
+    if (!listNotice) return;
+    const timer = setTimeout(() => setListNotice(''), 5000);
+    return () => clearTimeout(timer);
+  }, [listNotice]);
 
   const fetchTimelineDetail = useCallback(async (proposalId: string, showCachedImmediately = false) => {
     // 목록에만 있는 값(경로·제안 상태)은 상세 응답에 없다. 상세로 갈아끼울 때
@@ -780,7 +914,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     },
     {
       value: 'collab',
-      label: '담당자 협업',
+      label: '픽스폴리오 협업',
       count: timelines.filter(t => matchesSourceFilter(t, 'collab')).length,
     },
   ];
@@ -864,7 +998,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   <span className="text-[13px] font-extrabold text-gray-900 truncate">AI 어시스턴트</span>
                   <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600 tracking-tight">BETA</span>
                 </div>
-                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">전체 협업 현황 · 답장 초안 · 일정 정리</p>
+                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">인스타 캡션 · 숏폼 대본 · 담당자 메시지 초안</p>
               </div>
               <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
@@ -872,6 +1006,35 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </div>
           </button>
         </div>
+
+      {/* 삭제 직후의 되돌리기 · 삭제 실패 알림. 목록 맨 위에서 잠깐만 머문다. */}
+      {(recentlyDeleted || listNotice) && (
+        <div className="shrink-0 px-2 pb-2">
+          {listNotice ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200">
+              <span className="text-[11px] font-bold text-red-600 flex-1 min-w-0">{listNotice}</span>
+              <button
+                onClick={() => setListNotice('')}
+                className="shrink-0 text-[11px] font-black text-red-500 hover:text-red-700"
+              >
+                닫기
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-900 border border-gray-800 shadow-[0_8px_18px_-10px_rgba(15,23,42,0.7)]">
+              <span className="text-[11px] font-bold text-white/90 flex-1 min-w-0 truncate">
+                대화를 목록에서 삭제했어요
+              </span>
+              <button
+                onClick={handleUndoDelete}
+                className="shrink-0 text-[11px] font-black text-white px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
+              >
+                되돌리기
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide">
@@ -891,7 +1054,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             </p>
             {!searchQuery && !sourceFilter && (
               <p className="text-[11px] text-gray-400 mt-1">
-                비즈니스 제안이 도착하거나 담당자가 협업을 시작하면 여기에 표시됩니다
+                비즈니스 제안이 도착하거나 픽스폴리오 협업이 시작되면 여기에 표시됩니다
               </p>
             )}
             {!searchQuery && sourceFilter && (
@@ -919,15 +1082,17 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 : undefined;
 
               return (
+                // 삭제 버튼은 목록 줄 위에 겹쳐 놓는다. 줄 자체가 버튼이라 안에
+                // 버튼을 또 넣을 수 없다.
+                <div key={timeline.proposalId} className="relative group">
                 <button
-                  key={timeline.proposalId}
                   onClick={() => {
                     setAiActive(false);
                     setSelectedTimeline(timeline);
                     fetchTimelineDetail(timeline.proposalId, true);
                     setShowList(false);
                   }}
-                  className={`w-full text-left px-3 py-3 rounded-xl transition-all group ${
+                  className={`w-full text-left pl-3 pr-9 py-3 rounded-xl transition-all ${
                     isActive
                       ? 'bg-blue-50 border border-blue-200 shadow-[0_10px_22px_-10px_rgba(37,99,235,0.5)]'
                       : isUnread
@@ -997,6 +1162,33 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     </div>
                   </div>
                 </button>
+
+                {/* 목록에서 삭제. 데스크톱은 마우스를 올릴 때, 모바일은 항상 보인다
+                    (터치에는 hover 가 없다). */}
+                <button
+                  type="button"
+                  aria-label="대화 목록에서 삭제"
+                  title="대화 목록에서 삭제"
+                  disabled={deletingId === timeline.proposalId}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteTimeline(timeline);
+                  }}
+                  className={`absolute top-1/2 -translate-y-1/2 right-1 w-7 h-7 rounded-lg flex items-center justify-center transition-all md:opacity-0 md:group-hover:opacity-100 ${
+                    deletingId === timeline.proposalId
+                      ? 'text-gray-300'
+                      : 'text-gray-300 hover:text-red-500 hover:bg-red-50 active:scale-95'
+                  }`}
+                >
+                  {deletingId === timeline.proposalId ? (
+                    <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  )}
+                </button>
+                </div>
               );
             })}
           </div>
@@ -1491,13 +1683,29 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600">BETA</span>
               </div>
               <p className="text-[10px] md:text-[11px] text-gray-500 font-medium truncate mt-0.5">
-                {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '모든 협업을 함께 보고 업무를 도와드려요'}
+                {selectedTimeline ? `현재 협업: #${selectedTimeline.proposalTitle}` : '콘텐츠 초안 · 메시지 초안 · 협업 현황을 도와드려요'}
               </p>
             </div>
 
             {/* Model selector — Gemini (free, membership) vs Claude (premium credits).
                 Switching keeps the same conversation; neither model forgets the other. */}
             <div className="shrink-0 flex items-center gap-1.5">
+              {/* 대화 비우기. 캡션 초안을 뽑다가 다른 제품으로 넘어갈 때 앞의 대화가
+                  계속 따라오면 엉뚱한 제품 이야기가 섞인다. */}
+              {aiMessages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (aiLoading) return;
+                    setAiMessages([]);
+                    setLastClaudeCost(null);
+                  }}
+                  title="이 대화를 비우고 새로 시작"
+                  className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 text-[11px] font-bold hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                >
+                  새 대화
+                </button>
+              )}
               {/* Show the wallet balance whenever Claude is selected — even with no
                   active plan it reads 0 크레딧, so the member can always see where
                   they stand (and tap to start the plan / recharge on the web). */}
@@ -1560,12 +1768,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               <h3 className="text-base font-extrabold text-gray-900 mb-1.5">AI 어시스턴트는 AI 멤버십 전용 기능입니다</h3>
               {isNativeApp() ? (
                 <p className="text-xs text-gray-500 leading-relaxed mb-1">
-                  AI 멤버십에 가입하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 이용할 수 있어요. 멤버십 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.
+                  AI 멤버십에 가입하면 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 이용할 수 있어요. 멤버십 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.
                 </p>
               ) : (
                 <>
                   <p className="text-xs text-gray-500 leading-relaxed mb-5">
-                    AI 협업 멤버십(6,900원) 이상(프로 18,700원 포함)을 구독하면 협업 대화 요약, 일정 정리, 답장 초안 작성을 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다. (모든 금액 부가세 포함)
+                    AI 협업 멤버십(6,900원) 이상(프로 18,700원 포함)을 구독하면 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다. (모든 금액 부가세 포함)
                   </p>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
@@ -1588,8 +1796,27 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </div>
                   <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
                   <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed">
-                    모든 협업을 한눈에 파악해 드려요. 대화 중인 업체 현황, 답장이 필요한 협업, 답장 초안은 물론 계약·정산·세금·광고 표시 같은 업무·법률 질문까지 물어보세요.
+                    협업 제품의 <strong className="text-gray-700">인스타 광고 캡션</strong>과 <strong className="text-gray-700">숏폼 대본 초안</strong>을 써 드리고,
+                    담당자에게 보낼 <strong className="text-gray-700">메시지 초안</strong>과 협업에 필요한 질문까지 정리해 드려요.
+                    원하는 <strong className="text-gray-700">무드</strong>를 말해 주시면 그 톤으로 다시 잡아 드립니다.
+                    계약·정산·세금·광고 표시 같은 업무 질문도 물어보세요.
                   </p>
+
+                  {/* 예시 질문 — 눌러서 바로 보낸다. 무엇에 쓰는 기능인지 이 칩이 알려준다. */}
+                  <div className="flex flex-wrap justify-center gap-1.5 mt-4">
+                    {AI_QUICK_PROMPTS.map(q => (
+                      <button
+                        key={q.label}
+                        type="button"
+                        disabled={aiLoading}
+                        onClick={() => sendAiMessage(q.prompt)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-gray-200 text-[11px] md:text-xs font-bold text-gray-600 hover:border-violet-300 hover:text-violet-700 hover:bg-violet-50/60 active:scale-95 transition-all shadow-[0_4px_12px_-8px_rgba(15,23,42,0.5)] disabled:opacity-50"
+                      >
+                        <span className="leading-none">{q.icon}</span>
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1656,7 +1883,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                       ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
                     }}
                     onKeyDown={handleAiKeyDown}
-                    placeholder="AI에게 무엇이든 물어보세요..."
+                    placeholder="캡션 초안, 숏폼 대본, 담당자 메시지 초안을 요청해 보세요. (예: 감성 브이로그 무드로)"
                     rows={1}
                     className="flex-1 bg-transparent text-[13px] md:text-[15px] text-gray-900 placeholder-gray-400 resize-none focus:outline-none py-1 px-1 leading-relaxed"
                     style={{ maxHeight: '80px' }}
@@ -1839,7 +2066,7 @@ const ClaudePlanModal: React.FC<{
                 <p className="text-3xl font-black text-orange-700">{krw(data.activationPriceKrw)}</p>
                 <p className="text-xs font-bold text-orange-600 mt-2">결제 즉시 기본 {creditStr(data.activationGrantCredits)} 지급</p>
                 <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
-                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (깊은 분석·문서 검토에 강함)</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (캡션·숏폼 대본 초안, 담당자 메시지 초안, 계약 문서 검토에 강함)</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>충전 경로: 이 클로드 관리 화면 · 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
