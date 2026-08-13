@@ -231,7 +231,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                 <div
                   key={c.id}
                   className={`bg-white rounded-2xl border p-3 md:p-4 flex flex-col ${
-                    inList ? 'border-orange-300 ring-1 ring-orange-100' : 'border-slate-100'
+                    inList ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-100'
                   }`}
                 >
                   <div className="flex items-start gap-2.5">
@@ -256,7 +256,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                           {snap.instagramHandle ? `@${snap.instagramHandle}` : snap.name || '비공개'}
                         </span>
                         {c.badge && (
-                          <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 text-[10px] font-black">
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-black">
                             {c.badge}
                           </span>
                         )}
@@ -378,7 +378,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">팔로워</p>
                       <p
-                        className="text-[17px] md:text-[19px] text-orange-500 font-black truncate"
+                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
                         title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
                       >
                         {snap.followers ? formatCountKo(snap.followers) : '—'}
@@ -387,7 +387,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     <div className="min-w-0">
                       <p className="text-[10px] text-slate-400 font-black">평균 조회수</p>
                       <p
-                        className="text-[17px] md:text-[19px] text-orange-500 font-black truncate"
+                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
                         title={snap.avgViews ? formatNumberWithCommas(snap.avgViews) : ''}
                       >
                         {snap.avgViews ? formatCountKo(snap.avgViews) : '—'}
@@ -401,7 +401,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                       {/* 값을 자르지 않는다. "1억2,000만원"처럼 자릿수가 커질수록 문자열이
                           길어지는데, 브랜드가 이 카드에서 마지막으로 확인하는 값이 이것이라
                           말줄임으로 끊기면 카드를 열어 봐야 알 수 있게 된다. */}
-                      <p className="text-[16px] md:text-[18px] text-orange-500 font-black leading-snug break-keep">
+                      <p className="text-[16px] md:text-[18px] text-blue-600 font-black leading-snug break-keep">
                         {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
                       </p>
                       {c.quotedSecondUseFee > 0 && (
@@ -497,8 +497,8 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         onClick={() => toggleSelect(c.id)}
                         className={`w-full py-2.5 rounded-xl text-[12px] font-black transition-colors ${
                           inList
-                            ? 'bg-white border border-orange-400 text-orange-500 hover:bg-orange-50'
-                            : 'bg-orange-500 text-white hover:bg-orange-600'
+                            ? 'bg-white border border-blue-400 text-blue-600 hover:bg-blue-50'
+                            : 'bg-blue-600 text-white hover:bg-blue-500'
                         }`}
                       >
                         {inList ? '리스트에 담김' : '리스트에 담기'}

@@ -3,6 +3,7 @@ import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
 import ListupWorkspace from '../collab/ListupWorkspace';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
+import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
 
 /**
  * 브랜드 캠페인 — 목록에서 캠페인을 눌러 들어가 인플루언서를 배정한다.
@@ -12,8 +13,9 @@ import CollabReviewRoom from '../collab/CollabReviewRoom';
  *
  * 캠페인 하나를 열면 세 가지가 한 화면에 있다.
  *   1. 브리프 — 무엇을 원하는 캠페인인지
- *   2. 배정 — 후보를 명단에 올리고 브랜드가 고른 사람에게 제안
- *   3. 진행 중인 협업 — 인플루언서가 낸 대본·영상을 그 자리에서 확인
+ *   2. 배정 — 후보를 명단에 올리고 브랜드가 고른 사람에게 제안하거나 바로 진행
+ *   3. 진행 중인 협업 — 인플루언서가 낸 대본·영상을 그 자리에서 확인하고,
+ *      기획안·영상 파일을 브랜드·인플루언서와 주고받는다
  *
  * 3번을 다른 화면으로 빼지 않는 이유는, 담당자가 "이 캠페인은 지금 어디까지 왔나"를
  * 물을 때 답이 두 화면에 나뉘어 있으면 안 되기 때문이다.
@@ -22,13 +24,18 @@ import CollabReviewRoom from '../collab/CollabReviewRoom';
 interface ManagerCampaignsPanelProps {
   managerUsername: string;
   onNotify: (message: string, type?: 'success' | 'error') => void;
+  /**
+   * 처음부터 이 캠페인을 펼친 채로 연다. 브랜드 선택 화면에서 "캠페인 열기"로
+   * 넘어올 때 쓴다 — 넘어와서 목록을 다시 뒤지게 하면 건너온 뜻이 없다.
+   */
+  initialCampaignId?: string;
 }
 
 const STAGE_STATUS: Record<string, { label: string; cls: string }> = {
   pending: { label: '대기', cls: 'bg-slate-100 text-slate-400' },
   active: { label: '진행중', cls: 'bg-blue-50 text-blue-600' },
   submitted: { label: '검수 대기', cls: 'bg-amber-50 text-amber-600' },
-  revision: { label: '수정중', cls: 'bg-orange-50 text-orange-600' },
+  revision: { label: '수정중', cls: 'bg-indigo-50 text-indigo-600' },
   done: { label: '완료', cls: 'bg-emerald-50 text-emerald-600' },
   skipped: { label: '생략', cls: 'bg-slate-100 text-slate-400' },
 };
@@ -36,6 +43,7 @@ const STAGE_STATUS: Record<string, { label: string; cls: string }> = {
 const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
   managerUsername,
   onNotify,
+  initialCampaignId,
 }) => {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +56,11 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
   const [reviewTarget, setReviewTarget] = useState<{ collabId: string; target: 'script' | 'content' } | null>(
     null,
   );
+  // 자료함은 펼친 협업 한 건만 읽는다. 캠페인 안 협업마다 미리 읽으면 목록을 여는
+  // 것만으로 협업 수만큼 요청이 나간다.
+  const [assetsFor, setAssetsFor] = useState('');
+  const [assetDetail, setAssetDetail] = useState<any>(null);
+  const [assetLoading, setAssetLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,8 +93,48 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
   const openCampaign = async (c: any) => {
     setOpenId(c.id);
     setConfirmDue(c.listupConfirmDue ? String(c.listupConfirmDue).slice(0, 10) : '');
+    setAssetsFor('');
+    setAssetDetail(null);
     await loadCollabs();
   };
+
+  // 브랜드 선택 화면에서 넘어온 캠페인을 한 번만 펼친다. openId 를 이미 쥐고 있으면
+  // 손대지 않는다 — 담당자가 목록으로 되돌아간 뒤에 다시 열리면 뒤로 가기가 막힌다.
+  const [autoOpened, setAutoOpened] = useState('');
+  useEffect(() => {
+    if (!initialCampaignId || autoOpened === initialCampaignId || openId) return;
+    const target = campaigns.find((c) => c.id === initialCampaignId);
+    if (!target) return;
+    setAutoOpened(initialCampaignId);
+    openCampaign(target);
+    // openCampaign 은 매 렌더 새로 만들어지므로 의존성에 넣지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaigns, initialCampaignId, autoOpened, openId]);
+
+  /** 협업 자료함 열기/닫기. 열 때만 상세를 읽는다. */
+  const toggleAssets = async (collabId: string) => {
+    if (assetsFor === collabId) {
+      setAssetsFor('');
+      setAssetDetail(null);
+      return;
+    }
+    setAssetsFor(collabId);
+    setAssetLoading(true);
+    const res = await apiService.getCollabDetail(collabId);
+    setAssetLoading(false);
+    if (res.error) {
+      onNotify(res.error, 'error');
+      setAssetsFor('');
+      return;
+    }
+    setAssetDetail(res);
+  };
+
+  const refreshAssets = useCallback(async () => {
+    if (!assetsFor) return;
+    const res = await apiService.getCollabDetail(assetsFor);
+    if (!res.error) setAssetDetail(res);
+  }, [assetsFor]);
 
   const act = async (campaignId: string, action: any, payload: Record<string, any> = {}) => {
     setBusy(true);
@@ -297,6 +350,19 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                       >
                         영상 확인
                       </button>
+                      {/* 기획안·영상 파일 주고받기. 검수실(대본·영상 확인)이 단계별
+                          제출물을 다룬다면, 자료함은 단계에 매이지 않은 파일을 다룬다 —
+                          브랜드 가이드, 초안 기획안, 참고 영상 같은 것들이다. */}
+                      <button
+                        onClick={() => toggleAssets(c.id)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black ${
+                          assetsFor === c.id
+                            ? 'bg-blue-600 text-white hover:bg-blue-500'
+                            : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                        }`}
+                      >
+                        {assetsFor === c.id ? '자료함 접기' : '기획안·영상 공유'}
+                      </button>
                       {c.uploadUrl && (
                         <a
                           href={c.uploadUrl}
@@ -308,6 +374,24 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                         </a>
                       )}
                     </div>
+
+                    {assetsFor === c.id && (
+                      <div className="mt-2.5">
+                        {assetLoading || !assetDetail ? (
+                          <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center">
+                            <p className="text-[11px] text-slate-400 font-bold">자료함을 불러오는 중...</p>
+                          </div>
+                        ) : (
+                          <CollabSharedWorkspace
+                            collabId={c.id}
+                            role="manager"
+                            detail={assetDetail}
+                            onRefresh={refreshAssets}
+                            onNotify={onNotify}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })

@@ -433,7 +433,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       active: { bg: 'bg-emerald-50', text: 'text-emerald-600', label: '모집중' },
       inactive: { bg: 'bg-slate-100', text: 'text-slate-500', label: '마감' },
       pending: { bg: 'bg-yellow-50', text: 'text-yellow-600', label: '대기중' },
-      pending_approval: { bg: 'bg-orange-50', text: 'text-orange-600', label: '승인 대기' },
+      pending_approval: { bg: 'bg-amber-50', text: 'text-amber-600', label: '승인 대기' },
       admin_rejected: { bg: 'bg-red-50', text: 'text-red-600', label: '승인 거절' },
       accepted: { bg: 'bg-blue-50', text: 'text-blue-600', label: '수락됨' },
       rejected: { bg: 'bg-red-50', text: 'text-red-600', label: '거절됨' },
@@ -607,7 +607,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           ? { label: '섭외중', cls: 'bg-blue-50 text-blue-600' }
           : uploadedCount >= collabSummary.length
             ? { label: '업로드 완료', cls: 'bg-emerald-50 text-emerald-600' }
-            : { label: '진행중', cls: 'bg-orange-50 text-orange-600' };
+            : { label: '진행중', cls: 'bg-blue-50 text-blue-600' };
 
     /**
      * 상세 탭. 정산은 지급할 돈이 있는 방식에만 붙는다 — 제품 협찬형은 광고비도
@@ -869,9 +869,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
         {/* 상태 안내. 승인 대기·거절·기간 종료는 탭과 무관하게 항상 보여야 한다. */}
         {selectedCampaign.status === 'pending_approval' && (
-          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4">
-            <p className="text-sm font-black text-orange-700">관리자 승인 대기 중</p>
-            <p className="text-xs text-orange-500 font-medium mt-1">캠페인이 관리자 승인 후 공개되고, 담당자가 배정됩니다.</p>
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4">
+            <p className="text-sm font-black text-amber-700">관리자 승인 대기 중</p>
+            <p className="text-xs text-amber-600 font-medium mt-1">캠페인이 관리자 승인 후 공개되고, 담당자가 배정됩니다.</p>
           </div>
         )}
         {selectedCampaign.status === 'admin_rejected' && (
@@ -1089,6 +1089,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             username: app.applicant_username,
                             instagramUrl: app.insights?.instagramUrl || app.instagram_url || '',
                           }}
+                          /* 지원자 카드는 릴스·숏폼만 세 편 싣는다. 지원은 이미
+                             "이 캠페인을 하겠다"는 뜻이라, 브랜드가 여기서 판단하는
+                             것은 계정 톤이 아니라 이 사람이 만드는 영상이다. 피드
+                             사진으로 빈 칸을 메우면 그 판단에 쓰이지 않는 그림이
+                             자리를 차지한다. */
+                          mediaMode="reels"
                           badges={
                             <>
                               {statusBadge(app.status)}

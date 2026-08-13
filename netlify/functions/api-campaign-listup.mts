@@ -660,6 +660,78 @@ export default async (req: Request) => {
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
+      // --- 담당자 진행하기 -------------------------------------------------
+      // 브랜드가 고른 후보를 담당자가 바로 협업으로 넘긴다.
+      //
+      // 원래 흐름은 제안 발송 → 인플루언서 수락이다. 그런데 실제 운영에서는 담당자가
+      // 이미 전화나 DM으로 합의를 끝내고 오는 경우가 대부분이고, 그때 인플루언서에게
+      // "앱에 들어가서 수락을 눌러 달라"고 다시 부탁해야 협업이 시작됐다. 그 한 단계가
+      // 브랜드·인플루언서 양쪽 진행사항을 며칠씩 비워 놓는다. 그래서 담당자가 직접
+      // 진행을 시작할 수 있게 두되, 브랜드가 고르지 않은 후보는 막는다 — 선택은
+      // 여전히 브랜드의 몫이다.
+      if (action === "start_collab") {
+        if (!isManager) return managerRequired();
+        if (listup.outreach_status === "accepted") {
+          // 두 번 눌렀을 때. 이미 만들어진 협업을 그대로 알려준다.
+          return Response.json({
+            success: true,
+            alreadyAccepted: true,
+            collabId: listup.collab_id || "",
+            listup: await reload("manager"),
+          });
+        }
+        if (listup.brand_decision !== "pick") {
+          return Response.json(
+            { error: "브랜드가 선택한 후보만 진행할 수 있습니다." },
+            { status: 409 },
+          );
+        }
+
+        // 제안을 아직 보내지 않았다면 캠페인 조건을 기본값으로 쓴다. 담당자가 적어 둔
+        // 지급 단가·일정이 있으면 그쪽이 이긴다.
+        const base = offerFromCampaign(campaign);
+        const saved = normalizeOffer(listup.offer);
+        const effective = normalizeOffer({
+          ...base,
+          ...Object.fromEntries(
+            Object.entries(saved).filter(([, value]) => value !== "" && value !== 0),
+          ),
+        });
+
+        const result = await acceptListup({
+          db,
+          listup: { ...listup, offer: effective },
+          campaign,
+          actorRole: "manager",
+          actorUsername: managerUsername,
+        });
+
+        await db.sql`
+          UPDATE campaign_listups
+          SET offer = ${JSON.stringify(effective)},
+              outreach_status = 'accepted',
+              offer_sent_at = COALESCE(offer_sent_at, NOW()),
+              offer_sent_by = CASE WHEN offer_sent_by = '' OR offer_sent_by IS NULL
+                                   THEN ${managerUsername} ELSE offer_sent_by END,
+              responded_at = NOW(),
+              response_note = ${String(body.note || "담당자 진행 처리")},
+              collab_id = ${result.collabId},
+              updated_at = NOW()
+          WHERE id = ${id}
+        `;
+
+        return Response.json({
+          success: true,
+          collabId: result.collabId,
+          created: result.created,
+          threads: {
+            influencerSupport: result.influencerThreadId,
+            brandSupport: result.brandThreadId,
+          },
+          listup: await reload("manager"),
+        });
+      }
+
       // --- 제안 회수 -------------------------------------------------------
       if (action === "withdraw_offer") {
         if (!isManager) return managerRequired();

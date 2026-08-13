@@ -389,6 +389,31 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     notify(accept ? '수락으로 기록했습니다. 협업이 생성됐습니다.' : '거절로 기록했습니다.');
   };
 
+  /**
+   * 브랜드가 고른 후보를 바로 협업으로 넘긴다.
+   *
+   * 제안을 보내고 인플루언서가 앱에서 수락하는 길은 그대로 둔다. 다만 담당자가 이미
+   * 합의를 끝내고 온 경우가 더 많고, 그때마다 인플루언서에게 "들어가서 수락 눌러
+   * 주세요"를 부탁하는 동안 브랜드 진행사항은 비어 있었다. 되돌릴 수 없는 동작이라
+   * 한 번 묻는다.
+   */
+  const startCollab = async (c: any) => {
+    if (
+      !window.confirm(
+        `@${c.influencerUsername} 협업을 시작합니다. 브랜드와 인플루언서 진행사항에 바로 표시되고 되돌릴 수 없습니다. 계속하시겠습니까?`,
+      )
+    ) {
+      return;
+    }
+    const res = await act(c.id, 'start_collab', {});
+    if (!res) return;
+    notify(
+      res.alreadyAccepted
+        ? '이미 진행 중인 협업입니다.'
+        : `@${c.influencerUsername} 협업을 시작했습니다. 양쪽 진행사항에 표시됩니다.`,
+    );
+  };
+
   const field = (key: keyof OfferForm, label: string, type: 'text' | 'date' | 'number' = 'text') => (
     <div>
       <label className="block text-[10px] text-slate-400 font-black uppercase mb-1">{label}</label>
@@ -644,6 +669,27 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                       </p>
                     ) : (
                       <div className="space-y-2">
+                        {/* 브랜드가 고른 후보. 담당자가 다음에 할 일은 하나뿐이므로
+                            제안 폼보다 앞에 둔다. */}
+                        {canSend && (
+                          <div className="rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2.5 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-black text-blue-700">
+                                브랜드가 이 인플루언서를 선택했습니다
+                              </p>
+                              <p className="text-[10px] font-medium text-blue-500 mt-0.5">
+                                진행하기를 누르면 브랜드·인플루언서 진행사항에 협업이 바로 생깁니다.
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => startCollab(c)}
+                              disabled={busy}
+                              className="px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 disabled:opacity-40 flex-shrink-0"
+                            >
+                              진행하기
+                            </button>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => openOffer(c)}

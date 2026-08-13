@@ -92,7 +92,7 @@ const StoryboardEditor: React.FC<StoryboardEditorProps> = ({
         </p>
         <p
           className={`text-[11px] font-bold mt-1.5 ${
-            filled.length >= RECOMMENDED_SCENE_COUNT ? 'text-emerald-600' : 'text-orange-500'
+            filled.length >= RECOMMENDED_SCENE_COUNT ? 'text-emerald-600' : 'text-blue-600'
           }`}
         >
           작성한 장면 {filled.length}개 · 최소 {RECOMMENDED_SCENE_COUNT}개 장면을 권장합니다

@@ -137,8 +137,16 @@ export const MEDIA_SLOTS = 3;
  * 계정 톤을 읽는 데 필요한 것은 "릴스인지 사진인지"가 아니라 최근에 무엇을
  * 올렸는지이고, 카드 높이는 계정마다 같아야 훑는 눈이 같은 자리에서 멈춘다.
  * 릴스는 조회수를 함께 실어 피드 사진과 구분한다.
+ *
+ * reelsOnly 는 그 예외다. 지원자 목록처럼 "이 사람이 숏폼을 어떻게 만드는가"만
+ * 보는 자리에서는 사진으로 칸을 메우면 판단에 쓰이지 않는 그림이 절반을 차지한다.
+ * 이때는 릴스와 피드의 영상만 쓰고, 셋을 못 채우면 못 채운 채로 둔다.
  */
-export const buildMediaStrip = (reels: any[], feed: any[]): MediaSlot[] => {
+export const buildMediaStrip = (
+  reels: any[],
+  feed: any[],
+  opts?: { reelsOnly?: boolean },
+): MediaSlot[] => {
   const slots: MediaSlot[] = [];
   const seen = new Set<string>();
 
@@ -160,7 +168,13 @@ export const buildMediaStrip = (reels: any[], feed: any[]): MediaSlot[] => {
   };
 
   for (const reel of Array.isArray(reels) ? reels : []) push(reel, true);
-  for (const item of Array.isArray(feed) ? feed : []) push(item, false);
+  for (const item of Array.isArray(feed) ? feed : []) {
+    const isVideo = String(item?.mediaType || '').toUpperCase() === 'VIDEO';
+    // 릴스 전용 칸에서는 피드의 영상만 잇는다. 메타는 릴스를 피드 목록에도 함께
+    // 내려 주므로, 릴스 목록이 짧아도 여기서 숏폼이 더 나오는 계정이 있다.
+    if (opts?.reelsOnly && !isVideo) continue;
+    push(item, opts?.reelsOnly ? true : false);
+  }
   return slots;
 };
 
@@ -176,7 +190,9 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
  *
  * 값은 만 단위로 접어 짧게 적고(2.4만), 정확한 숫자는 title 로 단다. 후보를 나란히
  * 놓고 비교하는 자리라 자릿수보다 크기가 먼저 읽혀야 한다. 값에 색을 주는 이유도
- * 같다 — 카드를 훑을 때 눈이 먼저 닿는 곳이 팔로워·조회수여야 한다.
+ * 같다 — 카드를 훑을 때 눈이 먼저 닿는 곳이 팔로워·조회수여야 한다. 색은 픽스폴리오
+ * 파랑(--color-blue-primary)이다. 강조색을 브랜드 색 밖에서 가져오면, 다른 회사
+ * 서비스에서 그대로 옮겨 온 화면처럼 보인다.
  *
  * 여기에는 자릿수가 정해진 숫자만 넣는다. 광고비처럼 길이를 알 수 없는 자유 문장은
  * 이 칸에 넣으면 잘리므로 아래 폭 전체 줄에 따로 적는다.
@@ -189,7 +205,7 @@ const Stat: React.FC<{ label: string; value: string; title?: string; hint?: stri
 }) => (
   <div className="min-w-0">
     <p className="text-[10px] text-slate-400 font-black uppercase truncate">{label}</p>
-    <p className="text-[17px] md:text-[19px] text-orange-500 font-black truncate" title={title}>
+    <p className="text-[17px] md:text-[19px] text-blue-600 font-black truncate" title={title}>
       {value}
     </p>
     {hint ? <p className="text-[10px] text-slate-400 font-medium truncate">{hint}</p> : null}
@@ -209,6 +225,14 @@ interface InfluencerCandidateCardProps {
   note?: string;
   /** 처음부터 펼친 상태로 그린다. 후보가 한 명뿐인 화면에서 쓴다. */
   defaultExpanded?: boolean;
+  /**
+   * 카드에 실을 그림의 종류.
+   *
+   * 'mixed'(기본) — 릴스로 시작해 피드 사진으로 세 칸을 채운다. 계정 톤을 보는 자리.
+   * 'reels' — 릴스·숏폼만 최대 세 편. 지원자 목록처럼 "숏폼을 어떻게 만드는가"만
+   *           보는 자리에서 쓴다. 피드 사진 영역도 함께 접힌다.
+   */
+  mediaMode?: 'mixed' | 'reels';
 }
 
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
@@ -218,16 +242,20 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   details,
   note,
   defaultExpanded,
+  mediaMode = 'mixed',
 }) => {
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   const m = metricsFrom(data);
   const source = SOURCE_BADGE[m.metricsSource || 'none'] || SOURCE_BADGE.none;
   const allReels = m.recentReels || [];
   const trend = reelTrendOf(allReels);
-  const feed = (m.recentFeed || []).slice(0, 9);
+  const reelsOnly = mediaMode === 'reels';
+  // 릴스 전용 카드에서는 피드 사진을 아예 다루지 않는다. 겉의 세 칸만 바꾸고
+  // 펼침 안에 사진 아홉 칸을 그대로 두면, 사진을 빼려던 자리에 더 많은 사진이 남는다.
+  const feed = reelsOnly ? [] : (m.recentFeed || []).slice(0, 9);
   // 릴스로 시작해 피드로 잇는 그림 세 칸. 릴스가 한 편뿐인 계정에서도 카드 높이가
   // 같아야 후보 여러 명을 나란히 견줄 수 있다.
-  const media = buildMediaStrip(allReels, feed);
+  const media = buildMediaStrip(allReels, m.recentFeed || [], { reelsOnly });
   const reelSlots = media.filter(slot => slot.isReel).length;
 
   /**
@@ -390,7 +418,11 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         <div className="mt-3">
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <p className="text-[10px] text-slate-400 font-black uppercase">
-              {reelSlots > 0 ? `최근 릴스 ${reelSlots}편` : '최근 게시물'}
+              {reelsOnly
+                ? `최근 릴스 · 숏폼 ${media.length}편`
+                : reelSlots > 0
+                  ? `최근 릴스 ${reelSlots}편`
+                  : '최근 게시물'}
             </p>
             {trend && trend.percent !== null && (
               <span
@@ -448,7 +480,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               {priceLines.map((p, i) => (
                 <div key={`${p.label}-${i}`} className="flex items-baseline gap-1.5">
                   <span className="shrink-0 text-[10px] text-slate-400 font-black">{p.label}</span>
-                  <span className="text-[15px] md:text-[17px] text-orange-500 font-black break-keep leading-snug">
+                  <span className="text-[15px] md:text-[17px] text-blue-600 font-black break-keep leading-snug">
                     {p.value}
                   </span>
                 </div>

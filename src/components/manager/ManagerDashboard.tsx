@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import ManagerInfluencerDirectory from './ManagerInfluencerDirectory';
 import ManagerCampaignsPanel from './ManagerCampaignsPanel';
+import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
 import ManagerChatPanel from './ManagerChatPanel';
 
 /**
@@ -9,7 +10,13 @@ import ManagerChatPanel from './ManagerChatPanel';
  * 운영자가 일반 계정을 담당자로 배정하면 로그인 후 이 화면이 뜬다. 운영 콘솔과
  * 나눠 둔 이유는 권한 범위다. 담당자는 승인·정산·회원 관리를 하지 않는다. 담당자가
  * 하는 일은 인플루언서를 알고, 캠페인에 배정하고, 대화하는 것 셋뿐이므로 메뉴도
- * 셋만 둔다. 여기에 운영 탭을 하나씩 얹기 시작하면 결국 운영 콘솔이 두 벌이 된다.
+ * 넷을 넘기지 않는다. 여기에 운영 탭을 하나씩 얹기 시작하면 결국 운영 콘솔이 두 벌이 된다.
+ *
+ * 첫 탭이 "브랜드 선택"인 이유는 그것이 유일하게 답을 기다리는 일이기 때문이다.
+ * 브랜드가 명단에서 사람을 고르면 그 요청은 캠페인 안쪽 명단에만 남아, 담당자가
+ * 캠페인을 하나씩 열어 보기 전에는 아무 데도 뜨지 않았다. 그동안 브랜드 화면에는
+ * 아무 변화가 없다. 나머지 탭(인플루언서·캠페인·대화)은 담당자가 찾아가는 자료지만,
+ * 이 탭은 담당자를 찾아온 일이다.
  *
  * 인플루언서가 올린 가이드·대본·영상 확인은 별도 메뉴가 아니라 캠페인 안에 있다.
  * 검수는 항상 "어느 캠페인의 누구"에 대한 일이고, 캠페인에서 떼면 담당자가 목록에서
@@ -28,9 +35,10 @@ interface ManagerDashboardProps {
   onNavigateCreator?: () => void;
 }
 
-type ManagerTab = 'influencers' | 'campaigns' | 'chat';
+type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'chat';
 
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
+  { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
   { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정과 검수' },
   { key: 'chat', label: '대화', hint: '인플루언서 · 브랜드 채널' },
@@ -42,7 +50,8 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   onLogout,
   onNavigateCreator,
 }) => {
-  const [tab, setTab] = useState<ManagerTab>('campaigns');
+  const [tab, setTab] = useState<ManagerTab>('picks');
+  const [openCampaignId, setOpenCampaignId] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => {
@@ -111,9 +120,22 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         </div>
         <p className="text-[11px] font-bold text-slate-400 mb-5">{active?.hint}</p>
 
+        {tab === 'picks' && (
+          <ManagerBrandPicksPanel
+            onNotify={notify}
+            onOpenCampaign={(campaignId) => {
+              setOpenCampaignId(campaignId);
+              setTab('campaigns');
+            }}
+          />
+        )}
         {tab === 'influencers' && <ManagerInfluencerDirectory onNotify={notify} />}
         {tab === 'campaigns' && (
-          <ManagerCampaignsPanel managerUsername={username} onNotify={notify} />
+          <ManagerCampaignsPanel
+            managerUsername={username}
+            onNotify={notify}
+            initialCampaignId={openCampaignId}
+          />
         )}
         {tab === 'chat' && <ManagerChatPanel managerUsername={username} onNotify={notify} />}
       </div>

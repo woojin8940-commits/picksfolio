@@ -2141,6 +2141,7 @@ export const apiService = {
       | 'brand_decision'
       | 'send_offer'
       | 'withdraw_offer'
+      | 'start_collab'
       | 'respond'
       | 'note'
       | 'quote'
@@ -2319,18 +2320,18 @@ export const apiService = {
   /** 담당자가 보는 브랜드 캠페인 목록. 진행 숫자가 함께 온다. */
   async getManagerCampaigns(
     opts: { mine?: boolean; token?: string } = {},
-  ): Promise<{ campaigns?: any[]; managerUsername?: string; error?: string }> {
+  ): Promise<{ campaigns?: any[]; brandPicks?: any[]; managerUsername?: string; error?: string }> {
     try {
       const res = await fetch(`/api/manager-campaigns${opts.mine ? '?mine=1' : ''}`, {
         credentials: 'same-origin',
         headers: await collabHeaders(opts.token),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { campaigns: [], error: json?.error || '캠페인을 불러오지 못했습니다.' };
+      if (!res.ok) return { campaigns: [], brandPicks: [], error: json?.error || '캠페인을 불러오지 못했습니다.' };
       return json;
     } catch (e) {
       console.error('[API] Failed to get manager campaigns:', e);
-      return { campaigns: [], error: '네트워크 오류' };
+      return { campaigns: [], brandPicks: [], error: '네트워크 오류' };
     }
   },
 

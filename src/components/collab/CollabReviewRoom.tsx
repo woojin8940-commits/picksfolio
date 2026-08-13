@@ -46,7 +46,7 @@ const TARGET_LABEL: Record<'script' | 'content', { title: string; empty: string 
 
 const DELIVERABLE_STATUS: Record<string, { label: string; cls: string }> = {
   submitted: { label: '검수 대기', cls: 'bg-amber-50 text-amber-600' },
-  revision_requested: { label: '수정 요청됨', cls: 'bg-orange-50 text-orange-600' },
+  revision_requested: { label: '수정 요청됨', cls: 'bg-indigo-50 text-indigo-600' },
   approved: { label: '승인', cls: 'bg-emerald-50 text-emerald-600' },
 };
 
@@ -704,7 +704,7 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
                     <button
                       onClick={requestRevision}
                       disabled={busy}
-                      className="px-3.5 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[11px] font-black hover:bg-orange-100 disabled:opacity-40"
+                      className="px-3.5 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-[11px] font-black hover:bg-indigo-100 disabled:opacity-40"
                     >
                       수정 요청
                     </button>
