@@ -54,7 +54,7 @@ const STAGE_STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   pending: { label: '대기', cls: 'bg-slate-100 text-slate-400' },
   active: { label: '진행중', cls: 'bg-blue-50 text-blue-600' },
   submitted: { label: '검수 대기', cls: 'bg-amber-50 text-amber-600' },
-  revision: { label: '수정중', cls: 'bg-orange-50 text-orange-600' },
+  revision: { label: '수정중', cls: 'bg-indigo-50 text-indigo-600' },
   done: { label: '완료', cls: 'bg-emerald-50 text-emerald-600' },
   skipped: { label: '생략', cls: 'bg-slate-100 text-slate-400' },
 };
@@ -81,7 +81,7 @@ const REVIEW_TARGET: Record<string, { target: 'script' | 'content'; cta: string 
 /** 세로 진행 스텝의 색. 계산식으로 만들면 Tailwind가 클래스를 찾지 못한다. */
 const STEP_TONE = {
   done: { dot: 'bg-emerald-500 text-white', line: 'bg-emerald-200', title: 'text-slate-400' },
-  current: { dot: 'bg-orange-500 text-white', line: 'bg-slate-200', title: 'text-slate-900' },
+  current: { dot: 'bg-blue-600 text-white', line: 'bg-slate-200', title: 'text-slate-900' },
   pending: { dot: 'bg-slate-200 text-slate-400', line: 'bg-slate-200', title: 'text-slate-400' },
 } as const;
 
@@ -303,7 +303,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${step.cls}`}>
                         {step.label}
                       </span>
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-orange-50 text-orange-600">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600">
                         선택 완료
                       </span>
                     </div>
@@ -588,7 +588,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                                   </div>
                                   <p
                                     className={`text-[10px] font-bold mt-0.5 ${
-                                      state === 'current' ? 'text-orange-500' : 'text-slate-300'
+                                      state === 'current' ? 'text-blue-600' : 'text-slate-300'
                                     }`}
                                   >
                                     {s.dueDate ? `${s.dueDate} 까지` : '마감일 미정'}

@@ -17,7 +17,7 @@ const getStageStatusLabel = (status: string, isEn: boolean) => {
     pending: { label: isEn ? 'Pending' : '대기', cls: 'bg-slate-100 text-slate-400' },
     active: { label: isEn ? 'In Progress' : '진행중', cls: 'bg-blue-50 text-blue-600' },
     submitted: { label: isEn ? 'Review Pending' : '검수 대기', cls: 'bg-amber-50 text-amber-600' },
-    revision: { label: isEn ? 'Revision Requested' : '수정 요청', cls: 'bg-orange-50 text-orange-600' },
+    revision: { label: isEn ? 'Revision Requested' : '수정 요청', cls: 'bg-indigo-50 text-indigo-600' },
     done: { label: isEn ? 'Completed' : '완료', cls: 'bg-emerald-50 text-emerald-600' },
     skipped: { label: isEn ? 'Skipped' : '생략', cls: 'bg-slate-100 text-slate-400' },
   };

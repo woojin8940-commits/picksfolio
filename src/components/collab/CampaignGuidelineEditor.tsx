@@ -103,13 +103,13 @@ const CampaignGuidelineEditor: React.FC<CampaignGuidelineEditorProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 flex items-start justify-between gap-3">
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-black text-orange-800">
+            <p className="text-sm font-black text-blue-900">
               콘텐츠 가이드라인 작성하기
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-orange-600 text-white text-[10px] align-middle">필수</span>
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[10px] align-middle">필수</span>
             </p>
-            <p className="text-[11px] text-orange-600 font-medium mt-1 leading-relaxed">
+            <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
               인플루언서가 촬영할 때 지켜야 할 것을 적어 주세요. 담당자가 이 내용을 정리해 전달합니다.
               작성 전에는 촬영이 시작되지 않습니다.
             </p>
@@ -117,7 +117,7 @@ const CampaignGuidelineEditor: React.FC<CampaignGuidelineEditorProps> = ({
           {isOwner && (
             <button
               onClick={() => setOpen(true)}
-              className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-black flex-shrink-0 transition-colors"
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black flex-shrink-0 transition-colors"
             >
               가이드라인 작성
             </button>

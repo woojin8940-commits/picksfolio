@@ -2,6 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { isManagerListupMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
+import { shapeListup } from "./_shared/campaign-listup.mts";
 
 /**
  * 담당자가 보는 브랜드 캠페인 목록.
@@ -61,6 +62,46 @@ const shape = (row: any) => ({
   },
 });
 
+/**
+ * 브랜드가 고른 후보를 캠페인 경계 없이 한 줄로 편다.
+ *
+ * 브랜드의 선택은 캠페인 안쪽 명단에만 남는다. 그래서 담당자는 캠페인을 하나씩 열어
+ * 봐야 "브랜드가 골랐는데 아직 아무것도 안 한 사람"을 찾을 수 있었다. 선택은 답을
+ * 기다리는 요청이므로, 담당자 대시보드 첫 화면에 그대로 올라와야 한다.
+ *
+ * 이미 협업이 시작된(accepted) 후보는 뺀다 — 그쪽은 할 일이 아니라 기록이다.
+ */
+const loadBrandPicks = async (db: any, me: string, mineOnly: boolean) =>
+  ((await db.sql`
+    SELECT l.*, c.title AS campaign_title, c.brand_name, c.business_username,
+           c.manager_username, c.type AS campaign_type, c.reward_mode,
+           c.listup_confirm_due
+    FROM campaign_listups l
+    JOIN campaigns c ON c.id = l.campaign_id
+    WHERE l.brand_decision = 'pick'
+      AND l.outreach_status <> 'accepted'
+      AND c.status = 'active'
+      AND c.admin_approved_at IS NOT NULL
+      AND (${mineOnly} = false OR LOWER(COALESCE(c.manager_username, '')) = ${me})
+    ORDER BY l.brand_decided_at DESC NULLS LAST, l.created_at DESC
+    LIMIT 200
+  `) as any[]).map((row) => {
+    const listup = shapeListup(row, "manager") as any;
+    return {
+      ...listup,
+      campaignTitle: row.campaign_title || "",
+      brandName: row.brand_name || "",
+      businessUsername: norm(row.business_username),
+      campaignType: row.campaign_type || "",
+      managerUsername: norm(row.manager_username),
+      // 내가 맡지 않은 캠페인의 선택도 보여 준다. 담당자가 비어 있는 캠페인을
+      // 브랜드가 먼저 고르는 일이 흔한데, 그 요청이 아무 화면에도 안 뜨면
+      // 캠페인을 맡는 사람이 나올 때까지 그대로 묻힌다.
+      mine: norm(row.manager_username) === me,
+      unassigned: !norm(row.manager_username),
+    };
+  });
+
 const loadCampaigns = async (db: any, me: string, mineOnly: boolean) =>
   ((await db.sql`
     SELECT c.*,
@@ -91,8 +132,13 @@ export default async (req: Request) => {
   try {
     if (req.method === "GET") {
       const mineOnly = url.searchParams.get("mine") === "1";
+      const [campaigns, brandPicks] = await Promise.all([
+        loadCampaigns(db, me, mineOnly),
+        loadBrandPicks(db, me, mineOnly),
+      ]);
       return Response.json({
-        campaigns: await loadCampaigns(db, me, mineOnly),
+        campaigns,
+        brandPicks,
         managerUsername: me,
       });
     }
@@ -154,6 +200,7 @@ export default async (req: Request) => {
       return Response.json({
         success: true,
         campaigns: await loadCampaigns(db, me, url.searchParams.get("mine") === "1"),
+        brandPicks: await loadBrandPicks(db, me, url.searchParams.get("mine") === "1"),
       });
     }
 

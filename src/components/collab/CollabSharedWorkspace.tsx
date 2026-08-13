@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../../services/apiService';
 
-type WorkspaceRole = 'brand' | 'influencer';
+type WorkspaceRole = 'brand' | 'influencer' | 'manager';
 
 type Props = {
   collabId: string;
@@ -22,9 +22,21 @@ const KIND_LABEL: Record<string, string> = {
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   shared: { label: '확인 대기', cls: 'bg-amber-50 text-amber-600' },
   confirmed: { label: '확인 완료', cls: 'bg-emerald-50 text-emerald-600' },
-  revision: { label: '수정 요청', cls: 'bg-orange-50 text-orange-600' },
+  revision: { label: '수정 요청', cls: 'bg-indigo-50 text-indigo-600' },
 };
 
+/**
+ * 협업 자료함 — 가이드 · 기획안 · 영상 초안 · 광고코드를 한 곳에서 주고받는다.
+ *
+ * 브랜드 · 인플루언서 · 담당자가 같은 화면을 쓴다. 담당자를 넣은 이유는 이 서비스의
+ * 협업이 담당자를 거쳐 굴러가기 때문이다. 브랜드 가이드를 담당자가 정리해 넘기고,
+ * 인플루언서가 낸 기획안을 담당자가 먼저 보는 일이 실제 흐름인데, 자료함이 양쪽에만
+ * 열려 있으면 그 파일들은 결국 카카오톡으로 오간다. 그렇게 오간 파일은 협업 기록에
+ * 남지 않는다.
+ *
+ * 올릴 수 있는 자료 종류는 서버가 역할별로 막는다(api-collab-workflow 의 add_asset).
+ * 여기서는 그 목록을 그대로 그린다.
+ */
 const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, isEn }) => {
   const [kind, setKind] = useState(role === 'brand' ? 'guide' : 'plan');
   const [title, setTitle] = useState('');
@@ -101,7 +113,9 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
         <p className="text-[10px] text-slate-400 font-medium mt-0.5">
           {role === 'brand'
             ? '가이드를 올리고, 인플루언서가 공유한 기획안과 영상 초안을 확인해 주세요.'
-            : '브랜드 가이드를 확인하고 기획안·영상 초안을 같은 곳에 공유해 주세요.'}
+            : role === 'manager'
+              ? '브랜드 가이드와 인플루언서 기획안·영상을 여기서 주고받습니다. 담당자가 올린 자료도 양쪽이 그대로 봅니다.'
+              : '브랜드 가이드를 확인하고 기획안·영상 초안을 같은 곳에 공유해 주세요.'}
         </p>
       </div>
 
@@ -114,6 +128,13 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
           >
             {role === 'brand' ? (
               <option value="guide">가이드 파일</option>
+            ) : role === 'manager' ? (
+              <>
+                <option value="plan">기획안</option>
+                <option value="video">영상 초안</option>
+                <option value="guide">가이드 파일</option>
+                <option value="other">기타 자료</option>
+              </>
             ) : (
               <>
                 <option value="plan">기획안</option>
@@ -154,7 +175,10 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
           <div className="space-y-2">
             {assets.map((asset: any) => {
               const status = STATUS_LABEL[asset.status] || STATUS_LABEL.shared;
-              const canReview = role === 'brand' && asset.uploadedByRole === 'influencer';
+              // 검수는 브랜드와 담당자가 한다. 담당자가 먼저 걸러 주지 않으면
+              // 브랜드는 초안 단계의 파일까지 전부 열어 보게 된다.
+              const canReview =
+                (role === 'brand' || role === 'manager') && asset.uploadedByRole !== role;
               return (
                 <div key={asset.id} className="rounded-lg border border-slate-100 p-3 flex flex-col md:flex-row md:items-center gap-3">
                   <div className="min-w-0 flex-1">
@@ -168,12 +192,12 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
                     <a href={asset.fileUrl} target="_blank" rel="noopener noreferrer" className="block text-xs text-slate-800 font-black hover:text-blue-600 truncate mt-1">
                       {asset.title || asset.fileName || '파일 열기'}
                     </a>
-                    {asset.reviewNote && <p className="text-[10px] text-orange-600 font-medium mt-1">수정 요청: {asset.reviewNote}</p>}
+                    {asset.reviewNote && <p className="text-[10px] text-indigo-600 font-medium mt-1">수정 요청: {asset.reviewNote}</p>}
                   </div>
                   {canReview && asset.status !== 'confirmed' && (
                     <div className="flex gap-1.5 shrink-0">
                       <button onClick={() => review(asset.id, 'confirmed')} disabled={busy} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-black disabled:opacity-40">확인 완료</button>
-                      <button onClick={() => review(asset.id, 'revision')} disabled={busy} className="px-3 py-1.5 rounded-lg bg-orange-50 text-orange-600 text-[10px] font-black disabled:opacity-40">수정 요청</button>
+                      <button onClick={() => review(asset.id, 'revision')} disabled={busy} className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-black disabled:opacity-40">수정 요청</button>
                     </div>
                   )}
                 </div>
