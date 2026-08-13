@@ -223,6 +223,15 @@ export default async (req: Request, _context: Context) => {
     // 정적으로 가져오면 그 모듈이 없는 환경에서 계정 연동 전체가 실패한다. 지표는
     // 부가 기능이고 연동은 그렇지 않으므로 필요한 순간에만 불러온다.
     let metricsSynced = false;
+    /**
+     * 방금 받아 온 숫자를 복귀 주소에 함께 실어 보낸다(캠페인 연동만).
+     *
+     * 여기서 이미 팔로워·조회수를 받아 저장했는데, 돌아간 화면은 그것을 모른 채
+     * 다시 물어본다. 그 왕복 동안 연동을 마치고 온 사람은 "연동 상태 확인 중..."
+     * 만 본다. 답을 알고 있으면서 기다리게 할 이유가 없다. 화면은 이 값으로 카드를
+     * 먼저 그리고, 곧 도착하는 서버 응답으로 덮는다(정확한 값은 언제나 서버가 정한다).
+     */
+    let syncedSummary: Record<string, string> = {};
     try {
       const { getDatabase } = await import("@picks/netlify-database");
       const synced = await syncChannelFromMeta(
@@ -233,6 +242,15 @@ export default async (req: Request, _context: Context) => {
       );
       if (synced.ok) {
         metricsSynced = true;
+        if (isCollab) {
+          const row = (synced.row || {}) as any;
+          syncedSummary = {
+            ig_handle: String(row.instagram_handle || next.igUsername || ""),
+            ig_followers: String(Math.max(0, Number(row.followers || 0))),
+            ig_following: String(Math.max(0, Number(row.following || 0))),
+            ig_views: String(Math.max(0, Number(row.avg_views || 0))),
+          };
+        }
       } else {
         console.warn("[ig-oauth] metrics sync failed:", synced.error);
       }
@@ -240,7 +258,11 @@ export default async (req: Request, _context: Context) => {
       console.warn("[ig-oauth] metrics sync error:", (e as Error)?.message);
     }
 
-    return redirectBack({ ig_connected: "1", ig_metrics: metricsSynced ? "1" : "0" });
+    return redirectBack({
+      ig_connected: "1",
+      ig_metrics: metricsSynced ? "1" : "0",
+      ...syncedSummary,
+    });
   } catch (e: any) {
     console.error("[ig-oauth] callback error:", e);
     return fail("unexpected_error");

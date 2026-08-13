@@ -30,7 +30,9 @@ async function crawlFollowers(url: string): Promise<number | null> {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
       },
-      signal: AbortSignal.timeout(6000),
+      // 접수 응답을 이 요청이 붙잡고 있다. 남의 사이트가 늦게 답하는 만큼
+      // 접수 완료 화면이 늦게 뜨므로, 기다리는 시간을 짧게 끊는다.
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
     const html = await res.text();
@@ -353,7 +355,11 @@ export default async (req: Request) => {
         // 사용한다. 연동을 마쳤으면 그 숫자를 대표값으로 굳히고, 연동 전에는 수기값을
         // 저장한 뒤 운영자 명단에서 Meta 동기화한다.
         // 틱톡은 기존 분류 호환을 위해 공개 페이지 확인을 best-effort 로 유지한다.
-        const crawled = tiktok_url ? await crawlFollowers(tiktok_url) : null;
+        //
+        // 연동을 마친 계정이면 이 확인은 하지 않는다. 아래 deriveInfluencerFields 가
+        // 연동값을 우선하므로 결과에 쓰이지 않는 값이고, 그 사이 접수 응답만 늦어진다
+        // — 인스타를 연동하고 등록서를 다 쓴 사람이 가장 오래 기다리게 된다.
+        const crawled = tiktok_url && !metaFollowers ? await crawlFollowers(tiktok_url) : null;
 
         // 관리자 화면 호환을 위해 단일 ad_price 텍스트를 파생 표기로 채운다.
         // 구간 분류/정렬용 대표 팔로워 수도 여기서 정해진다.
@@ -368,7 +374,7 @@ export default async (req: Request) => {
           crawledFollowers: crawled,
         });
 
-        await db.sql`
+        const inserted = (await db.sql`
           INSERT INTO collab_directory_applications
             (id, role, applicant_username, name, contact,
              instagram_url, youtube_url, tiktok_url, naver_blog_url,
@@ -381,7 +387,8 @@ export default async (req: Request) => {
              ${instagram_followers}, ${youtube_followers}, ${tiktok_followers},
              ${ad_price}, ${post_price}, ${short_price}, ${(b.category || "").toString()},
              ${follower_count}, ${follower_source}, ${(b.note || "").toString()})
-        `;
+          RETURNING *
+        `) as any[];
 
         // 고른 카테고리는 채널 정보(creator_channels)에도 남긴다. 빈 값일 때는 쓰지
         // 않는다 — 예전에 채워 둔 카테고리를 이번 등록서가 비었다는 이유로 지울 이유가 없다.
@@ -394,12 +401,17 @@ export default async (req: Request) => {
           follower_source,
           // 화면이 "검증된 숫자로 접수됐다"를 말할 수 있게 연동 여부를 함께 알려준다.
           instagram_connected: !!linked,
+          status: inserted?.[0]?.status || "pending",
+          // 방금 접수된 등록서를 그대로 돌려준다. 화면은 접수 완료 카드(단가 표시,
+          // 수정 화면의 시작값)를 그리려고 한 번 더 물어보지 않아도 된다 — 그 왕복
+          // 만큼 "접수되었습니다"가 늦게 뜬다.
+          application: shapeOwnApplication(inserted?.[0]),
         });
       }
 
       // brand
       const budget = Math.max(0, parseInt(String(b.budget).replace(/[^\d]/g, ""), 10) || 0);
-      await db.sql`
+      const insertedBrand = (await db.sql`
         INSERT INTO collab_directory_applications
           (id, role, applicant_username, name, contact,
            brand_homepage, brand_instagram, desired_count, desired_followers,
@@ -411,8 +423,14 @@ export default async (req: Request) => {
            ${budget}, ${(b.budget_text || "").toString()},
            ${(b.desired_schedule || "").toString()}, ${(b.desired_category || "").toString()},
            ${(b.note || "").toString()})
-      `;
-      return Response.json({ success: true, id });
+        RETURNING *
+      `) as any[];
+      return Response.json({
+        success: true,
+        id,
+        status: insertedBrand?.[0]?.status || "pending",
+        application: shapeOwnApplication(insertedBrand?.[0]),
+      });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }
@@ -559,9 +577,10 @@ export default async (req: Request) => {
         const short_price = text("short_price", row.short_price);
 
         // 틱톡 주소가 바뀐 경우에만 공개 페이지를 다시 본다. 단가만 고치러 온 요청이
-        // 외부 사이트 응답을 기다릴 이유가 없다.
+        // 외부 사이트 응답을 기다릴 이유가 없다. 연동을 마친 계정이면 그 값이 쓰이지
+        // 않으므로(연동값 우선) 아예 보지 않는다.
         const crawled =
-          tiktok_url && tiktok_url !== String(row.tiktok_url || "")
+          tiktok_url && !metaFollowers && tiktok_url !== String(row.tiktok_url || "")
             ? await crawlFollowers(tiktok_url)
             : null;
 

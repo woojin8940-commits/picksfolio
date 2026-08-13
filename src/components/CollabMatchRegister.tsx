@@ -113,6 +113,55 @@ const consumePendingLink = () => {
   }
 };
 
+/**
+ * 지난번에 확인한 접수 상태를 이 브라우저에 적어 두는 자리.
+ *
+ * 이 화면은 서버에 물어보기 전까지 버튼도 접수 카드도 그리지 않는다(버튼이 떴다
+ * 사라지면 눌렀다 실패한 것처럼 보인다). 그래서 응답이 늦는 만큼 그 자리가 통째로
+ * 비어 있고, 인스타그램을 연동하고 돌아온 사람은 — 연동은 페이지가 새로 뜨는
+ * 흐름이라 확인을 처음부터 다시 한다 — 방금 끝낸 일이 화면에 없는 상태를 한참 본다.
+ *
+ * 지난 답을 적어 두면 화면은 첫 프레임부터 그 상태로 시작한다. 캐시는 화면을 먼저
+ * 그리기 위한 것일 뿐 판단의 근거가 아니다 — 접수·수정·취소는 모두 서버 응답으로만
+ * 확정되고, 응답이 도착하면 그 값이 캐시를 덮는다.
+ */
+const STATE_CACHE_PREFIX = 'picks_collab_match_state_v1';
+
+interface CachedState {
+  submitted: boolean;
+  status: string;
+  application: Record<string, any> | null;
+}
+
+const stateCacheKey = (variant: string, username: string) =>
+  `${STATE_CACHE_PREFIX}:${variant}:${username.trim().toLowerCase()}`;
+
+const readStateCache = (variant: string, username: string): CachedState | null => {
+  if (!username) return null;
+  try {
+    const raw = localStorage.getItem(stateCacheKey(variant, username));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.submitted !== 'boolean') return null;
+    return {
+      submitted: parsed.submitted,
+      status: String(parsed.status || ''),
+      application: parsed.application || null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const writeStateCache = (variant: string, username: string, value: CachedState) => {
+  if (!username) return;
+  try {
+    localStorage.setItem(stateCacheKey(variant, username), JSON.stringify(value));
+  } catch {
+    // 저장이 막힌 브라우저에서는 예전처럼 서버 응답을 기다렸다 그린다.
+  }
+};
+
 
 /**
  * 접수 후 보여 줄 한 줄 안내. 키는 collab_directory_applications.status 값이다.
@@ -194,17 +243,33 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
    */
   const [linkedNow, setLinkedNow] = useState(false);
 
+  /** 첫 프레임을 지난 답으로 그리기 위한 값. 확정은 언제나 서버 응답으로 한다. */
+  const [cachedOnMount] = useState(() => readStateCache(variant, applicantUsername));
+
   /**
    * 이미 등록서를 낸 계정인지. null = 아직 확인 중.
    *
    * 낸 사람에게는 등록 버튼을 보여 주지 않는다 — 같은 정보를 또 받으면 운영자 목록에
    * 같은 사람이 두 줄로 쌓이고, 본인은 어느 쪽이 반영된 건지 알 수 없다. 확인 중에는
    * 버튼 자리를 비워 둔다: 버튼이 떴다가 사라지면 눌렀다 실패한 것처럼 보인다.
+   *
+   * 지난번에 확인해 둔 답이 있으면 그것으로 시작한다. 서버 응답을 기다리는 동안
+   * 자리를 비워 두면, 접수를 마친 사람은 화면을 열 때마다 자기 접수 카드가 없는
+   * 순간을 먼저 본다.
    */
-  const [submitted, setSubmitted] = useState<boolean | null>(null);
-  const [submittedStatus, setSubmittedStatus] = useState('');
+  const [submitted, setSubmitted] = useState<boolean | null>(() => cachedOnMount?.submitted ?? null);
+  const [submittedStatus, setSubmittedStatus] = useState(() => cachedOnMount?.status ?? '');
   /** 접수한 등록서 내용. 수정 화면이 값을 되살리는 원본이다. */
-  const [application, setApplication] = useState<Record<string, any> | null>(null);
+  const [application, setApplication] = useState<Record<string, any> | null>(
+    () => cachedOnMount?.application ?? null,
+  );
+  /**
+   * 지금 들고 있는 등록서가 서버에서 온 것인지.
+   *
+   * 캐시로 그린 값은 카드에 숫자를 띄우는 데까지만 쓴다. 수정 화면의 시작값으로
+   * 쓰면, 다른 기기에서 고친 내용을 모르는 채 저장해 되돌려 버릴 수 있다.
+   */
+  const applicationVerified = useRef(false);
   /** 접수한 등록서를 고치는 중인지. 켜져 있으면 모달이 접수 대신 수정으로 동작한다. */
   const [editing, setEditing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -321,14 +386,33 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       setSubmitted(false);
       return;
     }
+    // 확인하는 동안은 지난번 답으로 화면을 채워 둔다. 계정이 바뀌었을 수도 있으므로
+    // 이 계정의 캐시가 없으면 예전처럼 자리를 비워 두고 응답을 기다린다.
+    const cached = readStateCache(variant, applicantUsername);
+    if (cached) {
+      setSubmitted(cached.submitted);
+      setSubmittedStatus(cached.status);
+      setApplication(cached.application);
+      applicationVerified.current = false;
+    }
     (async () => {
       const res = await apiService.getMyCollabDirectory(variant, applicantUsername);
       if (!alive) return;
+      // 확인을 못 했을 때 캐시가 있으면 그 상태를 유지한다. 잠깐의 네트워크 오류로
+      // 접수 카드가 사라지면, 본인은 접수가 취소된 것으로 읽는다.
+      if (res.error && cached) return;
       // 보관 처리된 등록서는 없는 것으로 본다. 운영자가 접어 둔 사람이 영원히 다시
       // 등록할 수 없게 되면, 문의할 곳이 없는 막힌 화면이 된다.
-      setSubmitted(!!res.submitted && res.status !== 'archived');
+      const nextSubmitted = !!res.submitted && res.status !== 'archived';
+      setSubmitted(nextSubmitted);
       setSubmittedStatus(res.status || '');
       setApplication(res.application || null);
+      applicationVerified.current = true;
+      writeStateCache(variant, applicantUsername, {
+        submitted: nextSubmitted,
+        status: res.status || '',
+        application: res.application || null,
+      });
     })();
     return () => { alive = false; };
   }, [applicantUsername, variant]);
@@ -357,6 +441,23 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       // 이 세션의 로그인이 끝났다. 지금부터 화면은 방금 로그인한 계정의 숫자를 보여 준다.
       markSessionLinked(consumePendingLink());
       setLinkedNow(true);
+      // 연동을 처리한 쪽이 방금 받아 온 숫자를 함께 실어 보낸다. 있으면 그대로 그린다
+      // — 서버에 한 번 더 물어보는 동안 빈 카드를 보여 줄 이유가 없다. 곧 도착하는
+      // 서버 응답이 이 값을 덮는다(화면에 남는 값은 언제나 서버가 보관 중인 값이다).
+      const handle = params.get('ig_handle') || '';
+      const followers = Number(params.get('ig_followers') || 0);
+      if (handle || followers > 0) {
+        setChannel({
+          connected: true,
+          handle,
+          followers: Math.max(0, followers),
+          following: Math.max(0, Number(params.get('ig_following') || 0)),
+          avgViews: Math.max(0, Number(params.get('ig_views') || 0)),
+          avgLikes: 0,
+          metricsSource: 'meta_api',
+          syncedAt: new Date().toISOString(),
+        });
+      }
       // 지표를 못 받고 돌아왔으면 이 화면이 한 번 더 받아 본다. 사람에게 버튼을
       // 찾아 누르라고 하기 전에 채워 보는 편이 빠르다.
       if (metricsMissing) setPendingSync(true);
@@ -379,30 +480,38 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     params.delete('ig_connected');
     params.delete('ig_error');
     params.delete('ig_metrics');
+    params.delete('ig_handle');
+    params.delete('ig_followers');
+    params.delete('ig_following');
+    params.delete('ig_views');
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
 
-  // 모달을 열 때마다 연동 상태를 다시 확인한다(다른 화면에서 연동했을 수 있다).
-  // 접수를 마친 사람에게도 확인한다 — 접수 카드가 팔로워·릴스 평균 조회수를 그대로
-  // 보여 주기 때문이다. 브랜드에게 전달되는 숫자를 본인이 볼 수 있어야 한다.
+  // 연동 상태는 화면이 뜨는 즉시 확인한다. 접수 여부 응답을 기다렸다 시작하면 왕복
+  // 두 번이 줄줄이 이어져, 방금 연동하고 온 사람이 빈 카드를 그만큼 오래 본다.
+  // 모달을 열 때도 다시 확인한다(다른 화면에서 연동했을 수 있다). 이 세션에
+  // 로그인하지 않았으면 loadChannel 은 아무 것도 하지 않는다.
   useEffect(() => {
-    if (open || (isInfluencer && submitted === true)) loadChannel();
-  }, [open, submitted, isInfluencer, loadChannel]);
+    loadChannel();
+  }, [open, loadChannel]);
+
+  // 수정 화면은 접수한 내용에서 시작한다. 서버에서 받은 등록서가 있어야 시작값으로
+  // 쓴다 — 화면을 먼저 그리려고 들고 있던 캐시로 폼을 채우면, 그 사이 다른 기기에서
+  // 고친 내용을 모르는 채 저장해 되돌려 버린다.
+  // 연동하러 나갔다 돌아오며 되살린 값이 있으면 그것이 더 최신이므로 덮지 않는다.
+  useEffect(() => {
+    if (!editing || !application || draftRestored.current) return;
+    if (!applicationVerified.current) return;
+    prefillFrom(application);
+  }, [editing, application, prefillFrom]);
 
   // 이미 접수한 사람이 모달을 열었다면 그것은 수정이다. 접수 화면으로 두면 같은
   // 등록서가 한 장 더 쌓인다(연동 후 복귀처럼 버튼을 거치지 않고 열리는 길이 있다).
   useEffect(() => {
     if (open && submitted === true && !editing) setEditing(true);
   }, [open, submitted, editing]);
-
-  // 수정 화면은 접수한 내용에서 시작한다. 연동하러 나갔다 돌아오며 되살린 값이
-  // 있으면 그것이 더 최신이므로 덮지 않는다.
-  useEffect(() => {
-    if (!editing || !application || draftRestored.current) return;
-    prefillFrom(application);
-  }, [editing, application, prefillFrom]);
 
   const reset = () => {
     setInfForm({
@@ -533,24 +642,50 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         : await apiService.submitCollabDirectory(payload);
       if (!result?.error) {
         setOpen(false);
-        setNotice(null);
         draftRestored.current = false;
         // 서버에 다시 물어보지 않고 바로 감춘다. 접수는 방금 성공했고, 이 화면에
         // 버튼이 한 번 더 남아 있으면 같은 등록서를 두 번 내게 된다.
         setSubmitted(true);
+        // 접수·수정 응답은 저장된 등록서를 그대로 싣고 온다. 카드를 그리려고 한 번
+        // 더 물어보지 않는다 — 그 왕복만큼 "접수 완료"가 늦게 뜬다.
+        const saved = (result as { application?: Record<string, any> | null }).application || null;
+        if (saved) {
+          setApplication(saved);
+          applicationVerified.current = true;
+        }
+        const nextStatus = editing ? submittedStatus || 'pending' : 'pending';
         if (editing) {
           // 수정은 접수 상태를 건드리지 않는다. 검토 중이던 등록서가 수정했다고
           // 다시 대기로 돌아가면, 본인은 순서를 잃은 것처럼 보인다.
-          setApplication((result as { application?: Record<string, any> | null }).application || null);
           setEditing(false);
-          alert('수정되었습니다.');
+          setNotice({ type: 'ok', text: '수정되었습니다.' });
         } else {
           reset();
           setSubmittedStatus('pending');
-          // 접수 카드가 방금 낸 단가를 그대로 보여 줄 수 있게 내용을 한 번 받아 온다.
-          const fresh = await apiService.getMyCollabDirectory(variant, applicantUsername);
-          setApplication(fresh.application || null);
-          alert('접수되었습니다.');
+          // 확인 대화상자로 알리지 않는다. 대화상자는 방금 바뀐 화면을 가린 채
+          // 확인을 누를 때까지 기다리게 하는데, 정작 알려 줄 내용은 그 뒤에 있는
+          // 접수 완료 카드에 이미 다 적혀 있다.
+          setNotice({ type: 'ok', text: '접수되었습니다. 담당자 확인 후 안내해 드립니다.' });
+        }
+        writeStateCache(variant, applicantUsername, {
+          submitted: true,
+          status: nextStatus,
+          application: saved ?? application,
+        });
+        // 응답에 등록서가 없으면(예전 서버로 붙은 경우) 뒤에서 한 번 받아 온다.
+        // 화면은 이미 접수 완료 상태이고, 도착하면 단가 표시만 채워진다.
+        if (!saved && applicantUsername) {
+          void (async () => {
+            const fresh = await apiService.getMyCollabDirectory(variant, applicantUsername);
+            if (fresh.error) return;
+            setApplication(fresh.application || null);
+            applicationVerified.current = true;
+            writeStateCache(variant, applicantUsername, {
+              submitted: true,
+              status: fresh.status || nextStatus,
+              application: fresh.application || null,
+            });
+          })();
         }
       } else {
         setNotice({ type: 'err', text: result.error });
@@ -572,6 +707,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       setSubmittedStatus('');
       setApplication(null);
       setEditing(false);
+      applicationVerified.current = true;
+      // 취소했다는 사실도 적어 둔다. 이 자리를 비워 두면 다음에 화면을 열 때
+      // 참고할 답이 없어, 등록 버튼이 다시 서버 응답을 기다렸다 뜬다.
+      writeStateCache(variant, applicantUsername, { submitted: false, status: '', application: null });
       setNotice({ type: 'ok', text: `${copy.title} 접수가 취소되었습니다.` });
       alert(`${copy.title} 접수가 취소되었습니다.`);
     } else {
@@ -919,7 +1058,10 @@ const InstagramLinkCard: React.FC<{
   onLink: () => void;
   onResync: () => void;
 }> = ({ channel, loading, linking, syncing, canLink, onLink, onResync }) => {
-  if (loading) {
+  // 보여 줄 것이 아직 없을 때만 확인 중이라고 말한다. 이미 화면에 있는 숫자를
+  // 확인할 때마다 회색 카드로 되돌리면, 연동을 마친 사람은 자기 계정이 붙었다
+  // 떨어졌다 하는 것처럼 본다.
+  if (loading && !channel.connected) {
     return (
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 flex items-center gap-2.5">
         <div className="w-4 h-4 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin" />
