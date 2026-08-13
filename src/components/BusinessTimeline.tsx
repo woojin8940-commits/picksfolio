@@ -84,10 +84,19 @@ const MANAGER_THREAD_KINDS = ['influencer_support', 'brand_support'];
  * AI 어시스턴트를 처음 열었을 때 보여줄 예시 질문.
  *
  * "무엇이든 물어보세요"만 띄워 두면 대부분 아무것도 묻지 못하고 닫는다. 그래서 이
- * 어시스턴트로 실제로 하는 일을 칩으로 앞에 내놓는다 — 콘텐츠 초안(인스타 광고 캡션 ·
- * 숏폼 대본)과 담당자에게 보낼 메시지 초안이 먼저 오고, 협업 현황 파악은 뒤에 둔다.
+ * 어시스턴트로 실제로 하는 일을 칩으로 앞에 내놓는다 — 브랜드 가이드를 읽고 쓰는
+ * 기획안과 콘텐츠 초안(인스타 광고 캡션 · 숏폼 대본)이 먼저 오고, 담당자에게 보낼
+ * 메시지 초안이 그다음, 협업 현황 파악은 뒤에 둔다.
  */
 const AI_QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string }> = [
+  {
+    icon: '📄',
+    label: '가이드 보고 기획안',
+    prompt:
+      '브랜드에서 준 기본 가이드를 보고 이번 협업 콘텐츠 기획안을 작성해 주세요. ' +
+      '가이드에서 꼭 지켜야 할 것부터 정리하고, 컷 구성과 캡션 초안까지 잡아 주세요. ' +
+      '가이드가 없으면 지금까지 나온 내용으로 먼저 초안을 잡고 필요한 것만 물어봐 주세요.',
+  },
   {
     icon: '📸',
     label: '인스타 광고 캡션 초안',
@@ -244,6 +253,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   });
   const aiEndRef = useRef<HTMLDivElement>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
+  // 브랜드가 준 기본 가이드(이미지·PDF)를 AI 대화창에 바로 붙여 읽히기 위한 첨부.
+  const [aiFiles, setAiFiles] = useState<File[]>([]);
+  const aiFileInputRef = useRef<HTMLInputElement>(null);
 
   // Model selection. Gemini (default) is the membership-bundled model; Claude is
   // the optional premium model billed against the separately-purchased Claude plan
@@ -305,8 +317,13 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     setShowList(false);
   };
 
+  const AI_GUIDE_FALLBACK_PROMPT =
+    '첨부한 브랜드 가이드를 읽고, 이 협업으로 만들 콘텐츠 기획안을 작성해 주세요.';
+
   const sendAiMessage = async (text: string) => {
-    const content = text.trim();
+    const attachedFiles = [...aiFiles];
+    const typed = text.trim();
+    const content = typed || (attachedFiles.length > 0 ? AI_GUIDE_FALLBACK_PROMPT : '');
     if (!content || aiLoading) return;
 
     // Gemini requires an AI membership; Claude requires an active Claude plan with
@@ -340,9 +357,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       }
     }
 
-    const nextMessages: AiMessage[] = [...aiMessages, { role: 'user', content }];
+    // 첨부한 파일은 대화에도 남겨 둔다. 파일 내용은 이번 요청에만 실려 가므로,
+    // 다음 턴에서도 무슨 파일을 보고 쓴 기획안인지 알 수 있어야 한다.
+    const fileNote =
+      attachedFiles.length > 0 ? `\n\n📎 ${attachedFiles.map(f => f.name).join(', ')}` : '';
+    const nextMessages: AiMessage[] = [...aiMessages, { role: 'user', content: content + fileNote }];
     setAiMessages(nextMessages);
     setAiInput('');
+    setAiFiles([]);
     setAiLoading(true);
     if (aiInputRef.current) aiInputRef.current.style.height = 'auto';
 
@@ -371,6 +393,19 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     }));
 
     try {
+      // 붙인 가이드 파일을 먼저 올린다. 서버는 주소만 받아 저장소에서 원본을 읽는다.
+      const attachments: { url: string; fileName: string; fileType: string }[] = [];
+      for (const file of attachedFiles) {
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('username', normalizedUserName.toLowerCase());
+        const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json().catch(() => null);
+        if (uploadData?.url) {
+          attachments.push({ url: uploadData.url, fileName: file.name, fileType: file.type });
+        }
+      }
+
       const res = await fetch('/api/collab-ai', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
@@ -381,6 +416,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           activeProposalId: selectedTimeline?.proposalId || '',
           timelines: timelineSummary,
           messages: nextMessages,
+          attachments,
           context,
         }),
       });
@@ -998,7 +1034,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   <span className="text-[13px] font-extrabold text-gray-900 truncate">AI 어시스턴트</span>
                   <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600 tracking-tight">BETA</span>
                 </div>
-                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">인스타 캡션 · 숏폼 대본 · 담당자 메시지 초안</p>
+                <p className="text-[11px] text-gray-500 font-medium truncate mt-0.5">가이드 보고 기획안 · 캡션 · 숏폼 대본 · 담당자 메시지</p>
               </div>
               <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
@@ -1698,6 +1734,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   onClick={() => {
                     if (aiLoading) return;
                     setAiMessages([]);
+                    setAiFiles([]);
                     setLastClaudeCost(null);
                   }}
                   title="이 대화를 비우고 새로 시작"
@@ -1768,12 +1805,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               <h3 className="text-base font-extrabold text-gray-900 mb-1.5">AI 어시스턴트는 AI 멤버십 전용 기능입니다</h3>
               {isNativeApp() ? (
                 <p className="text-xs text-gray-500 leading-relaxed mb-1">
-                  AI 멤버십에 가입하면 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 이용할 수 있어요. 멤버십 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.
+                  AI 멤버십에 가입하면 브랜드 가이드를 읽고 쓰는 콘텐츠 기획안, 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 이용할 수 있어요. 멤버십 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 사용됩니다.
                 </p>
               ) : (
                 <>
                   <p className="text-xs text-gray-500 leading-relaxed mb-5">
-                    AI 협업 멤버십(6,900원) 이상(프로 18,700원 포함)을 구독하면 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다. (모든 금액 부가세 포함)
+                    AI 협업 멤버십(6,900원) 이상(프로 18,700원 포함)을 구독하면 브랜드 가이드를 읽고 쓰는 콘텐츠 기획안, 인스타 광고 캡션·숏폼 대본 초안, 담당자에게 보낼 메시지 초안, 협업 대화 요약과 일정 정리를 바로 이용할 수 있어요. 비즈니스 계정과 일반 계정 모두 동일한 멤버십으로 사용할 수 있습니다. (모든 금액 부가세 포함)
                   </p>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
@@ -1796,8 +1833,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                   </div>
                   <h3 className="text-sm md:text-base font-extrabold text-gray-900 mb-1">무엇을 도와드릴까요?</h3>
                   <p className="text-[11px] md:text-xs text-gray-500 leading-relaxed">
-                    협업 제품의 <strong className="text-gray-700">인스타 광고 캡션</strong>과 <strong className="text-gray-700">숏폼 대본 초안</strong>을 써 드리고,
-                    담당자에게 보낼 <strong className="text-gray-700">메시지 초안</strong>과 협업에 필요한 질문까지 정리해 드려요.
+                    브랜드가 준 <strong className="text-gray-700">기본 가이드(이미지·PDF)</strong>를 첨부하면 읽고
+                    <strong className="text-gray-700"> 콘텐츠 기획안</strong>을 써 드려요. 가이드가 없으면 이야기하면서 함께 잡아 갑니다.
+                    <strong className="text-gray-700"> 인스타 광고 캡션</strong>·<strong className="text-gray-700">숏폼 대본</strong>과
+                    담당자에게 보낼 <strong className="text-gray-700">메시지 초안</strong>도 정리해 드리고,
                     원하는 <strong className="text-gray-700">무드</strong>를 말해 주시면 그 톤으로 다시 잡아 드립니다.
                     계약·정산·세금·광고 표시 같은 업무 질문도 물어보세요.
                   </p>
@@ -1872,7 +1911,53 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             {/* Composer */}
             <div className="fixed bottom-0 left-0 right-0 md:static md:bottom-auto px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] md:px-5 md:pb-4 pt-1.5 md:pt-2 bg-white border-t border-gray-100 md:border-t-0 z-[120] md:z-10 md:shrink-0 shadow-[0_-8px_22px_-14px_rgba(15,23,42,0.5)] md:shadow-none" style={{ touchAction: 'manipulation' }}>
               <div className="max-w-3xl mx-auto relative bg-white border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-400 transition-all shadow-[0_8px_20px_-14px_rgba(15,23,42,0.55)] focus-within:shadow-[0_12px_26px_-14px_rgba(124,58,237,0.5)]">
+                {/* 붙여 둔 가이드 파일 — 보내면 AI 가 내용까지 읽는다. */}
+                {aiFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5 md:px-3 md:pt-3">
+                    {aiFiles.map((file, idx) => (
+                      <div key={idx} className="relative group flex items-center gap-1.5 bg-violet-50 border border-violet-100 rounded-lg px-2 py-1 max-w-[170px]">
+                        <span className="text-sm leading-none shrink-0">{file.type === 'application/pdf' ? '📄' : '🖼️'}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] text-gray-700 font-semibold truncate">{file.name}</p>
+                          <p className="text-[9px] text-gray-400">{formatFileSize(file.size)}</p>
+                        </div>
+                        <button
+                          onClick={() => setAiFiles(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                          title="첨부 취소"
+                        >
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-end gap-1.5 md:gap-2 p-2 md:p-2.5">
+                  {/* 브랜드 기본 가이드 첨부 — 이미지·PDF 만 읽을 수 있다. */}
+                  <input
+                    ref={aiFileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.jpg,.jpeg,.png,.gif,.webp,.pdf"
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files || []);
+                      setAiFiles(prev => [...prev, ...picked].slice(0, 3));
+                      if (aiFileInputRef.current) aiFileInputRef.current.value = '';
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => aiFileInputRef.current?.click()}
+                    disabled={aiLoading || aiFiles.length >= 3}
+                    className="shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 text-gray-400 hover:text-violet-600 transition-colors disabled:opacity-40"
+                    title="브랜드 가이드 첨부 (이미지 · PDF, 최대 3개)"
+                  >
+                    <svg className="w-4 h-4 md:w-[18px] md:h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                  </button>
                   <textarea
                     ref={aiInputRef}
                     value={aiInput}
@@ -1883,16 +1968,16 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                       ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
                     }}
                     onKeyDown={handleAiKeyDown}
-                    placeholder="캡션 초안, 숏폼 대본, 담당자 메시지 초안을 요청해 보세요. (예: 감성 브이로그 무드로)"
+                    placeholder="브랜드 가이드를 첨부하면 기획안을 써 드려요. 캡션·숏폼 대본·담당자 메시지도 요청해 보세요."
                     rows={1}
                     className="flex-1 bg-transparent text-[13px] md:text-[15px] text-gray-900 placeholder-gray-400 resize-none focus:outline-none py-1 px-1 leading-relaxed"
                     style={{ maxHeight: '80px' }}
                   />
                   <button
                     onClick={() => sendAiMessage(aiInput)}
-                    disabled={!aiInput.trim() || aiLoading}
+                    disabled={(!aiInput.trim() && aiFiles.length === 0) || aiLoading}
                     className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all ${
-                      aiInput.trim() && !aiLoading
+                      (aiInput.trim() || aiFiles.length > 0) && !aiLoading
                         ? 'bg-gradient-to-br from-violet-600 to-blue-600 text-white hover:opacity-90 active:scale-95 shadow-[0_6px_14px_-5px_rgba(124,58,237,0.8)] hover:shadow-[0_9px_18px_-5px_rgba(124,58,237,0.85)]'
                         : 'bg-gray-100 text-gray-400'
                     }`}
@@ -2066,7 +2151,7 @@ const ClaudePlanModal: React.FC<{
                 <p className="text-3xl font-black text-orange-700">{krw(data.activationPriceKrw)}</p>
                 <p className="text-xs font-bold text-orange-600 mt-2">결제 즉시 기본 {creditStr(data.activationGrantCredits)} 지급</p>
                 <ul className="mt-3 space-y-1.5 text-[12px] text-slate-600">
-                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (캡션·숏폼 대본 초안, 담당자 메시지 초안, 계약 문서 검토에 강함)</li>
+                  <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>협업 타임라인 AI를 <strong>Claude</strong>로 사용 (브랜드 가이드 파일 해석·기획안, 캡션·숏폼 대본 초안, 담당자 메시지 초안, 계약 문서 검토에 강함)</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>사용한 토큰만큼만 크레딧 차감 · 남는 크레딧은 이월</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>충전 경로: 이 클로드 관리 화면 · 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문</li>
                   <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">✓</span>제미나이(무료 기본)는 그대로 사용 가능</li>
