@@ -16,6 +16,10 @@ import { requireManager } from "./_shared/manager-auth.mts";
  * 담당자인지, 이 건이 아직 검토 중인 제안인지 이미 진행 중인 협업인지 구분되지
  * 않았다. 그래서 응답에 `source`(어느 경로에서 왔는지)와, 제안 경로인 경우
  * `proposalStatus`(검토 중 / 수락 / 거절)를 함께 실어 보낸다.
+ *
+ * 사용자가 자기 목록에서 내린 대화(timeline_hidden)는 여기서 걸러낸다. 방 자체는
+ * 지우지 않는다 — 상대와 함께 쓰는 기록이기 때문이다. 자세한 이유는
+ * `api-timeline-hide.mts` 에 적어 두었다.
  */
 
 /** 방 하나가 어느 경로에서 온 협업인지. */
@@ -361,7 +365,53 @@ export default async (req: Request, context: Context) => {
       }
     }
 
-    const enriched = existing.map((t: any) => ({
+    // 사용자가 목록에서 내린 대화(timeline_hidden). 방과 메시지는 그대로 두고
+    // 목록에서만 감춘다 — 방은 상대와 함께 쓰는 기록이라 지울 수 없다.
+    //
+    // 내린 뒤에 새 메시지가 도착한 방은 다시 보여 주고 기록을 지운다. 한 번 삭제한
+    // 업체의 연락을 영구히 놓치면 삭제 기능이 오히려 손해가 된다.
+    const hiddenAtMap: Record<string, number> = {};
+    if (proposalIds.length > 0 && dbInstance) {
+      try {
+        const hiddenRows = (await dbInstance.sql`
+          SELECT proposal_id, hidden_at FROM timeline_hidden
+          WHERE username = ${username} AND proposal_id = ANY(${proposalIds})
+        `) as any[];
+        for (const row of hiddenRows || []) {
+          const at = new Date(row?.hidden_at).getTime();
+          if (row?.proposal_id && !Number.isNaN(at)) hiddenAtMap[row.proposal_id] = at;
+        }
+      } catch {
+        // 조회가 실패하면 아무것도 감추지 않는다 — 진행 중인 대화가 사라지는 것보다
+        // 지웠던 줄이 다시 보이는 편이 안전하다.
+      }
+    }
+
+    const revived: string[] = [];
+    const visible = existing.filter((t: any) => {
+      const hiddenAt = hiddenAtMap[t.proposalId];
+      if (hiddenAt === undefined) return true;
+      const lastRaw = latestMessageMap[t.proposalId];
+      const lastAt = lastRaw ? new Date(lastRaw).getTime() : NaN;
+      if (!Number.isNaN(lastAt) && lastAt > hiddenAt) {
+        revived.push(t.proposalId);
+        return true;
+      }
+      return false;
+    });
+
+    if (revived.length > 0 && dbInstance) {
+      context.waitUntil((async () => {
+        try {
+          await dbInstance.sql`
+            DELETE FROM timeline_hidden
+            WHERE username = ${username} AND proposal_id = ANY(${revived})
+          `;
+        } catch {}
+      })());
+    }
+
+    const enriched = visible.map((t: any) => ({
       ...t,
       source: sourceOf(t),
       proposalStatus: proposalStatusMap[t.proposalId] || null,

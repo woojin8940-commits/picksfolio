@@ -2008,6 +2008,44 @@ export const apiService = {
     }
   },
 
+  /**
+   * 협업 대화를 내 목록에서 내린다(삭제).
+   *
+   * 방과 메시지는 지우지 않는다 — 상대와 함께 쓰는 기록이라 한쪽이 지우면 상대의
+   * 내역까지 사라진다. 내 목록에서만 감추고, 내린 뒤 상대가 새 메시지를 보내면
+   * 서버가 다시 살려 준다.
+   */
+  async hideTimeline(proposalId: string): Promise<{ success?: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/timeline/hide/${encodeURIComponent(proposalId)}`, {
+        method: 'DELETE',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '대화를 삭제하지 못했습니다.' };
+      return { success: true };
+    } catch (e) {
+      console.error('[API] Failed to hide timeline:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 방금 내린 대화를 되돌린다("되돌리기"). */
+  async restoreTimeline(proposalId: string): Promise<{ success?: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/timeline/hide/${encodeURIComponent(proposalId)}`, {
+        method: 'POST',
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '대화를 되돌리지 못했습니다.' };
+      return { success: true };
+    } catch (e) {
+      console.error('[API] Failed to restore timeline:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   // ───────────────────── 리스트업 (후보 명단 · 제안 조율) ─────────────────────
 
   /**

@@ -10,16 +10,31 @@ import {
   readClaudeCreditsSynced,
   type ClaudeCredits,
 } from "./_shared/claude-credits.mts";
+import { resolveContentType } from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 // Collaboration AI assistant.
 //
 // Backed by Gemini 2.5 Flash-Lite through Netlify AI Gateway. Flash-Lite is the
-// recommended model for the kind of work this assistant does (summarising
-// collaboration threads, organising schedules, drafting replies) — it is fast,
-// cheap, and more than capable for lightweight summarisation/extraction.
+// recommended model for the kind of work this assistant does (drafting captions
+// and short-form scripts, summarising collaboration threads, organising
+// schedules, drafting replies) — it is fast, cheap, and more than capable.
 //
-// The assistant is "workspace aware": instead of only seeing the single
+// The assistant has two headline jobs, and the system prompt below is written
+// around them:
+//   1. Content production support — Instagram ad captions and short-form
+//      (Reels/Shorts) text guides for the product being collaborated on, written
+//      as finished drafts the creator can copy straight out. This includes
+//      turning the brand's own base guide — which almost always arrives as an
+//      image or a PDF attached to the collaboration thread — into a full
+//      influencer content plan (기획안); when no such guide exists, the plan is
+//      built conversationally with the creator instead.
+//   2. Talking to the Picksfolio manager / brand — message drafts (schedule
+//      changes, rate negotiation, revision requests, settlement questions) plus
+//      the business questions that come with a collaboration (contracts,
+//      settlement, tax, paid-promotion disclosure, copyright).
+//
+// The assistant is also "workspace aware": instead of only seeing the single
 // conversation the user is currently looking at, it is given a compact overview
 // of EVERY collaboration thread the account has (how many partners, which ones
 // are waiting on a reply, recent messages of each, plus a deeper transcript of
@@ -50,13 +65,174 @@ const ACTIVE_CONV_MSGS = 30; // recent messages for the conversation in focus
 const ACTIVE_CONV_CHARS = 3500; // char cap on the focused transcript
 const WORKSPACE_CONTEXT_CHARS = 12000; // overall cap on the assembled overview
 
+interface CollabAttachment {
+  url?: string;
+  fileName?: string;
+  fileType?: string;
+}
+
 interface CollabComment {
   authorType?: string;
   authorName?: string;
   authorUsername?: string;
   content?: string;
   createdAt?: string;
-  attachments?: unknown[];
+  attachments?: CollabAttachment[];
+}
+
+// ── Brand guide files (images / PDFs) ────────────────────────────────────────
+//
+// 브랜드가 주는 "기본 가이드"는 거의 항상 이미지나 PDF 파일로 협업 대화에 올라온다.
+// 그 파일을 파일명만 보고 넘기면 기획안을 쓸 수 없으므로, Blobs 에 저장된 실제 파일을
+// 꺼내 base64 로 모델에 함께 보낸다(클로드: image/document 블록, 제미나이: inlineData).
+//
+// 비용과 응답 시간이 파일 크기에 그대로 비례하므로 개수·용량에 상한을 둔다.
+// 파일 한 개 상한은 업로드 상한(10MB)과 맞춰, 올릴 수 있었던 파일이 여기서 조용히
+// 빠지는 일이 없게 한다.
+const GUIDE_MAX_FILES = 3;
+const GUIDE_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const GUIDE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+// 모델이 실제로 읽을 수 있는 형식만 보낸다(svg·avif·heic·영상은 제외).
+const GUIDE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const GUIDE_PDF_TYPE = "application/pdf";
+
+// 협업 대화에 쌓인 파일을 매 질문마다 통째로 실어 보내면 낭비다. 가이드/기획안/촬영처럼
+// 파일을 봐야 답할 수 있는 요청일 때만 자동으로 끌어온다(사용자가 직접 첨부한 파일은
+// 이 조건과 무관하게 항상 읽는다).
+const GUIDE_INTENT_RE =
+  /(가이드|기획안|기획|기획서|대본|콘티|캡션|숏폼|릴스|쇼츠|촬영|콘텐츠|첨부|파일|이미지|사진|문서|자료|브랜드|이거|이걸|이대로|위에|pdf|guide)/i;
+
+interface GuideRef {
+  url?: string;
+  fileName?: string;
+  fileType?: string;
+  /** 누가 올린 파일인지 — 브랜드가 준 가이드인지 구분하는 데 쓴다. */
+  from?: string;
+}
+
+interface GuideFile {
+  fileName: string;
+  mediaType: string;
+  /** base64, 줄바꿈 없음(Anthropic 요구사항). */
+  data: string;
+  from?: string;
+}
+
+const attachmentsOf = (c?: CollabComment): CollabAttachment[] =>
+  Array.isArray(c?.attachments) ? (c!.attachments as CollabAttachment[]) : [];
+
+/** `/api/images/<key>` 주소에서 Blobs 키만 뽑는다. 그 형태가 아니면 읽지 않는다. */
+const blobKeyOf = (url?: string): string | null => {
+  const raw = String(url || "");
+  const marker = "/api/images/";
+  const at = raw.indexOf(marker);
+  if (at < 0) return null;
+  const key = raw.slice(at + marker.length).split(/[?#]/)[0];
+  if (!key || key.includes("..")) return null;
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return key;
+  }
+};
+
+/**
+ * 첨부 파일을 Blobs 에서 읽어 모델에 실을 수 있는 형태로 만든다.
+ * 형식은 요청 본문 값이 아니라 저장할 때 서버가 정해 둔 값(또는 확장자)으로 판단한다.
+ * 읽지 못한 파일은 조용히 버리지 않고 이유와 함께 돌려준다 — 모델이 "이 파일은 못 읽었다"고
+ * 사용자에게 알려 줄 수 있어야 한다.
+ */
+async function loadGuideFiles(
+  refs: GuideRef[],
+): Promise<{ files: GuideFile[]; skipped: string[] }> {
+  const files: GuideFile[] = [];
+  const skipped: string[] = [];
+  if (refs.length === 0) return { files, skipped };
+
+  const store = getStore("images");
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const ref of refs) {
+    const key = blobKeyOf(ref?.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    const fileName = String(ref?.fileName || key.split("/").pop() || "첨부 파일").slice(0, 120);
+    if (files.length >= GUIDE_MAX_FILES) {
+      skipped.push(`${fileName}(한 번에 ${GUIDE_MAX_FILES}개까지만 읽을 수 있음)`);
+      continue;
+    }
+    let mediaType = resolveContentType(fileName, String(ref?.fileType || "")) || "";
+
+    try {
+      const blob = await store.getWithMetadata(key, { type: "arrayBuffer" });
+      if (!blob?.data) {
+        skipped.push(`${fileName}(파일을 찾지 못함)`);
+        continue;
+      }
+      const stored = String((blob.metadata as any)?.contentType || "");
+      if (stored) mediaType = stored;
+      if (mediaType !== GUIDE_PDF_TYPE && !GUIDE_IMAGE_TYPES.has(mediaType)) {
+        skipped.push(`${fileName}(이미지·PDF 가 아니라 열어 볼 수 없음)`);
+        continue;
+      }
+
+      const bytes = blob.data as ArrayBuffer;
+      if (bytes.byteLength === 0) {
+        skipped.push(`${fileName}(빈 파일)`);
+        continue;
+      }
+      if (
+        bytes.byteLength > GUIDE_MAX_FILE_BYTES ||
+        total + bytes.byteLength > GUIDE_MAX_TOTAL_BYTES
+      ) {
+        skipped.push(`${fileName}(용량이 커서 열어 볼 수 없음)`);
+        continue;
+      }
+      total += bytes.byteLength;
+
+      files.push({
+        fileName,
+        mediaType,
+        data: Buffer.from(bytes).toString("base64"),
+        from: ref.from,
+      });
+    } catch (e) {
+      console.error("[collab-ai] guide file read failed", e);
+      skipped.push(`${fileName}(읽는 중 오류)`);
+    }
+  }
+
+  return { files, skipped };
+}
+
+/**
+ * 협업 대화에 올라온 이미지·PDF 첨부를 최신순으로 모은다. 기본 가이드는 브랜드(비즈니스)
+ * 쪽에서 오므로 비즈니스가 올린 파일을 앞에 둔다.
+ */
+function collectGuideRefs(comments: CollabComment[]): GuideRef[] {
+  const fromBusiness: GuideRef[] = [];
+  const fromOthers: GuideRef[] = [];
+
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const c = comments[i];
+    for (const a of attachmentsOf(c)) {
+      const fileName = String(a?.fileName || "");
+      const type = resolveContentType(fileName, String(a?.fileType || "")) || "";
+      if (type !== GUIDE_PDF_TYPE && !GUIDE_IMAGE_TYPES.has(type)) continue;
+      const ref: GuideRef = {
+        url: a?.url,
+        fileName,
+        fileType: type,
+        from: `${c.authorName || "(이름 없음)"}(${roleLabel(c.authorType)})`,
+      };
+      if (c.authorType === "business" || c.authorType === "manager") fromBusiness.push(ref);
+      else fromOthers.push(ref);
+    }
+  }
+
+  return [...fromBusiness, ...fromOthers].slice(0, GUIDE_MAX_FILES * 3);
 }
 
 interface CollabMeta {
@@ -90,11 +266,21 @@ const relTime = (dateStr?: string) => {
 
 const roleLabel = (authorType?: string) => (authorType === "business" ? "비즈니스" : "인플루언서");
 
+// 첨부는 개수만 알려 주면 "가이드 파일 보내주신 거 있나요?" 같은 질문에 답할 수 없다.
+// 파일명을 그대로 보여 줘야 어떤 파일이 가이드인지 모델이 골라낼 수 있다.
+const attachmentLabel = (c?: CollabComment) => {
+  const names = attachmentsOf(c)
+    .map((a) => String(a?.fileName || "").trim())
+    .filter(Boolean);
+  if (names.length === 0) return "";
+  return `[첨부 파일: ${names.slice(0, 4).join(", ")}${names.length > 4 ? ` 외 ${names.length - 4}개` : ""}]`;
+};
+
 const previewOf = (c?: CollabComment) => {
   if (!c) return "";
   if (c.content) return oneLine(c.content, 70);
-  if (Array.isArray(c.attachments) && c.attachments.length > 0)
-    return `[첨부 파일 ${c.attachments.length}개]`;
+  const files = attachmentLabel(c);
+  if (files) return oneLine(files, 70);
   return "[빈 메시지]";
 };
 
@@ -102,11 +288,12 @@ const transcriptOf = (comments: CollabComment[], maxMsgs: number, maxChars: numb
   const recent = comments.slice(-maxMsgs);
   let s = recent
     .map((c) => {
+      const files = attachmentLabel(c);
       const text = c.content
-        ? c.content
-        : Array.isArray(c.attachments) && c.attachments.length > 0
-          ? `[첨부 파일 ${c.attachments.length}개]`
-          : "[빈 메시지]";
+        ? files
+          ? `${c.content} ${files}`
+          : c.content
+        : files || "[빈 메시지]";
       return `    ${c.authorName || "(이름 없음)"}(${roleLabel(c.authorType)}): ${oneLine(text, 240)}`;
     })
     .join("\n");
@@ -118,13 +305,17 @@ const transcriptOf = (comments: CollabComment[], maxMsgs: number, maxChars: numb
 // collaboration threads. Conversation metadata can be supplied by the client
 // (the list it already renders); transcripts are always read from the canonical
 // `timelines` Blobs store so the AI sees real message content.
+//
+// The image/PDF attachments of the conversation in focus are returned alongside
+// the text — those are where the brand's base guide lives.
 async function buildWorkspaceContext(
   username: string,
   userType: string,
   activeProposalId: string,
   clientTimelines: CollabMeta[],
-): Promise<string | null> {
+): Promise<{ text: string | null; guideRefs: GuideRef[] }> {
   const store = getStore("timelines");
+  let guideRefs: GuideRef[] = [];
 
   let list: CollabMeta[] =
     Array.isArray(clientTimelines) && clientTimelines.length > 0 ? clientTimelines : [];
@@ -134,7 +325,7 @@ async function buildWorkspaceContext(
       .catch(() => null)) as CollabMeta[] | null;
     list = Array.isArray(idx) ? idx : [];
   }
-  if (list.length === 0) return null;
+  if (list.length === 0) return { text: null, guideRefs };
 
   // De-duplicate by proposalId, most-recent first, then cap.
   const seen = new Set<string>();
@@ -189,9 +380,15 @@ async function buildWorkspaceContext(
       `   마지막: ${last ? `${last.authorName}(${roleLabel(last.authorType)}) "${previewOf(last)}" (${relTime(last.createdAt)})` : "메시지 없음"}`;
 
     if (isActive) {
+      guideRefs = collectGuideRefs(comments);
+      const guideLine = guideRefs.length
+        ? `\n이 협업에 올라온 파일(가이드일 수 있음): ${guideRefs
+            .map((g) => `${g.fileName} — ${g.from}`)
+            .join(" / ")}`
+        : "";
       activeBlock =
         `\n\n[지금 보고 있는 협업 상세]\n` +
-        `상대: ${partner} · 제안: "${title}"\n` +
+        `상대: ${partner} · 제안: "${title}"${guideLine}\n` +
         `최근 대화:\n${transcriptOf(comments, ACTIVE_CONV_MSGS, ACTIVE_CONV_CHARS)}`;
       blocks.push(header);
     } else if (comments.length > 0) {
@@ -220,7 +417,7 @@ async function buildWorkspaceContext(
     body += b + "\n\n";
   }
 
-  return overview + body + activeBlock;
+  return { text: overview + body + activeBlock, guideRefs };
 }
 
 export default async (req: Request) => {
@@ -245,6 +442,11 @@ export default async (req: Request) => {
   const userType = body?.userType === "business" ? "business" : "influencer";
   const activeProposalId = String(body?.activeProposalId || "");
   const clientTimelines: CollabMeta[] = Array.isArray(body?.timelines) ? body.timelines : [];
+  // 사용자가 AI 대화창에서 직접 올린 파일(브랜드 가이드 등). 실제 파일은 업로드 시
+  // Blobs 에 저장되므로 여기서는 주소만 받는다.
+  const clientAttachments: GuideRef[] = Array.isArray(body?.attachments)
+    ? (body.attachments as GuideRef[]).slice(0, GUIDE_MAX_FILES)
+    : [];
   // Which model to answer with. Gemini (default) is bundled into the AI memberships;
   // Claude is the optional premium model gated on the separately-purchased Claude plan.
   const useClaude = body?.model === "claude";
@@ -358,16 +560,54 @@ export default async (req: Request) => {
   // legacy single-conversation transcript the client used to send when the
   // overview cannot be assembled.
   let workspaceContext: string | null = null;
+  let discoveredGuideRefs: GuideRef[] = [];
   try {
-    workspaceContext = await buildWorkspaceContext(
+    const built = await buildWorkspaceContext(
       username,
       userType,
       activeProposalId,
       clientTimelines,
     );
+    workspaceContext = built.text;
+    discoveredGuideRefs = built.guideRefs;
   } catch (e) {
     console.error("[collab-ai] failed to build workspace context", e);
   }
+
+  // 브랜드 기본 가이드 읽기. 사용자가 직접 올린 파일이 있으면 그것을 쓰고, 없으면
+  // 지금 보고 있는 협업에 올라온 이미지·PDF 를 가져온다(가이드를 봐야 하는 요청일 때만).
+  const lastUserText = [...messages].reverse().find((m) => m.role !== "assistant")?.content || "";
+  const wantsGuide = GUIDE_INTENT_RE.test(String(lastUserText));
+  let guideFiles: GuideFile[] = [];
+  let skippedGuideFiles: string[] = [];
+  try {
+    const loaded = await loadGuideFiles(
+      clientAttachments.length > 0
+        ? clientAttachments
+        : wantsGuide
+          ? discoveredGuideRefs.slice(0, GUIDE_MAX_FILES)
+          : [],
+    );
+    guideFiles = loaded.files;
+    skippedGuideFiles = loaded.skipped;
+  } catch (e) {
+    console.error("[collab-ai] failed to load guide files", e);
+  }
+
+  // 첨부한 파일이 무엇인지 모델에게 한 줄로 알려 준다(이미지·PDF 블록만으로는
+  // 파일명과 출처를 알 수 없다). 못 읽은 파일도 함께 알려 사용자에게 전달되게 한다.
+  const guideNoteBody =
+    (guideFiles.length
+      ? `[함께 첨부된 파일 ${guideFiles.length}개] ` +
+        guideFiles.map((f) => `${f.fileName}${f.from ? ` (올린 사람: ${f.from})` : ""}`).join(", ") +
+        "\n위 파일이 이 메시지와 함께 첨부되어 있습니다. 브랜드 가이드라면 내용을 끝까지 읽고 " +
+        "필수 준수사항을 그대로 반영해 답하세요.\n"
+      : "") +
+    (skippedGuideFiles.length
+      ? `[열어 보지 못한 파일] ${skippedGuideFiles.join(", ")}\n` +
+        "이 파일들은 내용을 볼 수 없으니 아는 척하지 말고, 답변 끝에 한 줄로 알려 주세요.\n"
+      : "");
+  const guideNote = guideNoteBody ? guideNoteBody + "\n" : "";
 
   const legacyTranscript = context?.transcript
     ? String(context.transcript).slice(-MAX_CONTEXT_CHARS)
@@ -375,14 +615,110 @@ export default async (req: Request) => {
 
   const systemInstruction =
     "당신은 픽스폴리오(Picksfolio)의 인플루언서·비즈니스 협업을 돕는 유능한 한국어 AI 업무 비서입니다. " +
-    "당신에게는 사용자의 '모든' 협업 대화 목록과 현황이 제공됩니다. 따라서 다음과 같은 일을 도울 수 있습니다:\n" +
-    "- 전체 현황 파악: 지금 대화 중인 업체(협업)가 몇 곳인지, 어떤 협업이 답장이 필요한지, 안 읽은 메시지가 있는지 알려주기\n" +
-    "- 특정 업체 대응: 사용자가 언급한 업체와의 대화를 찾아 요약하고, 그 업체에 보낼 답장 초안을 작성하기\n" +
-    "- 우선순위 제안: 먼저 답해야 할 협업, 마감/일정이 임박한 협업을 정리해 주기\n" +
-    "- 일정·할 일 정리, 협상 포인트 정리, 메시지 톤 다듬기\n" +
-    "- 업무 일반 지식 상담: 협업 데이터에 없는 주제라도 인플루언서·커머스 비즈니스 운영에 필요한 " +
-    "계약·정산·세금·광고 표시(뒷광고)·저작권/초상권·개인정보·전자상거래 등 법적·업무적 질문에 " +
-    "당신의 일반 지식으로 실무적인 설명과 조언을 제공하기\n" +
+    "당신의 일은 크게 두 가지이고, 이 두 가지를 가장 잘 해내야 합니다.\n\n" +
+    "[역할 1] 인플루언서 콘텐츠 제작 지원 — 초안을 직접 써 준다\n" +
+    "- 협업 제품/브랜드에 맞는 **인스타그램 광고 캡션** 초안: 후킹 첫 문장, 본문, CTA, 해시태그 묶음까지 " +
+    "바로 붙여 쓸 수 있는 완성형으로 씁니다. 톤이 다른 버전을 2~3개 제시해 고를 수 있게 하세요.\n" +
+    "- **숏폼(릴스·쇼츠) 텍스트 가이드** 초안: 아래 [숏폼 가이드 고정 형식]을 반드시 그대로 지켜서 " +
+    "'장면 설명 → 자막'이 컷 순서대로 나열되게 씁니다. 무드는 [무드는 사용자와 함께 정한다] 규칙대로 " +
+    "사용자와 이야기하며 맞춰 갑니다.\n" +
+    "- **브랜드가 준 기본 가이드(이미지·PDF)를 읽고 쓰는 인플루언서 기획안**: 아래 [역할 1-B]가 " +
+    "이 일의 기준입니다. 가이드가 있으면 그 내용대로, 없으면 사용자와 이야기하며 잡아 갑니다.\n" +
+    "- 캡션·숏폼 문구를 쓸 때는 협업 대화에 나온 제품명·특징·강조점·금지 표현(가이드)을 최대한 반영하고, " +
+    "제품 정보가 부족하면 짐작으로 채우지 말고 초안은 일단 쓰되 '이 부분은 제품 정보가 필요하다'고 " +
+    "표시하거나 한두 가지만 되물으세요.\n" +
+    "- 광고·협찬 콘텐츠에는 대가성 표시(#광고 · #유료광고 · '유료 광고 포함' 등)를 반드시 넣고, " +
+    "의학적 효능 단정, 최고·1위 같은 과장 표현, 근거 없는 비교는 피하도록 안내하세요.\n\n" +
+    // 실제 협업은 브랜드가 준 기본 가이드(이미지·PDF)에서 시작한다. 그 파일이 붙어 오면
+    // 파일을 읽어 기획안을 쓰고, 없으면 인플루언서와 대화하면서 기획안을 잡아 간다.
+    "[역할 1-B] 브랜드 기본 가이드 → 인플루언서 기획안 작성 (콘텐츠 지원의 출발점)\n" +
+    "- 브랜드(담당자)가 주는 기본 가이드는 보통 **이미지나 PDF 파일**로 협업 대화에 올라옵니다. " +
+    "그런 파일이 함께 제공되면 먼저 **파일을 끝까지 읽고**, 거기 적힌 내용을 기획안의 뼈대로 삼으세요. " +
+    "특히 필수 문구·해시태그·계정 멘션, 강조해야 할 포인트, 금지 표현, 영상 길이·업로드 일정, " +
+    "반드시 담아야 할 장면을 빠짐없이 뽑아내세요.\n" +
+    "- 가이드에서 읽어낸 내용과 당신이 제안하는 내용을 섞지 마세요. 가이드에 적힌 것은 '(가이드)', " +
+    "협업 대화에서 나온 것은 '(협업 대화)', 당신의 제안은 표시 없이 씁니다. 파일이 흐릿하거나 " +
+    "일부만 보이면 지어내지 말고 '[가이드 확인 필요]'로 남기세요.\n" +
+    "- 파일을 읽을 수 없거나 첨부가 없는데 사용자가 가이드를 언급하면, 대화창 아래 첨부 버튼으로 " +
+    "가이드 파일(이미지·PDF)을 올려 달라고 한 줄로 안내하세요.\n" +
+    "- **가이드가 없으면 인플루언서와 이야기하면서 기획안을 잡아 갑니다.** 질문만 늘어놓지 말고, " +
+    "지금까지 나온 정보(제품, 협업 대화, 채널 성격)로 **먼저 기획안 초안을 한 번 써 준 뒤** " +
+    "빠진 것만 1~2개 물어보고, 답을 들으면 그 부분만 고쳐서 다시 보여 주세요. 무드·컷 수·강조점은 " +
+    "[무드는 사용자와 함께 정한다] 규칙대로 대화하며 좁혀 갑니다.\n" +
+    "- 기획안을 요청받으면(‘기획안’, ‘가이드 보고 정리해줘’, ‘이거대로 짜줘’ 등) 아래 " +
+    "[기획안 고정 형식]을 그대로 쓰세요.\n\n" +
+    "[기획안 고정 형식] 소제목을 **굵게** 한 줄씩 쓰고 그 아래에 내용을 채웁니다. 순서를 바꾸지 마세요.\n" +
+    "**콘텐츠 기획안 — (제품명) · (포맷: 릴스/피드/스토리) · (무드)**\n" +
+    "**1) 협업 개요** — 브랜드·제품, 콘텐츠 형태, 업로드 시기를 '- ' 항목으로 한 줄씩.\n" +
+    "**2) 가이드 필수 준수사항** — 반드시 지켜야 하는 것만 '- ' 항목으로. 줄 끝에 (가이드)/(협업 대화) " +
+    "출처를 붙입니다. 가이드 파일이 없으면 '가이드 미제공 — 담당자 확인 필요'라고 먼저 적고, " +
+    "일반적으로 확인해야 할 항목을 대신 나열하세요.\n" +
+    "**3) 콘셉트 한 줄** — 이 콘텐츠가 무엇을 보여 주는지 한 문장.\n" +
+    "**4) 무드·톤** — 정한 무드와 그렇게 잡은 이유 한 줄.\n" +
+    "**5) 컷 구성** — 아래 [숏폼 가이드 고정 형식]을 그대로 써서 컷을 나열합니다.\n" +
+    "**6) 캡션 초안** — 그대로 복사해 올릴 수 있는 완성형 캡션 1개(대가성 표시·해시태그 포함).\n" +
+    "**7) 촬영 준비물** — 2~4줄.\n" +
+    "**8) 담당자 확인 필요** — 가이드에 없어서 물어봐야 할 것 2~4줄.\n\n" +
+    // 숏폼 가이드는 매번 형식이 달라지면 촬영할 때 쓰기 어렵다. 컷 번호 → 영상(장면 지시) →
+    // 자막(화면에 올릴 문구) 순서를 고정한다. 초 단위 타임코드는 촬영하면서 어차피 달라지므로
+    // 넣지 않는다. 대신 무드는 사용자와 대화하면서 맞춰 간다.
+    "[숏폼 가이드 고정 형식] 숏폼 대본·촬영 가이드를 쓸 때는 아래 틀을 **그대로** 쓰세요. " +
+    "컷 번호 → 장면 설명(영상) → 화면 자막 순서를 절대 바꾸지 마세요.\n" +
+    "**숏폼 가이드 — (제품명) · (무드) · (총 컷 수)컷**\n" +
+    "1. 훅\n" +
+    "   - **영상:** 무엇을 어떻게 보여줄지 (동작·표정·클로즈업까지 구체적인 촬영 지시문)\n" +
+    "   - **자막:** 화면에 그대로 올릴 문구 (짧게, 필요하면 이모지)\n" +
+    "2. 문제 제기\n" +
+    "   - **영상:** ...\n" +
+    "   - **자막:** ...\n" +
+    "(이하 컷도 같은 형식으로 끝까지)\n" +
+    "형식 규칙:\n" +
+    "- 컷마다 그 컷의 역할(훅 / 문제 제기 / 제형·질감 / 사용법 / 근거·수치 / 서브 제품 / " +
+    "세안·마무리 / 결과 / CTA)을 번호 줄에 한 줄로 붙입니다.\n" +
+    "- **초 단위 타임코드([0-3초] 같은 표기)는 쓰지 마세요.** 촬영하면서 길이가 달라지므로 " +
+    "컷 순서와 역할만 보여 주면 됩니다. 사용자가 직접 요청할 때만 초를 넣으세요.\n" +
+    "- '영상'은 촬영자가 그대로 따라 찍을 수 있는 지시문, '자막'은 설명이 아니라 화면에 올릴 문구 " +
+    "그 자체로 씁니다. 자막은 한 줄 20자 안쪽으로 짧게 끊고, 화면 구석 보조 문구는 '(작은 자막)'을 앞에 붙입니다.\n" +
+    "- 컷 수는 짧은 영상 5~6컷, 보통 8~10컷, 긴 영상 10~12컷을 기준으로 잡습니다.\n" +
+    "- 마지막 컷은 항상 CTA(구매·프로필 링크 안내)로 끝내고, 브랜드 계정 멘션(@아이디)이 대화에 있으면 함께 넣습니다.\n" +
+    "- 임상 수치·순위·수상 이력 같은 숫자는 협업 대화에 근거가 있을 때만 쓰고, 없으면 자막에 " +
+    "'[확인 필요]'로 남겨 두세요. 지어내지 마세요.\n" +
+    "- 대본이 끝나면 '촬영 준비물'과 '담당자 확인 필요' 항목을 각각 2~4줄로 덧붙입니다.\n" +
+    "- 컷 번호는 '1.', '2.'처럼 번호 목록으로, 영상·자막은 그 아래에 세 칸 들여쓴 '- ' 항목으로 쓰세요. " +
+    "표나 코드 블록은 쓰지 마세요.\n\n" +
+    // 같은 제품이라도 채널 톤에 따라 대본이 완전히 달라진다. 한 번 던지고 끝내지 말고
+    // 사용자가 원하는 무드에 맞춰 계속 다듬어 주는 대화형 작업으로 다룬다.
+    "[무드는 사용자와 함께 정한다] 숏폼 가이드와 캡션은 무드(톤·분위기)에 따라 완전히 달라집니다. " +
+    "혼자 정해 버리지 말고 사용자와 이야기하며 맞춰 가세요.\n" +
+    "- 무드 지정이 없으면 먼저 가장 잘 맞을 무드 하나를 골라 **가이드를 끝까지 써 주고**, 맨 아래에 " +
+    "'지금 무드: OO — 다른 무드로 볼까요? (예: 솔직 리뷰형 / 감성 브이로그형 / 텐션 높은 유머형)'처럼 " +
+    "선택지를 2~3개 제시하세요. 무드를 물어보느라 초안을 미루지 마세요.\n" +
+    "- 무드 예시: 솔직 리뷰·검증형, 감성·잔잔한 브이로그형, 텐션 높은 유머·밈형, 정보 전달·전문가형, " +
+    "일상 브이로그 자연스러운형, 트렌디한 챌린지형, 고급스러운 무드 광고형. 사용자가 자기 채널 " +
+    "분위기를 말하면 그 표현을 그대로 받아 적용하세요.\n" +
+    "- 무드가 정해지면 자막 말투(반말·존댓말, 이모지 양, 감탄사), 영상 지시(카메라 움직임, 조명, " +
+    "표정, 배경), 컷 전환 속도를 그 무드에 맞게 통째로 바꿔 쓰세요. 무드만 바꾸고 문장은 " +
+    "그대로 두는 식은 안 됩니다.\n" +
+    "- '더 담백하게', '더 웃기게', '자막 더 짧게', '이 컷만 다시'처럼 수정 요청이 오면 전체를 다시 " +
+    "쓰지 말고 요청한 부분만 고쳐서 바뀐 컷을 보여 주세요. 앞 대화에서 정한 무드·제품·컷 구성은 " +
+    "계속 이어서 유지합니다.\n" +
+    "- 사용자가 이전 콘텐츠나 참고 영상 스타일을 말해 주면 그 톤을 기준으로 삼고, 필요하면 " +
+    "'어떤 무드로 갈까요?'를 한 줄로 짧게만 물으세요.\n\n" +
+    "[역할 2] 협업 담당자와의 대화·비즈니스 질문 처리 — 보낼 말을 대신 정리한다\n" +
+    "- 픽스폴리오 담당자(또는 브랜드)에게 보낼 **메시지 초안**을 씁니다. 일정 조정, 단가·조건 협의, " +
+    "가이드 확인, 수정 요청, 배송/제품 수령 문의, 정산 문의, 거절·보류 통보처럼 실제로 자주 보내는 " +
+    "메시지를 바로 복사해 보낼 수 있는 형태로 쓰세요. 예의는 지키되 요구사항이 분명하게 드러나야 합니다.\n" +
+    "- 협업 진행에 필요한 질문을 대신 정리해 줍니다. 사용자가 무엇을 물어야 할지 모를 때 " +
+    "'담당자에게 지금 확인해야 할 것' 목록(마감일, 사용 기간·2차 활용 범위, 필수 문구, 수정 횟수, " +
+    "정산 시점·방식 등)을 짚어 주세요.\n" +
+    "- 업무 일반 지식 상담: 계약·정산·세금·광고 표시(뒷광고)·저작권/초상권·개인정보·전자상거래처럼 " +
+    "인플루언서·커머스 운영에 필요한 질문에 실무적인 설명과 조언을 제공하세요.\n\n" +
+    "[함께 제공되는 데이터] 당신에게는 사용자의 '모든' 협업 대화 목록과 현황이 제공됩니다. 그래서 다음도 " +
+    "할 수 있습니다: 전체 협업 현황 파악(몇 곳과 대화 중인지, 어디가 답장이 필요한지, 안 읽은 메시지), " +
+    "특정 업체 대화 요약, 답장이 급한 순서 정리, 일정·할 일 정리, 메시지 톤 다듬기.\n" +
+    "대화에 올라온 첨부 파일은 '[첨부 파일: 파일명]'으로 표시되고, 지금 보고 있는 협업의 이미지·PDF " +
+    "파일은 필요할 때 실제 내용까지 함께 전달됩니다. 파일이 전달되면 그 내용을 근거로 답하고, " +
+    "파일명만 보이고 내용이 오지 않았다면 내용을 아는 척하지 마세요.\n\n" +
     "답변 규칙:\n" +
     "1) 사용자의 협업 '사실'(업체 수, 누구와 무슨 대화를 했는지, 누가 답장이 필요한지 등)은 반드시 " +
     "제공된 협업 데이터에 근거해서만 답하고, 데이터에 없는 사실은 지어내지 말고 모른다고 말하세요. " +
@@ -390,23 +726,26 @@ export default async (req: Request) => {
     "1-1) 협업 현황을 묻는 질문(예: '대화 중인 업체가 몇 곳이야?', '진행 중인 협업 알려줘')에는 숫자만 " +
     "단답하지 말고, 반드시 ①전체 업체 수와 함께 ②각 업체의 이름(상대 이름/회사명)을 하나씩 나열하고 " +
     "③각 업체의 대화 현황(답장이 필요한지, 안 읽은 메시지가 있는지, 마지막 메시지 요약 등)을 곁들여 " +
-    "한눈에 파악되도록 정리하세요. 사용자가 묻지 않았더라도 바로 다음 행동을 정할 수 있게 핵심 현황을 " +
-    "먼저 챙겨서 알려 주세요. 예를 들어 업체가 2곳이면 '총 2곳'이라고만 하지 말고 두 업체의 이름과 " +
-    "각각의 답장 필요 여부까지 함께 제시하세요.\n" +
-    "2) 반면 일반적인 업무·법률·세무·계약 지식 질문에는 협업 데이터에 없더라도 당신이 아는 범위에서 " +
-    "도움이 되는 설명과 실무 팁을 적극적으로 제공하세요. 다만 법률·세무처럼 책임이 큰 주제는 " +
-    "'일반적인 안내이며 구체적인 사안은 변호사·세무사 등 전문가 확인이 필요하다'는 점을 한 줄로 덧붙이고, " +
-    "확실하지 않으면 단정하지 말고 한계를 분명히 밝히세요.\n" +
+    "한눈에 파악되도록 정리하세요.\n" +
+    "2) 캡션·숏폼 가이드·기획안·메시지 초안을 요청받으면 되묻기부터 하지 말고 **먼저 초안을 완성해서 보여 주세요.** " +
+    "가정한 부분(제품 정보, 일정 등)은 초안 아래에 한 줄로 밝히고, 정말 필요한 확인 사항만 1~2개 짧게 " +
+    "덧붙이세요. 초안은 사용자가 그대로 복사해 쓸 수 있는 완성된 문장이어야 합니다.\n" +
+    "3) 일반적인 업무·법률·세무·계약 지식 질문에는 협업 데이터에 없더라도 아는 범위에서 도움이 되는 " +
+    "설명과 실무 팁을 적극적으로 제공하세요. 다만 법률·세무처럼 책임이 큰 주제는 '일반적인 안내이며 " +
+    "구체적인 사안은 변호사·세무사 등 전문가 확인이 필요하다'는 점을 한 줄로 덧붙이고, 확실하지 않으면 " +
+    "단정하지 말고 한계를 분명히 밝히세요.\n" +
     "항상 핵심을 먼저 제시하고, 필요하면 목록이나 짧은 단락으로 간결하고 친절하게 한국어로 답하세요.\n" +
     "가독성 규칙: 답변은 마크다운으로 작성하세요. 항목이 2개 이상이면 '- ' 글머리 기호나 '1.' 번호 목록을 쓰고, " +
     "단계·순서가 있으면 번호 목록을 쓰세요. 중요한 키워드(업체명, 금액, 마감일 등)는 **굵게** 강조하고, " +
-    "긴 답변은 짧은 단락으로 나누되, 표나 코드 블록은 쓰지 마세요. 단순한 질문이면 한 문장으로 끝내도 되지만, 협업 현황(업체 수·목록·답장 필요 여부 등)을 묻는 질문에는 위 1-1 규칙대로 업체 이름과 현황을 함께 정리해 주세요." +
+    "긴 답변은 짧은 단락으로 나누되, 표나 코드 블록은 쓰지 마세요. 캡션이나 메시지 초안은 어디까지가 " +
+    "그대로 보낼 문장인지 알 수 있게 '초안 1', '숏폼 대본'처럼 소제목을 붙여 구분하세요. " +
+    "단순한 질문이면 한 문장으로 끝내도 되지만, 협업 현황(업체 수·목록·답장 필요 여부 등)을 묻는 질문에는 위 1-1 규칙대로 업체 이름과 현황을 함께 정리해 주세요." +
     (workspaceContext
       ? `\n\n아래는 현재 사용자의 협업 현황 데이터입니다. 이 데이터를 근거로 답하세요:\n${workspaceContext}`
       : legacyTranscript
         ? `\n\n[현재 협업: ${context?.title || "(제목 없음)"} · 상대: ${context?.partner || "(상대 정보 없음)"}]\n` +
           `아래는 이 협업의 최근 대화 내용입니다. 이 내용을 바탕으로 답해 주세요:\n${legacyTranscript}`
-        : "\n\n현재 불러올 수 있는 협업 대화가 없습니다. 협업이 아직 없다면 일반적인 협업·업무 도움을 제공하세요.");
+        : "\n\n현재 불러올 수 있는 협업 대화가 없습니다. 협업이 아직 없다면 콘텐츠 초안 작성이나 일반적인 협업·업무 도움을 제공하세요.");
 
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {
@@ -414,10 +753,42 @@ export default async (req: Request) => {
     // overview) is sent as a cached block, so repeat turns within ~5 minutes are
     // billed at the discounted cache-read rate — the saving is passed through to
     // the member's credit deduction, keeping long conversations cheap.
-    const claudeMessages = messages.slice(-MAX_TURNS).map((m) => ({
+    const claudeMessages: { role: string; content: any }[] = messages.slice(-MAX_TURNS).map((m) => ({
       role: m.role === "assistant" ? "assistant" : "user",
       content: String(m.content || ""),
     }));
+
+    // 첨부한 가이드 파일은 마지막 사용자 메시지에 붙인다. PDF(document)는 텍스트보다
+    // 앞에 두어야 모델이 문서를 먼저 읽고 답한다.
+    if (guideNote) {
+      let lastUser = -1;
+      for (let i = claudeMessages.length - 1; i >= 0; i--) {
+        if (claudeMessages[i].role === "user") {
+          lastUser = i;
+          break;
+        }
+      }
+      if (lastUser >= 0) {
+        claudeMessages[lastUser] = {
+          role: "user",
+          content: [
+            ...guideFiles
+              .filter((f) => f.mediaType === GUIDE_PDF_TYPE)
+              .map((f) => ({
+                type: "document",
+                source: { type: "base64", media_type: f.mediaType, data: f.data },
+              })),
+            ...guideFiles
+              .filter((f) => f.mediaType !== GUIDE_PDF_TYPE)
+              .map((f) => ({
+                type: "image",
+                source: { type: "base64", media_type: f.mediaType, data: f.data },
+              })),
+            { type: "text", text: guideNote + String(claudeMessages[lastUser].content || "") },
+          ],
+        };
+      }
+    }
 
     try {
       const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
@@ -429,7 +800,11 @@ export default async (req: Request) => {
         },
         body: JSON.stringify({
           model: CLAUDE_MODEL,
-          max_tokens: 1024,
+          // 캡션 초안 2~3개나 숏폼 대본은 1,024 토큰에서 문장 중간에 끊긴다.
+          // 기획안(개요+준수사항+컷 구성+캡션)은 그보다도 길어서 더 여유가 필요하다.
+          // 한국어는 토큰이 더 많이 들어간다(크레딧은 실제 사용량으로 차감되므로,
+          // 한도를 올려도 짧은 답변의 비용은 그대로다).
+          max_tokens: 3072,
           temperature: 0.6,
           system: [
             { type: "text", text: systemInstruction, cache_control: { type: "ephemeral" } },
@@ -496,10 +871,31 @@ export default async (req: Request) => {
   }
 
   // ── Gemini (default, membership-bundled) ───────────────────────────────────
-  const contents = messages.slice(-MAX_TURNS).map((m) => ({
+  const contents: { role: string; parts: any[] }[] = messages.slice(-MAX_TURNS).map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: String(m.content || "") }],
   }));
+
+  // 가이드 파일은 마지막 사용자 차례에 inlineData 로 함께 보낸다.
+  if (guideNote) {
+    let lastUser = -1;
+    for (let i = contents.length - 1; i >= 0; i--) {
+      if (contents[i].role === "user") {
+        lastUser = i;
+        break;
+      }
+    }
+    if (lastUser >= 0) {
+      const text = String(contents[lastUser].parts[0]?.text || "");
+      contents[lastUser] = {
+        role: "user",
+        parts: [
+          ...guideFiles.map((f) => ({ inlineData: { mimeType: f.mediaType, data: f.data } })),
+          { text: guideNote + text },
+        ],
+      };
+    }
+  }
 
   try {
     const res = await fetch(
@@ -513,7 +909,8 @@ export default async (req: Request) => {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents,
-          generationConfig: { temperature: 0.6, maxOutputTokens: 1024 },
+          // 캡션·숏폼 대본·기획안 초안이 문장 중간에 끊기지 않도록 여유를 둔다.
+          generationConfig: { temperature: 0.6, maxOutputTokens: 3072 },
         }),
       },
     );
