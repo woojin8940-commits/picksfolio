@@ -157,6 +157,7 @@ export function offerFromCampaign(campaign: any): ListupOffer {
 }
 
 export type ChannelSnapshot = {
+  profileImage: string;
   instagramHandle: string;
   instagramUrl: string;
   followers: number;
@@ -183,6 +184,7 @@ export type ChannelSnapshot = {
 };
 
 const emptySnapshot = (): ChannelSnapshot => ({
+  profileImage: "",
   instagramHandle: "",
   instagramUrl: "",
   followers: 0,
@@ -211,6 +213,7 @@ export function shapeChannel(row: any): ChannelSnapshot {
   if (!row) return base;
   return {
     ...base,
+    profileImage: row.profile_image || "",
     instagramHandle: row.instagram_handle || "",
     instagramUrl: row.instagram_url || "",
     followers: Number(row.followers || 0),
@@ -247,8 +250,14 @@ export async function buildSnapshot(
 }
 
 /** 채널 행 + 등록서 행을 하나의 스냅샷으로 겹친다. 합치는 규칙은 여기 한 군데만 둔다. */
-function mergeSnapshot(channel: any, dir: any): ChannelSnapshot {
+function mergeSnapshot(channel: any, dir: any, site: any): ChannelSnapshot {
   const snap = shapeChannel(channel);
+
+  // 프로필 사진은 메타에서 받아 둔 인스타 사진이 먼저다. 픽스폴리오 안에서 따로
+  // 꾸민 아바타는 인스타 연동만 하고 페이지를 안 만든 사람에게는 없기 때문에,
+  // 그것만 보면 명단 절반이 회색 동그라미가 된다. 채널 쪽이 비었을 때만 되돌아간다.
+  snap.profileImage =
+    String(channel?.profile_image || "") || String(site?.data?.profile?.avatar_url || "");
 
   if (dir) {
     snap.name = dir.name || "";
@@ -281,7 +290,7 @@ export async function buildSnapshots(
   const out = new Map<string, ChannelSnapshot>();
   if (!names.length) return out;
 
-  const [channelRows, dirRows] = await Promise.all([
+  const [channelRows, dirRows, siteRows] = await Promise.all([
     db.sql`SELECT * FROM creator_channels WHERE username = ANY(${names})` as Promise<any[]>,
     // 등록서는 사람마다 여러 장일 수 있다. 가장 최근 것만 본다(단건 조회의 LIMIT 1 과 같은 규칙).
     db.sql`
@@ -290,17 +299,97 @@ export async function buildSnapshots(
       WHERE role = 'influencer' AND applicant_username = ANY(${names})
       ORDER BY applicant_username, created_at DESC
     ` as Promise<any[]>,
+    db.sql`SELECT username, data FROM site_data WHERE username = ANY(${names})` as Promise<any[]>,
   ]);
 
   const channelBy = new Map<string, any>();
   for (const row of (channelRows as any[]) || []) channelBy.set(norm(row.username), row);
   const dirBy = new Map<string, any>();
   for (const row of (dirRows as any[]) || []) dirBy.set(norm(row.applicant_username), row);
+  const siteBy = new Map<string, any>();
+  for (const row of (siteRows as any[]) || []) siteBy.set(norm(row.username), row);
 
   for (const name of names) {
-    out.set(name, mergeSnapshot(channelBy.get(name), dirBy.get(name)));
+    out.set(name, mergeSnapshot(channelBy.get(name), dirBy.get(name), siteBy.get(name)));
   }
   return out;
+}
+
+/**
+ * 명단 행에 굳어 있는 스냅샷 위에 지금 채널 값을 덧입힌다.
+ *
+ * 스냅샷을 굳히는 이유는 기록이다. 명단에 올릴 때 브랜드가 보고 판단한 숫자가
+ * 나중에 바뀌면 "왜 이 사람을 골랐나"를 되짚을 수 없다. 그런데 그 규칙만 두면
+ * 곤란한 경우가 둘 있다.
+ *
+ * 하나, 메타 연동 전에 명단에 오른 사람은 스냅샷이 통째로 비어 있고, 나중에 연동을
+ * 마쳐도 명단 카드는 영영 '—' 로 남는다. 브랜드 화면에 평균 조회수와 최근 릴스가
+ * 안 나온다는 말은 대부분 이 경우다.
+ *
+ * 둘, 메타가 주는 썸네일·프로필 사진 주소는 만료된다. 굳은 주소를 계속 쓰면 시간이
+ * 지날수록 카드의 그림이 하나씩 깨진 자리로 바뀐다.
+ *
+ * 그래서 숫자는 "비어 있을 때만" 채우고(굳은 값은 절대 덮지 않는다), 만료되는
+ * 주소류(프로필 사진·릴스·피드)는 지금 값이 있으면 그쪽을 쓴다. 판단 근거는 그대로
+ * 두면서 화면만 살아 있게 하는 절충이다.
+ */
+export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[]> {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return list;
+
+  const names = Array.from(
+    new Set(list.map((r) => norm(r?.influencer_username)).filter(Boolean)),
+  );
+  if (!names.length) return list;
+
+  let channelRows: any[] = [];
+  try {
+    channelRows = (await db.sql`
+      SELECT * FROM creator_channels WHERE username = ANY(${names})
+    `) as any[];
+  } catch (e) {
+    // 지표 새로 고침은 덤이다. 실패해도 굳은 스냅샷으로 명단은 그려져야 한다.
+    console.warn("[listup] 채널 지표 새로 고침 실패:", (e as Error)?.message);
+    return list;
+  }
+
+  const channelBy = new Map<string, any>();
+  for (const row of channelRows || []) channelBy.set(norm(row.username), row);
+
+  return list.map((row) => {
+    const channel = channelBy.get(norm(row?.influencer_username));
+    if (!channel) return row;
+    const frozen = (row?.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}) as any;
+    const live = shapeChannel(channel);
+
+    const fill = (key: keyof ChannelSnapshot) =>
+      Number(frozen?.[key] || 0) > 0 ? Number(frozen[key]) : Number(live[key] || 0);
+
+    return {
+      ...row,
+      snapshot: {
+        ...frozen,
+        followers: fill("followers"),
+        avgViews: fill("avgViews"),
+        avgLikes: fill("avgLikes"),
+        avgComments: fill("avgComments"),
+        reelsCount: fill("reelsCount"),
+        connected: frozen?.connected || live.connected,
+        metricsSource: frozen?.metricsSource || live.metricsSource,
+        profileImage: live.profileImage || String(frozen?.profileImage || ""),
+        recentReels: live.recentReels.length
+          ? live.recentReels
+          : Array.isArray(frozen?.recentReels)
+            ? frozen.recentReels
+            : [],
+        recentFeed: live.recentFeed.length
+          ? live.recentFeed
+          : Array.isArray(frozen?.recentFeed)
+            ? frozen.recentFeed
+            : [],
+      },
+    };
+  });
 }
 
 /** campaign_listups 행 → 화면용. 인플루언서에게는 다른 후보 이야기가 가지 않는다. */
@@ -407,6 +496,12 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
  *
  * 화면에서만 별표로 덮는 방식은 쓰지 않는다. 응답에 값이 실려 있으면 가린 것이
  * 아니다. 수락된 뒤에는 이미 협업이 시작된 사이이므로 그대로 내보낸다.
+ *
+ * 프로필 사진은 가리지 않는다. 예전에는 지웠는데, 그러면 브랜드가 받는 명단이
+ * 회색 동그라미만 늘어선 화면이 되어 후보를 고를 마음 자체가 안 생긴다. 사진은
+ * 릴스 썸네일과 같은 성질의 판단 재료이고, 계정을 찾아가는 열쇠(아이디·주소·
+ * permalink)는 그대로 막아 두므로 가리는 목적 — 브랜드가 우리를 건너뛰고 직접
+ * 연락하는 것 — 은 그대로 지켜진다.
  */
 function maskSnapshot(snapshot: any, outreachStatus: string) {
   if (outreachStatus === "accepted") return snapshot;

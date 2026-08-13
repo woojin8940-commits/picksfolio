@@ -4,6 +4,7 @@ import { formatKoreanWon } from '../utils/formatters';
 import { parseAnchor } from '../utils/collabScenes';
 import StoryboardEditor from './collab/StoryboardEditor';
 import CollabReviewRoom from './collab/CollabReviewRoom';
+import CollabSharedWorkspace from './collab/CollabSharedWorkspace';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface CreatorCollabWorkspaceProps {
@@ -122,10 +123,15 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
         setBusy(false);
         return;
       }
-      payload = { url: uploadUrl.trim(), adCode: adCode.trim() };
+      payload = { uploadUrl: uploadUrl.trim(), adCode: adCode.trim() };
     }
 
-    const res = await apiService.collabAction(detail.id, 'submit_stage', { seq: stage.seq, payload });
+    const collabId = detail?.collab?.id;
+    const res = await apiService.collabAction(collabId, 'submit_deliverable', {
+      stageKey: stage.stageKey,
+      kind: stage.deliverableKind,
+      payload,
+    });
     setBusy(false);
     if (res.error) {
       notify(res.error, 'error');
@@ -135,7 +141,7 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
       setContentNote('');
       setUploadUrl('');
       setAdCode('');
-      await refreshDetail(detail.id);
+      await refreshDetail(collabId);
       await load();
     }
   };
@@ -143,13 +149,14 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
   const resolveFeedback = async (feedbackId: string, status: 'applied' | 'wont_apply') => {
     setBusy(true);
     const note = resolveNote[feedbackId] || '';
-    const res = await apiService.collabAction(detail.id, 'resolve_feedback', { feedbackId, status, note });
+    const collabId = detail?.collab?.id;
+    const res = await apiService.collabAction(collabId, 'resolve_feedback', { feedbackId, status, note });
     setBusy(false);
     if (res.error) {
       notify(res.error, 'error');
     } else {
       notify(isEn ? 'Status updated.' : '처리 상태가 반영되었습니다.');
-      await refreshDetail(detail.id);
+      await refreshDetail(collabId);
     }
   };
 
@@ -171,6 +178,19 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
       <p className="text-[11px] text-slate-400 font-medium mb-4">
         {isEn ? 'Send questions on terms or schedule to your manager.' : '조건 · 일정 문의는 담당자 채널로 보내 주세요. 브랜드와 직접 조율하지 않아도 됩니다.'}
       </p>
+
+      {/* 협업이 아직 없을 때. 캠페인 목록 안에 얹혀 있을 때(hideWhenEmpty)는 상자째
+          숨기지만, 메뉴로 직접 들어온 화면이 아무것도 없이 비어 있으면 화면이 깨진
+          것으로 읽힌다. 무엇을 기다리는 중인지 한 줄로 적어 둔다. */}
+      {!loading && collabs.length === 0 && (
+        <div className="border border-dashed border-slate-200 rounded-xl px-4 py-8 text-center">
+          <p className="text-xs text-slate-400 font-bold">
+            {isEn
+              ? 'No collaborations yet. Once you accept an offer, it shows up here.'
+              : '아직 진행 중인 협업이 없습니다. 받은 제안을 수락하면 이곳에 캠페인이 생기고, 기획안 · 영상 초안 · 광고코드를 브랜드와 주고받을 수 있습니다.'}
+          </p>
+        </div>
+      )}
 
       {message && (
         <div
@@ -402,6 +422,15 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
                           })}
                         </div>
                       </div>
+
+                      <CollabSharedWorkspace
+                        collabId={detail.collab.id}
+                        role="influencer"
+                        detail={detail}
+                        onRefresh={() => refreshDetail(detail.collab.id)}
+                        onNotify={notify}
+                        isEn={isEn}
+                      />
 
                       {(() => {
                         const kinds: Array<{ key: 'script' | 'content'; label: string }> = [

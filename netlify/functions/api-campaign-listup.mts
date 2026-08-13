@@ -12,6 +12,7 @@ import {
   normalizePayout,
   normalizeQuote,
   offerFromCampaign,
+  refreshListupSnapshots,
   shapeChannel,
   shapeListup,
 } from "./_shared/campaign-listup.mts";
@@ -158,7 +159,10 @@ export default async (req: Request) => {
           CASE brand_decision WHEN 'pick' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
           created_at DESC
       `;
-      const candidates = (listRows as any[]).map((r) => shapeListup(r, viewerRole));
+      // 굳은 스냅샷 위에 지금 채널 값을 덧입힌다. 연동을 나중에 마친 후보의 카드가
+      // 계속 '—' 로 남지 않게 하기 위한 것으로, 규칙은 refreshListupSnapshots 주석에 있다.
+      const freshRows = await refreshListupSnapshots(db, listRows as any[]);
+      const candidates = freshRows.map((r) => shapeListup(r, viewerRole));
       const listed = new Set((listRows as any[]).map((r) => norm(r.influencer_username)));
 
       const payload: Record<string, unknown> = {

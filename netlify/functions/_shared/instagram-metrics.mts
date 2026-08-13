@@ -113,6 +113,8 @@ export interface MetaMetrics {
   igUsername: string;
   followers: number | null;
   following: number | null;
+  /** 인스타 프로필 사진 주소. 못 받으면 빈 문자열 — 지난번 값을 지우지 않는다. */
+  profileImage: string;
   avgViews: number;
   avgLikes: number;
   avgComments: number;
@@ -389,16 +391,25 @@ export async function fetchInstagramMetrics(
   let igUsername = String(link.igUsername || "");
   let followers: number | null = null;
   let following: number | null = null;
+  let profileImage = "";
   try {
-    const profileRes = await fetch(
-      `https://${graphHost}/me?fields=username,followers_count,follows_count` +
-        `&access_token=${encodeURIComponent(token)}`,
-    );
+    // profile_picture_url 은 토큰 종류·권한에 따라 없는 필드일 수 있고, 그럴 때
+    // 그래프는 요청 전체를 400 으로 돌려준다. 사진 한 장 때문에 팔로워 수까지
+    // 잃으면 안 되므로, 실패하면 예전 필드만으로 한 번 더 부른다.
+    const baseFields = "username,followers_count,follows_count";
+    const askProfile = (fields: string) =>
+      fetch(
+        `https://${graphHost}/me?fields=${fields}` +
+          `&access_token=${encodeURIComponent(token)}`,
+      );
+    let profileRes = await askProfile(`${baseFields},profile_picture_url`);
+    if (!profileRes.ok) profileRes = await askProfile(baseFields);
     const profile = (await profileRes.json().catch(() => ({}))) as any;
     if (profileRes.ok) {
       if (profile?.username) igUsername = String(profile.username);
       if (typeof profile?.followers_count !== "undefined") followers = intOf(profile.followers_count);
       if (typeof profile?.follows_count !== "undefined") following = intOf(profile.follows_count);
+      profileImage = String(profile?.profile_picture_url || "");
     }
   } catch (e) {
     console.warn("[ig-metrics] 프로필(팔로워/팔로잉) 조회 실패:", (e as Error)?.message);
@@ -410,6 +421,7 @@ export async function fetchInstagramMetrics(
       igUsername,
       followers,
       following,
+      profileImage,
       avgViews: avg(reelViews),
       avgLikes: avg(reels.map((m) => intOf(m?.like_count))),
       avgComments: avg(reels.map((m) => intOf(m?.comments_count))),
@@ -480,6 +492,9 @@ export async function persistMetrics(
       : [];
 
   const handle = metrics.igUsername || String(existing?.instagram_handle || "");
+  // 프로필 사진도 같은 규칙이다. 이번 응답에 없으면(권한·필드 미지원) 지난번 주소를
+  // 남긴다. 단 계정이 바뀌었으면 물려받지 않는다 — 남의 얼굴이 걸린다.
+  const profileImage = metrics.profileImage || String(prior?.profile_image || "");
   // 프로필 주소도 계정을 따라간다. 바뀐 계정에 옛 주소가 남으면 브랜드가 다른 사람의
   // 프로필을 열어 보게 된다.
   const igUrl =
@@ -489,12 +504,12 @@ export async function persistMetrics(
     INSERT INTO creator_channels (
       username, instagram_handle, instagram_url, connected, followers, following, avg_views,
       avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed, synced_at,
-      intro, categories
+      intro, categories, profile_image
     ) VALUES (
       ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
       ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
       ${JSON.stringify(recentReels)}, ${JSON.stringify(recentFeed)}, NOW(),
-      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}
+      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}
     )
     ON CONFLICT (username) DO UPDATE SET
       instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
@@ -509,6 +524,7 @@ export async function persistMetrics(
       metrics_source = 'meta_api',
       recent_reels = EXCLUDED.recent_reels,
       recent_feed = EXCLUDED.recent_feed,
+      profile_image = EXCLUDED.profile_image,
       synced_at = NOW(),
       updated_at = NOW()
   `;

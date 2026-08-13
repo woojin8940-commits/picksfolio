@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
-import { reelGridCols } from './InfluencerCandidateCard';
+import { buildMediaStrip } from './InfluencerCandidateCard';
 
 /**
  * 브랜드가 보는 리스트업 — 담당자가 올린 추천 조합.
@@ -24,6 +24,8 @@ import { reelGridCols } from './InfluencerCandidateCard';
 interface CampaignListupBoardProps {
   campaignId: string;
   onNotify?: (message: string, type?: 'success' | 'error') => void;
+  /** 확정을 마쳤을 때. 부모가 진행사항 탭으로 옮겨 선택 결과를 바로 보여 준다. */
+  onConfirmed?: () => void;
 }
 
 const OUTREACH_BADGE: Record<string, { label: string; cls: string }> = {
@@ -50,7 +52,7 @@ const formatRemaining = (ms: number) => {
  */
 const profileLine = (c: any) => String(c?.profileLine || c?.snapshot?.categories || '').trim();
 
-const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify }) => {
+const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify, onConfirmed }) => {
   const [candidates, setCandidates] = useState<any[]>([]);
   const [campaign, setCampaign] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -144,8 +146,12 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
       return;
     }
     touched.current = false;
+    const picked = selected.size;
     await load();
-    notify(`${selected.size}명으로 확정했습니다. 담당자가 조건을 정리해 제안합니다.`);
+    notify(`${picked}명으로 확정했습니다. 진행사항에서 선택한 인플루언서를 확인할 수 있습니다.`);
+    // 확정 결과가 어디로 갔는지 말로만 알리면 브랜드는 명단 화면에 그대로 남아
+    // 같은 사람을 다시 담는다. 결과가 쌓이는 자리로 화면을 옮겨 준다.
+    if (onConfirmed) onConfirmed();
   };
 
   const openList = useMemo(
@@ -204,11 +210,13 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
             {[...openList, ...runningList].map((c) => {
               const snap = c.snapshot || {};
               const allReels = Array.isArray(snap.recentReels) ? snap.recentReels : [];
-              const reels = allReels.slice(0, 3);
               const trend = reelTrendOf(allReels);
               // 피드 9칸은 톤을 보는 자리다. 수락 전에는 서버가 permalink 를 지우므로
               // 그림만 오고, 그래도 판단에 필요한 것은 다 온다.
               const feed = (Array.isArray(snap.recentFeed) ? snap.recentFeed : []).slice(0, 9);
+              // 릴스로 시작해 피드로 잇는 그림 세 칸. 지원자 카드와 같은 규칙을 쓴다.
+              const media = buildMediaStrip(allReels, feed);
+              const reelSlots = media.filter(slot => slot.isReel).length;
               const outreach = OUTREACH_BADGE[c.outreachStatus] || OUTREACH_BADGE.not_sent;
               const locked = c.outreachStatus === 'accepted';
               const inList = selected.has(c.id);
@@ -227,10 +235,18 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                   }`}
                 >
                   <div className="flex items-start gap-2.5">
-                    {/* 프로필 사진은 받아 두지 않는다. 이름 끝 글자로 자리를 채운다. */}
-                    <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
-                      {String(snap.name || '?').slice(-1)}
-                    </div>
+                    {snap.profileImage ? (
+                      <img
+                        src={snap.profileImage}
+                        alt={`${snap.name || '인플루언서'} 프로필`}
+                        loading="lazy"
+                        className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
+                        {String(snap.name || '?').slice(-1)}
+                      </div>
+                    )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -286,14 +302,17 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
 
                   {/* 그림을 먼저 둔다. 브랜드가 후보를 거르는 첫 동작은 "이 계정 톤이
                       우리 제품과 맞나"를 보는 것이고, 그건 숫자가 아니라 그림이 답한다.
-                      예전에는 168px 안에 셋을 욱여넣어 한 칸이 50px 남짓이었는데, 그
-                      크기로는 무엇이 찍혔는지 알 수 없어 그림을 실은 뜻이 없었다.
+                      칸 수는 항상 셋이다. 릴스가 한 편뿐인 계정에서 칸을 줄이면 그
+                      한 칸이 카드 폭 절반을 먹어 카드만 커지고, 옆 카드와 높이가 달라져
+                      후보를 나란히 견줄 수 없다. 모자란 칸은 최근 피드로 채운다.
                       세로 9:16 을 그대로 늘리면 카드 하나가 화면을 다 먹으므로 4:5 로
                       자른다. */}
-                  {reels.length > 0 && (
+                  {media.length > 0 && (
                     <div className="mt-3">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <p className="text-[10px] text-slate-400 font-black">최근 릴스 {reels.length}편</p>
+                        <p className="text-[10px] text-slate-400 font-black">
+                          {reelSlots > 0 ? `최근 릴스 ${reelSlots}편` : '최근 게시물'}
+                        </p>
                         {trend && trend.percent !== null && (
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
@@ -303,27 +322,38 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                           </span>
                         )}
                       </div>
-                      <div className={`grid ${reelGridCols(reels.length)} gap-2`}>
-                        {reels.map((r: any, i: number) => (
-                          <div key={r?.id || i}>
-                            {r?.thumbnailUrl ? (
+                      <div className="grid grid-cols-3 gap-2">
+                        {media.map(slot => (
+                          <div key={slot.id}>
+                            {slot.thumbnailUrl ? (
                               <img
-                                src={r.thumbnailUrl}
+                                src={slot.thumbnailUrl}
                                 alt=""
                                 loading="lazy"
                                 className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
                               />
                             ) : (
                               <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
-                                <span className="text-[10px] text-slate-300 font-bold">영상</span>
+                                <span className="text-[10px] text-slate-300 font-bold">
+                                  {slot.isVideo ? '영상' : '사진'}
+                                </span>
                               </div>
                             )}
-                            <p
-                              className="text-[11px] text-slate-500 font-bold mt-1 truncate text-center"
-                              title={r?.views ? `조회 ${formatNumberWithCommas(r.views)}` : '조회수 비공개'}
-                            >
-                              {r?.views ? `조회 ${formatCountKo(r.views)}` : '비공개'}
-                            </p>
+                            {/* 조회수 줄은 릴스에만 붙는다. 피드 사진에는 조회수 지표가
+                                아예 없어 같은 자리에 '비공개'라 적으면 값을 숨긴
+                                계정으로 잘못 읽힌다. */}
+                            {slot.isReel ? (
+                              <p
+                                className="text-[10px] text-slate-500 font-bold mt-1 truncate text-center"
+                                title={slot.views ? `조회 ${formatNumberWithCommas(slot.views)}` : '조회수 비공개'}
+                              >
+                                {slot.views ? `조회 ${formatCountKo(slot.views)}` : '비공개'}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-slate-300 font-bold mt-1 truncate text-center">
+                                게시물
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -341,7 +371,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </div>
                   )}
 
-                  {/* 그림으로 한 번 거르고 나면 남는 것은 값이다. 팔로워·보장 조회수·
+                  {/* 그림으로 한 번 거르고 나면 남는 것은 값이다. 팔로워·평균 조회수·
                       광고비를 한 줄에 나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세
                       숫자에서 멈추게 한다. */}
                   <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
@@ -355,15 +385,15 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                       </p>
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] text-slate-400 font-black">보장 조회수</p>
+                      <p className="text-[10px] text-slate-400 font-black">평균 조회수</p>
                       <p
                         className="text-[17px] md:text-[19px] text-orange-500 font-black truncate"
-                        title={c.guaranteedViews ? formatNumberWithCommas(c.guaranteedViews) : ''}
+                        title={snap.avgViews ? formatNumberWithCommas(snap.avgViews) : ''}
                       >
-                        {c.guaranteedViews ? formatCountKo(c.guaranteedViews) : '—'}
+                        {snap.avgViews ? formatCountKo(snap.avgViews) : '—'}
                       </p>
-                      {c.cpv > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold truncate">CPV {c.cpv}원</p>
+                      {snap.reelsCount > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold truncate">릴스 {snap.reelsCount}편 기준</p>
                       )}
                     </div>
                     <div className="min-w-0">
@@ -410,7 +440,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
 
                   {open && (
                     <div className="mt-2 space-y-3">
-                      {reels.length > 0 &&
+                      {allReels.length > 0 &&
                         (trend ? (
                           <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
                             최근 {formatNumberWithCommas(trend.recent)}회

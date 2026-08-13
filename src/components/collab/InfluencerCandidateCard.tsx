@@ -52,6 +52,7 @@ import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 export type CandidateMetrics = {
   username: string;
+  profileImage?: string;
   name?: string;
   instagramHandle?: string;
   instagramUrl?: string;
@@ -76,6 +77,7 @@ export const metricsFrom = (raw: any): CandidateMetrics => {
   const snap = raw?.snapshot && typeof raw.snapshot === 'object' ? raw.snapshot : raw || {};
   return {
     username: String(raw?.influencerUsername || raw?.username || snap.username || ''),
+    profileImage: snap.profileImage || raw?.profileImage || '',
     name: snap.name || raw?.name || '',
     instagramHandle: snap.instagramHandle || raw?.instagramHandle || '',
     instagramUrl: snap.instagramUrl || raw?.instagramUrl || '',
@@ -110,17 +112,57 @@ export const candidateSortValues = (raw: any) => {
   return { followers: m.followers || 0, avgViews: m.avgViews || 0 };
 };
 
+export type MediaSlot = {
+  id: string;
+  thumbnailUrl: string;
+  permalink: string;
+  /** 릴스만 조회수를 갖는다. 피드 사진에는 조회수 지표가 없다. */
+  views: number;
+  isReel: boolean;
+  isVideo: boolean;
+};
+
+/** 카드 그림 칸 수. 항상 셋이다 — 이유는 buildMediaStrip 주석에 적었다. */
+export const MEDIA_SLOTS = 3;
+
 /**
- * 릴스 칸 수. Tailwind 는 클래스 문자열을 빌드 시점에 훑으므로 `grid-cols-${n}` 조립은
- * 사라진다 — 표에서 꺼낸다.
+ * 카드 앞면 그림 세 칸을 만든다.
  *
- * 연동한 지 얼마 안 된 계정은 릴스가 한두 편만 온다. 그때도 칸을 셋으로 나눠 두면
- * 그림 하나가 카드 구석의 조각으로 남아 무엇이 찍혔는지 알 수 없다. 대신 한 편일 때도
- * 폭을 다 주지는 않는다 — 4:5 그림 하나가 카드 높이를 다 먹으면 아래 숫자가 화면 밖으로
- * 밀린다.
+ * 예전에는 릴스 편수에 따라 칸 수를 바꿨다(한두 편이면 2칸, 셋이면 3칸). 그림을
+ * 크게 보여 주려는 뜻이었지만 결과는 반대였다 — 릴스가 한 편뿐인 계정에서 그
+ * 한 편이 카드 폭의 절반을 4:5 로 차지해, 후보 한 명이 화면 한 장을 다 먹었다.
+ * 그러면 여러 명을 나란히 견줄 수 없고, 카드가 크다고 정보가 늘어나지도 않는다.
+ *
+ * 그래서 칸 수를 셋으로 고정하고, 릴스로 못 채운 자리를 최근 피드로 잇는다.
+ * 계정 톤을 읽는 데 필요한 것은 "릴스인지 사진인지"가 아니라 최근에 무엇을
+ * 올렸는지이고, 카드 높이는 계정마다 같아야 훑는 눈이 같은 자리에서 멈춘다.
+ * 릴스는 조회수를 함께 실어 피드 사진과 구분한다.
  */
-export const reelGridCols = (count: number) =>
-  count <= 2 ? 'grid-cols-2' : 'grid-cols-3';
+export const buildMediaStrip = (reels: any[], feed: any[]): MediaSlot[] => {
+  const slots: MediaSlot[] = [];
+  const seen = new Set<string>();
+
+  const push = (item: any, isReel: boolean) => {
+    if (slots.length >= MEDIA_SLOTS) return;
+    const id = String(item?.id || '');
+    // 릴스는 피드에도 같이 들어온다(둘 다 메타의 media 목록에서 나온다). 같은
+    // 게시물을 두 칸에 그리면 최근 게시물이 셋인 계정으로 잘못 읽힌다.
+    if (id && seen.has(id)) return;
+    if (id) seen.add(id);
+    slots.push({
+      id: id || `${isReel ? 'reel' : 'feed'}-${slots.length}`,
+      thumbnailUrl: String(item?.thumbnailUrl || ''),
+      permalink: String(item?.permalink || ''),
+      views: Number(item?.views || 0),
+      isReel,
+      isVideo: isReel || String(item?.mediaType || '').toUpperCase() === 'VIDEO',
+    });
+  };
+
+  for (const reel of Array.isArray(reels) ? reels : []) push(reel, true);
+  for (const item of Array.isArray(feed) ? feed : []) push(item, false);
+  return slots;
+};
 
 /** 지표 출처. 클래스 이름은 문자열 조립 없이 표에서 꺼내야 Tailwind 가 살려 둔다. */
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
@@ -181,9 +223,12 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   const m = metricsFrom(data);
   const source = SOURCE_BADGE[m.metricsSource || 'none'] || SOURCE_BADGE.none;
   const allReels = m.recentReels || [];
-  const reels = allReels.slice(0, 3);
   const trend = reelTrendOf(allReels);
   const feed = (m.recentFeed || []).slice(0, 9);
+  // 릴스로 시작해 피드로 잇는 그림 세 칸. 릴스가 한 편뿐인 계정에서도 카드 높이가
+  // 같아야 후보 여러 명을 나란히 견줄 수 있다.
+  const media = buildMediaStrip(allReels, feed);
+  const reelSlots = media.filter(slot => slot.isReel).length;
 
   /**
    * 단가.
@@ -248,38 +293,48 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   );
 
   /**
-   * 릴스 썸네일 한 칸. 폭은 카드를 셋으로 나눈 칸이 정하고, 그림은 4:5 로 자른다.
+   * 그림 한 칸. 폭은 카드를 셋으로 나눈 칸이 정하고, 그림은 4:5 로 자른다.
    * 9:16 을 그대로 두면 카드 하나가 화면을 다 먹어 여러 명을 견줄 수 없고, 폭을
    * 고정한 조각으로 두면 무슨 영상인지 알아볼 수 없다.
+   *
+   * 조회수 줄은 릴스에만 붙는다. 피드 사진에는 조회수 지표 자체가 없어서, 같은
+   * 자리에 '비공개'라고 적으면 값을 숨긴 계정으로 잘못 읽힌다.
    */
-  const reelThumb = (r: any, i: number) => {
-    const views = Number(r?.views || 0);
+  const mediaThumb = (slot: MediaSlot) => {
     const inner = (
       <>
-        {r?.thumbnailUrl ? (
-          <img
-            src={r.thumbnailUrl}
-            alt=""
-            loading="lazy"
-            className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
-          />
+        <div className="relative">
+          {slot.thumbnailUrl ? (
+            <img
+              src={slot.thumbnailUrl}
+              alt=""
+              loading="lazy"
+              className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
+            />
+          ) : (
+            // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면 "게시물이 없는
+            // 계정"과 구분된다.
+            <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
+              <span className="text-[10px] text-slate-300 font-bold">{slot.isVideo ? '영상' : '사진'}</span>
+            </div>
+          )}
+        </div>
+        {slot.isReel ? (
+          <p
+            className="text-[10px] text-slate-500 font-bold mt-1 truncate text-center"
+            title={slot.views ? `조회 ${formatNumberWithCommas(slot.views)}` : '조회수 비공개'}
+          >
+            {slot.views ? `조회 ${formatCountKo(slot.views)}` : '비공개'}
+          </p>
         ) : (
-          <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
-            <span className="text-[10px] text-slate-400 font-bold">영상</span>
-          </div>
+          <p className="text-[10px] text-slate-300 font-bold mt-1 truncate text-center">게시물</p>
         )}
-        <p
-          className="text-[11px] text-slate-500 font-bold mt-1 truncate text-center"
-          title={views ? `조회 ${formatNumberWithCommas(views)}` : '조회수 비공개'}
-        >
-          {views ? `조회 ${formatCountKo(views)}` : '비공개'}
-        </p>
       </>
     );
-    return r?.permalink ? (
+    return slot.permalink ? (
       <a
-        key={r.id || i}
-        href={r.permalink}
+        key={slot.id}
+        href={slot.permalink}
         target="_blank"
         rel="noopener noreferrer"
         className="block hover:opacity-80"
@@ -287,7 +342,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         {inner}
       </a>
     ) : (
-      <div key={r?.id || i}>{inner}</div>
+      <div key={slot.id}>{inner}</div>
     );
   };
 
@@ -297,14 +352,18 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
           것은 이 줄 하나뿐이고, 그 구분자는 계정 아이디다. */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2.5 min-w-0">
-          {/* 프로필 사진은 받아 두지 않는다. 아이디 첫 글자로 자리를 채워 카드마다
-              같은 위치에서 시선이 시작되게 한다. */}
-          <div className="w-9 h-9 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
-            {String(handle || m.name || '?')
-              .replace('@', '')
-              .slice(0, 1)
-              .toUpperCase()}
-          </div>
+          {m.profileImage ? (
+            <img
+              src={m.profileImage}
+              alt={`${idLine} 프로필`}
+              loading="lazy"
+              className="w-9 h-9 rounded-full object-cover bg-slate-100 flex-shrink-0"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
+              {String(handle || m.name || '?').replace('@', '').slice(0, 1).toUpperCase()}
+            </div>
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-sm font-black text-slate-900 truncate" title={idLine}>
@@ -324,12 +383,14 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         )}
       </div>
 
-      {/* 최근 릴스 3편. 카드 폭을 꽉 채운다 — 계정 톤은 숫자가 아니라 그림이 답한다. */}
-      {reels.length > 0 && (
+      {/* 최근 게시물 세 칸. 계정 톤은 숫자가 아니라 그림이 답한다. 칸 수를 세 개로
+          못박아 릴스가 한 편뿐인 계정도 같은 높이의 카드로 나온다 — 후보를 나란히
+          견주는 화면에서 카드 크기가 사람마다 다르면 비교 자체가 안 된다. */}
+      {media.length > 0 && (
         <div className="mt-3">
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <p className="text-[10px] text-slate-400 font-black uppercase">
-              최근 릴스 {reels.length}편
+              {reelSlots > 0 ? `최근 릴스 ${reelSlots}편` : '최근 게시물'}
             </p>
             {trend && trend.percent !== null && (
               <span
@@ -340,8 +401,10 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               </span>
             )}
           </div>
-          <div className={`grid ${reelGridCols(reels.length)} gap-2`}>
-            {reels.map((r: any, i: number) => reelThumb(r, i))}
+          {/* grid-cols-3 을 문자열로 조합하지 않고 그대로 적는다. 테일윈드는 소스에
+              적힌 글자만 보고 클래스를 만든다. */}
+          <div className="grid grid-cols-3 gap-2">
+            {media.map(slot => mediaThumb(slot))}
           </div>
         </div>
       )}
@@ -418,7 +481,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
       {expanded && (
         <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-3">
           {/* 그림은 이미 겉에 크게 실었으므로 여기서는 숫자로 읽는 동향만 적는다. */}
-          {reels.length > 0 && (
+          {allReels.length > 0 && (
             <div>
               <p className="text-[10px] text-slate-400 font-black uppercase mb-1">최근 릴스 동향</p>
               {trend ? (
