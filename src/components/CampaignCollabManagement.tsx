@@ -948,7 +948,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   공동구매는 지원과 명단이 함께 온다.
                   제품 협찬형에는 리스트업이 없다(지원자만 받는다). 빈 명단을 띄워 두면
                   "담당자가 아직 안 올려 줬나"로 읽혀 오지 않을 명단을 기다리게 된다. */}
-              {mode.managerListup && <CampaignListupBoard campaignId={selectedCampaign.id} onNotify={notify} />}
+              {mode.managerListup && (
+                <CampaignListupBoard
+                  campaignId={selectedCampaign.id}
+                  onNotify={notify}
+                  onConfirmed={() => setDetailTab('progress')}
+                />
+              )}
 
               {/* 지원자 목록은 지원을 받는 방식에만 둔다. 광고비 지급형은 담당자가 조건에
                   맞는 후보를 찾아 올리는 길이라 지원이 들어오지 않는다 — 그 캠페인에서
@@ -1065,13 +1071,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       이 조건에 해당하는 지원자가 없습니다.
                     </p>
                   ) : (
-                    /* 한 줄에 둘까지만 놓는다. 셋으로 쪼개면 카드 폭이 좁아져 릴스
-                       썸네일이 알아볼 수 없는 크기가 되는데, 브랜드가 사람을 고르는
-                       마지막 판단은 그림이 한다. 모바일은 한 줄에 하나 — 폭이 반으로
-                       갈리면 팔로워·조회수 칸이 서로 줄바꿈돼 어느 숫자도 안 읽힌다.
-                       담당자 추천 명단과 같은 배치라, 두 화면을 오가며 후보를 견줘도
-                       눈이 같은 자리에서 같은 숫자를 찾는다. */
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
+                    /* 640px 부터 두 줄, 1280px 부터 세 줄로 나눈다. 예전에는 768px
+                       아래를 전부 한 줄로 뒀는데, 노트북 창을 반만 열어 둔 700px 언저리에서
+                       카드 하나가 폭을 다 먹어 지원자가 한 명일 때 카드가 화면만큼
+                       커 보였다. 담당자 추천 명단과 같은 배치라, 두 화면을 오가며 후보를
+                       견줘도 눈이 같은 자리에서 같은 숫자를 찾는다. */
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
                       {visibleApplyRows.map(app => (
                         /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
                            화면이 두 곳(담당자 명단 · 지원자 목록)인데 숫자가 다르게 생기면
@@ -1143,9 +1148,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                               </div>
                             </div>
                           }
-                          /* 지원자가 한 명뿐이면 접어 둘 이유가 없다 — 비교할 상대가
-                             없으니 바로 다 보여 주는 편이 빠르다. */
-                          defaultExpanded={visibleApplyRows.length === 1}
                         >
                           <div className="space-y-2">
                             {app.status === 'pending' && (

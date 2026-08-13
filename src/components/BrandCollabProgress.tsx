@@ -3,14 +3,15 @@ import { apiService } from '../services/apiService';
 import { formatKoreanWon } from '../utils/formatters';
 import { normalizeScenes, parseAnchor } from '../utils/collabScenes';
 import CollabReviewRoom from './collab/CollabReviewRoom';
+import CollabSharedWorkspace from './collab/CollabSharedWorkspace';
 
 /**
- * 브랜드가 보는 협업 진행 현황 (읽기 전용).
+ * 브랜드가 보는 협업 진행 현황.
  *
  * 브랜드는 캠페인을 올리고 지원자에게 의견을 남기는 데까지 관여한다. 그 뒤의 진행 —
  * 조건 확정, 대본 검수, 마감 관리, 업로드 확인 — 은 담당자가 맡는다. 그래서 이 화면에
- * 승인 버튼이 없다. 대신 "지금 어느 단계인지"와 "무엇이 제출되었는지"를 그대로 보여주고,
- * 하고 싶은 말은 담당자에게 전달한다.
+ * 단계 승인 권한은 담당자에게 두되, 브랜드는 공유된 기획안·영상 초안을 직접 확인하고
+ * 자료함에서 확인 완료 또는 수정 요청을 남긴다.
  *
  * 의견을 인플루언서에게 직접 보내지 않는 것이 이 구조의 핵심이다. 브랜드 원문은 담당자만
  * 보고(visible_to_influencer=false), 담당자가 정리해 전달한다 — 그러지 않으면 중간에
@@ -92,8 +93,50 @@ const dueText = (dueDate: string, daysLeft: number | null) => {
   return `${dueDate} · D-${daysLeft}`;
 };
 
+/**
+ * 브랜드가 선택만 해 둔 후보 한 줄.
+ *
+ * 선택('리스트에 담기' 확정)과 협업 시작 사이에는 두 단계가 더 있다 — 담당자가
+ * 제안을 보내고, 인플루언서가 수락해야 협업 기록이 생긴다. 그동안 진행사항이
+ * 비어 있으면 브랜드는 자기가 누른 선택이 어디로 갔는지 알 수 없어서 같은 사람을
+ * 다시 고르거나 담당자에게 되묻는다. 그래서 협업이 생기기 전 구간도 한 줄로 남긴다.
+ */
+type PickRow = {
+  id: string;
+  username: string;
+  name: string;
+  profileImage: string;
+  outreachStatus: string;
+  quotedFee: number;
+};
+
+/** 제안 진행 상태를 브랜드가 읽는 말로. 내부 상태 이름은 브랜드에게 뜻이 없다. */
+const OUTREACH_STEP: Record<string, { label: string; cls: string; hint: string }> = {
+  not_sent: {
+    label: '제안 준비 중',
+    cls: 'bg-slate-100 text-slate-500',
+    hint: '담당자가 조건을 정리해 제안을 보냅니다.',
+  },
+  sent: {
+    label: '제안 발송',
+    cls: 'bg-blue-50 text-blue-600',
+    hint: '인플루언서의 수락을 기다리는 중입니다.',
+  },
+  declined: {
+    label: '거절',
+    cls: 'bg-red-50 text-red-500',
+    hint: '담당자가 대체 후보를 다시 제안합니다.',
+  },
+  expired: {
+    label: '응답 없음',
+    cls: 'bg-slate-100 text-slate-500',
+    hint: '기한 안에 답이 오지 않았습니다. 담당자가 다시 연락합니다.',
+  },
+};
+
 const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, onNotify }) => {
   const [collabs, setCollabs] = useState<CollabRow[]>([]);
+  const [picks, setPicks] = useState<PickRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState('');
   const [detail, setDetail] = useState<any>(null);
@@ -115,7 +158,29 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
     setLoading(true);
     const res = await apiService.getCollabs('brand');
     const rows: CollabRow[] = res.collabs || [];
-    setCollabs(campaignId ? rows.filter(c => c.campaignId === campaignId) : rows);
+    const mine = campaignId ? rows.filter(c => c.campaignId === campaignId) : rows;
+    setCollabs(mine);
+
+    // 선택은 했지만 아직 협업이 안 열린 후보. 캠페인 한 건을 보고 있을 때만 붙인다 —
+    // 전체 협업 목록에서는 어느 캠페인의 선택인지 구분이 안 돼 줄만 늘어난다.
+    if (campaignId) {
+      const started = new Set(mine.map(c => String(c.creatorUsername || '').toLowerCase()));
+      const listup = await apiService.getCampaignListup(campaignId);
+      const waiting: PickRow[] = ((listup?.candidates || []) as any[])
+        .filter(c => c.brandDecision === 'pick' && c.outreachStatus !== 'accepted')
+        .filter(c => !started.has(String(c.snapshot?.username || c.influencerUsername || '').toLowerCase()))
+        .map(c => ({
+          id: String(c.id),
+          username: String(c.influencerUsername || ''),
+          name: String(c.snapshot?.name || ''),
+          profileImage: String(c.snapshot?.profileImage || ''),
+          outreachStatus: String(c.outreachStatus || 'not_sent'),
+          quotedFee: Number(c.quotedFee || 0),
+        }));
+      setPicks(waiting);
+    } else {
+      setPicks([]);
+    }
     setLoading(false);
   }, [campaignId]);
 
@@ -184,12 +249,13 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
     );
   }
 
-  if (collabs.length === 0) {
+  if (collabs.length === 0 && picks.length === 0) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
         <h3 className="text-lg font-black text-slate-900 mb-2">협업 진행 현황</h3>
         <p className="text-xs text-slate-400 font-medium">
-          담당자가 지원자를 선정하면 이곳에 협업이 생기고 단계별 진행 상황이 표시됩니다.
+          인플루언서 명단에서 선택을 완료하면 선택한 사람이 이곳에 한 줄씩 생기고, 제안 수락
+          이후에는 단계별 진행 상황과 자료함이 함께 표시됩니다.
         </p>
       </div>
     );
@@ -197,12 +263,69 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-sm">
-      <h3 className="text-lg font-black text-slate-900 mb-1">협업 진행 현황 ({collabs.length}건)</h3>
+      <h3 className="text-lg font-black text-slate-900 mb-1">
+        협업 진행 현황 ({collabs.length + picks.length}건)
+      </h3>
       <p className="text-[11px] text-slate-400 font-medium mb-5">
         인플루언서별로 한 줄씩 표시됩니다. 이름을 누르면 그 인플루언서에게 공유된 가이드라인과
-        단계별 진행을 확인할 수 있습니다. 단계 승인과 마감 관리는 담당자가 진행하고, 의견은
-        담당자에게 전달됩니다.
+        단계별 진행, 자료함(기획안·영상 초안·광고코드)을 확인할 수 있습니다. 단계 승인과 마감
+        관리는 담당자가 진행하고, 의견은 담당자에게 전달됩니다.
       </p>
+
+      {/* 선택했지만 아직 협업이 안 열린 후보를 위에 둔다. 브랜드가 방금 누른 결과가
+          맨 위에 있어야 "선택이 됐나?"를 다시 확인하러 명단으로 돌아가지 않는다. */}
+      {picks.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {picks.map(p => {
+            const step = OUTREACH_STEP[p.outreachStatus] || OUTREACH_STEP.not_sent;
+            return (
+              <div
+                key={p.id}
+                className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/60"
+              >
+                <div className="flex items-start gap-3">
+                  {p.profileImage ? (
+                    <img
+                      src={p.profileImage}
+                      alt=""
+                      loading="lazy"
+                      className="w-9 h-9 rounded-full object-cover bg-slate-100 flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-slate-100 flex-shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* 수락 전에는 계정 아이디가 오지 않는다. 가려진 이름이 그 자리를 대신한다. */}
+                      <span className="font-black text-sm text-slate-900 truncate">
+                        {p.username ? `@${p.username}` : p.name || '선정한 인플루언서'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${step.cls}`}>
+                        {step.label}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-orange-50 text-orange-600">
+                        선택 완료
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-bold mt-1">{step.hint}</p>
+                    {p.quotedFee > 0 && (
+                      <p className="text-[11px] text-slate-400 font-bold mt-0.5">
+                        제시 조건 {formatKoreanWon(p.quotedFee)}
+                      </p>
+                    )}
+                    {/* 자료함은 협업이 열린 뒤에 생긴다. 여기에 미리 업로드 칸을 두면
+                        어디에도 붙지 않는 파일이 만들어진다. */}
+                    <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                      수락되면 이 줄이 협업으로 바뀌고, 가이드 파일과 기획안·영상 초안을 주고받는
+                      자료함이 함께 열립니다.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="space-y-3">
         {collabs.map(c => {
@@ -419,6 +542,14 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({ campaignId, o
                           </div>
                         );
                       })()}
+
+                      <CollabSharedWorkspace
+                        collabId={c.id}
+                        role="brand"
+                        detail={detail}
+                        onRefresh={() => refreshDetail(c.id)}
+                        onNotify={notify}
+                      />
 
                       {/* 전체 프로세스 — 어디까지 왔는지 한눈에.
                           단계 상태를 배지로만 보여 주면 여덟 줄을 다 읽어야 현재 위치를

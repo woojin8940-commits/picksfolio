@@ -24,6 +24,7 @@ const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashb
 const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalendar'));
 const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenScheduleManagement'));
 const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
+const CreatorCollabWorkspace = lazyWithRetry(() => import('./components/CreatorCollabWorkspace'));
 const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
 const OperatorLogin = lazyWithRetry(() => import('./components/OperatorLogin'));
 const OperatorDashboard = lazyWithRetry(() => import('./components/OperatorDashboard'));
@@ -42,7 +43,7 @@ import { clearAllLinkCache } from './services/prefetchService';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
 
 // 지연 로딩 화면은 모두 utils/lazyRoute 의 LazyRoute 로 감싼다 — 로딩 표시와
 // 오류 경계가 항상 함께 붙어야, 청크를 못 받은 화면이 로딩 표시에서 멈춘 것처럼
@@ -1598,6 +1599,12 @@ const App: React.FC = () => {
       case 'campaigns':
         subComponent = <LazyRoute><UserCampaignBrowse userName={userName} /></LazyRoute>;
         break;
+      // 진행 중인 협업만 따로 보는 화면. 캠페인 찾기(UserCampaignBrowse) 안에도 같은
+      // 상자가 있지만 그건 검색 목록 위에 얹힌 것이라, 이미 시작한 협업의 자료를
+      // 주고받으러 들어오는 사람은 매번 남의 캠페인 목록을 지나쳐야 했다.
+      case 'my-collabs':
+        subComponent = <LazyRoute><CreatorCollabWorkspace userName={userName} /></LazyRoute>;
+        break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
     }
@@ -1629,6 +1636,7 @@ const App: React.FC = () => {
         onNavigateTimeline={() => setSubView('timeline')}
         onNavigateMembership={() => setSubView('membership')}
         onNavigateCampaigns={() => setSubView('campaigns')}
+        onNavigateMyCollabs={() => setSubView('my-collabs')}
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>

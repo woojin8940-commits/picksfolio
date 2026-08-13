@@ -233,13 +233,14 @@ export default async (req: Request, context: Context) => {
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
     try {
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_events WHERE collab_id = ${collabId} ORDER BY created_at DESC LIMIT 50` as Promise<any[]>,
         db.sql`SELECT * FROM collab_terms WHERE collab_id = ${collabId}` as Promise<any[]>,
         db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
+        db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
       ]);
 
       const template = templateByKey(collab.template_key);
@@ -309,6 +310,21 @@ export default async (req: Request, context: Context) => {
           reviewNote: d.review_note || "",
           createdAt: d.created_at,
         })),
+        assets: (assets as any[]).map((asset) => ({
+          id: asset.id,
+          kind: asset.kind,
+          title: asset.title || "",
+          fileUrl: asset.file_url,
+          fileName: asset.file_name || "",
+          mimeType: asset.mime_type || "",
+          uploadedByRole: asset.uploaded_by_role,
+          uploadedBy: asset.uploaded_by,
+          status: asset.status,
+          reviewedBy: asset.reviewed_by || "",
+          reviewNote: asset.review_note || "",
+          reviewedAt: asset.reviewed_at,
+          createdAt: asset.created_at,
+        })),
         feedbacks: shapeFeedbacks(feedbacks as any[], role),
         terms: terms
           ? {
@@ -372,6 +388,72 @@ export default async (req: Request, context: Context) => {
 
   try {
     switch (action) {
+      case "add_asset": {
+        const kind = String((body as any).kind || "other");
+        const allowed = role === "brand" ? ["guide", "other"] : role === "influencer" ? ["plan", "video", "other"] : ["guide", "plan", "video", "other"];
+        if (!allowed.includes(kind)) return jsonError("이 역할로 올릴 수 없는 자료입니다.", 403);
+        const fileUrl = String((body as any).fileUrl || "").trim();
+        if (!fileUrl.startsWith("/api/images/")) return jsonError("업로드한 파일을 선택해 주세요.");
+        const assetId = newId("asset");
+        const title = String((body as any).title || "").trim().slice(0, 120);
+        const fileName = String((body as any).fileName || "").trim().slice(0, 240);
+        const mimeType = String((body as any).mimeType || "").trim().slice(0, 120);
+        await db.sql`
+          INSERT INTO collab_assets (
+            id, collab_id, kind, title, file_url, file_name, mime_type,
+            uploaded_by_role, uploaded_by
+          ) VALUES (
+            ${assetId}, ${collabId}, ${kind}, ${title}, ${fileUrl}, ${fileName}, ${mimeType},
+            ${role}, ${caller.username}
+          )
+        `;
+        await logCollabEvent(db, {
+          collabId,
+          type: "asset_shared",
+          ...actor,
+          summary: `${kind === "guide" ? "가이드" : kind === "plan" ? "기획안" : kind === "video" ? "영상 초안" : "자료"} 공유`,
+          payload: { assetId, kind },
+        });
+        return Response.json({ success: true, assetId });
+      }
+
+      case "review_asset": {
+        if (role !== "brand" && role !== "manager") return jsonError("브랜드 또는 담당자만 확인할 수 있습니다.", 403);
+        const assetId = String((body as any).assetId || "");
+        const status = String((body as any).status || "confirmed");
+        if (!["confirmed", "revision"].includes(status)) return jsonError("잘못된 확인 상태입니다.");
+        const note = String((body as any).note || "").trim().slice(0, 2000);
+        if (status === "revision" && !note) return jsonError("수정 요청 내용을 입력해 주세요.");
+        const updated = await db.sql`
+          UPDATE collab_assets
+          SET status = ${status}, reviewed_by = ${caller.username}, review_note = ${note}, reviewed_at = NOW()
+          WHERE id = ${assetId} AND collab_id = ${collabId}
+          RETURNING id, kind
+        `;
+        if (!(updated as any[])?.[0]) return jsonError("자료를 찾을 수 없습니다.", 404);
+        await logCollabEvent(db, {
+          collabId,
+          type: "asset_reviewed",
+          ...actor,
+          summary: status === "confirmed" ? "공유 자료 확인 완료" : "공유 자료 수정 요청",
+          payload: { assetId, status },
+        });
+        return Response.json({ success: true });
+      }
+
+      case "update_ad_code": {
+        if (role !== "influencer" && role !== "manager") return jsonError("광고코드는 인플루언서가 공유합니다.", 403);
+        const adCode = String((body as any).adCode || "").trim().slice(0, 500);
+        await db.sql`UPDATE campaign_collabs SET ad_code = ${adCode}, updated_at = NOW() WHERE id = ${collabId}`;
+        await logCollabEvent(db, {
+          collabId,
+          type: "ad_code_shared",
+          ...actor,
+          summary: adCode ? "광고코드 공유" : "광고코드 삭제",
+        });
+        return Response.json({ success: true });
+      }
+
       // 인플루언서: 산출물 제출 -------------------------------------------
       case "submit_deliverable": {
         const stageKey = String((body as any).stageKey || "");
