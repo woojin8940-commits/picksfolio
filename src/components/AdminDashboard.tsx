@@ -222,17 +222,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="my-3 border-t border-white/10" />
           <NavItem
             icon="📢"
-            label={t('nav.campaigns', '캠페인 협업', 'Campaigns')}
+            label={t('nav.campaigns', '캠페인', 'Campaigns')}
             active={currentSubView === 'campaigns'}
             onClick={onNavigateCampaigns}
           />
-          {/* 캠페인 찾기와 캠페인 현황은 하는 일이 다르다. 하나는 새 일을 찾는
-              자리이고 하나는 지원해 둔 캠페인과 진행 중인 캠페인의 다섯 단계를
-              굴리는 자리인데, 한 화면에 겹쳐 두면 마감이 걸린 일이 남의 캠페인
-              목록 위에 얹힌 상자로 밀린다. */}
+          {/* 캠페인과 캠페인 협업은 하는 일이 다르다. 하나는 새 캠페인을 찾아
+              지원하는 자리이고, 하나는 선정된 캠페인의 진행사항 · 인사이트 · 정산을
+              브랜드 화면과 같은 모양으로 굴리는 자리다. 한 화면에 겹쳐 두면 마감이
+              걸린 일이 남의 캠페인 목록 위에 얹힌 상자로 밀린다. */}
           <NavItem
             icon="🤝"
-            label={t('nav.myCollabs', '캠페인 현황', 'Campaign Status')}
+            label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')}
             active={currentSubView === 'my-collabs'}
             onClick={onNavigateMyCollabs}
           />
@@ -337,8 +337,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               />
               <NavItem icon="📩" label={t('nav.dmAutomation', 'DM 자동화', 'DM Automation')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
-              <NavItem icon="📢" label={t('nav.campaigns', '캠페인 협업', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 현황', 'Campaign Status')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label={t('nav.timeline', '협업 타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
@@ -465,13 +465,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-500 text-white py-4 md:py-5 rounded-2xl font-black text-sm md:text-lg mb-6 md:mb-8 shadow-[0_8px_30px_rgba(124,58,237,0.25)] hover:shadow-[0_12px_40px_rgba(124,58,237,0.35)] transition-all active:scale-[0.99] flex items-center justify-center gap-3"
             >
               <span className="text-xl">🤝</span>
-              {t('dash.collabCTA', '캠페인 협업하기', 'Collaborate on Campaigns')}
+              {t('dash.collabCTA', '캠페인 지원하기', 'Find Campaigns')}
               <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-              <QuickCard icon="🤝" label={t('nav.myCollabs', '캠페인 현황', 'Campaign Status')} onClick={onNavigateMyCollabs} />
+              <QuickCard icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} onClick={onNavigateMyCollabs} />
               <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
               <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />
               <QuickCard icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} onClick={onNavigateCalendar} />

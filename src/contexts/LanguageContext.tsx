@@ -20,7 +20,11 @@ const translations: Record<string, { ko: string; en: string }> = {
   'nav.links': { ko: '링크 관리', en: 'Links' },
   'nav.manage': { ko: '관리', en: 'Manage' },
   'nav.dmAutomation': { ko: 'DM 자동화', en: 'DM Automation' },
-  'nav.campaigns': { ko: '캠페인 협업', en: 'Campaigns' },
+  // 캠페인은 새 캠페인을 찾아 지원하는 자리, 캠페인 협업은 선정된 캠페인을 굴리는
+  // 자리다. 둘 다 '캠페인 협업'으로 부르던 때에는 진행하러 들어온 사람이 남의
+  // 캠페인 목록에서 자기 캠페인을 찾아야 했다.
+  'nav.campaigns': { ko: '캠페인', en: 'Campaigns' },
+  'nav.myCollabs': { ko: '캠페인 협업', en: 'Campaign Collabs' },
   'nav.inbox': { ko: '비즈니스 수신함', en: 'Inbox' },
   'nav.timeline': { ko: '협업 타임라인', en: 'Timeline' },
   'nav.calendar': { ko: '협업 현황', en: 'Calendar' },
@@ -47,7 +51,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dash.top3': { ko: '클릭 TOP 3', en: 'Top 3 Clicks' },
   'dash.collecting': { ko: '데이터 수집 중', en: 'Collecting data...' },
   'dash.addPostLink': { ko: '+ 새로운 포스트 & 링크 등록', en: '+ Add New Post & Link' },
-  'dash.collabCTA': { ko: '🤝 캠페인 협업하기', en: '🤝 Collaborate on Campaigns' },
+  'dash.collabCTA': { ko: '🤝 캠페인 지원하기', en: '🤝 Find Campaigns' },
   'dash.dataOverview': { ko: '내 데이터 현황', en: 'My Data Overview' },
   'dash.productBlocks': { ko: '상품 블록', en: 'Product Blocks' },
   'dash.aiTrend': { ko: 'AI 트렌드 분석', en: 'AI Trend Analysis' },
