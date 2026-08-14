@@ -38,7 +38,7 @@ const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashb
 const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalendar'));
 const OpenScheduleManagement = lazyWithRetry(() => import('./components/OpenScheduleManagement'));
 const UserCampaignBrowse = lazyWithRetry(() => import('./components/UserCampaignBrowse'));
-const CreatorCollabWorkspace = lazyWithRetry(() => import('./components/CreatorCollabWorkspace'));
+const CreatorCampaignCollabs = lazyWithRetry(() => import('./components/CreatorCampaignCollabs'));
 const MembershipPlan = lazyWithRetry(() => import('./components/MembershipPlan'));
 const OperatorLogin = lazyWithRetry(() => import('./components/OperatorLogin'));
 const OperatorDashboard = lazyWithRetry(() => import('./components/OperatorDashboard'));
@@ -1633,12 +1633,12 @@ const App: React.FC = () => {
       case 'campaigns':
         subComponent = <LazyRoute><UserCampaignBrowse userName={userName} /></LazyRoute>;
         break;
-      // 캠페인 현황. 지원한 캠페인과 진행 중인 캠페인을 한 화면에서 본다.
-      // 캠페인 찾기(UserCampaignBrowse) 안에도 같은 상자가 있지만 그건 검색 목록
-      // 위에 얹힌 것이라, 이미 시작한 캠페인을 진행하러 들어오는 사람은 매번 남의
-      // 캠페인 목록을 지나쳐야 했다.
+      // 캠페인 협업. 선정된 캠페인을 브랜드 화면과 같은 모양으로 — 캠페인 카드가
+      // 깔리고, 하나를 누르면 진행사항 · 인사이트 · 정산 탭이 열린다. 캠페인 찾기
+      // (UserCampaignBrowse)에는 이 상자를 얹지 않는다. 새 캠페인을 찾는 자리와
+      // 이미 시작한 캠페인을 굴리는 자리는 하는 일이 다르다.
       case 'my-collabs':
-        subComponent = <LazyRoute><CreatorCollabWorkspace userName={userName} /></LazyRoute>;
+        subComponent = <LazyRoute><CreatorCampaignCollabs userName={userName} /></LazyRoute>;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null

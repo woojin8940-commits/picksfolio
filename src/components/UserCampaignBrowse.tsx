@@ -4,7 +4,6 @@ import { apiService } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { rewardModeOf } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
-import CreatorCollabWorkspace from './CreatorCollabWorkspace';
 import CreatorOfferInbox from './collab/CreatorOfferInbox';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -755,12 +754,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </p>
       </div>
 
-      {userName && (
-        <div className="mb-6">
-          <CreatorCollabWorkspace userName={userName} hideWhenEmpty />
-        </div>
-      )}
-
+      {/* 진행 중인 캠페인은 여기 얹지 않는다. 이 화면은 새 캠페인을 찾는 자리이고,
+          이미 시작한 캠페인의 단계 · 인사이트 · 정산은 '캠페인 협업' 메뉴에서
+          브랜드 화면과 같은 모양(CreatorCampaignCollabs)으로 연다. 두 곳에 같은
+          상자를 두면 어느 쪽이 지금 상태인지 매번 맞춰 봐야 한다. */}
       {userName && (
         <div className="mb-6">
           <CreatorOfferInbox

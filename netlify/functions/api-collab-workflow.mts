@@ -332,15 +332,40 @@ export default async (req: Request, context: Context) => {
       `) as any[];
       const openMap = new Map(openFeedback.map((r) => [r.collab_id, r.open_count]));
 
+      /**
+       * 캠페인 표지. 협업 행에는 제목과 브랜드 이름만 들어 있어서, 목록을 카드로
+       * 그리면 사진 자리가 비고 마감일도 알 수 없다. 브랜드가 보는 캠페인 리스트와
+       * 같은 모양으로 그리려면 캠페인 쪽 값이 필요하다.
+       *
+       * 집행 예산처럼 브랜드만 볼 값은 담지 않는다 — 이 응답은 인플루언서도 받는다.
+       */
+      const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
+      const campaignRows = campaignIds.length
+        ? ((await db.sql`
+            SELECT id, title, brand_name, thumbnail_url, category, type,
+                   reward_mode, reward_type, reward_amount, end_date, status
+            FROM campaigns WHERE id = ANY(${campaignIds})
+          `) as any[])
+        : [];
+      const campaignMap = new Map(campaignRows.map((c) => [c.id, c]));
+
       const today = todayInSeoul();
       const collabs = rows.map((row) => {
         const own = stages.filter((s) => s.collab_id === row.id);
         const current = own.find((s) => s.stage_key === row.current_stage_key) || own.find((s) => s.status !== "done");
+        const campaign = campaignMap.get(row.campaign_id) || null;
         return {
           id: row.id,
           campaignId: row.campaign_id,
-          campaignTitle: row.campaign_title,
-          companyName: row.company_name,
+          campaignTitle: row.campaign_title || campaign?.title || "",
+          companyName: row.company_name || campaign?.brand_name || "",
+          campaignThumbnail: campaign?.thumbnail_url || "",
+          campaignCategory: campaign?.category || "",
+          campaignType: row.campaign_type || campaign?.type || "",
+          campaignRewardMode: campaign?.reward_mode || "",
+          campaignRewardAmount: campaign?.reward_amount || "",
+          campaignEndDate: campaign?.end_date || "",
+          campaignStatus: campaign?.status || "",
           businessUsername: row.business_username,
           creatorUsername: row.creator_username,
           managerUsername: row.manager_username,

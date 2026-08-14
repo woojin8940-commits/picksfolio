@@ -17,7 +17,8 @@ export default async (req: Request) => {
       if (username) {
         const result = await db.sql`
           SELECT ca.*, c.title as campaign_title, c.brand_name, c.type as campaign_type,
-                 c.status as campaign_status, c.reward_type, c.reward_amount
+                 c.status as campaign_status, c.reward_type, c.reward_amount,
+                 c.thumbnail_url, c.category, c.end_date, c.reward_mode
           FROM campaign_applications ca
           JOIN campaigns c ON ca.campaign_id = c.id
           WHERE ca.applicant_username = ${username}
