@@ -126,12 +126,34 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     return stageDone;
   };
 
+  /** 브랜드가 이 단계에 피드백을 남겨 다시 인플루언서 차례가 된 상태. */
+  const revisionOf = (step: StepKey): boolean => String(stageOf(step)?.status || '') === 'revision';
+
+  /**
+   * 입력을 마쳤고 상대의 차례가 된 단계인가.
+   *
+   * 완료(done)와는 다르다 — 기획안을 올려도 브랜드가 확인하기 전까지 단계는 닫히지
+   * 않는다. 그런데 그 사이를 "진행 전"과 같은 회색으로 두면, 다 적어 놓고도 화면상
+   * 아무 일도 일어나지 않은 것처럼 보인다. 채워 넣은 것이 있으면 색이 들어와야 한다.
+   */
+  const submittedOf = (step: StepKey): boolean => {
+    if (doneOf(step) || revisionOf(step)) return false;
+    const stageSubmitted = String(stageOf(step)?.status || '') === 'submitted';
+    if (step === 'shipping') return Boolean(shipping.filled);
+    if (step === 'plan') return Boolean(workOf('plan')) || stageSubmitted;
+    if (step === 'video') return Boolean(workOf('video')) || stageSubmitted;
+    if (step === 'upload') return Boolean(collab.uploadUrl) || stageSubmitted;
+    return stageSubmitted;
+  };
+
   const states = useMemo(() => {
     const done = STEPS.map(s => doneOf(s.key));
     const currentIndex = done.findIndex(d => !d);
     return STEPS.map((s, i) => ({
       ...s,
       done: done[i],
+      submitted: submittedOf(s.key),
+      revision: revisionOf(s.key),
       current: i === currentIndex,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -316,6 +338,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (ok) {
       if (step === 'plan') setPlanFile(null);
       if (step === 'video') setVideoFile(null);
+      // 다 적은 칸은 접는다. 펼쳐진 채로 남으면 아직 할 일이 남은 것처럼 보이고,
+      // 접힌 줄에 색이 들어오는 것으로 "올라갔다"가 한눈에 읽힌다.
+      setOpen('');
     }
   };
 
@@ -885,10 +910,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /** 단계 한 줄에 붙는 상태 한 마디. 길면 읽지 않는다. */
   const statusText = (step: StepKey, done: boolean, current: boolean) => {
     if (done) return '완료';
-    if (step === 'shipping' && shipping.filled) return isInfluencer ? '브랜드 발송 대기' : '발송해 주세요';
-    if (step === 'plan' && planWork) return isInfluencer ? '브랜드 확인 대기' : '확인해 주세요';
-    if (step === 'video' && videoWork) return isInfluencer ? '브랜드 확인 대기' : '확인해 주세요';
-    if (step === 'upload' && collab.uploadUrl) return isInfluencer ? '브랜드 확인 대기' : '확인해 주세요';
+    if (revisionOf(step)) return isInfluencer ? '피드백 반영이 필요합니다' : '수정 요청 전달됨';
+    if (step === 'shipping' && shipping.filled) return isInfluencer ? '입력 완료 · 브랜드 발송 대기' : '발송해 주세요';
+    if (step === 'plan' && planWork) return isInfluencer ? '입력 완료 · 브랜드 확인 대기' : '확인해 주세요';
+    if (step === 'video' && videoWork) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
+    if (step === 'upload' && collab.uploadUrl) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
     if (step === 'guide' && guideFiles.length === 0) return isBrandSide ? '가이드를 올려 주세요' : '브랜드 준비 중';
     return current ? '진행 중' : '진행 전';
   };
@@ -904,28 +930,54 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               type="button"
               onClick={() => setOpen(isOpen ? '' : s.key)}
               aria-expanded={isOpen}
-              className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${isOpen ? 'bg-slate-50' : 'hover:bg-slate-50/60'}`}
+              className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+                isOpen
+                  ? 'bg-slate-50'
+                  : s.done
+                    ? 'bg-emerald-50/60 hover:bg-emerald-50'
+                    : s.submitted
+                      ? 'bg-emerald-50/40 hover:bg-emerald-50'
+                      : s.revision
+                        ? 'bg-amber-50/50 hover:bg-amber-50'
+                        : 'hover:bg-slate-50/60'
+              }`}
             >
+              {/* 동그라미 색이 이 줄의 상태다. 다 채워 넣었지만 상대의 확인을 기다리는
+                  단계는 옅은 초록 — 완료(진한 초록)와 진행 전(회색) 사이의 자리다. */}
               <span
                 className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
                   s.done
                     ? 'bg-emerald-500 text-white'
-                    : s.current
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-100 text-slate-400'
+                    : s.submitted
+                      ? 'bg-emerald-100 text-emerald-600'
+                      : s.revision
+                        ? 'bg-amber-100 text-amber-700'
+                        : s.current
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-100 text-slate-400'
                 }`}
               >
-                {s.done ? '✓' : i + 1}
+                {s.done || s.submitted ? '✓' : i + 1}
               </span>
               <span className="min-w-0 flex-1">
-                <span className={`block text-sm font-black ${s.done || s.current ? 'text-slate-900' : 'text-slate-400'}`}>
+                <span className={`block text-sm font-black ${s.done || s.submitted || s.current || s.revision ? 'text-slate-900' : 'text-slate-400'}`}>
                   {s.title}
                 </span>
-                <span className="block text-[11px] font-bold text-slate-400 truncate">
+                <span
+                  className={`block text-[11px] font-bold truncate ${
+                    isOpen
+                      ? 'text-slate-400'
+                      : s.done || s.submitted
+                        ? 'text-emerald-600'
+                        : s.revision
+                          ? 'text-amber-600'
+                          : 'text-slate-400'
+                  }`}
+                >
                   {isOpen ? s.lead : statusText(s.key, s.done, s.current)}
                 </span>
               </span>
-              {!isOpen && stage?.dueDate && !s.done && (
+              {!isOpen && stage?.dueDate && !s.done && !s.submitted && (
                 <span className="text-[10px] font-black text-slate-400 flex-shrink-0">{fmtDate(stage.dueDate)}까지</span>
               )}
               <span className={`text-slate-300 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
