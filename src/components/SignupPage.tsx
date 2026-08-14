@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { digitsOnly, formatPhoneInput } from '../utils/formatters';
 
 interface SignupPageProps {
   initialId: string;
@@ -237,14 +238,13 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
             <div className="flex gap-2">
               <input
                 type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={formatPhoneInput(phone)}
+                onChange={(e) => setPhone(digitsOnly(e.target.value).slice(0, 11))}
                 className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                placeholder="01012345678"
+                placeholder="010-1234-5678"
                 required
                 inputMode="numeric"
                 autoComplete="tel"
-                pattern="[0-9]*"
               />
               <button
                 type="button"

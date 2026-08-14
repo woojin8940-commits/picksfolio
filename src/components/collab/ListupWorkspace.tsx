@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas, formatSignedKRW } from '../../utils/formatters';
+import { digitsOnly, formatNumberWithCommas, formatSignedKRW } from '../../utils/formatters';
 import InfluencerCandidateCard from './InfluencerCandidateCard';
 
 /**
@@ -129,6 +129,16 @@ const QuoteFields: React.FC<{
 }> = ({ value, onChange, hint, payoutLocked }) => {
   const set = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [key]: e.target.value });
+  /**
+   * 금액 칸은 보이는 값과 담기는 값이 다르다.
+   *
+   * 화면에는 쉼표를 붙여 보여 주지만 상태에는 숫자만 담는다. 쉼표까지 담아 두면
+   * 바로 아래에서 마진과 CPV 를 계산하는 Number(...) 가 NaN 이 되어, 금액을 적을수록
+   * 차액이 사라지는 화면이 된다.
+   */
+  const setMoney = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [key]: digitsOnly(e.target.value) });
+  const money = (raw: string) => formatNumberWithCommas(raw);
   const cls =
     'w-full text-[11px] font-bold text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400';
   const cpv =
@@ -154,22 +164,24 @@ const QuoteFields: React.FC<{
           <div>
             <label className="block text-[10px] text-slate-400 font-black mb-1">지급 단가(원)</label>
             <input
-              type="number"
-              value={value.payoutFee}
-              onChange={set('payoutFee')}
+              type="text"
+              inputMode="numeric"
+              value={money(value.payoutFee)}
+              onChange={setMoney('payoutFee')}
               disabled={payoutLocked}
-              placeholder="1000000"
-              className={`${cls} disabled:bg-slate-50 disabled:text-slate-400`}
+              placeholder="1,000,000"
+              className={`${cls} text-right disabled:bg-slate-50 disabled:text-slate-400`}
             />
           </div>
           <div>
             <label className="block text-[10px] text-slate-400 font-black mb-1">2차 활용 지급(원)</label>
             <input
-              type="number"
-              value={value.payoutSecondUseFee}
-              onChange={set('payoutSecondUseFee')}
+              type="text"
+              inputMode="numeric"
+              value={money(value.payoutSecondUseFee)}
+              onChange={setMoney('payoutSecondUseFee')}
               disabled={payoutLocked}
-              className={`${cls} disabled:bg-slate-50 disabled:text-slate-400`}
+              className={`${cls} text-right disabled:bg-slate-50 disabled:text-slate-400`}
             />
           </div>
         </div>
@@ -188,15 +200,23 @@ const QuoteFields: React.FC<{
         <div className="grid grid-cols-3 gap-2">
           <div>
             <label className="block text-[10px] text-slate-400 font-black mb-1">제시 광고비(원)</label>
-            <input type="number" value={value.fee} onChange={set('fee')} placeholder="1100000" className={cls} />
+            <input
+              type="text"
+              inputMode="numeric"
+              value={money(value.fee)}
+              onChange={setMoney('fee')}
+              placeholder="1,100,000"
+              className={`${cls} text-right`}
+            />
           </div>
           <div>
             <label className="block text-[10px] text-slate-400 font-black mb-1">2차 활용(원)</label>
             <input
-              type="number"
-              value={value.secondUseFee}
-              onChange={set('secondUseFee')}
-              className={cls}
+              type="text"
+              inputMode="numeric"
+              value={money(value.secondUseFee)}
+              onChange={setMoney('secondUseFee')}
+              className={`${cls} text-right`}
             />
           </div>
           <div>

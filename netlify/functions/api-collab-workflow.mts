@@ -333,6 +333,23 @@ export default async (req: Request, context: Context) => {
       const openMap = new Map(openFeedback.map((r) => [r.collab_id, r.open_count]));
 
       /**
+       * 배송 정보 요약.
+       *
+       * 목록에 실어 보내는 이유는 하나다 — 브랜드는 인플루언서 줄을 하나씩 열어 보기
+       * 전에는 주소가 들어왔는지 알 수 없었다. 협업의 "현재 단계"는 가이드 확인처럼
+       * 앞 단계에 걸려 있을 수 있어서, 주소가 이미 저장돼 있어도 배송 줄에는 아무도
+       * 나타나지 않았다. 주소가 채워졌는지를 목록이 알면 그 줄이 바로 뜬다.
+       *
+       * 주소 원문은 브랜드·담당자에게만 싣는다. 인플루언서에게는 자기 주소지만,
+       * 목록 화면에는 쓸 데가 없다.
+       */
+      const shipRows = (await db.sql`
+        SELECT * FROM collab_shipping WHERE collab_id = ANY(${ids})
+      `) as any[];
+      const shipMap = new Map(shipRows.map((r) => [r.collab_id, r]));
+      const showAddress = role === "brand" || role === "manager";
+
+      /**
        * 캠페인 표지. 협업 행에는 제목과 브랜드 이름만 들어 있어서, 목록을 카드로
        * 그리면 사진 자리가 비고 마감일도 알 수 없다. 브랜드가 보는 캠페인 리스트와
        * 같은 모양으로 그리려면 캠페인 쪽 값이 필요하다.
@@ -354,6 +371,7 @@ export default async (req: Request, context: Context) => {
         const own = stages.filter((s) => s.collab_id === row.id);
         const current = own.find((s) => s.stage_key === row.current_stage_key) || own.find((s) => s.status !== "done");
         const campaign = campaignMap.get(row.campaign_id) || null;
+        const ship = shapeShipping(shipMap.get(row.id));
         return {
           id: row.id,
           campaignId: row.campaign_id,
@@ -379,6 +397,24 @@ export default async (req: Request, context: Context) => {
           progress: progressOf(own),
           stageCount: own.length,
           openFeedbackCount: openMap.get(row.id) || 0,
+          shipping: {
+            filled: ship.filled,
+            status: ship.status,
+            savedAt: ship.savedAt,
+            courier: ship.courier,
+            trackingNumber: ship.trackingNumber,
+            shippedAt: ship.shippedAt,
+            ...(showAddress
+              ? {
+                  recipient: ship.recipient,
+                  phone: ship.phone,
+                  postcode: ship.postcode,
+                  address1: ship.address1,
+                  address2: ship.address2,
+                  memo: ship.memo,
+                }
+              : {}),
+          },
           uploadUrl: row.upload_url || "",
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
@@ -792,14 +828,28 @@ export default async (req: Request, context: Context) => {
         if (fileUrl && !fileUrl.startsWith("/api/images/")) {
           return jsonError("업로드한 파일을 선택해 주세요.");
         }
-        if (stepKey === "plan" && !text && !fileUrl) return jsonError("기획안 내용을 입력하거나 파일을 올려 주세요.");
+        // 기획안은 장면 단위로 온다 — 장면마다 설명과 자막. 브랜드 피드백이 장면
+        // 번호에 붙기 때문에 그 번호가 제출물 안에 함께 남아 있어야 한다.
+        const scenes = Array.isArray((body as any).scenes)
+          ? ((body as any).scenes as any[])
+              .slice(0, 40)
+              .map((s) => ({
+                visual: String(s?.visual || "").slice(0, 2000),
+                subtitle: String(s?.subtitle || "").slice(0, 1000),
+                narration: String(s?.narration || "").slice(0, 2000),
+              }))
+              .filter((s) => s.visual.trim() || s.subtitle.trim() || s.narration.trim())
+          : [];
+        if (stepKey === "plan" && !text && !fileUrl && scenes.length === 0) {
+          return jsonError("기획안 내용을 입력하거나 파일을 올려 주세요.");
+        }
         if (stepKey === "video" && !link && !fileUrl) return jsonError("초안 영상 링크를 넣거나 파일을 올려 주세요.");
         if (stepKey === "upload" && !link) return jsonError("게시물 링크를 입력해 주세요.");
 
         const stage = await resolveStepStage(db, collabId, stepKey);
         const stageKey = stage?.stage_key || stepKey;
         const adCode = String((body as any).adCode || "").trim().slice(0, 500);
-        const payload = { body: text, link, fileUrl, fileName, adCode, step: stepKey };
+        const payload = { body: text, link, fileUrl, fileName, adCode, step: stepKey, scenes };
 
         // 덮어쓰지 않고 버전을 쌓는다. 피드백이 "몇 번째 안"에 붙은 말인지가
         // 남지 않으면 수정 왕복이 기억 싸움이 된다.
@@ -852,6 +902,18 @@ export default async (req: Request, context: Context) => {
         const bodyText = String((body as any).body || "").trim().slice(0, 4000);
         if (!bodyText) return jsonError("피드백 내용을 입력해 주세요.");
 
+        /**
+         * 피드백이 붙는 자리.
+         *
+         * 기획안은 장면으로 나뉘어 있어서 "몇 번 장면에 대한 말인지"가 피드백 자체에
+         * 남아야 한다. 자리를 비워 보내면 예전처럼 단계 전체에 대한 말이 된다.
+         * `scene:3` 꼴만 받는다 — 화면이 읽을 수 있는 형식은 그것뿐이다.
+         */
+        const rawAnchor = String((body as any).anchor || "").trim();
+        const sceneMatch = /^scene:(\d{1,3})$/.exec(rawAnchor);
+        if (rawAnchor && !sceneMatch) return jsonError("잘못된 피드백 위치입니다.");
+        const anchor = sceneMatch ? rawAnchor : stepKey;
+
         // 이 피드백은 인플루언서에게 바로 보인다.
         //
         // 다른 경로(add_feedback)에서 브랜드 의견을 담당자만 보게 막아 둔 것은,
@@ -871,7 +933,7 @@ export default async (req: Request, context: Context) => {
             author_type, author_username, visible_to_influencer
           ) VALUES (
             ${id}, ${collabId}, ${deliverableRows?.[0]?.id || null},
-            ${stage?.stage_key || stepKey}, ${stepKey}, ${bodyText},
+            ${stage?.stage_key || stepKey}, ${anchor}, ${bodyText},
             ${role}, ${caller.username}, TRUE
           )
         `;
@@ -885,8 +947,10 @@ export default async (req: Request, context: Context) => {
           type: "feedback_sent",
           ...actor,
           stageKey: stage?.stage_key || stepKey,
-          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "영상" : "진행"} 피드백 전달`,
-          payload: { feedbackId: id, step: stepKey },
+          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "영상" : "진행"}${
+            sceneMatch ? ` 장면 ${sceneMatch[1]}` : ""
+          } 피드백 전달`,
+          payload: { feedbackId: id, step: stepKey, anchor },
         });
         return Response.json({ success: true, feedbackId: id });
       }

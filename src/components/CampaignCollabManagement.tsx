@@ -1254,6 +1254,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               guidelineFiles={parseGuidelineFiles(selectedCampaign.guideline_files)}
               guidelineNote={selectedCampaign.guideline_note || ''}
               guidelineUrl={selectedCampaign.guideline_url || ''}
+              onGuidelineFilesChange={files => {
+                // 진행사항 안에서 올린 가이드도 같은 캠페인 가이드라인이다. 위쪽
+                // 가이드라인 카드가 곧바로 같은 목록을 보여 주지 않으면 방금 올린
+                // 파일이 사라진 것처럼 읽힌다.
+                setSelectedCampaign(prev => (prev ? { ...prev, guideline_files: files } : prev));
+                setCampaigns(prev =>
+                  prev.map(c => (c.id === selectedCampaign.id ? { ...c, guideline_files: files } : c)),
+                );
+              }}
               onNotify={notify}
             />
           ) : (

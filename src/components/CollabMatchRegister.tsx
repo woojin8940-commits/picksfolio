@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/apiService';
 import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/creatorCategories';
+import { digitsOnly, formatContact, formatNumberWithCommas, parseWonText } from '../utils/formatters';
 
 // 캠페인 협업 "매칭 받기" 등록 버튼 + 모달.
 // variant 로 역할을 고정한다:
@@ -229,6 +230,27 @@ const safeNotice = (raw: unknown) => {
   return text;
 };
 
+/**
+ * 금액 칸의 두 얼굴.
+ *
+ * 예전에는 단가와 예산을 "예: 500만원" 안내와 함께 자유 입력으로 받았다. 그래서 같은
+ * 칸에 "500만원", "5000000", "오백만원"이 섞였고, 서버가 숫자를 뽑을 때 글자를 지워
+ * 읽는 탓에 "500만원"은 500원이 됐다 — 예산이 가장 큰 브랜드가 목록 맨 아래로 갔다.
+ * 이제 칸에서는 원 단위 숫자만 받고 쉼표를 자동으로 붙인다. 저장은 "5,000,000원"
+ * 꼴이라 사람이 읽는 화면과 숫자를 뽑는 쪽이 같은 값을 본다.
+ *
+ * moneyDisplay 는 예전에 적어 둔 값을 칸에 되돌릴 때, moneyText 는 저장할 때 쓴다.
+ */
+const moneyDisplay = (raw: unknown): string => {
+  const won = parseWonText(raw as string);
+  return won > 0 ? formatNumberWithCommas(won) : '';
+};
+
+const moneyText = (display: string): string => {
+  const digits = digitsOnly(display);
+  return digits ? `${formatNumberWithCommas(digits)}원` : '';
+};
+
 const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName }) => {
   const copy = COPY[variant];
   const [open, setOpen] = useState(false);
@@ -370,8 +392,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         tiktok_url: String(app.tiktok_url || ''),
         tiktok_followers: num(app.tiktok_followers),
         naver_blog_url: String(app.naver_blog_url || ''),
-        post_price: String(app.post_price || ''),
-        short_price: String(app.short_price || ''),
+        post_price: moneyDisplay(app.post_price),
+        short_price: moneyDisplay(app.short_price),
         category: String(app.category || ''),
       });
       setCustomCategory('');
@@ -383,7 +405,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         brand_instagram: String(app.brand_instagram || ''),
         desired_count: String(app.desired_count || ''),
         desired_followers: String(app.desired_followers || ''),
-        budget_text: String(app.budget_text || ''),
+        budget_text: moneyDisplay(app.budget_text),
         desired_schedule: String(app.desired_schedule || ''),
         desired_category: String(app.desired_category || ''),
         note: String(app.note || ''),
@@ -651,8 +673,16 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     setNotice(null);
     try {
       const payload = variant === 'influencer'
-        ? { role: 'influencer', applicant_username: applicantUsername, ...infForm }
-        : { role: 'brand', applicant_username: applicantUsername, ...brandForm, budget: brandForm.budget_text };
+        ? {
+            role: 'influencer', applicant_username: applicantUsername, ...infForm,
+            post_price: moneyText(infForm.post_price),
+            short_price: moneyText(infForm.short_price),
+          }
+        : {
+            role: 'brand', applicant_username: applicantUsername, ...brandForm,
+            budget_text: moneyText(brandForm.budget_text),
+            budget: moneyText(brandForm.budget_text),
+          };
       if (!payload.name?.trim()) {
         setNotice({ type: 'err', text: variant === 'influencer' ? '이름을 입력해 주세요.' : '담당자/브랜드명을 입력해 주세요.' });
         setSubmitting(false);
@@ -893,7 +923,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
               {variant === 'influencer' ? (
                 <div className="space-y-3">
                   <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
-                  <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
+                  <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: formatContact(v) }))} placeholder="010-0000-0000 / 이메일" />
 
                   {/* 인스타 계정 연동 — 브랜드가 보는 숫자의 출처가 여기서 정해진다. */}
                   <div className="pt-1">
@@ -953,8 +983,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                   <div className="pt-1">
                     <p className="text-xs font-black text-slate-500 mb-2">광고 단가</p>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="게시물 단가" value={infForm.post_price} onChange={v => setInfForm(f => ({ ...f, post_price: v }))} placeholder="예: 30만원" />
-                      <Field label="숏폼 단가" value={infForm.short_price} onChange={v => setInfForm(f => ({ ...f, short_price: v }))} placeholder="예: 50만원" />
+                      <MoneyField label="게시물 단가" value={infForm.post_price} onChange={v => setInfForm(f => ({ ...f, post_price: v }))} placeholder="300,000" />
+                      <MoneyField label="숏폼 단가" value={infForm.short_price} onChange={v => setInfForm(f => ({ ...f, short_price: v }))} placeholder="500,000" />
                     </div>
                   </div>
 
@@ -1030,7 +1060,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
               ) : (
                 <div className="space-y-3">
                   <Field label="담당자 이름 / 브랜드명" required value={brandForm.name} onChange={v => setBrandForm(f => ({ ...f, name: v }))} placeholder="브랜드명 또는 담당자" />
-                  <Field label="연락처" required value={brandForm.contact} onChange={v => setBrandForm(f => ({ ...f, contact: v }))} placeholder="010-0000-0000 / 이메일" />
+                  <Field label="연락처" required value={brandForm.contact} onChange={v => setBrandForm(f => ({ ...f, contact: formatContact(v) }))} placeholder="010-0000-0000 / 이메일" />
                   <Field label="브랜드 홈페이지" value={brandForm.brand_homepage} onChange={v => setBrandForm(f => ({ ...f, brand_homepage: v }))} placeholder="https://..." />
                   <Field label="브랜드 인스타 링크" value={brandForm.brand_instagram} onChange={v => setBrandForm(f => ({ ...f, brand_instagram: v }))} placeholder="https://instagram.com/..." />
                   <div className="grid grid-cols-2 gap-3">
@@ -1038,7 +1068,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                     <Field label="원하는 팔로워" value={brandForm.desired_followers} onChange={v => setBrandForm(f => ({ ...f, desired_followers: v }))} placeholder="예: 1만~5만" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="예산" value={brandForm.budget_text} onChange={v => setBrandForm(f => ({ ...f, budget_text: v }))} placeholder="예: 500만원" />
+                    <MoneyField label="예산" value={brandForm.budget_text} onChange={v => setBrandForm(f => ({ ...f, budget_text: v }))} placeholder="5,000,000" />
                     <Field label="원하는 일정" type="date" value={brandForm.desired_schedule} onChange={v => setBrandForm(f => ({ ...f, desired_schedule: v }))} />
                   </div>
                   <Field label="원하는 인플루언서 카테고리" value={brandForm.desired_category} onChange={v => setBrandForm(f => ({ ...f, desired_category: v }))} placeholder="뷰티, 패션, 푸드 등" />
@@ -1253,6 +1283,25 @@ const Field: React.FC<{
       placeholder={placeholder}
       className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
     />
+  </div>
+);
+
+/** 원 단위 금액 칸. 적는 대로 쉼표가 붙고, 단위(원)는 칸 안에 붙박이로 둔다. */
+const MoneyField: React.FC<{
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}> = ({ label, value, onChange, placeholder }) => (
+  <div>
+    <label className="block text-xs font-bold text-slate-500 mb-1.5">{label}</label>
+    <div className="flex items-center gap-2 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-colors">
+      <input
+        value={value}
+        onChange={e => onChange(formatNumberWithCommas(digitsOnly(e.target.value)))}
+        inputMode="numeric"
+        placeholder={placeholder}
+        className="min-w-0 flex-1 bg-transparent border-none outline-none text-sm font-medium text-slate-900 text-right"
+      />
+      <span className="text-xs font-black text-slate-400 flex-shrink-0">원</span>
+    </div>
   </div>
 );
 

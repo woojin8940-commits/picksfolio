@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, formatPhone } from '../utils/formatters';
 import { isPastDeadline } from '../utils/campaignRecruit';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -277,7 +277,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
             </div>
             <div className="bg-slate-50 rounded-xl p-3">
               <p className="text-[9px] font-black text-slate-400 uppercase">{isEn ? 'Phone' : '연락처'}</p>
-              <p className="text-xs font-bold text-slate-900 mt-0.5">{proposal.contact_phone || '-'}</p>
+              <p className="text-xs font-bold text-slate-900 mt-0.5">{formatPhone(proposal.contact_phone) || '-'}</p>
             </div>
           </div>
 

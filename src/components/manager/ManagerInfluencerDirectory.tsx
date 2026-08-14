@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import { formatContact, formatNumberWithCommas } from '../../utils/formatters';
 
 /**
  * 인플루언서 명부 — 픽스폴리오에 등록된 사람 전체를 카테고리로 본다.
@@ -236,7 +236,7 @@ const ManagerInfluencerDirectory: React.FC<ManagerInfluencerDirectoryProps> = ({
                       </p>
                     )}
                     {p.contact && (
-                      <p className="text-[11px] text-slate-500 font-bold">연락처 {p.contact}</p>
+                      <p className="text-[11px] text-slate-500 font-bold">연락처 {formatContact(p.contact)}</p>
                     )}
                     {p.note && (
                       <p className="text-[11px] text-slate-500 font-medium whitespace-pre-wrap">

@@ -3,7 +3,7 @@ import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
 import { sessionGet, sessionRemove } from '../utils/accountScope';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, formatPhone } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
 import AdminGrowthCards from './admin/AdminGrowthCards';
@@ -548,7 +548,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                           <div className="col-span-3 min-w-0">
                             <p className="font-black text-blue-600 text-[11px] truncate">@{proposal._username}</p>
                             <p className="text-[10px] font-bold text-slate-400 truncate">
-                              {proposal.contact_email}{proposal.contact_phone ? ` · ${proposal.contact_phone}` : ''}
+                              {proposal.contact_email}{proposal.contact_phone ? ` · ${formatPhone(proposal.contact_phone)}` : ''}
                             </p>
                           </div>
                           <div className="col-span-2">
@@ -594,7 +594,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
                                 { k: '담당자', v: proposal.contact_person },
                                 { k: '인플루언서', v: `@${proposal._username}` },
                                 { k: '이메일', v: proposal.contact_email },
-                                { k: '연락처', v: proposal.contact_phone || '-' },
+                                { k: '연락처', v: formatPhone(proposal.contact_phone) || '-' },
                                 { k: '카테고리', v: proposal.category },
                                 { k: '접수일', v: formatDate(proposal.created_at) },
                               ].map(item => (

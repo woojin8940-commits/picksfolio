@@ -4,7 +4,7 @@ import { Users, MessageCircle, X, Send, Heart, LogIn, Loader2, Radio, ShoppingBa
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import { formatKRW } from '../utils/formatters';
+import { formatKRW, formatPhoneInput } from '../utils/formatters';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
@@ -123,13 +123,7 @@ const EMPTY_SHIPPING: ShippingFormState = {
   recipientName: '', recipientPhone: '', postcode: '', address1: '', address2: '', memo: '',
 };
 
-// Format to 010-1234-5678 as the viewer types; keep only digits, cap at 11.
-const formatPhoneInput = (raw: string): string => {
-  const d = raw.replace(/[^0-9]/g, '').slice(0, 11);
-  if (d.length < 4) return d;
-  if (d.length < 8) return `${d.slice(0, 3)}-${d.slice(3)}`;
-  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
-};
+// 번호를 적는 동안 하이픈이 따라 붙는 규칙은 공용 서식(formatPhoneInput)에 있다.
 const isValidPhone = (raw: string): boolean => raw.replace(/[^0-9]/g, '').length >= 10;
 
 // Collapse the form (incl. the "주문자와 동일" toggle) into the persisted shape.

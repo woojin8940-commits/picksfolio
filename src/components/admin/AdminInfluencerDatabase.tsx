@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import { formatContact, formatNumberWithCommas } from '../../utils/formatters';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
 
 /**
@@ -499,7 +499,7 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
 
               <p className="text-[11px] font-bold text-slate-500">
                 협업 진행 {open.runningCollabs || 0}건 · 완료 {open.completedCollabs || 0}건
-                {open.contact ? ` · 연락처 ${open.contact}` : ''}
+                {open.contact ? ` · 연락처 ${formatContact(open.contact)}` : ''}
               </p>
 
               {open.note && (

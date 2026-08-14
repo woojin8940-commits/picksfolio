@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
+import { formatContact } from '../../utils/formatters';
 
 interface DirApplication {
   id: string;
@@ -356,7 +357,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div>
                       <p className="font-black text-slate-900 text-sm">{it.name || '(이름 미입력)'}</p>
-                      <p className="text-xs text-slate-400 font-medium">{it.contact || '연락처 없음'}</p>
+                      <p className="text-xs text-slate-400 font-medium">{formatContact(it.contact) || '연락처 없음'}</p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 text-[11px] font-black whitespace-nowrap">
@@ -534,7 +535,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div>
                       <p className="font-black text-slate-900 text-sm">{it.name || '(브랜드명 미입력)'}</p>
-                      <p className="text-xs text-slate-400 font-medium">{it.contact || '연락처 없음'}</p>
+                      <p className="text-xs text-slate-400 font-medium">{formatContact(it.contact) || '연락처 없음'}</p>
                     </div>
                     {it.budget > 0 && (
                       <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-600 text-[11px] font-black whitespace-nowrap">

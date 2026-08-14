@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { formatNumberWithCommas, formatKoreanWon, todayInSeoul } from '../../utils/formatters';
+import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul } from '../../utils/formatters';
 import { authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
@@ -119,8 +119,7 @@ const INPUT =
   'w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500';
 const LABEL = 'block text-xs font-black text-slate-700 mb-1.5';
 
-/** 화면에 쉼표를 넣어 보여 주고, 서버에는 숫자만 보낸다. */
-const digitsOnly = (raw: unknown) => String(raw ?? '').replace(/[^\d]/g, '');
+/** 화면에 쉼표를 넣어 보여 주고, 서버에는 숫자만 보낸다(digitsOnly 는 공용 서식에서 온다). */
 
 /** 쉼표로 이어 저장된 값 ↔ 배열. 수정 모드에서 기존 캠페인을 되읽을 때 쓴다. */
 const splitCsv = (raw: unknown): string[] =>

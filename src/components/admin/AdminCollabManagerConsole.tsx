@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatKoreanWon } from '../../utils/formatters';
+import { digitsOnly, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { normalizeScenes, parseAnchor } from '../../utils/collabScenes';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import AdminCampaignListup from './AdminCampaignListup';
@@ -166,7 +166,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
     }
     setDetail(res);
     setTerms({
-      fee: res.terms?.fee ? String(res.terms.fee) : '',
+      fee: res.terms?.fee ? formatNumberWithCommas(res.terms.fee) : '',
       scriptDue: res.terms?.scriptDue || '',
       contentDue: res.terms?.contentDue || '',
       uploadDue: res.terms?.uploadDue || '',
@@ -820,9 +820,10 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                   {detail.collab?.campaignType === 'group_buy' ? '판매 수수료 정산액 (원)' : '보수 (원)'}
                                 </span>
                                 <input
-                                  type="number"
+                                  type="text"
+                                  inputMode="numeric"
                                   value={terms.fee}
-                                  onChange={e => setTerms(p => ({ ...p, fee: e.target.value }))}
+                                  onChange={e => setTerms(p => ({ ...p, fee: formatNumberWithCommas(e.target.value) }))}
                                   className="w-full text-xs font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
                                 />
                               </label>
@@ -908,7 +909,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                 onClick={() =>
                                   act(c.id, 'update_terms', {
                                     terms: {
-                                      fee: Number(terms.fee || 0),
+                                      fee: Number(digitsOnly(terms.fee) || 0),
                                       scriptDue: terms.scriptDue,
                                       contentDue: terms.contentDue,
                                       uploadDue: terms.uploadDue,
@@ -927,7 +928,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                 onClick={() =>
                                   act(c.id, 'update_terms', {
                                     terms: {
-                                      fee: Number(terms.fee || 0),
+                                      fee: Number(digitsOnly(terms.fee) || 0),
                                       scriptDue: terms.scriptDue,
                                       contentDue: terms.contentDue,
                                       uploadDue: terms.uploadDue,

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { digitsOnly, formatPhoneInput } from '../utils/formatters';
 
 interface FindAccountProps {
   accountType: 'user' | 'business';
@@ -227,10 +228,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
         <div className="flex gap-2">
           <div className={`flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
             <input
-              type="tel" value={phone}
-              onChange={e => setPhone(e.target.value)}
+              type="tel" value={formatPhoneInput(phone)}
+              onChange={e => setPhone(digitsOnly(e.target.value).slice(0, 11))}
               className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
-              placeholder="01012345678"
+              placeholder="010-1234-5678"
               inputMode="numeric"
               disabled={isVerified}
             />
