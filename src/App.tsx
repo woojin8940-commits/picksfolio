@@ -1599,9 +1599,10 @@ const App: React.FC = () => {
       case 'campaigns':
         subComponent = <LazyRoute><UserCampaignBrowse userName={userName} /></LazyRoute>;
         break;
-      // 진행 중인 협업만 따로 보는 화면. 캠페인 찾기(UserCampaignBrowse) 안에도 같은
-      // 상자가 있지만 그건 검색 목록 위에 얹힌 것이라, 이미 시작한 협업의 자료를
-      // 주고받으러 들어오는 사람은 매번 남의 캠페인 목록을 지나쳐야 했다.
+      // 캠페인 현황. 지원한 캠페인과 진행 중인 캠페인을 한 화면에서 본다.
+      // 캠페인 찾기(UserCampaignBrowse) 안에도 같은 상자가 있지만 그건 검색 목록
+      // 위에 얹힌 것이라, 이미 시작한 캠페인을 진행하러 들어오는 사람은 매번 남의
+      // 캠페인 목록을 지나쳐야 했다.
       case 'my-collabs':
         subComponent = <LazyRoute><CreatorCollabWorkspace userName={userName} /></LazyRoute>;
         break;

@@ -18,7 +18,7 @@ import { todayInSeoul } from "./campaign-recruit.mts";
  */
 
 export type StageOwner = "influencer" | "brand" | "manager";
-export type DeliverableKind = "script" | "content" | "upload";
+export type DeliverableKind = "script" | "content" | "upload" | "shipping" | "plan" | "video";
 
 export type StageTemplate = {
   key: string;
@@ -144,40 +144,65 @@ const BARTER: StageTemplateSet = {
   ],
 };
 
-const TEMPLATES: StageTemplateSet[] = [AD_COLLAB, AD_COLLAB_LITE, SEEDING, GROUP_BUY, BARTER];
+/**
+ * 캠페인 진행 — 지금 새로 시작하는 모든 협업이 쓰는 다섯 단계.
+ *
+ * 예전 묶음(AD_COLLAB 계열)은 아홉 단계였다. 조건 확정 · 가이드 전달 · 구성안 제출 ·
+ * 구성안 검수 · 콘텐츠 제출 · 콘텐츠 검수 · 업로드 · 업로드 확인 · 정산. 단계 하나가
+ * 곧 화면 한 줄이라, 인플루언서는 "지금 내가 뭘 해야 하는지"를 아홉 줄에서 찾아야
+ * 했고 그중 다섯 줄은 담당자 몫이라 아무 것도 할 수 없는 줄이었다.
+ *
+ * 새 묶음은 실제로 사람이 무언가를 하는 다섯 개만 남긴다. 검수는 단계를 따로 만들지
+ * 않고 그 단계 안에서 일어난다 — 기획안 입력칸 바로 밑에 브랜드 피드백칸이 붙어 있는
+ * 형태가 검수다. 별도의 "검수 단계"는 같은 일을 화면 두 곳으로 쪼개는 것뿐이었다.
+ *
+ * 제품 배송이 새로 들어왔다. 주소를 주고받는 일은 어느 협업에나 있었지만 저장할 곳이
+ * 없어서 대화창에서 처리됐고, 그래서 "보냈는지 안 보냈는지"를 물어보는 대화가 반복됐다.
+ */
+const CAMPAIGN_PROCESS: StageTemplateSet = {
+  key: "campaign_process_v1",
+  label: "캠페인 진행",
+  stages: [
+    { key: "guide", title: "콘텐츠 가이드", owner: "brand", dueOffsetDays: 2, hint: "브랜드가 올린 가이드 파일을 확인해 주세요." },
+    { key: "shipping", title: "제품 배송", owner: "influencer", dueOffsetDays: 4, deliverable: "shipping", hint: "제품 받을 주소를 입력하면 브랜드가 발송합니다." },
+    { key: "plan", title: "기획안 피드백", owner: "influencer", dueOffsetDays: 8, deliverable: "plan", hint: "기획안을 작성하면 바로 아래에 브랜드 피드백이 붙습니다." },
+    { key: "video", title: "영상 피드백", owner: "influencer", dueOffsetDays: 13, deliverable: "video", hint: "초안 영상을 올리면 바로 아래에 브랜드 피드백이 붙습니다." },
+    { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 17, deliverable: "upload", hint: "업로드 후 게시물 링크와 광고 파트너십 코드를 남겨 주세요." },
+  ],
+};
+
+const TEMPLATES: StageTemplateSet[] = [CAMPAIGN_PROCESS, AD_COLLAB, AD_COLLAB_LITE, SEEDING, GROUP_BUY, BARTER];
+
+/** 다섯 단계 묶음인가. 브랜드가 직접 단계를 넘길 수 있는지가 여기서 갈린다. */
+export function isProcessV1(templateKey?: string | null): boolean {
+  return String(templateKey || "") === CAMPAIGN_PROCESS.key;
+}
 
 /**
  * 캠페인에 맞는 단계 묶음.
  *
- * 유형이 먼저다. 공동구매는 진행 방식과 무관하게 판매 흐름을 따라야 한다(혜택 표기
- * 검수를 뺄 수 없다). 그다음이 진행 방식이다 — 제품 협찬형은 광고비가 없으므로
- * 검수와 정산이 빠진 묶음으로 간다.
+ * 공동구매만 따로 간다. 판매 흐름은 혜택 표기 검수를 뺄 수 없고, "판매 시작"이
+ * 업로드와 같은 말이 아니기 때문이다.
  *
- * packageTier 는 진행 방식이 없을 때만 본다. 패키지를 없애기 전에 등록된 캠페인은
- * reward_mode 가 비어 있고 package_tier 만 들고 있는데, 그 캠페인에서 협업이 새로
- * 생기면 예전에 브랜드가 고른 것과 같은 단계가 나와야 한다.
+ * 나머지는 전부 CAMPAIGN_PROCESS(다섯 단계)로 시작한다. 예전에는 진행 방식과
+ * packageTier 를 보고 네 묶음 중 하나를 골랐는데, 고른 결과가 인플루언서 화면에서는
+ * "단계 수가 다르다" 이상의 의미가 없었다. 광고비 유무는 조건(collab_terms.fee)이
+ * 이미 들고 있으므로 단계를 나눠 표현할 이유가 없다 — 협찬형이면 정산 예약이
+ * 자동으로 빠진다.
  *
- * 등록 화면이 "구성안 검수 제외"라고 보여준 진행 방식에서 실제로 구성안 단계가
- * 생기면 브랜드는 자기가 고른 것과 다른 진행을 보게 된다. 그래서 표시와 단계를 한
- * 곳에서 맞춘다 — 화면 쪽 짝은 src/utils/campaignBrief.ts 의 stageMarksFor() 다.
+ * packageTier / rewardMode 인자는 남겨 둔다. 호출부가 여러 곳이고, 앞으로 유형별로
+ * 다시 갈라야 할 때 신호를 다시 끌어올 필요가 없어야 한다.
  */
 export function templateForCampaignType(
   campaignType?: string | null,
-  packageTier?: string | null,
-  rewardMode?: string | null,
+  _packageTier?: string | null,
+  _rewardMode?: string | null,
 ): StageTemplateSet {
   const type = String(campaignType || "").trim().toLowerCase();
   if (type.includes("group_buy") || type.includes("공동구매") || type.includes("commerce")) {
     return GROUP_BUY;
   }
-  const mode = String(rewardMode || "").trim().toLowerCase();
-  if (mode === "barter") return BARTER;
-  if (mode === "paid") return AD_COLLAB;
-
-  const tier = String(packageTier || "").trim().toLowerCase();
-  if (tier === "seeding") return SEEDING;
-  if (tier === "lite") return AD_COLLAB_LITE;
-  return AD_COLLAB;
+  return CAMPAIGN_PROCESS;
 }
 
 /** 저장된 template_key 로 단계 묶음을 되찾는다(진행 중 협업 조회용). */
@@ -596,8 +621,11 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
     `;
   }
 
-  const scriptStage = template.stages.find((s) => s.deliverable === "script");
-  const contentStage = template.stages.find((s) => s.deliverable === "content");
+  // 조건표의 세 마감일. 다섯 단계 묶음에서는 구성안 = 기획안(plan), 콘텐츠 = 영상(video) 이
+  // 같은 자리를 차지하므로 둘 다 받아 준다 — 조건표 칸 이름까지 바꾸면 정산·알림을 포함해
+  // 이 세 칸을 읽는 곳을 전부 따라 고쳐야 하고, 얻는 것은 칸 이름뿐이다.
+  const scriptStage = template.stages.find((s) => s.deliverable === "script" || s.deliverable === "plan");
+  const contentStage = template.stages.find((s) => s.deliverable === "content" || s.deliverable === "video");
   const uploadStage = template.stages.find((s) => s.deliverable === "upload");
 
   const brief = input.brief || {};

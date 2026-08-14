@@ -166,7 +166,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const loadMyApplications = useCallback(async () => {
     if (!userName) return;
     try {
-      const res = await fetch(`/.netlify/functions/api-campaign-applications?applicant_username=${encodeURIComponent(userName)}`).then(r => r.json());
+      // 조회 파라미터는 username 이다. 예전에는 applicant_username 으로 불러서
+      // 서버가 400 을 돌려줬고, 이미 지원한 캠페인에도 "지원하기"가 그대로 떴다.
+      const res = await fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`).then(r => r.json());
       if (res.applications) {
         setAppliedIds(new Set(res.applications.map((a: any) => a.campaign_id)));
       }
@@ -181,9 +183,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     const acceptedSet = new Set<string>();
     const map: Record<string, string> = {};
     (res.collabs || []).forEach((c: any) => {
-      if (c.campaign_id) {
-        acceptedSet.add(c.campaign_id);
-        map[c.campaign_id] = c.id;
+      // 협업 목록은 campaignId(카멜)로 내려온다. snake_case 로 읽던 예전 코드에서는
+      // 이 표가 늘 비어 있어서, 진행 중인 캠페인도 "지원 가능"으로 보였다.
+      const campaignId = c.campaignId || c.campaign_id;
+      if (campaignId) {
+        acceptedSet.add(campaignId);
+        map[campaignId] = c.id;
       }
     });
     setAcceptedCampaigns(acceptedSet);
