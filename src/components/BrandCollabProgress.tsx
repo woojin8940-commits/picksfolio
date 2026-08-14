@@ -64,6 +64,17 @@ type CreatorChannel = {
   followers: number;
 };
 
+/** 다섯 칸 각각의 상태. 목록 API 가 협업 줄마다 함께 싣는다. */
+type StepProgress = {
+  status: string;
+  title: string;
+  dueDate: string;
+  submitted: boolean;
+  submittedAt: string | null;
+  version: number;
+  workStatus: string;
+};
+
 type CollabRow = {
   id: string;
   campaignId: string;
@@ -81,8 +92,11 @@ type CollabRow = {
   daysLeft: number | null;
   progress: number;
   stageCount: number;
+  /** 칸마다의 단계 상태와 제출물 유무. 현재 단계만으로 추측하지 않기 위해 함께 받는다. */
+  steps?: Record<string, StepProgress>;
   openFeedbackCount: number;
   uploadUrl: string;
+  uploadConfirmedAt: string | null;
   confirmedAt: string | null;
   /** 목록에 함께 실려 오는 배송 요약. 줄을 열지 않아도 주소가 왔는지 알 수 있다. */
   shipping?: ShippingRow;
@@ -109,6 +123,10 @@ const STEPS: {
   reviewLabel?: string;
   /** 인플루언서가 아직 작업 중일 때 줄에 적는 말. */
   workingLabel?: string;
+  /** 아직 이 칸까지 오지 않은 사람의 줄에 적는 말. */
+  waitingLabel?: string;
+  /** 이 칸을 지나간 사람의 줄에 적는 말. */
+  doneLabel?: string;
   icon: React.ReactNode;
 }[] = [
   {
@@ -116,6 +134,8 @@ const STEPS: {
     title: '콘텐츠 가이드',
     stageKeys: ['guide'],
     workingLabel: '가이드 확인 대기',
+    waitingLabel: '가이드 확인 대기',
+    doneLabel: '확인 완료',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
     ),
@@ -127,6 +147,8 @@ const STEPS: {
     review: true,
     reviewLabel: '발송 처리하기',
     workingLabel: '주소 입력 대기',
+    waitingLabel: '주소 입력 전',
+    doneLabel: '발송 완료',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
     ),
@@ -138,6 +160,8 @@ const STEPS: {
     review: true,
     reviewLabel: '기획안 피드백하기',
     workingLabel: '기획안 작성 중',
+    waitingLabel: '기획안 작성 전',
+    doneLabel: '기획안 확정',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
     ),
@@ -149,6 +173,8 @@ const STEPS: {
     review: true,
     reviewLabel: '영상 피드백하기',
     workingLabel: '영상 촬영 중',
+    waitingLabel: '영상 촬영 전',
+    doneLabel: '영상 확정',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
     ),
@@ -160,6 +186,8 @@ const STEPS: {
     review: true,
     reviewLabel: '업로드 확인하기',
     workingLabel: '업로드 대기',
+    waitingLabel: '업로드 전',
+    doneLabel: '업로드 확인 완료',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
     ),
@@ -186,42 +214,65 @@ const shortDate = (raw: string) => {
  * 협업 한 건이 이 묶음에서 어디까지 왔는지.
  *
  * 'review' 는 지금 브랜드가 볼 것이 올라와 있다는 뜻이다 — 그 줄에만 검은 버튼이
- * 붙는다. 'working' 은 인플루언서가 작업 중, 'done' 은 이 묶음을 지나간 것.
+ * 붙는다. 'working' 은 인플루언서가 작업 중, 'done' 은 이 묶음을 지나간 것,
+ * 'waiting' 은 아직 이 칸까지 오지 않은 것.
  */
 type StepState = 'done' | 'review' | 'working' | 'waiting';
 
-const stepStateOf = (collab: CollabRow, step: typeof STEPS[number]): { state: StepState; due: string } => {
+/**
+ * 현재 단계 하나로만 판정하던 예전 방식. 목록이 칸별 상태(steps)를 싣기 전에
+ * 배포된 응답을 받았을 때만 쓴다.
+ */
+const stepStateByCurrent = (collab: CollabRow, step: typeof STEPS[number]): { state: StepState; due: string } => {
   const key = collab.currentStageKey || '';
   const idx = STEPS.findIndex(s => s.stageKeys.includes(key));
   const myIdx = STEPS.findIndex(s => s.key === step.key);
-
-  if (collab.status === 'completed') return { state: 'done', due: '' };
-
-  /**
-   * 배송은 현재 단계와 무관하게 판정한다.
-   *
-   * 주소가 저장됐는지는 그 자체로 알 수 있는 사실인데, 예전에는 협업의 "현재 단계"가
-   * 배송 줄에 와 있을 때만 이 줄에 사람이 나타났다. 가이드 확인을 아무도 누르지 않아
-   * 현재 단계가 앞에 걸려 있으면, 인플루언서가 주소를 넣어도 브랜드 화면에는 아무
-   * 일도 일어나지 않았다 — "입력했는데 확인이 안 된다"는 말이 여기서 나왔다.
-   */
-  if (step.key === 'shipping' && collab.shipping) {
-    if (collab.shipping.status === 'shipped') return { state: 'done', due: '' };
-    if (collab.shipping.filled) return { state: 'review', due: collab.dueDate };
-  }
-
-  // 현재 단계가 이 묶음보다 뒤에 있으면 지나간 것이다. 협업 목록 API 는 단계
-  // 전체를 주지 않으므로(줄마다 아홉 줄씩 받으면 목록이 무거워진다) 현재 단계의
-  // 위치로 판정한다.
   if (idx === -1) return { state: myIdx === 0 ? 'working' : 'waiting', due: collab.dueDate };
   if (myIdx < idx) return { state: 'done', due: '' };
   if (myIdx > idx) return { state: 'waiting', due: '' };
-
-  // 같은 묶음 안. 검수 단계(script_review · content_review)이거나 제출이 올라온
-  // 상태면 브랜드가 볼 차례다.
   const isReviewStage = key.endsWith('_review') || collab.currentStageStatus === 'submitted';
   return { state: step.review && isReviewStage ? 'review' : 'working', due: collab.dueDate };
 };
+
+/**
+ * 칸 하나에서 이 사람이 지금 어디에 서 있는지.
+ *
+ * 판정의 근거는 그 칸의 단계 상태와 실제로 올라온 제출물이다. 예전에는 협업의
+ * "현재 단계"만 보고 다섯 칸을 추측했는데, 그러면 순서를 벗어난 진행이 통째로
+ * 사라졌다 — 가이드 확인을 아무도 누르지 않아 현재 단계가 첫 칸에 걸려 있으면,
+ * 인플루언서가 기획안을 올려도 브랜드 화면에서는 "아직 이 단계에 온 인플루언서가
+ * 없습니다"로 남았다. "입력했는데 확인이 안 된다"는 말이 여기서 나왔다.
+ */
+const stepStateOf = (collab: CollabRow, step: typeof STEPS[number]): { state: StepState; due: string } => {
+  if (collab.status === 'completed') return { state: 'done', due: '' };
+
+  const progress = collab.steps?.[step.key];
+  const status = String(progress?.status || '');
+  const stageDone = status === 'done' || status === 'skipped';
+  const due = progress?.dueDate || collab.dueDate;
+
+  if (step.key === 'shipping') {
+    if (collab.shipping?.status === 'shipped' || stageDone) return { state: 'done', due: '' };
+    if (collab.shipping?.filled) return { state: 'review', due };
+  } else if (step.key === 'upload') {
+    if (collab.uploadConfirmedAt || stageDone) return { state: 'done', due: '' };
+    if (collab.uploadUrl) return { state: 'review', due };
+  } else if (stageDone) {
+    return { state: 'done', due: '' };
+  } else if (step.review && progress?.submitted && status !== 'revision') {
+    // 기획안 · 영상: 올라온 안이 있고 아직 피드백을 주지 않았으면 브랜드 차례다.
+    return { state: 'review', due };
+  }
+
+  if (!progress) return stepStateByCurrent(collab, step);
+  // 아직 열리지 않은 칸('pending')과 지금 사람이 서 있는 칸을 나눈다. 예전 아홉 단계
+  // 협업은 이 칸에 해당하는 단계 자체가 없을 수 있어(status 가 빈 문자열) 현재 단계로 돌아간다.
+  if (!status) return stepStateByCurrent(collab, step);
+  return { state: status === 'pending' ? 'waiting' : 'working', due };
+};
+
+/** 줄 정렬 — 지금 손대야 하는 사람이 맨 위. 그다음이 진행 중, 대기, 지나간 사람 순. */
+const STATE_ORDER: Record<StepState, number> = { review: 0, working: 1, waiting: 2, done: 3 };
 
 /**
  * 단계 카드 머리의 색. 계산식으로 만들면 Tailwind가 클래스를 찾지 못한다.
@@ -515,15 +566,22 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   /**
    * 단계 하나에 들어 있는 인플루언서들.
    *
-   * 카드 하나가 이 값 하나다. 취소·완료된 협업은 여기서 빼고 아래 "종료된 협업"으로
-   * 보낸다 — 남겨 두면 끝난 사람이 계속 단계마다 세어져 인원이 실제와 어긋난다.
-   * 가이드는 협업 단계보다 브랜드가 파일을 올렸는지가 먼저다. 협업이 아직 없어도
-   * 올려 두었으면 완료로 본다 — 그것이 이 단계에서 브랜드가 하는 일의 전부다.
+   * 카드 하나가 이 값 하나다. 진행 중인 사람은 상태와 무관하게 모두 한 줄씩 들어간다 —
+   * "3명 모두 이 단계를 지났습니다" 한 줄로 접어 두면 그 세 명이 누구인지, 누가 아직
+   * 안 왔는지를 다시 어딘가에서 찾아야 한다. 대신 줄 오른쪽에 그 사람의 지금 상태를
+   * 적고, 손댈 것이 있는 줄만 검은 버튼을 단다.
+   *
+   * 취소·완료된 협업은 여기서 빼고 아래 "종료된 협업"으로 보낸다 — 남겨 두면 끝난
+   * 사람이 계속 단계마다 세어져 인원이 실제와 어긋난다. 가이드는 협업 단계보다
+   * 브랜드가 파일을 올렸는지가 먼저다. 협업이 아직 없어도 올려 두었으면 완료로 본다 —
+   * 그것이 이 단계에서 브랜드가 하는 일의 전부다.
    */
   const steps = useMemo(() => {
     const running = collabs.filter(c => c.status === 'in_progress');
     return STEPS.map(step => {
-      const all = running.map(c => ({ collab: c, ...stepStateOf(c, step) }));
+      const all = running
+        .map(c => ({ collab: c, ...stepStateOf(c, step) }))
+        .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state]);
       const active = all.filter(r => r.state === 'review' || r.state === 'working');
       const reviewCount = all.filter(r => r.state === 'review').length;
       const doneCount = all.filter(r => r.state === 'done').length;
@@ -536,6 +594,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       const dues = active.map(r => r.due).filter(Boolean).sort();
       return {
         step,
+        rows: all,
         active,
         state,
         reviewCount,
@@ -758,7 +817,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               카드 하나가 한 단계이고, 그 안에 지금 그 단계에 서 있는 인플루언서가
               한 줄씩 들어간다. 검은 버튼이 붙은 줄이 브랜드가 움직일 자리다 —
               누르면 그 사람의 진행사항이 그 단계가 펼쳐진 채로 열린다. */}
-          {steps.map(({ step, active, state, reviewCount: stepReviewCount, total, dueFrom, dueTo }) => {
+          {steps.map(({ step, rows, active, state, reviewCount: stepReviewCount, total, dueFrom, dueTo }) => {
             const tone = CARD_TONE[state];
             const isGuide = step.key === 'guide';
             const rangeText =
@@ -860,18 +919,21 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                   </div>
                 )}
 
-                {active.length > 0 && (
+                {rows.length > 0 && (
                   <div className="px-2.5 md:px-3 pb-3 space-y-1.5">
-                    {active.map(({ collab, state: rowState, due }) => {
+                    {rows.map(({ collab, state: rowState, due }) => {
                       const who = identityOf(collab);
                       const rowDue = due || collab.dueDate;
+                      const isDone = rowState === 'done';
                       return (
                         <div
                           key={collab.id}
                           className={`rounded-xl border transition-colors ${
                             rowState === 'review'
                               ? 'border-slate-200 bg-white hover:border-slate-300'
-                              : 'border-transparent bg-slate-50'
+                              : isDone
+                                ? 'border-transparent bg-emerald-50/50'
+                                : 'border-transparent bg-slate-50'
                           }`}
                         >
                           <div className="flex items-center gap-3 px-3 py-2.5">
@@ -893,7 +955,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                                   {who.instagramUrl && (
                                     <span className="text-pink-500 flex-shrink-0"><InstagramMark /></span>
                                   )}
-                                  {collab.openFeedbackCount > 0 && (
+                                  {collab.openFeedbackCount > 0 && rowState !== 'done' && (
                                     <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[10px] font-black flex-shrink-0">
                                       의견 {collab.openFeedbackCount}
                                     </span>
@@ -905,7 +967,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                               </div>
                             </button>
 
-                            {/* 볼 것이 올라온 줄에만 검은 버튼. 버튼 글자가 곧 그 자리에서
+                            {/* 오른쪽은 이 사람이 지금 이 단계에서 어디에 있는지. 볼 것이
+                                올라온 줄에만 검은 버튼이 붙고, 버튼 글자가 곧 그 자리에서
                                 할 일이다 — "기획안 피드백하기"를 누르면 기획안이 펼쳐진다. */}
                             {rowState === 'review' ? (
                               <button
@@ -914,12 +977,18 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                               >
                                 {step.reviewLabel || '확인하기'}
                               </button>
+                            ) : isDone ? (
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-xs font-black text-emerald-600">{step.doneLabel || '완료'}</p>
+                              </div>
                             ) : (
                               <div className="text-right flex-shrink-0">
-                                <p className="text-xs font-black text-slate-500">
-                                  {step.workingLabel || collab.currentStageTitle || '진행 중'}
+                                <p className={`text-xs font-black ${rowState === 'working' ? 'text-slate-500' : 'text-slate-400'}`}>
+                                  {rowState === 'working'
+                                    ? step.workingLabel || collab.currentStageTitle || '진행 중'
+                                    : step.waitingLabel || '진행 전'}
                                 </p>
-                                <p className={`text-[10px] font-bold ${(collab.daysLeft ?? 1) < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                <p className={`text-[10px] font-bold ${(collab.daysLeft ?? 1) < 0 && rowState === 'working' ? 'text-red-500' : 'text-slate-400'}`}>
                                   {rowDue ? `${shortDate(rowDue)} 까지` : '마감일 미정'}
                                 </p>
                               </div>
@@ -963,13 +1032,11 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                   </div>
                 )}
 
-                {/* 사람이 한 줄도 없는 카드도 한 마디는 남긴다. 빈 카드는 "아직 안
-                    왔다"인지 "다 지나갔다"인지를 말해 주지 않는다. */}
-                {active.length === 0 && total > 0 && !(isGuide && campaignId) && (
+                {/* 진행 확정된 사람이 아직 한 명도 없을 때만 한 마디 남긴다. 사람이
+                    있으면 그 사람들의 줄이 곧 상태라, 문장을 덧붙일 자리가 없다. */}
+                {total === 0 && !(isGuide && campaignId) && (
                   <p className="px-4 md:px-5 pb-4 text-[11px] text-slate-400 font-bold">
-                    {state === 'done'
-                      ? `${total}명 모두 이 단계를 지났습니다.`
-                      : '아직 이 단계에 온 인플루언서가 없습니다.'}
+                    아직 진행이 확정된 인플루언서가 없습니다.
                   </p>
                 )}
               </section>

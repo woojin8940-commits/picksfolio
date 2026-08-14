@@ -149,6 +149,21 @@ const STEP_STAGE_KEYS: Record<string, string[]> = {
   upload: ["upload"],
 };
 
+/**
+ * 진행사항 화면의 다섯 칸 → 그 칸에 들어가는 단계 키(예전 이름까지).
+ *
+ * 위의 STEP_STAGE_KEYS 는 "요청이 들어왔을 때 어느 단계 행을 건드릴 것인가"를 정하는
+ * 표라서 검수 단계(script_review 등)를 넣지 않는다. 여기는 읽기용이다 — 예전 아홉
+ * 단계로 시작한 협업의 검수 단계도 같은 칸에 묶여야 화면에서 사라지지 않는다.
+ */
+const STEP_STAGE_GROUP: Record<string, string[]> = {
+  guide: ["guide"],
+  shipping: ["shipping", "terms"],
+  plan: ["plan", "script", "script_review"],
+  video: ["video", "content", "content_review"],
+  upload: ["upload", "confirm", "settlement"],
+};
+
 async function resolveStepStage(db: any, collabId: string, stepKey: string) {
   const keys = STEP_STAGE_KEYS[stepKey] || [];
   if (keys.length === 0) return null;
@@ -353,6 +368,22 @@ export default async (req: Request, context: Context) => {
       const openMap = new Map(openFeedback.map((r) => [r.collab_id, r.open_count]));
 
       /**
+       * 단계별 제출물의 최신 한 건.
+       *
+       * 목록이 "지금 이 협업이 몇 번째 단계인가"(current_stage_key)만 들고 있으면,
+       * 인플루언서가 앞 단계를 건너뛰고 기획안을 먼저 올린 경우 브랜드 화면에는 아무
+       * 일도 일어나지 않는다 — 현재 단계는 여전히 가이드에 걸려 있기 때문이다. 실제로
+       * 무엇이 올라왔는지는 제출물 행이 알고 있으므로, 단계마다 최신 한 건씩만 싣는다.
+       */
+      const workRows = (await db.sql`
+        SELECT DISTINCT ON (collab_id, stage_key)
+               collab_id, stage_key, kind, version, status, created_at
+        FROM collab_deliverables
+        WHERE collab_id = ANY(${ids})
+        ORDER BY collab_id, stage_key, version DESC
+      `) as any[];
+
+      /**
        * 배송 정보 요약.
        *
        * 목록에 실어 보내는 이유는 하나다 — 브랜드는 인플루언서 줄을 하나씩 열어 보기
@@ -405,8 +436,36 @@ export default async (req: Request, context: Context) => {
       const campaignMap = new Map(campaignRows.map((c) => [c.id, c]));
 
       const today = todayInSeoul();
+      /**
+       * 다섯 칸의 상태를 협업 한 건에서 뽑아낸다.
+       *
+       * 화면이 current_stage_key 하나로 다섯 칸을 추측하면, 순서를 벗어난 진행(가이드
+       * 확인 전에 올라온 기획안, 이미 저장된 배송지)이 전부 보이지 않게 된다. 칸마다
+       * 그 칸의 단계 상태와 최신 제출물 유무를 함께 보내면 화면은 추측할 것이 없다.
+       */
+      const stepSummary = (own: any[], works: any[]) => {
+        const out: Record<string, any> = {};
+        for (const [step, keys] of Object.entries(STEP_STAGE_GROUP)) {
+          const stage = own.find((s) => keys.includes(String(s.stage_key)));
+          const work = works
+            .filter((w) => keys.includes(String(w.stage_key)))
+            .sort((a, b) => Number(b.version || 0) - Number(a.version || 0))[0];
+          out[step] = {
+            status: String(stage?.status || ""),
+            title: String(stage?.title || ""),
+            dueDate: stage?.due_date || "",
+            submitted: Boolean(work),
+            submittedAt: work?.created_at || null,
+            version: Number(work?.version || 0),
+            workStatus: String(work?.status || ""),
+          };
+        }
+        return out;
+      };
+
       const collabs = rows.map((row) => {
         const own = stages.filter((s) => s.collab_id === row.id);
+        const works = workRows.filter((w) => w.collab_id === row.id);
         const current = own.find((s) => s.stage_key === row.current_stage_key) || own.find((s) => s.status !== "done");
         const campaign = campaignMap.get(row.campaign_id) || null;
         const ship = shapeShipping(shipMap.get(row.id));
@@ -435,6 +494,8 @@ export default async (req: Request, context: Context) => {
           daysLeft: daysUntil(current?.due_date, today),
           progress: progressOf(own),
           stageCount: own.length,
+          /** 다섯 칸 각각의 상태. 화면은 이것만 보고 그린다. */
+          steps: stepSummary(own, works),
           openFeedbackCount: openMap.get(row.id) || 0,
           shipping: {
             filled: ship.filled,
@@ -455,6 +516,8 @@ export default async (req: Request, context: Context) => {
               : {}),
           },
           uploadUrl: row.upload_url || "",
+          adCode: row.ad_code || "",
+          uploadConfirmedAt: row.upload_confirmed_at || null,
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
           scheduleEnd: row.schedule_end || "",
