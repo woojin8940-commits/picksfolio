@@ -215,6 +215,26 @@ async function scheduleSettlementFor(db: any, collab: any) {
   }
 }
 
+/**
+ * 인플루언서를 화면에 그리는 데 필요한 최소한의 신원 — 인스타 연동 정보에서만 온다.
+ *
+ * 얼굴과 아이디를 두 곳(픽스폴리오 프로필 · 인스타)에서 섞어 가져오면, 브랜드는
+ * 리스트업에서 보고 고른 계정과 진행사항에 뜬 계정이 같은 사람인지 확신할 수 없다.
+ * 한 곳(creator_channels)에서만 읽고, 없으면 비워 둔다.
+ */
+function shapeCreatorChannel(row: any, username: string) {
+  const handle = String(row?.instagram_handle || "");
+  return {
+    username,
+    instagramHandle: handle,
+    instagramUrl:
+      String(row?.instagram_url || "") || (handle ? `https://www.instagram.com/${handle}/` : ""),
+    profileImage: String(row?.profile_image || ""),
+    connected: Boolean(row?.connected),
+    followers: Number(row?.followers || 0),
+  };
+}
+
 /** 배송 정보 한 줄. 아직 아무도 입력하지 않았으면 빈 껍데기를 돌려준다. */
 function shapeShipping(row: any) {
   return {
@@ -356,6 +376,24 @@ export default async (req: Request, context: Context) => {
        *
        * 집행 예산처럼 브랜드만 볼 값은 담지 않는다 — 이 응답은 인플루언서도 받는다.
        */
+      /**
+       * 인플루언서의 인스타 연동 정보.
+       *
+       * 브랜드 진행사항의 한 줄에 붙는 얼굴과 계정은 인스타에서 온 것이어야 한다.
+       * 픽스폴리오 안에서 따로 꾸민 프로필(site_data.profile)을 쓰면, 인스타 연동만
+       * 하고 페이지를 안 만든 사람은 회색 동그라미로 남고, 브랜드가 리스트업에서
+       * 보고 고른 그 계정과도 다른 사진·다른 이름이 뜬다. 연동 때 함께 받아 둔
+       * creator_channels 의 사진·아이디를 그대로 싣는다.
+       */
+      const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
+      const channelRows = creatorNames.length
+        ? ((await db.sql`
+            SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
+            FROM creator_channels WHERE username = ANY(${creatorNames})
+          `) as any[])
+        : [];
+      const channelMap = new Map(channelRows.map((c) => [norm(c.username), c]));
+
       const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
       const campaignRows = campaignIds.length
         ? ((await db.sql`
@@ -386,6 +424,7 @@ export default async (req: Request, context: Context) => {
           campaignStatus: campaign?.status || "",
           businessUsername: row.business_username,
           creatorUsername: row.creator_username,
+          creator: shapeCreatorChannel(channelMap.get(norm(row.creator_username)), row.creator_username),
           managerUsername: row.manager_username,
           status: row.status,
           currentStageKey: row.current_stage_key,
@@ -454,7 +493,7 @@ export default async (req: Request, context: Context) => {
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
     try {
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, channelRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
@@ -463,6 +502,12 @@ export default async (req: Request, context: Context) => {
         db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as Promise<any[]>,
+        // 얼굴과 인스타 아이디. 목록과 같은 곳에서 읽어야 목록에서 누른 사람과 열린
+        // 화면의 사람이 같아 보인다.
+        db.sql`
+          SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
+          FROM creator_channels WHERE username = ${norm(collab.creator_username)}
+        ` as Promise<any[]>,
       ]);
 
       const template = templateByKey(collab.template_key);
@@ -531,6 +576,7 @@ export default async (req: Request, context: Context) => {
           createdAt: collab.created_at,
         },
         guideline,
+        creator: shapeCreatorChannel((channelRows as any[])?.[0], collab.creator_username),
         shipping: shapeShipping((shippingRows as any[])?.[0]),
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
