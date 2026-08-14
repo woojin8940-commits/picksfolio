@@ -297,23 +297,58 @@ const CreatorCollabWorkspace: React.FC<CreatorCollabWorkspaceProps> = ({ userNam
                               </p>
                             </div>
                           </div>
-                          {detail.terms.guideUrl && (
-                            <a
-                              href={detail.terms.guideUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-block mt-2 text-[11px] text-blue-600 font-bold hover:underline"
-                            >
-                              {isEn ? 'View Guide Document' : '가이드 문서 보기'}
-                            </a>
-                          )}
-                          {detail.terms.guideNote && (
-                            <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap mt-2">
-                              {detail.terms.guideNote}
-                            </p>
-                          )}
                         </div>
                       )}
+
+                      {/* 가이드라인. 브랜드가 캠페인에 올린 파일과 담당자가 이 협업에
+                          맞춰 정리한 내용이 서버에서 합쳐져 온다. 조건 카드 안에 링크
+                          한 줄로 묻어 두면 촬영 전에 열어 보지 않아서 카드로 뺐다. */}
+                      {(() => {
+                        const g = detail.guideline || {};
+                        const files: any[] = Array.isArray(g.files) ? g.files : [];
+                        const note = String(g.note || '').trim();
+                        const url = String(g.url || '').trim();
+                        if (!files.length && !note && !url) return null;
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <p className="text-[9px] text-slate-400 font-black uppercase mb-2">
+                              {isEn ? 'Content Guidelines' : '콘텐츠 가이드라인'}
+                            </p>
+                            {files.length > 0 && (
+                              <div className="space-y-1.5">
+                                {files.map((f: any) => (
+                                  <a
+                                    key={f.url}
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 hover:border-blue-200 hover:bg-blue-50/40 transition-colors"
+                                  >
+                                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    <span className="min-w-0 flex-1 text-xs font-bold text-slate-800 truncate">{f.name}</span>
+                                    <span className="text-[10px] font-black text-blue-600 flex-shrink-0">{isEn ? 'Open' : '열기'}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                            {note && (
+                              <p className={`text-xs text-slate-600 font-medium whitespace-pre-wrap ${files.length ? 'mt-2' : ''}`}>
+                                {note}
+                              </p>
+                            )}
+                            {url && (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-block mt-2 text-[11px] text-blue-600 font-bold hover:underline break-all"
+                              >
+                                {isEn ? 'View Guide Document' : '가이드 문서 보기'}
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <div>
                         <p className="text-[9px] text-slate-400 font-black uppercase mb-2">{isEn ? 'Stages' : '진행 단계'}</p>

@@ -58,9 +58,44 @@ async function resolveCaller(req: Request): Promise<CallerContext | { error: Res
 
 const jsonError = (message: string, status = 400) => Response.json({ error: message }, { status });
 
+/**
+ * 협업 한 건 + 그 캠페인의 가이드라인.
+ *
+ * 캠페인을 함께 읽는 이유는 둘이다. 첫째, 가이드라인 파일은 캠페인 단위로 올린다
+ * (인플루언서마다 다르지 않다). 둘째, 협업 행의 business_username 이 비었거나
+ * `biz/` 표기 차이로 어긋난 예전 건이 있어서, 접근 권한을 판정할 때 캠페인 소유자를
+ * 함께 봐야 브랜드가 자기 협업에서 튕기지 않는다.
+ */
 async function loadCollab(db: any, collabId: string) {
-  const rows = await db.sql`SELECT * FROM campaign_collabs WHERE id = ${collabId}`;
+  const rows = await db.sql`
+    SELECT cc.*,
+           c.business_username AS campaign_owner_username,
+           c.guideline_note    AS campaign_guideline_note,
+           c.guideline_url     AS campaign_guideline_url,
+           c.guideline_files   AS campaign_guideline_files
+    FROM campaign_collabs cc
+    LEFT JOIN campaigns c ON c.id = cc.campaign_id
+    WHERE cc.id = ${collabId}
+  `;
   return (rows as any[])?.[0] || null;
+}
+
+/** 가이드라인 파일 목록은 JSONB 로 저장되지만 예전 행은 문자열이거나 비어 있다. */
+function guidelineFiles(raw: unknown): any[] {
+  let value = raw;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return []; }
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((f) => f && typeof f === "object" && String((f as any).url || ""))
+    .map((f: any) => ({
+      url: String(f.url || ""),
+      name: String(f.name || "가이드라인"),
+      mimeType: String(f.mimeType || ""),
+      uploadedAt: String(f.uploadedAt || ""),
+      uploadedBy: String(f.uploadedBy || ""),
+    }));
 }
 
 async function loadStages(db: any, collabId: string) {
@@ -153,9 +188,20 @@ export default async (req: Request, context: Context) => {
         if (!caller.isManager && requested && requested !== caller.username) {
           return jsonError("다른 계정의 협업은 조회할 수 없습니다.", 403);
         }
+        // 이름을 정규화해서 맞춘다. 비즈니스 계정은 자리에 따라 `biz/acme` 로도
+        // `acme` 로도 저장돼 있고 대소문자도 섞여 있다. 예전처럼 문자열을 그대로
+        // 비교하면 담당자가 진행을 시작한 협업이 브랜드 화면에서 통째로 사라진다
+        // (행은 있는데 이름 표기가 달라 안 잡힌다).
+        //
+        // 캠페인 소유자로도 한 번 더 찾는다. 협업 행의 business_username 이 비어
+        // 있거나 다른 표기로 들어간 건이 있어도, 그 캠페인을 등록한 브랜드라면
+        // 자기 진행사항에서 봐야 한다.
         rows = (await db.sql`
-          SELECT * FROM campaign_collabs WHERE business_username = ${target}
-          ORDER BY created_at DESC
+          SELECT cc.* FROM campaign_collabs cc
+          LEFT JOIN campaigns c ON c.id = cc.campaign_id
+          WHERE LOWER(REPLACE(COALESCE(cc.business_username, ''), 'biz/', '')) = ${target}
+             OR LOWER(REPLACE(COALESCE(c.business_username, ''), 'biz/', '')) = ${target}
+          ORDER BY cc.created_at DESC
         `) as any[];
       } else {
         const target = caller.isManager && requested ? requested : caller.username;
@@ -227,7 +273,18 @@ export default async (req: Request, context: Context) => {
   const collab = await loadCollab(db, collabId);
   if (!collab) return jsonError("협업을 찾을 수 없습니다.", 404);
 
-  const role = roleInCollab(collab, caller.username, caller.isManager);
+  // 브랜드 판정에는 캠페인 소유자도 넣는다. 협업 행의 business_username 이 비어
+  // 있거나 `biz/` 표기가 섞인 예전 건에서, 캠페인을 등록한 당사자가 자기 협업을
+  // 열지 못하고 403 을 받는 일이 있었다.
+  const role = roleInCollab(
+    { ...collab, business_username: collab.business_username || collab.campaign_owner_username },
+    caller.username,
+    caller.isManager,
+  ) || roleInCollab(
+    { ...collab, business_username: collab.campaign_owner_username },
+    caller.username,
+    caller.isManager,
+  );
   if (!role) return jsonError("이 협업에 접근할 수 없습니다.", 403);
 
   // ------------------------------------------------------------------ 상세
@@ -246,6 +303,36 @@ export default async (req: Request, context: Context) => {
       const template = templateByKey(collab.template_key);
       const today = todayInSeoul();
       const terms = (termsRows as any[])?.[0] || null;
+
+      // 가이드라인 한 덩어리.
+      //
+      // 지금까지는 collab_terms 의 guide_note/guide_url 만 봤다. 그 두 칸은 담당자가
+      // 조건을 확정할 때 채우는 것이라, 브랜드가 캠페인 화면에서 올려 둔 가이드라인은
+      // 인플루언서 진행 화면까지 도달하지 못했다. 여기서 세 곳(캠페인 · 협업 조건 ·
+      // 협업 자료함의 guide 파일)을 합쳐 한 번에 내려보낸다 — 화면이 어디를 봐야
+      // 할지 고르게 두면 결국 어느 한 곳은 빠뜨린다.
+      const guideFiles = [
+        ...guidelineFiles(collab.campaign_guideline_files),
+        ...(assets as any[])
+          .filter((a) => a.kind === "guide" && a.file_url)
+          .map((a) => ({
+            url: String(a.file_url),
+            name: String(a.title || a.file_name || "가이드 파일"),
+            mimeType: String(a.mime_type || ""),
+            uploadedAt: a.created_at ? String(a.created_at) : "",
+            uploadedBy: String(a.uploaded_by || ""),
+          })),
+      ];
+      const seenGuideUrls = new Set<string>();
+      const guideline = {
+        note: String(terms?.guide_note || collab.campaign_guideline_note || ""),
+        url: String(terms?.guide_url || collab.campaign_guideline_url || ""),
+        files: guideFiles.filter((f) => {
+          if (seenGuideUrls.has(f.url)) return false;
+          seenGuideUrls.add(f.url);
+          return true;
+        }),
+      };
 
       return Response.json({
         role,
@@ -276,9 +363,13 @@ export default async (req: Request, context: Context) => {
           progress: progressOf(stages),
           createdAt: collab.created_at,
         },
+        guideline,
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
-          brandSupport: role === "influencer" ? null : supportThreadId("brand_support", collabId),
+          // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
+          // 받고 담당자가 정리해 인플루언서에게 옮긴다. 예전에 만들어진 방은
+          // 담당자 대화 목록에 그대로 남아 있다.
+          brandSupport: null,
           legacy: collab.proposal_id || "",
         },
         stages: stages.map((s) => ({
@@ -1049,20 +1140,13 @@ export default async (req: Request, context: Context) => {
       case "ensure_threads": {
         if (role !== "manager") return jsonError("담당자만 처리할 수 있습니다.", 403);
         const manager = collab.manager_username || caller.username;
+        // 인플루언서 채널만 복구한다. 브랜드↔담당자 방은 더 이상 만들지 않는다 —
+        // 브랜드의 요청은 진행사항의 단계별 피드백으로 받는다.
         await ensureSupportThread({
           db,
           kind: "influencer_support",
           collabId,
           counterpartUsername: collab.creator_username,
-          managerUsername: manager,
-          companyName: collab.company_name || "",
-          title: collab.campaign_title || "",
-        });
-        await ensureSupportThread({
-          db,
-          kind: "brand_support",
-          collabId,
-          counterpartUsername: collab.business_username,
           managerUsername: manager,
           companyName: collab.company_name || "",
           title: collab.campaign_title || "",
