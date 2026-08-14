@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { openPostcodeSearch } from '../../utils/daumPostcode';
+import { formatPhone, formatPhoneInput } from '../../utils/formatters';
+import {
+  StoryboardScene,
+  emptyScene,
+  normalizeScenes,
+  parseAnchor,
+  sceneAnchor,
+  sceneIsEmpty,
+} from '../../utils/collabScenes';
 
 /**
  * 캠페인 진행 프로세스 — 다섯 단계 하나의 화면.
@@ -27,6 +37,9 @@ type Props = {
   detail: any;
   onRefresh: () => Promise<any> | void;
   onNotify: (message: string, type?: 'success' | 'error') => void;
+  /** 이 단계를 펼친 채로 연다. 브랜드가 "제품 배송" 줄에서 들어왔는데 가이드가
+   *  펼쳐져 있으면, 보러 온 것을 다시 찾아 눌러야 한다. */
+  focusStep?: StepKey | '';
 };
 
 type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
@@ -51,6 +64,18 @@ const STAGE_KEYS: Record<StepKey, string[]> = {
 const inputCls =
   'w-full text-xs font-medium border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:border-slate-400 transition-colors';
 
+/**
+ * 값이 들어간 칸은 눈에 다르게 보여야 한다.
+ *
+ * 배송 정보를 다 적고 저장한 뒤에도 칸이 전부 흰색이면 "저장이 된 건가, 비어 있는
+ * 건가"를 알 수 없다 — 실제로 값이 들어 있는데도 빈칸처럼 읽혔다. 채워진 칸은
+ * 옅은 초록 배경과 진한 글씨로 바꾼다.
+ */
+const fieldCls = (value: string) =>
+  String(value || '').trim()
+    ? 'w-full text-xs font-bold text-slate-900 border border-emerald-200 bg-emerald-50/60 rounded-lg px-3 py-2.5 focus:outline-none focus:border-emerald-400 transition-colors'
+    : inputCls;
+
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className="block">
     <span className="block text-[10px] font-black text-slate-400 mb-1">{label}</span>
@@ -65,7 +90,7 @@ const fmtDate = (value?: string | null) => {
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 };
 
-const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify }) => {
+const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep }) => {
   const stages = useMemo(() => (Array.isArray(detail?.stages) ? detail.stages : []), [detail]);
   const deliverables = useMemo(() => (Array.isArray(detail?.deliverables) ? detail.deliverables : []), [detail]);
   const feedbacks = useMemo(() => (Array.isArray(detail?.feedbacks) ? detail.feedbacks : []), [detail]);
@@ -113,10 +138,15 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   }, [detail]);
 
   const currentKey = states.find(s => s.current)?.key || 'upload';
-  const [open, setOpen] = useState<StepKey | ''>(currentKey);
+  const [open, setOpen] = useState<StepKey | ''>(focusStep || currentKey);
   useEffect(() => {
     setOpen(currentKey);
   }, [currentKey]);
+  // 보러 온 단계가 있으면 그것이 이긴다. 브랜드가 배송 줄에서 열었는데 "지금 단계"가
+  // 가이드라서 가이드가 펼쳐지면, 주소를 보려고 한 번 더 눌러야 한다.
+  useEffect(() => {
+    if (focusStep) setOpen(focusStep);
+  }, [focusStep]);
 
   const [busy, setBusy] = useState(false);
 
@@ -158,6 +188,22 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     recipient: '', phone: '', postcode: '', address1: '', address2: '', memo: '',
   });
   const [tracking, setTracking] = useState({ courier: '', trackingNumber: '' });
+  /** 주소 SDK 를 못 받았을 때만 켠다 — 그때는 직접 적어야 한다. */
+  const [postcodeFailed, setPostcodeFailed] = useState(false);
+
+  /**
+   * 저장된 주소를 칸에 되돌려 놓는다.
+   *
+   * 예전에는 받는 분·연락처·주소만 의존성으로 걸어 두어서, 상세주소나 요청사항만
+   * 바뀐 저장은 화면에 되돌아오지 않았다. 저장한 값 전체를 한 문자열로 묶어 비교하면
+   * 그 구멍이 없어지고, 사람이 타자를 치는 중에는(저장값이 그대로이므로) 다시 덮어쓰지도
+   * 않는다.
+   */
+  const shippingKey = [
+    shipping.recipient, shipping.phone, shipping.postcode,
+    shipping.address1, shipping.address2, shipping.memo,
+    shipping.courier, shipping.trackingNumber, shipping.savedAt,
+  ].join('|');
 
   useEffect(() => {
     setShip({
@@ -170,26 +216,87 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     });
     setTracking({ courier: shipping.courier || '', trackingNumber: shipping.trackingNumber || '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shipping.recipient, shipping.phone, shipping.address1, shipping.courier, shipping.trackingNumber]);
+  }, [shippingKey]);
+
+  const searchAddress = async () => {
+    const ok = await openPostcodeSearch(({ postcode, address }) => {
+      setShip(prev => ({ ...prev, postcode, address1: address }));
+      setPostcodeFailed(false);
+      // 검색으로 받은 주소 뒤에 남는 것은 동·호수뿐이다. 그 칸으로 커서를 옮겨 준다.
+      setTimeout(() => document.getElementById(`ship-detail-${collabId}`)?.focus(), 100);
+    });
+    if (!ok) setPostcodeFailed(true);
+  };
+
+  const saveShipping = async () => {
+    if (!ship.recipient.trim()) { onNotify('받는 분 이름을 입력해 주세요.', 'error'); return; }
+    if (!ship.phone.trim()) { onNotify('연락처를 입력해 주세요.', 'error'); return; }
+    if (!ship.address1.trim()) { onNotify('주소 찾기로 주소를 선택해 주세요.', 'error'); return; }
+    const ok = await act('save_shipping', ship, '배송 정보를 저장했습니다. 브랜드가 바로 확인합니다.');
+    // 저장이 끝나면 단계를 접는다. 다 적은 칸을 계속 펼쳐 두면 아직 할 일이 남은
+    // 것처럼 보인다.
+    if (ok) setOpen('');
+  };
 
   // ── 3·4·5. 기획안 · 영상 · 업로드 ────────────────────────────────────
   const planWork = workOf('plan');
   const videoWork = workOf('video');
-  const [planText, setPlanText] = useState('');
+  /**
+   * 기획안은 장면 단위로 받는다.
+   *
+   * 예전에는 큰 글상자 하나였다. 그렇게 모인 기획안에는 브랜드가 의견을 붙일 자리가
+   * 없다 — "두 번째 자막을 바꿔 달라"고 적어도 그 자막이라는 칸 자체가 없어서, 결국
+   * 기획안 전체에 대한 한 덩어리 피드백이 되고 인플루언서는 어디를 고쳐야 하는지
+   * 다시 물어야 했다. 장면 1의 설명과 자막부터 시작하고, + 를 누르면 장면 2가 생긴다.
+   */
+  const [scenes, setScenes] = useState<StoryboardScene[]>([emptyScene()]);
   const [planFile, setPlanFile] = useState<File | null>(null);
   const [videoLink, setVideoLink] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
-  const [reply, setReply] = useState<Record<string, string>>({ plan: '', video: '', upload: '' });
+  const [reply, setReply] = useState<Record<string, string>>({});
+  /** 지금 피드백 칸이 열려 있는 자리. 장면마다 칸을 늘 펴 두면 기획안이 안 보인다. */
+  const [composer, setComposer] = useState('');
 
   useEffect(() => {
-    setPlanText(String(planWork?.payload?.body || ''));
+    const saved = normalizeScenes(planWork?.payload?.scenes);
+    if (saved.length > 0) {
+      setScenes(saved);
+    } else {
+      // 장면 없이 글상자로 낸 예전 기획안은 그 글을 장면 1의 설명으로 이어받는다.
+      const legacy = String(planWork?.payload?.body || '');
+      setScenes([{ ...emptyScene(), visual: legacy }]);
+    }
     setVideoLink(String(videoWork?.payload?.link || ''));
     setUploadLink(String(collab.uploadUrl || ''));
     setAdCode(String(collab.adCode || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planWork?.id, videoWork?.id, collab.uploadUrl, collab.adCode]);
+
+  const patchScene = (index: number, key: keyof StoryboardScene, value: string) =>
+    setScenes(prev => prev.map((s, i) => (i === index ? { ...s, [key]: value } : s)));
+  const addScene = () => setScenes(prev => [...prev, emptyScene()]);
+  const removeScene = (index: number) =>
+    setScenes(prev => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+
+  const savePlan = async () => {
+    const filled = scenes.filter(s => !sceneIsEmpty(s));
+    if (filled.length === 0 && !planFile) {
+      onNotify('장면 1의 설명을 적어 주세요.', 'error');
+      return;
+    }
+    const missing = filled.findIndex(s => !s.visual.trim());
+    if (missing >= 0) {
+      onNotify(`장면 ${missing + 1}의 설명을 적어 주세요.`, 'error');
+      return;
+    }
+    // 장면을 줄글로도 함께 보낸다. 담당자 화면과 알림처럼 글로만 읽는 자리가 있다.
+    const body = filled
+      .map((s, i) => `장면 ${i + 1}\n설명: ${s.visual}${s.subtitle.trim() ? `\n자막: ${s.subtitle}` : ''}`)
+      .join('\n\n');
+    await saveWork('plan', { scenes: filled, body }, planFile);
+  };
 
   const saveWork = async (step: 'plan' | 'video' | 'upload', extra: Record<string, any>, file: File | null) => {
     let fileUrl = '';
@@ -212,19 +319,34 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     }
   };
 
-  const sendFeedback = async (step: StepKey) => {
-    const text = (reply[step] || '').trim();
+  /**
+   * 피드백 한 줄. anchor 가 있으면 그 자리(장면 번호)에 붙는다.
+   *
+   * 자리 없는 피드백은 기획안 전체에 대한 말이 되고, 그러면 "몇 번 장면"인지를
+   * 본문에 적어야 한다 — 그 순간 장면으로 나눈 의미가 없어진다.
+   */
+  const sendFeedback = async (step: StepKey, anchor = '') => {
+    const key = anchor ? `${step}:${anchor}` : step;
+    const text = (reply[key] || '').trim();
     if (!text) return;
-    const ok = await act('step_feedback', { stepKey: step, body: text }, '피드백을 전달했습니다.');
-    if (ok) setReply(prev => ({ ...prev, [step]: '' }));
+    const ok = await act('step_feedback', { stepKey: step, body: text, anchor }, '피드백을 전달했습니다.');
+    if (ok) {
+      setReply(prev => ({ ...prev, [key]: '' }));
+      setComposer('');
+    }
   };
 
   // ── 공통 조각 ───────────────────────────────────────────────────────
   // 컴포넌트가 아니라 함수로 둔다. 컴포넌트로 만들면 입력할 때마다 상태가 바뀌면서
   // 새 타입으로 인식돼 통째로 다시 마운트되고, 피드백을 한 글자 칠 때마다 커서가
   // 칸 밖으로 튀어나간다.
-  const renderFeedbackThread = (step: StepKey) => {
-    const rows = feedbacksOf(step);
+  const renderFeedbackThread = (step: StepKey, sceneIndex = -2) => {
+    // sceneIndex 가 -2 면 그 단계의 "자리 없는" 피드백만, 0 이상이면 그 장면의 것만.
+    const rows = feedbacksOf(step).filter((f: any) => {
+      const parsed = parseAnchor(f.anchor);
+      const at = parsed.kind === 'scene' ? parsed.sceneIndex : -1;
+      return sceneIndex === -2 ? at === -1 : at === sceneIndex;
+    });
     if (rows.length === 0) return null;
     return (
       <div className="space-y-1.5">
@@ -298,6 +420,49 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       </div>
     </div>
   );
+
+  /** 장면 하나에만 붙는 작은 피드백 칸. 접었다 펴는 이유는 다섯 장면이면 칸도 다섯이라서다. */
+  const renderSceneFeedbackBox = (step: StepKey, index: number) => {
+    const anchor = sceneAnchor(index);
+    const key = `${step}:${anchor}`;
+    if (composer !== key) {
+      return (
+        <button
+          onClick={() => setComposer(key)}
+          className="mt-2 px-2.5 py-1.5 rounded-md bg-slate-900 text-white text-[10px] font-black hover:bg-slate-700 transition-colors"
+        >
+          이 장면에 피드백
+        </button>
+      );
+    }
+    return (
+      <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+        <textarea
+          value={reply[key] || ''}
+          onChange={e => setReply(prev => ({ ...prev, [key]: e.target.value }))}
+          rows={2}
+          autoFocus
+          placeholder={`장면 ${index + 1}에서 바꿨으면 하는 점을 적어 주세요.`}
+          className={`${inputCls} resize-none`}
+        />
+        <div className="flex gap-1.5 mt-1.5">
+          <button
+            onClick={() => sendFeedback(step, anchor)}
+            disabled={busy || !(reply[key] || '').trim()}
+            className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-[10px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
+          >
+            보내기
+          </button>
+          <button
+            onClick={() => setComposer('')}
+            className="px-3 py-1.5 rounded-md bg-white border border-slate-200 text-slate-500 text-[10px] font-black hover:bg-slate-100 transition-colors"
+          >
+            접기
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const renderFileLink = (url: string, name: string) => (
     <a
@@ -384,35 +549,77 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   {shipping.shippedAt ? ` · ${fmtDate(shipping.shippedAt)}` : ''}
                 </p>
               </div>
+            ) : shipping.filled ? (
+              /* 저장된 주소를 맨 위에 한 번 더 보여 준다. 칸만 채워져 있으면
+                 "이게 저장된 값인지 내가 방금 친 값인지"를 알 수 없다. */
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+                <p className="text-xs font-black text-emerald-700">배송지 저장 완료 · 브랜드 발송 대기</p>
+                <p className="text-[11px] text-emerald-700 font-bold mt-0.5 leading-relaxed">
+                  {shipping.recipient} · {formatPhone(shipping.phone)}
+                  <br />
+                  {[shipping.postcode && `(${shipping.postcode})`, shipping.address1, shipping.address2].filter(Boolean).join(' ')}
+                </p>
+              </div>
             ) : (
               <p className="text-xs text-slate-400 font-medium">
                 입력한 주소는 이 캠페인의 브랜드에게만 보입니다.
               </p>
             )}
             <div className="grid grid-cols-2 gap-2">
-              <Field label="받는 분"><input value={ship.recipient} onChange={e => setShip({ ...ship, recipient: e.target.value })} className={inputCls} /></Field>
-              <Field label="연락처"><input value={ship.phone} onChange={e => setShip({ ...ship, phone: e.target.value })} placeholder="010-0000-0000" className={inputCls} /></Field>
+              <Field label="받는 분"><input value={ship.recipient} onChange={e => setShip({ ...ship, recipient: e.target.value })} className={fieldCls(ship.recipient)} /></Field>
+              <Field label="연락처"><input value={ship.phone} onChange={e => setShip({ ...ship, phone: formatPhoneInput(e.target.value) })} inputMode="numeric" placeholder="010-0000-0000" className={fieldCls(ship.phone)} /></Field>
             </div>
-            <div className="grid grid-cols-[100px_1fr] gap-2">
-              <Field label="우편번호"><input value={ship.postcode} onChange={e => setShip({ ...ship, postcode: e.target.value })} className={inputCls} /></Field>
-              <Field label="주소"><input value={ship.address1} onChange={e => setShip({ ...ship, address1: e.target.value })} className={inputCls} /></Field>
+
+            {/* 주소는 검색으로 받는다. 손으로 적으면 우편번호가 비거나 도로명과
+                지번이 섞여 들어와, 택배를 부치는 쪽이 결국 되묻게 된다. */}
+            <div className="grid grid-cols-[100px_1fr_auto] gap-2 items-end">
+              <Field label="우편번호">
+                <input value={ship.postcode} readOnly onClick={searchAddress} placeholder="검색" className={`${fieldCls(ship.postcode)} cursor-pointer`} />
+              </Field>
+              <Field label="주소">
+                <input value={ship.address1} readOnly onClick={searchAddress} placeholder="주소 찾기를 눌러 주세요" className={`${fieldCls(ship.address1)} cursor-pointer`} />
+              </Field>
+              <button
+                type="button"
+                onClick={searchAddress}
+                className="px-3.5 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 transition-colors flex-shrink-0"
+              >
+                주소 찾기
+              </button>
             </div>
-            <Field label="상세주소"><input value={ship.address2} onChange={e => setShip({ ...ship, address2: e.target.value })} className={inputCls} /></Field>
-            <Field label="배송 요청사항 (선택)"><input value={ship.memo} onChange={e => setShip({ ...ship, memo: e.target.value })} placeholder="부재 시 문 앞에 놓아주세요" className={inputCls} /></Field>
+            {postcodeFailed && (
+              <p className="text-[10px] font-bold text-amber-600">
+                주소 검색을 열지 못했습니다. 아래 상세주소 칸에 전체 주소를 적어 주세요.
+              </p>
+            )}
+
+            <Field label="상세주소">
+              <input
+                id={`ship-detail-${collabId}`}
+                value={ship.address2}
+                onChange={e => setShip({ ...ship, address2: e.target.value })}
+                placeholder="동 · 호수"
+                className={fieldCls(ship.address2)}
+              />
+            </Field>
+            <Field label="배송 요청사항 (선택)"><input value={ship.memo} onChange={e => setShip({ ...ship, memo: e.target.value })} placeholder="부재 시 문 앞에 놓아주세요" className={fieldCls(ship.memo)} /></Field>
             <button
-              onClick={() => act('save_shipping', ship, '배송 정보를 저장했습니다.')}
+              onClick={saveShipping}
               disabled={busy}
               className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
             >
-              배송 정보 저장
+              {busy ? '저장 중...' : shipping.filled ? '배송 정보 수정 저장' : '배송 정보 저장'}
             </button>
           </div>
         ) : (
           <div className="space-y-3">
             {shipping.filled ? (
-              <div className="rounded-lg bg-slate-50 p-3">
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+                <p className="text-[10px] font-black text-emerald-700 mb-1">
+                  인플루언서가 배송지를 입력했습니다{shipping.savedAt ? ` · ${fmtDate(shipping.savedAt)}` : ''}
+                </p>
                 <p className="text-xs font-black text-slate-900">
-                  {shipping.recipient} · {shipping.phone}
+                  {shipping.recipient} · {formatPhone(shipping.phone)}
                 </p>
                 <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">
                   {[shipping.postcode && `(${shipping.postcode})`, shipping.address1, shipping.address2].filter(Boolean).join(' ')}
@@ -421,7 +628,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 <button
                   onClick={() =>
                     navigator.clipboard?.writeText(
-                      `${shipping.recipient} ${shipping.phone} ${[shipping.postcode && `(${shipping.postcode})`, shipping.address1, shipping.address2].filter(Boolean).join(' ')}`,
+                      `${shipping.recipient} ${formatPhone(shipping.phone)} ${[shipping.postcode && `(${shipping.postcode})`, shipping.address1, shipping.address2].filter(Boolean).join(' ')}`,
                     )
                   }
                   className="mt-2 text-[10px] font-black text-blue-600"
@@ -449,18 +656,59 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
           </div>
         );
 
-      case 'plan':
+      case 'plan': {
+        /** 브랜드가 보는 것은 제출된 장면. 인플루언서가 보는 것은 지금 쓰고 있는 장면. */
+        const savedScenes = normalizeScenes(planWork?.payload?.scenes);
+        const shownScenes = isInfluencer ? scenes : savedScenes;
         return (
           <div className="space-y-3">
             {isInfluencer ? (
               <>
-                <textarea
-                  value={planText}
-                  onChange={e => setPlanText(e.target.value)}
-                  rows={7}
-                  placeholder={'기획안을 자유롭게 적어 주세요.\n\n· 어떤 흐름으로 찍을지\n· 강조할 제품 포인트\n· 촬영 장소와 분위기'}
-                  className={`${inputCls} resize-none leading-relaxed`}
-                />
+                <p className="text-[11px] text-slate-400 font-medium">
+                  장면 하나에 설명과 자막을 적고, 아래 + 로 다음 장면을 추가하세요. 브랜드는 장면마다 피드백을 답니다.
+                </p>
+                {scenes.map((scene, i) => (
+                  <div key={i} className="rounded-lg border border-slate-200 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-black text-slate-900">장면 {i + 1}</span>
+                      {scenes.length > 1 && (
+                        <button
+                          onClick={() => removeScene(i)}
+                          className="text-[10px] font-black text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          삭제
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Field label="설명">
+                        <textarea
+                          value={scene.visual}
+                          onChange={e => patchScene(i, 'visual', e.target.value)}
+                          rows={3}
+                          placeholder="어떤 장면을 찍는지 (예: 제품을 손에 들고 카메라 정면)"
+                          className={`${fieldCls(scene.visual)} resize-none leading-relaxed`}
+                        />
+                      </Field>
+                      <Field label="자막">
+                        <input
+                          value={scene.subtitle}
+                          onChange={e => patchScene(i, 'subtitle', e.target.value)}
+                          placeholder="화면에 뜨는 글자"
+                          className={fieldCls(scene.subtitle)}
+                        />
+                      </Field>
+                    </div>
+                    {/* 브랜드가 이 장면에 남긴 말은 이 장면 안에 둔다. */}
+                    <div className="mt-2">{renderFeedbackThread('plan', i)}</div>
+                  </div>
+                ))}
+                <button
+                  onClick={addScene}
+                  className="w-full py-2.5 rounded-lg border border-dashed border-slate-300 text-[11px] font-black text-slate-500 hover:border-slate-900 hover:text-slate-900 transition-colors"
+                >
+                  + 장면 추가
+                </button>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="file"
@@ -469,7 +717,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-md file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-[10px] file:font-black"
                   />
                   <button
-                    onClick={() => saveWork('plan', { body: planText }, planFile)}
+                    onClick={savePlan}
                     disabled={busy}
                     className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                   >
@@ -478,22 +726,47 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </div>
               </>
             ) : planWork ? (
-              <div className="rounded-lg bg-slate-50 p-3 space-y-2">
-                {String(planWork.payload?.body || '').trim() && (
-                  <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{planWork.payload.body}</p>
+              <>
+                {shownScenes.map((scene, i) => (
+                  <div key={i} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <span className="text-xs font-black text-slate-900">장면 {i + 1}</span>
+                    <div className="mt-1.5 space-y-1.5">
+                      <div className="flex gap-2">
+                        <span className="text-[10px] font-black text-slate-400 w-8 flex-shrink-0 pt-0.5">설명</span>
+                        <p className="flex-1 text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                          {scene.visual || <span className="text-slate-300">비어 있음</span>}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="text-[10px] font-black text-slate-400 w-8 flex-shrink-0 pt-0.5">자막</span>
+                        <p className="flex-1 text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                          {scene.subtitle || <span className="text-slate-300">없음</span>}
+                        </p>
+                      </div>
+                    </div>
+                    {renderFeedbackThread('plan', i)}
+                    {isBrandSide && renderSceneFeedbackBox('plan', i)}
+                  </div>
+                ))}
+                {/* 장면 없이 글상자로 낸 예전 기획안. 그대로 열려야 한다. */}
+                {shownScenes.length === 0 && String(planWork.payload?.body || '').trim() && (
+                  <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed rounded-lg bg-slate-50 p-3">
+                    {planWork.payload.body}
+                  </p>
                 )}
                 {planWork.payload?.fileUrl && renderFileLink(planWork.payload.fileUrl, planWork.payload.fileName || '기획안 파일')}
                 <p className="text-[10px] text-slate-400 font-bold">{planWork.version}번째 안 · {fmtDate(planWork.createdAt)}</p>
-              </div>
+              </>
             ) : (
               <p className="text-xs text-slate-400 font-medium">인플루언서가 기획안을 올리면 여기에 표시됩니다.</p>
             )}
 
             {/* 기획안 바로 아래에 피드백. 이 순서가 이 단계의 전부다. */}
             {renderFeedbackThread('plan')}
-            {isBrandSide && planWork && renderFeedbackBox('plan', '고쳤으면 하는 부분을 적어 주세요.')}
+            {isBrandSide && planWork && renderFeedbackBox('plan', '기획안 전체에 대한 의견을 적어 주세요. 장면 하나를 고쳐야 하면 그 장면의 피드백 칸을 쓰세요.')}
           </div>
         );
+      }
 
       case 'video':
         return (

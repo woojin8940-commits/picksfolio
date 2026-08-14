@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { digitsOnly, formatPhoneInput } from '../utils/formatters';
 
 interface BusinessSignupPageProps {
   onNavigateHome: () => void;
@@ -291,8 +292,10 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
             <label className={labelClass}>담당자 연락처 *</label>
             <div className="flex gap-2">
               <input
-                type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
-                className={`flex-1 ${inputClass}`} placeholder="01012345678" required
+                type="tel" inputMode="numeric" autoComplete="tel"
+                value={formatPhoneInput(contactPhone)}
+                onChange={(e) => setContactPhone(digitsOnly(e.target.value).slice(0, 11))}
+                className={`flex-1 ${inputClass}`} placeholder="010-1234-5678" required
               />
               <button
                 type="button" onClick={handleSendSMS} disabled={isSending || isVerified}

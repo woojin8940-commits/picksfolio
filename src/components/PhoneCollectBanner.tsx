@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
+import { digitsOnly, formatPhoneInput } from '../utils/formatters';
 
 interface PhoneCollectBannerProps {
   onPhoneUpdated: () => void;
@@ -108,9 +109,10 @@ const PhoneCollectBanner: React.FC<PhoneCollectBannerProps> = ({ onPhoneUpdated 
           <div className="flex gap-2 items-center justify-center">
             <input
               type="tel"
-              placeholder="01012345678"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              inputMode="numeric"
+              placeholder="010-1234-5678"
+              value={formatPhoneInput(phone)}
+              onChange={(e) => setPhone(digitsOnly(e.target.value).slice(0, 11))}
               className="border border-amber-300 rounded-lg px-3 py-1.5 text-sm w-40 bg-white text-slate-900 focus:outline-none focus:border-amber-500"
             />
             <button

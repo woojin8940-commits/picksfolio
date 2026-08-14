@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
-import { formatKRW, stripCommas } from '../utils/formatters';
+import { formatKRW, formatNumberWithCommas, stripCommas } from '../utils/formatters';
 import { authHeaders } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -67,7 +67,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
 
   const startEditAmount = (s: Settlement) => {
     setEditingId(s.id);
-    setEditAmount(String(s.amount ?? 0));
+    setEditAmount(formatNumberWithCommas(s.amount ?? 0));
   };
 
   const cancelEditAmount = () => {
@@ -292,10 +292,10 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
                           <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-1">
                               <input
-                                type="number"
-                                min={0}
+                                type="text"
+                                inputMode="numeric"
                                 value={editAmount}
-                                onChange={e => setEditAmount(e.target.value)}
+                                onChange={e => setEditAmount(formatNumberWithCommas(e.target.value))}
                                 autoFocus
                                 className="w-28 md:w-32 text-right font-black text-blue-600 text-base border-2 border-blue-200 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
                               />

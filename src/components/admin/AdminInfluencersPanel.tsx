@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
 import { isTestUsername } from '../../utils/testData';
 import { TIER_LABEL, normalizeTier, type MembershipTier } from '../../utils/membershipTiers';
+import { formatPhone } from '../../utils/formatters';
 
 interface InfluencerRow {
   username: string;
@@ -546,7 +547,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       <p className="text-[10px] font-bold text-slate-400 truncate">{b.email || '-'}</p>
                     </div>
                     <div className="md:col-span-2 mt-1 md:mt-0">
-                      <p className="text-[11px] font-bold text-slate-700">{b.phone || '-'}</p>
+                      <p className="text-[11px] font-bold text-slate-700">{formatPhone(b.phone) || '-'}</p>
                     </div>
                     <div className="md:col-span-2 mt-1 md:mt-0">
                       <p className="text-[11px] font-bold text-slate-600">{formatDate(b.created_at)}</p>
@@ -648,7 +649,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       </div>
                     </div>
                     <div className="md:col-span-3 mt-1 md:mt-0">
-                      <p className="text-[12px] font-bold text-slate-700">{c.phone}</p>
+                      <p className="text-[12px] font-bold text-slate-700">{formatPhone(c.phone)}</p>
                     </div>
                     <div className="md:col-span-3 mt-1 md:mt-0">
                       <p className="text-[12px] font-black text-blue-600 truncate">@{c.subscribed_to}</p>
