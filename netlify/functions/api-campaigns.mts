@@ -42,6 +42,32 @@ const csv = (raw: unknown): string => {
 const rewardMode = (raw: unknown): string => normalizeRewardMode(raw);
 
 /**
+ * 가이드라인 파일 목록. 브랜드가 올린 PDF·이미지의 주소만 모아 둔다.
+ *
+ * 화면이 보낸 것을 그대로 믿지 않고 필요한 칸만 뽑아 다시 만든다 — 이 값은 협업
+ * 상세를 통해 인플루언서 화면까지 그대로 흘러가므로, 임의의 객체가 섞여 들어오면
+ * 그쪽에서 무엇이 렌더링될지 알 수 없다.
+ */
+const guidelineFiles = (raw: unknown): string => {
+  let value: any = raw;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return "[]"; }
+  }
+  if (!Array.isArray(value)) return "[]";
+  const cleaned = value
+    .filter((f) => f && typeof f === "object" && typeof f.url === "string" && /^https?:\/\//i.test(f.url))
+    .slice(0, 20)
+    .map((f: any) => ({
+      url: String(f.url),
+      name: String(f.name || "가이드라인").slice(0, 200),
+      mimeType: String(f.mimeType || "").slice(0, 100),
+      uploadedAt: String(f.uploadedAt || ""),
+      uploadedBy: String(f.uploadedBy || "").slice(0, 100),
+    }));
+  return JSON.stringify(cleaned);
+};
+
+/**
  * 공개 목록에서 빼는 값. 공동구매 판매 수수료는 브랜드가 등록할 때 적어 두는
  * 희망 비율이고, 최종 비율은 담당자가 인플루언서와 이야기하며 정한다. 응답에
  * 남겨 두면 화면에서 지웠어도 값은 계속 내려가므로, 브랜드 자신의 관리 화면이
@@ -258,6 +284,7 @@ export default async (req: Request) => {
             video_concept = ${updates.video_concept ?? c.video_concept ?? ""},
             guideline_url = ${updates.guideline_url ?? c.guideline_url ?? ""},
             guideline_note = ${updates.guideline_note ?? c.guideline_note ?? ""},
+            guideline_files = ${updates.guideline_files === undefined ? (typeof c.guideline_files === "string" ? c.guideline_files : JSON.stringify(c.guideline_files ?? [])) : guidelineFiles(updates.guideline_files)}::jsonb,
             second_use_fee = ${updates.second_use_fee === undefined ? Number(c.second_use_fee || 0) : briefFee(updates.second_use_fee)},
             second_use_note = ${updates.second_use_note ?? c.second_use_note ?? ""},
             upload_from = ${updates.upload_from ?? c.upload_from ?? ""},

@@ -778,12 +778,10 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                         >
                           인플루언서 채널
                         </button>
-                        <button
-                          onClick={() => openThread(`support_biz_${c.id}`)}
-                          className="px-2.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black hover:bg-slate-200"
-                        >
-                          브랜드 채널
-                        </button>
+                        {/* 브랜드 채널 버튼은 없앴다. 브랜드↔담당자 방을 더 이상 만들지
+                            않기 때문이다 — 브랜드의 요청은 진행사항의 단계별 피드백으로
+                            들어오고, 담당자는 '관리'에서 그것을 본다. 예전에 만들어진
+                            방은 담당자 대화 목록에 그대로 남아 있다. */}
                         <button
                           onClick={() => openCollab(c.id)}
                           className="px-2.5 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"
@@ -872,6 +870,27 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                               placeholder="가이드 요약 · 필수 표기 사항"
                               className="w-full mt-2 text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 resize-none focus:outline-none focus:border-blue-400"
                             />
+                            {/* 브랜드가 캠페인에 올려 둔 가이드라인 파일. 담당자가 요약을
+                                쓰기 전에 원본을 열어 봐야 하는데, 예전에는 캠페인 화면으로
+                                따로 나가야 보였다. 여기서는 읽기만 한다 — 브랜드가 올린
+                                파일을 담당자가 바꾸면 브랜드가 무엇이 전달됐는지 모른다. */}
+                            {Array.isArray(detail.guideline?.files) && detail.guideline.files.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                <p className="text-[10px] text-slate-400 font-bold">브랜드가 올린 가이드라인</p>
+                                {detail.guideline.files.map((f: any) => (
+                                  <a
+                                    key={f.url}
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 hover:border-blue-200 hover:bg-blue-50/40 transition-colors"
+                                  >
+                                    <span className="min-w-0 flex-1 text-[11px] font-bold text-slate-700 truncate">{f.name}</span>
+                                    <span className="text-[10px] font-black text-blue-600 flex-shrink-0">열기</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
                             {detail.terms?.fee > 0 ? (
                               <p className="text-[10px] text-slate-400 font-bold mt-2">
                                 세후 지급 예상 {formatKoreanWon(detail.terms.netFee)} (원천징수 3.3%)

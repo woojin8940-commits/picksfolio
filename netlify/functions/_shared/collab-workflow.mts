@@ -514,6 +514,7 @@ export type CreatedCollab = {
   templateKey: string;
   firstStageKey: string;
   influencerThreadId: string;
+  /** 더 이상 만들지 않는다. 호출부 호환을 위해 빈 문자열로 남겨 둔다. */
   brandThreadId: string;
   created: boolean;
 };
@@ -524,7 +525,7 @@ export type CreatedCollab = {
  * 지금까지 `campaign_collabs` 표는 존재만 하고 아무도 쓰지 않았다(캠페인 삭제 시
  * 정리 대상으로만 등장했다). 그래서 "선정됐다" 이후의 상태를 담을 곳이 없었고,
  * 진행 상황은 대화 내용을 사람이 읽어야만 알 수 있었다. 여기서 협업 본체와 단계,
- * 조건 초안, 담당자 채널 두 개를 한꺼번에 만든다.
+ * 조건 초안, 인플루언서↔담당자 채널을 한꺼번에 만든다.
  *
  * 이미 있으면(재수락, 중복 호출) 그대로 두고 created=false 로 알린다.
  */
@@ -560,7 +561,7 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
       templateKey: existingRow.template_key || template.key,
       firstStageKey: existingRow.current_stage_key || template.stages[0].key,
       influencerThreadId: supportThreadId("influencer_support", collabId),
-      brandThreadId: supportThreadId("brand_support", collabId),
+      brandThreadId: "",
       created: false,
     };
   }
@@ -667,21 +668,18 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
       `확인하실 수 있고, 궁금한 점은 여기로 편하게 남겨 주세요.`,
   });
 
-  const brandThreadId = await ensureSupportThread({
-    db,
-    kind: "brand_support",
-    collabId,
-    counterpartUsername: businessUsername,
-    managerUsername,
-    companyName: input.companyName,
-    title: input.campaignTitle,
-    firstMessage: byBrand
-      ? `"${input.campaignTitle}" 캠페인에 ${creatorUsername} 크리에이터를 수락해 주셨습니다.\n` +
-        `지금부터 조건과 일정은 픽스폴리오 담당자가 중간에서 정리해 진행합니다. 요청이나 의견은 ` +
-        `여기로 남겨 주시면 담당자가 크리에이터에게 전달합니다.`
-      : `"${input.campaignTitle}" 캠페인에 ${creatorUsername} 크리에이터를 선정했습니다.\n` +
-        `진행 상황은 협업 현황에서 단계별로 확인하실 수 있고, 수정 요청이나 의견은 여기로 남겨 주시면 담당자가 정리해 전달합니다.`,
-  });
+  // 브랜드 채널(brand_support)은 더 이상 만들지 않는다.
+  //
+  // 브랜드가 담당자에게 할 말은 전부 특정 인플루언서의 특정 단계에 대한 것이다
+  // ("이 대본 3번 씬 고쳐 주세요", "영상 승인합니다"). 그 말이 별도 대화방으로
+  // 빠지면 어느 협업의 어느 단계 이야기인지 다시 적어야 하고, 진행 화면에는
+  // 아무 흔적도 남지 않는다. 그래서 브랜드의 의견은 진행사항의 단계별 피드백
+  // (collab_feedbacks)으로만 받는다 — 담당자가 그것을 정리해 인플루언서에게
+  // 전달하는 흐름은 그대로다.
+  //
+  // 이미 만들어진 방은 지우지 않는다. 지난 대화가 사라지기 때문이다. 다만
+  // 비즈니스 목록에서는 감춘다(api-timeline-list).
+  const brandThreadId = "";
 
   await logCollabEvent(db, {
     collabId,

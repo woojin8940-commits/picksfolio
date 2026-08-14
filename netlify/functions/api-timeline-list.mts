@@ -53,7 +53,12 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     let data = (await store.get(indexKey, { type: "json" })) as any[] | null;
-    const existing = Array.isArray(data) ? data : [];
+    // 비즈니스 목록에서는 예전에 만들어진 brand_support(브랜드↔담당자) 방을 뺀다.
+    // 지금은 그 방을 새로 만들지 않는다 — 브랜드의 요청은 진행사항의 단계별
+    // 피드백으로 받는다. 방과 대화 내용 자체는 남겨 두고 목록에서만 감춘다.
+    const existing = (Array.isArray(data) ? data : []).filter(
+      (t: any) => !(userType === "business" && t?.kind === "brand_support"),
+    );
     const seenProposalIds = new Set<string>(existing.map((t: any) => t.proposalId));
     let added = 0;
 
@@ -125,9 +130,14 @@ export default async (req: Request, context: Context) => {
               ` as any[];
             }
             if (userType === "business") {
+              // brand_support(브랜드↔담당자) 방은 목록에서 뺀다. 브랜드가 담당자에게
+              // 하는 말은 전부 특정 인플루언서의 특정 단계에 대한 것이라 진행사항의
+              // 단계별 피드백으로 받는다. 예전에 만들어진 방은 지우지 않고 감추기만
+              // 한다 — 지난 대화까지 없애 버릴 이유는 없다.
               return await dbInstance.sql`
                 SELECT * FROM timelines
                 WHERE LOWER(business_username) = ${username}
+                  AND COALESCE(kind, '') <> 'brand_support'
                 ORDER BY created_at DESC
               ` as any[];
             }

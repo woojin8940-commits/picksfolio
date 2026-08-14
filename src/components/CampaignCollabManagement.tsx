@@ -5,7 +5,7 @@ import { authHeaders, apiService } from '../services/apiService';
 import BrandCollabProgress from './BrandCollabProgress';
 import CampaignRegisterWizard from './collab/CampaignRegisterWizard';
 import CampaignListupBoard from './collab/CampaignListupBoard';
-import CampaignGuidelineEditor from './collab/CampaignGuidelineEditor';
+import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
@@ -45,6 +45,7 @@ interface Campaign {
   video_concept?: string;
   guideline_url?: string;
   guideline_note?: string;
+  guideline_files?: unknown;
   second_use_fee?: number;
   second_use_note?: string;
   upload_from?: string;
@@ -379,11 +380,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   /**
    * 지원자 수락(제품 협찬형·공동구매).
    *
-   * 이 버튼 한 번으로 협업 본체와 단계, 담당자 채널 두 개가 생기고 인플루언서에게
-   * 선정 알림이 간다. 되돌릴 수 없는 통보가 나가므로 누르기 전에 한 번 확인한다.
+   * 이 버튼 한 번으로 협업 본체와 단계가 생기고 인플루언서에게 선정 알림이 간다.
+   * 되돌릴 수 없는 통보가 나가므로 누르기 전에 한 번 확인한다.
    *
-   * 수락 뒤에는 목록을 다시 읽는다 — 협업 ID 가 생겨야 '담당자와 대화' 버튼이
-   * 어느 방으로 갈지 알 수 있고, 그 값은 서버가 만든다.
+   * 수락 뒤에는 목록을 다시 읽는다 — 협업 ID 가 생겨야 진행사항에 이 인플루언서가
+   * 나타나고, 그 값은 서버가 만든다.
    */
   const handleAcceptApplicant = async (app: Applicant) => {
     if (
@@ -415,13 +416,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     }
   };
 
-  /** 담당자 채널 열기. 브랜드는 인플루언서와 직접 대화하지 않는다. */
-  const openManagerThread = (app: Applicant) => {
-    if (!app.collab_id) return;
-    window.dispatchEvent(
-      new CustomEvent('navigate-timeline', { detail: { proposalId: `support_biz_${app.collab_id}` } }),
-    );
-  };
+  /**
+   * 진행사항 탭으로 보낸다.
+   *
+   * 예전에는 여기에 '담당자와 대화' 버튼이 있었다(브랜드↔담당자 전용 대화방).
+   * 그런데 브랜드가 담당자에게 하는 말은 예외 없이 "이 인플루언서의 이 단계"에
+   * 대한 것이라, 대화방으로 빠지면 어느 건인지 다시 설명해야 했고 그 결정은
+   * 진행 화면에 남지 않았다. 이제는 진행사항의 단계별 피드백으로 받는다.
+   */
+  const openProgress = () => setDetailTab('progress');
 
   const resetForm = () => {
     setShowForm(false);
@@ -625,20 +628,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const activeTab = TABS.some(t => t.key === detailTab) ? detailTab : 'influencer';
 
     /**
-     * 담당자 채널. 브랜드는 인플루언서와 직접 대화하지 않는다.
+     * 진행 중인 협업이 하나라도 있는지. 하단 고정 바의 '진행사항 보기' 버튼을
+     * 켤지 정하는 데만 쓴다.
      *
      * 여기서는 지원 경로로 걸러 낸 applyRows 가 아니라 전체 목록을 본다 — 리스트업
-     * 제안을 수락해 시작된 협업도 담당자와 대화할 통로가 있어야 하고, 광고비 지급형은
-     * 그 협업이 유일한 통로다.
+     * 제안으로 시작된 협업도 진행사항에 나와야 하고, 광고비 지급형은 그 경로가
+     * 유일하다.
      */
-    const managerThreadId =
-      applicants.find(a => a.collab_id)?.collab_id || collabSummary[0]?.id || '';
-    const openManagerChannel = () => {
-      if (!managerThreadId) return;
-      window.dispatchEvent(
-        new CustomEvent('navigate-timeline', { detail: { proposalId: `support_biz_${managerThreadId}` } }),
-      );
-    };
+    const hasCollab = !!(applicants.find(a => a.collab_id)?.collab_id || collabSummary[0]?.id);
 
     return (
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto pb-28">
@@ -907,6 +904,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               campaignId={selectedCampaign.id}
               guidelineNote={selectedCampaign.guideline_note || ''}
               guidelineUrl={selectedCampaign.guideline_url || ''}
+              guidelineFiles={parseGuidelineFiles(selectedCampaign.guideline_files)}
               isOwner={isOwner}
               onSaved={next => {
                 setSelectedCampaign(prev => (prev ? { ...prev, ...next } : prev));
@@ -1211,12 +1209,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             )}
                             {app.status === 'accepted' && (
                               <button
-                                onClick={() => openManagerThread(app)}
+                                onClick={openProgress}
                                 disabled={!app.collab_id}
                                 className="px-3 py-2 bg-slate-900 text-white rounded-lg text-[11px] font-black hover:bg-slate-700 transition-colors flex items-center gap-1 disabled:opacity-40"
                               >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                                담당자와 대화
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-6 0h.01M12 16h3m-6 0h.01" /></svg>
+                                진행사항 보기
                               </button>
                             )}
                             {app.status === 'accepted' && (
@@ -1251,7 +1249,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           isOwner ? (
             // 선정 이후의 진행 상황. 브랜드는 여기서 단계와 산출물을 보고 담당자에게
             // 의견을 남긴다 — 인플루언서에게 직접 전달되지 않고 담당자를 거친다.
-            <BrandCollabProgress campaignId={selectedCampaign.id} onNotify={notify} />
+            <BrandCollabProgress
+              campaignId={selectedCampaign.id}
+              guidelineFiles={parseGuidelineFiles(selectedCampaign.guideline_files)}
+              guidelineNote={selectedCampaign.guideline_note || ''}
+              guidelineUrl={selectedCampaign.guideline_url || ''}
+              onNotify={notify}
+            />
           ) : (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 shadow-sm text-center">
               <p className="text-sm text-slate-500 font-bold">진행 상황은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
@@ -1284,9 +1288,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           )
         )}
 
-        {/* 하단 고정 요약. 탭을 옮겨 다니는 동안에도 이 캠페인의 규모와 담당자로 가는
-            길이 남아 있어야 한다. 견적을 확정하는 버튼은 두지 않는다 — 인원과 조건은
-            담당자가 후보를 올린 뒤 대화에서 정해지고, 브랜드가 먼저 확정하면 그 대화가
+        {/* 하단 고정 요약. 탭을 옮겨 다니는 동안에도 이 캠페인의 규모와 진행사항으로
+            가는 길이 남아 있어야 한다. 견적을 확정하는 버튼은 두지 않는다 — 인원과
+            조건은 담당자가 후보를 올린 뒤 정해지고, 브랜드가 먼저 확정하면 그 과정이
             할 일이 없어진다. */}
         {isOwner && (
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
@@ -1304,11 +1308,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 </p>
               </div>
               <button
-                onClick={openManagerChannel}
-                disabled={!managerThreadId}
+                onClick={openProgress}
+                disabled={!hasCollab}
                 className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black hover:bg-slate-800 disabled:opacity-40 flex-shrink-0 transition-colors"
               >
-                {managerThreadId ? '담당자와 대화' : '담당자 배정 대기'}
+                {hasCollab ? '진행사항 보기' : '진행 대기'}
               </button>
             </div>
           </div>
