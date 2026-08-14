@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { logout, getUser } from '@netlify/identity';
 import type { BusinessProposal } from '../types';
 import { apiService } from '../services/apiService';
+import { sessionGet, sessionRemove } from '../utils/accountScope';
 import { formatKRW } from '../utils/formatters';
 import AdminInfluencersPanel from './admin/AdminInfluencersPanel';
 import AdminSettlementConsole from './admin/AdminSettlementConsole';
@@ -113,7 +114,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
     const user = await getUser();
     const identityToken = (user as any)?.token?.access_token || '';
     if (identityToken) return identityToken;
-    return localStorage.getItem('picks_admin_token') || '';
+    return sessionGet('picks_admin_token') || '';
   }, []);
 
   const fetchData = async () => {
@@ -125,7 +126,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       if (user) {
         token = (user as any).token?.access_token || '';
       } else {
-        token = localStorage.getItem('picks_admin_token') || '';
+        token = sessionGet('picks_admin_token') || '';
         if (!token) {
           setError('인증이 만료되었습니다. 다시 로그인해주세요.');
           setLoading(false);
@@ -188,7 +189,7 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
-    localStorage.removeItem('picks_admin_token');
+    sessionRemove('picks_admin_token');
     onLogout();
   };
 

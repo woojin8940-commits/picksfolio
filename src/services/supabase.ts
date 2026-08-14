@@ -1,5 +1,6 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { authStorageKey, scopedAuthStorage } from '../utils/accountScope';
 
 // NOTE: anon keys are safe to ship in client bundles by design — actual access
 // control must come from RLS policies on the Supabase side. Even so, prefer
@@ -134,13 +135,17 @@ const resilientLock = async <R,>(
 
 try {
   const projectRef = supabaseUrl.replace(/^https?:\/\//, '').split('.')[0];
+  // 세션은 탭 슬롯별로 따로 저장한다(utils/accountScope). storageKey 는 이 페이지가
+  // 뜬 시점의 슬롯 이름이고 — 탭 사이 인증 알림(BroadcastChannel) 이름이기도 하다 —
+  // 실제 읽고 쓰는 위치는 storage 어댑터가 매번 지금 슬롯으로 정해 준다.
   supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
       lock: resilientLock,
-      storageKey: `sb-${projectRef}-auth-token`,
+      storage: scopedAuthStorage,
+      storageKey: authStorageKey(`sb-${projectRef}-auth-token`),
     },
   });
 } catch (error) {

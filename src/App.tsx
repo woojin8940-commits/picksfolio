@@ -7,6 +7,20 @@ import DataBoardSection from './components/DataBoardSection';
 import ErrorBoundary from './components/ErrorBoundary';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
+// 탭마다 계정 슬롯을 나눠, 일반 유저 · 비즈니스 · 운영자를 동시에 열어 두고 써도
+// 새로고침에서 서로의 로그인이 풀리지 않게 한다. 자세한 이유는 모듈 주석에 있다.
+import {
+  sessionGet,
+  sessionSet,
+  sessionRemove,
+  scopedKey,
+  getAccountScope,
+  setAccountScope,
+  ownPicksKeys,
+  ownSupabaseKeys,
+  hasOwnSupabaseSession,
+  clearTabStateKeepScope,
+} from './utils/accountScope';
 // 실패한 dynamic import() 를 재시도하고, 그래도 안 되면 오류를 던져 오류 경계가
 // 안내하게 하는 래퍼. 구현과 이유는 utils/lazyRoute.tsx 에 있다.
 import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
@@ -57,6 +71,19 @@ type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar'
 const HOME_INTENT_KEY = 'picks_home_intent';
 const HOME_INTENT_TTL = 5 * 60 * 1000;
 
+/**
+ * 비즈니스 로그인이 쓰는 키. 크리에이터 · 운영자 쪽 정리 로직은 이 키들을 절대
+ * 지우지 않는다 — 같은 브라우저의 다른 탭에서 비즈니스 계정이 켜져 있을 수 있고,
+ * 지우면 그 탭이 새로고침하는 순간 로그아웃된다.
+ */
+const BUSINESS_SESSION_KEYS = [
+  'picks_business_session',
+  'picks_business_company',
+  'picks_business_access_token',
+  'picks_business_refresh_token',
+  'picks_business_last_activity',
+];
+
 function markHomeIntent(): void {
   try { sessionStorage.setItem(HOME_INTENT_KEY, Date.now().toString()); } catch {}
 }
@@ -98,7 +125,7 @@ function launchDashboardView(): View | null {
     if (new URLSearchParams(window.location.search).get('code')) return null;
     if (hasRecentHomeIntent()) return null;
     // A creator (Kakao) session wins over a business one when both are cached.
-    if (localStorage.getItem('picks_user_session') && hasStoredSupabaseSession()) return 'admin';
+    if (sessionGet('picks_user_session') && hasStoredSupabaseSession()) return 'admin';
     if (
       localStorage.getItem('picks_business_session') &&
       localStorage.getItem('picks_business_access_token')
@@ -115,13 +142,12 @@ function launchDashboardView(): View | null {
  * True when Supabase has a persisted session in localStorage (`sb-<ref>-auth-token`).
  * Its access token may well be expired — Supabase refreshes it on start-up — but
  * if the entry is gone entirely then the user is signed out and needs to log in.
+ *
+ * 이 탭의 계정 슬롯에 저장된 세션만 본다. 다른 탭에 열려 있는 운영자 세션을
+ * 자기 것으로 착각하면 안 된다.
  */
 function hasStoredSupabaseSession(): boolean {
-  try {
-    return Object.keys(localStorage).some((key) => /^sb-.*-auth-token$/.test(key));
-  } catch {
-    return false;
-  }
+  return hasOwnSupabaseSession();
 }
 
 const App: React.FC = () => {
@@ -136,8 +162,8 @@ const App: React.FC = () => {
   const [subView, setSubView] = useState<SubView>('dashboard');
   const [targetUser, setTargetUser] = useState('');
   const [initialId, setInitialId] = useState('');
-  const [userName, setUserName] = useState(() => localStorage.getItem('picks_user_session') || '');
-  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('picks_user_session'));
+  const [userName, setUserName] = useState(() => sessionGet('picks_user_session') || '');
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!sessionGet('picks_user_session'));
   const [authUserId, setAuthUserId] = useState<string>('');
 
   // Business account state
@@ -159,7 +185,7 @@ const App: React.FC = () => {
   // For returning users with a cached session (not an OAuth callback), skip the
   // blocking check — the profile will be verified in the background.
   const [profileChecked, setProfileChecked] = useState(() => {
-    const hasCache = !!localStorage.getItem('picks_user_session');
+    const hasCache = !!sessionGet('picks_user_session');
     const params = new URLSearchParams(window.location.search);
     const isOAuthCallback = !!params.get('code') || window.location.hash.includes('access_token');
     return hasCache && !isOAuthCallback;
@@ -384,14 +410,14 @@ const App: React.FC = () => {
       // 보여주고, 프로필 검증은 아래에서 그대로 이어서 한다(끝나면 최신 값으로
       // 덮어쓴다). 캐시가 없는 첫 로그인에서는 예전처럼 확인이 끝날 때까지
       // 기다려야 하므로 그때만 게이트를 닫는다.
-      const hasCachedIdentity = !!(localStorage.getItem('picks_user_session') || userNameRef.current);
+      const hasCachedIdentity = !!(sessionGet('picks_user_session') || userNameRef.current);
       if (!hasCachedIdentity) setProfileChecked(false);
 
       // NON-BLOCKING profile fetch: Use safeFetchProfile with 5s timeout.
       // If the fetch fails or times out, immediately proceed with a fallback
       // (localStorage username or 'Anonymous') so broadcasting/signaling is
       // never delayed. A background retry will update the profile later.
-      const fallbackUsername = localStorage.getItem('picks_user_session') || '';
+      const fallbackUsername = sessionGet('picks_user_session') || '';
       let profileData: any = await safeFetchProfile(uid, {
         timeoutMs: 5000,
         defaultValue: null,
@@ -400,7 +426,7 @@ const App: React.FC = () => {
           console.log('[Auth] Background profile retry succeeded:', latestProfile?.username);
           if (latestProfile?.username) {
             setUserName(latestProfile.username);
-            localStorage.setItem('picks_user_session', latestProfile.username);
+            sessionSet('picks_user_session', latestProfile.username);
           }
           if (latestProfile?.role === 'admin') {
             setProfileRole('admin');
@@ -481,13 +507,13 @@ const App: React.FC = () => {
             };
             // Persist username to localStorage immediately so it survives page reloads
             if (setupResult.profile.username) {
-              localStorage.setItem('picks_user_session', setupResult.profile.username);
+              sessionSet('picks_user_session', setupResult.profile.username);
               console.log('[Auth] Kakao profile username persisted to localStorage:', setupResult.profile.username);
             }
           } else {
             console.error('[Debug] Server-side profile setup failed:', setupResult.error);
             // Use localStorage username as fallback when server call fails
-            const savedUsername = localStorage.getItem('picks_user_session') || '';
+            const savedUsername = sessionGet('picks_user_session') || '';
             if (savedUsername) {
               profileData = { username: savedUsername, role: 'user' };
               console.log('[Auth] Using saved username from localStorage as fallback:', savedUsername);
@@ -514,7 +540,7 @@ const App: React.FC = () => {
         } catch (serverErr) {
           console.error('[Debug] Server-side profile setup call failed:', serverErr);
           // Use localStorage username as fallback when server call throws
-          const savedUsernameOnErr = localStorage.getItem('picks_user_session') || '';
+          const savedUsernameOnErr = sessionGet('picks_user_session') || '';
           if (savedUsernameOnErr && !profileData) {
             profileData = { username: savedUsernameOnErr, role: 'user' };
             console.log('[Auth] Using saved username from localStorage after server error:', savedUsernameOnErr);
@@ -535,7 +561,7 @@ const App: React.FC = () => {
                 setIsLoggedIn(true);
                 setProfileChecked(true);
                 setOauthProcessing(false);
-                const savedName = localStorage.getItem('picks_user_session') || '';
+                const savedName = sessionGet('picks_user_session') || '';
                 if (savedName) {
                   setUserName(savedName);
                 }
@@ -637,9 +663,9 @@ const App: React.FC = () => {
       const emailUsername = session.user.email?.endsWith('@picks.me')
         ? session.user.email.replace('@picks.me', '')
         : '';
-      const existingUsername = profileUsername || localStorage.getItem('picks_user_session') || userNameRef.current || emailUsername || '';
+      const existingUsername = profileUsername || sessionGet('picks_user_session') || userNameRef.current || emailUsername || '';
 
-      console.log('[Debug] Username resolution:', { profileUsername, localStorage: localStorage.getItem('picks_user_session'), ref: userNameRef.current, emailUsername, final: existingUsername });
+      console.log('[Debug] Username resolution:', { profileUsername, localStorage: sessionGet('picks_user_session'), ref: userNameRef.current, emailUsername, final: existingUsername });
 
       // KEY CHECK: If the user has ANY username (even 1 character), they are an existing user.
       // Only redirect to admin if user is on a non-settled page (login, signup, home).
@@ -647,19 +673,19 @@ const App: React.FC = () => {
       if (existingUsername) {
         const userRole = (profileData?.role || 'user').trim();
         console.log('[Debug] Existing user detected with username:', existingUsername, 'role:', userRole);
-        // Clear stale localStorage data from previous user session
-        const prevSessionUser = localStorage.getItem('picks_user_session');
+        // Clear stale localStorage data from previous user session.
+        // 이 탭 슬롯이 가진 키만, 그리고 비즈니스 로그인 키는 남기고 지운다 —
+        // 다른 탭에 띄워 둔 비즈니스 · 운영자 계정까지 끊어 버리면 안 된다.
+        const prevSessionUser = sessionGet('picks_user_session');
         if (prevSessionUser && prevSessionUser !== existingUsername) {
-          const staleKeys = Object.keys(localStorage).filter(key =>
-            key.startsWith('picks_') && key !== 'picks_user_session'
-          );
+          const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS]);
           staleKeys.forEach(key => localStorage.removeItem(key));
           console.log('[Auth] Cleared stale localStorage from previous user:', prevSessionUser);
         }
         setUserName(existingUsername);
         setIsLoggedIn(true);
         setProfileRole(userRole);
-        localStorage.setItem('picks_user_session', existingUsername);
+        sessionSet('picks_user_session', existingUsername);
         setProfileChecked(true);
         // Supabase confirmed a live session, so the optimistic launch was right.
         // From here on, losing the session means a real logout — which belongs on
@@ -818,10 +844,15 @@ const App: React.FC = () => {
             setProfileChecked(true);
           }
         } else {
-          // No session — clear stale local login state if present
-          if (localStorage.getItem('picks_user_session')) {
-            localStorage.removeItem('picks_user_session');
-            localStorage.removeItem('picks_last_activity');
+          // No session — clear stale local login state if present.
+          // 다만 운영자 슬롯은 Netlify Identity 로만 로그인하는 경로가 있어서
+          // Supabase 세션이 아예 없을 수 있다. 운영자 토큰이 남아 있으면 이 탭은
+          // 정상적으로 로그인된 운영자이므로 건드리지 않는다.
+          const operatorStillSignedIn =
+            getAccountScope() === 'operator' && !!sessionGet('picks_admin_token');
+          if (!operatorStillSignedIn && sessionGet('picks_user_session')) {
+            sessionRemove('picks_user_session');
+            sessionRemove('picks_last_activity');
             setIsLoggedIn(false);
             setUserName('');
           }
@@ -844,7 +875,7 @@ const App: React.FC = () => {
         if (loginNavigationHandledRef.current) {
           const uid = session.user.id;
           setAuthUserId(uid);
-          const savedUsername = localStorage.getItem('picks_user_session') || userNameRef.current;
+          const savedUsername = sessionGet('picks_user_session') || userNameRef.current;
           if (savedUsername) {
             setUserName(savedUsername);
             setIsLoggedIn(true);
@@ -891,7 +922,7 @@ const App: React.FC = () => {
         // (i.e., this was an intentional logout via handleLogout).
         // Supabase may fire SIGNED_OUT on token refresh failures — ignore those
         // so users don't get unexpectedly kicked out of admin/personal pages.
-        const hasLocalSession = localStorage.getItem('picks_user_session');
+        const hasLocalSession = sessionGet('picks_user_session');
         if (!hasLocalSession) {
           setIsLoggedIn(false);
           setUserName('');
@@ -924,7 +955,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isLoggedIn) return;
     if (isPersistentLoginEnv()) {
-      localStorage.removeItem('picks_last_activity');
+      sessionRemove('picks_last_activity');
       return;
     }
 
@@ -932,13 +963,12 @@ const App: React.FC = () => {
     let loggedOut = false;
 
     const updateActivity = () => {
-      localStorage.setItem('picks_last_activity', Date.now().toString());
+      sessionSet('picks_last_activity', Date.now().toString());
     };
 
     const publicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'business-login'];
 
     const silentLogout = async () => {
-      const businessKeys = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
       setIsLoggedIn(false);
       setUserName('');
       setProfileChecked(false);
@@ -947,16 +977,17 @@ const App: React.FC = () => {
       isPlatformManagerRef.current = false;
       setIsPlatformManager(false);
       setManagerDisplayName('');
-      Object.keys(localStorage).filter(key => key.startsWith('picks_') && !businessKeys.includes(key)).forEach(key => localStorage.removeItem(key));
-      Object.keys(localStorage).filter(key => key.startsWith('sb-') || key.includes('supabase.auth')).forEach(key => localStorage.removeItem(key));
-      sessionStorage.clear();
+      // 이 탭 슬롯의 키만 지운다(다른 탭의 계정은 그대로 살아 있어야 한다).
+      ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+      ownSupabaseKeys().forEach(key => localStorage.removeItem(key));
+      clearTabStateKeepScope();
       clearAllLinkCache();
       if (supabase) { try { await supabase.auth.signOut(); } catch {} }
     };
 
     const checkInactivity = () => {
       if (loggedOut) return;
-      const lastActivity = localStorage.getItem('picks_last_activity');
+      const lastActivity = sessionGet('picks_last_activity');
       if (!lastActivity) return;
       const elapsed = Date.now() - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_LIMIT) {
@@ -977,7 +1008,7 @@ const App: React.FC = () => {
     // was idle past the 2-hour window (laptop slept, computer powered off,
     // browser closed), this triggers the logout immediately regardless of
     // which view they land on.
-    const stored = localStorage.getItem('picks_last_activity');
+    const stored = sessionGet('picks_last_activity');
     if (stored) {
       const elapsed = Date.now() - parseInt(stored, 10);
       if (elapsed > INACTIVITY_LIMIT) {
@@ -1002,7 +1033,7 @@ const App: React.FC = () => {
     // Without this, opening the app in two tabs and using only one would log
     // the idle tab out mid-session.
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'picks_last_activity') {
+      if (e.key === scopedKey('picks_last_activity')) {
         // Storage events already reflect the new value; no action needed beyond
         // re-reading on the next check tick, which reads directly from storage.
       }
@@ -1055,7 +1086,7 @@ const App: React.FC = () => {
       setIsBusinessLoggedIn(false);
       setBusinessUsername('');
       setBusinessCompanyName('');
-      ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token', 'picks_business_last_activity'].forEach(key => localStorage.removeItem(key));
+      BUSINESS_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
     };
 
     const businessPublicViews: View[] = ['home', 'signup', 'user-page', 'proposal', 'terms', 'privacy', 'business-signup', 'login'];
@@ -1157,11 +1188,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isLoggedIn && userName) {
       wasLoggedInRef.current = true;
-      localStorage.setItem('picks_user_session', userName);
+      sessionSet('picks_user_session', userName);
       import('./components/BusinessTimeline').catch(() => {});
     } else if (!isLoggedIn && wasLoggedInRef.current) {
-      localStorage.removeItem('picks_user_session');
-      localStorage.removeItem('picks_last_activity');
+      sessionRemove('picks_user_session');
+      sessionRemove('picks_last_activity');
     }
   }, [isLoggedIn, userName]);
 
@@ -1211,7 +1242,7 @@ const App: React.FC = () => {
           if (data.success) {
             // Set session based on user type
             if (data.userType === 'influencer') {
-              localStorage.setItem('picks_user_session', data.username);
+              sessionSet('picks_user_session', data.username);
               setUserName(data.username);
               setIsLoggedIn(true);
             }
@@ -1270,7 +1301,7 @@ const App: React.FC = () => {
         setView('home');
       }
       else if (path === 'setup-link') {
-        const savedUser = localStorage.getItem('picks_user_session');
+        const savedUser = sessionGet('picks_user_session');
         if (savedUser && isLoggedIn) {
           setView('admin');
           window.history.replaceState(null, '', '/admin');
@@ -1312,9 +1343,9 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     console.log('Logout process started...');
 
-    // 1. Immediate local cleanup — clear user-specific picks_ keys
-    //    but PRESERVE business session keys so business login survives
-    const businessKeys = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
+    // 1. Immediate local cleanup — clear this tab's own picks_ keys but PRESERVE
+    //    business session keys, and never touch another slot's keys: 다른 탭에
+    //    띄워 둔 비즈니스 · 운영자 로그인은 이 로그아웃과 상관이 없다.
     loginNavigationHandledRef.current = false;
     // 다음 사람이 같은 브라우저로 로그인할 때 앞사람의 담당자 권한이 남아 있으면
     // 안 된다. 서버에 다시 물어 정해질 값이므로 여기서는 비워만 둔다.
@@ -1325,9 +1356,8 @@ const App: React.FC = () => {
     setProfileChecked(false);
     setIsLoggedIn(false);
     setUserName('');
-    const keysToRemove = Object.keys(localStorage).filter(key => key.startsWith('picks_') && !businessKeys.includes(key));
-    keysToRemove.forEach(key => localStorage.removeItem(key));
-    sessionStorage.clear();
+    ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+    clearTabStateKeepScope();
     clearAllLinkCache();
     console.log('User picks_ localStorage keys cleared (business keys preserved)');
 
@@ -1349,11 +1379,8 @@ const App: React.FC = () => {
 
     // 3. Belt-and-suspenders: strip any remaining sb-* auth keys in case signOut
     //    didn't finish wiping them. Prevents Supabase from rehydrating a session.
-    try {
-      Object.keys(localStorage)
-        .filter((key) => key.startsWith('sb-') || key.includes('supabase.auth'))
-        .forEach((key) => localStorage.removeItem(key));
-    } catch {}
+    //    이 탭 슬롯의 키만 — 다른 계정의 세션까지 지우면 안 된다.
+    ownSupabaseKeys().forEach((key) => localStorage.removeItem(key));
 
     // 4. Immediate feedback
     alert('정상적으로 로그아웃되었습니다.');
@@ -1365,11 +1392,9 @@ const App: React.FC = () => {
   };
 
   const handleBusinessLogout = () => {
-    localStorage.removeItem('picks_business_session');
-    localStorage.removeItem('picks_business_company');
-    localStorage.removeItem('picks_business_access_token');
-    localStorage.removeItem('picks_business_refresh_token');
-    localStorage.removeItem('picks_business_last_activity');
+    // 비즈니스 로그아웃은 비즈니스 키만 건드린다 — 다른 탭의 크리에이터 · 운영자
+    // 로그인은 그대로 살아 있어야 한다.
+    BUSINESS_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
     setBusinessUsername('');
     setBusinessCompanyName('');
     setIsBusinessLoggedIn(false);
@@ -1435,12 +1460,21 @@ const App: React.FC = () => {
   }
 
   if (view === 'operator-login') return <LazyRoute><OperatorLogin onLoginSuccess={(info) => {
+    // 이 탭은 운영자 슬롯이 된다 — 같은 브라우저의 일반 유저 탭과 로그인이
+    // 섞이지 않도록 아래 저장은 모두 운영자 슬롯 키로 들어간다.
+    const slotChanged = setAccountScope('operator');
     if (info?.username && info?.token) {
-      localStorage.setItem('picks_user_session', info.username);
-      localStorage.setItem('picks_admin_token', info.token);
+      sessionSet('picks_user_session', info.username);
+      sessionSet('picks_admin_token', info.token);
       setUserName(info.username);
       setIsLoggedIn(true);
       setProfileChecked(true);
+    }
+    if (slotChanged && info?.username && info?.token) {
+      // 슬롯이 바뀐 탭은 한 번 새로 열어야 Supabase 클라이언트도 이 슬롯으로
+      // 다시 만들어진다. 저장은 이미 끝났으므로 그대로 운영 콘솔로 들어간다.
+      window.location.href = window.location.origin + '/operator';
+      return;
     }
     navigate('operator');
   }} /></LazyRoute>;
@@ -1499,7 +1533,7 @@ const App: React.FC = () => {
   if (view === 'user-page') return <LazyRoute><UserPage username={targetUser} /></LazyRoute>;
   if (view === 'setup-link') {
     // If user already has a username (existing user), skip setup and go to admin dashboard
-    const savedUser = (userName || localStorage.getItem('picks_user_session') || '').trim();
+    const savedUser = (userName || sessionGet('picks_user_session') || '').trim();
     if (savedUser) {
       console.log('[Auth] Redirecting to /admin because user already has username on setup-link render gate:', savedUser);
       // Use setTimeout to avoid state update during render
@@ -1699,13 +1733,11 @@ const App: React.FC = () => {
               // 인증 이벤트에서 확인해 옮긴다. 그동안은 예전처럼 크리에이터
               // 대시보드로 가 두므로, 담당자가 아니면 아무 것도 달라지지 않는다.
               pendingManagerRouteRef.current = true;
-              // Clear any previous user's cached data before setting new user
-              const prevUser = localStorage.getItem('picks_user_session');
+              // Clear any previous user's cached data before setting new user.
+              // 지우는 범위는 이 탭 슬롯 · 비즈니스 키 제외로 제한한다.
+              const prevUser = sessionGet('picks_user_session');
               if (prevUser && prevUser !== id) {
-                const businessKeysToKeep = ['picks_business_session', 'picks_business_company', 'picks_business_access_token', 'picks_business_refresh_token'];
-                const staleKeys = Object.keys(localStorage).filter(key =>
-                  key.startsWith('picks_') && key !== 'picks_user_session' && !businessKeysToKeep.includes(key)
-                );
+                const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS]);
                 staleKeys.forEach(key => localStorage.removeItem(key));
                 console.log('[Auth] Cleared previous user localStorage data, switching from', prevUser, 'to', id);
               }
@@ -1731,9 +1763,13 @@ const App: React.FC = () => {
               }
             }}
             onAdminLoginSuccess={(info) => {
+              // 운영자로 들어온 탭은 운영자 슬롯을 쓴다(로그인 화면에서 이미
+              // 표시해 두지만, Netlify Identity 경로로 들어온 경우도 있어 여기서
+              // 한 번 더 못 박는다).
+              setAccountScope('operator');
               if (info?.username && info?.token) {
-                localStorage.setItem('picks_user_session', info.username);
-                localStorage.setItem('picks_admin_token', info.token);
+                sessionSet('picks_user_session', info.username);
+                sessionSet('picks_admin_token', info.token);
                 setUserName(info.username);
                 setIsLoggedIn(true);
                 setProfileChecked(true);
