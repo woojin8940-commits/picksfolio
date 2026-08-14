@@ -1,6 +1,7 @@
 import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 import type { MembershipTier } from '../utils/membershipTiers';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, withTimeout } from './supabase';
+import { scopedKey } from '../utils/accountScope';
 
 const BIZ_SESSION_KEY = 'picks_business_session';
 const BIZ_TOKEN_KEY = 'picks_business_access_token';
@@ -22,7 +23,7 @@ const readLocal = (key: string): string => {
 /** 브라우저에 저장된 일반 회원 Supabase 액세스 토큰. */
 function persistedSupabaseToken(): string {
   try {
-    const raw = localStorage.getItem(SUPABASE_STORAGE_KEY);
+    const raw = localStorage.getItem(scopedKey(SUPABASE_STORAGE_KEY));
     if (!raw) return '';
     const stored = JSON.parse(raw);
     const token = String(stored?.access_token || stored?.currentSession?.access_token || '');

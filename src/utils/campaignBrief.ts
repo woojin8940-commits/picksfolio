@@ -85,8 +85,8 @@ export type RewardModeDef = {
    *
    * 제품 협찬형은 지급할 돈이 없다 — 광고비도, 판매 수수료도 없다. 그런 캠페인에
    * 정산 탭을 열어 두면 브랜드는 "언젠가 채워지는 칸"으로 읽고 지급 일정을 기다리게
-   * 된다. 협업 단계에도 정산 단계가 없으므로(netlify/functions/_shared/collab-workflow.mts
-   * 의 BARTER) 화면에서도 자리를 두지 않는다. stageMarksFor() 의 정산 줄과 짝이다.
+   * 된다. 진행 단계에도 정산 자리가 생기지 않는다 — 정산은 업로드를 확인하는 시점에
+   * 예약되는데, 지급액이 0원이면 그 예약을 만들지 않는다(api-collab-workflow.mts).
    */
   hasSettlement: boolean;
   /** 지원/모집 인원 칸에 붙는 이름. 진행 방식마다 세는 대상이 다르다. */
@@ -328,6 +328,10 @@ export type StageMark = { label: string; included: boolean };
  * 협업에 실제로 생기는 단계와 짝을 맞춰야 한다. "콘텐츠 검수 포함"이라고 보여 주고
  * 협업에 그 단계가 없으면 그 표시는 거짓말이 된다. 공동구매는 단계 이름 자체가 다르므로
  * (가이드 전달 → 상품 정보 전달, 업로드 → 판매 시작) 목록을 따로 둔다.
+ *
+ * 공동구매가 아닌 캠페인은 전부 다섯 단계로 진행한다
+ * (collab-workflow.mts 의 CAMPAIGN_PROCESS). 정산은 단계로 두지 않는다 — 업로드를
+ * 확인하는 시점에 자동으로 예약되고, 광고비가 없는 협찬형이면 예약 자체가 없다.
  */
 export const stageMarksFor = (mode: RewardMode): StageMark[] => {
   if (mode === 'groupbuy') {
@@ -341,12 +345,11 @@ export const stageMarksFor = (mode: RewardMode): StageMark[] => {
     ];
   }
   return [
-    { label: '조건 확정', included: true },
-    { label: '가이드 전달', included: true },
-    { label: '구성안 검수', included: mode === 'paid' },
-    { label: '콘텐츠 검수', included: mode === 'paid' },
-    { label: '업로드 확인', included: true },
-    { label: '광고비 정산', included: rewardModeOf(mode).hasSettlement },
+    { label: '콘텐츠 가이드', included: true },
+    { label: '제품 배송', included: true },
+    { label: '기획안 피드백', included: true },
+    { label: '영상 피드백', included: true },
+    { label: '업로드', included: true },
   ];
 };
 

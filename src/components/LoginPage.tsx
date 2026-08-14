@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
+import { setAccountScope, sessionSet } from '../utils/accountScope';
 import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -74,6 +75,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
             return;
           }
           if (onAdminLoginSuccess) {
+            // Netlify Identity 로 들어온 운영자도 이 탭을 운영자 슬롯으로 쓴다.
+            setAccountScope('operator');
             onAdminLoginSuccess();
           }
           return;
@@ -114,21 +117,38 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         const phone = result.phone || '';
 
         if (ADMIN_USERNAMES.includes(username) && onAdminLoginSuccess) {
-          localStorage.setItem('picks_user_session', username);
-          localStorage.setItem('picks_admin_token', result.access_token || '');
+          // 운영자로 들어오는 탭은 운영자 슬롯을 쓴다. 이 표시가 먼저 있어야 아래
+          // 저장과 Supabase 세션이 일반 유저 탭의 로그인을 덮지 않는다.
+          const slotChanged = setAccountScope('operator');
+          sessionSet('picks_user_session', username);
+          sessionSet('picks_admin_token', result.access_token || '');
           if (supabase && result.access_token && result.refresh_token) {
-            supabase.auth.setSession({
-              access_token: result.access_token,
-              refresh_token: result.refresh_token,
-            }).catch(err => console.warn('[Login] setSession warning:', err));
+            // 슬롯이 바뀐 뒤 새로고침(아래)으로 넘어가야 하므로 저장이 끝날 때까지 기다린다.
+            try {
+              await supabase.auth.setSession({
+                access_token: result.access_token,
+                refresh_token: result.refresh_token,
+              });
+            } catch (err) {
+              console.warn('[Login] setSession warning:', err);
+            }
+          }
+          if (slotChanged) {
+            // 이 탭은 방금 일반 슬롯에서 운영자 슬롯으로 옮겨 왔다. Supabase
+            // 클라이언트는 페이지가 뜰 때의 슬롯 이름으로 만들어져 있어서, 한 번
+            // 새로 열어야 다른 탭(일반 유저)의 인증 알림과 완전히 갈라진다.
+            window.location.href = window.location.origin + '/operator';
+            return;
           }
           onAdminLoginSuccess({ username, token: result.access_token || '' });
           return;
         }
 
         // Set localStorage BEFORE setSession so that the auth state listener
-        // can find the username and won't redirect to setup-link
-        localStorage.setItem('picks_user_session', username);
+        // can find the username and won't redirect to setup-link.
+        // 일반 계정으로 로그인했으니 이 탭은 다시 기본 슬롯이다.
+        const slotChanged = setAccountScope('user');
+        sessionSet('picks_user_session', username);
 
         // Call onLoginSuccess BEFORE setSession so that loginNavigationHandledRef
         // is set before onAuthStateChange fires (prevents race condition to setup-link)
@@ -139,7 +159,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           supabase.auth.setSession({
             access_token: result.access_token,
             refresh_token: result.refresh_token,
-          }).catch(err => console.warn('[Login] setSession warning:', err));
+          })
+            .then(() => {
+              // 운영자로 쓰던 탭에 일반 계정으로 로그인한 경우에만 해당한다.
+              // 세션이 새 슬롯에 저장된 뒤 한 번 새로 열어야 Supabase 클라이언트가
+              // 이 슬롯 이름으로 다시 만들어진다.
+              if (slotChanged) window.location.href = window.location.origin + '/admin';
+            })
+            .catch(err => console.warn('[Login] setSession warning:', err));
         }
       }
     } catch (error: any) {

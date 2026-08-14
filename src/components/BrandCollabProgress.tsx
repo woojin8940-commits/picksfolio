@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../services/apiService';
 import { formatKoreanWon } from '../utils/formatters';
-import { normalizeScenes, parseAnchor } from '../utils/collabScenes';
-import CollabReviewRoom from './collab/CollabReviewRoom';
-import CollabSharedWorkspace from './collab/CollabSharedWorkspace';
+import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
 
 /**
@@ -15,14 +13,15 @@ import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
  * 것이 아니라 단계별로 굴러간다 — 가이드라인을 한 번 올리고, 대본을 몰아서 보고,
  * 영상을 몰아서 본다. 그래서 축을 단계로 바꾸고 사람은 그 안의 줄로 넣었다.
  *
- * 브랜드는 캠페인을 올리고 지원자에게 의견을 남기는 데까지 관여한다. 그 뒤의 진행 —
- * 조건 확정, 대본 검수, 마감 관리, 업로드 확인 — 은 담당자가 맡는다. 그래서 이 화면에
- * 단계 승인 권한은 담당자에게 두되, 브랜드는 공유된 기획안·영상 초안을 직접 확인하고
- * 자료함에서 확인 완료 또는 수정 요청을 남긴다.
+ * 브랜드는 캠페인을 올리고 조건을 담당자와 정리하는 데까지 관여한다. 진행 자체는
+ * 다섯 단계로 굴러간다 — 콘텐츠 가이드 · 제품 배송 · 기획안 피드백 · 영상 피드백 ·
+ * 업로드. 인플루언서 한 명을 열면 그 다섯 단계가 인플루언서 화면과 같은 컴포넌트
+ * (CampaignProcessBoard)로 열린다. 브랜드가 기획안·영상 밑에 바로 피드백을 적고
+ * 확인 완료를 누르는 자리도 그 안이다.
  *
- * 의견을 인플루언서에게 직접 보내지 않는 것이 이 구조의 핵심이다. 브랜드 원문은 담당자만
- * 보고(visible_to_influencer=false), 담당자가 정리해 전달한다 — 그러지 않으면 중간에
- * 사람을 두는 의미가 없고, 예전처럼 브랜드가 곧 검수자가 된다.
+ * 조건 · 마감 · 정산처럼 사람 사이를 조율하는 일은 여전히 담당자가 맡는다. 다만
+ * "이 기획안의 이 부분을 고쳐 달라"는 말까지 담당자를 거치게 하면 무엇에 대한
+ * 답인지가 옮겨 적는 사이에 사라진다. 그 한 종류만 브랜드 → 인플루언서로 바로 간다.
  */
 
 interface BrandCollabProgressProps {
@@ -55,21 +54,6 @@ type CollabRow = {
   confirmedAt: string | null;
 };
 
-const STAGE_STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  pending: { label: '대기', cls: 'bg-slate-100 text-slate-400' },
-  active: { label: '진행중', cls: 'bg-blue-50 text-blue-600' },
-  submitted: { label: '검수 대기', cls: 'bg-amber-50 text-amber-600' },
-  revision: { label: '수정중', cls: 'bg-indigo-50 text-indigo-600' },
-  done: { label: '완료', cls: 'bg-emerald-50 text-emerald-600' },
-  skipped: { label: '생략', cls: 'bg-slate-100 text-slate-400' },
-};
-
-const OWNER_LABEL: Record<string, string> = {
-  influencer: '인플루언서',
-  manager: '담당자',
-  brand: '브랜드',
-};
-
 /** 세로 진행 스텝의 색. 계산식으로 만들면 Tailwind가 클래스를 찾지 못한다. */
 const STEP_TONE = {
   done: { dot: 'bg-emerald-500 text-white', line: 'bg-emerald-200', title: 'text-slate-400' },
@@ -78,58 +62,59 @@ const STEP_TONE = {
 } as const;
 
 /**
- * 브랜드가 보는 단계 묶음.
+ * 브랜드가 보는 단계 묶음 — 캠페인 진행 프로세스 다섯 단계 그대로.
  *
- * 협업 템플릿의 단계는 아홉 개다(조건 · 가이드 · 대본 · 대본검수 · 콘텐츠 ·
- * 콘텐츠검수 · 업로드 · 확인 · 정산). 그대로 늘어놓으면 브랜드가 실제로 무언가를
- * 하는 자리(가이드라인 올리기, 대본 보기, 영상 보기, 업로드 확인)가 그 사이에
- * 묻힌다. 작성과 검수는 브랜드에게 한 덩어리다 — "대본이 도는 중"이거나 "볼
- * 차례"이거나 둘 중 하나다. 그래서 묶어서 다섯 줄로 만든다.
+ * 예전에는 아홉 단계(조건 · 가이드 · 대본 · 대본검수 · 콘텐츠 · 콘텐츠검수 ·
+ * 업로드 · 확인 · 정산)를 브랜드용으로 다섯 줄로 접어서 보여 줬다. 이제는 진행
+ * 자체가 다섯 단계라 접을 것이 없다. 예전 아홉 단계로 시작한 협업도 같은 줄에
+ * 들어오도록 stageKeys 에 옛 이름을 함께 적어 둔다(보드와 같은 표).
  */
-type StepKey = 'guideline' | 'terms' | 'script' | 'content' | 'upload';
+type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
 
 const STEPS: {
   key: StepKey;
   title: string;
-  /** 이 묶음에 들어가는 협업 단계 키. */
+  /** 이 묶음에 들어가는 협업 단계 키. 앞이 새 이름, 뒤가 예전 이름. */
   stageKeys: string[];
-  /** 검수 화면을 여는 줄인지. 대본·영상만 해당한다. */
-  review?: 'script' | 'content';
+  /** 브랜드가 볼 것이 올라오는 줄인지. 그 줄에만 검은 버튼이 붙는다. */
+  review?: boolean;
   /** 인플루언서가 아직 작업 중일 때 줄에 적는 말. */
   workingLabel?: string;
   icon: React.ReactNode;
 }[] = [
   {
-    key: 'guideline',
-    title: '콘텐츠 가이드라인',
+    key: 'guide',
+    title: '콘텐츠 가이드',
     stageKeys: ['guide'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
     ),
   },
   {
-    key: 'terms',
-    title: '조건 확정',
-    stageKeys: ['terms'],
+    key: 'shipping',
+    title: '제품 배송',
+    stageKeys: ['shipping', 'terms'],
+    review: true,
+    workingLabel: '주소 입력 대기',
     icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
     ),
   },
   {
-    key: 'script',
-    title: '대본 피드백',
-    stageKeys: ['script', 'script_review'],
-    review: 'script',
-    workingLabel: '대본 작성 중',
+    key: 'plan',
+    title: '기획안 피드백',
+    stageKeys: ['plan', 'script', 'script_review'],
+    review: true,
+    workingLabel: '기획안 작성 중',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
     ),
   },
   {
-    key: 'content',
+    key: 'video',
     title: '영상 피드백',
-    stageKeys: ['content', 'content_review'],
-    review: 'content',
+    stageKeys: ['video', 'content', 'content_review'],
+    review: true,
     workingLabel: '영상 촬영 중',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -137,8 +122,9 @@ const STEPS: {
   },
   {
     key: 'upload',
-    title: '업로드 확인',
+    title: '업로드',
     stageKeys: ['upload', 'confirm', 'settlement'],
+    review: true,
     workingLabel: '업로드 대기',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -240,12 +226,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const [openId, setOpenId] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [feedbackText, setFeedbackText] = useState('');
-  const [feedbackStage, setFeedbackStage] = useState('');
-  const [sending, setSending] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
-  /** 열어 둔 검수 화면. 협업마다 따로 열리므로 협업 ID까지 같이 들고 있는다. */
-  const [reviewFor, setReviewFor] = useState<{ collabId: string; target: 'script' | 'content' } | null>(null);
 
   const notify = useCallback(
     (message: string, type: 'success' | 'error' = 'success') => {
@@ -327,28 +308,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
     setOpenId(collabId);
     setDetail(null);
     setDetailLoading(true);
-    const res = await refreshDetail(collabId);
+    await refreshDetail(collabId);
     setDetailLoading(false);
-    if (res) setFeedbackStage(res.collab?.currentStageKey || '');
-  };
-
-  const sendFeedback = async () => {
-    const text = feedbackText.trim();
-    if (!text || !openId) return;
-    setSending(true);
-    const res = await apiService.collabAction(openId, 'add_feedback', {
-      stageKey: feedbackStage,
-      body: text,
-    });
-    setSending(false);
-    if (res.error) {
-      notify(res.error, 'error');
-      return;
-    }
-    setFeedbackText('');
-    notify('담당자에게 의견을 전달했습니다. 담당자가 정리해 인플루언서에게 전달합니다.');
-    const refreshed = await apiService.getCollabDetail(openId);
-    if (!refreshed.error) setDetail(refreshed);
   };
 
   /** 단계 묶음마다: 어떤 인플루언서가 어떤 상태로 들어 있는지. */
@@ -363,10 +324,10 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       const allDone = running.length > 0 && rows.every(r => r.state === 'done');
       // 가이드라인은 협업 단계보다 브랜드가 파일을 올렸는지가 먼저다. 협업이 아직
       // 없어도 올려 두었으면 완료로 본다 — 그것이 브랜드가 한 일의 전부다.
-      const done = step.key === 'guideline' ? hasGuideline : allDone;
+      const done = step.key === 'guide' ? hasGuideline : allDone;
       const state: 'done' | 'current' | 'pending' = done
         ? 'done'
-        : active.length > 0 || (step.key === 'guideline' && running.length > 0)
+        : active.length > 0 || (step.key === 'guide' && running.length > 0)
           ? 'current'
           : 'pending';
       const dues = rows.map(r => r.due).filter(Boolean).sort();
@@ -531,7 +492,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     </span>
                   )}
                   {/* 가이드라인 줄에만 붙는 버튼. 브랜드가 올려 둔 파일을 그 자리에서 연다. */}
-                  {step.key === 'guideline' && hasGuideline && (
+                  {step.key === 'guide' && hasGuideline && (
                     <button
                       onClick={() => setGuideOpen(true)}
                       className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-black text-slate-700 transition-colors"
@@ -542,7 +503,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                 </div>
               </div>
 
-              {step.key === 'guideline' && !hasGuideline && (
+              {step.key === 'guide' && !hasGuideline && (
                 <div className="px-4 md:px-5 pb-4">
                   <p className="text-[11px] text-slate-400 font-medium">
                     화면 위쪽의 가이드라인 카드에서 파일(PDF·이미지)을 올려 주세요. 올린 파일은 진행 중인
@@ -557,7 +518,6 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     .filter(r => r.state === 'review' || r.state === 'working')
                     .map(({ collab, state: rowState, due }) => {
                       const isOpen = openId === collab.id;
-                      const reviewOpen = reviewFor?.collabId === collab.id;
                       const name = nameOf(collab.creatorUsername);
                       const image = imageOf(collab.creatorUsername);
                       return (
@@ -590,21 +550,20 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                               </div>
                             </button>
 
-                            {rowState === 'review' && step.review ? (
+                            {/* 볼 것이 올라온 줄에만 검은 버튼. 누르면 아래 진행사항이
+                                열리고 그 단계가 펼쳐진 채로 보인다 — 피드백을 적는
+                                자리가 곧 그 단계의 자리다. */}
+                            {rowState === 'review' ? (
                               <button
-                                onClick={() =>
-                                  setReviewFor(reviewOpen ? null : { collabId: collab.id, target: step.review! })
-                                }
+                                onClick={() => openDetail(collab.id)}
                                 className="px-3.5 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 transition-colors flex-shrink-0"
                               >
-                                {reviewOpen ? '닫기' : step.review === 'script' ? '대본 피드백하기' : '영상 피드백하기'}
+                                {isOpen ? '진행사항 열림' : '확인하고 피드백'}
                               </button>
                             ) : (
                               <div className="text-right flex-shrink-0">
                                 <p className="text-xs font-black text-slate-500">
-                                  {collab.currentStageStatus === 'submitted'
-                                    ? '담당자 검수 중'
-                                    : step.workingLabel || collab.currentStageTitle || '진행 중'}
+                                  {step.workingLabel || collab.currentStageTitle || '진행 중'}
                                 </p>
                                 <p className={`text-[10px] font-bold ${(collab.daysLeft ?? 1) < 0 ? 'text-red-500' : 'text-slate-400'}`}>
                                   {due ? `${shortDate(due)} 까지` : '마감일 미정'}
@@ -612,20 +571,6 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                               </div>
                             )}
                           </div>
-
-                          {reviewOpen && reviewFor && (
-                            <div className="px-3 pb-3">
-                              <CollabReviewRoom
-                                collabId={collab.id}
-                                target={reviewFor.target}
-                                onClose={() => setReviewFor(null)}
-                                onChanged={() => {
-                                  load();
-                                  if (openId === collab.id) refreshDetail(collab.id);
-                                }}
-                              />
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -633,7 +578,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               )}
 
               {/* 이미 지나간 단계도 누가 있었는지는 남긴다 — 접힌 한 줄로만. */}
-              {state === 'done' && total > 0 && step.key !== 'guideline' && (
+              {state === 'done' && total > 0 && step.key !== 'guide' && (
                 <div className="px-4 md:px-5 pb-4">
                   <p className="text-[11px] text-slate-400 font-bold">
                     {total}명 모두 이 단계를 지났습니다.
@@ -683,8 +628,10 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         )}
 
         {/* ── 인플루언서 한 명의 진행사항 ─────────────────────────────────
-            줄을 누르면 여기로 열린다. 맨 위가 가이드라인인 것은 일부러다 —
-            "이 사람이 무엇을 보고 찍고 있는지"가 나머지를 읽는 전제다. */}
+            줄을 누르면 여기로 열린다. 안은 인플루언서가 보는 것과 같은 다섯 단계
+            보드다. 예전에는 이 자리에 가이드라인 카드 · 아홉 줄 단계 · 자료함 ·
+            제출물 · 의견함이 차례로 쌓여 있어서, 정작 "지금 무엇을 봐 줘야 하는지"가
+            다섯 번째 스크롤에 가서야 나왔다. */}
         {openId && (
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5">
             <div className="flex items-center justify-between gap-3 mb-4">
@@ -707,294 +654,41 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
             ) : !detail ? (
               <p className="text-xs text-slate-400 font-bold text-center py-6">정보를 불러오지 못했습니다.</p>
             ) : (
-              <div className="space-y-4">
-                {/* 가이드라인 — 캠페인에 올린 파일 + 담당자가 이 인플루언서에게 맞춰
-                    정리한 내용이 서버에서 이미 합쳐져 온다(detail.guideline). */}
-                {(() => {
-                  const g = detail.guideline || {};
-                  const files: GuidelineFile[] = Array.isArray(g.files) ? g.files : [];
-                  const note = String(g.note || '').trim();
-                  const url = String(g.url || '').trim();
-                  const guideStage = (detail.stages || []).find((s: any) => s.stageKey === 'guide');
-                  const gb = guideStage
-                    ? STAGE_STATUS_LABEL[guideStage.status] || { label: guideStage.status, cls: 'bg-slate-100 text-slate-500' }
-                    : null;
-                  return (
-                    <div className="bg-white rounded-xl border border-slate-100 p-4">
-                      <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-                        <p className="text-xs font-black text-slate-900">콘텐츠 가이드라인</p>
-                        {gb && (
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${gb.cls}`}>
-                            {guideStage.title} · {gb.label}
-                          </span>
-                        )}
-                      </div>
-                      {files.length > 0 || note || url ? (
-                        <>
-                          {files.length > 0 && (
-                            <div className="space-y-1.5">
-                              {files.map(f => (
-                                <a
-                                  key={f.url}
-                                  href={f.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 hover:border-blue-200 hover:bg-blue-50/40 transition-colors"
-                                >
-                                  <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                  <span className="min-w-0 flex-1 text-xs font-bold text-slate-800 truncate">{f.name}</span>
-                                  <span className="text-[10px] font-black text-blue-600 flex-shrink-0">열기</span>
-                                </a>
-                              ))}
-                            </div>
-                          )}
-                          {note && (
-                            <p className={`text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed ${files.length ? 'mt-2.5' : ''}`}>
-                              {note}
-                            </p>
-                          )}
-                          {url && (
-                            <a
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-block text-xs text-blue-600 font-bold hover:underline break-all mt-2"
-                            >
-                              가이드 문서 열기
-                            </a>
-                          )}
-                          <p className="text-[10px] text-slate-400 font-medium mt-2.5">
-                            이 인플루언서가 보고 있는 가이드라인입니다. 고칠 내용은 아래 의견으로 남겨 주세요.
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-[11px] text-slate-400 font-medium">
-                          아직 전달된 가이드라인이 없습니다. 화면 위쪽의 가이드라인 카드에서 파일을 올리면
-                          이 자리에 바로 표시됩니다.
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* 조건 */}
+              <div className="space-y-3">
+                {/* 조건은 한 줄. 브랜드가 진행 중에 다시 보는 값은 보수와 업로드 마감
+                    정도다. 나머지는 담당자가 정리한다. */}
                 {detail.terms && (
-                  <div className="bg-white rounded-xl border border-slate-100 p-4">
-                    <p className="text-xs font-black text-slate-900 mb-2.5">협업 조건</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold">보수</p>
-                        <p className="text-xs text-slate-900 font-black">
-                          {detail.terms.fee ? formatKoreanWon(detail.terms.fee) : '협의'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold">대본 마감</p>
-                        <p className="text-xs text-slate-900 font-black">{detail.terms.scriptDue || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold">콘텐츠 마감</p>
-                        <p className="text-xs text-slate-900 font-black">{detail.terms.contentDue || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold">업로드 마감</p>
-                        <p className="text-xs text-slate-900 font-black">{detail.terms.uploadDue || '-'}</p>
-                      </div>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-white border border-slate-200 px-4 py-3">
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-black">보수</p>
+                      <p className="text-xs text-slate-900 font-black">
+                        {detail.terms.fee ? formatKoreanWon(detail.terms.fee) : '협의 중'}
+                      </p>
                     </div>
-                    <p className="text-[10px] text-slate-400 font-medium mt-2">
-                      {detail.terms.lockedAt ? '담당자가 확정한 조건입니다.' : '담당자가 조건을 정리하는 중입니다.'}
-                    </p>
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-black">업로드 마감</p>
+                      <p className="text-xs text-slate-900 font-black">{detail.terms.uploadDue || '-'}</p>
+                    </div>
+                    <span className={`ml-auto text-[10px] font-black ${detail.terms.lockedAt ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {detail.terms.lockedAt ? '담당자 확정 조건' : '담당자가 조건 정리 중'}
+                    </span>
                   </div>
                 )}
 
-                {/* 단계 — 이 사람의 아홉 단계. 왼쪽 레일이 캠페인 전체라면 이것은 한 명. */}
-                <div className="bg-white rounded-xl border border-slate-100 p-4">
-                  <p className="text-xs font-black text-slate-900 mb-2.5">
-                    단계 {detail.stages?.length || 0}개
-                  </p>
-                  {(detail.stages || []).map((s: any, i: number) => {
-                    const isCurrent = s.stageKey === detail.collab?.currentStageKey;
-                    const state = s.status === 'done' || s.status === 'skipped'
-                      ? 'done'
-                      : isCurrent || ['active', 'submitted', 'revision'].includes(s.status)
-                        ? 'current'
-                        : 'pending';
-                    const tone = STEP_TONE[state];
-                    const sb = STAGE_STATUS_LABEL[s.status] || { label: s.status, cls: 'bg-slate-100 text-slate-500' };
-                    const last = i === (detail.stages || []).length - 1;
-                    return (
-                      <div key={s.id} className="flex gap-3">
-                        <div className="flex flex-col items-center flex-shrink-0">
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black ${tone.dot}`}>
-                            {state === 'done' ? '✓' : s.seq}
-                          </span>
-                          {!last && <span className={`w-px flex-1 my-1 ${tone.line}`} />}
-                        </div>
-                        <div className={`min-w-0 ${last ? '' : 'pb-3'}`}>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`text-xs font-black ${tone.title}`}>{s.title}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${sb.cls}`}>{sb.label}</span>
-                          </div>
-                          <p className={`text-[10px] font-bold mt-0.5 ${state === 'current' ? 'text-blue-600' : 'text-slate-300'}`}>
-                            {s.dueDate ? `${s.dueDate} 까지` : '마감일 미정'}
-                            {s.ownerRole ? ` · ${OWNER_LABEL[s.ownerRole] || s.ownerRole}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <CollabSharedWorkspace
+                <CampaignProcessBoard
                   collabId={openId}
                   role="brand"
                   detail={detail}
-                  onRefresh={() => refreshDetail(openId)}
+                  onRefresh={async () => {
+                    await refreshDetail(openId);
+                    await load();
+                  }}
                   onNotify={notify}
                 />
 
-                {/* 제출물 */}
-                {(detail.deliverables || []).length > 0 && (
-                  <div className="bg-white rounded-xl border border-slate-100 p-4">
-                    <p className="text-xs font-black text-slate-900 mb-2.5">제출물</p>
-                    <div className="space-y-2">
-                      {detail.deliverables.map((d: any) => {
-                        const scenes = normalizeScenes(d.payload?.scenes);
-                        return (
-                          <div key={d.id} className="rounded-lg border border-slate-100 p-3">
-                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                              <span className="text-xs text-slate-800 font-black">
-                                {(detail.stages || []).find((s: any) => s.stageKey === d.stageKey)?.title || d.stageKey}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-bold">v{d.version}</span>
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                {new Date(d.createdAt).toLocaleDateString('ko-KR')}
-                              </span>
-                              {(d.kind === 'script' || d.kind === 'content') && (
-                                <button
-                                  onClick={() => setReviewFor({ collabId: openId, target: d.kind })}
-                                  className="ml-auto px-2.5 py-1 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"
-                                >
-                                  {d.kind === 'script' ? '대본 피드백하기' : '영상 피드백하기'}
-                                </button>
-                              )}
-                            </div>
-                            {scenes.length > 0 && (
-                              <div className="space-y-1.5">
-                                {scenes.map((scene, i) => (
-                                  <div key={i} className="border-l-2 border-slate-100 pl-2.5">
-                                    <p className="text-[10px] text-slate-400 font-black"># {i + 1}</p>
-                                    <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{scene.visual}</p>
-                                    {scene.subtitle && (
-                                      <p className="text-[11px] text-slate-500 font-medium">자막 · {scene.subtitle}</p>
-                                    )}
-                                    {scene.narration && (
-                                      <p className="text-[11px] text-slate-500 font-medium">나레이션 · {scene.narration}</p>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {d.payload?.note && (
-                              <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{d.payload.note}</p>
-                            )}
-                            {d.payload?.uploadUrl && (
-                              <a href={d.payload.uploadUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline break-all">
-                                {d.payload.uploadUrl}
-                              </a>
-                            )}
-                            {d.payload?.contentUrl && (
-                              <a href={d.payload.contentUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline break-all">
-                                {d.payload.contentUrl}
-                              </a>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* 의견 */}
-                <div className="bg-white rounded-xl border border-slate-100 p-4">
-                  <p className="text-xs font-black text-slate-900 mb-2.5">의견 · 피드백</p>
-                  {(detail.feedbacks || []).length > 0 && (
-                    <div className="space-y-2 mb-3">
-                      {detail.feedbacks.map((f: any) => {
-                        const anchor = parseAnchor(f.anchor);
-                        const stageTitle = (detail.stages || []).find((s: any) => s.stageKey === f.stageKey)?.title;
-                        return (
-                          <div key={f.id} className="rounded-lg border border-slate-100 p-3">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <span className="text-[10px] font-black text-slate-500">
-                                {f.authorType === 'brand' ? '우리 의견' : f.authorType === 'manager' ? '담당자' : '인플루언서'}
-                              </span>
-                              {anchor.kind !== 'whole' && (
-                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600 font-black">
-                                  {anchor.label}
-                                </span>
-                              )}
-                              {f.stageKey && (
-                                <span className="text-[10px] text-slate-300 font-bold">{stageTitle || f.stageKey}</span>
-                              )}
-                              <span className="text-[10px] text-slate-400 font-bold">
-                                {f.status === 'open'
-                                  ? '담당자 확인 중'
-                                  : f.status === 'relayed'
-                                    ? '인플루언서에게 전달됨'
-                                    : f.status === 'applied'
-                                      ? '반영 완료'
-                                      : f.status === 'wont_apply'
-                                        ? '미반영'
-                                        : f.status}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{f.body}</p>
-                            {f.resolutionNote && f.status === 'wont_apply' && (
-                              <p className="text-[11px] text-slate-500 font-medium mt-1">사유: {f.resolutionNote}</p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="rounded-lg border border-slate-100 p-3">
-                    <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <select
-                        value={feedbackStage}
-                        onChange={e => setFeedbackStage(e.target.value)}
-                        className="text-[11px] font-bold text-slate-600 border border-slate-200 rounded-md px-2 py-1"
-                      >
-                        <option value="">단계 선택</option>
-                        {(detail.stages || []).map((s: any) => (
-                          <option key={s.id} value={s.stageKey}>
-                            {s.title}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="text-[10px] text-slate-400 font-medium">
-                        담당자에게 전달됩니다 (인플루언서에게 바로 가지 않습니다)
-                      </span>
-                    </div>
-                    <textarea
-                      value={feedbackText}
-                      onChange={e => setFeedbackText(e.target.value)}
-                      rows={3}
-                      placeholder="수정이 필요한 부분이나 요청 사항을 적어 주세요."
-                      className="w-full text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-blue-400"
-                    />
-                    <div className="flex justify-end mt-2">
-                      <button
-                        onClick={sendFeedback}
-                        disabled={sending || !feedbackText.trim()}
-                        className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 transition-colors disabled:opacity-40"
-                      >
-                        {sending ? '전달 중...' : '담당자에게 전달'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <p className="text-[10px] text-slate-400 font-bold px-1">
+                  기획안 · 영상 피드백은 인플루언서에게 바로 전달됩니다. 조건 · 일정 · 정산 문의는 담당자에게 남겨 주세요.
+                </p>
               </div>
             )}
           </div>

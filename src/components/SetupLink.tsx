@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
+import { sessionSet } from '../utils/accountScope';
 
 interface SetupLinkProps {
   userId: string;
@@ -48,7 +49,7 @@ const SetupLink: React.FC<SetupLinkProps> = ({ userId, onSetupComplete }) => {
     if (!supabase) {
       // Demo mode: just save username and proceed
       setIsLoading(true);
-      localStorage.setItem('picks_user_session', username);
+      sessionSet('picks_user_session', username);
       onSetupComplete(username);
       setIsLoading(false);
       return;

@@ -19,6 +19,10 @@ import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/c
 //  2) 광고 단가 수정 — 단가는 접수한 뒤에도 바뀐다(성수기·채널 성장·재계약).
 //     고칠 방법이 "취소 후 재등록"뿐이면 접수 순서를 잃고, 운영자 명단에는 같은
 //     사람이 두 번 지나간 것처럼 보인다. 그래서 접수한 등록서를 제자리에서 고친다.
+//
+// 연동한 계정과 적어 둔 값은 그대로 남는다. 등록서는 한 번에 끝내기 어려운 분량이라
+// 닫았다 다시 여는 일이 흔한데, 그때마다 연동이 풀리고 입력칸이 비어 있으면 대부분
+// 다시 적지 않고 그대로 나간다.
 interface Props {
   variant: 'influencer' | 'brand';
   applicantUsername: string;
@@ -48,68 +52,56 @@ const DRAFT_MODE_KEY = 'picks_collab_match_draft_mode';
 const RETURN_FLAG = 'collab_match';
 
 /**
- * 이 브라우저 세션에서 캠페인용 인스타그램 로그인을 마쳤는지 적어 두는 자리.
+ * 한 번 연동한 계정은 계속 연동된 상태로 둔다.
  *
- * 캠페인 등록은 "지금 이 계정으로 브랜드에게 나를 보여 준다"를 정하는 자리다. 그래서
- * 지난번에 연동해 둔 계정이나 디엠 자동화에 붙여 둔 계정을 끌어와 이미 연동된 것처럼
- * 보여 주지 않는다 — 등록하는 사람은 자기가 어떤 계정으로 등록되는지 고른 적이 없고,
- * 화면에 뜬 팔로워·조회수가 언제 받아 온 숫자인지도 알 수 없다.
+ * 예전에는 "이 브라우저 세션에서 로그인했는지"를 따로 적어 두고, 그 표시가 없으면
+ * 연동 상태를 아예 불러오지 않았다. 그러다 보니 연동을 마치고 탭을 닫았다 다시 들어온
+ * 사람에게는 연동이 통째로 사라진 것처럼 보였다 — 서버에는 그대로 남아 있는데도.
  *
- * 그래서 화면은 매번 로그인에서 시작하고, 로그인해서 방금 받아 온 숫자만 보여 준다.
- * 값에 사용자명을 넣어 두는 이유는 같은 탭에서 계정을 바꿔 로그인하는 경우다.
+ * 화면에 뜬 계정이 "디엠 자동화에 붙여 둔 남의 맥락"이 아닌지는 서버가 이미 가려 준다.
+ * api-creator-channel 은 purpose='collab' 으로 연동한 토큰만 metaLinked 로 셈한다.
+ * 그러니 이 화면은 서버가 말하는 연동 상태를 그대로 믿으면 된다.
+ *
+ * 여기 적어 두는 것은 "마지막으로 확인한 연동 카드"다. 서버 응답이 오기 전 첫 프레임을
+ * 채우는 용도이고, 응답이 도착하면 언제나 그 값이 덮는다.
  */
-const SESSION_LINK_KEY = 'picks_collab_ig_session';
+const CHANNEL_CACHE_PREFIX = 'picks_collab_ig_card_v1';
+
 /**
- * 로그인하러 나가면서 적어 두는 "누가 나갔는지".
+ * 작성 중인 등록서를 이 브라우저에 적어 두는 자리.
  *
- * 돌아왔을 때는 페이지가 새로 뜬 직후라 로그인 정보가 아직 안 실려 있을 수 있다.
- * 그 순간의 사용자명에 기대면 연동을 마치고 왔는데도 표시가 남지 않아, 화면은
- * 방금 로그인한 계정을 두고 또 로그인하라고 말한다.
+ * 등록서는 단가·채널·카테고리까지 한참 적어야 하는 화면이라, 한 번에 끝내지 못하고
+ * 닫았다 다시 여는 경우가 많다. 적던 값이 사라지면 처음부터 다시 적어야 하므로
+ * 대부분 그대로 이탈한다. 접수 전에는 입력할 때마다 적어 두고, 접수하고 나면 지운다
+ * (그 뒤로는 서버에 저장된 등록서가 원본이고, 수정 화면은 거기서 시작한다).
  */
-const SESSION_PENDING_KEY = 'picks_collab_ig_pending';
+const FORM_DRAFT_PREFIX = 'picks_collab_match_form_v1';
 
-const sessionLinkedFor = (username: string) => {
-  if (!username) return false;
+const scopedKey = (prefix: string, variant: string, username: string) =>
+  `${prefix}:${variant}:${username.trim().toLowerCase()}`;
+
+const readJson = <T,>(key: string): T | null => {
   try {
-    return sessionStorage.getItem(SESSION_LINK_KEY) === username;
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
-    return false;
+    return null;
   }
 };
 
-const markSessionLinked = (username: string) => {
-  if (!username) return;
+const writeJson = (key: string, value: unknown) => {
   try {
-    sessionStorage.setItem(SESSION_LINK_KEY, username);
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // 기록을 못 남기면 다음 화면에서 로그인을 한 번 더 하게 될 뿐이다.
+    // 저장이 막힌 브라우저에서는 예전처럼 서버 응답을 기다렸다 그린다.
   }
 };
 
-const clearSessionLink = () => {
+const dropKey = (key: string) => {
   try {
-    sessionStorage.removeItem(SESSION_LINK_KEY);
+    localStorage.removeItem(key);
   } catch {
     // 위와 같다.
-  }
-};
-
-const markPendingLink = (username: string) => {
-  try {
-    sessionStorage.setItem(SESSION_PENDING_KEY, username);
-  } catch {
-    // 위와 같다.
-  }
-};
-
-/** 나갈 때 적어 둔 사용자명을 읽고 지운다. 한 번의 복귀에 한 번만 쓰인다. */
-const consumePendingLink = () => {
-  try {
-    const who = sessionStorage.getItem(SESSION_PENDING_KEY) || '';
-    sessionStorage.removeItem(SESSION_PENDING_KEY);
-    return who;
-  } catch {
-    return '';
   }
 };
 
@@ -133,33 +125,20 @@ interface CachedState {
   application: Record<string, any> | null;
 }
 
-const stateCacheKey = (variant: string, username: string) =>
-  `${STATE_CACHE_PREFIX}:${variant}:${username.trim().toLowerCase()}`;
-
 const readStateCache = (variant: string, username: string): CachedState | null => {
   if (!username) return null;
-  try {
-    const raw = localStorage.getItem(stateCacheKey(variant, username));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.submitted !== 'boolean') return null;
-    return {
-      submitted: parsed.submitted,
-      status: String(parsed.status || ''),
-      application: parsed.application || null,
-    };
-  } catch {
-    return null;
-  }
+  const parsed = readJson<any>(scopedKey(STATE_CACHE_PREFIX, variant, username));
+  if (typeof parsed?.submitted !== 'boolean') return null;
+  return {
+    submitted: parsed.submitted,
+    status: String(parsed.status || ''),
+    application: parsed.application || null,
+  };
 };
 
 const writeStateCache = (variant: string, username: string, value: CachedState) => {
   if (!username) return;
-  try {
-    localStorage.setItem(stateCacheKey(variant, username), JSON.stringify(value));
-  } catch {
-    // 저장이 막힌 브라우저에서는 예전처럼 서버 응답을 기다렸다 그린다.
-  }
+  writeJson(scopedKey(STATE_CACHE_PREFIX, variant, username), value);
 };
 
 
@@ -175,6 +154,8 @@ const SUBMITTED_NOTE: Record<string, string> = {
 
 interface InfluencerChannel {
   connected: boolean;
+  /** 연동은 남아 있지만 토큰이 만료돼 다시 동의가 필요한 상태. */
+  needsReauth: boolean;
   handle: string;
   followers: number;
   following: number;
@@ -185,8 +166,43 @@ interface InfluencerChannel {
 }
 
 const emptyChannel: InfluencerChannel = {
-  connected: false, handle: '', followers: 0, following: 0,
+  connected: false, needsReauth: false, handle: '', followers: 0, following: 0,
   avgViews: 0, avgLikes: 0, metricsSource: '', syncedAt: '',
+};
+
+/** 마지막으로 확인한 연동 카드. 첫 프레임을 채우는 용도이고 서버 응답이 덮는다. */
+const readChannelCache = (username: string): InfluencerChannel | null => {
+  if (!username) return null;
+  const parsed = readJson<any>(scopedKey(CHANNEL_CACHE_PREFIX, 'influencer', username));
+  if (!parsed || typeof parsed.connected !== 'boolean') return null;
+  return { ...emptyChannel, ...parsed };
+};
+
+const writeChannelCache = (username: string, value: InfluencerChannel) => {
+  if (!username) return;
+  writeJson(scopedKey(CHANNEL_CACHE_PREFIX, 'influencer', username), value);
+};
+
+/** 작성 중인 등록서. 접수 전에만 쓰고, 접수하면 지운다. */
+const readFormDraft = (variant: string, username: string): Record<string, string> | null => {
+  if (!username) return null;
+  const parsed = readJson<any>(scopedKey(FORM_DRAFT_PREFIX, variant, username));
+  if (!parsed || typeof parsed !== 'object') return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return Object.values(out).some(v => v.trim()) ? out : null;
+};
+
+const writeFormDraft = (variant: string, username: string, form: Record<string, string>) => {
+  if (!username) return;
+  writeJson(scopedKey(FORM_DRAFT_PREFIX, variant, username), form);
+};
+
+const clearFormDraft = (variant: string, username: string) => {
+  if (!username) return;
+  dropKey(scopedKey(FORM_DRAFT_PREFIX, variant, username));
 };
 
 const compact = (n: number) => {
@@ -232,16 +248,12 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   });
 
   // 인스타 연동 상태 — 연동 여부와 픽스폴리오가 보관 중인 지표.
-  const [channel, setChannel] = useState<InfluencerChannel>(emptyChannel);
+  // 지난번에 본 카드로 시작한다. 서버 응답을 기다리는 동안 자리를 비워 두면, 연동을
+  // 마친 사람은 화면을 열 때마다 "연동이 풀렸나" 하는 순간을 먼저 본다.
+  const [channel, setChannel] = useState<InfluencerChannel>(
+    () => (variant === 'influencer' ? readChannelCache(applicantUsername) : null) ?? emptyChannel,
+  );
   const [channelLoading, setChannelLoading] = useState(false);
-  /**
-   * 이 화면이 떠 있는 동안 로그인을 마쳤는지.
-   *
-   * 기록은 sessionStorage 에 남기지만, 시크릿 모드나 저장이 막힌 브라우저에서는 그
-   * 기록이 남지 않는다. 그런 브라우저에서 방금 로그인하고 돌아온 사람에게 또 로그인을
-   * 시키지 않도록, 화면이 살아 있는 동안은 이 값으로도 인정한다.
-   */
-  const [linkedNow, setLinkedNow] = useState(false);
 
   /** 첫 프레임을 지난 답으로 그리기 위한 값. 확정은 언제나 서버 응답으로 한다. */
   const [cachedOnMount] = useState(() => readStateCache(variant, applicantUsername));
@@ -283,6 +295,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   const [pendingSync, setPendingSync] = useState(false);
   /** 임시 저장(연동 후 복귀)으로 폼을 되살렸는지. 되살린 값을 접수 내용으로 덮지 않는다. */
   const draftRestored = useRef(false);
+  /** 이 브라우저에 적어 둔 작성 중 등록서를 이미 되살렸는지. 한 번만 되살린다. */
+  const localDraftRestored = useRef(false);
 
   /** 목록에 없는 분야를 직접 적는 칸. 추가하면 infForm.category 로 들어가고 비워진다. */
   const [customCategory, setCustomCategory] = useState('');
@@ -311,28 +325,25 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   const loadChannel = useCallback(async () => {
     if (!isInfluencer || !applicantUsername) return;
-    // 이번 세션에 로그인하지 않았으면 아무 것도 불러오지 않는다. 지난번에 연동해 둔
-    // 계정의 팔로워·조회수를 그대로 띄우면, 화면은 "이미 연동됨"이라고 말하지만 그
-    // 숫자가 어느 계정의 것이고 언제 받아 온 것인지는 아무도 모른다.
-    if (!linkedNow && !sessionLinkedFor(applicantUsername)) {
-      setChannel(emptyChannel);
-      return;
-    }
     setChannelLoading(true);
     const result = await apiService.getCreatorChannel(applicantUsername);
     setChannelLoading(false);
+    // 확인을 못 했으면 화면에 있던 카드를 그대로 둔다. 잠깐의 네트워크 오류로 카드가
+    // 사라지면, 본인은 연동이 풀린 것으로 읽고 같은 계정을 또 연동하러 간다.
     if (result?.error) return;
-    // metaLinked = 캠페인용으로 연동한 토큰이 살아 있다는 뜻. 끊겼으면 이 세션의
-    // 로그인도 끝난 것으로 보고 처음(로그인 버튼)으로 되돌린다.
-    if (!result?.metaLinked) {
-      clearSessionLink();
-      setLinkedNow(false);
+    // metaLinked = 캠페인용(purpose='collab')으로 연동한 토큰이 살아 있다는 뜻.
+    // 디엠 자동화에 붙여 둔 계정은 서버가 이미 걸러 내므로 여기서는 그대로 믿는다.
+    // needsReauth = 연동은 남아 있는데 토큰이 만료된 상태. "연동 안 됨"과 구분해야
+    // 이미 받아 둔 계정 정보를 지우지 않고 "다시 동의해 주세요"라고 말할 수 있다.
+    if (!result?.metaLinked && !result?.needsReauth) {
       setChannel(emptyChannel);
+      writeChannelCache(applicantUsername, emptyChannel);
       return;
     }
     const c = result?.channel || {};
-    setChannel({
+    const next: InfluencerChannel = {
       connected: true,
+      needsReauth: !result?.metaLinked,
       handle: String(result?.igUsername || c.instagramHandle || ''),
       followers: Number(c.followers || 0),
       following: Number(c.following || 0),
@@ -340,8 +351,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       avgLikes: Number(c.avgLikes || 0),
       metricsSource: String(c.metricsSource || ''),
       syncedAt: String(c.syncedAt || ''),
-    });
-  }, [applicantUsername, isInfluencer, linkedNow]);
+    };
+    setChannel(next);
+    writeChannelCache(applicantUsername, next);
+  }, [applicantUsername, isInfluencer]);
 
   /** 접수한 등록서를 수정 폼으로 되살린다. 0 은 빈칸으로 둔다("0"이 적힌 칸은 오해를 부른다). */
   const prefillFrom = useCallback((app: Record<string, any>) => {
@@ -438,17 +451,15 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
     if (params.get('ig_connected')) {
       const metricsMissing = params.get('ig_metrics') === '0';
-      // 이 세션의 로그인이 끝났다. 지금부터 화면은 방금 로그인한 계정의 숫자를 보여 준다.
-      markSessionLinked(consumePendingLink());
-      setLinkedNow(true);
       // 연동을 처리한 쪽이 방금 받아 온 숫자를 함께 실어 보낸다. 있으면 그대로 그린다
       // — 서버에 한 번 더 물어보는 동안 빈 카드를 보여 줄 이유가 없다. 곧 도착하는
       // 서버 응답이 이 값을 덮는다(화면에 남는 값은 언제나 서버가 보관 중인 값이다).
       const handle = params.get('ig_handle') || '';
       const followers = Number(params.get('ig_followers') || 0);
       if (handle || followers > 0) {
-        setChannel({
+        const linked: InfluencerChannel = {
           connected: true,
+          needsReauth: false,
           handle,
           followers: Math.max(0, followers),
           following: Math.max(0, Number(params.get('ig_following') || 0)),
@@ -456,7 +467,9 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           avgLikes: 0,
           metricsSource: 'meta_api',
           syncedAt: new Date().toISOString(),
-        });
+        };
+        setChannel(linked);
+        writeChannelCache(applicantUsername, linked);
       }
       // 지표를 못 받고 돌아왔으면 이 화면이 한 번 더 받아 본다. 사람에게 버튼을
       // 찾아 누르라고 하기 전에 채워 보는 편이 빠르다.
@@ -467,9 +480,6 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
           : { type: 'ok', text: '인스타그램 계정이 연동되었습니다! 🎉' },
       );
     } else if (params.get('ig_error')) {
-      consumePendingLink();
-      clearSessionLink();
-      setLinkedNow(false);
       setNotice({ type: 'err', text: '연동에 실패했어요. 다시 시도해 주세요.' });
     }
 
@@ -491,11 +501,29 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   // 연동 상태는 화면이 뜨는 즉시 확인한다. 접수 여부 응답을 기다렸다 시작하면 왕복
   // 두 번이 줄줄이 이어져, 방금 연동하고 온 사람이 빈 카드를 그만큼 오래 본다.
-  // 모달을 열 때도 다시 확인한다(다른 화면에서 연동했을 수 있다). 이 세션에
-  // 로그인하지 않았으면 loadChannel 은 아무 것도 하지 않는다.
+  // 모달을 열 때도 다시 확인한다(다른 기기·화면에서 연동을 바꿨을 수 있다).
   useEffect(() => {
     loadChannel();
   }, [open, loadChannel]);
+
+  // 작성 중이던 등록서를 되살린다 — 접수 전(새 등록서) 화면에서만.
+  // 접수한 뒤에는 서버에 저장된 등록서가 원본이고, 수정 화면은 거기서 시작한다.
+  useEffect(() => {
+    if (!applicantUsername || submitted !== false) return;
+    if (localDraftRestored.current || draftRestored.current) return;
+    const draft = readFormDraft(variant, applicantUsername);
+    if (!draft) return;
+    localDraftRestored.current = true;
+    if (variant === 'influencer') setInfForm(f => ({ ...f, ...draft }));
+    else setBrandForm(f => ({ ...f, ...draft }));
+  }, [applicantUsername, submitted, variant]);
+
+  // 입력할 때마다 적어 둔다. 등록서는 한 번에 다 적기 어려운 분량이라(채널·단가·
+  // 카테고리) 닫았다 다시 여는 일이 흔한데, 그때마다 빈 화면이면 대부분 그대로 만다.
+  useEffect(() => {
+    if (!applicantUsername || submitted !== false) return;
+    writeFormDraft(variant, applicantUsername, variant === 'influencer' ? infForm : brandForm);
+  }, [applicantUsername, submitted, variant, infForm, brandForm]);
 
   // 수정 화면은 접수한 내용에서 시작한다. 서버에서 받은 등록서가 있어야 시작값으로
   // 쓴다 — 화면을 먼저 그리려고 들고 있던 캐시로 폼을 채우면, 그 사이 다른 기기에서
@@ -545,14 +573,12 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     } catch {
       // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
     }
-    markPendingLink(applicantUsername);
     const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1`;
     // 'collab' — 캠페인 전용 연동이다. 디엠 자동화와 보관함이 다르고, 인스타그램
     // 로그인 화면을 매번 새로 띄운다.
     const result = await apiService.instagramConnectUrl(applicantUsername, returnTo, 'collab');
     if (!result.url) {
       setLinking(false);
-      consumePendingLink();
       setNotice({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
       return;
     }
@@ -571,13 +597,21 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     const result = await apiService.syncCreatorChannel(applicantUsername);
     setSyncing(false);
     if (result?.error) {
-      // 연동이 끊겼거나(토큰 만료·권한 해제) 애초에 없는 경우다. 안내 문구를 붙여
-      // 붙잡아 두지 않는다 — 여기서 할 수 있는 일은 다시 로그인하는 것 하나뿐이므로
-      // 화면을 처음(로그인 버튼)으로 되돌린다.
-      if (result.code === 'META_TOKEN_INVALID' || result.code === 'META_NOT_LINKED') {
-        clearSessionLink();
-        setLinkedNow(false);
+      // 연동이 끊겼거나(토큰 만료·권한 해제) 애초에 없는 경우다.
+      // 토큰 만료는 "연동 안 됨"이 아니다. 이미 확인해 둔 계정은 그대로 두고 "다시
+      // 동의해 주세요"라고만 말한다 — 카드를 빈 상태로 되돌리면, 본인은 지난번 연동이
+      // 통째로 사라진 것으로 읽는다.
+      if (result.code === 'META_TOKEN_INVALID') {
+        setChannel(prev => {
+          const next = { ...prev, connected: true, needsReauth: true };
+          writeChannelCache(applicantUsername, next);
+          return next;
+        });
+        return;
+      }
+      if (result.code === 'META_NOT_LINKED') {
         setChannel(emptyChannel);
+        writeChannelCache(applicantUsername, emptyChannel);
         return;
       }
       if (silent) return;
@@ -643,6 +677,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       if (!result?.error) {
         setOpen(false);
         draftRestored.current = false;
+        // 접수했으면 작성 중이던 값은 더 이상 쓰지 않는다. 이제부터 원본은 서버에
+        // 저장된 등록서이고, 수정 화면은 거기서 시작한다.
+        clearFormDraft(variant, applicantUsername);
+        localDraftRestored.current = false;
         // 서버에 다시 물어보지 않고 바로 감춘다. 접수는 방금 성공했고, 이 화면에
         // 버튼이 한 번 더 남아 있으면 같은 등록서를 두 번 내게 된다.
         setSubmitted(true);
@@ -1100,6 +1138,29 @@ const InstagramLinkCard: React.FC<{
   }
 
   const verified = channel.metricsSource === 'meta_api';
+
+  // 토큰이 만료된 연동 — 계정은 그대로 두고 다시 동의만 받는다.
+  if (channel.needsReauth) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-4">
+        <p className="text-sm font-black text-slate-900">
+          {channel.handle ? `@${channel.handle}` : '연동한 계정'} · 다시 연동이 필요해요
+        </p>
+        <p className="text-[11px] text-amber-700 font-bold leading-relaxed mt-1.5">
+          인스타그램 동의 기간이 끝났습니다. 계정과 등록 정보는 그대로 있으니 다시 연동만
+          해 주시면 팔로워·릴스 조회수가 최신으로 채워집니다.
+        </p>
+        <button
+          type="button"
+          onClick={onLink}
+          disabled={linking || !canLink}
+          className="mt-3 w-full rounded-xl bg-slate-900 text-white font-black text-sm py-3 hover:bg-slate-800 active:scale-[0.99] transition-all disabled:opacity-60"
+        >
+          {linking ? '연동 창으로 이동 중...' : '다시 연동하기'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-4">

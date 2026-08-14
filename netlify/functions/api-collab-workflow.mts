@@ -8,6 +8,7 @@ import {
   canTransitionStage,
   daysUntil,
   ensureSupportThread,
+  isProcessV1,
   logCollabEvent,
   netAfterWithholding,
   newId,
@@ -129,6 +130,108 @@ async function openNextStage(db: any, collabId: string, currentSeq: number) {
     UPDATE campaign_collabs SET current_stage_key = ${stage.stage_key}, updated_at = NOW() WHERE id = ${collabId}
   `;
   return stage;
+}
+
+/**
+ * 다섯 단계 화면의 단계 키 → 실제 collab_stages 의 단계 키.
+ *
+ * 진행 중인 협업은 예전 아홉 단계 묶음으로 시작한 것들이 섞여 있다. 템플릿은 협업이
+ * 생길 때 행으로 복사되므로 그 협업들의 단계 이름은 영원히 예전 것이다. 화면을 새
+ * 다섯 단계로 바꾸면서 예전 협업을 버릴 수는 없으니, 새 이름으로 들어온 요청을 그
+ * 협업이 실제로 들고 있는 단계로 떨어뜨린다 — 기획안은 예전의 구성안(script),
+ * 영상은 예전의 콘텐츠(content) 자리다.
+ */
+const STEP_STAGE_KEYS: Record<string, string[]> = {
+  guide: ["guide"],
+  shipping: ["shipping"],
+  plan: ["plan", "script"],
+  video: ["video", "content"],
+  upload: ["upload"],
+};
+
+async function resolveStepStage(db: any, collabId: string, stepKey: string) {
+  const keys = STEP_STAGE_KEYS[stepKey] || [];
+  if (keys.length === 0) return null;
+  const stages = await loadStages(db, collabId);
+  for (const key of keys) {
+    const found = stages.find((s) => s.stage_key === key);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * 단계 하나를 닫고 다음을 연다 — 다섯 단계 묶음에서만.
+ *
+ * 예전 묶음은 담당자 승인(approve_stage)으로만 움직인다. 그 묶음에는 "구성안 검수",
+ * "콘텐츠 검수" 처럼 담당자가 주인인 단계가 사이사이 들어 있어서, 브랜드가 확인을
+ * 누른다고 다음 단계가 열리면 담당자가 하기로 한 일이 통째로 건너뛰어진다.
+ */
+async function advanceProcessStage(db: any, collab: any, stage: any, actorUsername: string) {
+  if (!stage || !isProcessV1(collab.template_key)) return null;
+  if (stage.status === "done" || stage.status === "skipped") return null;
+  await db.sql`
+    UPDATE collab_stages SET status = 'done', completed_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
+  `;
+  await db.sql`
+    UPDATE collab_deliverables
+    SET status = 'approved', reviewed_by = ${actorUsername}, reviewed_at = NOW()
+    WHERE collab_id = ${collab.id} AND stage_key = ${stage.stage_key} AND status = 'submitted'
+  `;
+  return openNextStage(db, collab.id, stage.seq);
+}
+
+/**
+ * 정산 예약. 업로드가 확인된 시점에만 부른다.
+ *
+ * 광고비가 0원인 협업(제품 협찬형)은 예약하지 않는다. 그대로 두면 받을 것이 없는
+ * 0원짜리 줄이 인플루언서 정산 목록에 남는다.
+ */
+async function scheduleSettlementFor(db: any, collab: any) {
+  const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collab.id}`) as any[];
+  const fee = Number(termsRows?.[0]?.fee || 0);
+  if (fee <= 0) return null;
+  const scheduledDate = settlementDateFrom(todayInSeoul());
+  try {
+    const stlNow = new Date().toISOString();
+    await addSettlementForProposal({
+      id: newId("stl"),
+      proposal_id: collab.proposal_id || `campaign_${collab.campaign_id}_${collab.creator_username}`,
+      influencer_username: collab.creator_username,
+      business_username: collab.business_username,
+      company_name: collab.company_name || "",
+      title: collab.campaign_title || "",
+      amount: fee,
+      scheduled_date: scheduledDate,
+      status: "scheduled",
+      memo: `업로드 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
+      created_at: stlNow,
+      updated_at: stlNow,
+    });
+    return { scheduledDate, amount: fee, net: netAfterWithholding(fee) };
+  } catch (stlErr) {
+    console.error("[collab-workflow] 정산 예약 실패:", stlErr);
+    return null;
+  }
+}
+
+/** 배송 정보 한 줄. 아직 아무도 입력하지 않았으면 빈 껍데기를 돌려준다. */
+function shapeShipping(row: any) {
+  return {
+    recipient: String(row?.recipient || ""),
+    phone: String(row?.phone || ""),
+    postcode: String(row?.postcode || ""),
+    address1: String(row?.address1 || ""),
+    address2: String(row?.address2 || ""),
+    memo: String(row?.memo || ""),
+    status: String(row?.status || "pending"),
+    courier: String(row?.courier || ""),
+    trackingNumber: String(row?.tracking_number || ""),
+    shippedAt: row?.shipped_at || null,
+    savedAt: row?.updated_at || null,
+    /** 주소가 채워졌는가 = 브랜드가 발송할 수 있는가. */
+    filled: Boolean(String(row?.recipient || "").trim() && String(row?.address1 || "").trim()),
+  };
 }
 
 /**
@@ -290,7 +393,7 @@ export default async (req: Request, context: Context) => {
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
     try {
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
@@ -298,6 +401,7 @@ export default async (req: Request, context: Context) => {
         db.sql`SELECT * FROM collab_terms WHERE collab_id = ${collabId}` as Promise<any[]>,
         db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
+        db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as Promise<any[]>,
       ]);
 
       const template = templateByKey(collab.template_key);
@@ -353,6 +457,8 @@ export default async (req: Request, context: Context) => {
           proposalId: collab.proposal_id,
           uploadUrl: collab.upload_url || "",
           adCode: collab.ad_code || "",
+          uploadConfirmedAt: collab.upload_confirmed_at || null,
+          uploadConfirmedBy: role === "influencer" ? "" : collab.upload_confirmed_by || "",
           confirmedAt: collab.confirmed_at,
           scheduleStart: collab.schedule_start || "",
           scheduleEnd: collab.schedule_end || "",
@@ -364,6 +470,7 @@ export default async (req: Request, context: Context) => {
           createdAt: collab.created_at,
         },
         guideline,
+        shipping: shapeShipping((shippingRows as any[])?.[0]),
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
           // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
@@ -505,6 +612,19 @@ export default async (req: Request, context: Context) => {
           summary: `${kind === "guide" ? "가이드" : kind === "plan" ? "기획안" : kind === "video" ? "영상 초안" : "자료"} 공유`,
           payload: { assetId, kind },
         });
+
+        // 가이드 파일이 올라왔으면 콘텐츠 가이드 단계는 브랜드 손을 떠난 것이다.
+        // 다음은 인플루언서가 "확인했다"를 누를 차례라 여기서 완료로 닫지는 않는다.
+        if (kind === "guide") {
+          const guideStage = await resolveStepStage(db, collabId, "guide");
+          if (guideStage && ["pending", "active"].includes(guideStage.status)) {
+            await db.sql`
+              UPDATE collab_stages
+              SET status = 'submitted', submitted_at = NOW(), updated_at = NOW()
+              WHERE id = ${guideStage.id}
+            `;
+          }
+        }
         return Response.json({ success: true, assetId });
       }
 
@@ -545,7 +665,260 @@ export default async (req: Request, context: Context) => {
         return Response.json({ success: true });
       }
 
-      // 인플루언서: 산출물 제출 -------------------------------------------
+      // ── 다섯 단계 프로세스 ────────────────────────────────────────────
+      // 콘텐츠 가이드 · 제품 배송 · 기획안 피드백 · 영상 피드백 · 업로드.
+      // 아래 다섯 동작이 그 프로세스를 그대로 움직인다. 담당자 승인(approve_stage)은
+      // 남겨 두되, 이 흐름에서는 브랜드와 인플루언서가 서로에게 직접 넘긴다 —
+      // 주소를 받고 제품을 보내는 일까지 사람을 한 명 더 기다리게 할 이유가 없다.
+
+      // 인플루언서: 제품 받을 주소 ---------------------------------------
+      case "save_shipping": {
+        if (role !== "influencer" && role !== "manager") {
+          return jsonError("배송 정보는 인플루언서가 입력합니다.", 403);
+        }
+        const recipient = String((body as any).recipient || "").trim().slice(0, 60);
+        const phone = String((body as any).phone || "").trim().slice(0, 40);
+        const postcode = String((body as any).postcode || "").trim().slice(0, 20);
+        const address1 = String((body as any).address1 || "").trim().slice(0, 300);
+        const address2 = String((body as any).address2 || "").trim().slice(0, 300);
+        const memo = String((body as any).memo || "").trim().slice(0, 500);
+        if (!recipient) return jsonError("받는 분 이름을 입력해 주세요.");
+        if (!phone) return jsonError("연락처를 입력해 주세요.");
+        if (!address1) return jsonError("주소를 입력해 주세요.");
+
+        await db.sql`
+          INSERT INTO collab_shipping (
+            collab_id, recipient, phone, postcode, address1, address2, memo, saved_by
+          ) VALUES (
+            ${collabId}, ${recipient}, ${phone}, ${postcode}, ${address1}, ${address2}, ${memo}, ${caller.username}
+          )
+          ON CONFLICT (collab_id) DO UPDATE SET
+            recipient = EXCLUDED.recipient,
+            phone = EXCLUDED.phone,
+            postcode = EXCLUDED.postcode,
+            address1 = EXCLUDED.address1,
+            address2 = EXCLUDED.address2,
+            memo = EXCLUDED.memo,
+            saved_by = EXCLUDED.saved_by,
+            updated_at = NOW()
+        `;
+
+        // 주소가 들어왔으면 배송 단계는 인플루언서 손을 떠난 것이다.
+        const stage = await resolveStepStage(db, collabId, "shipping");
+        if (stage && !["done", "skipped"].includes(stage.status)) {
+          await db.sql`
+            UPDATE collab_stages SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
+          `;
+        }
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "shipping_saved",
+          ...actor,
+          stageKey: stage?.stage_key || "shipping",
+          summary: "배송 정보 입력",
+        });
+        return Response.json({ success: true });
+      }
+
+      // 브랜드: 제품 발송 -------------------------------------------------
+      case "mark_shipped": {
+        if (role !== "brand" && role !== "manager") {
+          return jsonError("발송 처리는 브랜드가 합니다.", 403);
+        }
+        const rows = (await db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}`) as any[];
+        if (!rows?.[0] || !String(rows[0].address1 || "").trim()) {
+          return jsonError("아직 인플루언서가 배송 정보를 입력하지 않았습니다.", 409);
+        }
+        const courier = String((body as any).courier || "").trim().slice(0, 60);
+        const trackingNumber = String((body as any).trackingNumber || "").trim().slice(0, 80);
+        await db.sql`
+          UPDATE collab_shipping
+          SET status = 'shipped', courier = ${courier}, tracking_number = ${trackingNumber},
+              shipped_at = COALESCE(shipped_at, NOW()), updated_at = NOW()
+          WHERE collab_id = ${collabId}
+        `;
+
+        const stage = await resolveStepStage(db, collabId, "shipping");
+        const next = await advanceProcessStage(db, collab, stage, caller.username);
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "product_shipped",
+          ...actor,
+          stageKey: stage?.stage_key || "shipping",
+          summary: trackingNumber ? `제품 발송 · ${courier || "택배"} ${trackingNumber}` : "제품 발송",
+        });
+        return Response.json({ success: true, nextStageKey: next?.stage_key || "" });
+      }
+
+      // 인플루언서: 기획안 · 영상 초안 · 업로드 결과 ----------------------
+      case "save_step_work": {
+        if (role !== "influencer" && role !== "manager") {
+          return jsonError("이 칸은 인플루언서가 채웁니다.", 403);
+        }
+        const stepKey = String((body as any).stepKey || "");
+        if (!["plan", "video", "upload"].includes(stepKey)) return jsonError("잘못된 단계입니다.");
+
+        const text = String((body as any).body || "").trim().slice(0, 8000);
+        const link = String((body as any).link || "").trim().slice(0, 1000);
+        const fileUrl = String((body as any).fileUrl || "").trim();
+        const fileName = String((body as any).fileName || "").trim().slice(0, 240);
+        if (fileUrl && !fileUrl.startsWith("/api/images/")) {
+          return jsonError("업로드한 파일을 선택해 주세요.");
+        }
+        if (stepKey === "plan" && !text && !fileUrl) return jsonError("기획안 내용을 입력하거나 파일을 올려 주세요.");
+        if (stepKey === "video" && !link && !fileUrl) return jsonError("초안 영상 링크를 넣거나 파일을 올려 주세요.");
+        if (stepKey === "upload" && !link) return jsonError("게시물 링크를 입력해 주세요.");
+
+        const stage = await resolveStepStage(db, collabId, stepKey);
+        const stageKey = stage?.stage_key || stepKey;
+        const adCode = String((body as any).adCode || "").trim().slice(0, 500);
+        const payload = { body: text, link, fileUrl, fileName, adCode, step: stepKey };
+
+        // 덮어쓰지 않고 버전을 쌓는다. 피드백이 "몇 번째 안"에 붙은 말인지가
+        // 남지 않으면 수정 왕복이 기억 싸움이 된다.
+        const versionRows = (await db.sql`
+          SELECT COALESCE(MAX(version), 0)::int AS v FROM collab_deliverables
+          WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
+        `) as any[];
+        const version = Number(versionRows?.[0]?.v || 0) + 1;
+        const deliverableId = newId("cd");
+        await db.sql`
+          INSERT INTO collab_deliverables (id, collab_id, stage_key, kind, version, status, payload, submitted_by)
+          VALUES (${deliverableId}, ${collabId}, ${stageKey}, ${stepKey}, ${version}, 'submitted', ${JSON.stringify(payload)}, ${caller.username})
+        `;
+        if (stage && !["done", "skipped"].includes(stage.status)) {
+          await db.sql`
+            UPDATE collab_stages SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
+          `;
+        }
+        if (stepKey === "upload") {
+          await db.sql`
+            UPDATE campaign_collabs
+            SET upload_url = ${link},
+                deliverable_url = ${link},
+                ad_code = ${adCode || collab.ad_code || ""},
+                updated_at = NOW()
+            WHERE id = ${collabId}
+          `;
+        }
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "deliverable_submitted",
+          ...actor,
+          stageKey,
+          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "초안 영상" : "업로드 결과"} 등록 (v${version})`,
+          payload: { deliverableId, kind: stepKey, version },
+        });
+        return Response.json({ success: true, deliverableId, version });
+      }
+
+      // 브랜드: 기획안 · 영상 바로 아래에 남기는 피드백 -------------------
+      case "step_feedback": {
+        if (role !== "brand" && role !== "manager") {
+          return jsonError("피드백은 브랜드가 남깁니다.", 403);
+        }
+        const stepKey = String((body as any).stepKey || "");
+        if (!["guide", "shipping", "plan", "video", "upload"].includes(stepKey)) {
+          return jsonError("잘못된 단계입니다.");
+        }
+        const bodyText = String((body as any).body || "").trim().slice(0, 4000);
+        if (!bodyText) return jsonError("피드백 내용을 입력해 주세요.");
+
+        // 이 피드백은 인플루언서에게 바로 보인다.
+        //
+        // 다른 경로(add_feedback)에서 브랜드 의견을 담당자만 보게 막아 둔 것은,
+        // 그것이 담당자가 정리해 전달할 원문이기 때문이다. 여기는 다르다. 기획안
+        // 입력칸 바로 밑에 달린 칸에 쓴 말은 그 기획안에 대한 답이고, 답이 한 사람을
+        // 더 거치면 그 자리에 있을 이유가 없다.
+        const stage = await resolveStepStage(db, collabId, stepKey);
+        const id = newId("cf");
+        const deliverableRows = (await db.sql`
+          SELECT id FROM collab_deliverables
+          WHERE collab_id = ${collabId} AND stage_key = ${stage?.stage_key || stepKey}
+          ORDER BY version DESC LIMIT 1
+        `) as any[];
+        await db.sql`
+          INSERT INTO collab_feedbacks (
+            id, collab_id, deliverable_id, stage_key, anchor, body,
+            author_type, author_username, visible_to_influencer
+          ) VALUES (
+            ${id}, ${collabId}, ${deliverableRows?.[0]?.id || null},
+            ${stage?.stage_key || stepKey}, ${stepKey}, ${bodyText},
+            ${role}, ${caller.username}, TRUE
+          )
+        `;
+        // 피드백이 왔다는 것은 다시 인플루언서 차례라는 뜻이다.
+        if (stage && stage.status === "submitted" && isProcessV1(collab.template_key)) {
+          await db.sql`UPDATE collab_stages SET status = 'revision', updated_at = NOW() WHERE id = ${stage.id}`;
+        }
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "feedback_sent",
+          ...actor,
+          stageKey: stage?.stage_key || stepKey,
+          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "영상" : "진행"} 피드백 전달`,
+          payload: { feedbackId: id, step: stepKey },
+        });
+        return Response.json({ success: true, feedbackId: id });
+      }
+
+      // 단계 확인 완료 ----------------------------------------------------
+      case "confirm_step": {
+        const stepKey = String((body as any).stepKey || "");
+        if (!["guide", "plan", "video", "upload"].includes(stepKey)) {
+          return jsonError("잘못된 단계입니다.");
+        }
+        // 가이드는 "읽었다"를 인플루언서가 표시한다. 나머지는 브랜드가 확인한다.
+        if (stepKey === "guide") {
+          if (role !== "influencer" && role !== "manager") {
+            return jsonError("가이드 확인은 인플루언서가 표시합니다.", 403);
+          }
+        } else if (role !== "brand" && role !== "manager") {
+          return jsonError("확인은 브랜드가 합니다.", 403);
+        }
+
+        const stage = await resolveStepStage(db, collabId, stepKey);
+        let settlement: any = null;
+
+        if (stepKey === "upload") {
+          if (!String(collab.upload_url || "").trim()) {
+            return jsonError("아직 게시물 링크가 등록되지 않았습니다.", 409);
+          }
+          // 이미 확인된 협업이면 정산을 다시 예약하지 않는다 — 두 번 누르면
+          // 같은 금액이 두 줄로 잡힌다.
+          const confirmed = (await db.sql`
+            UPDATE campaign_collabs
+            SET upload_confirmed_at = NOW(), upload_confirmed_by = ${caller.username},
+                confirmed_at = COALESCE(confirmed_at, NOW()), updated_at = NOW()
+            WHERE id = ${collabId} AND upload_confirmed_at IS NULL
+            RETURNING id
+          `) as any[];
+          if (confirmed?.[0]) settlement = await scheduleSettlementFor(db, collab);
+        }
+
+        const next = await advanceProcessStage(db, collab, stage, caller.username);
+
+        await logCollabEvent(db, {
+          collabId,
+          type: stepKey === "upload" ? "upload_confirmed" : "stage_completed",
+          ...actor,
+          stageKey: stage?.stage_key || stepKey,
+          summary:
+            stepKey === "guide"
+              ? "가이드 확인"
+              : stepKey === "upload"
+                ? "업로드 확인 완료"
+                : `${stepKey === "plan" ? "기획안" : "영상"} 확인 완료`,
+          payload: { settlement },
+        });
+        return Response.json({ success: true, nextStageKey: next?.stage_key || "", settlement });
+      }
+
+      // 인플루언서: 산출물 제출 (예전 아홉 단계 묶음) ---------------------
       case "submit_deliverable": {
         const stageKey = String((body as any).stageKey || "");
         const stage = await stageByKey(stageKey);
@@ -702,33 +1075,7 @@ export default async (req: Request, context: Context) => {
             SET confirmed_at = COALESCE(confirmed_at, NOW()), updated_at = NOW()
             WHERE id = ${collabId}
           `;
-          const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
-          const fee = Number(termsRows?.[0]?.fee || 0);
-          const scheduledDate = settlementDateFrom(todayInSeoul());
-          // 제품 협찬형 협업은 지급할 광고비가 없다. 그대로 두면 0원 정산이
-          // 예약되고, 인플루언서 정산 목록에 받을 것 없는 줄이 하나 남는다.
-          if (fee > 0) {
-            try {
-              const stlNow = new Date().toISOString();
-              await addSettlementForProposal({
-                id: newId("stl"),
-                proposal_id: collab.proposal_id || `campaign_${collab.campaign_id}_${collab.creator_username}`,
-                influencer_username: collab.creator_username,
-                business_username: collab.business_username,
-                company_name: collab.company_name || "",
-                title: collab.campaign_title || "",
-                amount: fee,
-                scheduled_date: scheduledDate,
-                status: "scheduled",
-                memo: `업로드 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
-                created_at: stlNow,
-                updated_at: stlNow,
-              });
-              settlement = { scheduledDate, amount: fee, net: netAfterWithholding(fee) };
-            } catch (stlErr) {
-              console.error("[collab-workflow] 정산 예약 실패:", stlErr);
-            }
-          }
+          settlement = await scheduleSettlementFor(db, collab);
         }
 
         const next = await openNextStage(db, collabId, stage.seq);
