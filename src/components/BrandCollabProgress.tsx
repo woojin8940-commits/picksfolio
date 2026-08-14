@@ -1,27 +1,27 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService, authHeaders } from '../services/apiService';
-import { formatKoreanWon, formatPhone } from '../utils/formatters';
+import { formatKoreanWon, formatPhone, formatCountKo } from '../utils/formatters';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
 
 /**
  * 브랜드가 보는 협업 진행 현황.
  *
- * 화면은 두 겹이다 — 진행이 확정된 인플루언서 명단이 먼저 나오고, 한 명을 누르면
- * 그 사람의 진행사항이 열린다. 한동안은 단계를 축으로 놓고(가이드 · 배송 · 기획안 …)
- * 각 단계 밑에 사람을 줄로 넣었는데, 브랜드가 이 화면에서 하는 일은 대부분 사람
- * 단위였다 — "이 사람 주소 나왔나", "이 사람 기획안 봐 줘야 하나". 단계가 축이면
- * 한 사람의 사정을 알기 위해 다섯 카드를 훑어 그 사람의 이름을 찾아야 했고, 같은
- * 이름이 카드마다 나왔다 사라졌다 해서 지금 몇 명이 진행 중인지도 세기 어려웠다.
- * 그래서 축을 사람으로 되돌리고, 단계는 줄 안의 다섯 칸 막대로 접어 넣었다.
+ * 축은 단계다 — 콘텐츠 가이드 · 제품 배송 · 기획안 피드백 · 영상 피드백 · 업로드.
+ * 카드 하나가 한 단계이고, 그 안에 지금 그 단계에 서 있는 인플루언서가 한 줄씩
+ * 들어간다. 한동안은 축을 사람으로 두고 한 명을 눌러야 그 사람의 다섯 단계가
+ * 열리게 했는데, 그러면 "지금 내가 볼 게 있는 사람이 누구인지"를 알기 위해 명단을
+ * 한 명씩 열어 봐야 했다. 브랜드가 이 화면에서 하는 일은 대부분 단계 단위다 —
+ * "기획안 올라온 사람 피드백 주기", "주소 나온 사람 발송하기". 그 일이 카드 하나로
+ * 모여 있어야 열 명이어도 한 화면에서 끝난다.
  *
- * 가이드라인은 사람이 아니라 캠페인에 딸린 것이라 명단 위에 카드 하나로 남긴다.
+ * 줄에 붙는 얼굴과 아이디는 인스타 연동 정보에서만 온다(creator_channels). 픽스폴리오
+ * 안에서 따로 꾸민 프로필을 쓰면, 인스타만 연동하고 페이지를 안 만든 사람은 회색
+ * 동그라미로 남고 브랜드가 리스트업에서 보고 고른 그 계정과도 달라 보인다.
  *
  * 브랜드는 캠페인을 올리고 조건을 담당자와 정리하는 데까지 관여한다. 진행 자체는
- * 다섯 단계로 굴러간다 — 콘텐츠 가이드 · 제품 배송 · 기획안 피드백 · 영상 피드백 ·
- * 업로드. 인플루언서 한 명을 열면 그 다섯 단계가 인플루언서 화면과 같은 컴포넌트
- * (CampaignProcessBoard)로 열린다. 브랜드가 기획안·영상 밑에 바로 피드백을 적고
- * 확인 완료를 누르는 자리도 그 안이다.
+ * 다섯 단계로 굴러간다. 줄의 버튼을 누르면 그 사람의 진행사항이 그 단계가 펼쳐진
+ * 채로 열리고(CampaignProcessBoard), 기획안·영상 밑에 바로 피드백을 적는다.
  *
  * 조건 · 마감 · 정산처럼 사람 사이를 조율하는 일은 여전히 담당자가 맡는다. 다만
  * "이 기획안의 이 부분을 고쳐 달라"는 말까지 담당자를 거치게 하면 무엇에 대한
@@ -54,11 +54,23 @@ type ShippingRow = {
   memo?: string;
 };
 
+/** 인스타 연동에서 온 인플루언서 신원. 목록 API 가 협업 줄마다 함께 싣는다. */
+type CreatorChannel = {
+  username: string;
+  instagramHandle: string;
+  instagramUrl: string;
+  profileImage: string;
+  connected: boolean;
+  followers: number;
+};
+
 type CollabRow = {
   id: string;
   campaignId: string;
   campaignTitle: string;
   creatorUsername: string;
+  /** 인스타 계정·프로필 사진. 픽스폴리오 프로필이 아니라 연동된 인스타에서 온다. */
+  creator?: CreatorChannel;
   managerUsername: string;
   status: string;
   currentStageKey: string;
@@ -93,6 +105,8 @@ const STEPS: {
   stageKeys: string[];
   /** 브랜드가 볼 것이 올라오는 줄인지. 그 줄에만 검은 버튼이 붙는다. */
   review?: boolean;
+  /** 볼 것이 올라온 줄의 버튼 글자. 무엇을 하러 들어가는지가 버튼에 적혀 있어야 한다. */
+  reviewLabel?: string;
   /** 인플루언서가 아직 작업 중일 때 줄에 적는 말. */
   workingLabel?: string;
   icon: React.ReactNode;
@@ -101,6 +115,7 @@ const STEPS: {
     key: 'guide',
     title: '콘텐츠 가이드',
     stageKeys: ['guide'],
+    workingLabel: '가이드 확인 대기',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
     ),
@@ -110,6 +125,7 @@ const STEPS: {
     title: '제품 배송',
     stageKeys: ['shipping', 'terms'],
     review: true,
+    reviewLabel: '발송 처리하기',
     workingLabel: '주소 입력 대기',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
@@ -120,6 +136,7 @@ const STEPS: {
     title: '기획안 피드백',
     stageKeys: ['plan', 'script', 'script_review'],
     review: true,
+    reviewLabel: '기획안 피드백하기',
     workingLabel: '기획안 작성 중',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
@@ -130,6 +147,7 @@ const STEPS: {
     title: '영상 피드백',
     stageKeys: ['video', 'content', 'content_review'],
     review: true,
+    reviewLabel: '영상 피드백하기',
     workingLabel: '영상 촬영 중',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -140,12 +158,22 @@ const STEPS: {
     title: '업로드',
     stageKeys: ['upload', 'confirm', 'settlement'],
     review: true,
+    reviewLabel: '업로드 확인하기',
     workingLabel: '업로드 대기',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
     ),
   },
 ];
+
+/** 인스타 아이콘. 아이디 옆에 붙어 "이 계정은 인스타에서 왔다"를 한 글자도 안 쓰고 말한다. */
+const InstagramMark: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="2" y="2" width="20" height="20" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" stroke="none" />
+  </svg>
+);
 
 /** 26/03/01 꼴. 뮤즈바이처럼 짧게 — 줄 오른쪽 끝에 붙는 값이라 길면 이름을 밀어낸다. */
 const shortDate = (raw: string) => {
@@ -196,18 +224,16 @@ const stepStateOf = (collab: CollabRow, step: typeof STEPS[number]): { state: St
 };
 
 /**
- * 줄 안 진행 막대 한 칸의 색. 계산식으로 만들면 Tailwind가 클래스를 찾지 못한다.
+ * 단계 카드 머리의 색. 계산식으로 만들면 Tailwind가 클래스를 찾지 못한다.
  *
- * 지나간 칸은 초록, 지금 브랜드가 봐 줘야 하는 칸은 검정, 인플루언서가 작업 중인
- * 칸은 파랑이다. 검정을 파랑보다 진하게 둔 것은 "내가 움직여야 하는 자리"가 명단을
- * 훑을 때 먼저 눈에 들어와야 하기 때문이다.
+ * 지나간 단계는 초록, 지금 사람이 서 있는 단계는 검정, 아직 아무도 오지 않은 단계는
+ * 회색이다. "지금 봐 줄 것이 있는 카드"가 화면을 훑을 때 먼저 눈에 들어와야 한다.
  */
-const SEG_TONE: Record<StepState, string> = {
-  done: 'bg-emerald-400',
-  review: 'bg-slate-900',
-  working: 'bg-blue-500',
-  waiting: 'bg-slate-200',
-};
+const CARD_TONE = {
+  done: { badge: 'bg-emerald-500 text-white', title: 'text-slate-900', icon: 'text-emerald-500' },
+  current: { badge: 'bg-slate-900 text-white', title: 'text-slate-900', icon: 'text-slate-600' },
+  pending: { badge: 'bg-slate-100 text-slate-400', title: 'text-slate-400', icon: 'text-slate-300' },
+} as const;
 
 /**
  * 브랜드가 선택만 해 둔 후보 한 줄.
@@ -221,6 +247,8 @@ type PickRow = {
   id: string;
   username: string;
   name: string;
+  instagramHandle: string;
+  instagramUrl: string;
   profileImage: string;
   outreachStatus: string;
   quotedFee: number;
@@ -250,7 +278,14 @@ const OUTREACH_STEP: Record<string, { label: string; cls: string; hint: string }
   },
 };
 
-type Snapshot = { name: string; profileImage: string };
+/**
+ * 리스트업에 굳어 있는 인플루언서 표시 정보.
+ *
+ * 얼굴과 인스타 아이디는 협업 목록이 실어 주는 연동 정보(collab.creator)가 먼저다.
+ * 이 스냅샷은 그것이 아직 없는 사람(연동 전·동기화 전)에게만 쓰는 보조 자료이고,
+ * 이름은 여기에만 있다.
+ */
+type Snapshot = { name: string; instagramHandle: string; instagramUrl: string; profileImage: string };
 
 const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   campaignId,
@@ -298,14 +333,16 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       const listup = await apiService.getCampaignListup(campaignId);
       const candidates = (listup?.candidates || []) as any[];
 
-      // 얼굴과 이름. 협업 목록 API 는 계정 아이디만 주는데, 브랜드가 기억하는 것은
-      // 아이디가 아니라 리스트업에서 본 얼굴이다.
+      // 이름과 (연동 정보가 아직 없을 때의) 얼굴. 협업 목록 API 는 계정 아이디와
+      // 인스타 연동 정보를 주지만 사람 이름은 리스트업에만 있다.
       const snaps: Record<string, Snapshot> = {};
       for (const c of candidates) {
         const key = String(c.snapshot?.username || c.influencerUsername || '').toLowerCase();
         if (!key) continue;
         snaps[key] = {
           name: String(c.snapshot?.name || ''),
+          instagramHandle: String(c.snapshot?.instagramHandle || ''),
+          instagramUrl: String(c.snapshot?.instagramUrl || ''),
           profileImage: String(c.snapshot?.profileImage || ''),
         };
       }
@@ -318,6 +355,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
           id: String(c.id),
           username: String(c.influencerUsername || ''),
           name: String(c.snapshot?.name || ''),
+          instagramHandle: String(c.snapshot?.instagramHandle || ''),
+          instagramUrl: String(c.snapshot?.instagramUrl || ''),
           profileImage: String(c.snapshot?.profileImage || ''),
           outreachStatus: String(c.outreachStatus || 'not_sent'),
           quotedFee: Number(c.quotedFee || 0),
@@ -392,6 +431,40 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   };
 
   /**
+   * 배송지를 한 장의 표로 내려받는다.
+   *
+   * 열 명에게 보낼 때 한 줄씩 복사하면 열 번 오간다. 택배사 대량 등록은 대부분
+   * 엑셀을 받으므로 CSV 로 준다. 앞의 BOM 은 엑셀이 한글을 깨뜨리지 않게 하는
+   * 표식이다 — 이게 없으면 받는 사람 이름이 전부 깨져 보인다.
+   */
+  const downloadAddresses = () => {
+    const filled = collabs.filter(c => c.status === 'in_progress' && c.shipping?.filled);
+    if (filled.length === 0) return;
+    const cell = (v: string) => `"${String(v || '').replace(/"/g, '""')}"`;
+    const lines = [
+      ['인스타 계정', '받는 분', '연락처', '우편번호', '주소', '상세주소', '요청사항'].map(cell).join(','),
+      ...filled.map(c =>
+        [
+          identityOf(c).title,
+          c.shipping?.recipient || '',
+          formatPhone(c.shipping?.phone),
+          c.shipping?.postcode || '',
+          c.shipping?.address1 || '',
+          c.shipping?.address2 || '',
+          c.shipping?.memo || '',
+        ].map(cell).join(','),
+      ),
+    ];
+    const blob = new Blob([`﻿${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `배송지_${filled.length}건.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /**
    * 콘텐츠 가이드 파일을 이 자리에서 바로 올린다.
    *
    * 예전에는 화면 맨 위 가이드라인 카드에서만 올릴 수 있었다. 그런데 브랜드가 가이드를
@@ -437,41 +510,79 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
     }
   };
 
-  /**
-   * 인플루언서 한 명이 다섯 단계 중 어디에 있는지.
-   *
-   * 명단의 한 줄이 곧 이 값 하나다. 지금 서 있는 칸(active)은 브랜드가 봐 줄 것이
-   * 올라온 칸을 먼저 고르고, 없으면 인플루언서가 작업 중인 칸을 고른다 — 줄을 눌렀을
-   * 때 열려야 하는 단계도 같은 칸이다. 취소·완료된 협업은 여기서 빼고 아래 "종료된
-   * 협업"으로 보낸다. 남겨 두면 끝난 사람이 계속 진행 중으로 세어진다.
-   */
-  const rows = useMemo(() => {
-    return collabs
-      .filter(c => c.status === 'in_progress')
-      .map(c => {
-        const states = STEPS.map(step => ({ step, ...stepStateOf(c, step) }));
-        const reviewIdx = states.findIndex(s => s.state === 'review');
-        const workingIdx = states.findIndex(s => s.state === 'working');
-        const pendingIdx = states.findIndex(s => s.state !== 'done');
-        const activeIdx =
-          reviewIdx >= 0 ? reviewIdx : workingIdx >= 0 ? workingIdx : pendingIdx >= 0 ? pendingIdx : states.length - 1;
-        return {
-          collab: c,
-          states,
-          active: states[activeIdx],
-          activeIdx,
-          needsReview: reviewIdx >= 0,
-          doneCount: states.filter(s => s.state === 'done').length,
-        };
-      });
-  }, [collabs]);
-
-  /** 지금 브랜드가 손대야 하는 사람 수. 명단 맨 위에 이 숫자 하나만 적는다. */
-  const reviewCount = rows.filter(r => r.needsReview).length;
   const hasGuideline = guidelineFiles.length > 0 || !!guidelineNote.trim() || !!guidelineUrl.trim();
 
-  const nameOf = (username: string) => snapshots[String(username || '').toLowerCase()]?.name || '';
-  const imageOf = (username: string) => snapshots[String(username || '').toLowerCase()]?.profileImage || '';
+  /**
+   * 단계 하나에 들어 있는 인플루언서들.
+   *
+   * 카드 하나가 이 값 하나다. 취소·완료된 협업은 여기서 빼고 아래 "종료된 협업"으로
+   * 보낸다 — 남겨 두면 끝난 사람이 계속 단계마다 세어져 인원이 실제와 어긋난다.
+   * 가이드는 협업 단계보다 브랜드가 파일을 올렸는지가 먼저다. 협업이 아직 없어도
+   * 올려 두었으면 완료로 본다 — 그것이 이 단계에서 브랜드가 하는 일의 전부다.
+   */
+  const steps = useMemo(() => {
+    const running = collabs.filter(c => c.status === 'in_progress');
+    return STEPS.map(step => {
+      const all = running.map(c => ({ collab: c, ...stepStateOf(c, step) }));
+      const active = all.filter(r => r.state === 'review' || r.state === 'working');
+      const reviewCount = all.filter(r => r.state === 'review').length;
+      const doneCount = all.filter(r => r.state === 'done').length;
+      const done = step.key === 'guide' ? hasGuideline : running.length > 0 && doneCount === running.length;
+      const state: 'done' | 'current' | 'pending' = done
+        ? 'done'
+        : active.length > 0
+          ? 'current'
+          : 'pending';
+      const dues = active.map(r => r.due).filter(Boolean).sort();
+      return {
+        step,
+        active,
+        state,
+        reviewCount,
+        doneCount,
+        total: running.length,
+        dueFrom: dues[0] || '',
+        dueTo: dues[dues.length - 1] || '',
+      };
+    });
+  }, [collabs, hasGuideline]);
+
+  /** 진행 중인 사람 수와, 그중 지금 브랜드가 손대야 하는 건수. 화면 맨 위 한 줄. */
+  const runningCount = collabs.filter(c => c.status === 'in_progress').length;
+  const reviewCount = steps.reduce((sum, s) => sum + s.reviewCount, 0);
+  /** 배송지를 채워 둔 사람 수. 0명이면 내려받을 표가 없으니 버튼도 없다. */
+  const addressCount = collabs.filter(c => c.status === 'in_progress' && c.shipping?.filled).length;
+
+  /**
+   * 줄에 그릴 인플루언서 신원.
+   *
+   * 얼굴과 아이디는 인스타 연동 정보(collab.creator)에서만 가져온다. 픽스폴리오
+   * 프로필에서 가져오면 인스타만 연동하고 페이지를 안 만든 사람이 빈 동그라미로
+   * 남고, 브랜드가 리스트업에서 보고 고른 계정과도 달라 보인다. 연동 정보가 아직
+   * 없는 사람만 리스트업 스냅샷으로 되돌아간다.
+   */
+  const identityOf = (collab: CollabRow) => {
+    const snap = snapshots[String(collab.creatorUsername || '').toLowerCase()];
+    const handle = collab.creator?.instagramHandle || snap?.instagramHandle || '';
+    return {
+      handle,
+      instagramUrl:
+        collab.creator?.instagramUrl ||
+        snap?.instagramUrl ||
+        (handle ? `https://www.instagram.com/${handle}/` : ''),
+      image: collab.creator?.profileImage || snap?.profileImage || '',
+      name: snap?.name || '',
+      /** 인스타 아이디가 없으면 계정 아이디로 대신한다. 빈 줄로 두면 누구인지 알 수 없다. */
+      title: handle || snap?.name || `@${collab.creatorUsername}`,
+      /**
+       * 아랫줄은 사람 이름, 없으면 팔로워 수. 굵은 줄에 이미 아이디가 있는데 아이디를
+       * 한 번 더 쓰면 두 줄이 같은 말을 한다. 둘 다 없으면 아예 안 그린다.
+       */
+      sub:
+        snap?.name ||
+        (collab.creator?.followers ? `팔로워 ${formatCountKo(collab.creator.followers)}` : ''),
+    };
+  };
 
   if (loading) {
     return (
@@ -500,16 +611,33 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   }
 
   const openedCollab = collabs.find(c => c.id === openId);
-  /** 열어 둔 사람의 명단 줄. 상세 머리에 "확인 필요"를 그대로 이어 보여 준다. */
-  const openedRow = rows.find(r => r.collab.id === openId);
+  /** 열어 둔 사람의 신원. 상세에서 온 연동 정보가 있으면 그것이 가장 새 값이다. */
+  const openedIdentity = openedCollab
+    ? (() => {
+        const base = identityOf(openedCollab);
+        const live = detail?.creator;
+        if (!live) return base;
+        return {
+          ...base,
+          handle: live.instagramHandle || base.handle,
+          instagramUrl: live.instagramUrl || base.instagramUrl,
+          image: live.profileImage || base.image,
+          title: live.instagramHandle || base.title,
+        };
+      })()
+    : null;
+  /** 열어 둔 사람이 지금 브랜드의 손을 기다리는지. 상세 머리에 그대로 이어 보여 준다. */
+  const openedNeedsReview = openedCollab
+    ? STEPS.some(step => stepStateOf(openedCollab, step).state === 'review')
+    : false;
 
   return (
     <div className="space-y-3">
       {openId ? (
         /* ── 한 사람의 진행사항 ───────────────────────────────────────────
-           명단을 옆에 남겨 두지 않고 자리를 통째로 바꾼다. 여기서 브랜드가 하는 일은
-           기획안을 읽고 피드백을 쓰는 것 — 한 사람에게만 쓰는 시간이라, 다른 사람의
-           줄이 옆에 계속 보이면 쓰던 문장을 놓친다. */
+           단계 카드를 옆에 남겨 두지 않고 자리를 통째로 바꾼다. 여기서 브랜드가 하는
+           일은 기획안을 읽고 피드백을 쓰는 것 — 한 사람에게만 쓰는 시간이라, 다른
+           사람의 줄이 옆에 계속 보이면 쓰던 문장을 놓친다. */
         <div className="space-y-3">
           <button
             type="button"
@@ -517,14 +645,14 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
             className="inline-flex items-center gap-1.5 text-xs font-black text-slate-500 hover:text-slate-900 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
-            인플루언서 목록
+            진행사항으로 돌아가기
           </button>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:p-5">
             <div className="flex items-center gap-3 mb-4">
-              {imageOf(openedCollab?.creatorUsername || '') ? (
+              {openedIdentity?.image ? (
                 <img
-                  src={imageOf(openedCollab?.creatorUsername || '')}
+                  src={openedIdentity.image}
                   alt=""
                   loading="lazy"
                   className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0"
@@ -533,15 +661,26 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                 <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0" />
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-black text-slate-900 truncate">
-                  {nameOf(openedCollab?.creatorUsername || '') || `@${openedCollab?.creatorUsername || ''}`}
+                <p className="text-sm font-black text-slate-900 truncate flex items-center gap-1.5">
+                  {openedIdentity?.title || `@${openedCollab?.creatorUsername || ''}`}
+                  {openedIdentity?.instagramUrl && (
+                    <a
+                      href={openedIdentity.instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="인스타그램 프로필 열기"
+                      className="text-pink-500 hover:text-pink-600 transition-colors flex-shrink-0"
+                    >
+                      <InstagramMark className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </p>
                 <p className="text-[11px] text-slate-400 font-bold truncate">
-                  @{openedCollab?.creatorUsername || ''}
+                  {openedIdentity?.sub || `@${openedCollab?.creatorUsername || ''}`}
                   {openedCollab?.campaignTitle ? ` · ${openedCollab.campaignTitle}` : ''}
                 </p>
               </div>
-              {openedRow?.needsReview && (
+              {openedNeedsReview && (
                 <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black flex-shrink-0">
                   확인 필요
                 </span>
@@ -595,204 +734,247 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         </div>
       ) : (
         <>
-          {/* ── 콘텐츠 가이드 ────────────────────────────────────────────────
-              사람이 아니라 캠페인에 딸린 것이라 명단 위에 한 장으로 둔다. 올린 파일은
-              진행 중인 모두의 첫 단계에서 그대로 열린다. 캠페인 한 건을 보고 있을
-              때만 나온다 — 전체 협업 목록에서는 어느 캠페인의 가이드인지 알 수 없다. */}
-          {campaignId && (
-          <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-            <div className="px-4 md:px-5 py-4 flex items-center gap-3">
-              <span className={`flex-shrink-0 ${hasGuideline ? 'text-slate-500' : 'text-slate-300'}`}>
-                {STEPS[0].icon}
+          {/* 지금 진행 중인 인원과, 그중 브랜드가 손대야 하는 건수. 카드를 훑기 전에
+              "오늘 할 일이 있는지"부터 한 줄로 답한다. */}
+          <div className="flex flex-wrap items-center gap-2 px-1">
+            <p className="text-sm font-black text-slate-900">진행 확정 인플루언서 {runningCount}명</p>
+            {reviewCount > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10px] font-black">
+                확인 필요 {reviewCount}건
               </span>
-              <p className="text-sm font-black text-slate-900 flex-shrink-0">콘텐츠 가이드</p>
-              <span className={`text-[11px] font-bold flex-shrink-0 ${hasGuideline ? 'text-emerald-600' : 'text-slate-400'}`}>
-                {hasGuideline ? '올림' : '올리기 전'}
-              </span>
-              {hasGuideline && (
-                <button
-                  onClick={() => setGuideOpen(true)}
-                  className="ml-auto px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-black text-slate-700 flex-shrink-0 transition-colors"
-                >
-                  작성한 가이드라인 보기
-                </button>
-              )}
-            </div>
+            )}
+          </div>
 
-            <div className="px-4 md:px-5 pb-4 space-y-2">
-              {guidelineFiles.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {guidelineFiles.map(f => (
-                    <a
-                      key={f.url}
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-[11px] font-black text-slate-700 max-w-full transition-colors"
-                    >
-                      <span className="truncate">{f.name}</span>
-                    </a>
-                  ))}
-                </div>
-              )}
-              {!hasGuideline && (
-                <p className="text-[11px] text-slate-400 font-medium">
-                  가이드 파일(PDF·이미지)을 여기에 올리면 진행 중인 인플루언서의 진행사항에서 그대로 열립니다.
-                </p>
-              )}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,video/*,application/pdf,.doc,.docx,.ppt,.pptx"
-                  disabled={guideUploading}
-                  onChange={e => { uploadGuideFiles(e.target.files); e.target.value = ''; }}
-                  className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-lg file:bg-slate-100 file:px-3 file:py-2 file:text-[11px] file:font-black file:text-slate-700 disabled:opacity-50"
-                />
-                <span className="text-[11px] font-bold text-slate-400 flex-shrink-0">
-                  {guideUploading ? '올리는 중...' : '파일을 고르면 바로 올라갑니다'}
-                </span>
-              </div>
-            </div>
-          </section>
+          {/* 아직 아무도 확정되지 않았다면 한 번만 말한다. 단계 카드마다 같은 문장을
+              다섯 번 되풀이하면 화면이 비어 있다는 사실보다 문장이 먼저 읽힌다. */}
+          {runningCount === 0 && (
+            <p className="px-1 text-xs text-slate-400 font-medium">
+              담당자가 진행을 확정하면 아래 단계에 인플루언서가 한 줄씩 들어옵니다.
+              {picks.length > 0 && " 확정 전 후보는 아래 '제안 진행 중'에서 볼 수 있습니다."}
+            </p>
           )}
 
-          {/* ── 진행 확정 인플루언서 명단 ──────────────────────────────────
-              한 줄이 한 사람이다. 줄 안의 다섯 칸 막대가 그 사람이 어디까지 왔는지를
-              말해 주고, 오른쪽 딱지가 지금 누가 움직일 차례인지를 말해 준다. 누르면
-              그 사람의 진행사항이 열리되, 지금 서 있는 단계가 펼쳐진 채로 열린다. */}
-          <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-            <div className="px-4 md:px-5 py-4 flex flex-wrap items-center gap-2">
-              <p className="text-sm font-black text-slate-900">진행 확정 인플루언서 {rows.length}명</p>
-              {reviewCount > 0 && (
-                <span className="px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10px] font-black">
-                  확인 필요 {reviewCount}명
-                </span>
-              )}
-              {rows.length > 0 && (
-                <span className="ml-auto text-[11px] text-slate-400 font-bold">
-                  인플루언서를 누르면 진행사항이 열립니다
-                </span>
-              )}
-            </div>
-
-            {rows.length === 0 ? (
-              <p className="px-4 md:px-5 pb-6 text-xs text-slate-400 font-medium">
-                담당자가 진행을 확정하면 이곳에 한 줄씩 생깁니다. 확정 전 후보는 아래 &apos;제안 진행 중&apos;에서 볼 수 있습니다.
-              </p>
-            ) : (
-              <div className="px-2.5 md:px-3 pb-3 space-y-1.5">
-                {rows.map(({ collab, states, active, activeIdx, needsReview, doneCount }) => {
-                  const name = nameOf(collab.creatorUsername);
-                  const image = imageOf(collab.creatorUsername);
-                  const allDone = doneCount === STEPS.length;
-                  const due = active.due || collab.dueDate;
-                  return (
-                    <div
-                      key={collab.id}
-                      className={`rounded-xl border transition-colors ${
-                        needsReview ? 'border-slate-200 bg-white hover:border-slate-300' : 'border-transparent bg-slate-50 hover:bg-slate-100'
+          {/* ── 단계 카드 ────────────────────────────────────────────────────
+              카드 하나가 한 단계이고, 그 안에 지금 그 단계에 서 있는 인플루언서가
+              한 줄씩 들어간다. 검은 버튼이 붙은 줄이 브랜드가 움직일 자리다 —
+              누르면 그 사람의 진행사항이 그 단계가 펼쳐진 채로 열린다. */}
+          {steps.map(({ step, active, state, reviewCount: stepReviewCount, total, dueFrom, dueTo }) => {
+            const tone = CARD_TONE[state];
+            const isGuide = step.key === 'guide';
+            const rangeText =
+              dueFrom && dueTo && dueFrom !== dueTo
+                ? `${shortDate(dueFrom)} ~ ${shortDate(dueTo)}`
+                : dueFrom
+                  ? `${shortDate(dueFrom)} 까지`
+                  : '';
+            return (
+              <section key={step.key} className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+                <div className="px-4 md:px-5 py-4 flex flex-wrap items-center gap-2">
+                  <span className={`flex-shrink-0 ${tone.icon}`}>{step.icon}</span>
+                  <p className={`text-sm font-black flex-shrink-0 ${tone.title}`}>{step.title}</p>
+                  {isGuide ? (
+                    <span className={`text-[11px] font-bold flex-shrink-0 ${hasGuideline ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      {hasGuideline ? '올림' : '올리기 전'}
+                    </span>
+                  ) : (
+                    <span
+                      className={`text-[11px] font-bold flex-shrink-0 ${
+                        state === 'done' ? 'text-emerald-600' : state === 'current' ? 'text-slate-500' : 'text-slate-400'
                       }`}
                     >
+                      {state === 'done' ? '완료' : state === 'current' ? `진행중 ${active.length}명` : '진행 전'}
+                    </span>
+                  )}
+                  {stepReviewCount > 0 && (
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-black flex-shrink-0 ${tone.badge}`}>
+                      확인 필요 {stepReviewCount}
+                    </span>
+                  )}
+
+                  <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+                    {rangeText && (
+                      <span className={`text-[11px] font-black ${state === 'current' ? 'text-orange-500' : 'text-slate-400'}`}>
+                        {rangeText}
+                      </span>
+                    )}
+                    {/* 배송지가 한 건이라도 들어와 있으면 표로 내려받을 수 있다. 택배사에
+                        대량 등록할 때 한 줄씩 복사하는 수고를 없앤다. */}
+                    {step.key === 'shipping' && addressCount > 0 && (
                       <button
-                        type="button"
-                        onClick={() => openDetail(collab.id, active.step.key)}
-                        className="w-full flex items-center gap-3 px-3 py-3 text-left"
+                        onClick={downloadAddresses}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-black text-slate-700 transition-colors"
                       >
-                        {image ? (
-                          <img src={image} alt="" loading="lazy" className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0" />
-                        )}
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-xs font-black text-slate-900 truncate">
-                              {name || `@${collab.creatorUsername}`}
-                            </p>
-                            {collab.openFeedbackCount > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[10px] font-black flex-shrink-0">
-                                의견 {collab.openFeedbackCount}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-slate-400 font-bold truncate">@{collab.creatorUsername}</p>
-
-                          {/* 다섯 단계를 다섯 칸으로. 이름 밑에 붙여 두면 명단을 세로로
-                              훑는 것만으로 누가 앞서 있고 누가 걸려 있는지 보인다. */}
-                          <div className="mt-2 flex items-center gap-1">
-                            {states.map(s => (
-                              <span
-                                key={s.step.key}
-                                title={s.step.title}
-                                className={`h-1.5 flex-1 rounded-full ${SEG_TONE[s.state]}`}
-                              />
-                            ))}
-                          </div>
-                          <p className="mt-1.5 text-[10px] font-bold text-slate-400 truncate">
-                            {allDone ? '다섯 단계 모두 완료' : `${activeIdx + 1}/${STEPS.length} ${active.step.title}`}
-                          </p>
-                        </div>
-
-                        <div className="text-right flex-shrink-0">
-                          <span
-                            className={`inline-block px-2.5 py-1 rounded-lg text-[10px] font-black ${
-                              needsReview ? 'bg-slate-900 text-white' : allDone ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
-                            }`}
-                          >
-                            {needsReview
-                              ? active.step.key === 'shipping'
-                                ? '발송 대기'
-                                : '확인 필요'
-                              : allDone
-                                ? '완료'
-                                : active.step.workingLabel || collab.currentStageTitle || '진행 중'}
-                          </span>
-                          <p className={`text-[10px] font-bold mt-1 ${(collab.daysLeft ?? 1) < 0 ? 'text-red-500' : 'text-slate-400'}`}>
-                            {due ? `${shortDate(due)} 까지` : '마감일 미정'}
-                          </p>
-                        </div>
-
-                        <svg className="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                        주소지 일괄 다운로드
                       </button>
+                    )}
+                    {isGuide && hasGuideline && (
+                      <button
+                        onClick={() => setGuideOpen(true)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-black text-slate-700 transition-colors"
+                      >
+                        작성한 가이드라인 보기
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-                      {/* 배송지는 줄을 열지 않아도 여기서 그대로 읽힌다 — 송장을 쓰는
-                          사람이 원하는 것은 "이름·연락처·주소" 세 줄이 전부인데, 그걸
-                          보려고 진행사항을 열게 하면 열 명이면 열 번 연다. 복사 버튼은
-                          택배사 화면에 붙여 넣기 위한 것이다. */}
-                      {collab.shipping?.filled && collab.shipping.status !== 'shipped' && (
-                        <div className="mx-3 mb-3 rounded-lg bg-emerald-50/70 border border-emerald-100 px-3 py-2.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 space-y-0.5">
-                              <p className="text-[11px] font-black text-emerald-700">
-                                {collab.shipping.recipient || '받는 분 미입력'}
-                                {collab.shipping.phone ? ` · ${formatPhone(collab.shipping.phone)}` : ''}
-                              </p>
-                              <p className="text-[11px] font-bold text-slate-600 break-words">
-                                {addressLine(collab.shipping) || '주소 미입력'}
-                              </p>
-                              {collab.shipping.memo && (
-                                <p className="text-[10px] font-bold text-slate-400 break-words">
-                                  요청사항: {collab.shipping.memo}
-                                </p>
-                              )}
-                            </div>
+                {/* 가이드는 사람이 아니라 캠페인에 딸린 것이라, 파일을 올리는 자리가
+                    이 카드 안에 함께 있다. 브랜드가 "콘텐츠 가이드 · 올리기 전"을 본
+                    바로 그 자리에 올릴 곳이 없으면 위로 올라가 다른 카드를 찾아야 하고,
+                    그 사이에 하려던 일을 잊는다. */}
+                {isGuide && campaignId && (
+                  <div className="px-4 md:px-5 pb-4 space-y-2">
+                    {guidelineFiles.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {guidelineFiles.map(f => (
+                          <a
+                            key={f.url}
+                            href={f.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-[11px] font-black text-slate-700 max-w-full transition-colors"
+                          >
+                            <span className="truncate">{f.name}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {!hasGuideline && (
+                      <p className="text-[11px] text-slate-400 font-medium">
+                        가이드 파일(PDF·이미지)을 여기에 올리면 진행 중인 인플루언서의 진행사항에서 그대로 열립니다.
+                      </p>
+                    )}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,video/*,application/pdf,.doc,.docx,.ppt,.pptx"
+                        disabled={guideUploading}
+                        onChange={e => { uploadGuideFiles(e.target.files); e.target.value = ''; }}
+                        className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-lg file:bg-slate-100 file:px-3 file:py-2 file:text-[11px] file:font-black file:text-slate-700 disabled:opacity-50"
+                      />
+                      <span className="text-[11px] font-bold text-slate-400 flex-shrink-0">
+                        {guideUploading ? '올리는 중...' : '파일을 고르면 바로 올라갑니다'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {active.length > 0 && (
+                  <div className="px-2.5 md:px-3 pb-3 space-y-1.5">
+                    {active.map(({ collab, state: rowState, due }) => {
+                      const who = identityOf(collab);
+                      const rowDue = due || collab.dueDate;
+                      return (
+                        <div
+                          key={collab.id}
+                          className={`rounded-xl border transition-colors ${
+                            rowState === 'review'
+                              ? 'border-slate-200 bg-white hover:border-slate-300'
+                              : 'border-transparent bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 px-3 py-2.5">
                             <button
                               type="button"
-                              onClick={() => copyShipping(collab.shipping)}
-                              className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-200 text-[10px] font-black text-emerald-700 hover:bg-emerald-100 flex-shrink-0 transition-colors"
+                              onClick={() => openDetail(collab.id, step.key)}
+                              className="flex items-center gap-3 min-w-0 flex-1 text-left"
                             >
-                              주소 복사
+                              {who.image ? (
+                                <img src={who.image} alt="" loading="lazy" className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0" />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0" />
+                              )}
+                              <div className="min-w-0">
+                                {/* 굵은 줄은 인스타 아이디다. 브랜드가 리스트업에서 보고
+                                    고른 것이 그 계정이라, 같은 이름이어야 같은 사람으로 읽힌다. */}
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="text-xs font-black text-slate-900 truncate">{who.title}</p>
+                                  {who.instagramUrl && (
+                                    <span className="text-pink-500 flex-shrink-0"><InstagramMark /></span>
+                                  )}
+                                  {collab.openFeedbackCount > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[10px] font-black flex-shrink-0">
+                                      의견 {collab.openFeedbackCount}
+                                    </span>
+                                  )}
+                                </div>
+                                {who.sub && (
+                                  <p className="text-[10px] text-slate-400 font-bold truncate">{who.sub}</p>
+                                )}
+                              </div>
                             </button>
+
+                            {/* 볼 것이 올라온 줄에만 검은 버튼. 버튼 글자가 곧 그 자리에서
+                                할 일이다 — "기획안 피드백하기"를 누르면 기획안이 펼쳐진다. */}
+                            {rowState === 'review' ? (
+                              <button
+                                onClick={() => openDetail(collab.id, step.key)}
+                                className="px-3.5 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 transition-colors flex-shrink-0"
+                              >
+                                {step.reviewLabel || '확인하기'}
+                              </button>
+                            ) : (
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-xs font-black text-slate-500">
+                                  {step.workingLabel || collab.currentStageTitle || '진행 중'}
+                                </p>
+                                <p className={`text-[10px] font-bold ${(collab.daysLeft ?? 1) < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                  {rowDue ? `${shortDate(rowDue)} 까지` : '마감일 미정'}
+                                </p>
+                              </div>
+                            )}
                           </div>
+
+                          {/* 배송지는 줄을 열지 않아도 여기서 그대로 읽힌다 — 송장을 쓰는
+                              사람이 원하는 것은 "이름·연락처·주소" 세 줄이 전부인데, 그걸
+                              보려고 진행사항을 열게 하면 열 명이면 열 번 연다. 복사 버튼은
+                              택배사 화면에 붙여 넣기 위한 것이다. */}
+                          {step.key === 'shipping' && collab.shipping?.filled && collab.shipping.status !== 'shipped' && (
+                            <div className="mx-3 mb-3 rounded-lg bg-emerald-50/70 border border-emerald-100 px-3 py-2.5">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 space-y-0.5">
+                                  <p className="text-[11px] font-black text-emerald-700">
+                                    {collab.shipping.recipient || '받는 분 미입력'}
+                                    {collab.shipping.phone ? ` · ${formatPhone(collab.shipping.phone)}` : ''}
+                                  </p>
+                                  <p className="text-[11px] font-bold text-slate-600 break-words">
+                                    {addressLine(collab.shipping) || '주소 미입력'}
+                                  </p>
+                                  {collab.shipping.memo && (
+                                    <p className="text-[10px] font-bold text-slate-400 break-words">
+                                      요청사항: {collab.shipping.memo}
+                                    </p>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => copyShipping(collab.shipping)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-200 text-[10px] font-black text-emerald-700 hover:bg-emerald-100 flex-shrink-0 transition-colors"
+                                >
+                                  주소 복사
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 사람이 한 줄도 없는 카드도 한 마디는 남긴다. 빈 카드는 "아직 안
+                    왔다"인지 "다 지나갔다"인지를 말해 주지 않는다. */}
+                {active.length === 0 && total > 0 && !(isGuide && campaignId) && (
+                  <p className="px-4 md:px-5 pb-4 text-[11px] text-slate-400 font-bold">
+                    {state === 'done'
+                      ? `${total}명 모두 이 단계를 지났습니다.`
+                      : '아직 이 단계에 온 인플루언서가 없습니다.'}
+                  </p>
+                )}
+              </section>
+            );
+          })}
 
           {/* 선택은 했지만 아직 협업이 안 열린 후보. 명단 아래에 둔다 — 확정된 사람과
               같은 줄에 섞으면 누를 수 있는 줄과 없는 줄이 구분되지 않는다. */}
@@ -810,9 +992,16 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                         <div className="w-8 h-8 rounded-full bg-slate-100 flex-shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-black text-slate-900 truncate">
-                          {p.name || (p.username ? `@${p.username}` : '선정한 인플루언서')}
-                        </p>
+                        {/* 확정 전 후보도 위 카드와 같은 이름으로 부른다 — 인스타 아이디.
+                            여기서는 이름, 위에서는 아이디로 부르면 같은 사람이 두 사람으로 읽힌다. */}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-xs font-black text-slate-900 truncate">
+                            {p.instagramHandle || p.name || (p.username ? `@${p.username}` : '선정한 인플루언서')}
+                          </p>
+                          {p.instagramHandle && (
+                            <span className="text-pink-500 flex-shrink-0"><InstagramMark /></span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-slate-400 font-bold truncate">{step.hint}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -836,21 +1025,21 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               <div className="space-y-1.5">
                 {collabs
                   .filter(c => c.status !== 'in_progress')
-                  .map(c => (
+                  .map(c => {
+                    const who = identityOf(c);
+                    return (
                     <button
                       key={c.id}
                       onClick={() => openDetail(c.id)}
                       className="w-full flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
                     >
-                      {imageOf(c.creatorUsername) ? (
-                        <img src={imageOf(c.creatorUsername)} alt="" loading="lazy" className="w-8 h-8 rounded-full object-cover bg-slate-100 flex-shrink-0" />
+                      {who.image ? (
+                        <img src={who.image} alt="" loading="lazy" className="w-8 h-8 rounded-full object-cover bg-slate-100 flex-shrink-0" />
                       ) : (
                         <div className="w-8 h-8 rounded-full bg-slate-100 flex-shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-black text-slate-900 truncate">
-                          {nameOf(c.creatorUsername) || `@${c.creatorUsername}`}
-                        </p>
+                        <p className="text-xs font-black text-slate-900 truncate">{who.title}</p>
                         <p className="text-[10px] text-slate-400 font-bold truncate">{c.campaignTitle}</p>
                       </div>
                       <span
@@ -861,7 +1050,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                         {c.status === 'completed' ? '완료' : '취소'}
                       </span>
                     </button>
-                  ))}
+                    );
+                  })}
               </div>
             </div>
           )}
