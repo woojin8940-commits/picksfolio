@@ -442,7 +442,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       rejected: { bg: 'bg-red-50', text: 'text-red-600', label: '거절됨' },
     };
     const s = map[status] || { bg: 'bg-slate-100', text: 'text-slate-500', label: status };
-    return <span className={`${s.bg} ${s.text} px-2.5 py-1 rounded-full text-[11px] font-black`}>{s.label}</span>;
+    return <span className={`${s.bg} ${s.text} px-2.5 py-1 rounded-full text-xs font-black`}>{s.label}</span>;
   };
 
   // status가 'active'여도 종료일이 지난 캠페인은 크리에이터 화면에 더 이상 노출되지
@@ -450,7 +450,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // 모집 인원을 다 채운 것은 마감 사유가 아니다(정원이 차도 지원은 계속 받는다).
   const campaignStatusBadge = (campaign: Campaign) => {
     if (campaign.status === 'active' && isPastDeadline(campaign.end_date)) {
-      return <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-[11px] font-black">기간 종료</span>;
+      return <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-xs font-black">기간 종료</span>;
     }
     return statusBadge(campaign.status);
   };
@@ -638,7 +638,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const hasCollab = !!(applicants.find(a => a.collab_id)?.collab_id || collabSummary[0]?.id);
 
     return (
-      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto pb-28">
+      /* 폭은 화면을 거의 다 쓴다. 진행사항 탭이 단계를 가로로 늘어놓은 보드라
+         (BrandCollabProgress) 1024px 에 맞춰 두면 다섯 칸 중 두 칸만 보이고 나머지는
+         가로로 밀어 봐야 한다 — 보드로 만든 이유가 "몰려 있는 칸이 한눈에 보이는 것"인데
+         그 이유가 폭에서 사라진다. 다른 탭은 카드 열이 늘어나 빈자리를 채운다. */
+      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto pb-28">
         <button onClick={() => setSelectedCampaign(null)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           캠페인 목록
@@ -652,14 +656,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 {campaignStatusBadge(selectedCampaign)}
                 {phasePill && (
-                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-black ${phasePill.cls}`}>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-black ${phasePill.cls}`}>
                     {phasePill.label}
                   </span>
                 )}
-                <span className="text-[11px] text-slate-400 font-bold">{typeLabel(selectedCampaign.type)}</span>
-                <span className="text-[11px] text-slate-400 font-bold">· {mode.label}</span>
+                <span className="text-xs text-slate-400 font-bold">{typeLabel(selectedCampaign.type)}</span>
+                <span className="text-xs text-slate-400 font-bold">· {mode.label}</span>
                 {openApply && (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[11px] font-black">
                     {mode.tagline}
                   </span>
                 )}
@@ -700,7 +704,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
           <button
             onClick={() => setShowBrief(v => !v)}
-            className="mt-4 text-[11px] font-black text-blue-600 hover:underline"
+            className="mt-4 text-xs font-black text-blue-600 hover:underline"
           >
             {showBrief ? '접기 ▲' : '자세히 보기 ▼'}
           </button>
@@ -716,13 +720,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {selectedCampaign.category && (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">카테고리</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">카테고리</p>
                     <p className="text-sm font-black text-slate-900">{categoryLabel(selectedCampaign.category)}</p>
                   </div>
                 )}
                 {isBarter ? (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">협찬 인원</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">협찬 인원</p>
                     <p className="text-sm font-black text-slate-900">
                       {barterHeadcount > 0 ? `${barterHeadcount}명` : '-'}
                     </p>
@@ -732,7 +736,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                      숫자가 나가지 않고 "담당자와 협의"로만 표시된다. 최종 수수료는
                      담당자가 인플루언서와 조율해 정한다. */
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">희망 수수료</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">희망 수수료</p>
                     <p className="text-sm font-black text-slate-900">
                       {commissionRate > 0 ? `${commissionRate}%` : '담당자 조율'}
                     </p>
@@ -740,12 +744,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </div>
                 ) : (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">집행 예산</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">집행 예산</p>
                     <p className="text-sm font-black text-slate-900">{formatKoreanWon(budget) || '-'}</p>
                   </div>
                 )}
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-[9px] text-slate-400 font-black uppercase">
+                  <p className="text-[11px] text-slate-400 font-black uppercase">
                     {openApply ? mode.headcountLabel : '예정 인원'}
                   </p>
                   <p className="text-sm font-black text-blue-600">
@@ -754,13 +758,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 </div>
                 {selectedCampaign.upload_channel && (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">업로드 채널</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">업로드 채널</p>
                     <p className="text-sm font-black text-slate-900">{selectedCampaign.upload_channel}</p>
                   </div>
                 )}
                 {(selectedCampaign.upload_from || selectedCampaign.upload_to) && (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">희망 업로드</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">희망 업로드</p>
                     <p className="text-sm font-black text-slate-900">
                       {selectedCampaign.upload_from || '미정'}{selectedCampaign.upload_to ? ` ~ ${selectedCampaign.upload_to}` : ''}
                     </p>
@@ -768,13 +772,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 )}
                 {provideLabel && (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">제품 제공</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">제품 제공</p>
                     <p className="text-sm font-black text-slate-900">{provideLabel}</p>
                   </div>
                 )}
                 {objectiveLabel && (
                   <div className="bg-slate-50 rounded-xl p-3">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">광고 목적</p>
+                    <p className="text-[11px] text-slate-400 font-black uppercase">광고 목적</p>
                     <p className="text-sm font-black text-slate-900">{objectiveLabel}</p>
                   </div>
                 )}
@@ -784,15 +788,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   담당자가 올린 후보가 그 구성과 맞는지 대조할 수 있어야 한다. */}
               {tierRows.length > 0 && (
                 <div className="rounded-xl bg-slate-50 p-4">
-                  <p className="text-[9px] text-slate-400 font-black uppercase mb-3">모집 구성</p>
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-3">모집 구성</p>
                   <div className="space-y-2">
                     {tierRows.map(t => (
                       <div key={t.key} className="flex items-center justify-between gap-3">
-                        <span className="text-xs font-black text-slate-900">
+                        <span className="text-sm font-black text-slate-900">
                           {t.label}
-                          <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
+                          <span className="text-[11px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
                         </span>
-                        <span className="text-[11px] font-black text-slate-500 flex-shrink-0">
+                        <span className="text-xs font-black text-slate-500 flex-shrink-0">
                           {tierCounts[t.key]}명
                           {mode.pickInfluencer && <span className="text-slate-400 font-bold ml-1.5">1인 {tierFeeLabel(t)}</span>}
                         </span>
@@ -800,7 +804,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     ))}
                   </div>
                   {mode.pickInfluencer && (
-                    <p className="text-[11px] text-slate-400 font-medium mt-3 pt-3 border-t border-slate-200">
+                    <p className="text-xs text-slate-400 font-medium mt-3 pt-3 border-t border-slate-200">
                       최소 집행액 {formatKoreanWon(allocatedFloor(tierCounts)) || '0원'}
                       {budget > 0 && ` · 예산 ${formatKoreanWon(budget)}`}
                     </p>
@@ -810,7 +814,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
               {/* 진행 방식이 정한 진행 단계. 등록 화면에서 본 것과 같은 표시여야 한다. */}
               <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-[9px] text-slate-400 font-black uppercase mb-3">진행 단계 · {mode.label}</p>
+                <p className="text-[11px] text-slate-400 font-black uppercase mb-3">진행 단계 · {mode.label}</p>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
                   {stageMarks.map((s, i) => (
                     <React.Fragment key={s.label}>
@@ -818,7 +822,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black ${s.included ? 'bg-slate-900 text-white' : 'bg-white text-slate-300 border border-slate-200'}`}>
                           {s.included ? '✓' : '—'}
                         </span>
-                        <span className={`text-[10px] font-black text-center leading-tight ${s.included ? 'text-slate-700' : 'text-slate-300'}`}>
+                        <span className={`text-[11px] font-black text-center leading-tight ${s.included ? 'text-slate-700' : 'text-slate-300'}`}>
                           {s.label}
                         </span>
                       </div>
@@ -826,27 +830,27 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     </React.Fragment>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-400 font-medium mt-2">{mode.secondUseNote}</p>
+                <p className="text-xs text-slate-400 font-medium mt-2">{mode.secondUseNote}</p>
               </div>
 
               {selectedCampaign.video_concept && (
                 <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">영상 컨셉</p>
-                  <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{selectedCampaign.video_concept}</p>
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1.5">영상 컨셉</p>
+                  <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{selectedCampaign.video_concept}</p>
                 </div>
               )}
 
               {selectedCampaign.requirements && (
                 <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">희망 인플루언서</p>
-                  <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{selectedCampaign.requirements}</p>
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1.5">희망 인플루언서</p>
+                  <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap">{selectedCampaign.requirements}</p>
                 </div>
               )}
 
               {selectedCampaign.target_audience && (
                 <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">타겟 오디언스</p>
-                  <p className="text-xs text-slate-700 font-medium">{selectedCampaign.target_audience}</p>
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1.5">타겟 오디언스</p>
+                  <p className="text-sm text-slate-700 font-medium">{selectedCampaign.target_audience}</p>
                 </div>
               )}
 
@@ -921,7 +925,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             <button
               key={t.key}
               onClick={() => setDetailTab(t.key)}
-              className={`px-4 py-3 text-xs font-black whitespace-nowrap border-b-2 transition-colors ${
+              className={`px-4 py-3 text-sm font-black whitespace-nowrap border-b-2 transition-colors ${
                 activeTab === t.key
                   ? 'border-slate-900 text-slate-900'
                   : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -965,12 +969,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       어느 쪽이든 수락 뒤의 조건·일정·발송은 담당자가 맡는다 — 그래서
                       "고르기"와 "진행"을 한 문장 안에서 나눠 적는다. */}
                   <div className="mb-5 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
-                    <p className="text-xs text-slate-700 font-bold">
+                    <p className="text-sm text-slate-700 font-bold">
                       {brandSelects
                         ? `함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 중간에서 맡습니다.`
                         : `지원자 선정은 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.`}
                     </p>
-                    <p className="text-[11px] text-slate-500 font-medium mt-1">
+                    <p className="text-xs text-slate-500 font-medium mt-1">
                       {brandSelects ? (
                         <>
                           지원자의 팔로워·평균 조회수와 최근 릴스를 보고 함께하고 싶은 분을{' '}
@@ -990,7 +994,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     </p>
                     {/* 지표 출처를 미리 알려 둔다. '본인 입력'과 '메타 연동 확인'이 같은
                         굵기로 보이면 브랜드는 어느 숫자도 믿지 않게 된다. */}
-                    <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    <p className="text-xs text-slate-400 font-medium mt-1.5">
                       숫자 옆 배지는 지표의 출처입니다 — <span className="font-black text-emerald-600">메타 연동 확인</span>은 인스타그램 계정을 연동해 받아온 값이고,
                       <span className="font-black text-amber-600"> 본인 입력</span>은 인플루언서가 적어 낸 값입니다.
                     </p>
@@ -1010,7 +1014,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                           <button
                             key={v.value || 'all'}
                             onClick={() => setApplicantView(v.value)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-colors ${
                               applicantView === v.value
                                 ? 'bg-slate-900 text-white'
                                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -1021,7 +1025,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         ))}
                       </div>
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-slate-400 font-black mr-0.5">정렬</span>
+                        <span className="text-[11px] text-slate-400 font-black mr-0.5">정렬</span>
                         {([
                           { value: 'recent' as const, label: '최신순' },
                           { value: 'followers' as const, label: '팔로워순' },
@@ -1030,7 +1034,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                           <button
                             key={s.value}
                             onClick={() => setApplicantSort(s.value)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-colors ${
                               applicantSort === s.value
                                 ? 'bg-blue-50 text-blue-600'
                                 : 'text-slate-400 hover:bg-slate-50'
@@ -1053,7 +1057,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                         <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       </div>
                       <p className="text-sm text-slate-500 font-bold">아직 지원자가 없습니다</p>
-                      <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+                      <p className="text-xs text-slate-400 font-medium mt-1.5 leading-relaxed">
                         승인된 캠페인은 캠페인 협업 목록에 올라갑니다.<br />
                         조건을 보고 지원한 인플루언서가 이 목록에 쌓입니다.
                         {mode.managerListup && (
@@ -1065,7 +1069,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       </p>
                     </div>
                   ) : visibleApplyRows.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+                    <p className="text-xs text-slate-400 font-bold text-center py-8">
                       이 조건에 해당하는 지원자가 없습니다.
                     </p>
                   ) : (
@@ -1074,7 +1078,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                        카드 하나가 폭을 다 먹어 지원자가 한 명일 때 카드가 화면만큼
                        커 보였다. 담당자 추천 명단과 같은 배치라, 두 화면을 오가며 후보를
                        견줘도 눈이 같은 자리에서 같은 숫자를 찾는다. */
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 items-stretch">
                       {visibleApplyRows.map(app => (
                         /* 지원자도 후보 명단과 같은 카드로 본다. 브랜드가 사람을 고르는
                            화면이 두 곳(담당자 명단 · 지원자 목록)인데 숫자가 다르게 생기면
@@ -1097,9 +1101,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             <>
                               {statusBadge(app.status)}
                               {app.status === 'pending' && app.brand_preference === 'pass' && (
-                                <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-[11px] font-black">보류</span>
+                                <span className="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-xs font-black">보류</span>
                               )}
-                              <span className="text-[10px] text-slate-300 font-bold">
+                              <span className="text-[11px] text-slate-300 font-bold">
                                 {new Date(app.created_at).toLocaleDateString('ko-KR')}
                               </span>
                             </>
@@ -1117,8 +1121,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             <div className="space-y-2.5">
                               {app.message && (
                                 <div>
-                                  <p className="text-[9px] text-slate-400 font-black uppercase mb-1">지원 메시지</p>
-                                  <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{app.message}</p>
+                                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1">지원 메시지</p>
+                                  <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap">{app.message}</p>
                                 </div>
                               )}
                               <div className="bg-slate-50 rounded-lg p-3 space-y-2">
@@ -1163,14 +1167,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                                     <button
                                       onClick={() => handleAcceptApplicant(app)}
                                       disabled={accepting === app.id}
-                                      className="px-3.5 py-2 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 transition-colors disabled:opacity-50"
+                                      className="px-3.5 py-2 bg-blue-600 text-white rounded-lg text-xs font-black hover:bg-blue-500 transition-colors disabled:opacity-50"
                                     >
                                       {accepting === app.id ? '수락 중...' : '수락하고 진행하기'}
                                     </button>
                                     <button
                                       onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
                                       disabled={prefSaving === app.id}
-                                      className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors disabled:opacity-50 ${
                                         app.brand_preference === 'pass'
                                           ? 'bg-slate-600 text-white hover:bg-slate-500'
                                           : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -1184,7 +1188,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                                     <button
                                       onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'shortlist' ? '' : 'shortlist')}
                                       disabled={prefSaving === app.id}
-                                      className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors disabled:opacity-50 ${
                                         app.brand_preference === 'shortlist'
                                           ? 'bg-blue-600 text-white hover:bg-blue-500'
                                           : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
@@ -1195,7 +1199,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                                     <button
                                       onClick={() => handleApplicantPreference(app.id, app.brand_preference === 'pass' ? '' : 'pass')}
                                       disabled={prefSaving === app.id}
-                                      className={`px-3 py-2 rounded-lg text-[11px] font-black transition-colors disabled:opacity-50 ${
+                                      className={`px-3 py-2 rounded-lg text-xs font-black transition-colors disabled:opacity-50 ${
                                         app.brand_preference === 'pass'
                                           ? 'bg-slate-600 text-white hover:bg-slate-500'
                                           : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -1211,19 +1215,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                               <button
                                 onClick={openProgress}
                                 disabled={!app.collab_id}
-                                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-[11px] font-black hover:bg-slate-700 transition-colors flex items-center gap-1 disabled:opacity-40"
+                                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-black hover:bg-slate-700 transition-colors flex items-center gap-1 disabled:opacity-40"
                               >
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-6 0h.01M12 16h3m-6 0h.01" /></svg>
                                 진행사항 보기
                               </button>
                             )}
                             {app.status === 'accepted' && (
-                              <p className="text-[11px] text-emerald-600 font-bold">
+                              <p className="text-xs text-emerald-600 font-bold">
                                 수락 완료. 조건과 일정은 담당자{campaignManager ? ` (@${campaignManager})` : ''}가 정리해 진행합니다.
                               </p>
                             )}
                             {app.status === 'pending' && !brandSelects && app.brand_preference === 'shortlist' && (
-                              <p className="text-[11px] text-blue-600 font-bold">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
+                              <p className="text-xs text-blue-600 font-bold">담당자에게 추천 의견이 전달되었습니다. 선정 결과를 기다려 주세요.</p>
                             )}
                           </div>
                         </InfluencerCandidateCard>
@@ -1254,6 +1258,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               guidelineFiles={parseGuidelineFiles(selectedCampaign.guideline_files)}
               guidelineNote={selectedCampaign.guideline_note || ''}
               guidelineUrl={selectedCampaign.guideline_url || ''}
+              budgetKrw={budget}
+              businessUsername={businessUsername}
               onGuidelineFilesChange={files => {
                 // 진행사항 안에서 올린 가이드도 같은 캠페인 가이드라인이다. 위쪽
                 // 가이드라인 카드가 곧바로 같은 목록을 보여 주지 않으면 방금 올린
@@ -1303,10 +1309,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             할 일이 없어진다. */}
         {isOwner && (
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
-            <div className="max-w-5xl mx-auto px-4 md:px-10 py-3 flex items-center justify-between gap-3">
+            <div className="max-w-[1560px] mx-auto px-4 md:px-10 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] font-black text-slate-400">{mode.label}</p>
-                <p className="text-xs font-black text-slate-900 truncate">
+                <p className="text-[11px] font-black text-slate-400">{mode.label}</p>
+                <p className="text-sm font-black text-slate-900 truncate">
                   진행 {collabSummary.length}명
                   {selectedCampaign.max_applicants > 0 && ` / 예정 ${selectedCampaign.max_applicants}명`}
                   {isBarter
@@ -1319,7 +1325,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               <button
                 onClick={openProgress}
                 disabled={!hasCollab}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black hover:bg-slate-800 disabled:opacity-40 flex-shrink-0 transition-colors"
+                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-40 flex-shrink-0 transition-colors"
               >
                 {hasCollab ? '진행사항 보기' : '진행 대기'}
               </button>
@@ -1359,7 +1365,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   // --- Campaign List ---
   return (
-    <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
+    <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>
@@ -1384,7 +1390,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <button
             key={ct.value}
             onClick={() => setActiveTypeFilter(ct.value)}
-            className={`px-4 py-2 rounded-full text-xs font-black whitespace-nowrap transition-all ${
+            className={`px-4 py-2 rounded-full text-sm font-black whitespace-nowrap transition-all ${
               activeTypeFilter === ct.value
                 ? 'bg-slate-900 text-white shadow-sm'
                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -1393,7 +1399,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             {ct.label}
           </button>
         ))}
-        <div className="ml-auto pl-4 text-xs text-slate-400 font-bold whitespace-nowrap">
+        <div className="ml-auto pl-4 text-sm text-slate-400 font-bold whitespace-nowrap">
           총 {filteredCampaigns.length}개
         </div>
       </div>
@@ -1404,7 +1410,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <button
             key={sf.value || 'all'}
             onClick={() => setActiveStatusFilter(sf.value)}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all border ${
+            className={`px-3.5 py-1.5 rounded-full text-sm font-black whitespace-nowrap transition-all border ${
               activeStatusFilter === sf.value
                 ? 'bg-blue-600 border-blue-600 text-white'
                 : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
@@ -1425,7 +1431,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           <button
             key={cat.value || 'all'}
             onClick={() => setActiveCategoryFilter(cat.value)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${
+            className={`px-3 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-all border ${
               activeCategoryFilter === cat.value
                 ? 'bg-slate-900 border-slate-900 text-white'
                 : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
@@ -1475,7 +1481,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5 md:gap-3">
           {filteredCampaigns.map(campaign => {
             const deadline = deadlineInfo(campaign.end_date);
             const closed = isClosedCampaign(campaign);
@@ -1501,7 +1507,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     {campaignStatusBadge(campaign)}
                     {deadline && campaign.status === 'active' && (
-                      <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm`}>
+                      <span className={`${deadline.urgent ? 'bg-rose-500' : 'bg-slate-900/85'} text-white px-2 py-0.5 rounded-lg text-xs font-black shadow-sm`}>
                         {deadline.urgent ? `마감임박 ${deadline.label}` : deadline.label}
                       </span>
                     )}
@@ -1528,23 +1534,23 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 <div className="p-2.5 md:p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     {campaign.brand_name && (
-                      <span className="text-[10px] text-slate-400 font-bold truncate">{campaign.brand_name}</span>
+                      <span className="text-xs text-slate-400 font-bold truncate">{campaign.brand_name}</span>
                     )}
                     {campaign.category && (
                       <>
                         <span className="text-slate-200">·</span>
-                        <span className="text-[10px] text-slate-400 font-medium truncate">{categoryLabel(campaign.category)}</span>
+                        <span className="text-xs text-slate-400 font-medium truncate">{categoryLabel(campaign.category)}</span>
                       </>
                     )}
                   </div>
-                  <h3 className="font-black text-xs md:text-sm text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1">
+                  <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1">
                     {campaign.title}
                   </h3>
                   <div className="flex items-center justify-between">
                     {campaign.reward_amount ? (
-                      <span className="text-xs font-black text-blue-600">{formatKoreanWon(campaign.reward_amount)}</span>
+                      <span className="text-sm font-black text-blue-600">{formatKoreanWon(campaign.reward_amount)}</span>
                     ) : <span />}
-                    <span className="text-[10px] text-slate-400 font-bold">
+                    <span className="text-xs text-slate-400 font-bold">
                       {/* 지원을 받지 않는 캠페인(광고비 지급형)에 "N명 신청중"을 적으면
                           오지 않는 지원을 기다리게 된다. 그 캠페인은 담당자가 명단을
                           올려 주는 길이라 모집 규모만 적는다. */}

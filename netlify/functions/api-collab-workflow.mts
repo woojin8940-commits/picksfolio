@@ -231,23 +231,33 @@ async function scheduleSettlementFor(db: any, collab: any) {
 }
 
 /**
- * 인플루언서를 화면에 그리는 데 필요한 최소한의 신원 — 인스타 연동 정보에서만 온다.
+ * 인플루언서를 화면에 그리는 데 필요한 최소한의 신원 — 인스타 연동 정보에서 온다.
  *
- * 얼굴과 아이디를 두 곳(픽스폴리오 프로필 · 인스타)에서 섞어 가져오면, 브랜드는
+ * 아이디는 한 곳(creator_channels)에서만 읽는다. 두 곳에서 섞어 가져오면 브랜드는
  * 리스트업에서 보고 고른 계정과 진행사항에 뜬 계정이 같은 사람인지 확신할 수 없다.
- * 한 곳(creator_channels)에서만 읽고, 없으면 비워 둔다.
+ *
+ * 얼굴만은 되돌아갈 곳을 둔다. 인스타 사진은 연동한 뒤 한 번이라도 동기화가 돌아야
+ * 채널 행에 들어오는데(profile_image 는 나중에 생긴 칸이라 예전 연동에는 비어 있다),
+ * 그동안 진행사항의 줄은 전부 회색 동그라미가 된다. 같은 사람이 리스트업 카드에서는
+ * 사진과 함께 보이던 터라 "인스타 연동이 안 된다"로 읽혔다. 리스트업과 같은 규칙으로
+ * (채널 사진 → 픽스폴리오 아바타) 되돌아간다.
  */
-function shapeCreatorChannel(row: any, username: string) {
+function shapeCreatorChannel(row: any, username: string, fallbackImage = "") {
   const handle = String(row?.instagram_handle || "");
   return {
     username,
     instagramHandle: handle,
     instagramUrl:
       String(row?.instagram_url || "") || (handle ? `https://www.instagram.com/${handle}/` : ""),
-    profileImage: String(row?.profile_image || ""),
+    profileImage: String(row?.profile_image || "") || String(fallbackImage || ""),
     connected: Boolean(row?.connected),
     followers: Number(row?.followers || 0),
   };
+}
+
+/** site_data 한 줄에서 프로필 사진만. 채널에 사진이 없을 때의 되돌아갈 자리다. */
+function avatarFromSite(row: any): string {
+  return String(row?.data?.profile?.avatar_url || "");
 }
 
 /** 배송 정보 한 줄. 아직 아무도 입력하지 않았으면 빈 껍데기를 돌려준다. */
@@ -401,6 +411,20 @@ export default async (req: Request, context: Context) => {
       const showAddress = role === "brand" || role === "manager";
 
       /**
+       * 확정된 보수. 브랜드·담당자에게만 싣는다.
+       *
+       * 브랜드 진행사항 맨 위의 "총 진행 예산"이 이 값의 합이다. 캠페인에 적어 둔
+       * 집행 예산이 아니라 실제로 확정된 협업들의 보수를 더한 값이어야 한다 —
+       * 예산은 등록할 때 적은 계획이고, 브랜드가 진행 중에 알고 싶은 것은 "지금
+       * 확정된 사람들에게 나갈 돈이 얼마인가"다. 조건이 아직 잠기지 않은(담당자가
+       * 정리 중인) 협업은 0원으로 들어오므로, 화면은 잠긴 건수를 함께 센다.
+       */
+      const termRows = (await db.sql`
+        SELECT collab_id, fee, locked_at FROM collab_terms WHERE collab_id = ANY(${ids})
+      `) as any[];
+      const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
+
+      /**
        * 캠페인 표지. 협업 행에는 제목과 브랜드 이름만 들어 있어서, 목록을 카드로
        * 그리면 사진 자리가 비고 마감일도 알 수 없다. 브랜드가 보는 캠페인 리스트와
        * 같은 모양으로 그리려면 캠페인 쪽 값이 필요하다.
@@ -417,13 +441,20 @@ export default async (req: Request, context: Context) => {
        * creator_channels 의 사진·아이디를 그대로 싣는다.
        */
       const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
-      const channelRows = creatorNames.length
-        ? ((await db.sql`
-            SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
-            FROM creator_channels WHERE username = ANY(${creatorNames})
-          `) as any[])
-        : [];
+      const [channelRows, siteRows] = await Promise.all([
+        creatorNames.length
+          ? (db.sql`
+              SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
+              FROM creator_channels WHERE username = ANY(${creatorNames})
+            ` as Promise<any[]>)
+          : Promise.resolve([] as any[]),
+        // 채널에 사진이 없는 사람의 되돌아갈 자리. 리스트업이 쓰는 규칙과 같다.
+        creatorNames.length
+          ? (db.sql`SELECT username, data FROM site_data WHERE username = ANY(${creatorNames})` as Promise<any[]>)
+          : Promise.resolve([] as any[]),
+      ]);
       const channelMap = new Map(channelRows.map((c) => [norm(c.username), c]));
+      const avatarMap = new Map(siteRows.map((s) => [norm(s.username), avatarFromSite(s)]));
 
       const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
       const campaignRows = campaignIds.length
@@ -483,7 +514,11 @@ export default async (req: Request, context: Context) => {
           campaignStatus: campaign?.status || "",
           businessUsername: row.business_username,
           creatorUsername: row.creator_username,
-          creator: shapeCreatorChannel(channelMap.get(norm(row.creator_username)), row.creator_username),
+          creator: shapeCreatorChannel(
+            channelMap.get(norm(row.creator_username)),
+            row.creator_username,
+            avatarMap.get(norm(row.creator_username)) || "",
+          ),
           managerUsername: row.manager_username,
           status: row.status,
           currentStageKey: row.current_stage_key,
@@ -517,6 +552,12 @@ export default async (req: Request, context: Context) => {
           },
           uploadUrl: row.upload_url || "",
           adCode: row.ad_code || "",
+          ...(showAddress
+            ? {
+                fee: Number(termMap.get(row.id)?.fee || 0),
+                feeLocked: Boolean(termMap.get(row.id)?.locked_at),
+              }
+            : {}),
           uploadConfirmedAt: row.upload_confirmed_at || null,
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
@@ -556,7 +597,7 @@ export default async (req: Request, context: Context) => {
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
     try {
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, channelRows] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
@@ -570,6 +611,9 @@ export default async (req: Request, context: Context) => {
         db.sql`
           SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
           FROM creator_channels WHERE username = ${norm(collab.creator_username)}
+        ` as Promise<any[]>,
+        db.sql`
+          SELECT username, data FROM site_data WHERE username = ${norm(collab.creator_username)}
         ` as Promise<any[]>,
       ]);
 
@@ -639,7 +683,11 @@ export default async (req: Request, context: Context) => {
           createdAt: collab.created_at,
         },
         guideline,
-        creator: shapeCreatorChannel((channelRows as any[])?.[0], collab.creator_username),
+        creator: shapeCreatorChannel(
+          (channelRows as any[])?.[0],
+          collab.creator_username,
+          avatarFromSite((siteRows as any[])?.[0]),
+        ),
         shipping: shapeShipping((shippingRows as any[])?.[0]),
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),

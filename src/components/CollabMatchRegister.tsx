@@ -315,6 +315,17 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
    * 사람이 버튼을 찾아 누르기 전에 화면이 먼저 채워 본다.
    */
   const [pendingSync, setPendingSync] = useState(false);
+  /**
+   * 연동은 돼 있는데 프로필 사진만 비어 있을 때의 표시.
+   *
+   * 사진은 채널 지표보다 나중에 생긴 값이라, 그전에 연동해 둔 계정은 다시 받아오기
+   * 전까지 값이 없다. 그 사이 브랜드가 보는 진행사항·명단에서는 이 사람이 계속
+   * 회색 동그라미로 남아 "인스타 연동이 안 된 사람"으로 읽힌다. 본인이 이 화면을
+   * 열었을 때 한 번 조용히 채워 둔다 — 갱신 버튼을 찾아 누를 이유가 없는 값이다.
+   */
+  const [avatarMissing, setAvatarMissing] = useState(false);
+  /** 이 화면에서 사진을 이미 한 번 받아 봤는지. 못 받는 계정에서 무한히 되풀이하지 않는다. */
+  const avatarHealed = useRef(false);
   /** 임시 저장(연동 후 복귀)으로 폼을 되살렸는지. 되살린 값을 접수 내용으로 덮지 않는다. */
   const draftRestored = useRef(false);
   /** 이 브라우저에 적어 둔 작성 중 등록서를 이미 되살렸는지. 한 번만 되살린다. */
@@ -376,6 +387,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     };
     setChannel(next);
     writeChannelCache(applicantUsername, next);
+    // 지표는 있는데 사진만 비어 있는 계정. 아래 효과가 한 번 다시 받아 본다.
+    if (result?.metaLinked && !String(c.profileImage || '')) setAvatarMissing(true);
   }, [applicantUsername, isInfluencer]);
 
   /** 접수한 등록서를 수정 폼으로 되살린다. 0 은 빈칸으로 둔다("0"이 적힌 칸은 오해를 부른다). */
@@ -667,6 +680,17 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       await resyncInstagram(true);
     })();
   }, [pendingSync, resyncInstagram]);
+
+  // 프로필 사진만 비어 있는 계정을 한 번 채운다. 갱신과 같은 호출이라 사진과 함께
+  // 팔로워·릴스도 최신이 된다. 못 받는 계정(권한 거부)에서 되풀이하지 않도록 한 번만.
+  useEffect(() => {
+    if (!avatarMissing || avatarHealed.current) return;
+    avatarHealed.current = true;
+    setAvatarMissing(false);
+    (async () => {
+      await resyncInstagram(true);
+    })();
+  }, [avatarMissing, resyncInstagram]);
 
   const handleSubmit = async () => {
     setSubmitting(true);
