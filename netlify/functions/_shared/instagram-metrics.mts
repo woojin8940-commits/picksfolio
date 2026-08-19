@@ -502,6 +502,141 @@ async function mirrorProfileImage(username: string, sourceUrl: string, priorUrl:
 }
 
 /**
+ * 프로필 사진만 다시 받아 오는 간격. 이 시간이 지난 계정만 메타에 다시 묻는다.
+ *
+ * 사람이 프로필 사진을 바꾸는 빈도는 하루에 몇 번이 아니라 몇 달에 한 번이다.
+ * 그래서 짧게 잡을 이유가 없고, 짧게 잡으면 명단을 열 때마다 메타를 부르는 값을
+ * 브랜드가 로딩으로 낸다.
+ */
+const PROFILE_IMAGE_TTL_HOURS = 6;
+/** 한 번의 요청에서 사진을 다시 받아 올 계정 수 상한. 명단이 서른 줄이어도 화면은 기다리지 않는다. */
+const PROFILE_IMAGE_BATCH = 6;
+
+/** "물어본 시각"만 찍는다. 실패한 호출을 페이지를 열 때마다 되풀이하지 않기 위한 도장이다. */
+async function stampProfileImageCheck(db: any, username: string): Promise<void> {
+  try {
+    await db.sql`
+      UPDATE creator_channels SET profile_image_checked_at = NOW() WHERE username = ${username}
+    `;
+  } catch (e) {
+    console.warn("[ig-metrics] 프로필 사진 확인 시각 저장 실패:", (e as Error)?.message);
+  }
+}
+
+/**
+ * 한 계정의 프로필 사진을 연동된 인스타에서 다시 받아 온다.
+ *
+ * 지표 전체를 다시 받는 것(syncChannelFromMeta)과 일부러 나눠 둔다 — 그쪽은 릴스
+ * 열두 편의 인사이트까지 부르므로 브랜드가 명단을 여는 길에 끼워 넣을 무게가 아니다.
+ * 여기서 부르는 것은 프로필 필드 하나뿐이다.
+ */
+async function refreshOneProfileImage(db: any, row: any): Promise<boolean> {
+  const username = String(row?.username || "");
+  if (!username) return false;
+
+  // 연동은 두 곳에 따로 보관된다(캠페인용 · 디엠 자동화용). 이 사진이 뜨는 자리는
+  // 캠페인 화면이므로 캠페인 연동을 먼저 본다.
+  let scope: MetaLinkScope = "collab";
+  let link = await loadMetaLink(username, "collab");
+  if (!link?.accessToken) {
+    const dm = await loadMetaLink(username, "dm");
+    if (dm?.accessToken) {
+      link = dm;
+      scope = "dm";
+    }
+  }
+  const token = String(link?.accessToken || "");
+  // 토큰이 없거나 죽은 것이 확인된 연동은 물어볼 것이 없다. 지난 사진을 그대로 두고
+  // 도장만 찍는다 — 인플루언서가 재연동하면 그 순간 새 사진이 들어온다.
+  if (!token || link?.needsReauth) {
+    await stampProfileImageCheck(db, username);
+    return false;
+  }
+
+  try {
+    const host = graphHostFor(link?.tokenSource);
+    const res = await fetch(
+      `https://${host}/me?fields=username,profile_picture_url` +
+        `&access_token=${encodeURIComponent(token)}`,
+    );
+    const payload = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      if (isTokenInvalidError(payload)) await markLinkNeedsReauth(username, scope);
+      await stampProfileImageCheck(db, username);
+      return false;
+    }
+    const source = String(payload?.profile_picture_url || "");
+    if (!source) {
+      await stampProfileImageCheck(db, username);
+      return false;
+    }
+
+    // 메타가 주는 주소는 서명과 만료가 박힌 임시 주소다. 지표 동기화와 같은 방식으로
+    // 우리 저장소에 한 장 복사하고 그 주소를 굳힌다.
+    const prior = String(row?.profile_image || "");
+    const next = (await mirrorProfileImage(username, source, prior)) || source;
+    await db.sql`
+      UPDATE creator_channels
+      SET profile_image = ${next}, profile_image_checked_at = NOW(), updated_at = NOW()
+      WHERE username = ${username}
+    `;
+    return true;
+  } catch (e) {
+    console.warn("[ig-metrics] 프로필 사진 갱신 실패:", (e as Error)?.message);
+    await stampProfileImageCheck(db, username);
+    return false;
+  }
+}
+
+/**
+ * 명단에 뜰 얼굴을 연동된 인스타 계정의 지금 사진으로 맞춘다.
+ *
+ * 지금까지 creator_channels.profile_image 는 연동하는 순간과 인플루언서가 '갱신'을
+ * 누르는 순간에만 채워졌다. 둘 다 인플루언서의 손이 필요한 일이라, 연동해 둔 사람이
+ * 인스타에서 사진을 바꿔도 브랜드 화면에는 연동한 날의 얼굴이 남았다 — 브랜드는
+ * 진행사항 카드에서 지금 인스타에 없는 사진을 보고 같은 사람인지 의심하게 된다.
+ *
+ * 그래서 브랜드·담당자가 명단을 여는 길에 사진만 따로 확인한다. 계정마다 마지막으로
+ * 물어본 시각을 남겨 두고 그 뒤로 몇 시간이 지난 계정만, 그것도 한 번에 몇 개까지만
+ * 다시 묻는다. 대부분의 페이지 열기에서는 한 건도 부르지 않는다.
+ *
+ * 실패는 조용히 삼킨다 — 사진 한 장 때문에 협업 명단이 안 열리면 안 된다.
+ */
+export async function refreshStaleProfileImages(db: any, usernames: string[]): Promise<number> {
+  const names = [
+    ...new Set(
+      (usernames || []).map((n) => String(n || "").trim().toLowerCase()).filter(Boolean),
+    ),
+  ];
+  if (names.length === 0) return 0;
+
+  // 기준 시각은 여기서 계산해 넘긴다. SQL 안에서 시간 간격을 매개변수로 곱하면
+  // 드라이버가 넘긴 숫자의 타입을 포스트그레스가 짐작해야 해서, 같은 질의가 환경에
+  // 따라 다르게 풀린다.
+  const cutoff = new Date(Date.now() - PROFILE_IMAGE_TTL_HOURS * 3600 * 1000).toISOString();
+
+  let stale: any[] = [];
+  try {
+    stale = (await db.sql`
+      SELECT username, instagram_handle, profile_image
+      FROM creator_channels
+      WHERE username = ANY(${names})
+        AND connected = TRUE
+        AND (profile_image_checked_at IS NULL OR profile_image_checked_at < ${cutoff})
+      ORDER BY profile_image_checked_at ASC NULLS FIRST
+      LIMIT ${PROFILE_IMAGE_BATCH}
+    `) as any[];
+  } catch (e) {
+    console.warn("[ig-metrics] 프로필 사진 확인 대상 조회 실패:", (e as Error)?.message);
+    return 0;
+  }
+  if (stale.length === 0) return 0;
+
+  const results = await Promise.all(stale.map((row) => refreshOneProfileImage(db, row)));
+  return results.filter(Boolean).length;
+}
+
+/**
  * 메타에서 받은 지표를 creator_channels 에 굳힌다.
  *
  * 못 받은 항목(권한 거부 등)은 기존 값을 유지한다. 연동 후 첫 저장이라 기존 값이
@@ -565,12 +700,12 @@ export async function persistMetrics(
     INSERT INTO creator_channels (
       username, instagram_handle, instagram_url, connected, followers, following, avg_views,
       avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed, synced_at,
-      intro, categories, profile_image
+      intro, categories, profile_image, profile_image_checked_at
     ) VALUES (
       ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
       ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
       ${JSON.stringify(recentReels)}, ${JSON.stringify(recentFeed)}, NOW(),
-      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}
+      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}, NOW()
     )
     ON CONFLICT (username) DO UPDATE SET
       instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
@@ -586,6 +721,9 @@ export async function persistMetrics(
       recent_reels = EXCLUDED.recent_reels,
       recent_feed = EXCLUDED.recent_feed,
       profile_image = EXCLUDED.profile_image,
+      -- 지표를 통째로 받아 온 이 순간도 "사진을 물어본 시각"이다. 안 찍으면 방금
+      -- 동기화한 계정을 명단이 다시 한 번 메타에 물어본다.
+      profile_image_checked_at = NOW(),
       synced_at = NOW(),
       updated_at = NOW()
   `;

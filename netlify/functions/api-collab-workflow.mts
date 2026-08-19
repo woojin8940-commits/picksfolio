@@ -4,6 +4,7 @@ import { requireSignedInUser } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { addSettlementForProposal, upsertCollabScheduleRecord } from "./_shared/collab-records.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
 import {
   canTransitionStage,
   daysUntil,
@@ -441,6 +442,21 @@ export default async (req: Request, context: Context) => {
        * creator_channels 의 사진·아이디를 그대로 싣는다.
        */
       const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
+      /**
+       * 얼굴을 읽기 전에, 오래된 사진만 인스타에 다시 물어본다.
+       *
+       * 채널 행의 사진은 연동하는 순간과 인플루언서가 '갱신'을 누르는 순간에만 채워져
+       * 왔다. 둘 다 인플루언서의 손이 필요한 일이라, 연동해 둔 사람이 인스타에서 프로필
+       * 사진을 바꿔도 브랜드 화면에는 연동한 날의 얼굴이 남았다 — 브랜드는 자기가 고른
+       * 계정과 다른 사진을 보고 같은 사람인지 의심하게 된다.
+       *
+       * 계정마다 마지막으로 물어본 시각을 남겨 두므로 대부분의 열기에서는 한 건도
+       * 부르지 않고, 부를 때도 한 번에 몇 개까지만 부른다. 브랜드·담당자 화면에서만
+       * 한다 — 인플루언서는 자기 화면에서 언제든 직접 갱신할 수 있다.
+       */
+      if (role === "brand" || role === "manager") {
+        await refreshStaleProfileImages(db, creatorNames);
+      }
       const [channelRows, siteRows] = await Promise.all([
         creatorNames.length
           ? (db.sql`
@@ -597,6 +613,11 @@ export default async (req: Request, context: Context) => {
   // ------------------------------------------------------------------ 상세
   if (req.method === "GET") {
     try {
+      // 목록과 같은 규칙으로 얼굴을 맞춘다. 목록에서 누른 사람과 열린 화면의 사람이
+      // 다른 사진으로 보이면 브랜드는 잘못 눌렀다고 읽는다.
+      if (role === "brand" || role === "manager") {
+        await refreshStaleProfileImages(db, [norm(collab.creator_username)]);
+      }
       const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,

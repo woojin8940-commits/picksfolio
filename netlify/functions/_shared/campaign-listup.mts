@@ -8,6 +8,7 @@ import {
   templateForCampaignType,
 } from "./collab-workflow.mts";
 import { todayInSeoul } from "./campaign-recruit.mts";
+import { refreshStaleProfileImages } from "./instagram-metrics.mts";
 
 /**
  * 리스트업(후보 제안) 공용 로직.
@@ -341,6 +342,11 @@ export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[
     new Set(list.map((r) => norm(r?.influencer_username)).filter(Boolean)),
   );
   if (!names.length) return list;
+
+  // 얼굴은 연동된 인스타 계정의 지금 사진이어야 한다. 사진만 따로, 오래된 계정만
+  // 다시 받아 온다(자세한 규칙은 refreshStaleProfileImages 주석). 실패는 삼킨다 —
+  // 명단은 사진 한 장 없이도 그려져야 한다.
+  await refreshStaleProfileImages(db, names).catch(() => 0);
 
   let channelRows: any[] = [];
   try {

@@ -9,11 +9,15 @@ import type { Settlement } from '../types';
  * 브랜드가 보는 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
  *
  * 칸(열) 하나가 한 단계이고, 그 칸에 지금 서 있는 인플루언서가 카드로 들어간다.
- * 사람은 보드 전체에서 딱 한 번만 나온다 — 자기가 지금 서 있는 칸에. 한동안은 단계를
- * 위아래로 쌓고 칸마다 관련된 사람을 모두 넣었는데, 그러면 한 사람이 화면에 다섯 번
- * 나오고 그중 넷은 아직 오지 않은 일이거나 이미 지나간 일이라, 정작 지금 손댈 카드가
- * 그 사이에 묻혔다. 가로로 늘어놓으면 "어느 단계에 몇 명이 몰려 있는지"가 스크롤 없이
- * 한눈에 들어오고, 카드가 왼쪽에서 오른쪽으로 옮겨 가는 것이 곧 진행이다.
+ * 가로로 늘어놓으면 "어느 단계에 몇 명이 몰려 있는지"가 스크롤 없이 한눈에 들어오고,
+ * 카드가 왼쪽에서 오른쪽으로 옮겨 가는 것이 곧 진행이다.
+ *
+ * 지나온 칸에는 이름이 남는다 — 카드가 아니라 '완료'가 붙은 한 줄로. 한동안은 사람이
+ * 보드 전체에서 딱 한 번, 지금 서 있는 칸에만 나오게 했다. 그러면 손댈 카드는 잘
+ * 보였지만, 배송을 이미 보낸 사람의 이름이 배송 칸에서 통째로 사라져서 브랜드는
+ * "이 사람이 명단에서 빠졌나"를 되물었다. 앞 칸에서 찾는 것은 할 일이 아니라 "끝났나"의
+ * 확인이므로, 손댈 카드와 같은 무게로 그리지 않고 아래쪽 완료 줄로 내려 둔다. 아직
+ * 오지 않은 칸에는 여전히 아무것도 적지 않는다 — 그건 확인할 것이 없는 일이다.
  *
  * 칸은 다섯이다 — 제품 배송 · 기획안 · 영상 초안 · 업로드 · 정산. 콘텐츠 가이드는
  * 칸이 아니다. 가이드는 사람마다 진행되는 일이 아니라 캠페인에 한 번 올려 두는
@@ -378,8 +382,9 @@ const STATE_ORDER: Record<StepState, number> = { review: 0, working: 1, waiting:
 /**
  * 보드 카드 하나 — 사람 한 명.
  *
- * 사람은 보드 전체에서 딱 한 번, 자기가 지금 서 있는 칸에만 나온다. settlement 는
- * 마지막 칸에서만 쓴다(정산 기록이 있는 사람만 들어 있다).
+ * 카드로 그려지는 것은 지금 서 있는 칸 하나뿐이고, 지나온 칸에는 같은 사람이 완료
+ * 줄(doneCards)로 한 번 더 들어간다. settlement 는 마지막 칸에서만 쓴다(정산 기록이
+ * 있는 사람만 들어 있다).
  */
 type Card = { collab: CollabRow; state: StepState; due: string; settlement?: Settlement };
 
@@ -711,11 +716,15 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   /**
    * 보드 — 칸마다 그 칸에 서 있는 사람들.
    *
-   * 사람 한 명이 카드 하나다. 그 카드가 놓이는 칸은 **아직 끝나지 않은 첫 칸**이다.
-   * 예전에는 다섯 단계를 위아래로 쌓고 칸마다 관련된 사람을 모두 넣었는데, 그러면 한
-   * 사람이 화면에 다섯 번 나오고 그중 넷은 이미 지나간 일이거나 아직 오지 않은 일이라,
-   * 정작 지금 손댈 카드가 그 사이에 묻혔다. 한 번만 나오게 하면 칸에 쌓인 카드 수가
-   * 곧 "어디에서 막혀 있는지"이고, 카드가 오른쪽으로 옮겨 가는 것이 곧 진행이다.
+   * 사람 한 명이 카드 하나다. 그 카드가 놓이는 칸은 **아직 끝나지 않은 첫 칸**이고,
+   * 칸에 쌓인 카드 수가 곧 "어디에서 막혀 있는지"다. 예전에는 다섯 단계를 위아래로
+   * 쌓고 칸마다 관련된 사람을 모두 같은 무게로 넣었는데, 그러면 한 사람이 화면에
+   * 다섯 번 나오고 그중 넷은 지금 할 일이 아니라, 정작 손댈 카드가 그 사이에 묻혔다.
+   *
+   * 그래서 지나온 칸에는 카드 대신 완료 줄만 남긴다(doneCards). 칸의 숫자는 여전히
+   * "지금 여기 몇 명"이고, 완료한 사람 수는 그 옆에 따로 적는다. 아직 오지 않은 칸에는
+   * 아무것도 넣지 않는다 — 대기는 확인할 것이 없고, 넣으면 다섯 번 나오던 화면으로
+   * 되돌아간다.
    *
    * 네 칸을 모두 지난 사람과 완료된 협업은 마지막 정산 칸으로 간다. 업로드 확인까지
    * 끝난 사람이 보드에서 사라지면 브랜드는 "이 사람 정산은 어떻게 됐나"를 다른 탭에서
@@ -723,27 +732,35 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
    */
   const board = useMemo(() => {
     const buckets: Record<ColumnKey, Card[]> = { shipping: [], plan: [], video: [], upload: [], settlement: [] };
+    /** 칸을 이미 지나간 사람들. 카드가 아니라 한 줄짜리 완료 명단으로 그린다. */
+    const passed: Record<ColumnKey, Card[]> = { shipping: [], plan: [], video: [], upload: [], settlement: [] };
     const settlementOf = (collab: CollabRow) =>
       settlements[String(collab.creatorUsername || '').toLowerCase()];
 
     for (const collab of collabs) {
       if (collab.status !== 'in_progress' && collab.status !== 'completed') continue;
+      const states = PROCESS_COLUMNS.map(column => ({ column, ...stepStateOf(collab, column) }));
       // 완료된 협업은 단계를 볼 것도 없이 마지막 칸이다.
-      const placed =
-        collab.status === 'completed'
-          ? null
-          : PROCESS_COLUMNS.map(column => ({ column, ...stepStateOf(collab, column) }))
-              .find(r => r.state !== 'done') || null;
+      const placed = collab.status === 'completed' ? null : states.find(r => r.state !== 'done') || null;
       if (!placed) {
         buckets.settlement.push({ collab, state: 'done', due: '', settlement: settlementOf(collab) });
-        continue;
+      } else {
+        buckets[placed.column.key].push({
+          collab,
+          state: placed.state,
+          due: placed.due,
+          settlement: settlementOf(collab),
+        });
       }
-      buckets[placed.column.key].push({
-        collab,
-        state: placed.state,
-        due: placed.due,
-        settlement: settlementOf(collab),
-      });
+      // 지나온 칸에도 이름을 남긴다. 지금 서 있는 칸에만 나오게 하면, 브랜드는 배송을
+      // 이미 보낸 사람의 이름이 배송 칸에서 사라진 것을 "빠졌다"로 읽는다. 앞 칸에서
+      // 찾는 것은 손댈 일이 아니라 "이 사람 배송은 끝났나"의 확인이므로, 카드가 아니라
+      // 완료 표시가 붙은 한 줄로 둔다.
+      for (const r of states) {
+        if (r.state !== 'done') continue;
+        if (placed && r.column.key === placed.column.key) continue;
+        passed[r.column.key].push({ collab, state: 'done', due: '', settlement: settlementOf(collab) });
+      }
     }
 
     return COLUMNS.map(column => {
@@ -756,6 +773,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       return {
         column,
         cards,
+        /** 이 칸을 지나간 사람들. 칸의 숫자에는 세지 않는다 — 그 숫자는 "지금 여기 몇 명"이다. */
+        doneCards: passed[column.key],
         reviewCount: cards.filter(c => c.state === 'review').length,
       };
     });
@@ -1077,7 +1096,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               "한 사람이 다섯 번 나오는" 화면으로 되돌아간다. */}
           <div className="-mx-1 overflow-x-auto pb-2">
             <div className="flex gap-3 items-start px-1 min-w-max">
-              {board.map(({ column, cards, reviewCount: colReviewCount }) => (
+              {board.map(({ column, cards, doneCards, reviewCount: colReviewCount }) => (
                 <section
                   key={column.key}
                   className="w-[268px] flex-shrink-0 rounded-2xl border border-slate-100 bg-slate-50/80"
@@ -1088,6 +1107,13 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     <span className="px-1.5 py-0.5 rounded-md bg-white text-[11px] font-black text-slate-500 flex-shrink-0">
                       {cards.length}
                     </span>
+                    {/* 지나간 사람 수는 칸의 숫자와 따로 적는다. 둘을 더해 하나로 적으면
+                        "지금 여기 몇 명이 걸려 있나"를 알 수 없다. */}
+                    {doneCards.length > 0 && (
+                      <span className="text-[11px] font-black text-emerald-600 flex-shrink-0">
+                        완료 {doneCards.length}
+                      </span>
+                    )}
                     {colReviewCount > 0 && (
                       <span className="ml-auto px-2 py-0.5 rounded-md bg-slate-900 text-white text-[11px] font-black flex-shrink-0">
                         확인 {colReviewCount}
@@ -1095,8 +1121,11 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     )}
                   </div>
 
-                  <div className="p-2 space-y-2">
-                    {cards.length === 0 ? (
+                  {/* 세로로도 밀어 본다. 한 칸에 열 명이 몰리면 칸이 화면보다 길어져서
+                      옆 칸의 머리글까지 아래로 밀려나고, 보드 전체를 스크롤해야 다음 칸의
+                      카드를 볼 수 있었다. 칸 안에서 접히면 머리글 줄은 항상 제자리에 있다. */}
+                  <div className="p-2 space-y-2 max-h-[520px] overflow-y-auto overscroll-contain">
+                    {cards.length === 0 && doneCards.length === 0 ? (
                       <p className="px-1.5 py-4 text-[11px] text-slate-400 font-bold leading-relaxed">
                         {column.emptyLabel}
                       </p>
@@ -1263,6 +1292,43 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                           </div>
                         );
                       })
+                    )}
+
+                    {/* ── 이 칸을 지나간 사람들 ──────────────────────────────
+                        카드가 아니라 한 줄이다. 여기서 브랜드가 하는 일은 "이 사람
+                        배송은 끝났나"의 확인뿐이라, 손댈 카드와 같은 크기로 그리면
+                        지금 할 일이 다시 그 사이에 묻힌다. 눌러서 열 수는 있다 —
+                        지난 단계의 내용을 되짚어 볼 곳이 그 화면이다. */}
+                    {doneCards.length > 0 && (
+                      <div className="pt-1 space-y-1">
+                        <div className="flex items-center gap-1.5 px-0.5 pb-0.5">
+                          <span className="h-px flex-1 bg-slate-200" />
+                          <span className="text-[10px] font-black text-slate-400 flex-shrink-0">
+                            완료 {doneCards.length}명
+                          </span>
+                          <span className="h-px flex-1 bg-slate-200" />
+                        </div>
+                        {doneCards.map(({ collab }) => {
+                          const who = identityOf(collab);
+                          return (
+                            <button
+                              key={collab.id}
+                              type="button"
+                              onClick={() => openDetail(collab.id, column.focus)}
+                              className="w-full flex items-center gap-2 rounded-lg border border-slate-100 bg-white/70 px-2 py-1.5 text-left hover:bg-white transition-colors"
+                            >
+                              <CreatorAvatar src={who.image} label={who.title} size="w-6 h-6" />
+                              <p className="min-w-0 flex-1 text-[11px] font-black text-slate-500 truncate">
+                                {who.title}
+                              </p>
+                              <span className="flex items-center gap-0.5 text-[10px] font-black text-emerald-600 flex-shrink-0">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                완료
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </section>
