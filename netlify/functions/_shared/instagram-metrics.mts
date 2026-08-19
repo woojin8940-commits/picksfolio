@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { safeKeyPrefix } from "./upload-media.mts";
 
 /**
  * 메타(인스타그램) 지표 수집 — 픽스폴리오가 보관하는 숫자의 단일 출처.
@@ -448,6 +449,58 @@ async function loadChannel(db: any, username: string) {
   return (rows as any[])?.[0] || null;
 }
 
+/** 프로필 사진으로 받아 둘 형식. 목록에 없는 형식은 저장하지 않는다. */
+const AVATAR_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+/** 프로필 사진 한 장의 상한. 인스타가 주는 원본은 보통 100KB 안쪽이다. */
+const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+
+/**
+ * 인스타 프로필 사진을 우리 저장소에 한 장 복사해 두고, 그 주소를 대신 굳힌다.
+ *
+ * 메타가 주는 `profile_picture_url` 은 서명과 만료 시각이 박힌 임시 주소다. 그대로
+ * 저장하면 동기화 직후에는 얼굴이 보이다가 며칠 뒤 조용히 깨져, 브랜드 화면에는
+ * 회색 동그라미만 남는다("인스타 연동이 안 된다"는 말이 여기서 나온다). 사진은
+ * 한 장짜리 파일이라 받아 두는 비용이 작고, 우리 도메인 주소가 되면 만료도
+ * 핫링크 차단도 없다.
+ *
+ * 실패하면 빈 문자열을 돌려준다 — 부르는 쪽이 원본 주소로 되돌아갈 수 있게 해서,
+ * 사진 한 장 때문에 동기화 전체를 실패시키지 않는다.
+ */
+async function mirrorProfileImage(username: string, sourceUrl: string, priorUrl: string): Promise<string> {
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return "";
+  try {
+    const res = await fetch(sourceUrl);
+    if (!res.ok) return "";
+    const contentType = String(res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const ext = AVATAR_TYPES[contentType];
+    if (!ext) return "";
+    const buffer = await res.arrayBuffer();
+    if (!buffer.byteLength || buffer.byteLength > AVATAR_MAX_BYTES) return "";
+
+    const store = getStore("images");
+    // 주소에 시각을 넣는다. 이미지 응답이 immutable 로 캐시되므로, 같은 키에 덮어쓰면
+    // 계정 사진을 바꿔도 브라우저에는 옛 얼굴이 남는다.
+    const key = `creator-avatar/${safeKeyPrefix(username)}/${Date.now()}.${ext}`;
+    await store.set(key, buffer, { metadata: { contentType } });
+
+    // 지난 사진은 지운다. 동기화를 누를 때마다 한 장씩 쌓이게 두지 않는다.
+    const priorKey = String(priorUrl || "").startsWith("/api/images/")
+      ? priorUrl.slice("/api/images/".length)
+      : "";
+    if (priorKey && priorKey.startsWith("creator-avatar/") && priorKey !== key) {
+      await store.delete(priorKey).catch(() => {});
+    }
+    return `/api/images/${key}`;
+  } catch (e) {
+    console.warn("[ig-metrics] 프로필 사진 저장 실패:", (e as Error)?.message);
+    return "";
+  }
+}
+
 /**
  * 메타에서 받은 지표를 creator_channels 에 굳힌다.
  *
@@ -494,7 +547,15 @@ export async function persistMetrics(
   const handle = metrics.igUsername || String(existing?.instagram_handle || "");
   // 프로필 사진도 같은 규칙이다. 이번 응답에 없으면(권한·필드 미지원) 지난번 주소를
   // 남긴다. 단 계정이 바뀌었으면 물려받지 않는다 — 남의 얼굴이 걸린다.
-  const profileImage = metrics.profileImage || String(prior?.profile_image || "");
+  //
+  // 받아 온 주소는 그대로 굳히지 않고 우리 저장소로 한 번 복사한다. 메타 주소는
+  // 만료되기 때문에, 굳혀 두면 며칠 뒤 화면에서 사진이 사라진다. 복사에 실패하면
+  // 원본 주소라도 남긴다 — 당장은 보이고, 다음 동기화가 다시 시도한다.
+  const priorImage = String(prior?.profile_image || "");
+  const mirrored = metrics.profileImage
+    ? await mirrorProfileImage(username, metrics.profileImage, priorImage)
+    : "";
+  const profileImage = mirrored || metrics.profileImage || priorImage;
   // 프로필 주소도 계정을 따라간다. 바뀐 계정에 옛 주소가 남으면 브랜드가 다른 사람의
   // 프로필을 열어 보게 된다.
   const igUrl =
