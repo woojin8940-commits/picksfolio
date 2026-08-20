@@ -642,7 +642,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
          (BrandCollabProgress) 1024px 에 맞춰 두면 다섯 칸 중 두 칸만 보이고 나머지는
          가로로 밀어 봐야 한다 — 보드로 만든 이유가 "몰려 있는 칸이 한눈에 보이는 것"인데
          그 이유가 폭에서 사라진다. 다른 탭은 카드 열이 늘어나 빈자리를 채운다. */
-      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto pb-28">
+      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto pb-[calc(152px+env(safe-area-inset-bottom,0px))] md:pb-28">
         <button onClick={() => setSelectedCampaign(null)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           캠페인 목록
@@ -1308,7 +1308,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             조건은 담당자가 후보를 올린 뒤 정해지고, 브랜드가 먼저 확정하면 그 과정이
             할 일이 없어진다. */}
         {isOwner && (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
+          /* 왼쪽은 사이드바(w-60, z-50) 폭만큼 비켜 세운다 — left-0 으로 두면 바가
+             사이드바 아래로 깔려 '광고비 지급형 / 진행 n명' 앞부분이 잘려 보인다.
+             휴대폰에서는 아래쪽 탭 바(약 72px + 홈 인디케이터)가 화면 맨 아래를
+             쓰고 있으니 그 높이만큼 올려 앉힌다. */
+          <div className="fixed left-0 right-0 md:left-60 bottom-[calc(72px+env(safe-area-inset-bottom,0px))] md:bottom-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200">
             <div className="max-w-[1560px] mx-auto px-4 md:px-10 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-slate-400">{mode.label}</p>
@@ -1340,7 +1344,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   // --- 캠페인 등록 ---
   if (showForm) {
     return (
-      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-6xl mx-auto">
+      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-6xl mx-auto pb-[calc(88px+env(safe-area-inset-bottom,0px))] md:pb-10">
         <button onClick={resetForm} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           캠페인 목록
@@ -1365,7 +1369,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   // --- Campaign List ---
   return (
-    <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto">
+    <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto pb-[calc(88px+env(safe-area-inset-bottom,0px))] md:pb-10">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h2 className="text-lg md:text-2xl font-black text-slate-900">캠페인 리스트</h2>

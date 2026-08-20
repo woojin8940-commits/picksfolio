@@ -204,8 +204,10 @@ const CampaignGuidelineEditor: React.FC<CampaignGuidelineEditorProps> = ({
       )}
 
       {open && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6">
-          <div className="bg-white w-full md:max-w-xl rounded-t-3xl md:rounded-3xl max-h-[90vh] overflow-y-auto">
+        /* 휴대폰에서는 아래쪽에서 올라오는 시트다. 앱 하단 탭 바(z-[100])보다 위에
+           떠야 '취소·저장' 줄이 탭 바에 덮여 잘리지 않는다. */
+        <div className="fixed inset-0 z-[150] bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6">
+          <div className="bg-white w-full md:max-w-xl rounded-t-3xl md:rounded-3xl max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] md:pb-0">
             <div className="px-6 pt-6 pb-4 border-b border-slate-100">
               <h3 className="text-lg font-black text-slate-900">콘텐츠 가이드라인</h3>
               <p className="text-[11px] text-slate-400 font-medium mt-1">
