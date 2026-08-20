@@ -184,7 +184,10 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    /* overflow-hidden 을 두지 않는다 — 스크롤 컨테이너가 하나 생기면 아래 확정 바의
+       sticky 가 죽어(제자리에 그대로 남아) 화면 아래 고정 요약 바에 덮여 잘렸다.
+       확정 바가 직접 rounded-b-2xl 로 카드 모서리를 맞춘다. */
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
       <div className="px-4 md:px-5 py-4 border-b border-slate-100">
         <h3 className="text-base font-black text-slate-900">담당자 추천 인플루언서</h3>
         <p className="text-[11px] text-slate-400 font-medium mt-0.5">
@@ -511,8 +514,11 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
           </div>
 
           {/* 확정 바. 화면 아래에 붙여 두는 이유는 카드를 훑어 내려가는 동안에도
-              지금 몇 명 · 얼마인지가 계속 보여야 하기 때문이다. */}
-          <div className="sticky bottom-0 bg-slate-900 text-white px-4 md:px-5 py-3">
+              지금 몇 명 · 얼마인지가 계속 보여야 하기 때문이다.
+              bottom-0 이 아니라 한 칸 위에 붙인다 — 캠페인 상세 화면은 맨 아래에
+              고정 요약 바(약 64px, 휴대폰에서는 그 아래 탭 바까지)를 깔고 있어서
+              화면 밑에 그대로 붙이면 '총 금액'과 확정 버튼이 그 바에 덮여 잘린다. */}
+          <div className="sticky bottom-[calc(136px+env(safe-area-inset-bottom,0px))] md:bottom-16 z-10 bg-slate-900 text-white px-4 md:px-5 py-3 rounded-b-2xl">
             {due > 0 && (
               <div className="flex items-center justify-between gap-3 pb-2.5 mb-2.5 border-b border-white/10">
                 <p className="text-[11px] text-white/60 font-bold truncate">
