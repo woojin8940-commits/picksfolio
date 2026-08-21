@@ -20,18 +20,47 @@ const readLocal = (key: string): string => {
   }
 };
 
-/** 브라우저에 저장된 일반 회원 Supabase 액세스 토큰. */
-function persistedSupabaseToken(): string {
+/** 브라우저에 저장된 일반 회원 Supabase 세션 뭉치. 없으면 null. */
+function readStoredSupabaseSession(): Record<string, any> | null {
   try {
     const raw = localStorage.getItem(scopedKey(SUPABASE_STORAGE_KEY));
-    if (!raw) return '';
+    if (!raw) return null;
     const stored = JSON.parse(raw);
-    const token = String(stored?.access_token || stored?.currentSession?.access_token || '');
-    const expiresAt = tokenExpiresAt(token);
-    return token && (!expiresAt || expiresAt - Date.now() > 30_000) ? token : '';
+    // supabase-js v1 은 세션을 currentSession 아래에 넣었다. 둘 다 읽는다.
+    const session = stored?.currentSession && typeof stored.currentSession === 'object'
+      ? stored.currentSession
+      : stored;
+    return session && typeof session === 'object' ? session : null;
   } catch {
-    return '';
+    return null;
   }
+}
+
+/** 저장된 세션 뭉치를 새 토큰으로 갈아끼운다. 모양(user 등)은 그대로 둔다. */
+function writeStoredSupabaseSession(next: Record<string, any>): void {
+  try {
+    const raw = localStorage.getItem(scopedKey(SUPABASE_STORAGE_KEY));
+    const stored = raw ? JSON.parse(raw) : null;
+    if (stored?.currentSession && typeof stored.currentSession === 'object') {
+      localStorage.setItem(
+        scopedKey(SUPABASE_STORAGE_KEY),
+        JSON.stringify({ ...stored, currentSession: { ...stored.currentSession, ...next } }),
+      );
+      return;
+    }
+    localStorage.setItem(scopedKey(SUPABASE_STORAGE_KEY), JSON.stringify({ ...(stored || {}), ...next }));
+  } catch {
+    // 저장하지 못해도 이번 요청은 새 토큰으로 보낼 수 있다.
+  }
+}
+
+/** 브라우저에 저장된 일반 회원 Supabase 액세스 토큰. 만료가 가까우면 빈 문자열. */
+function persistedSupabaseToken(): string {
+  const session = readStoredSupabaseSession();
+  const token = String(session?.access_token || '');
+  if (!token) return '';
+  const expiresAt = tokenExpiresAt(token);
+  return !expiresAt || expiresAt - Date.now() > 30_000 ? token : '';
 }
 
 /**
@@ -126,6 +155,150 @@ async function businessAccessToken(): Promise<string> {
   return refreshed || token;
 }
 
+/** 직전 요청에서 실제로 통했던 일반 회원 토큰. 세션 조회가 흔들릴 때의 버팀목. */
+let lastKnownSupabaseToken = '';
+let primedSupabaseRefreshToken = '';
+
+/**
+ * 로그인이 막 끝난 순간의 토큰을 API 계층에 먼저 심어 둔다.
+ *
+ * 아이디 로그인은 서버 함수가 토큰을 내려주고, 화면은 곧바로 대시보드로 넘어간다.
+ * `supabase.auth.setSession()` 은 그 뒤에 끝나므로, 대시보드가 처음 띄우는 요청들
+ * (받은 제안 · 협업 목록 · DM 자동화)은 아직 아무 데도 저장되지 않은 세션을 찾다가
+ * 인증 헤더 없이 나갔다. 서버는 당연히 401 을 돌려주고, 화면에는 방금 로그인했는데도
+ * "로그인이 필요합니다" 가 떴다.
+ */
+export function primeSupabaseSession(accessToken: string, refreshToken: string): void {
+  if (accessToken) lastKnownSupabaseToken = accessToken;
+  if (refreshToken) primedSupabaseRefreshToken = refreshToken;
+}
+
+/** 만료되지 않은 토큰만 돌려준다. */
+function usableToken(token: string, marginMs = 30_000): string {
+  if (!token) return '';
+  const expiresAt = tokenExpiresAt(token);
+  return !expiresAt || expiresAt - Date.now() > marginMs ? token : '';
+}
+
+let supabaseRefreshInFlight: Promise<string> | null = null;
+
+/**
+ * 마지막 갱신 시도가 "세션이 정말 끝났다"로 끝났는지.
+ *
+ * 서버에 닿지 못한 것(오프라인 · 5xx)과 서버가 리프레시 토큰을 거절한 것은 전혀
+ * 다르다. 앞의 경우까지 재로그인으로 몰면 잠깐 끊긴 네트워크가 로그아웃이 된다.
+ */
+let supabaseSessionDead = false;
+
+/**
+ * 일반 회원 세션을 리프레시 토큰으로 되살린다.
+ *
+ * `supabase.auth.getSession()` 이 항상 알아서 갱신해 줄 것 같지만, 그렇지 못한
+ * 경우가 실제로 있다 — 탭 사이 잠금(navigator.locks)이 얽혀 갱신이 시간 안에 끝나지
+ * 않거나, 갱신 요청이 한 번 실패하면 supabase-js 는 세션을 비우고 SIGNED_OUT 을
+ * 쏜다. 앱은 `picks_user_session` 을 보고 여전히 로그인 상태로 그리는데, 저장소에는
+ * 만료된 액세스 토큰만 남아 있어 이후 모든 요청이 인증 헤더 없이 나갔다. 화면에서는
+ * 로그인해 있는데도 캠페인 목록이 "로그인이 필요합니다" 로, DM 자동화가 "설정을
+ * 불러오지 못했습니다" 로 보이는 상태가 된다.
+ *
+ * 리프레시 토큰은 그대로 남아 있으므로 여기서 직접 갱신한다. 비즈니스 계정에 이미
+ * 쓰고 있는 방식(`refreshBusinessToken`)과 같다. 성공하면 supabase 클라이언트에도
+ * 새 토큰을 넘겨, 다음 갱신 때 이미 회전된 옛 리프레시 토큰을 다시 쓰지 않게 한다.
+ */
+async function refreshSupabaseSession(): Promise<string> {
+  if (supabaseRefreshInFlight) return supabaseRefreshInFlight;
+
+  supabaseRefreshInFlight = (async () => {
+    const stored = readStoredSupabaseSession();
+    const refreshToken = String(stored?.refresh_token || '') || primedSupabaseRefreshToken;
+    if (!refreshToken) {
+      // 되살릴 재료 자체가 없다 — 로그아웃됐거나 세션이 지워진 상태다.
+      supabaseSessionDead = true;
+      return '';
+    }
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) {
+        // 400 · 401 · 403 은 "이 리프레시 토큰은 더 못 쓴다"는 확정 답이다.
+        // 5xx 는 서버 사정이므로 다음 요청에서 다시 시도한다.
+        supabaseSessionDead = res.status >= 400 && res.status < 500;
+        return '';
+      }
+      const data = await res.json().catch(() => null);
+      const access = String(data?.access_token || '');
+      if (!access) return '';
+      supabaseSessionDead = false;
+
+      const nextRefresh = String(data?.refresh_token || refreshToken);
+      primedSupabaseRefreshToken = nextRefresh;
+      lastKnownSupabaseToken = access;
+
+      // 클라이언트가 새 토큰을 쓰게 한다. 여기서 실패하면 저장소에라도 남겨 둬야
+      // 다음 페이지 로드가 로그아웃으로 끝나지 않는다.
+      let adopted = false;
+      if (supabase) {
+        adopted = await withTimeout(
+          supabase.auth.setSession({ access_token: access, refresh_token: nextRefresh }),
+          8_000,
+          'setSession',
+        )
+          .then((r: any) => !r?.error)
+          .catch(() => false);
+      }
+      if (!adopted) {
+        writeStoredSupabaseSession({
+          ...(stored || {}),
+          access_token: access,
+          refresh_token: nextRefresh,
+          token_type: data?.token_type || 'bearer',
+          expires_in: data?.expires_in,
+          expires_at: data?.expires_at,
+        });
+      }
+      return access;
+    } catch {
+      return '';
+    } finally {
+      supabaseRefreshInFlight = null;
+    }
+  })();
+
+  return supabaseRefreshInFlight;
+}
+
+/**
+ * 되살릴 방법이 없는 세션을 화면에 알린다.
+ *
+ * 여기까지 왔다는 것은 앱은 로그인 상태로 그려져 있는데 서버에 보낼 토큰이 하나도
+ * 없다는 뜻이다. 그대로 두면 사용자는 메뉴마다 "로그인이 필요합니다" 만 만나면서
+ * 왜 그런지 알 수 없다. App 이 이 신호를 받아 다시 로그인하도록 안내한다.
+ */
+let authLostNotified = false;
+
+function notifyAuthLost(): void {
+  if (authLostNotified) return;
+  try {
+    if (!localStorage.getItem(scopedKey('picks_user_session'))) return;
+  } catch {
+    return;
+  }
+  authLostNotified = true;
+  try {
+    window.dispatchEvent(new CustomEvent('picks:auth-lost'));
+  } catch {
+    // 이벤트를 못 쏘더라도 요청 자체는 그대로 진행한다.
+  }
+}
+
 export interface AuthHeaderOptions {
   /**
    * 이 요청이 다루는 계정. 비즈니스 계정이면 그 계정 토큰으로 보낸다.
@@ -146,7 +319,6 @@ function isBusinessRequest(opts: AuthHeaderOptions): boolean {
   return requested === storedBusiness && (explicitlyPrefixed || activeDashboardAccount);
 }
 
-let lastKnownSupabaseToken = '';
 let lastKnownBusinessToken = '';
 
 /**
@@ -174,7 +346,15 @@ export async function authHeaders(
     } catch {
       token = '';
     }
+    // 세션을 못 읽었다고 바로 포기하면 인증 헤더 없는 요청이 나가고, 화면은
+    // 로그인해 있는데도 "로그인이 필요합니다" 를 본다. 저장소 → 직전 토큰 →
+    // 리프레시 순으로 되살릴 수 있는 데까지 되살린다.
     if (!token) token = persistedSupabaseToken();
+    if (!token) token = usableToken(lastKnownSupabaseToken);
+    if (!token) token = await refreshSupabaseSession();
+    // 네트워크가 잠깐 끊긴 것뿐이라면 다음 요청에서 다시 살아난다. 서버가 세션을
+    // 확실히 거절했을 때만 재로그인을 안내한다.
+    if (!token && supabaseSessionDead) notifyAuthLost();
   }
 
   if (token) {
@@ -183,6 +363,26 @@ export async function authHeaders(
     else lastKnownSupabaseToken = token;
   }
   return headers;
+}
+
+/**
+ * 인증이 필요한 조회 요청. 401 이면 세션을 한 번 되살려 다시 부른다.
+ *
+ * 화면이 처음 뜰 때 나가는 조회들은 실패를 되돌릴 기회가 없다 — 한 번 401 을 받으면
+ * 그 자리에 "로그인이 필요합니다" 가 그대로 남는다. 토큰이 잠깐 준비되지 않았을
+ * 뿐인 경우(세션 갱신 직전, 로그인 직후)까지 그렇게 끝나지 않도록, 조회에 한해
+ * 한 번만 다시 시도한다. GET 이라 다시 불러도 같은 결과다.
+ */
+async function authedGet(
+  url: string,
+  build: () => Promise<Record<string, string>>,
+): Promise<Response> {
+  const res = await fetch(url, { credentials: 'same-origin', headers: await build() });
+  if (res.status !== 401) return res;
+
+  const refreshed = await refreshSupabaseSession();
+  if (!refreshed) return res;
+  return await fetch(url, { credentials: 'same-origin', headers: await build() });
 }
 
 /**
@@ -1794,10 +1994,12 @@ export const apiService = {
       const params = new URLSearchParams({ role });
       if (opts.mine) params.set('mine', '1');
       if (opts.status) params.set('status', opts.status);
-      const res = await fetch(`/api/collab-workflow?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await collabHeaders(opts.token),
-      });
+      const res = opts.token
+        ? await fetch(`/api/collab-workflow?${params.toString()}`, {
+            credentials: 'same-origin',
+            headers: await collabHeaders(opts.token),
+          })
+        : await authedGet(`/api/collab-workflow?${params.toString()}`, () => collabHeaders());
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { collabs: [], error: json?.error || '협업 목록을 불러오지 못했습니다.' };
       return json;
@@ -1809,10 +2011,14 @@ export const apiService = {
 
   async getCollabDetail(collabId: string, token?: string): Promise<any> {
     try {
-      const res = await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
-        credentials: 'same-origin',
-        headers: await collabHeaders(token),
-      });
+      const res = token
+        ? await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
+            credentials: 'same-origin',
+            headers: await collabHeaders(token),
+          })
+        : await authedGet(`/api/collab-workflow/${encodeURIComponent(collabId)}`, () =>
+            collabHeaders(),
+          );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '협업 정보를 불러오지 못했습니다.' };
       return json;
@@ -2077,10 +2283,10 @@ export const apiService = {
   /** 인플루언서가 받은 제안 목록. */
   async getMyListupOffers(username: string): Promise<{ offers: any[]; error?: string }> {
     try {
-      const res = await fetch(`/api/campaign-listup?influencer=${encodeURIComponent(username)}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders(),
-      });
+      const res = await authedGet(
+        `/api/campaign-listup?influencer=${encodeURIComponent(username)}`,
+        () => authHeaders(),
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { offers: [], error: json?.error || '받은 제안을 불러오지 못했습니다.' };
       return json;
@@ -2739,8 +2945,10 @@ export const apiService = {
           const refreshableAuth = res.status === 401 && !isBusinessRequest(account);
           if (attempt > 0 || (!transient && !refreshableAuth)) throw lastError;
 
-          if (refreshableAuth && supabase) {
-            await withTimeout(supabase.auth.refreshSession(), 8_000, 'refreshSession').catch(() => undefined);
+          if (refreshableAuth) {
+            // supabase 클라이언트에 세션이 아예 없으면 refreshSession() 은 손쓸 게
+            // 없다. 저장된 리프레시 토큰으로 직접 되살린다.
+            await refreshSupabaseSession();
           }
         } catch (error) {
           lastError = error;

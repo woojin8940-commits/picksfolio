@@ -1402,6 +1402,33 @@ const App: React.FC = () => {
     window.location.href = window.location.origin + '/business-login';
   };
 
+  /**
+   * 되살릴 수 없는 세션을 만났을 때.
+   *
+   * `picks_user_session` 만 보고 로그인 상태를 그리기 때문에, Supabase 세션이
+   * 끊겨도 화면은 그대로 대시보드다. 그 상태에서는 메뉴마다 서버가 401 을 돌려주고
+   * 사용자는 "캠페인 목록이 로그인을 하라고 한다", "DM 자동화를 못 불러온다" 만
+   * 보게 된다 — 무엇을 해야 하는지 알 수 없는 화면이다.
+   *
+   * apiService 가 토큰을 되살리는 데까지 다 실패했을 때만 이 신호가 온다. 그때는
+   * 로그인해 있는 척하지 말고 재로그인을 안내한다. 비즈니스 · 운영자 화면은 다른
+   * 토큰을 쓰므로 건드리지 않는다.
+   */
+  useEffect(() => {
+    const onAuthLost = () => {
+      if (!isLoggedIn) return;
+      if (getAccountScope() === 'operator') return;
+      const currentView = viewRef.current;
+      if (currentView !== 'admin' && currentView !== 'setup-link') return;
+      try {
+        window.alert('로그인이 만료되었습니다.\n다시 로그인해 주세요.');
+      } catch {}
+      handleLogout();
+    };
+    window.addEventListener('picks:auth-lost', onAuthLost);
+    return () => window.removeEventListener('picks:auth-lost', onAuthLost);
+  }, [isLoggedIn]);
+
   // Business views
   if (view === 'business-signup') {
     return (
