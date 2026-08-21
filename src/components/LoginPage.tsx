@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
 import { setAccountScope, sessionSet } from '../utils/accountScope';
+import { primeSupabaseSession } from '../services/apiService';
 import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -149,6 +150,12 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         // 일반 계정으로 로그인했으니 이 탭은 다시 기본 슬롯이다.
         const slotChanged = setAccountScope('user');
         sessionSet('picks_user_session', username);
+
+        // 대시보드는 아래 onLoginSuccess 에서 곧바로 열리고, 그 화면들이 띄우는 첫
+        // 요청(받은 제안 · 협업 목록 · DM 자동화)은 setSession 이 끝나기 전에 나간다.
+        // 토큰을 API 계층에 먼저 넘겨 두지 않으면 그 요청들이 인증 헤더 없이 나가
+        // 방금 로그인했는데도 "로그인이 필요합니다" 를 보게 된다.
+        primeSupabaseSession(result.access_token || '', result.refresh_token || '');
 
         // Call onLoginSuccess BEFORE setSession so that loginNavigationHandledRef
         // is set before onAuthStateChange fires (prevents race condition to setup-link)
