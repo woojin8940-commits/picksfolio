@@ -267,6 +267,25 @@ export async function markLinkNeedsReauth(
   }
 }
 
+/**
+ * 연동 자체를 지운다 — 사람이 "연동 해제"를 눌렀을 때.
+ *
+ * 토큰 만료(markLinkNeedsReauth)와 달리 여기서는 보관함을 통째로 비운다. 해제는
+ * "이 계정을 더는 쓰지 않겠다"는 뜻이므로, 토큰이 남아 있으면 안 된다.
+ *
+ * 캠페인용(collab) 보관함에는 토큰과 계정 아이디밖에 없어서 지워도 잃는 것이 없다.
+ * 디엠 자동화(dm)는 같은 블롭에 자동 응답 규칙이 함께 들어 있으므로 이 함수 대신
+ * 규칙을 남기고 토큰만 비우는 자기 쪽 처리를 쓴다.
+ */
+export async function deleteMetaLink(
+  username: string,
+  scope: MetaLinkScope = "collab",
+): Promise<void> {
+  const at = linkLocation(scope, username);
+  const store = getStore({ name: at.store, consistency: "strong" });
+  await store.delete(at.key);
+}
+
 /** 토큰이 다시 살아 있는 것이 확인되면 표시를 지운다(재연동 직후·일시 오류였던 경우). */
 export async function clearLinkReauthFlag(
   username: string,

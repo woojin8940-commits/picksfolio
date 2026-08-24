@@ -309,6 +309,8 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   const [cancelling, setCancelling] = useState(false);
   const [linking, setLinking] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  /** 연동 해제를 서버에 알리는 중. 두 번 눌러 같은 요청이 겹치지 않게 한다. */
+  const [unlinking, setUnlinking] = useState(false);
   /**
    * 연동 직후 지표를 못 받고 돌아온 경우(ig_metrics=0) 한 번 더 받아 오기 위한 표시.
    * 연동은 끝났는데 팔로워·조회수가 비어 있으면 "연동이 안 됐다"로 읽히므로,
@@ -670,6 +672,42 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     });
   }, [applicantUsername, loadChannel]);
 
+  /**
+   * 캠페인 인스타그램 연동을 끊는다.
+   *
+   * 끊는 것은 이 화면의 연동뿐이다. 디엠 자동화에 따로 붙여 둔 계정은 그대로 남는다.
+   * 이미 확인된 팔로워·조회수는 지우지 않고 "본인 입력"으로 되돌아간다 — 접수해 둔
+   * 등록서가 한순간에 빈칸이 되면, 브랜드가 보던 명단에서도 같이 사라진다.
+   *
+   * 되돌릴 수 없는 동작이 아니라(언제든 다시 연동할 수 있다) 확인 한 번이면 충분하다.
+   */
+  const unlinkInstagram = useCallback(async () => {
+    if (!applicantUsername || unlinking) return;
+    const ok = window.confirm(
+      '인스타그램 계정 연동을 해제할까요?\n\n지금까지 확인된 팔로워·조회수는 그대로 남지만, 해제 후에는 자동으로 갱신되지 않습니다. 언제든 다시 연동할 수 있어요.',
+    );
+    if (!ok) return;
+    setUnlinking(true);
+    setNotice(null);
+    const result = await apiService.disconnectCreatorChannel(applicantUsername);
+    setUnlinking(false);
+    if (result?.error) {
+      setNotice({ type: 'err', text: safeNotice(result.error) });
+      return;
+    }
+    setChannel(emptyChannel);
+    writeChannelCache(applicantUsername, emptyChannel);
+    // 연동이 채워 주던 인스타 칸은 이제 본인이 적는 칸으로 돌아온다. 마지막으로
+    // 확인된 값을 그대로 넣어 둔다 — 빈칸부터 시작하면 방금까지 있던 숫자를 사람이
+    // 기억해 다시 적어야 한다.
+    setInfForm(f => ({
+      ...f,
+      instagram_url: f.instagram_url || (channel.handle ? `https://www.instagram.com/${channel.handle}/` : ''),
+      instagram_followers: f.instagram_followers || (channel.followers ? String(channel.followers) : ''),
+    }));
+    setNotice({ type: 'ok', text: '인스타그램 연동이 해제되었습니다. 필요하면 언제든 다시 연동할 수 있어요.' });
+  }, [applicantUsername, unlinking, channel.handle, channel.followers]);
+
   // 연동은 됐는데 지표를 못 받고 돌아온 경우 화면이 한 번 더 받아 본다.
   // 메타 쪽 계정 정보가 연동 직후 잠깐 준비되지 않는 경우가 있어, 두 번째 호출에서
   // 채워지는 일이 흔하다.
@@ -873,8 +911,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                 linking={linking}
                 syncing={syncing}
                 canLink={!!applicantUsername}
+                unlinking={unlinking}
                 onLink={linkInstagram}
                 onResync={() => resyncInstagram()}
+                onUnlink={unlinkInstagram}
               />
             </div>
           )}
@@ -958,8 +998,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                       linking={linking}
                       syncing={syncing}
                       canLink={!!applicantUsername}
+                      unlinking={unlinking}
                       onLink={linkInstagram}
                       onResync={() => resyncInstagram()}
+                      onUnlink={unlinkInstagram}
                     />
                   </div>
 
@@ -1147,9 +1189,11 @@ const InstagramLinkCard: React.FC<{
   linking: boolean;
   syncing: boolean;
   canLink: boolean;
+  unlinking: boolean;
   onLink: () => void;
   onResync: () => void;
-}> = ({ channel, loading, linking, syncing, canLink, onLink, onResync }) => {
+  onUnlink: () => void;
+}> = ({ channel, loading, linking, syncing, canLink, unlinking, onLink, onResync, onUnlink }) => {
   // 보여 줄 것이 아직 없을 때만 확인 중이라고 말한다. 이미 화면에 있는 숫자를
   // 확인할 때마다 회색 카드로 되돌리면, 연동을 마친 사람은 자기 계정이 붙었다
   // 떨어졌다 하는 것처럼 본다.
@@ -1212,6 +1256,16 @@ const InstagramLinkCard: React.FC<{
         >
           {linking ? '연동 창으로 이동 중...' : '다시 연동하기'}
         </button>
+        {/* 다시 연동할 생각이 없는 사람에게도 출구가 있어야 한다. 이 카드밖에 없으면
+            만료된 연동은 화면에서 영영 지워지지 않는다. */}
+        <button
+          type="button"
+          onClick={onUnlink}
+          disabled={unlinking}
+          className="mt-2 w-full text-[11px] font-bold text-slate-500 hover:text-rose-600 py-1.5 transition-colors disabled:opacity-60"
+        >
+          {unlinking ? '해제하는 중...' : '연동 해제하기'}
+        </button>
       </div>
     );
   }
@@ -1255,6 +1309,20 @@ const InstagramLinkCard: React.FC<{
           확인되었습니다.
         </p>
       )}
+
+      {/* 계정을 잘못 연동했거나 다른 계정으로 바꾸고 싶을 때의 출구. 눈에 띄는 자리에
+          두되 크게 만들지는 않는다 — 여기서 자주 할 일은 해제가 아니라 확인이다. */}
+      <div className="mt-3 pt-2.5 border-t border-emerald-100 flex items-center justify-between gap-2">
+        <p className="text-[11px] text-slate-400 font-medium">다른 계정으로 바꾸려면 해제 후 다시 연동해 주세요.</p>
+        <button
+          type="button"
+          onClick={onUnlink}
+          disabled={unlinking}
+          className="shrink-0 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-rose-600 hover:border-rose-200 font-black text-[11px] px-2.5 py-1.5 active:scale-[0.98] transition-all disabled:opacity-60"
+        >
+          {unlinking ? '해제 중' : '연동 해제'}
+        </button>
+      </div>
     </div>
   );
 };

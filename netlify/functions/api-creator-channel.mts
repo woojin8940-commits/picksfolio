@@ -11,6 +11,7 @@ import {
   linkIsUsable,
   linkNeedsReauth,
   loadMetaLink,
+  deleteMetaLink,
   syncChannelFromMeta,
 } from "./_shared/instagram-metrics.mts";
 
@@ -22,6 +23,7 @@ import {
  *
  *   PUT                       본인 입력 (metrics_source='self')
  *   POST {action:'sync'}      메타 API 로 갱신 (metrics_source='meta_api')
+ *   POST {action:'disconnect'} 캠페인 연동 해제 (숫자는 남기고 출처만 'self' 로)
  *
  * 두 경로를 한 컬럼에 섞지 않는다. 자기 입력 숫자와 검증된 숫자가 구분되지 않으면
  * 브랜드는 명단의 어느 숫자도 믿지 않게 되고, 결국 다시 사람에게 물어본다.
@@ -182,6 +184,50 @@ export default async (req: Request) => {
       if (!username) {
         return Response.json({ error: "사용자명이 필요합니다." }, { status: 400 });
       }
+
+      // -----------------------------------------------------------------------
+      // POST {action:'disconnect'} — 캠페인 연동만 끊는다
+      // -----------------------------------------------------------------------
+      //
+      // 해제는 본인만 할 수 있다. 담당자가 대신 끊으면, 본인은 자기가 고른 적 없는
+      // 순간에 브랜드로 나가던 숫자가 멈춘 것을 나중에야 알게 된다.
+      //
+      // 지우는 것은 캠페인용 연동(collab)뿐이다. 디엠 자동화에 붙여 둔 같은 계정은
+      // 다른 보관함에 있고 다른 기능이므로 그대로 둔다 — 여기서 함께 끊으면 자동
+      // 응답이 조용히 멈춘다.
+      //
+      // 이미 받아 둔 팔로워·조회수는 지우지 않는다. 그 숫자는 연동이 살아 있을 때
+      // 실제로 확인된 값이고, 지우면 접수해 둔 등록서와 브랜드가 보는 명단이 한꺼번에
+      // 빈칸이 된다. 대신 출처를 'self' 로 되돌려, 더는 "메타 연동 확인"으로 보이지
+      // 않게 한다 — 해제한 뒤로는 아무도 그 숫자를 다시 확인해 주지 않기 때문이다.
+      if (action === "disconnect") {
+        const auth = await requireAccountOwner(req, username);
+        if (!auth.ok) return auth.response;
+
+        // 토큰을 못 지웠으면 연동은 아직 살아 있다. 화면에만 "해제됨"을 띄우면,
+        // 사람은 끊은 줄 알지만 지표는 계속 갱신된다. 실패는 실패라고 답한다.
+        try {
+          await deleteMetaLink(username, "collab");
+        } catch (e: any) {
+          console.error("[creator-channel] 연동 해제 실패:", e?.message || e);
+          return Response.json(
+            { error: "연동을 해제하지 못했습니다. 잠시 후 다시 시도해 주세요.", code: "UNLINK_FAILED" },
+            { status: 500 },
+          );
+        }
+
+        await db.sql`
+          UPDATE creator_channels
+             SET connected = FALSE,
+                 metrics_source = 'self',
+                 updated_at = NOW()
+           WHERE username = ${username}
+        `;
+
+        const row = await loadChannel(db, username);
+        return Response.json({ success: true, connected: false, channel: shapeChannel(row) });
+      }
+
       if (action !== "sync") {
         return Response.json({ error: "알 수 없는 동작입니다." }, { status: 400 });
       }
