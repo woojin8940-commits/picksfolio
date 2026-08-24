@@ -2758,6 +2758,29 @@ export const apiService = {
     }
   },
 
+  /**
+   * 캠페인용 인스타그램 연동 해제.
+   *
+   * 디엠 자동화 연동(disconnectInstagram)과는 다른 보관함이라 따로 끊는다. 한쪽을
+   * 끊는다고 다른 쪽이 끊기면, 사람은 건드린 적 없는 기능이 멈춘 것을 나중에 안다.
+   */
+  async disconnectCreatorChannel(username: string): Promise<any> {
+    try {
+      const res = await fetch('/api/creator-channel', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+        body: JSON.stringify({ username: username.toLowerCase(), action: 'disconnect' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '연동을 해제하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to disconnect creator channel:', e);
+      return { error: '네트워크 오류로 연동을 해제하지 못했습니다.' };
+    }
+  },
+
   // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
   // List a creator's accepted co-broadcast friends plus pending friend requests
   // (incoming = others want to be my friend, outgoing = I'm awaiting acceptance).
