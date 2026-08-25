@@ -758,6 +758,12 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           (CreatorCampaignCollabs)으로 열고, 받은 광고 제안도 여기 얹지 않는다.
           두 곳에 같은 상자를 두면 어느 쪽이 지금 상태인지 매번 맞춰 봐야 한다. */}
       <div className="flex flex-col gap-3 mb-6">
+        {/* 연동한 인스타 계정 지표는 검색보다 위, 대신 한 줄로.
+            브랜드에게 전달되는 숫자라 화면을 열 때 한 번은 눈에 닿아야 하지만,
+            여기서 실제로 하는 일은 캠페인을 찾는 것이다. 카드로 두면 그 숫자를
+            확인하려고 온 것도 아닌데 첫 캠페인이 접힌 화면 밖으로 밀린다. */}
+        <CollabMatchRegister variant="influencer" applicantUsername={userName} slim />
+
         <form onSubmit={handleSearch}>
           <div className="relative">
             <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -812,8 +818,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             </button>
           ))}
         </div>
-
-        <CollabMatchRegister variant="influencer" applicantUsername={userName} />
       </div>
 
       {loading ? (
