@@ -40,6 +40,16 @@ type Props = {
   /** 이 단계를 펼친 채로 연다. 브랜드가 "제품 배송" 줄에서 들어왔는데 가이드가
    *  펼쳐져 있으면, 보러 온 것을 다시 찾아 눌러야 한다. */
   focusStep?: StepKey | '';
+  /**
+   * 이 단계 하나만 그린다.
+   *
+   * 보드의 "기획안" 칸에서 들어왔으면 그 화면에서 할 일은 기획안을 읽고 피드백을 쓰는
+   * 것 하나다. 그런데 다섯 줄이 전부 남아 있으면, 펼쳐 둔 한 줄이 나머지 네 줄 사이에
+   * 끼어 있어서 "내가 무엇을 보러 들어왔는지"를 화면이 다시 말해 주지 않는다. 보러 온
+   * 단계만 남기면 그 줄이 곧 화면의 제목이 된다. 나머지 단계는 아래 "전체 단계 보기"
+   * 한 번으로 되돌아온다 — 지난 단계를 되짚을 길까지 막지는 않는다.
+   */
+  onlyStep?: StepKey | '';
 };
 
 type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
@@ -90,7 +100,7 @@ const fmtDate = (value?: string | null) => {
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 };
 
-const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep }) => {
+const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep, onlyStep }) => {
   const stages = useMemo(() => (Array.isArray(detail?.stages) ? detail.stages : []), [detail]);
   const deliverables = useMemo(() => (Array.isArray(detail?.deliverables) ? detail.deliverables : []), [detail]);
   const feedbacks = useMemo(() => (Array.isArray(detail?.feedbacks) ? detail.feedbacks : []), [detail]);
@@ -169,6 +179,21 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   useEffect(() => {
     if (focusStep) setOpen(focusStep);
   }, [focusStep]);
+
+  /**
+   * 한 단계만 보고 있는 중인가.
+   *
+   * 들어온 단계가 바뀌면 다시 그 단계 하나로 돌아간다 — 기획안을 보다가 전체를 펼쳐 둔
+   * 뒤 영상 초안 칸에서 다른 사람을 열면, 펼쳐 둔 상태가 따라와서 또 다섯 줄이 된다.
+   */
+  const [showAllSteps, setShowAllSteps] = useState(false);
+  useEffect(() => {
+    setShowAllSteps(false);
+  }, [onlyStep, collabId]);
+
+  const soloStep = onlyStep && STEPS.some(s => s.key === onlyStep) ? (onlyStep as StepKey) : '';
+  const solo = Boolean(soloStep) && !showAllSteps;
+  const visibleStates = solo ? states.filter(s => s.key === soloStep) : states;
 
   const [busy, setBusy] = useState(false);
 
@@ -984,16 +1009,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      {states.map((s, i) => {
-        const isOpen = open === s.key;
+      {visibleStates.map((s, pos) => {
+        /* 번호는 늘 다섯 단계 안에서의 자리다. 기획안만 보고 있다고 해서 그 줄이 1번이
+           되면, 브랜드는 이 사람이 첫 단계에 서 있다고 읽는다. */
+        const i = STEPS.findIndex(step => step.key === s.key);
+        const isOpen = solo || open === s.key;
         const stage = stageOf(s.key);
         return (
-          <div key={s.key} className={i === 0 ? '' : 'border-t border-slate-100'}>
+          <div key={s.key} className={pos === 0 ? '' : 'border-t border-slate-100'}>
             <button
               type="button"
-              onClick={() => setOpen(isOpen ? '' : s.key)}
-              aria-expanded={isOpen}
-              className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+              onClick={() => { if (!solo) setOpen(isOpen ? '' : s.key); }}
+              aria-expanded={solo ? undefined : isOpen}
+              className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${solo ? 'cursor-default ' : ''}${
                 isOpen
                   ? 'bg-slate-50'
                   : s.done
@@ -1040,15 +1068,32 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   {isOpen ? s.lead : statusText(s.key, s.done, s.current)}
                 </span>
               </span>
-              {!isOpen && stage?.dueDate && !s.done && !s.submitted && (
+              {stage?.dueDate && !s.done && !s.submitted && (!isOpen || solo) && (
                 <span className="text-[10px] font-black text-slate-400 flex-shrink-0">{fmtDate(stage.dueDate)}까지</span>
               )}
-              <span className={`text-slate-300 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
+              {/* 한 단계만 보고 있을 때는 접을 것이 없다 — 접으면 화면에 아무것도 안 남는다. */}
+              {!solo && (
+                <span className={`text-slate-300 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
+              )}
             </button>
             {isOpen && <div className="px-4 pb-4">{renderStep(s.key)}</div>}
           </div>
         );
       })}
+
+      {/* 나머지 단계로 가는 문. 지난 단계를 되짚어 보는 일은 자주는 아니지만 분명히
+          있고, 한 단계만 남겨 두면 그 길이 화면에서 사라진다. */}
+      {soloStep && (
+        <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setShowAllSteps(!showAllSteps)}
+            className="text-[11px] font-black text-slate-500 hover:text-slate-900 transition-colors"
+          >
+            {showAllSteps ? '이 단계만 보기' : '전체 단계 보기'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
