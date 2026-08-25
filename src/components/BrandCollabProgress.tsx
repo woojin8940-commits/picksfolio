@@ -963,11 +963,16 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                   </div>
                 )}
 
+                {/* 들어온 칸의 단계 하나만 그린다. "기획안" 칸에서 눌러 들어왔으면 이
+                    화면에서 할 일은 그 기획안을 읽고 피드백을 쓰는 것 하나이고, 배송과
+                    업로드 줄이 위아래에 남아 있으면 읽던 자리를 매번 다시 찾는다.
+                    지난 단계는 보드 안의 "전체 단계 보기"로 되돌아온다. */}
                 <CampaignProcessBoard
                   collabId={openId}
                   role="brand"
                   detail={detail}
                   focusStep={focusStep}
+                  onlyStep={focusStep}
                   onRefresh={async () => {
                     await refreshDetail(openId);
                     await load();
