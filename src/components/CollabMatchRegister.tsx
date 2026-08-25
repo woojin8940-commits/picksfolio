@@ -20,6 +20,9 @@ import { digitsOnly, formatContact, formatNumberWithCommas, parseWonText } from 
 //  2) 광고 단가 수정 — 단가는 접수한 뒤에도 바뀐다(성수기·채널 성장·재계약).
 //     고칠 방법이 "취소 후 재등록"뿐이면 접수 순서를 잃고, 운영자 명단에는 같은
 //     사람이 두 번 지나간 것처럼 보인다. 그래서 접수한 등록서를 제자리에서 고친다.
+//     다만 접수된 금액을 이 자리에 도로 적어 두지는 않는다 — 이 컴포넌트가 놓이는
+//     캠페인 목록에서 금액은 읽어도 할 일이 생기지 않는 숫자다. 단가는 수정 화면
+//     안에서만 다룬다.
 //
 // 연동한 계정과 적어 둔 값은 그대로 남는다. 등록서는 한 번에 끝내기 어려운 분량이라
 // 닫았다 다시 여는 일이 흔한데, 그때마다 연동이 풀리고 입력칸이 비어 있으면 대부분
@@ -28,6 +31,15 @@ interface Props {
   variant: 'influencer' | 'brand';
   applicantUsername: string;
   buttonClassName?: string;
+  /**
+   * 얇은 한 줄로 그린다.
+   *
+   * 캠페인 목록처럼 이 자리가 주인공이 아닌 화면에서는, 접수 카드가 검색·필터보다
+   * 위에서 세로를 크게 차지하면 정작 찾으러 온 캠페인이 아래로 밀린다. 그래서 접수한
+   * 뒤에는 "지금 브랜드가 보는 숫자"만 한 줄로 남기고, 고치거나 해제하는 일은 줄을
+   * 펼쳤을 때 나오게 한다.
+   */
+  slim?: boolean;
 }
 
 
@@ -251,9 +263,11 @@ const moneyText = (display: string): string => {
   return digits ? `${formatNumberWithCommas(digits)}원` : '';
 };
 
-const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName }) => {
+const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, buttonClassName, slim }) => {
   const copy = COPY[variant];
   const [open, setOpen] = useState(false);
+  /** 얇은 줄에서 "관리"를 펼쳤는지. 얇은 줄이 아닐 때는 쓰지 않는다. */
+  const [slimOpen, setSlimOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [infForm, setInfForm] = useState({
@@ -860,97 +874,186 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     if (submitted === true) reset();
   };
 
+  /** 접수한 등록서를 고치거나 무르는 두 버튼. 카드와 얇은 줄이 같은 것을 쓴다. */
+  const manageButtons = (
+    <div className="shrink-0 flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => { setNotice(null); setEditing(true); setOpen(true); }}
+        className="text-xs font-bold text-blue-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 transition-colors"
+      >
+        수정하기
+      </button>
+      <button
+        type="button"
+        onClick={handleCancelSubmission}
+        disabled={cancelling}
+        className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+      >
+        {cancelling ? '취소 중...' : '취소하기'}
+      </button>
+    </div>
+  );
+
+  const instagramCard = (
+    <InstagramLinkCard
+      channel={channel}
+      loading={channelLoading}
+      linking={linking}
+      syncing={syncing}
+      canLink={!!applicantUsername}
+      unlinking={unlinking}
+      onLink={linkInstagram}
+      onResync={() => resyncInstagram()}
+      onUnlink={unlinkInstagram}
+    />
+  );
+
   return (
     <>
       {submitted === false && (
         <button
           onClick={() => setOpen(true)}
-          className={buttonClassName ?? 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_12px_26px_-8px_rgba(37,99,235,0.65)] hover:shadow-[0_16px_32px_-8px_rgba(37,99,235,0.75)] hover:-translate-y-0.5 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] active:translate-y-0 transition-all'}
+          className={
+            buttonClassName ??
+            (slim
+              ? 'w-full flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-xs py-2 shadow-[0_8px_18px_-8px_rgba(37,99,235,0.6)] hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] transition-all'
+              : 'w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm py-3 shadow-[0_12px_26px_-8px_rgba(37,99,235,0.65)] hover:shadow-[0_16px_32px_-8px_rgba(37,99,235,0.75)] hover:-translate-y-0.5 hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] active:translate-y-0 transition-all')
+          }
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+          <svg className={slim ? 'w-3.5 h-3.5' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
           {copy.title}
         </button>
       )}
 
       {/* 접수한 뒤에도 이 자리에서 계속 확인하고 고칠 수 있어야 한다.
           - 인플루언서: 연동 계정의 팔로워·릴스 평균 조회수(브랜드가 보는 숫자)
-          - 공통: 단가·조건 수정. 단가는 접수 뒤에도 바뀐다. */}
+          - 공통: 조건 수정.
+
+          단가는 여기에 적지 않는다. 이 줄이 있는 자리(캠페인 목록)에서 확인할 값은
+          "브랜드가 보는 내 숫자"이고, 금액은 그 옆에 있어도 할 일이 생기지 않는다.
+          고칠 일이 있으면 수정 화면에서 그대로 고친다. */}
       {submitted === true && !open && (
-        <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3.5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
-              <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
-            </div>
-            <div className="shrink-0 flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => { setNotice(null); setEditing(true); setOpen(true); }}
-                className="text-xs font-bold text-blue-700 hover:text-blue-800 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 transition-colors"
-              >
-                수정하기
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelSubmission}
-                disabled={cancelling}
-                className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
-              >
-                {cancelling ? '취소 중...' : '취소하기'}
-              </button>
-            </div>
-          </div>
+        slim ? (
+          /* 얇은 한 줄. 검색·필터 위에 놓이는 자리라 지표만 남기고, 새로 불러오기·
+             수정·해제처럼 가끔 하는 일은 펼쳤을 때만 나온다. */
+          <div className="w-full">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-[0_3px_10px_-8px_rgba(15,23,42,0.5)]">
+              <span className="w-5 h-5 rounded-md bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400 flex items-center justify-center shrink-0">
+                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.96.24 2.4.41.6.24 1.04.52 1.5.98.46.46.74.9.98 1.5.17.44.36 1.23.41 2.4.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.24 1.96-.41 2.4-.24.6-.52 1.04-.98 1.5-.46.46-.9.74-1.5.98-.44.17-1.23.36-2.4.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.96-.24-2.4-.41a4.04 4.04 0 01-1.5-.98 4.04 4.04 0 01-.98-1.5c-.17-.44-.36-1.23-.41-2.4C2.17 15.58 2.16 15.2 2.16 12s.01-3.58.07-4.85c.05-1.17.24-1.96.41-2.4.24-.6.52-1.04.98-1.5.46-.46.9-.74 1.5-.98.44-.17 1.23-.36 2.4-.41C8.42 2.17 8.8 2.16 12 2.16zm0 3.68a6.16 6.16 0 100 12.32 6.16 6.16 0 000-12.32zm0 10.16a4 4 0 110-8 4 4 0 010 8zm7.84-10.4a1.44 1.44 0 11-2.88 0 1.44 1.44 0 012.88 0z" />
+                </svg>
+              </span>
 
-          {/* 연동한 계정에서 확인된 숫자. 접수하고 나면 볼 곳이 없어서 "연동이 된 건가"
-              하고 다시 연동하러 가는 일이 생긴다. 여기서 바로 보여 준다. */}
-          {isInfluencer && (
-            <div className="mt-3">
-              <InstagramLinkCard
-                channel={channel}
-                loading={channelLoading}
-                linking={linking}
-                syncing={syncing}
-                canLink={!!applicantUsername}
-                unlinking={unlinking}
-                onLink={linkInstagram}
-                onResync={() => resyncInstagram()}
-                onUnlink={unlinkInstagram}
-              />
-            </div>
-          )}
-
-          {/* 접수된 단가를 그대로 보여 준다 — 브랜드에게 전달되는 값이 무엇인지 알아야
-              고칠지 말지 판단할 수 있다. */}
-          {isInfluencer && application && (application.post_price || application.short_price || application.ad_price) && (
-            <div className="mt-2.5 rounded-xl border border-blue-100 bg-white px-3.5 py-2.5">
-              <p className="text-[10px] font-black text-slate-400">접수된 광고 단가</p>
-              <div className="mt-1 space-y-0.5">
-                {application.post_price ? (
-                  <p className="text-xs font-bold text-slate-700 break-words">게시물 <span className="text-slate-900 font-black">{application.post_price}</span></p>
-                ) : null}
-                {application.short_price ? (
-                  <p className="text-xs font-bold text-slate-700 break-words">숏폼 <span className="text-slate-900 font-black">{application.short_price}</span></p>
-                ) : null}
-                {!application.post_price && !application.short_price && application.ad_price ? (
-                  <p className="text-xs font-black text-slate-900 break-words">{application.ad_price}</p>
-                ) : null}
+              <div className="min-w-0 flex-1 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+                {isInfluencer && channel.connected && !channel.needsReauth ? (
+                  <>
+                    <span className="text-[11px] font-black text-slate-900 whitespace-nowrap">
+                      {channel.handle ? `@${channel.handle}` : '연동 완료'}
+                    </span>
+                    <SlimStat label="팔로워" value={compact(channel.followers)} />
+                    <SlimStat label="팔로잉" value={compact(channel.following)} />
+                    {/* 아직 못 받은 조회수를 "0" 으로 적으면 아무도 안 본 계정으로 읽힌다. */}
+                    <SlimStat label="릴스" value={channel.avgViews ? compact(channel.avgViews) : '집계 전'} />
+                  </>
+                ) : isInfluencer && channel.needsReauth ? (
+                  <span className="text-[11px] font-black text-amber-600 whitespace-nowrap">
+                    인스타그램 다시 연동이 필요해요
+                  </span>
+                ) : isInfluencer && channelLoading ? (
+                  // 아직 서버 답을 못 받았을 때 "연동 안 됨"으로 적으면, 연동해 둔
+                  // 사람은 화면을 열 때마다 연동이 풀린 순간을 먼저 본다.
+                  <span className="text-[11px] font-bold text-slate-400 whitespace-nowrap">
+                    연동 상태 확인 중...
+                  </span>
+                ) : isInfluencer ? (
+                  <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">
+                    인스타그램을 연동하면 확인된 지표로 매칭돼요
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-black text-slate-900 whitespace-nowrap">
+                    {copy.title} 접수 완료
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-slate-400 font-medium mt-1.5">단가가 바뀌었다면 "수정하기"로 고쳐 주세요.</p>
-            </div>
-          )}
 
-          {notice && (
-            <div
-              className={`mt-2.5 rounded-xl px-3.5 py-2.5 text-xs font-bold ${
-                notice.type === 'ok'
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                  : 'bg-rose-50 text-rose-700 border border-rose-100'
-              }`}
-            >
-              {notice.text}
+              {/* 연동이 없거나 끊긴 상태에서는 펼치지 않고도 바로 연동할 수 있어야 한다. */}
+              {isInfluencer && !channelLoading && (!channel.connected || channel.needsReauth) && (
+                <button
+                  type="button"
+                  onClick={linkInstagram}
+                  disabled={linking || !applicantUsername}
+                  className="shrink-0 rounded-lg bg-slate-900 text-white text-[10px] font-black px-2.5 py-1 hover:bg-slate-700 transition-colors disabled:opacity-50"
+                >
+                  {linking ? '이동 중' : '연동하기'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setSlimOpen(v => !v)}
+                aria-expanded={slimOpen}
+                className="shrink-0 flex items-center gap-0.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 text-[10px] font-black px-2 py-1 transition-colors"
+              >
+                관리
+                <svg className={`w-3 h-3 transition-transform ${slimOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
             </div>
-          )}
-        </div>
+
+            {slimOpen && (
+              <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-3 space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
+                    <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+                  </div>
+                  {manageButtons}
+                </div>
+                {isInfluencer && instagramCard}
+              </div>
+            )}
+
+            {notice && (
+              <div
+                className={`mt-2 rounded-xl px-3.5 py-2 text-[11px] font-bold ${
+                  notice.type === 'ok'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                    : 'bg-rose-50 text-rose-700 border border-rose-100'
+                }`}
+              >
+                {notice.text}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-black text-blue-700">{copy.title} 접수 완료</p>
+                <p className="mt-0.5 text-[11px] font-bold text-blue-500">{SUBMITTED_NOTE[submittedStatus] || SUBMITTED_NOTE.pending}</p>
+              </div>
+              {manageButtons}
+            </div>
+
+            {/* 연동한 계정에서 확인된 숫자. 접수하고 나면 볼 곳이 없어서 "연동이 된 건가"
+                하고 다시 연동하러 가는 일이 생긴다. 여기서 바로 보여 준다. */}
+            {isInfluencer && <div className="mt-3">{instagramCard}</div>}
+
+            {notice && (
+              <div
+                className={`mt-2.5 rounded-xl px-3.5 py-2.5 text-xs font-bold ${
+                  notice.type === 'ok'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                    : 'bg-rose-50 text-rose-700 border border-rose-100'
+                }`}
+              >
+                {notice.text}
+              </div>
+            )}
+          </div>
+        )
       )}
 
       {open && (
@@ -1332,6 +1435,19 @@ const Metric: React.FC<{ label: string; value: string }> = ({ label, value }) =>
     <p className="text-[10px] font-bold text-slate-400 whitespace-nowrap">{label}</p>
     <p className="text-sm font-black text-slate-900 mt-0.5">{value}</p>
   </div>
+);
+
+/**
+ * 얇은 줄에 들어가는 지표 한 조각.
+ *
+ * 세로로 쌓지 않고 "팔로워 12.3만" 처럼 한 줄에 이어 붙인다 — 이 줄은 캠페인 검색
+ * 위에 놓이는 자리라, 숫자 세 개를 위해 카드 높이를 쓸 수 없다.
+ */
+const SlimStat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <span className="flex items-baseline gap-1 whitespace-nowrap rounded-md bg-slate-50 px-1.5 py-0.5">
+    <span className="text-[10px] font-bold text-slate-400">{label}</span>
+    <span className="text-[11px] font-black text-slate-900">{value}</span>
+  </span>
 );
 
 // 채널 링크(넓게) + 팔로워 수(좁게)를 한 줄에 배치하는 입력 행

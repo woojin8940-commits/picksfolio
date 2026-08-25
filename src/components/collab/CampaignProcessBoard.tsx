@@ -435,16 +435,76 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
         >
           피드백 보내기
         </button>
-        <button
-          onClick={() => act('confirm_step', { stepKey: step }, '확인 완료로 표시했습니다.')}
-          disabled={busy}
-          className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-500 disabled:opacity-40 transition-colors"
-        >
-          확인 완료
-        </button>
       </div>
     </div>
   );
+
+  /** 아직 인플루언서가 반영하지 않은 피드백. 검토를 닫기 전에 세어 보는 값이다. */
+  const openFeedbackCount = (step: StepKey) =>
+    feedbacksOf(step).filter((f: any) => ['open', 'relayed'].includes(String(f.status))).length;
+
+  /**
+   * 브랜드가 이 단계를 닫는다 — "더 볼 것이 없다".
+   *
+   * 예전에는 이 동작이 피드백 칸 안에서 "피드백 보내기" 옆에 같은 크기로 붙어 있었다.
+   * 그 두 버튼은 정반대의 일을 한다: 하나는 "고쳐 주세요"(공을 되돌려준다)이고, 다른
+   * 하나는 "끝났습니다"(다음 단계로 넘긴다)다. 나란히 두면 어느 쪽이 진행이고 어느
+   * 쪽이 되돌림인지 눌러 봐야 알고, 실제로 브랜드는 피드백만 남긴 채 단계를 닫지 않아
+   * 인플루언서 쪽에는 "브랜드 확인 대기"가 그대로 남았다. 되돌리는 일은 피드백 칸에
+   * 두고, 넘기는 일은 그 아래 따로 선다.
+   *
+   * 반영되지 않은 피드백이 남아 있어도 막지는 않는다 — 인플루언서가 "반영했어요"를
+   * 누르지 않고 그냥 다시 올리는 경우가 흔해서, 막으면 진행이 여기서 멈춘다. 대신
+   * 몇 개가 남았는지 세어 보여 주고 한 번 더 묻는다.
+   */
+  const completeReview = async (step: StepKey, stepName: string) => {
+    const remaining = openFeedbackCount(step);
+    const question = remaining > 0
+      ? `아직 반영 표시가 되지 않은 피드백이 ${remaining}개 있습니다.\n\n그래도 ${stepName} 검토를 완료하고 다음 단계로 넘어갈까요?`
+      : `${stepName}에 더 수정할 부분이 없다면 검토를 완료합니다.\n\n다음 단계로 넘어갈까요?`;
+    if (!window.confirm(question)) return;
+    await act('confirm_step', { stepKey: step }, `${stepName} 검토를 완료했습니다. 다음 단계로 넘어갑니다.`);
+  };
+
+  /** 검토 완료 줄. 브랜드·담당자 화면에서 제출물이 올라온 단계에만 선다. */
+  const renderReviewComplete = (step: StepKey, stepName: string) => {
+    if (!isBrandSide) return null;
+
+    if (doneOf(step)) {
+      return (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+          <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+          </svg>
+          <p className="text-[11px] font-black text-emerald-700">
+            {stepName} 검토 완료 · 다음 단계로 넘어갔습니다
+          </p>
+        </div>
+      );
+    }
+
+    const remaining = openFeedbackCount(step);
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+        <p className="text-[11px] font-black text-emerald-800">더 이상 수정할 부분이 없나요?</p>
+        <p className="text-[10px] font-bold text-emerald-700/80 mt-0.5 leading-relaxed">
+          검토를 완료하면 이 단계가 닫히고, 인플루언서에게 다음 단계가 열립니다.
+        </p>
+        {remaining > 0 && (
+          <p className="text-[10px] font-black text-amber-700 mt-1.5">
+            아직 반영 표시가 되지 않은 피드백 {remaining}개가 남아 있습니다.
+          </p>
+        )}
+        <button
+          onClick={() => completeReview(step, stepName)}
+          disabled={busy}
+          className="mt-2 w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+        >
+          {stepName} 검토 완료 · 다음 단계로
+        </button>
+      </div>
+    );
+  };
 
   /** 장면 하나에만 붙는 작은 피드백 칸. 접었다 펴는 이유는 다섯 장면이면 칸도 다섯이라서다. */
   const renderSceneFeedbackBox = (step: StepKey, index: number) => {
@@ -786,9 +846,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               <p className="text-xs text-slate-400 font-medium">인플루언서가 기획안을 올리면 여기에 표시됩니다.</p>
             )}
 
-            {/* 기획안 바로 아래에 피드백. 이 순서가 이 단계의 전부다. */}
+            {/* 기획안 바로 아래에 피드백, 그 아래에 검토 완료. 이 순서가 이 단계의
+                전부다 — 읽고, 고칠 것을 말하고, 없으면 넘긴다. */}
             {renderFeedbackThread('plan')}
             {isBrandSide && planWork && renderFeedbackBox('plan', '기획안 전체에 대한 의견을 적어 주세요. 장면 하나를 고쳐야 하면 그 장면의 피드백 칸을 쓰세요.')}
+            {planWork && renderReviewComplete('plan', '기획안')}
           </div>
         );
       }
@@ -838,6 +900,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
             {renderFeedbackThread('video')}
             {isBrandSide && videoWork && renderFeedbackBox('video', '수정이 필요한 장면과 이유를 적어 주세요.')}
+            {videoWork && renderReviewComplete('video', '영상')}
           </div>
         );
 
