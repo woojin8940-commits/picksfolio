@@ -576,7 +576,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
 
   const refreshDetail = useCallback(
     async (collabId: string) => {
-      const res = await apiService.getCollabDetail(collabId);
+      const res = await apiService.getCollabDetail(collabId, undefined, 'brand');
       if (res.error) {
         notify(res.error, 'error');
         return null;

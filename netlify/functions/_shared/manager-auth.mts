@@ -123,3 +123,56 @@ export async function resolveManager(req: Request): Promise<string | null> {
   const result = await requireManager(req);
   return result.ok ? result.managerUsername || "manager" : null;
 }
+
+/** resolveIdentities 가 돌려주는 두 신분. 둘 다 없을 수도, 둘 다 있을 수도 있다. */
+export type Identities = {
+  /** 서비스 계정(브랜드·인플루언서)으로 로그인한 사람. 확인되지 않으면 null. */
+  account: { username: string; userId: string; isAdmin: boolean } | null;
+  /** 담당자 자격. 없으면 null. */
+  manager: { username: string; via: "identity" | "supabase" | "assigned"; isAdmin: boolean } | null;
+  /** 서비스 계정 확인이 실패한 이유. 두 신분 모두 없을 때 그대로 반환한다. */
+  accountError: Response | null;
+};
+
+/**
+ * 두 신분을 **덮어쓰지 않고 나란히** 확인한다.
+ *
+ * requireManager 는 "담당자냐 아니냐"만 답하므로, 호출부가 그 답으로 호출자의
+ * 아이디까지 정하면 사고가 난다. Netlify Identity 의 인증은 `nf_jwt` **쿠키**로도
+ * 성립하기 때문에, 운영 콘솔에 로그인한 브라우저에서 같은 사람이 자기 브랜드
+ * 계정으로 서비스 화면을 쓰면 모든 API 호출이 담당자로 판정된다. 그러면 호출자
+ * 아이디가 담당자 아이디(운영자 이메일 앞부분)로 바뀌어, "내 캠페인" 조회가
+ * 존재하지 않는 이름으로 나가고 목록이 통째로 빈다 — 진행확정한 협업이 인플루언서
+ * 이력과 브랜드 진행사항에서 동시에 사라졌던 원인이 이것이다.
+ *
+ * 그래서 여기서는 판정을 합치지 않는다. 서비스 계정은 서비스 계정으로, 담당자
+ * 자격은 담당자 자격으로 각각 돌려주고, 어느 쪽 아이디로 자원을 찾을지는 호출부가
+ * 고른다.
+ *
+ * 서비스 계정을 먼저 본다. 배정된 담당자는 서비스 계정으로 로그인하므로, 그
+ * 사람의 아이디가 운영자 쿠키의 이메일 아이디로 바뀌면 배정 큐가 어긋난다.
+ */
+export async function resolveIdentities(req: Request): Promise<Identities> {
+  const supabase = await requireSignedInUser(req);
+  const account = supabase.ok
+    ? { username: supabase.username, userId: supabase.userId, isAdmin: supabase.isAdmin }
+    : null;
+
+  let manager: Identities["manager"] = null;
+  if (account?.isAdmin) {
+    manager = { username: account.username, via: "supabase", isAdmin: true };
+  } else if (account && (await isAssignedManager(account.username))) {
+    manager = { username: account.username, via: "assigned", isAdmin: false };
+  } else {
+    const identity = await requireAdmin(req);
+    if (identity.ok) {
+      manager = {
+        username: usernameFromEmail((identity.user as any)?.email || ""),
+        via: "identity",
+        isAdmin: true,
+      };
+    }
+  }
+
+  return { account, manager, accountError: supabase.ok ? null : supabase.response };
+}

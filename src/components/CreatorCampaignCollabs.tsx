@@ -81,6 +81,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   const [collabs, setCollabs] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<any>(null);
@@ -98,6 +99,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
         .then(r => r.json())
         .catch(() => ({ applications: [] })),
     ]);
+    // 실패를 "진행 중인 협업이 없음"으로 그리지 않는다. 예전에는 오류를 버려서,
+    // 진행이 확정된 협업이 조회에 실패하면 이 화면이 빈 목록으로 보였다 — 인플루언서
+    // 입장에서는 확정된 협업이 사라진 것처럼 보이고, 원인을 알 단서가 없었다.
+    setLoadError(collabRes.error || '');
     setCollabs(collabRes.collabs || []);
     setApplications(Array.isArray(applyRes?.applications) ? applyRes.applications : []);
     setLoading(false);
@@ -108,7 +113,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   }, [userName, load]);
 
   const refreshDetail = async (collabId: string) => {
-    const res = await apiService.getCollabDetail(collabId);
+    const res = await apiService.getCollabDetail(collabId, undefined, 'influencer');
     if (res.error) {
       notify(res.error, 'error');
       return null;
@@ -376,6 +381,19 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
           <p className="text-sm text-slate-400 font-bold">{isEn ? 'Loading campaigns...' : '캠페인 불러오는 중...'}</p>
+        </div>
+      ) : loadError ? (
+        <div className="text-center py-20">
+          <h3 className="text-lg font-black text-slate-900 mb-2">
+            {isEn ? "Couldn't load your campaigns" : '캠페인을 불러오지 못했습니다'}
+          </h3>
+          <p className="text-sm text-slate-500 font-medium mb-4">{loadError}</p>
+          <button
+            onClick={load}
+            className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-black hover:bg-slate-700"
+          >
+            {isEn ? 'Try again' : '다시 시도'}
+          </button>
         </div>
       ) : collabs.length === 0 && waiting.length === 0 ? (
         <div className="text-center py-20">

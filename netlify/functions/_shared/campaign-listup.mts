@@ -107,6 +107,46 @@ export function normalizePayout(raw: any): ListupPayout {
 }
 
 /**
+ * 등록서의 단가 칸에서 금액 하나를 읽는다.
+ *
+ * 지금 폼은 `"300,000원"` 처럼 한 가지 모양으로만 저장하지만, 폼이 생기기 전에
+ * 들어온 값에는 `"30~50만원"`, `"협의"`, `"게시물 30만 / 숏폼 100만"` 같은 자유
+ * 서술이 섞여 있다. 숫자가 둘 이상이면 어느 쪽이 단가인지 알 수 없으므로 0(모름)을
+ * 돌려주고 담당자가 직접 넣게 한다 — 아무 숫자나 골라 지급 단가로 채우면 실제 정산
+ * 금액이 조용히 틀어진다.
+ */
+const singleAmount = (raw: unknown): number => {
+  const text = String(raw ?? "").trim();
+  if (!text) return 0;
+  const groups = text.match(/\d[\d,]*/g) || [];
+  if (groups.length !== 1) return 0;
+  const n = money(groups[0]);
+  // "100만원" 처럼 만 단위로 적은 값을 100원으로 옮기면 정산이 망가진다.
+  return /만\s*원?$/.test(text.replace(/\s+/g, "")) ? n * 10000 : n;
+};
+
+/**
+ * 인플루언서가 "브랜드 매칭 받기"에 적어 둔 단가에서 이 캠페인에 맞는 값을 고른다.
+ *
+ * 담당자가 명단을 올릴 때 인플루언서 지급 단가를 매번 손으로 옮겨 적고 있었다.
+ * 그 숫자는 이미 등록서에 있고(스냅샷에 굳어 있다), 손으로 옮기는 과정에서만 틀린다.
+ * 그래서 담당자가 비워 두면 등록 단가를 기본값으로 쓰고, 담당자는 브랜드에게 제시할
+ * 금액만 적는다.
+ *
+ * 게시물 단가와 숏폼 단가 중 어느 쪽을 쓸지는 캠페인의 콘텐츠 형식이 정한다. 형식을
+ * 알 수 없으면 숏폼을 먼저 본다 — 지금 등록되는 캠페인은 사실상 전부 숏폼이다.
+ */
+export function registeredPayoutFee(snapshot: any, contentFormat?: unknown): number {
+  const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const post = singleAmount(snap.postPrice);
+  const short = singleAmount(snap.shortPrice);
+  const format = String(contentFormat || "").toLowerCase();
+  if (/short|reel|릴스|숏|영상|video/.test(format) && short) return short;
+  if (/post|feed|피드|게시물|이미지|image/.test(format) && post) return post;
+  return short || post || 0;
+}
+
+/**
  * 지급액을 제안 초안에 합친다. 일정·가이드처럼 이미 적어 둔 값은 건드리지 않는다.
  * 아직 보내지 않은 제안에만 쓴다 — 보낸 뒤에 금액이 바뀌면 인플루언서가 본 조건과
  * 우리 기록이 달라진다.
@@ -485,6 +525,12 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
           // 지급액이 빈 후보"를 마진 0원이 아니라 손해로 잘못 그리게 된다.
           payoutFee,
           payoutSecondUseFee,
+          // 인플루언서가 등록서에 적어 둔 단가. 담당자 폼의 지급 단가 기본값이고,
+          // 옆에 원문 표기를 함께 보여 줘야 담당자가 값을 믿고 쓸 수 있다.
+          registeredPayoutFee: registeredPayoutFee(snapshot, offer.contentFormat),
+          registeredPostPrice: String(snapshot.postPrice || ""),
+          registeredShortPrice: String(snapshot.shortPrice || ""),
+          registeredAdPrice: String(snapshot.adPrice || ""),
           // 두 값이 모두 있을 때만 숫자를 준다. null 은 "아직 모름"이고 0 과 다르다.
           margin: brandAmount > 0 && payoutFee > 0 ? brandAmount - payoutAmount : null,
         }

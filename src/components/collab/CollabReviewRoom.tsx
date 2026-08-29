@@ -82,7 +82,7 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
   };
 
   const load = useCallback(async () => {
-    const res = await apiService.getCollabDetail(collabId, token);
+    const res = await apiService.getCollabDetail(collabId, token, 'manager');
     setLoading(false);
     if (res.error) {
       notify(res.error, 'error');
@@ -135,7 +135,7 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
   // ------------------------------------------------------------------ 동작
   const act = async (action: string, payload: Record<string, any>) => {
     setBusy(true);
-    const res = await apiService.collabAction(collabId, action, payload, token);
+    const res = await apiService.collabAction(collabId, action, payload, token, 'manager');
     setBusy(false);
     if (res.error) {
       notify(res.error, 'error');

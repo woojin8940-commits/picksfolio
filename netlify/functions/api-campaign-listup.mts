@@ -1,7 +1,11 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
-import { requireAccountOwner, requireSignedInUser } from "./_shared/user-auth.mts";
-import { requireManager } from "./_shared/manager-auth.mts";
+import {
+  forbiddenResponse,
+  requireAccountOwner,
+  requireSignedInUser,
+} from "./_shared/user-auth.mts";
+import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { newId, norm } from "./_shared/collab-workflow.mts";
 import { isManagerListupMode } from "./_shared/reward-mode.mts";
 import {
@@ -13,6 +17,7 @@ import {
   normalizeQuote,
   offerFromCampaign,
   refreshListupSnapshots,
+  registeredPayoutFee,
   shapeChannel,
   shapeListup,
 } from "./_shared/campaign-listup.mts";
@@ -144,12 +149,24 @@ export default async (req: Request) => {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
 
-      const manager = await requireManager(req);
-      let viewerRole: "manager" | "brand" = "manager";
-      if (!manager.ok) {
-        const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
-        if (!auth.ok) return auth.response;
+      // 캠페인 소유자면 기본은 브랜드 화면이다.
+      //
+      // 예전에는 담당자 판정을 먼저 했다. 그런데 Netlify Identity 는 `nf_jwt`
+      // **쿠키**만으로도 인증이 성립하므로, 운영 콘솔에 로그인한 브라우저에서 자기
+      // 브랜드 계정으로 명단을 열면 담당자 화면이 나왔다 — 브랜드에게 절대 보이면
+      // 안 되는 인플루언서 지급 단가와 마진이 그대로 실려 나간다. 담당자 화면은
+      // 담당자 도구로 들어올 때만(후보 풀 검색 · viewer=manager) 준다.
+      const wantsManagerView =
+        url.searchParams.get("pool") === "1" || url.searchParams.get("viewer") === "manager";
+      const { account, manager, accountError } = await resolveIdentities(req);
+      const isOwner = !!account && account.username === norm(campaign.business_username || "");
+      let viewerRole: "manager" | "brand";
+      if (manager && (wantsManagerView || !isOwner)) {
+        viewerRole = "manager";
+      } else if (isOwner) {
         viewerRole = "brand";
+      } else {
+        return accountError || forbiddenResponse();
       }
 
       const listRows = await db.sql`
@@ -402,8 +419,18 @@ export default async (req: Request) => {
         const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
         // 지급액은 아직 보내지 않은 제안 초안(offer)에 담는다. 제안 폼이 이 초안을
         // 그대로 불러오므로 담당자가 같은 금액을 두 번 적지 않는다.
-        const payout = payoutByUser[username] || payoutDefaults;
-        const offerDraft = mergePayoutIntoOffer(offerFromCampaign(campaign), payout);
+        //
+        // 담당자가 지급 단가를 비워 두면 인플루언서가 "브랜드 매칭 받기"에 적어 둔
+        // 단가를 그대로 쓴다. 여러 후보를 한 번에 올릴 때는 폼이 하나뿐이라 사람마다
+        // 다른 단가를 넣을 자리가 없는데, 그 값은 이미 각자의 등록서에 있다 —
+        // 담당자가 브랜드에게 제시할 금액만 적으면 되도록 여기서 채운다.
+        const draftOffer = offerFromCampaign(campaign);
+        const requested = payoutByUser[username] || payoutDefaults;
+        const payout =
+          requested.fee > 0
+            ? requested
+            : { ...requested, fee: registeredPayoutFee(snapshot, draftOffer.contentFormat) };
+        const offerDraft = mergePayoutIntoOffer(draftOffer, payout);
         const res = await db.sql`
           INSERT INTO campaign_listups (
             id, campaign_id, influencer_username, source, snapshot, snapshot_at,
@@ -589,7 +616,15 @@ export default async (req: Request) => {
         // 인플루언서가 읽은 금액과 우리 기록이 달라지면 어느 쪽이 약속인지 알 수 없다.
         if (body.payout !== undefined) {
           if (listup.outreach_status === "not_sent") {
-            const payout = normalizePayout(body.payout);
+            const requested = normalizePayout(body.payout);
+            // 명단에 올릴 때와 같은 규칙 — 비워 두면 등록 단가로 되돌아간다.
+            const payout =
+              requested.fee > 0
+                ? requested
+                : {
+                    ...requested,
+                    fee: registeredPayoutFee(snapshot, normalizeOffer(listup.offer).contentFormat),
+                  };
             const nextOffer = mergePayoutIntoOffer(listup.offer, payout);
             await db.sql`
               UPDATE campaign_listups

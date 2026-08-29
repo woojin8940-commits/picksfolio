@@ -52,13 +52,22 @@ export default async (req: Request) => {
   // ── 본인 확인 ─────────────────────────────────────────────────────────────
   // 담당자 여부만 알려 준다. 다른 담당자가 누구인지는 운영 정보라 여기서 새지 않는다.
   if (req.method === "GET" && url.searchParams.get("me") === "1") {
+    // checked 는 "판정을 실제로 했는가"다. 실패를 "담당자 아님"으로 내려보내면
+    // 화면은 그 값을 확정으로 받아 담당자를 크리에이터 대시보드로 보낸다. 로그인
+    // 직후에는 세션이 막 심어지는 중이라 토큰이 아직 안 붙는 순간이 있어서, 이
+    // 구분이 없으면 같은 담당자가 어떤 때는 담당자 대시보드로, 어떤 때는 일반
+    // 대시보드로 들어간다 — 재현이 어려운 "가끔"의 정체가 이것이었다.
     const caller = await requireSignedInUser(req);
-    if (!caller.ok) return Response.json({ isManager: false, username: "" });
+    if (!caller.ok) {
+      // 401 로 답해야 화면이 세션을 다시 붙여 한 번 더 물어본다.
+      return Response.json({ isManager: false, checked: false, username: "" }, { status: 401 });
+    }
 
     if (caller.isAdmin) {
       return Response.json({
         isManager: true,
         isAdmin: true,
+        checked: true,
         username: caller.username,
         displayName: "",
       });
@@ -74,13 +83,15 @@ export default async (req: Request) => {
       return Response.json({
         isManager: !!row,
         isAdmin: false,
+        checked: true,
         username: caller.username,
         displayName: row?.display_name || "",
       });
     } catch {
       // 표가 없거나 조회가 실패하면 담당자 화면을 열지 않는다. 여는 쪽으로
-      // 실패하면 권한 없는 사람에게 담당자 대시보드가 뜬다.
-      return Response.json({ isManager: false, username: caller.username });
+      // 실패하면 권한 없는 사람에게 담당자 대시보드가 뜬다. 다만 판정을 못 했다는
+      // 사실은 그대로 알려서, 화면이 이 값을 확정으로 굳히지 않게 한다.
+      return Response.json({ isManager: false, checked: false, username: caller.username });
     }
   }
 

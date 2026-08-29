@@ -97,14 +97,34 @@ const emptyQuote = {
 };
 type QuoteForm = typeof emptyQuote;
 
+/**
+ * 후보 한 명의 값을 폼으로. 지급 단가는 아직 정한 적이 없으면 인플루언서가
+ * "브랜드 매칭 받기"에 적어 둔 단가를 채워 둔다 — 담당자는 브랜드에게 제시할
+ * 금액만 적으면 된다.
+ */
 const quoteFrom = (c: any): QuoteForm => ({
   fee: c?.quotedFee ? String(c.quotedFee) : '',
   secondUseFee: c?.quotedSecondUseFee ? String(c.quotedSecondUseFee) : '',
   guaranteedViews: c?.guaranteedViews ? String(c.guaranteedViews) : '',
   badge: c?.badge || '',
   profileLine: c?.profileLine || '',
-  payoutFee: c?.payoutFee ? String(c.payoutFee) : '',
+  payoutFee: String(c?.payoutFee || c?.registeredPayoutFee || '') || '',
   payoutSecondUseFee: c?.payoutSecondUseFee ? String(c.payoutSecondUseFee) : '',
+});
+
+/** 등록서에 적힌 단가 표기. 담당자가 채워진 값을 믿을 수 있게 원문을 함께 보여 준다. */
+type RegisteredRates = {
+  payoutFee?: number;
+  postPrice?: string;
+  shortPrice?: string;
+  adPrice?: string;
+};
+
+const registeredFrom = (c: any): RegisteredRates => ({
+  payoutFee: Number(c?.registeredPayoutFee || 0),
+  postPrice: c?.registeredPostPrice || c?.snapshot?.postPrice || '',
+  shortPrice: c?.registeredShortPrice || c?.snapshot?.shortPrice || '',
+  adPrice: c?.registeredAdPrice || c?.snapshot?.adPrice || '',
 });
 
 /** 서버로 보내는 두 덩어리. 견적은 컬럼으로, 지급액은 제안 초안으로 들어간다. */
@@ -126,7 +146,11 @@ const QuoteFields: React.FC<{
   hint?: string;
   /** 이미 제안을 보낸 후보. 지급액은 회수 전까지 고칠 수 없다. */
   payoutLocked?: boolean;
-}> = ({ value, onChange, hint, payoutLocked }) => {
+  /** 인플루언서가 등록서에 적어 둔 단가. 지급 단가 칸 아래에 원문으로 보여 준다. */
+  registered?: RegisteredRates;
+  /** 지급 단가를 비워도 되는 자리(여러 명을 한 번에 올릴 때)임을 알린다. */
+  payoutOptional?: boolean;
+}> = ({ value, onChange, hint, payoutLocked, registered, payoutOptional }) => {
   const set = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [key]: e.target.value });
   /**
@@ -151,6 +175,17 @@ const QuoteFields: React.FC<{
   // 두 값이 모두 있을 때만 차액을 말한다. 지급액이 비어 있는데 차액을 보여 주면
   // 제시가 전액이 우리 수익으로 읽힌다.
   const margin = brandAmount > 0 && payoutAmount > 0 ? brandAmount - payoutAmount : null;
+  // 등록서 원문 표기. 게시물·숏폼이 따로 적혀 있으면 둘 다 보여 준다 —
+  // 캠페인 형식과 다른 칸을 채워 넣지 않았는지 담당자가 눈으로 확인해야 한다.
+  const registeredLine = [
+    registered?.postPrice ? `게시물 ${registered.postPrice}` : '',
+    registered?.shortPrice ? `숏폼 ${registered.shortPrice}` : '',
+    !registered?.postPrice && !registered?.shortPrice && registered?.adPrice
+      ? registered.adPrice
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const rate = margin !== null && brandAmount > 0 ? Math.round((margin / brandAmount) * 100) : 0;
 
   return (
@@ -185,6 +220,17 @@ const QuoteFields: React.FC<{
             />
           </div>
         </div>
+        {registeredLine && (
+          <p className="text-[10px] font-bold text-slate-400 mt-1.5">
+            등록 단가 {registeredLine}
+            {registered?.payoutFee ? ' · 비워 두면 이 금액으로 들어갑니다' : ''}
+          </p>
+        )}
+        {payoutOptional && (
+          <p className="text-[10px] font-bold text-slate-400 mt-1">
+            비워 두면 후보마다 각자 등록해 둔 단가가 들어갑니다.
+          </p>
+        )}
         {payoutLocked && (
           <p className="text-[10px] font-bold text-amber-600 mt-1.5">
             이미 보낸 제안입니다. 지급 단가는 제안을 회수한 뒤 고칠 수 있습니다.
@@ -534,6 +580,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
               <QuoteFields
                 value={addQuote}
                 onChange={setAddQuote}
+                payoutOptional
                 hint="선택한 후보 전체에 같은 값으로 적용됩니다. 올린 뒤 한 명씩 고칠 수 있습니다."
               />
               <div className="flex justify-end">
@@ -766,7 +813,8 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                               value={quoteDraft}
                               onChange={setQuoteDraft}
                               payoutLocked={c.outreachStatus !== 'not_sent'}
-                              hint="보장 조회수를 비우면 채널 평균 조회수로 채워집니다. 지급 단가는 제안을 보낼 때 그대로 채워집니다."
+                              registered={registeredFrom(c)}
+                              hint="지급 단가는 인플루언서가 등록해 둔 단가로 채워져 있습니다. 브랜드에게 제시할 금액만 적으면 됩니다. 보장 조회수를 비우면 채널 평균 조회수로 채워집니다."
                             />
                             <div className="flex justify-end mt-2">
                               <button

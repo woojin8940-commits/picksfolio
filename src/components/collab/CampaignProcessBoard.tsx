@@ -199,7 +199,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
   const act = async (action: string, payload: Record<string, any>, okMessage: string) => {
     setBusy(true);
-    const res = await apiService.collabAction(collabId, action, payload);
+    const res = await apiService.collabAction(collabId, action, payload, undefined, role);
     setBusy(false);
     if (res.error) {
       onNotify(res.error, 'error');

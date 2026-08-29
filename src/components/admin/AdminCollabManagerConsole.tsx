@@ -159,7 +159,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
   }, [view, loadCollabs]);
 
   const refreshDetail = async (collabId: string) => {
-    const res = await apiService.getCollabDetail(collabId, token);
+    const res = await apiService.getCollabDetail(collabId, token, 'manager');
     if (res.error) {
       notify(res.error, 'error');
       return null;
@@ -231,7 +231,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
 
   const act = async (collabId: string, action: string, payload: Record<string, any> = {}) => {
     setBusy(true);
-    const res = await apiService.collabAction(collabId, action, payload, token);
+    const res = await apiService.collabAction(collabId, action, payload, token, 'manager');
     setBusy(false);
     if (res.error) {
       notify(res.error, 'error');
