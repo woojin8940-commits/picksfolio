@@ -120,7 +120,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
     }
     setAssetsFor(collabId);
     setAssetLoading(true);
-    const res = await apiService.getCollabDetail(collabId);
+    const res = await apiService.getCollabDetail(collabId, undefined, 'manager');
     setAssetLoading(false);
     if (res.error) {
       onNotify(res.error, 'error');
@@ -132,7 +132,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
 
   const refreshAssets = useCallback(async () => {
     if (!assetsFor) return;
-    const res = await apiService.getCollabDetail(assetsFor);
+    const res = await apiService.getCollabDetail(assetsFor, undefined, 'manager');
     if (!res.error) setAssetDetail(res);
   }, [assetsFor]);
 

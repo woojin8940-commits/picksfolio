@@ -1,7 +1,11 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
-import { requireAccountOwner, requireSignedInUser } from "./_shared/user-auth.mts";
-import { requireManager } from "./_shared/manager-auth.mts";
+import {
+  forbiddenResponse,
+  requireAccountOwner,
+  requireSignedInUser,
+} from "./_shared/user-auth.mts";
+import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { parseAmount } from "./_shared/collab-records.mts";
 import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
 import { buildSnapshots, mirrorCollabProposal } from "./_shared/campaign-listup.mts";
@@ -51,12 +55,20 @@ export default async (req: Request) => {
 
       // 지원자 목록에는 연락처·SNS 링크가 들어 있다. 캠페인을 등록한 브랜드와
       // 픽스폴리오 담당자만 볼 수 있다.
-      const manager = await requireManager(req);
-      let viewerRole: "manager" | "brand" = "manager";
-      if (!manager.ok) {
-        const auth = await requireAccountOwner(req, String(campaign.business_username || ""));
-        if (!auth.ok) return auth.response;
+      //
+      // 캠페인 소유자면 기본은 브랜드 화면이다. 담당자 자격은 운영 콘솔의 `nf_jwt`
+      // 쿠키만으로도 성립하므로, 담당자 판정을 먼저 하면 그 브라우저에서 자기
+      // 캠페인을 연 브랜드에게 담당자용 화면(선정 버튼 포함)이 나갔다.
+      const { account, manager, accountError } = await resolveIdentities(req);
+      const isOwner = !!account && account.username === norm(campaign.business_username || "");
+      const wantsManagerView = url.searchParams.get("viewer") === "manager";
+      let viewerRole: "manager" | "brand";
+      if (manager && (wantsManagerView || !isOwner)) {
+        viewerRole = "manager";
+      } else if (isOwner) {
         viewerRole = "brand";
+      } else {
+        return accountError || forbiddenResponse();
       }
 
       const result = await db.sql`

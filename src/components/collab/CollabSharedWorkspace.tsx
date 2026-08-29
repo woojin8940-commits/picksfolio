@@ -66,7 +66,7 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
       fileUrl,
       fileName: file.name,
       mimeType: file.type,
-    });
+    }, undefined, role);
     setBusy(false);
     if (res.error) {
       onNotify(res.error, 'error');
@@ -84,7 +84,7 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
       : '';
     if (status === 'revision' && !note) return;
     setBusy(true);
-    const res = await apiService.collabAction(collabId, 'review_asset', { assetId, status, note });
+    const res = await apiService.collabAction(collabId, 'review_asset', { assetId, status, note }, undefined, role);
     setBusy(false);
     if (res.error) onNotify(res.error, 'error');
     else {
@@ -95,7 +95,7 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
 
   const saveAdCode = async () => {
     setBusy(true);
-    const res = await apiService.collabAction(collabId, 'update_ad_code', { adCode: adCode.trim() });
+    const res = await apiService.collabAction(collabId, 'update_ad_code', { adCode: adCode.trim() }, undefined, role);
     setBusy(false);
     if (res.error) onNotify(res.error, 'error');
     else {

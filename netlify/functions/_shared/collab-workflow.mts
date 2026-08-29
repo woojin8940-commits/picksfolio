@@ -282,18 +282,36 @@ export function roleMayTransition(role: StageOwner, to: string): boolean {
 
 export type CollabRole = "manager" | "brand" | "influencer";
 
-/** 이 사람이 이 협업에서 어떤 역할인지. 담당자 여부는 호출부가 먼저 판정해 넘긴다. */
+/**
+ * 이 사람이 이 협업에서 어떤 역할인지. 담당자 여부는 호출부가 먼저 판정해 넘긴다.
+ *
+ * 한 사람이 두 역할을 동시에 들고 있을 수 있다 — 담당자 자격(운영 콘솔 쿠키)을 가진
+ * 사람이 자기 브랜드 계정으로 진행사항을 보는 경우다. 예전에는 담당자를 먼저
+ * 반환해서, 그 사람이 열 화면이 담당자용으로 바뀌었다. 브랜드에게 감춰야 할
+ * 지급 단가가 보이고, 인플루언서에게는 전달 전 브랜드 원문 피드백이 보였다.
+ *
+ * 그래서 기본값은 **당사자 역할**이다. 담당자로 일하려면 화면이 그렇게 말해야
+ * 한다(prefer="manager"). 당사자가 아닌 담당자는 그대로 담당자다.
+ */
 export function roleInCollab(
   collab: { business_username?: string; creator_username?: string },
   username: string,
   isManager: boolean,
+  prefer?: CollabRole | null,
 ): CollabRole | null {
-  if (isManager) return "manager";
   const me = norm(username);
-  if (!me) return null;
-  if (norm(collab.creator_username) === me) return "influencer";
-  if (norm(collab.business_username) === me) return "brand";
-  return null;
+  const party: CollabRole | null = !me
+    ? null
+    : norm(collab.creator_username) === me
+      ? "influencer"
+      : norm(collab.business_username) === me
+        ? "brand"
+        : null;
+
+  // 요청한 역할을 실제로 가지고 있을 때만 그 역할로 본다.
+  if (prefer && ((prefer === "manager" && isManager) || prefer === party)) return prefer;
+  if (party) return party;
+  return isManager ? "manager" : null;
 }
 
 export const norm = (raw: unknown) =>

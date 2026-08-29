@@ -88,6 +88,29 @@ function markHomeIntent(): void {
   try { sessionStorage.setItem(HOME_INTENT_KEY, Date.now().toString()); } catch {}
 }
 
+/**
+ * "담당자가 지금은 자기 크리에이터 대시보드를 보겠다"는 의사 표시.
+ *
+ * 배정된 담당자는 담당자 대시보드로만 들어가야 한다(운영자가 배정한 뜻이 그렇다).
+ * 그래서 담당자 계정이 크리에이터 대시보드에 있으면 담당자 화면으로 되돌린다.
+ * 다만 담당자도 자기 링크 페이지를 고쳐야 할 때가 있으므로, 담당자 대시보드에서
+ * "크리에이터 대시보드" 버튼으로 나온 경우에는 되돌리지 않는다. 새로고침해도
+ * 그 뜻이 살아 있어야 해서 탭 저장소에 남긴다 — 로그아웃 시 함께 지워진다.
+ */
+const CREATOR_INTENT_KEY = 'picks_manager_creator_intent';
+
+function markCreatorIntent(): void {
+  try { sessionStorage.setItem(CREATOR_INTENT_KEY, '1'); } catch {}
+}
+
+function clearCreatorIntent(): void {
+  try { sessionStorage.removeItem(CREATOR_INTENT_KEY); } catch {}
+}
+
+function hasCreatorIntent(): boolean {
+  try { return sessionStorage.getItem(CREATOR_INTENT_KEY) === '1'; } catch { return false; }
+}
+
 function hasRecentHomeIntent(): boolean {
   try {
     const stamp = sessionStorage.getItem(HOME_INTENT_KEY);
@@ -219,16 +242,17 @@ const App: React.FC = () => {
   const [isPlatformManager, setIsPlatformManager] = useState(false);
   const [managerDisplayName, setManagerDisplayName] = useState('');
   const isPlatformManagerRef = useRef(false);
-  // 아이디 로그인 직후 담당자 화면으로 한 번만 보내기 위한 표시. 로그인 처리에서는
-  // 아직 Supabase 세션이 없어서 배정 여부를 물을 수 없고, 세션이 생긴 뒤(인증 이벤트)
-  // 물어야 한다. 그 시점에 "방금 로그인해서 아직 첫 화면을 못 정했다"를 알려면
-  // 표시가 필요하다 — 이후의 토큰 갱신 이벤트에서 화면을 가로채면 안 되기 때문이다.
-  const pendingManagerRouteRef = useRef(false);
+  // 배정 여부를 실제로 확인했는지. isPlatformManager 는 false 로 시작하므로 이 값이
+  // 없으면 "아직 모름"과 "담당자 아님"을 구분할 수 없다. 그 구분이 없으면 담당자가
+  // /manager 를 새로고침할 때마다 크리에이터 대시보드로 튕겨 나간다.
+  const [managerChecked, setManagerChecked] = useState(false);
+  const managerCheckedRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { userNameRef.current = userName; }, [userName]);
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
+  useEffect(() => { managerCheckedRef.current = managerChecked; }, [managerChecked]);
 
   /**
    * 담당자 배정 여부를 서버에 물어 화면 상태에 반영한다.
@@ -244,9 +268,15 @@ const App: React.FC = () => {
    */
   const refreshManagerStatus = useCallback(async (): Promise<boolean> => {
     const status = await apiService.getMyManagerStatus();
+    // 확인하지 못했으면 아무것도 바꾸지 않는다. 로그인 직후에는 세션이 막 심어지는
+    // 중이라 토큰이 아직 안 붙는 순간이 있는데, 그때의 실패를 확정으로 받으면
+    // 배정된 담당자가 일반 대시보드로 떨어진다("가끔" 그랬던 이유다).
+    if (!status.checked) return isPlatformManagerRef.current;
     const assigned = !!status.isManager && !status.isAdmin;
     setIsPlatformManager(assigned);
     isPlatformManagerRef.current = assigned;
+    setManagerChecked(true);
+    managerCheckedRef.current = true;
     setManagerDisplayName(assigned ? status.displayName || '' : '');
     return assigned;
   }, []);
@@ -727,8 +757,8 @@ const App: React.FC = () => {
           // Set loginTransitioning BEFORE clearing oauthProcessing to prevent
           // a brief flash of the login page between the two state updates.
           setLoginTransitioning(true);
-          // 이 경로에서 첫 화면을 정했으므로, 인증 이벤트 쪽에서 한 번 더 옮기지 않는다.
-          pendingManagerRouteRef.current = false;
+          // 새 로그인이므로 이전 세션의 "크리에이터 대시보드를 보겠다"는 표시는 지운다.
+          clearCreatorIntent();
           if (userRole === 'admin') {
             navigate('operator');
           } else if (managerAssigned) {
@@ -885,19 +915,11 @@ const App: React.FC = () => {
           // 크리에이터 대시보드만 보고, 담당자 대시보드로 가는 버튼도 뜨지 않는다.
           //
           // 세션이 막 만들어진 직후(로그인 처리에서 setSession 을 부른 결과)라서
-          // 여기가 배정 여부를 물을 수 있는 첫 시점이다. 화면 이동은 "방금 로그인해
-          // 첫 화면을 정하는 중"일 때만 한다 — 이 분기는 이후 토큰 갱신에서도
-          // 실행되므로, 조건 없이 옮기면 담당자가 자기 크리에이터 대시보드를 보다가
-          // 갑자기 담당자 화면으로 끌려간다.
-          const routeAfterLogin = pendingManagerRouteRef.current;
-          pendingManagerRouteRef.current = false;
-          refreshManagerStatus()
-            .then((assigned) => {
-              if (assigned && routeAfterLogin && viewRef.current === 'admin') {
-                navigate('manager');
-              }
-            })
-            .catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
+          // 여기가 배정 여부를 물을 수 있는 첫 시점이다. 화면 이동은 하지 않는다 —
+          // 예전에는 여기서 viewRef.current 를 보고 옮겼는데, viewRef 는 렌더가 끝난
+          // 뒤의 효과에서 채워지므로 확인이 빨리 끝나면 아직 'login' 이었고 이동이
+          // 조용히 버려졌다. 담당자 라우팅은 아래의 선언적 효과 한 곳에서만 한다.
+          refreshManagerStatus().catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
           return;
         }
         // Skip re-processing for TOKEN_REFRESHED if user is already settled on a page
@@ -973,9 +995,11 @@ const App: React.FC = () => {
       setUserName('');
       setProfileChecked(false);
       loginNavigationHandledRef.current = false;
-      pendingManagerRouteRef.current = false;
       isPlatformManagerRef.current = false;
       setIsPlatformManager(false);
+      managerCheckedRef.current = false;
+      setManagerChecked(false);
+      clearCreatorIntent();
       setManagerDisplayName('');
       // 이 탭 슬롯의 키만 지운다(다른 탭의 계정은 그대로 살아 있어야 한다).
       ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
@@ -1163,6 +1187,36 @@ const App: React.FC = () => {
     }
   }, [isLoggedIn, userName, isBusinessLoggedIn, businessUsername]);
 
+  /**
+   * 담당자 라우팅 — 배정된 계정은 담당자 대시보드로만 들어간다.
+   *
+   * 예전에는 로그인 경로마다(세션 복원 · 인증 이벤트 · 아이디 로그인 안전장치)
+   * `viewRef.current === 'admin'` 을 확인하고 navigate 를 불렀다. viewRef 는 렌더가
+   * 끝난 뒤의 효과에서 채워지므로, 배정 확인이 빨리 끝나면 그 값이 아직 'login'
+   * 이었고 이동이 조용히 버려졌다 — 같은 계정이 어떤 때는 담당자 대시보드로, 어떤
+   * 때는 일반 대시보드로 들어가던 이유다. 판정이 끝난 상태를 보고 옮기는 효과 하나로
+   * 합쳐서 그 경합을 없앤다.
+   *
+   * 담당자가 "크리에이터 대시보드" 버튼으로 직접 나온 경우에는 되돌리지 않는다.
+   */
+  useEffect(() => {
+    if (!isLoggedIn || !managerChecked || !isPlatformManager) return;
+    if (view !== 'admin') return;
+    if (hasCreatorIntent()) return;
+    navigate('manager');
+  }, [isLoggedIn, managerChecked, isPlatformManager, view]);
+
+  /**
+   * /manager 를 직접 열었거나 새로고침한 경우의 배정 확인.
+   *
+   * 로그인 경로를 거치지 않고 이 주소로 들어오면 아무도 배정 여부를 묻지 않는다.
+   * 묻지 않으면 화면은 "권한 확인 중" 에서 멈춘다.
+   */
+  useEffect(() => {
+    if (view !== 'manager' || !isLoggedIn || managerChecked) return;
+    refreshManagerStatus().catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
+  }, [view, isLoggedIn, managerChecked, refreshManagerStatus]);
+
   // Clear login transition after a brief delay to allow state to settle
   useEffect(() => {
     // 담당자 대시보드도 로그인 직후 도착지가 될 수 있다. 여기에 'manager' 가 빠져
@@ -1349,9 +1403,11 @@ const App: React.FC = () => {
     loginNavigationHandledRef.current = false;
     // 다음 사람이 같은 브라우저로 로그인할 때 앞사람의 담당자 권한이 남아 있으면
     // 안 된다. 서버에 다시 물어 정해질 값이므로 여기서는 비워만 둔다.
-    pendingManagerRouteRef.current = false;
     isPlatformManagerRef.current = false;
     setIsPlatformManager(false);
+    managerCheckedRef.current = false;
+    setManagerChecked(false);
+    clearCreatorIntent();
     setManagerDisplayName('');
     setProfileChecked(false);
     setIsLoggedIn(false);
@@ -1529,7 +1585,12 @@ const App: React.FC = () => {
     }
     // 배정 확인이 끝나기 전에는 아무것도 렌더하지 않는다. 담당자 여부를 모르는
     // 동안 화면을 열면 배정되지 않은 계정에게 명부가 잠깐 보인다.
-    if (!profileChecked && supabase) {
+    //
+    // 여는 쪽으로도, 닫는 쪽으로도 서두르지 않는다. isPlatformManager 는 false 로
+    // 시작하므로 판정 전에 "담당자 아님"으로 읽으면 새로고침한 담당자가 매번
+    // 크리에이터 대시보드로 튕겨 나간다 — 그래서 판정(managerChecked)이 끝날
+    // 때까지는 스피너를 둔다.
+    if ((!profileChecked || !managerChecked) && supabase) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
           <div className="text-center">
@@ -1549,7 +1610,11 @@ const App: React.FC = () => {
           username={userName}
           displayName={managerDisplayName}
           onLogout={handleLogout}
-          onNavigateCreator={() => navigate('admin')}
+          onNavigateCreator={() => {
+            // 담당자가 직접 나온 것이므로 담당자 라우팅 효과가 되돌리지 않는다.
+            markCreatorIntent();
+            navigate('admin');
+          }}
         />
       </LazyRoute>
     );
@@ -1678,7 +1743,10 @@ const App: React.FC = () => {
             여기에 들어가는 문을 하나 둔다. */}
         {isPlatformManager && (
           <button
-            onClick={() => navigate('manager')}
+            onClick={() => {
+              clearCreatorIntent();
+              navigate('manager');
+            }}
             className="fixed bottom-5 right-5 z-50 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl text-xs font-black hover:bg-slate-700"
           >
             담당자 대시보드
@@ -1756,10 +1824,12 @@ const App: React.FC = () => {
               setLoginTransitioning(true);
               // 담당자로 배정된 계정이면 첫 화면은 담당자 대시보드다. 다만 이 시점에는
               // Supabase 세션이 아직 없어서(로그인 화면이 이 콜백 뒤에 setSession 을
-              // 부른다) 배정 여부를 물을 수 없다. 표시만 남기고, 세션이 생긴 직후
-              // 인증 이벤트에서 확인해 옮긴다. 그동안은 예전처럼 크리에이터
-              // 대시보드로 가 두므로, 담당자가 아니면 아무 것도 달라지지 않는다.
-              pendingManagerRouteRef.current = true;
+              // 부른다) 배정 여부를 물을 수 없다. 그래서 여기서는 예전처럼 크리에이터
+              // 대시보드로 가 두고, 세션이 생긴 뒤 확인이 끝나면 담당자 라우팅 효과가
+              // 담당자 화면으로 옮긴다. 새 로그인이므로 앞 세션이 남긴 "크리에이터
+              // 대시보드를 보겠다"는 표시는 지운다 — 그 표시가 남아 있으면 담당자가
+              // 로그인해도 담당자 화면으로 가지 못한다.
+              clearCreatorIntent();
               // Clear any previous user's cached data before setting new user.
               // 지우는 범위는 이 탭 슬롯 · 비즈니스 키 제외로 제한한다.
               const prevUser = sessionGet('picks_user_session');
@@ -1771,15 +1841,10 @@ const App: React.FC = () => {
               setUserName(id);
               setIsLoggedIn(true);
               // 인증 이벤트가 오지 않는 경우(세션 심기가 실패했거나 토큰이 비어서
-              // 왔을 때)를 위한 안전장치. 표시가 아직 남아 있으면 여기서 한 번 묻는다.
+              // 왔을 때)를 위한 안전장치. 아직 판정하지 못했으면 한 번 더 묻는다.
               window.setTimeout(() => {
-                if (!pendingManagerRouteRef.current) return;
-                pendingManagerRouteRef.current = false;
-                refreshManagerStatus()
-                  .then((assigned) => {
-                    if (assigned && viewRef.current === 'admin') navigate('manager');
-                  })
-                  .catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
+                if (managerCheckedRef.current) return;
+                refreshManagerStatus().catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
               }, 1500);
               if (hasSiteData) {
                 navigate('admin');

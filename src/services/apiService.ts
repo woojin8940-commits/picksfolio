@@ -676,6 +676,9 @@ const writeVerificationCache = (username: string, data: SellerVerification | nul
   }
 };
 
+/** 협업 API 를 어느 화면에서 부르는지. 서버가 역할을 고를 때 쓴다. */
+export type CollabViewerRole = 'brand' | 'influencer' | 'manager';
+
 export const apiService = {
   async getSiteData(username: string, opts?: { force?: boolean }): Promise<SiteData | null> {
     const key = username.toLowerCase();
@@ -2009,16 +2012,20 @@ export const apiService = {
     }
   },
 
-  async getCollabDetail(collabId: string, token?: string): Promise<any> {
+  /**
+   * 협업 상세. `role` 은 "어떤 화면에서 열었는지"를 서버에 알려 준다 — 담당자
+   * 자격과 당사자 계정을 겹쳐 가진 사람이 있어서, 알려주지 않으면 서버가 역할을
+   * 잘못 골라 브랜드에게 지급 단가가 보이거나 담당자 콘솔이 브랜드 화면으로 나온다.
+   */
+  async getCollabDetail(collabId: string, token?: string, role?: CollabViewerRole): Promise<any> {
     try {
+      const path = `/api/collab-workflow/${encodeURIComponent(collabId)}${role ? `?role=${role}` : ''}`;
       const res = token
-        ? await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
+        ? await fetch(path, {
             credentials: 'same-origin',
             headers: await collabHeaders(token),
           })
-        : await authedGet(`/api/collab-workflow/${encodeURIComponent(collabId)}`, () =>
-            collabHeaders(),
-          );
+        : await authedGet(path, () => collabHeaders());
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '협업 정보를 불러오지 못했습니다.' };
       return json;
@@ -2034,9 +2041,11 @@ export const apiService = {
     action: string,
     payload: Record<string, any> = {},
     token?: string,
+    role?: CollabViewerRole,
   ): Promise<{ success?: boolean; error?: string; [k: string]: any }> {
     try {
-      const res = await fetch(`/api/collab-workflow/${encodeURIComponent(collabId)}`, {
+      const path = `/api/collab-workflow/${encodeURIComponent(collabId)}${role ? `?role=${role}` : ''}`;
+      const res = await fetch(path, {
         method: 'PATCH',
         credentials: 'same-origin',
         headers: await collabHeaders(token),
@@ -2418,6 +2427,8 @@ export const apiService = {
   async getMyManagerStatus(): Promise<{
     isManager: boolean;
     isAdmin?: boolean;
+    /** 서버가 실제로 판정했는지. false 면 "담당자 아님"이 아니라 "아직 모름"이다. */
+    checked: boolean;
     username?: string;
     displayName?: string;
   }> {
@@ -2429,7 +2440,10 @@ export const apiService = {
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return json as { isManager: boolean; isAdmin?: boolean; username?: string; displayName?: string };
+      return {
+        ...(json as { isManager: boolean; isAdmin?: boolean; username?: string; displayName?: string }),
+        checked: (json as any)?.checked !== false,
+      };
     };
 
     try {
@@ -2440,7 +2454,9 @@ export const apiService = {
         return await ask();
       } catch (second) {
         console.error('[API] Failed to resolve manager status:', first, second);
-        return { isManager: false };
+        // 확인 실패다. isManager:false 를 확정으로 쓰면 담당자가 일반 대시보드로
+        // 떨어지므로, 판정하지 못했다는 사실을 함께 돌려준다.
+        return { isManager: false, checked: false };
       }
     }
   },

@@ -1,7 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
-import { requireSignedInUser } from "./_shared/user-auth.mts";
-import { requireManager } from "./_shared/manager-auth.mts";
+import { resolveIdentities } from "./_shared/manager-auth.mts";
 import { addSettlementForProposal, upsertCollabScheduleRecord } from "./_shared/collab-records.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
@@ -43,19 +42,33 @@ import {
  */
 
 type CallerContext = {
+  /**
+   * 자원을 찾을 때 쓰는 아이디. **서비스 계정이 있으면 항상 그 아이디**이고,
+   * 담당자 자격만으로 들어온 경우(운영 콘솔)에만 담당자 아이디가 들어온다.
+   */
   username: string;
   isManager: boolean;
   managerUsername: string;
 };
 
+/**
+ * 호출자를 확인한다. 담당자 자격과 서비스 계정을 **겹쳐서** 들고 있는 사람이
+ * 있으므로 (운영 콘솔에 로그인한 브라우저에서 자기 브랜드 계정으로 서비스 화면을
+ * 쓰는 경우 — Netlify Identity 는 `nf_jwt` 쿠키만으로도 인증이 성립한다) 둘 중
+ * 하나를 골라 덮어쓰지 않는다. 예전에는 담당자 판정이 먼저여서 호출자 아이디가
+ * 담당자 아이디로 바뀌었고, "내 협업" 조회가 존재하지 않는 이름으로 나가
+ * 인플루언서 캠페인 이력과 브랜드 진행사항이 동시에 비어 보였다.
+ */
 async function resolveCaller(req: Request): Promise<CallerContext | { error: Response }> {
-  const manager = await requireManager(req);
-  if (manager.ok) {
-    return { username: manager.managerUsername, isManager: true, managerUsername: manager.managerUsername };
+  const { account, manager, accountError } = await resolveIdentities(req);
+  if (!account && !manager) {
+    return { error: accountError || jsonError("로그인이 필요합니다.", 401) };
   }
-  const user = await requireSignedInUser(req);
-  if (!user.ok) return { error: user.response };
-  return { username: user.username, isManager: false, managerUsername: "" };
+  return {
+    username: account?.username || manager?.username || "",
+    isManager: !!manager,
+    managerUsername: manager?.username || "",
+  };
 }
 
 const jsonError = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -599,15 +612,19 @@ export default async (req: Request, context: Context) => {
   // 브랜드 판정에는 캠페인 소유자도 넣는다. 협업 행의 business_username 이 비어
   // 있거나 `biz/` 표기가 섞인 예전 건에서, 캠페인을 등록한 당사자가 자기 협업을
   // 열지 못하고 403 을 받는 일이 있었다.
-  const role = roleInCollab(
-    { ...collab, business_username: collab.business_username || collab.campaign_owner_username },
-    caller.username,
-    caller.isManager,
-  ) || roleInCollab(
-    { ...collab, business_username: collab.campaign_owner_username },
-    caller.username,
-    caller.isManager,
-  );
+  //
+  // 화면이 어떤 역할로 왔는지도 함께 넘긴다. 담당자 자격과 당사자 계정을 겹쳐 가진
+  // 사람이 있어서, 요청한 역할을 알려주지 않으면 담당자 콘솔에서 자기 캠페인을
+  // 열었을 때 브랜드 화면이 나오거나 그 반대가 된다.
+  const requestedRole = ((): CollabRole | null => {
+    const raw = (url.searchParams.get("role") || "").toLowerCase();
+    return raw === "manager" || raw === "brand" || raw === "influencer" ? raw : null;
+  })();
+  const roleWith = (business: string) =>
+    roleInCollab({ ...collab, business_username: business }, caller.username, caller.isManager, requestedRole);
+  const role =
+    roleWith(collab.business_username || collab.campaign_owner_username) ||
+    roleWith(collab.campaign_owner_username);
   if (!role) return jsonError("이 협업에 접근할 수 없습니다.", 403);
 
   // ------------------------------------------------------------------ 상세
