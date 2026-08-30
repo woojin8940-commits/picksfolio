@@ -10,6 +10,7 @@ import {
   viewsOnMedia,
   type MetaLink,
 } from "./instagram-metrics.mts";
+import { readCachedInsights } from "./creator-insights.mts";
 
 /**
  * 브랜드 계정이 태그·언급된 콘텐츠 목록.
@@ -87,9 +88,10 @@ const CACHE_STORE = "business-tagged-media";
  * 예전 판에는 조회수를 채우지 않은 항목과 브랜드 자기 게시물이 없다. 키를 그대로 두면
  * 이미 캐시가 있는 브랜드는 TTL 이 끝날 때까지 조회수 없는 화면을 계속 본다. v3 부터는
  * 릴스가 아닌 게시물에도 조회수를 물어보고(isReelLike 주석 참고), 왜 비었는지를 함께
- * 담는다.
+ * 담는다. v4 부터는 크리에이터 인사이트 캐시에 남아 있는 편별 조회수를 먼저 가져다
+ * 쓴다 — 이미 캐시가 있는 브랜드가 그 이득을 보려면 키가 달라져야 한다.
  */
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 
 /**
  * 조회수를 지금 채워 볼 콘텐츠 수 상한.
@@ -173,10 +175,12 @@ export interface TaggedMediaPayload {
   viewsFill: {
     /** 조회수가 비어 있어 물어볼 후보로 잡힌 콘텐츠 수. */
     candidates: number;
-    /** 실제로 물어본 수(상한에 걸려 뒤쪽은 빠질 수 있다). */
+    /** 실제로 메타에 물어본 수(상한에 걸려 뒤쪽은 빠질 수 있다). */
     attempted: number;
-    /** 값을 받아 채운 수. */
+    /** 메타에 물어봐서 채운 수. */
     filled: number;
+    /** 이미 받아 둔 값(크리에이터 인사이트 캐시)으로 채운 수. 메타 호출 없이 채운 몫. */
+    fromCache: number;
     /** 올린 계정의 연동을 찾을 수 없어 물어보지도 못한 수. */
     noToken: number;
   };
@@ -449,11 +453,12 @@ const isReelLike = (m: TaggedMedia): boolean => {
  * 많다. 그 계정을 마지막으로 동기화한 시점에 인사이트 권한이 없었거나, 올린 직후라
  * 집계 전이었기 때문이다. 그리고 저장된 피드(사진·캐러셀)에는 조회수 칸이 아예 없다.
  * 그 값을 그대로 쓰면 브랜드 화면의 "총 조회수" 는 계속 '—' 로 비고, 사람은 새로
- * 불러오기를 눌러도 같은 화면을 본다. 그래서 목록을 만드는 그 자리에서 게시물 주인의
- * 토큰으로 한 편씩 물어본다.
+ * 불러오기를 눌러도 같은 화면을 본다.
  *
- * 릴스를 먼저 물어본다. 상한에 걸려 다 못 물어볼 때 남겨야 하는 것은 값이 큰 쪽이고,
- * 브랜드가 성과로 읽는 숫자도 릴스 조회수다.
+ * 두 단계로 채운다. 먼저 크리에이터 인사이트 캐시에 이미 남아 있는 편별 조회수를
+ * 가져다 쓰고(메타 호출 0회), 그래도 빈 것만 게시물 주인의 토큰으로 물어본다. 순서가
+ * 중요하다 — 인사이트 권한이 승인되기 전에 발급된 토큰으로는 두 번째 단계가 거의 다
+ * 실패하므로, 캐시를 먼저 보지 않으면 우리가 이미 가진 숫자를 못 쓰고 버린다.
  *
  * 못 받은 값은 0 으로 접지 않고 null 로 남긴다 — 조회수 0 과 "조회수를 못 받음" 은
  * 화면에서 다른 말이어야 한다. 대신 몇 편을 물어봤고 몇 편은 물어볼 토큰조차 없었는지
@@ -464,18 +469,60 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<TaggedMediaPayloa
   // 남의 게시물)은 물어볼 토큰 자체가 없다.
   const empty = items.filter((m) => m.views === null && m.id);
   const candidates = empty.filter((m) => m.authorUsername);
-  const targets = [
-    ...candidates.filter(isReelLike),
-    ...candidates.filter((m) => !isReelLike(m)),
-  ].slice(0, VIEW_FILL_LIMIT);
 
   const fill: TaggedMediaPayload["viewsFill"] = {
     candidates: empty.length,
-    attempted: targets.length,
+    attempted: 0,
     filled: 0,
+    fromCache: 0,
     // 올린 계정이 우리 서비스 사용자가 아니면 인사이트를 물어볼 토큰이 없다.
     noToken: empty.length - candidates.length,
   };
+  if (candidates.length === 0) return fill;
+
+  /**
+   * 1단계 — 이미 받아 둔 값으로 채운다. 메타 호출은 한 번도 없다.
+   *
+   * 크리에이터가 자기 화면에서 릴스 성과를 열면 편별 조회수가 creator-insights 캐시에
+   * 남는다. 같은 게시물이 브랜드의 태그 목록에도 있으니, 그 값을 그대로 쓰면 된다.
+   * 이 단계가 없으면 인사이트 승인 전에 발급된 토큰(대다수)으로는 아래 2단계가 다
+   * 실패하고, 브랜드 화면의 조회수는 이유 없이 계속 비어 있다 — 정작 그 숫자는 우리가
+   * 이미 가지고 있는데도.
+   *
+   * 오래된 값이어도 쓴다. 조회수는 시간이 지나며 늘기만 하므로 과소 집계일 뿐 틀린
+   * 방향은 아니고, 화면에는 언제 받은 값인지 함께 적힌다.
+   */
+  const cachedViews = new Map<string, Map<string, number>>();
+  for (const username of new Set(candidates.map((m) => m.authorUsername))) {
+    const payload = await readCachedInsights(username);
+    const byId = new Map<string, number>();
+    for (const reel of payload?.reels || []) {
+      const views = Number(reel?.views);
+      // 0 은 담지 않는다. 캐시의 0 은 "아무도 안 봤다"가 아니라 "그때도 못 받았다"인
+      // 경우가 대부분이고, 그 값을 채우면 아래 2단계가 다시 물어볼 기회를 잃는다.
+      if (reel?.id && Number.isFinite(views) && views > 0) byId.set(String(reel.id), views);
+    }
+    cachedViews.set(username, byId);
+  }
+  for (const m of candidates) {
+    const value = cachedViews.get(m.authorUsername)?.get(String(m.id));
+    if (value === undefined) continue;
+    m.views = value;
+    fill.fromCache += 1;
+  }
+
+  /**
+   * 2단계 — 그래도 빈 것만 게시물 주인의 토큰으로 물어본다.
+   *
+   * 릴스를 먼저 물어본다. 상한에 걸려 다 못 물어볼 때 남겨야 하는 것은 값이 큰 쪽이고,
+   * 브랜드가 성과로 읽는 숫자도 릴스 조회수다.
+   */
+  const remaining = candidates.filter((m) => m.views === null);
+  const targets = [
+    ...remaining.filter(isReelLike),
+    ...remaining.filter((m) => !isReelLike(m)),
+  ].slice(0, VIEW_FILL_LIMIT);
+  fill.attempted = targets.length;
   if (targets.length === 0) return fill;
 
   // 계정별 연동은 한 번만 읽는다. 한 인플루언서가 여러 편을 올렸을 때 같은 블롭을
@@ -702,7 +749,7 @@ export async function getTaggedMedia(
     ownItems: own.items,
     tagsApi: { ok: tags.ok, reason: tags.reason },
     scannedCreators: scan.creators,
-    viewsFilled: fill.filled + own.viewsFilled,
+    viewsFilled: fill.filled + fill.fromCache + own.viewsFilled,
     viewsFill: fill,
     fetchedAt: new Date().toISOString(),
   };

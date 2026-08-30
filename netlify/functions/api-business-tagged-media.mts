@@ -150,7 +150,7 @@ export default async (req: Request) => {
        * 없는 값을 화면이 세면 "물어본 게 0편" 처럼 읽힌다.
        */
       viewsFill:
-        payload.viewsFill ?? { candidates: 0, attempted: 0, filled: 0, noToken: 0 },
+        payload.viewsFill ?? { candidates: 0, attempted: 0, filled: 0, fromCache: 0, noToken: 0 },
       fetchedAt: payload.fetchedAt,
       cached: result.cached,
       cacheTtlHours: CACHE_TTL_HOURS,

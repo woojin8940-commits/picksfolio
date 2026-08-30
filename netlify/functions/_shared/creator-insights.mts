@@ -263,6 +263,29 @@ async function readCache(
   }
 }
 
+/**
+ * 굳혀 둔 값을 유효기간 없이 읽는다.
+ *
+ * 태그된 콘텐츠 목록이 쓴다. 그쪽은 "이 값이 최신인가"보다 "조회수를 한 줄이라도
+ * 채울 수 있는가"가 중요하다 — 크리에이터가 자기 화면에서 릴스 성과를 한 번이라도
+ * 열었으면 그때 받아 둔 편별 조회수가 여기 남아 있고, 그 값은 메타를 다시 부르지
+ * 않고도 쓸 수 있다. 며칠 전 숫자라도 빈칸보다는 브랜드에게 훨씬 쓸모 있고, 화면에는
+ * 언제 받은 값인지 함께 적힌다.
+ *
+ * TTL 을 보는 `readCache` 와 굳이 나눈 이유는, 크리에이터 화면은 오래된 값을 그대로
+ * 보여주면 안 되기 때문이다(그쪽은 30분이 지나면 다시 받는다).
+ */
+export async function readCachedInsights(username: string): Promise<InsightsPayload | null> {
+  try {
+    const store = getStore({ name: CACHE_STORE, consistency: "eventual" });
+    const cached = (await store.get(cacheKey(username), { type: "json" })) as InsightsPayload | null;
+    return cached?.fetchedAt ? cached : null;
+  } catch (e) {
+    console.warn("[creator-insights] 캐시 읽기 실패:", (e as Error)?.message);
+    return null;
+  }
+}
+
 async function writeCache(username: string, payload: InsightsPayload): Promise<void> {
   try {
     const store = getStore({ name: CACHE_STORE, consistency: "eventual" });

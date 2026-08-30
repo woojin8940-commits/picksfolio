@@ -1088,6 +1088,29 @@ export default async (req: Request, context: Context) => {
             UPDATE collab_stages SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
           `;
         }
+
+        /**
+         * 이 단계에 열려 있던 피드백을 반영 완료로 닫는다.
+         *
+         * 예전에는 인플루언서 화면의 피드백마다 "반영했어요" / "어려워요" 버튼이
+         * 있었고, 그것을 눌러야 이 상태가 바뀌었다. 그런데 인플루언서가 실제로 하는
+         * 일은 하나다 — 피드백을 읽고 기획안을 고쳐 다시 저장한다. 저장 뒤에 버튼을
+         * 한 번 더 누르는 것은 그 작업과 별개의 숙제여서 대부분 눌리지 않았고, 브랜드
+         * 화면에는 "반영 표시가 되지 않은 피드백 N개"가 영원히 남았다. 다시 제출하는
+         * 행위 자체를 반영으로 읽으면 그 어긋남이 없어진다.
+         *
+         * 새 버전을 낸 것이므로 닫는 대상은 이 단계에 남아 있던 것 전부다. 미반영
+         * (wont_apply)으로 이미 사유를 남긴 것은 건드리지 않는다 — 그것은 "고치지
+         * 않기로 했다"는 별개의 결론이고, 덮어쓰면 브랜드가 읽은 사유가 사라진다.
+         */
+        await db.sql`
+          UPDATE collab_feedbacks
+             SET status = 'applied', resolved_by = ${caller.username}, resolved_at = NOW()
+           WHERE collab_id = ${collabId}
+             AND stage_key = ${stageKey}
+             AND status IN ('open', 'relayed')
+        `;
+
         if (stepKey === "upload") {
           await db.sql`
             UPDATE campaign_collabs
@@ -1111,7 +1134,14 @@ export default async (req: Request, context: Context) => {
       }
 
       // 브랜드: 기획안 · 영상 바로 아래에 남기는 피드백 -------------------
-      case "step_feedback": {
+      //
+      // 한 칸씩 보내는 경로(step_feedback)와 여러 칸을 모아 한 번에 저장하는 경로
+      // (step_feedback_batch)를 같은 자리에서 처리한다. 저장되는 모양은 완전히 같아야
+      // 한다 — 장면 하나하나가 자기 anchor 를 가진 별개의 행이다. 여러 칸을 한 덩어리
+      // 글로 합쳐 저장하면 인플루언서 화면에서 그 말이 어느 장면 아래에 붙을지 알 수
+      // 없어지고, 장면으로 나눠 받는 의미가 사라진다.
+      case "step_feedback":
+      case "step_feedback_batch": {
         if (role !== "brand" && role !== "manager") {
           return jsonError("피드백은 브랜드가 남깁니다.", 403);
         }
@@ -1119,8 +1149,6 @@ export default async (req: Request, context: Context) => {
         if (!["guide", "shipping", "plan", "video", "upload"].includes(stepKey)) {
           return jsonError("잘못된 단계입니다.");
         }
-        const bodyText = String((body as any).body || "").trim().slice(0, 4000);
-        if (!bodyText) return jsonError("피드백 내용을 입력해 주세요.");
 
         /**
          * 피드백이 붙는 자리.
@@ -1129,10 +1157,28 @@ export default async (req: Request, context: Context) => {
          * 남아야 한다. 자리를 비워 보내면 예전처럼 단계 전체에 대한 말이 된다.
          * `scene:3` 꼴만 받는다 — 화면이 읽을 수 있는 형식은 그것뿐이다.
          */
-        const rawAnchor = String((body as any).anchor || "").trim();
-        const sceneMatch = /^scene:(\d{1,3})$/.exec(rawAnchor);
-        if (rawAnchor && !sceneMatch) return jsonError("잘못된 피드백 위치입니다.");
-        const anchor = sceneMatch ? rawAnchor : stepKey;
+        const readAnchor = (raw: unknown): { anchor: string; scene: string | null } | null => {
+          const rawAnchor = String(raw || "").trim();
+          if (!rawAnchor) return { anchor: stepKey, scene: null };
+          const m = /^scene:(\d{1,3})$/.exec(rawAnchor);
+          if (!m) return null;
+          return { anchor: rawAnchor, scene: m[1] };
+        };
+
+        // 한 칸이든 여러 칸이든 이 배열 하나로 모은다.
+        const rawItems = Array.isArray((body as any).items)
+          ? ((body as any).items as any[]).slice(0, 60)
+          : [{ anchor: (body as any).anchor, body: (body as any).body }];
+
+        const entries: { anchor: string; scene: string | null; body: string }[] = [];
+        for (const raw of rawItems) {
+          const text = String(raw?.body || "").trim().slice(0, 4000);
+          if (!text) continue;
+          const at = readAnchor(raw?.anchor);
+          if (!at) return jsonError("잘못된 피드백 위치입니다.");
+          entries.push({ ...at, body: text });
+        }
+        if (entries.length === 0) return jsonError("피드백 내용을 입력해 주세요.");
 
         // 이 피드백은 인플루언서에게 바로 보인다.
         //
@@ -1141,38 +1187,53 @@ export default async (req: Request, context: Context) => {
         // 입력칸 바로 밑에 달린 칸에 쓴 말은 그 기획안에 대한 답이고, 답이 한 사람을
         // 더 거치면 그 자리에 있을 이유가 없다.
         const stage = await resolveStepStage(db, collabId, stepKey);
-        const id = newId("cf");
+        const stageKey = stage?.stage_key || stepKey;
         const deliverableRows = (await db.sql`
           SELECT id FROM collab_deliverables
-          WHERE collab_id = ${collabId} AND stage_key = ${stage?.stage_key || stepKey}
+          WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
           ORDER BY version DESC LIMIT 1
         `) as any[];
-        await db.sql`
-          INSERT INTO collab_feedbacks (
-            id, collab_id, deliverable_id, stage_key, anchor, body,
-            author_type, author_username, visible_to_influencer
-          ) VALUES (
-            ${id}, ${collabId}, ${deliverableRows?.[0]?.id || null},
-            ${stage?.stage_key || stepKey}, ${anchor}, ${bodyText},
-            ${role}, ${caller.username}, TRUE
-          )
-        `;
+        const deliverableId = deliverableRows?.[0]?.id || null;
+
+        const ids: string[] = [];
+        for (const entry of entries) {
+          const id = newId("cf");
+          await db.sql`
+            INSERT INTO collab_feedbacks (
+              id, collab_id, deliverable_id, stage_key, anchor, body,
+              author_type, author_username, visible_to_influencer
+            ) VALUES (
+              ${id}, ${collabId}, ${deliverableId},
+              ${stageKey}, ${entry.anchor}, ${entry.body},
+              ${role}, ${caller.username}, TRUE
+            )
+          `;
+          ids.push(id);
+        }
+
         // 피드백이 왔다는 것은 다시 인플루언서 차례라는 뜻이다.
         if (stage && stage.status === "submitted" && isProcessV1(collab.template_key)) {
           await db.sql`UPDATE collab_stages SET status = 'revision', updated_at = NOW() WHERE id = ${stage.id}`;
         }
 
+        // 원장에는 한 줄만 남긴다. 장면마다 한 줄씩 쌓으면 이력이 같은 시각의 같은
+        // 문장 다섯 줄로 채워져, 정작 "언제 무슨 일이 있었나"를 읽을 수 없게 된다.
+        const stepName = stepKey === "plan" ? "기획안" : stepKey === "video" ? "영상" : "진행";
+        const scenes = entries.map((e) => e.scene).filter(Boolean) as string[];
         await logCollabEvent(db, {
           collabId,
           type: "feedback_sent",
           ...actor,
-          stageKey: stage?.stage_key || stepKey,
-          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "영상" : "진행"}${
-            sceneMatch ? ` 장면 ${sceneMatch[1]}` : ""
-          } 피드백 전달`,
-          payload: { feedbackId: id, step: stepKey, anchor },
+          stageKey,
+          summary:
+            entries.length === 1
+              ? `${stepName}${scenes.length === 1 ? ` 장면 ${scenes[0]}` : ""} 피드백 전달`
+              : `${stepName} 피드백 ${entries.length}건 전달${
+                  scenes.length > 0 ? ` (장면 ${scenes.join(", ")})` : ""
+                }`,
+          payload: { feedbackIds: ids, feedbackId: ids[0], step: stepKey, count: entries.length },
         });
-        return Response.json({ success: true, feedbackId: id });
+        return Response.json({ success: true, feedbackId: ids[0], feedbackIds: ids, count: ids.length });
       }
 
       // 단계 확인 완료 ----------------------------------------------------

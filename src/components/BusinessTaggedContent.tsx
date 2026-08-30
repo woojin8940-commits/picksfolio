@@ -271,6 +271,7 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
     if (!allViews) return '';
     if (allViews.counted === 0) {
       if (fill && fill.noToken > 0) return '올린 계정의 연동이 없어 조회할 수 없습니다';
+      if (fill && fill.candidates > 0) return '인스타그램이 아직 조회수를 주지 않았습니다';
       return '아직 집계된 조회수가 없습니다';
     }
     if (allViews.counted < allViews.of) return `조회수가 있는 ${allViews.counted}개 기준`;
@@ -866,13 +867,15 @@ const CoverageNote: React.FC<{ data: TaggedMediaResponse | null }> = ({ data }) 
       {fill && fill.candidates > 0 && (
         <p className="text-[10px] md:text-[11px] font-bold text-slate-500 leading-relaxed mt-1">
           이번 조회에서 조회수가 비어 있던 {fill.candidates.toLocaleString()}개 중{' '}
-          {fill.attempted.toLocaleString()}개를 인스타그램에 다시 물어봐{' '}
-          {fill.filled.toLocaleString()}개를 채웠습니다.
+          {((fill.fromCache || 0) + fill.filled).toLocaleString()}개를 채웠습니다.
+          {(fill.fromCache || 0) > 0
+            ? ` (${(fill.fromCache || 0).toLocaleString()}개는 인플루언서 성과 화면에서 이미 받아 둔 값)`
+            : ''}
           {fill.noToken > 0
             ? ` ${fill.noToken.toLocaleString()}개는 올린 계정의 연동을 찾을 수 없어 조회할 수 없었습니다.`
             : ''}
           {fill.attempted > fill.filled
-            ? ' 나머지는 인스타그램이 아직 조회수를 집계하지 않은 콘텐츠입니다.'
+            ? ' 나머지는 인스타그램이 아직 조회수를 집계하지 않았거나, 연동 계정에 인사이트 권한이 없는 콘텐츠입니다.'
             : ''}
         </p>
       )}

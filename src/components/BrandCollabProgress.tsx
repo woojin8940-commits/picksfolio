@@ -978,6 +978,15 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     await load();
                   }}
                   onNotify={notify}
+                  /* 검토를 끝냈으면 이 사람의 상세를 계속 띄워 둘 이유가 없다. 끝낸
+                     화면에는 "검토 완료 · 다음 단계로 넘어갔습니다" 한 줄만 남는데,
+                     그 줄을 보려고 들어온 사람은 없다 — 다음 할 일은 다른 사람의
+                     다른 단계이고 그것은 진행사항 목록에 있다. 목록으로 돌려보낸다. */
+                  onStepComplete={() => {
+                    setOpenId('');
+                    setDetail(null);
+                    setFocusStep('');
+                  }}
                 />
 
                 <p className="text-xs text-slate-400 font-bold px-1">

@@ -56,6 +56,15 @@ type Props = {
    * 한 번으로 되돌아온다 — 지난 단계를 되짚을 길까지 막지는 않는다.
    */
   onlyStep?: StepKey | '';
+  /**
+   * 브랜드가 이 단계의 검토를 끝냈다.
+   *
+   * 검토 완료를 누르면 이 화면에는 "검토 완료 · 다음 단계로 넘어갔습니다" 한 줄만
+   * 남는다. 그 줄을 보러 여기까지 들어온 사람은 없다 — 다음 할 일은 다른 인플루언서의
+   * 다른 단계이고, 그것은 진행사항 목록에 있다. 그래서 끝낸 순간 목록으로 돌려보낸다.
+   * 부모가 이 콜백을 주지 않으면 예전처럼 이 화면에 남는다(담당자 화면 등).
+   */
+  onStepComplete?: (step: StepKey) => void;
 };
 
 type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
@@ -106,7 +115,7 @@ const fmtDate = (value?: string | null) => {
   return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 };
 
-const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep, onlyStep }) => {
+const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep, onlyStep, onStepComplete }) => {
   const stages = useMemo(() => (Array.isArray(detail?.stages) ? detail.stages : []), [detail]);
   const deliverables = useMemo(() => (Array.isArray(detail?.deliverables) ? detail.deliverables : []), [detail]);
   const feedbacks = useMemo(() => (Array.isArray(detail?.feedbacks) ? detail.feedbacks : []), [detail]);
@@ -269,18 +278,55 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     return true;
   };
 
+  /**
+   * 파일 하나를 올린다. 큰 파일은 apiService 가 조각으로 나눠 보낸다.
+   *
+   * 예전에는 크기와 상관없이 요청 한 번에 담아 보냈고, Netlify Functions 의 본문
+   * 한도(약 6MB)를 넘는 초안 영상은 함수에 닿기도 전에 끊겼다 — 그래서 영상 파일은
+   * 사실상 한 번도 올라가지 않았고, 화면에는 "파일 업로드에 실패했습니다." 만 떴다.
+   * 이제 파일은 우리 함수를 거치지 않고 브라우저에서 스토리지로 곧장 올라간다. 사유는
+   * 서버·스토리지가 보낸 문장을 그대로 보여 주고, 몇십 초가 걸리는 업로드는 진행률을
+   * 함께 적는다(표시가 없으면 사람은 멈춘 줄 알고 창을 닫는다).
+   */
+  const putFile = async (file: File): Promise<{ url?: string; error?: string }> => {
+    setBusy(true);
+    setUploadPct(0);
+    const res = await apiService.uploadAttachment(`collab-${collabId}`, file, setUploadPct);
+    setUploadPct(-1);
+    setBusy(false);
+    return res;
+  };
+
+  /** 올라가는 중임을 알리는 한 줄. 진행률이 없으면 큰 파일에서 화면이 멈춘 것처럼 보인다. */
+  const renderUploadProgress = () =>
+    uploadPct < 0 ? null : (
+      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+        <p className="text-[10px] font-black text-blue-700">
+          파일 올리는 중 · {Math.round(uploadPct * 100)}%
+        </p>
+        <div className="mt-1.5 h-1.5 rounded-full bg-blue-100 overflow-hidden">
+          <div
+            className="h-full bg-blue-600 transition-all duration-200"
+            style={{ width: `${Math.max(2, Math.round(uploadPct * 100))}%` }}
+          />
+        </div>
+        <p className="text-[10px] font-bold text-blue-600/80 mt-1">
+          파일이 저장소로 바로 올라갑니다. 이 화면을 닫지 말아 주세요.
+        </p>
+      </div>
+    );
+
   // ── 1. 콘텐츠 가이드 ─────────────────────────────────────────────────
   const [guideFile, setGuideFile] = useState<File | null>(null);
 
   const uploadGuide = async () => {
     if (!guideFile) return;
-    setBusy(true);
-    const fileUrl = await apiService.uploadProposalAttachment(`collab-${collabId}`, guideFile);
-    setBusy(false);
-    if (!fileUrl) {
-      onNotify('파일 업로드에 실패했습니다.', 'error');
+    const up = await putFile(guideFile);
+    if (!up.url) {
+      onNotify(up.error || '파일 업로드에 실패했습니다.', 'error');
       return;
     }
+    const fileUrl = up.url;
     const ok = await act(
       'add_asset',
       { kind: 'guide', title: guideFile.name, fileUrl, fileName: guideFile.name, mimeType: guideFile.type },
@@ -362,8 +408,28 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
   const [reply, setReply] = useState<Record<string, string>>({});
-  /** 지금 피드백 칸이 열려 있는 자리. 장면마다 칸을 늘 펴 두면 기획안이 안 보인다. */
-  const [composer, setComposer] = useState('');
+  /** 파일이 올라가는 중의 진행률(0~1). 큰 영상은 몇십 초가 걸려서 표시가 없으면 멈춘 줄 안다. */
+  const [uploadPct, setUploadPct] = useState(-1);
+
+  /**
+   * 아직 저장하지 않은 기획안 피드백. 장면 칸과 전체 칸을 한 배열로 모은다.
+   *
+   * 저장 버튼이 몇 개를 저장하는지 숫자로 말해 줄 수 있어야 한다 — 다섯 장면에 적고
+   * 눌렀는데 아무 말도 없으면, 브랜드는 마지막 칸만 갔는지 다 갔는지 알 수 없다.
+   */
+  const pendingFeedback = useMemo(() => {
+    const items: { anchor: string; body: string }[] = [];
+    const shown = normalizeScenes(planWork?.payload?.scenes);
+    shown.forEach((_, i) => {
+      const anchor = sceneAnchor(i);
+      const text = (reply[`plan:${anchor}`] || '').trim();
+      if (text) items.push({ anchor, body: text });
+    });
+    const whole = (reply.plan || '').trim();
+    if (whole) items.push({ anchor: '', body: whole });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reply, planWork?.id]);
 
   useEffect(() => {
     const saved = normalizeScenes(planWork?.payload?.scenes);
@@ -408,14 +474,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     let fileUrl = '';
     let fileName = '';
     if (file) {
-      setBusy(true);
-      const url = await apiService.uploadProposalAttachment(`collab-${collabId}`, file);
-      setBusy(false);
-      if (!url) {
-        onNotify('파일 업로드에 실패했습니다.', 'error');
+      const up = await putFile(file);
+      if (!up.url) {
+        onNotify(up.error || '파일 업로드에 실패했습니다.', 'error');
         return;
       }
-      fileUrl = url;
+      fileUrl = up.url;
       fileName = file.name;
     }
     const ok = await act('save_step_work', { stepKey: step, fileUrl, fileName, ...extra }, '등록했습니다. 브랜드가 확인하면 알려 드릴게요.');
@@ -439,9 +503,35 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     const text = (reply[key] || '').trim();
     if (!text) return;
     const ok = await act('step_feedback', { stepKey: step, body: text, anchor }, '피드백을 전달했습니다.');
+    if (ok) setReply(prev => ({ ...prev, [key]: '' }));
+  };
+
+  /**
+   * 기획안 피드백은 한 번에 저장한다.
+   *
+   * 예전에는 장면마다 "이 장면에 피드백" 을 눌러 칸을 열고, 한 줄 적고 "보내기" 를
+   * 눌렀다. 장면이 다섯이면 그 왕복이 다섯 번이고, 매번 화면이 새로 불러와지면서
+   * 방금 읽던 자리를 잃었다. 브랜드가 실제로 하는 일은 "기획안을 처음부터 끝까지
+   * 읽으면서 고칠 곳을 적는" 하나의 작업이므로, 칸은 장면마다 늘 열려 있고 저장은
+   * 마지막에 한 번이어야 한다.
+   *
+   * 서버에는 장면별로 따로 저장된다(anchor 가 장면 번호다). 한 덩어리로 합치면
+   * 인플루언서 화면에서 그 말이 어느 장면 아래에 붙을지 알 수 없어진다.
+   */
+  const savePlanFeedback = async () => {
+    const items = pendingFeedback;
+    if (items.length === 0) return;
+    const ok = await act(
+      'step_feedback_batch',
+      { stepKey: 'plan', items },
+      `피드백 ${items.length}개를 저장했습니다. 인플루언서에게 바로 전달됩니다.`,
+    );
     if (ok) {
-      setReply(prev => ({ ...prev, [key]: '' }));
-      setComposer('');
+      setReply(prev => {
+        const next = { ...prev };
+        for (const it of items) delete next[it.anchor ? `plan:${it.anchor}` : 'plan'];
+        return next;
+      });
     }
   };
 
@@ -469,29 +559,15 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               {f.status === 'applied' && <span className="text-[10px] font-black text-emerald-600">반영 완료</span>}
             </div>
             <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">{f.body}</p>
-            {/* 반영 여부는 인플루언서가 표시한다. 피드백 밑에 두는 이유는, 다른 화면에
-                모아 두면 "무엇에 대한 반영인지"가 사라지기 때문이다. */}
-            {isInfluencer && ['open', 'relayed'].includes(String(f.status)) && (
-              <div className="flex gap-1.5 mt-2">
-                <button
-                  onClick={() => act('resolve_feedback', { feedbackId: f.id, status: 'applied' }, '반영 완료로 표시했습니다.')}
-                  disabled={busy}
-                  className="px-2.5 py-1 rounded-md bg-emerald-600 text-white text-[10px] font-black disabled:opacity-40"
-                >
-                  반영했어요
-                </button>
-                <button
-                  onClick={() => {
-                    const note = window.prompt('반영이 어려운 이유를 적어 주세요.')?.trim();
-                    if (note) act('resolve_feedback', { feedbackId: f.id, status: 'wont_apply', note }, '전달했습니다.');
-                  }}
-                  disabled={busy}
-                  className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-600 text-[10px] font-black disabled:opacity-40"
-                >
-                  어려워요
-                </button>
-              </div>
-            )}
+            {/*
+              반영 여부를 인플루언서가 따로 표시하는 버튼("반영했어요" / "어려워요")은
+              두지 않는다. 그 두 버튼은 실제 작업과 어긋나 있었다 — 인플루언서가 하는
+              일은 피드백을 읽고 기획안을 고쳐 다시 저장하는 것 하나이고, 고친 뒤에
+              버튼을 한 번 더 누르는 일은 그것과 별개의 숙제였다. 그래서 대부분은
+              누르지 않았고, 브랜드 화면에는 "반영 표시가 되지 않은 피드백"이 계속
+              쌓였다. 이제는 기획안을 다시 저장하는 순간 서버가 그 단계의 피드백을
+              반영 완료로 닫는다(save_step_work). 화면에 남는 버튼은 저장 하나다.
+            */}
             {f.resolutionNote && String(f.status) === 'wont_apply' && (
               <p className="text-[10px] text-slate-400 font-bold mt-1.5">미반영 사유: {f.resolutionNote}</p>
             )}
@@ -501,9 +577,18 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     );
   };
 
-  const renderFeedbackBox = (step: StepKey, placeholder: string) => (
+  /**
+   * 단계 전체에 대한 피드백 칸.
+   *
+   * `deferred` 면 이 칸에 보내기 버튼을 두지 않는다 — 기획안 단계에서는 장면 칸과
+   * 함께 아래의 저장 버튼 하나로 나가기 때문이다. 칸마다 버튼이 있으면 "어느 버튼이
+   * 무엇까지 저장하는지"를 눌러 봐야 알게 된다.
+   */
+  const renderFeedbackBox = (step: StepKey, placeholder: string, deferred = false) => (
     <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-      <p className="text-[10px] font-black text-slate-500 mb-1.5">브랜드 피드백 남기기</p>
+      <p className="text-[10px] font-black text-slate-500 mb-1.5">
+        {deferred ? '기획안 전체에 대한 피드백' : '브랜드 피드백 남기기'}
+      </p>
       <textarea
         value={reply[step] || ''}
         onChange={e => setReply(prev => ({ ...prev, [step]: e.target.value }))}
@@ -511,19 +596,50 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
         placeholder={placeholder}
         className={`${inputCls} resize-none`}
       />
-      <div className="flex gap-2 mt-2">
-        <button
-          onClick={() => sendFeedback(step)}
-          disabled={busy || !(reply[step] || '').trim()}
-          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
-        >
-          피드백 보내기
-        </button>
-      </div>
+      {!deferred && (
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={() => sendFeedback(step)}
+            disabled={busy || !(reply[step] || '').trim()}
+            className="px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
+          >
+            피드백 보내기
+          </button>
+        </div>
+      )}
     </div>
   );
 
-  /** 아직 인플루언서가 반영하지 않은 피드백. 검토를 닫기 전에 세어 보는 값이다. */
+  /**
+   * 적어 둔 기획안 피드백을 한 번에 저장하는 줄.
+   *
+   * 장면 칸들과 전체 칸 아래에 하나만 선다. 몇 개가 저장될지 숫자로 적어 두는 것이
+   * 이 버튼의 핵심이다 — 어느 칸이 비어 있었는지 브랜드가 다시 위로 올라가 확인하지
+   * 않아도 되게 한다.
+   */
+  const renderPlanFeedbackSave = () => (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
+        장면마다 적은 피드백과 전체 피드백을 한 번에 저장합니다. 저장하면 인플루언서에게
+        바로 전달되고, 각 피드백은 적어 둔 장면 아래에 그대로 붙습니다.
+      </p>
+      <button
+        onClick={savePlanFeedback}
+        disabled={busy || pendingFeedback.length === 0}
+        className="mt-2 w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
+      >
+        {pendingFeedback.length > 0 ? `피드백 ${pendingFeedback.length}개 저장하기` : '저장하기'}
+      </button>
+    </div>
+  );
+
+  /**
+   * 아직 인플루언서가 다시 올리지 않은 피드백.
+   *
+   * 인플루언서가 그 단계를 다시 저장하면 서버가 이 피드백들을 반영 완료로 닫는다
+   * (save_step_work). 그래서 여기 남는 숫자는 "전달했지만 아직 새 버전이 오지 않은
+   * 피드백" 이라는 뜻이고, 검토를 닫기 전에 브랜드가 한 번 볼 값이다.
+   */
   const openFeedbackCount = (step: StepKey) =>
     feedbacksOf(step).filter((f: any) => ['open', 'relayed'].includes(String(f.status))).length;
 
@@ -537,17 +653,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    * 인플루언서 쪽에는 "브랜드 확인 대기"가 그대로 남았다. 되돌리는 일은 피드백 칸에
    * 두고, 넘기는 일은 그 아래 따로 선다.
    *
-   * 반영되지 않은 피드백이 남아 있어도 막지는 않는다 — 인플루언서가 "반영했어요"를
-   * 누르지 않고 그냥 다시 올리는 경우가 흔해서, 막으면 진행이 여기서 멈춘다. 대신
-   * 몇 개가 남았는지 세어 보여 주고 한 번 더 묻는다.
+   * 아직 새 버전이 오지 않은 피드백이 남아 있어도 막지는 않는다 — 브랜드가 말로
+   * 정리하고 넘어가기로 한 경우가 있어서, 막으면 진행이 여기서 멈춘다. 대신 몇 개가
+   * 남았는지 세어 보여 주고 한 번 더 묻는다.
    */
   const completeReview = async (step: StepKey, stepName: string) => {
     const remaining = openFeedbackCount(step);
     const question = remaining > 0
-      ? `아직 반영 표시가 되지 않은 피드백이 ${remaining}개 있습니다.\n\n그래도 ${stepName} 검토를 완료하고 다음 단계로 넘어갈까요?`
+      ? `전달했지만 아직 수정본이 오지 않은 피드백이 ${remaining}개 있습니다.\n\n그래도 ${stepName} 검토를 완료하고 다음 단계로 넘어갈까요?`
       : `${stepName}에 더 수정할 부분이 없다면 검토를 완료합니다.\n\n다음 단계로 넘어갈까요?`;
     if (!window.confirm(question)) return;
-    await act('confirm_step', { stepKey: step }, `${stepName} 검토를 완료했습니다. 다음 단계로 넘어갑니다.`);
+    const ok = await act('confirm_step', { stepKey: step }, `${stepName} 검토를 완료했습니다. 다음 단계로 넘어갑니다.`);
+    // 끝낸 단계의 상세를 계속 띄워 둘 이유가 없다. 다음 할 일은 목록에 있다.
+    if (ok) onStepComplete?.(step);
   };
 
   /** 검토 완료 줄. 브랜드·담당자 화면에서 제출물이 올라온 단계에만 선다. */
@@ -576,7 +694,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
         </p>
         {remaining > 0 && (
           <p className="text-[10px] font-black text-amber-700 mt-1.5">
-            아직 반영 표시가 되지 않은 피드백 {remaining}개가 남아 있습니다.
+            전달했지만 아직 수정본이 오지 않은 피드백 {remaining}개가 남아 있습니다.
           </p>
         )}
         <button
@@ -590,45 +708,27 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     );
   };
 
-  /** 장면 하나에만 붙는 작은 피드백 칸. 접었다 펴는 이유는 다섯 장면이면 칸도 다섯이라서다. */
+  /**
+   * 장면 하나에 붙는 피드백 칸. 늘 열려 있다.
+   *
+   * 예전에는 "이 장면에 피드백" 버튼을 눌러야 칸이 열렸고, 한 번에 한 장면만 열렸다.
+   * 그래서 기획안을 읽어 내려가며 떠오른 말을 적으려면 장면마다 열고 · 적고 · 보내고 ·
+   * 다음 장면을 다시 여는 왕복이 필요했다. 칸을 늘 펴 두면 읽는 흐름이 끊기지 않고,
+   * 어느 장면에 아직 아무 말도 적지 않았는지도 화면에서 바로 보인다. 저장은 아래
+   * 버튼 하나로 한 번에 한다.
+   */
   const renderSceneFeedbackBox = (step: StepKey, index: number) => {
-    const anchor = sceneAnchor(index);
-    const key = `${step}:${anchor}`;
-    if (composer !== key) {
-      return (
-        <button
-          onClick={() => setComposer(key)}
-          className="mt-2 px-2.5 py-1.5 rounded-md bg-slate-900 text-white text-[10px] font-black hover:bg-slate-700 transition-colors"
-        >
-          이 장면에 피드백
-        </button>
-      );
-    }
+    const key = `${step}:${sceneAnchor(index)}`;
+    const text = reply[key] || '';
     return (
-      <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+      <div className="mt-2">
         <textarea
-          value={reply[key] || ''}
+          value={text}
           onChange={e => setReply(prev => ({ ...prev, [key]: e.target.value }))}
           rows={2}
-          autoFocus
-          placeholder={`장면 ${index + 1}에서 바꿨으면 하는 점을 적어 주세요.`}
-          className={`${inputCls} resize-none`}
+          placeholder={`장면 ${index + 1}에서 바꿨으면 하는 점 (없으면 비워 두세요)`}
+          className={`${text.trim() ? fieldCls(text) : inputCls} resize-none`}
         />
-        <div className="flex gap-1.5 mt-1.5">
-          <button
-            onClick={() => sendFeedback(step, anchor)}
-            disabled={busy || !(reply[key] || '').trim()}
-            className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-[10px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
-          >
-            보내기
-          </button>
-          <button
-            onClick={() => setComposer('')}
-            className="px-3 py-1.5 rounded-md bg-white border border-slate-200 text-slate-500 text-[10px] font-black hover:bg-slate-100 transition-colors"
-          >
-            접기
-          </button>
-        </div>
       </div>
     );
   };
@@ -694,6 +794,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </button>
               </div>
             )}
+            {isBrandSide && renderUploadProgress()}
 
             {isInfluencer && guideReady && !doneOf('guide') && (
               <button
@@ -895,9 +996,10 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     disabled={busy}
                     className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                   >
-                    {planWork ? '기획안 다시 올리기' : '기획안 등록'}
+                    {planWork ? '기획안 수정완료' : '기획안 등록'}
                   </button>
                 </div>
+                {renderUploadProgress()}
               </>
             ) : planWork ? (
               <>
@@ -938,7 +1040,8 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             {/* 기획안 바로 아래에 피드백, 그 아래에 검토 완료. 이 순서가 이 단계의
                 전부다 — 읽고, 고칠 것을 말하고, 없으면 넘긴다. */}
             {renderFeedbackThread('plan')}
-            {isBrandSide && planWork && renderFeedbackBox('plan', '기획안 전체에 대한 의견을 적어 주세요. 장면 하나를 고쳐야 하면 그 장면의 피드백 칸을 쓰세요.')}
+            {isBrandSide && planWork && renderFeedbackBox('plan', '장면을 짚기 어려운 의견(전체 길이 · 톤 · 순서 등)을 적어 주세요.', true)}
+            {isBrandSide && planWork && renderPlanFeedbackSave()}
             {planWork && renderReviewComplete('plan', '기획안')}
           </div>
         );
@@ -972,6 +1075,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     {videoWork ? '영상 다시 올리기' : '초안 영상 올리기'}
                   </button>
                 </div>
+                {videoFile && uploadPct < 0 && (
+                  <p className="text-[10px] font-bold text-slate-400">
+                    {videoFile.name} · {(videoFile.size / (1024 * 1024)).toFixed(1)}MB
+                  </p>
+                )}
+                {renderUploadProgress()}
               </>
             ) : videoWork ? (
               <div className="rounded-lg bg-slate-50 p-3 space-y-2">
@@ -1043,7 +1152,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </div>
                 {collab.uploadUrl && !collab.uploadConfirmedAt && (
                   <button
-                    onClick={() => act('confirm_step', { stepKey: 'upload' }, '업로드를 확인했습니다.')}
+                    onClick={async () => {
+                      // 마지막 단계까지 확인했으면 이 협업에서 브랜드가 할 일은 끝났다.
+                      const ok = await act('confirm_step', { stepKey: 'upload' }, '업로드를 확인했습니다.');
+                      if (ok) onStepComplete?.('upload');
+                    }}
                     disabled={busy}
                     className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-xs font-black disabled:opacity-40 hover:bg-emerald-500 transition-colors"
                   >
