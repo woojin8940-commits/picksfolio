@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../services/apiService';
 import { formatKoreanWon } from '../utils/formatters';
 import { rewardModeOf } from '../utils/campaignBrief';
+import { CollabStepTurn, nextCollabAction } from '../utils/collabNextAction';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
@@ -66,6 +67,27 @@ const dueText = (dueDate: string, daysLeft: number | null, isEn: boolean) => {
   if (daysLeft === 0) return isEn ? 'Due today' : '오늘까지';
   return isEn ? `${daysLeft} days left` : `${daysLeft}일 남음`;
 };
+
+/**
+ * 이 협업에서 인플루언서가 지금 해야 하는 일.
+ *
+ * 예전에는 협업의 '현재 단계 주인'(currentStageOwner)만 보고 "내 차례" 배지를 붙였다.
+ * 그 값은 단계 순서대로만 움직여서, 브랜드가 가이드를 올리지 않아 첫 단계에 걸린
+ * 협업에서는 실제로 인플루언서가 적어야 하는 배송지가 있어도 배지가 뜨지 않았다.
+ * 진행사항 화면과 같은 함수로 판정해 두 화면이 같은 말을 하게 한다.
+ */
+const actionOf = (collab: any): CollabStepTurn | null =>
+  nextCollabAction(
+    {
+      steps: collab?.steps || {},
+      shipping: collab?.shipping || null,
+      uploadUrl: collab?.uploadUrl || '',
+      uploadConfirmedAt: collab?.uploadConfirmedAt || null,
+      guideReady: Boolean(collab?.guideReady),
+      collabStatus: String(collab?.status || ''),
+    },
+    'influencer',
+  );
 
 /** 카드 왼쪽 위 배지. 브랜드 카드의 모집 상태 자리와 같은 자리다. */
 const collabBadge = (c: any): { label: string; cls: string } => {
@@ -176,8 +198,21 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     const netFee = Number(terms?.netFee || 0);
     const mode = rewardModeOf(selected.campaignRewardMode);
     const badge = collabBadge(selected);
-    const mineNow =
-      selected.currentStageOwner === 'influencer' && ['active', 'revision'].includes(selected.currentStageStatus);
+    // 상세에서는 목록 요약이 아니라 방금 읽어 온 상세로 판정한다. 저장 직후 목록이
+    // 아직 갱신되지 않았을 때 머리말과 보드가 다른 말을 하지 않도록.
+    const action = actionOf({
+      ...selected,
+      shipping: detail?.shipping || selected.shipping,
+      uploadUrl: detail?.collab?.uploadUrl ?? selected.uploadUrl,
+      uploadConfirmedAt: detail?.collab?.uploadConfirmedAt ?? selected.uploadConfirmedAt,
+      guideReady: detail
+        ? Boolean(
+            (detail.guideline?.files || []).length > 0 ||
+              String(detail.guideline?.note || '').trim() ||
+              String(detail.guideline?.url || '').trim(),
+          )
+        : Boolean(selected.guideReady),
+    });
 
     /**
      * 상세 탭. 정산은 지급할 돈이 있는 협업에만 붙인다 — 제품 협찬형은 광고비도
@@ -210,9 +245,13 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className={`px-2.5 py-1 rounded-full text-[11px] font-black ${badge.cls}`}>{badge.label}</span>
-                {mineNow && (
-                  <span className="px-2.5 py-1 rounded-full text-[11px] font-black bg-slate-900 text-white">
-                    {isEn ? 'Your turn' : '내 차례'}
+                {action && (
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-black text-white ${
+                      action.revision ? 'bg-amber-500' : 'bg-blue-600'
+                    }`}
+                  >
+                    {isEn ? 'Your turn' : action.revision ? '수정 요청' : '진행 요청'}
                   </span>
                 )}
                 <span className="text-[11px] text-slate-400 font-bold">{mode.label}</span>
@@ -228,11 +267,17 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-5">
-            <div className="bg-slate-50 rounded-xl px-4 py-3">
-              <p className="text-[10px] font-black text-slate-400">{isEn ? 'Current step' : '현재 단계'}</p>
+            {/* 지금 할 일이 있으면 '현재 단계' 자리에 그것을 적는다. 단계 이름만 있는
+                칸은 "그래서 내가 무엇을 해야 하는가"를 말해 주지 않았다. */}
+            <div className={`rounded-xl px-4 py-3 ${action ? (action.revision ? 'bg-amber-50' : 'bg-blue-50') : 'bg-slate-50'}`}>
+              <p className={`text-[10px] font-black ${action ? (action.revision ? 'text-amber-600' : 'text-blue-600') : 'text-slate-400'}`}>
+                {action ? (isEn ? 'Your next step' : '지금 할 일') : isEn ? 'Current step' : '현재 단계'}
+              </p>
               <p className="text-sm font-black text-slate-900 mt-0.5 truncate">
-                {selected.currentStageTitle ||
-                  (selected.status === 'completed' ? (isEn ? 'All done' : '모든 단계 완료') : isEn ? 'Preparing' : '준비 중')}
+                {action
+                  ? `${action.title} · ${action.short}`
+                  : selected.currentStageTitle ||
+                    (selected.status === 'completed' ? (isEn ? 'All done' : '모든 단계 완료') : isEn ? 'Preparing' : '준비 중')}
               </p>
             </div>
             <div className="bg-slate-50 rounded-xl px-4 py-3">
@@ -275,13 +320,17 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             <button
               key={t.key}
               onClick={() => setDetailTab(t.key)}
-              className={`px-4 py-3 text-xs font-black whitespace-nowrap border-b-2 transition-colors ${
+              className={`px-4 py-3 text-xs font-black whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
                 activeTab === t.key
                   ? 'border-slate-900 text-slate-900'
                   : 'border-transparent text-slate-400 hover:text-slate-600'
               }`}
             >
               {t.label}
+              {/* 다른 탭을 보고 있어도 진행사항에 할 일이 남아 있다는 것은 보여야 한다. */}
+              {t.key === 'progress' && action && (
+                <span className={`w-1.5 h-1.5 rounded-full ${action.revision ? 'bg-amber-500' : 'bg-blue-600'}`} />
+              )}
             </button>
           ))}
         </div>
@@ -417,14 +466,19 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
               {collabs.map(c => {
                 const badge = collabBadge(c);
-                const mineNow =
-                  c.currentStageOwner === 'influencer' && ['active', 'revision'].includes(c.currentStageStatus);
+                const cardAction = actionOf(c);
                 const overdue = (c.daysLeft ?? 1) < 0 && c.status !== 'completed';
                 return (
                   <button
                     key={c.id}
                     onClick={() => openCollab(c.id)}
-                    className="text-left bg-white rounded-xl border border-slate-100 hover:border-blue-200 hover:shadow-lg transition-all cursor-pointer group overflow-hidden"
+                    className={`text-left bg-white rounded-xl border transition-all cursor-pointer group overflow-hidden hover:shadow-lg ${
+                      cardAction
+                        ? cardAction.revision
+                          ? 'border-amber-300 ring-1 ring-amber-200'
+                          : 'border-blue-300 ring-1 ring-blue-200'
+                        : 'border-slate-100 hover:border-blue-200'
+                    }`}
                   >
                     <div className="w-full aspect-square bg-slate-50 overflow-hidden relative">
                       {thumbOf(c.campaignThumbnail, c.campaignTitle, 'w-full h-full group-hover:scale-105 transition-transform duration-300')}
@@ -432,9 +486,13 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                         <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm ${badge.cls}`}>
                           {badge.label}
                         </span>
-                        {mineNow && (
-                          <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-slate-900 text-white shadow-sm">
-                            {isEn ? 'Your turn' : '내 차례'}
+                        {cardAction && (
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black text-white shadow-sm ${
+                              cardAction.revision ? 'bg-amber-500' : 'bg-blue-600'
+                            }`}
+                          >
+                            {isEn ? 'Your turn' : cardAction.revision ? '수정 요청' : '진행 요청'}
                           </span>
                         )}
                       </div>
@@ -466,9 +524,15 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                       <h3 className="font-black text-xs md:text-sm text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1.5">
                         {c.campaignTitle}
                       </h3>
-                      <p className="text-[10px] text-slate-500 font-bold truncate mb-1.5">
-                        {c.currentStageTitle ||
-                          (c.status === 'completed' ? (isEn ? 'All done' : '모든 단계 완료') : isEn ? 'Preparing' : '준비 중')}
+                      <p
+                        className={`text-[10px] font-bold truncate mb-1.5 ${
+                          cardAction ? (cardAction.revision ? 'text-amber-600' : 'text-blue-600') : 'text-slate-500'
+                        }`}
+                      >
+                        {cardAction
+                          ? `${cardAction.title} · ${cardAction.short}`
+                          : c.currentStageTitle ||
+                            (c.status === 'completed' ? (isEn ? 'All done' : '모든 단계 완료') : isEn ? 'Preparing' : '준비 중')}
                       </p>
                       <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div

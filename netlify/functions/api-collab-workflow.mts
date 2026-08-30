@@ -489,11 +489,34 @@ export default async (req: Request, context: Context) => {
       const campaignRows = campaignIds.length
         ? ((await db.sql`
             SELECT id, title, brand_name, thumbnail_url, category, type,
-                   reward_mode, reward_type, reward_amount, end_date, status
+                   reward_mode, reward_type, reward_amount, end_date, status,
+                   guideline_note, guideline_url, guideline_files
             FROM campaigns WHERE id = ANY(${campaignIds})
           `) as any[])
         : [];
       const campaignMap = new Map(campaignRows.map((c) => [c.id, c]));
+
+      /**
+       * 열어 볼 가이드가 있는 협업.
+       *
+       * 목록도 "지금 이 사람 차례인가"를 판정한다(화면이 카드에 '진행 요청'을 띄운다).
+       * 가이드 단계만은 상태 칸으로 판정할 수 없다 — 브랜드가 아직 아무것도 올리지
+       * 않았으면 기다리는 쪽은 브랜드이고, 올려 두었으면 확인할 쪽은 인플루언서인데,
+       * 두 경우의 단계 상태가 똑같이 'active' 다. 그래서 가이드가 실제로 있는지를 함께
+       * 싣는다. 캠페인에 적어 둔 가이드(메모 · 링크 · 파일)와 협업 자료함에 올린 파일을
+       * 상세 화면과 같은 규칙으로 본다.
+       */
+      const guideAssetRows = (await db.sql`
+        SELECT DISTINCT collab_id FROM collab_assets
+        WHERE collab_id = ANY(${ids}) AND kind = 'guide' AND COALESCE(file_url, '') <> ''
+      `) as any[];
+      const guideAssetSet = new Set(guideAssetRows.map((r) => r.collab_id));
+      const campaignGuideReady = (campaign: any) =>
+        Boolean(
+          String(campaign?.guideline_note || "").trim() ||
+            String(campaign?.guideline_url || "").trim() ||
+            guidelineFiles(campaign?.guideline_files).length > 0,
+        );
 
       const today = todayInSeoul();
       /**
@@ -560,6 +583,8 @@ export default async (req: Request, context: Context) => {
           stageCount: own.length,
           /** 다섯 칸 각각의 상태. 화면은 이것만 보고 그린다. */
           steps: stepSummary(own, works),
+          /** 인플루언서가 열어 볼 가이드가 올라와 있는가. 첫 칸의 차례를 가른다. */
+          guideReady: guideAssetSet.has(row.id) || campaignGuideReady(campaign),
           openFeedbackCount: openMap.get(row.id) || 0,
           shipping: {
             filled: ship.filled,
