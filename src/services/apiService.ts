@@ -623,7 +623,14 @@ export interface TaggedMediaResponse {
    * 물어볼 토큰이 없었거나(noToken), 물어봤는데 메타가 아직 값을 주지 않은 경우다.
    * 화면은 이 값으로 그 둘을 구분해 말한다.
    */
-  viewsFill?: { candidates: number; attempted: number; filled: number; noToken: number };
+  viewsFill?: {
+    candidates: number;
+    attempted: number;
+    filled: number;
+    /** 이미 받아 둔 값(크리에이터 인사이트 캐시)으로 채운 수. */
+    fromCache?: number;
+    noToken: number;
+  };
   fetchedAt?: string;
   cached?: boolean;
   cacheTtlHours?: number;
@@ -995,24 +1002,117 @@ export const apiService = {
     }
   },
 
-  async uploadProposalAttachment(username: string, file: File): Promise<string | null> {
+  /**
+   * 첨부 파일을 올린다. 파일은 우리 서버를 지나가지 않는다.
+   *
+   * 예전에는 파일을 함수로 보내고 함수가 저장소에 옮겼다. 함수의 요청 본문 한도가
+   * 약 6MB 이고 그 한도는 함수 코드가 실행되기 전에 걸리므로, 초안 영상(보통
+   * 20~100MB)은 어떻게 해도 통과할 수 없었다. 파일을 3MB 조각으로 잘라 여러 번
+   * 보내는 방법으로 한도를 피해 봤지만, 그건 한 번에 큰 파일을 보낼 방법이 아니라
+   * 한도를 우회하려고 요청 수를 늘린 것이었다(100MB 면 34번).
+   *
+   * 지금은 두 걸음이다.
+   *   1. 서버에서 업로드용 링크만 받는다(짧은 JSON 한 번, 파일 크기와 무관).
+   *   2. 브라우저가 그 링크로 스토리지에 파일을 곧장 올린다.
+   *
+   * 진행률은 XMLHttpRequest 로 읽는다. fetch 는 업로드 진행 상황을 알려주지 않아서,
+   * 조각을 나눠 보낼 때는 "몇 번째 조각까지 갔는지"로 진행률을 대신 나타내야 했다. 이제는
+   * 실제로 올라간 바이트를 그대로 쓰므로 100MB 짜리 한 개도 매끄럽게 채워진다.
+   *
+   * 실패는 서버·스토리지가 보낸 문장을 그대로 담아 돌려준다. "파일 업로드에
+   * 실패했습니다." 한 마디로 접으면, 형식이 안 맞는지 너무 큰지 통신이 끊긴 건지
+   * 사람이 알 수 없다.
+   */
+  async uploadAttachment(
+    username: string,
+    file: File,
+    onProgress?: (ratio: number) => void,
+  ): Promise<{ url?: string; error?: string }> {
+    const owner = `proposals-${username.toLowerCase()}`;
+
+    // 서버 응답에서 사람에게 보여줄 사유를 꺼낸다. JSON 이 아닐 수도 있다 — 그때는
+    // 상태 코드로 말을 만든다.
+    const reasonOf = async (res: Response): Promise<string> => {
+      try {
+        const data = await res.json();
+        if (data?.error) return String(data.error);
+      } catch {
+        /* 아래 기본 문장으로 */
+      }
+      if (res.status === 413) return '파일이 너무 큽니다.';
+      if (res.status === 415) return '이미지·영상·PDF 파일만 올릴 수 있습니다.';
+      return `업로드에 실패했습니다. (${res.status})`;
+    };
+
     try {
-      const formData = new FormData();
-      formData.append('image', file, file.name);
-      formData.append('username', `proposals-${username.toLowerCase()}`);
-
-      const res = await fetch('/api/upload-image', {
+      // ① 올릴 자리와 서명된 링크를 받는다. 형식·크기 검사도 이 단계에서 끝난다 —
+      //    거절될 파일을 몇 분 동안 올려보내고 나서 알게 되는 일이 없다.
+      const signRes = await fetch('/api/upload-url', {
         method: 'POST',
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: owner,
+          filename: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }),
       });
+      if (!signRes.ok) return { error: await reasonOf(signRes) };
 
-      if (!res.ok) return null;
-      const { url } = await res.json();
-      return url;
+      const sign = await signRes.json();
+      const uploadUrl = String(sign?.uploadUrl || '');
+      const publicUrl = String(sign?.publicUrl || '');
+      if (!uploadUrl || !publicUrl) return { error: '업로드를 시작할 수 없습니다.' };
+
+      // ② 브라우저 → 스토리지. 우리 함수는 이 구간에 없다.
+      const sent = await new Promise<{ error?: string }>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', uploadUrl, true);
+        // 형식은 서버가 확장자를 보고 정한 값을 쓴다. 브라우저가 보낸 file.type 은
+        // 비어 있거나 틀릴 수 있고(.mov 등), 그대로 저장되면 재생할 때 형식을 몰라
+        // 열리지 않는다.
+        xhr.setRequestHeader('content-type', String(sign?.contentType || 'application/octet-stream'));
+        xhr.setRequestHeader('cache-control', 'max-age=31536000');
+        // 경로는 매번 새로 만들어지므로 덮어쓸 일이 없다. 실수로 덮어쓰지 않게 끈다.
+        xhr.setRequestHeader('x-upsert', 'false');
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) return resolve({});
+          // 스토리지가 보낸 사유를 그대로 쓴다. 크기 상한을 넘으면 여기로 온다.
+          let message = '';
+          try {
+            const data = JSON.parse(xhr.responseText || '{}');
+            message = String(data?.message || data?.error || '');
+          } catch {
+            /* 본문이 JSON 이 아니면 상태 코드로 */
+          }
+          if (xhr.status === 413 || /EntityTooLarge|exceeded the maximum/i.test(message)) {
+            return resolve({ error: '파일이 저장소 허용 크기를 넘습니다. 더 짧게 잘라 올려 주세요.' });
+          }
+          resolve({ error: message || `업로드에 실패했습니다. (${xhr.status})` });
+        };
+        xhr.onerror = () => resolve({ error: '업로드 중 연결이 끊겼습니다. 다시 시도해 주세요.' });
+        xhr.onabort = () => resolve({ error: '업로드가 취소됐습니다.' });
+        xhr.send(file);
+      });
+      if (sent.error) return { error: sent.error };
+
+      onProgress?.(1);
+      return { url: publicUrl };
     } catch (e) {
-      console.error('[API] Failed to upload proposal attachment:', e);
-      return null;
+      console.error('[API] Failed to upload attachment:', e);
+      return { error: '업로드 중 연결이 끊겼습니다. 다시 시도해 주세요.' };
     }
+  },
+
+  /** 예전 호출부를 위한 얇은 겉면. 사유가 필요한 화면은 uploadAttachment 를 쓴다. */
+  async uploadProposalAttachment(username: string, file: File): Promise<string | null> {
+    const res = await apiService.uploadAttachment(username, file);
+    if (res.error) console.error('[API] Failed to upload proposal attachment:', res.error);
+    return res.url || null;
   },
 
   // AWS IVS Stream Key API

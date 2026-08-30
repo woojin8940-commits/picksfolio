@@ -143,6 +143,20 @@ const avg = (nums: number[]) => {
 const graphHostFor = (tokenSource?: string) =>
   tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
 
+/**
+ * 인사이트를 부를 때 붙이는 API 버전.
+ *
+ * 버전을 적지 않으면 메타가 앱 설정의 기본 버전으로 해석하고, 그 값은 우리가 모르는
+ * 사이 바뀌거나 오래된 버전으로 남아 있을 수 있다. `views` 지표는 2025년 4월 개편으로
+ * 생긴 이름이라 오래된 버전에서는 "없는 지표"가 되어 요청 전체가 400 이 된다 —
+ * 조회수가 있는 게시물인데도 화면에는 빈칸이 남는 조용한 실패다. 버전을 박아 두면
+ * 그 실패가 우리 손을 떠난 설정값에 좌우되지 않는다.
+ *
+ * 목록(/me/media) 요청에는 붙이지 않는다. 그쪽은 지금 값이 잘 오고 있고, 버전을
+ * 바꾸는 것은 그 자체로 필드가 사라질 위험이라 필요한 자리에만 건다.
+ */
+const GRAPH_VERSION = "v23.0";
+
 /** 미디어 목록에서 항상 받을 수 있는 필드들. 조회수는 여기 넣지 않는다(위 주석 참고). */
 export const MEDIA_FIELDS =
   "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
@@ -159,7 +173,19 @@ const VIEWS_EXPANSION = "insights.metric(views)";
 const insightValue = (payload: any): number | null => {
   const rows = Array.isArray(payload?.data) ? payload.data : [];
   for (const row of rows) {
-    const value = Array.isArray(row?.values) ? row.values[0]?.value : row?.value;
+    /**
+     * 응답 모양이 한 가지가 아니다.
+     *
+     * 시계열 지표는 `values: [{ value }]` 로 오지만, 2025년 지표 개편 이후 미디어의
+     * `views` 는 API 버전에 따라 `total_value: { value }` 로도 온다. 예전에는 앞쪽
+     * 모양만 읽었기 때문에, 값이 분명히 내려왔는데도 `null` 로 접혀 화면에는 조회수가
+     * 비어 보였다. 두 자리를 다 본다.
+     */
+    const value = Array.isArray(row?.values)
+      ? row.values[0]?.value
+      : typeof row?.total_value?.value !== "undefined"
+        ? row.total_value.value
+        : row?.value;
     if (typeof value !== "undefined" && value !== null) return intOf(value);
   }
   return null;
@@ -194,6 +220,28 @@ async function fetchReelViews(graphHost: string, token: string, mediaId: string)
 }
 
 /**
+ * 어느 (버전, 지표 이름) 조합이 통했는지 기억해 둔다.
+ *
+ * 사다리를 게시물마다 처음부터 다시 타면, 태그된 콘텐츠 서른 편을 채우는 데 필요한
+ * 호출이 여덟 배로 늘어 함수 실행 시간을 다 태운다. 한 계정에서 통한 조합은 같은
+ * 계정의 다른 게시물에서도 통하므로, 그래프 호스트별로 하나만 기억한다. 함수가
+ * 새로 뜨면 비는 값이고, 그때 다시 한 번 찾으면 된다.
+ */
+const viewsProbe = new Map<string, { base: string; metric: string }>();
+
+/**
+ * 지표 이름이 막혀서 온 실패인가.
+ *
+ * 이 경우에만 다음 이름으로 내려간다. "이 게시물에는 인사이트가 없다" 같은 실패에서
+ * 이름을 바꿔 다시 물어보는 것은 같은 답을 네 번 더 받는 일이고, 그 네 번이 다른
+ * 게시물의 조회수를 채울 시간을 가져간다.
+ */
+const isMetricRejected = (payload: any): boolean => {
+  const message = String(payload?.error?.message || "").toLowerCase();
+  return message.includes("metric") || message.includes("param") || message.includes("does not support");
+};
+
+/**
  * 미디어 한 편의 조회수를 지금 조회한다. 못 받으면 null.
  *
  * `fetchReelViews` 와 달리 실패를 0 으로 접지 않는다. 브랜드 화면의 태그된 콘텐츠
@@ -206,17 +254,65 @@ async function fetchReelViews(graphHost: string, token: string, mediaId: string)
 export async function fetchMediaViews(link: MetaLink, mediaId: string): Promise<number | null> {
   const token = String(link.accessToken || "");
   if (!token || !mediaId) return null;
-  try {
-    const res = await fetch(
-      `https://${graphHostFor(link.tokenSource)}/${encodeURIComponent(mediaId)}/insights?metric=views` +
-        `&access_token=${encodeURIComponent(token)}`,
-    );
-    const data = (await res.json().catch(() => ({}))) as any;
-    if (!res.ok) return null;
-    return insightValue(data);
-  } catch {
-    return null;
+  const host = graphHostFor(link.tokenSource);
+
+  /**
+   * 지표 이름을 한 칸씩 물러난다.
+   *
+   * 예전에는 `metric=views` 한 번만 물어보고, 실패하면 조용히 null 이었다. 그런데
+   * `views` 는 2025년 4월 지표 개편으로 생긴 이름이라 그 이전 버전으로 해석되는
+   * 요청에서는 "없는 지표"로 400 이 된다 — 조회수가 분명히 있는 게시물도 영원히
+   * 비어 있었고, 화면은 그 이유를 말할 수도 없었다. 개편 전 이름(plays ·
+   * video_views · impressions)까지 차례로 물어본다.
+   *
+   * 주소도 두 가지를 본다. 버전을 박아 두는 이유는 GRAPH_VERSION 주석에 있고, 박아
+   * 둔 버전이 언젠가 만료되면 그 주소만으로는 다시 빈칸이 되므로 버전 없는 주소를
+   * 뒤에 한 번 더 둔다.
+   */
+  const ladder = ["views", "plays", "video_views", "impressions"];
+  const bases = [`https://${host}/${GRAPH_VERSION}`, `https://${host}`];
+
+  const combos: { base: string; metric: string }[] = [];
+  const learned = viewsProbe.get(host);
+  if (learned) combos.push(learned);
+  for (const base of bases) {
+    for (const metric of ladder) {
+      if (learned && learned.base === base && learned.metric === metric) continue;
+      combos.push({ base, metric });
+    }
   }
+
+  let lastError = "";
+  for (const combo of combos) {
+    try {
+      const res = await fetch(
+        `${combo.base}/${encodeURIComponent(mediaId)}/insights?metric=${combo.metric}` +
+          `&access_token=${encodeURIComponent(token)}`,
+      );
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (res.ok) {
+        const value = insightValue(data);
+        if (value !== null) {
+          viewsProbe.set(host, combo);
+          return value;
+        }
+        // 요청은 통했는데 값이 비었다. 지표 이름 문제가 아니므로 더 물어볼 것이 없다.
+        return null;
+      }
+      // 메타가 보낸 사유를 남긴다. 토큰은 URL 에만 있고 로그에는 들어가지 않는다.
+      lastError = String(data?.error?.message || `HTTP ${res.status}`);
+      // 토큰이 죽었거나 권한이 없거나, 지표 이름과 무관한 실패면 여기서 끝난다.
+      if (isTokenInvalidError(data) || res.status === 403 || !isMetricRejected(data)) break;
+    } catch (e) {
+      lastError = (e as Error)?.message || "요청 실패";
+      break;
+    }
+  }
+
+  if (lastError) {
+    console.warn(`[instagram-metrics] 조회수 조회 실패 media=${mediaId}: ${lastError}`);
+  }
+  return null;
 }
 
 /** 목록 요청에 조회수를 함께 받기 위한 필드 조합. 자기 계정 미디어에만 쓴다. */
