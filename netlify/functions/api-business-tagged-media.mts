@@ -77,18 +77,26 @@ export default async (req: Request) => {
     }
 
     const { payload } = result;
+    // 예전 판 캐시에는 없는 배열이다. 키에 판 번호가 붙어 있어 보통은 걸리지 않지만,
+    // 없는 값을 그대로 내려보내면 화면이 undefined 를 세게 된다.
+    const ownItems = Array.isArray(payload.ownItems) ? payload.ownItems : [];
     const monthStart = seoulMonthStart();
-    const thisMonth = payload.items.filter((m) => {
+    const inThisMonth = (m: { timestamp: string }) => {
       const at = Date.parse(m.timestamp || "");
       return Number.isFinite(at) && at >= monthStart;
-    });
+    };
+    const thisMonth = payload.items.filter(inThisMonth);
+    const thisMonthOwn = ownItems.filter(inThisMonth);
 
     /**
      * 합계는 값이 있는 항목만 더한다. 못 받은 조회수를 0 으로 세면 합계는 진짜보다
      * 작게 나오는데 화면에는 "총 조회수"라고 적히므로, 몇 개를 근거로 낸 합계인지
      * 함께 내려보내 화면이 그대로 밝힐 수 있게 한다.
      */
-    const sum = (rows: typeof payload.items, key: "views" | "likes" | "comments") => {
+    const sum = (
+      rows: { views: number | null; likes: number | null; comments: number | null }[],
+      key: "views" | "likes" | "comments",
+    ) => {
       const valued = rows.filter((r) => typeof r[key] === "number");
       return {
         total: valued.reduce((acc, r) => acc + (r[key] as number), 0),
@@ -102,6 +110,12 @@ export default async (req: Request) => {
       needsReauth: false,
       igUsername: payload.igUsername,
       items: payload.items,
+      /**
+       * 브랜드 계정이 직접 올린 게시물. 목록과 요약 숫자는 태그된 콘텐츠 기준 그대로
+       * 두고, 월별 추이만 이 배열을 함께 센다 — 그 달에 우리 브랜드로 오간 콘텐츠
+       * 전체를 보려는 그래프이기 때문이다.
+       */
+      ownItems,
       summary: {
         monthCount: thisMonth.length,
         totalCount: payload.items.length,
@@ -111,9 +125,15 @@ export default async (req: Request) => {
         comments: sum(payload.items, "comments"),
         /** 우리를 태그한 서로 다른 계정 수. */
         authors: new Set(payload.items.map((m) => m.authorHandle).filter(Boolean)).size,
+        /** 브랜드 계정이 이번 달 올린 게시물 수. 월별 추이의 나머지 절반이다. */
+        monthOwnCount: thisMonthOwn.length,
+        ownCount: ownItems.length,
+        ownViews: sum(ownItems, "views"),
       },
       tagsApi: payload.tagsApi,
       scannedCreators: payload.scannedCreators,
+      /** 조회수를 이번 조회에서 직접 채운 콘텐츠 수. */
+      viewsFilled: payload.viewsFilled ?? 0,
       fetchedAt: payload.fetchedAt,
       cached: result.cached,
       cacheTtlHours: CACHE_TTL_HOURS,

@@ -499,6 +499,39 @@ export async function recordFollowerSnapshot(
   }
 }
 
+/**
+ * 이미 알고 있는 과거 팔로워 수를 스냅샷으로 옮겨 둔다.
+ *
+ * 왜 필요한가 — 스냅샷 표는 하루에 한 줄씩만 쌓이므로, 표를 만든 날에 화면을 연
+ * 사람에게는 점이 하나뿐이고 그래프에는 아무 선도 그려지지 않는다. 그런데 우리는
+ * 그 사람의 과거 팔로워 수를 이미 한 번 확인해 둔 적이 있다 — creator_channels 의
+ * followers 와 그 값을 받아 온 시각(synced_at)이다. 그 쌍은 만들어 낸 값이 아니라
+ * 그날 실제로 관측한 값이므로, 스냅샷으로 옮겨도 그래프가 거짓말을 하지 않는다.
+ *
+ * 같은 날 줄이 이미 있으면 건드리지 않는다(DO NOTHING). 그날 배치나 본인 화면이
+ * 남긴 값이 이 값보다 늦게 관측된 것일 수 있고, 늦은 관측이 그날의 값이다.
+ */
+export async function backfillSnapshotFromChannel(db: any, username: string): Promise<void> {
+  try {
+    await db.sql`
+      INSERT INTO creator_follower_snapshots (username, captured_on, followers, following, source)
+      SELECT username,
+             (synced_at AT TIME ZONE 'Asia/Seoul')::date,
+             followers,
+             COALESCE(following, 0),
+             'sync'
+        FROM creator_channels
+       WHERE username = ${username}
+         AND synced_at IS NOT NULL
+         AND followers > 0
+      ON CONFLICT (username, captured_on) DO NOTHING
+    `;
+  } catch (e) {
+    // 옮기지 못해도 오늘 점은 그대로 쌓인다. 그래프가 하루 늦게 그려질 뿐이다.
+    console.warn("[creator-insights] 과거 팔로워 수 이전 실패:", (e as Error)?.message);
+  }
+}
+
 /** 최근 N일 스냅샷. 오래된 것부터(그래프의 x축 순서) 돌려준다. */
 export async function loadFollowerSeries(
   db: any,

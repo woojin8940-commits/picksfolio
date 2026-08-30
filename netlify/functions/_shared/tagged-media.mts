@@ -1,9 +1,13 @@
 import { getStore } from "@netlify/blobs";
 import {
+  fetchMediaViews,
   intOf,
   isTokenInvalidError,
   loadMetaLink,
   linkIsUsable,
+  MEDIA_FIELDS,
+  MEDIA_FIELDS_WITH_VIEWS,
+  viewsOnMedia,
   type MetaLink,
 } from "./instagram-metrics.mts";
 
@@ -43,6 +47,23 @@ import {
  * 플랫폼에서 브랜드가 실제로 궁금해하는 콘텐츠(같이 일한 인플루언서가 올린 것)는
  * 대부분 여기에 들어온다. 그리고 그들은 연동 계정이라 릴스 조회수까지 있다 —
  * 남의 계정 게시물이라 조회수를 못 받는 tags 엣지보다 오히려 값이 풍부하다.
+ *
+ * 조회수는 목록을 만드는 그 자리에서 채운다
+ * -----------------------------------------
+ * ②로 들어온 릴스의 조회수는 creator_channels 에 0 으로 남아 있는 경우가 많다 —
+ * 그 계정을 마지막으로 동기화한 시점에 인사이트 권한이 없었거나 올린 직후라 집계
+ * 전이었기 때문이다. 저장된 값만 쓰면 브랜드 화면의 조회수는 계속 비고, 사람이
+ * 새로고침해도 같은 화면이 나온다. 그래서 목록이 정해진 직후 게시물 주인의 토큰으로
+ * 한 편씩 물어 빈 자리를 채운다(fillMissingViews). 첫 로딩 안에서 끝나야 하는 일이라
+ * 편 수와 동시 실행 수에 상한을 둔다.
+ *
+ * 브랜드가 직접 올린 게시물도 함께 받는다
+ * ---------------------------------------
+ * 월별 추이에서 브랜드가 보려는 것은 "그 달에 우리 브랜드로 오간 콘텐츠" 다. 태그된
+ * 것만 세면 우리가 직접 올린 콘텐츠가 통째로 빠져서, 브랜드 계정이 활발했던 달이
+ * 빈 달로 보인다. 그래서 자기 계정 미디어(`/me/media`)를 함께 받아 payload 의 별도
+ * 배열(ownItems)에 담는다. 목록에는 섞지 않는다 — "누가 우리를 태그했나" 목록에 우리
+ * 게시물이 끼면 그건 틀린 목록이다.
  */
 
 /** 목록 상한. 브랜드 화면 한 장에서 훑을 수 있는 양을 넘기지 않는다. */
@@ -58,6 +79,34 @@ const SCAN_ROW_LIMIT = 300;
  */
 export const CACHE_TTL_HOURS = 6;
 const CACHE_STORE = "business-tagged-media";
+/**
+ * 캐시 형식 판. 저장해 둔 값의 모양이 바뀌면 올린다.
+ *
+ * 예전 판에는 조회수를 채우지 않은 항목과 브랜드 자기 게시물이 없다. 키를 그대로 두면
+ * 이미 캐시가 있는 브랜드는 TTL 이 끝날 때까지 조회수 없는 화면을 계속 본다.
+ */
+const CACHE_VERSION = "v2";
+
+/**
+ * 조회수를 지금 채워 볼 콘텐츠 수 상한.
+ *
+ * 인사이트는 게시물 한 편에 한 번씩 불러야 한다. 상한이 없으면 태그된 콘텐츠가 많은
+ * 브랜드의 첫 조회가 함수 실행 시간(10초)을 다 태우고, 그러면 목록조차 나오지 않는다.
+ * 목록은 최신순이므로 앞쪽(= 브랜드가 실제로 보는 구간)부터 채운다. 뒤쪽 항목은
+ * 저장된 값이 있으면 그 값을, 없으면 '—' 로 남는다.
+ */
+const VIEW_FILL_LIMIT = 24;
+/** 조회수 조회 동시 실행 수. 위 상한을 세 번의 왕복으로 끝내는 크기. */
+const VIEW_FILL_CHUNK = 8;
+/**
+ * 브랜드 자기 계정 게시물을 몇 페이지까지 받아 오는가.
+ *
+ * 두 페이지(최대 100개)면 웬만한 브랜드의 최근 6개월을 덮는다. 월별 그래프가 보는
+ * 구간이 6개월이라 그보다 더 깊이 넘길 이유가 없다.
+ */
+const OWN_MEDIA_PAGES = 2;
+/** 브랜드 자기 계정 게시물 한 페이지 크기. */
+const OWN_MEDIA_PAGE_SIZE = 50;
 
 /** tags 엣지를 못 쓴 이유. 화면이 사람에게 할 말을 고르는 데 쓴다. */
 export type TagsUnavailableReason =
@@ -89,17 +138,27 @@ export interface TaggedMedia {
   likes: number | null;
   comments: number | null;
   /** 이 항목이 어디서 왔는가. 화면이 출처를 밝힐 수 있게. */
-  source: "tags_api" | "creator_feed";
+  source: "tags_api" | "creator_feed" | "brand_feed";
 }
 
 export interface TaggedMediaPayload {
   /** 브랜드 자신의 인스타그램 핸들. 무엇을 기준으로 찾았는지 화면이 밝힌다. */
   igUsername: string;
   items: TaggedMedia[];
+  /**
+   * 브랜드 계정이 직접 올린 게시물.
+   *
+   * 태그된 콘텐츠와 섞지 않고 따로 들고 다닌다 — "누가 우리를 태그했나" 목록에 우리
+   * 게시물이 끼면 그건 틀린 목록이 된다. 월별 추이는 두 배열을 함께 세서, 브랜드가
+   * 그 달에 오간 콘텐츠 전체(받은 것 + 올린 것)를 한 그래프에서 본다.
+   */
+  ownItems: TaggedMedia[];
   /** tags 엣지 시도 결과. 성공하면 목록에 tags_api 항목이 섞인다. */
   tagsApi: { ok: boolean; reason: TagsUnavailableReason | null };
   /** 캡션에서 언급을 찾은 연동 인플루언서 수. */
   scannedCreators: number;
+  /** 조회수를 지금 조회해 채운 콘텐츠 수. 화면이 무엇을 근거로 냈는지 밝힐 수 있게. */
+  viewsFilled: number;
   fetchedAt: string;
 }
 
@@ -157,7 +216,8 @@ export const mentionsHandle = (caption: string, handle: string): boolean => {
   return new RegExp(`@${escapeRegex(handle)}(?![A-Za-z0-9._])`, "i").test(caption);
 };
 
-const cacheKey = (username: string) => `tags_${username.replace(/[^a-z0-9._-]/gi, "_")}`;
+const cacheKey = (username: string) =>
+  `tags_${CACHE_VERSION}_${username.replace(/[^a-z0-9._-]/gi, "_")}`;
 
 async function readCache(username: string, ttlHours: number): Promise<TaggedMediaPayload | null> {
   try {
@@ -332,6 +392,178 @@ export async function scanCreatorMentions(
   return { items, creators };
 }
 
+/**
+ * 인플루언서 본인 계정의 연동을 찾는다.
+ *
+ * 조회수(인사이트)는 게시물 주인의 토큰으로만 나온다. 캠페인 등록에서 붙인 연동을
+ * 먼저 보고 없으면 디엠 자동화 연동을 본다 — 인사이트 화면이 쓰는 순서와 같다.
+ * 죽은 토큰은 여기서 걸러진다(눌러도 영원히 같은 실패가 나는 호출을 아낀다).
+ */
+async function usableCreatorLink(username: string): Promise<MetaLink | null> {
+  for (const scope of ["collab", "dm"] as const) {
+    const link = await loadMetaLink(username, scope);
+    if (linkIsUsable(link)) return link;
+  }
+  return null;
+}
+
+/** 조회수를 조회해 볼 만한 항목인가. 사진 게시물에는 애초에 조회수가 없다. */
+const viewable = (m: TaggedMedia): boolean => {
+  const type = String(m.mediaType || "").toUpperCase();
+  return type === "REELS" || type === "VIDEO";
+};
+
+/**
+ * 비어 있는 조회수를 지금 채운다.
+ *
+ * 왜 필요한가 — creator_channels 에 굳혀 둔 릴스에는 조회수가 0 으로 남아 있는 경우가
+ * 많다. 그 계정을 마지막으로 동기화한 시점에 인사이트 권한이 없었거나, 올린 직후라
+ * 집계 전이었기 때문이다. 그 값을 그대로 쓰면 브랜드 화면의 "총 조회수"는 계속 '—' 로
+ * 비고, 사람은 새로 불러오기를 눌러도 같은 화면을 본다. 그래서 목록을 만드는 그
+ * 자리에서 게시물 주인의 토큰으로 한 편씩 물어본다.
+ *
+ * 못 받은 값은 0 으로 접지 않고 null 로 남긴다 — 조회수 0 과 "조회수를 못 받음" 은
+ * 화면에서 다른 말이어야 한다.
+ */
+async function fillMissingViews(items: TaggedMedia[]): Promise<number> {
+  // 채울 수 있는 후보만 고른다. 우리 서비스 사용자명이 없는 항목(tags 엣지로 들어온
+  // 남의 게시물)은 물어볼 토큰 자체가 없다.
+  const targets = items
+    .filter((m) => m.views === null && m.id && m.authorUsername && viewable(m))
+    .slice(0, VIEW_FILL_LIMIT);
+  if (targets.length === 0) return 0;
+
+  // 계정별 연동은 한 번만 읽는다. 한 인플루언서가 여러 편을 올렸을 때 같은 블롭을
+  // 편 수만큼 다시 읽을 이유가 없다.
+  const links = new Map<string, MetaLink | null>();
+  for (const username of new Set(targets.map((m) => m.authorUsername))) {
+    links.set(username, await usableCreatorLink(username));
+  }
+
+  let filled = 0;
+  for (let i = 0; i < targets.length; i += VIEW_FILL_CHUNK) {
+    const chunk = targets.slice(i, i + VIEW_FILL_CHUNK);
+    const views = await Promise.all(
+      chunk.map(async (m) => {
+        const link = links.get(m.authorUsername);
+        return link ? await fetchMediaViews(link, m.id) : null;
+      }),
+    );
+    chunk.forEach((m, idx) => {
+      const value = views[idx];
+      if (value === null) return;
+      m.views = value;
+      filled += 1;
+    });
+  }
+
+  return filled;
+}
+
+/**
+ * 브랜드 계정이 직접 올린 최근 게시물.
+ *
+ * 자기 계정 미디어라 조회수까지 받을 수 있다(`/me/media` + 인사이트 필드 확장). 확장이
+ * 막히는 계정에서는 목록만 받고 조회수는 릴스별로 따로 물어본다 — 목록 자체를 놓치면
+ * 월별 그래프에서 브랜드가 올린 콘텐츠가 통째로 빠진다.
+ *
+ * 실패는 오류로 다루지 않는다. 이 값이 없어도 태그된 콘텐츠 화면은 성립한다.
+ */
+export async function fetchBrandOwnMedia(
+  link: MetaLink,
+): Promise<{ items: TaggedMedia[]; viewsFilled: number }> {
+  const token = String(link.accessToken || "");
+  if (!token) return { items: [], viewsFilled: 0 };
+  const host = graphHostFor(link.tokenSource);
+  const handle = String(link.igUsername || "").replace(/^@/, "");
+
+  const firstPage = (fields: string) =>
+    `https://${host}/me/media?fields=${encodeURIComponent(fields)}` +
+    `&limit=${OWN_MEDIA_PAGE_SIZE}&access_token=${encodeURIComponent(token)}`;
+
+  const rows: any[] = [];
+  let next = firstPage(MEDIA_FIELDS_WITH_VIEWS);
+  // 필드를 줄인 재시도를 한 번만 쓴다. 재시도가 페이지 예산을 먹지 않도록 페이지
+  // 수와 따로 센다 — 확장이 막힌 계정이 절반의 게시물만 받게 되면 안 된다.
+  let mayRetryWithoutViews = true;
+  let pages = 0;
+
+  while (next && pages < OWN_MEDIA_PAGES) {
+    let res: Response;
+    try {
+      res = await fetch(next);
+    } catch (e) {
+      console.warn("[tagged-media] 브랜드 게시물 조회 실패:", (e as Error)?.message);
+      break;
+    }
+    const data = (await res.json().catch(() => ({}))) as any;
+
+    if (!res.ok) {
+      // 인사이트 필드 확장이 막힌 계정이다. 목록만이라도 받는다 — 조회수는 아래에서
+      // 게시물별로 따로 물어본다. 토큰이 죽은 경우에는 다시 불러도 같은 실패라
+      // 두 번째 호출을 아낀다.
+      if (pages === 0 && mayRetryWithoutViews && !isTokenInvalidError(data)) {
+        mayRetryWithoutViews = false;
+        next = firstPage(MEDIA_FIELDS);
+        continue;
+      }
+      console.warn(
+        "[tagged-media] 브랜드 게시물 조회 실패:",
+        String(data?.error?.message || `HTTP ${res.status}`),
+      );
+      break;
+    }
+
+    rows.push(...(Array.isArray(data?.data) ? data.data : []));
+    next = String(data?.paging?.next || "");
+    pages += 1;
+  }
+
+  const items: TaggedMedia[] = rows.map((m: any) => {
+    const isReels =
+      String(m?.media_product_type || "").toUpperCase() === "REELS" ||
+      String(m?.media_type || "").toUpperCase() === "VIDEO";
+    const expanded = viewsOnMedia(m);
+    return {
+      id: String(m?.id || ""),
+      permalink: String(m?.permalink || ""),
+      thumbnailUrl:
+        String(m?.media_type || "").toUpperCase() === "VIDEO"
+          ? String(m?.thumbnail_url || m?.media_url || "")
+          : String(m?.media_url || m?.thumbnail_url || ""),
+      caption: String(m?.caption || "").slice(0, 200),
+      timestamp: String(m?.timestamp || ""),
+      authorHandle: handle,
+      authorUsername: "",
+      mediaType: isReels ? "REELS" : String(m?.media_type || "IMAGE"),
+      views: expanded !== null && expanded > 0 ? expanded : null,
+      likes: numOrNull(m?.like_count),
+      comments: numOrNull(m?.comments_count),
+      source: "brand_feed" as const,
+    };
+  });
+
+  // 확장으로 못 받은 조회수는 자기 게시물별로 물어본다. 브랜드 토큰이므로 권한이 있다.
+  const missing = items.filter((m) => m.views === null && m.id && viewable(m)).slice(0, VIEW_FILL_LIMIT);
+  let viewsFilled = 0;
+  for (let i = 0; i < missing.length; i += VIEW_FILL_CHUNK) {
+    const chunk = missing.slice(i, i + VIEW_FILL_CHUNK);
+    const values = await Promise.all(chunk.map((m) => fetchMediaViews(link, m.id)));
+    chunk.forEach((m, idx) => {
+      if (values[idx] === null) return;
+      m.views = values[idx];
+      viewsFilled += 1;
+    });
+  }
+
+  return {
+    items: items
+      .filter((m) => m.id || m.permalink)
+      .sort((a, b) => Date.parse(b.timestamp || "") - Date.parse(a.timestamp || "")),
+    viewsFilled,
+  };
+}
+
 /** 같은 게시물이 두 경로로 들어오면 한 번만 남긴다. tags 엣지 값을 우선한다. */
 const dedupe = (items: TaggedMedia[]): TaggedMedia[] => {
   const byId = new Map<string, TaggedMedia>();
@@ -389,7 +621,13 @@ export async function getTaggedMedia(
     if (cached) return { ok: true, payload: cached, cached: true };
   }
 
-  const [tags, scan] = await Promise.all([fetchTagsEdge(link), scanCreatorMentions(db, handle)]);
+  const [tags, scan, own] = await Promise.all([
+    fetchTagsEdge(link),
+    scanCreatorMentions(db, handle),
+    // 브랜드가 직접 올린 게시물. 월별 추이가 "받은 것 + 올린 것" 을 함께 세려면
+    // 목록을 만드는 이 자리에서 같이 받아 둬야 한다.
+    fetchBrandOwnMedia(link),
+  ]);
 
   const items = dedupe([...tags.items, ...scan.items])
     // 우리가 우리 계정을 언급한 게시물은 "누가 우리를 태그했나" 가 아니다.
@@ -398,11 +636,17 @@ export async function getTaggedMedia(
     .sort((a, b) => Date.parse(b.timestamp || "") - Date.parse(a.timestamp || ""))
     .slice(0, TAGGED_LIMIT);
 
+  // 조회수는 여기서 채운다. 사람이 "새로 불러오기" 를 누를 때만 채우면, 처음 화면을
+  // 연 사람은 조회수가 비어 있는 화면을 먼저 보고 왜 비었는지 알 방법이 없다.
+  const filled = await fillMissingViews(items);
+
   const payload: TaggedMediaPayload = {
     igUsername: handle,
     items,
+    ownItems: own.items,
     tagsApi: { ok: tags.ok, reason: tags.reason },
     scannedCreators: scan.creators,
+    viewsFilled: filled + own.viewsFilled,
     fetchedAt: new Date().toISOString(),
   };
 

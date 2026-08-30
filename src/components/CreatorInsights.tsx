@@ -98,6 +98,15 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const [connecting, setConnecting] = useState(false);
   const [notice, setNotice] = useState<string>('');
 
+  /**
+   * 인사이트 응답이 도착한 시각.
+   *
+   * 추이 그래프는 이 값이 바뀐 뒤에 읽는다. 두 요청을 동시에 보내면 그래프 쪽이 먼저
+   * 도착하는데, 오늘자 팔로워 점을 남기는 것은 인사이트 쪽 요청이다 — 순서가 뒤집히면
+   * 처음 화면을 연 사람은 점이 하나도 없는 "수집 중" 화면을 보게 된다.
+   */
+  const [loadedAt, setLoadedAt] = useState(0);
+
   const load = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!userName) return;
@@ -107,6 +116,7 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
       setData(res);
       setLoading(false);
       setRefreshing(false);
+      setLoadedAt(Date.now());
     },
     [userName],
   );
@@ -123,7 +133,11 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   );
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { loadSeries(range); }, [loadSeries, range]);
+  // 오늘자 점이 남은 뒤에 읽는다(loadedAt 주석 참고). 기간을 바꾸면 그때 다시 읽는다.
+  useEffect(() => {
+    if (!loadedAt) return;
+    loadSeries(range);
+  }, [loadSeries, range, loadedAt]);
 
   // 연동 콜백에서 돌아온 경우. 결과를 한 줄로 알리고 주소창의 표식은 지운다 —
   // 남겨 두면 다음 새로고침 때도 이 화면으로 끌려온다. 디엠 자동화 화면이 쓰는
@@ -237,9 +251,9 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         igUsername={data?.igUsername}
         fetchedAt={data?.fetchedAt}
         refreshing={refreshing}
-        // 강제 조회는 오늘자 스냅샷도 함께 남긴다. 그래프도 같이 다시 읽어야
-        // 방금 생긴 오늘 점이 화면에 반영된다.
-        onRefresh={async () => { await load({ refresh: true }); loadSeries(range); }}
+        // 강제 조회는 오늘자 스냅샷도 함께 남긴다. 그래프는 응답이 도착한 뒤에
+        // (loadedAt 이 바뀌면서) 다시 읽히므로 여기서 따로 부르지 않는다.
+        onRefresh={() => load({ refresh: true })}
       />
 
       {(notice || data?.error) && (
@@ -524,8 +538,13 @@ const SortChip: React.FC<{
  * 팔로워 추이 선 그래프.
  *
  * 한 계정의 팔로워 수 하나만 그린다. 계열이 하나라 범례를 두지 않고(제목이 그
- * 계열의 이름이다), 축은 뒤로 물러나고 값은 짚었을 때만 나온다. 점을 매번 찍지
- * 않는 이유는 90일을 고르면 점이 선을 덮기 때문이다.
+ * 계열의 이름이다), 축은 뒤로 물러나고 값은 짚었을 때만 나온다. 점은 며칠치가
+ * 쌓였는지에 따라 찍는다 — 90일을 고르면 점이 선을 덮지만, 며칠치뿐일 때는 점이
+ * 없으면 값이 어느 날의 것인지 알 수 없다.
+ *
+ * 기록이 하루치뿐이어도 그린다. 선은 이어지지 않지만 그래프의 축·격자와 점 하나가
+ * 보이면 사람은 "무엇이 언제부터 쌓이고 있는가"를 볼 수 있다. 빈 상자에 안내 문구만
+ * 띄우면 값이 있는 계정에서도 화면이 고장 난 것처럼 읽힌다.
  *
  * y축은 0 에서 시작하지 않는다. 팔로워 3만 계정의 하루 증감 40명은 0 기준 축에서
  * 완전한 수평선이 되고, 그러면 이 그래프는 아무것도 말하지 않는다.
@@ -542,9 +561,9 @@ const FollowerChart: React.FC<{
 
   const points = series?.points || [];
 
-  // 점이 두 개 미만이면 선을 그릴 수 없다. 가짜 0 을 채워 그리면 그 날 팔로워가
-  // 전부 빠진 것으로 읽힌다.
-  if (points.length < 2) {
+  // 기록이 아예 없으면 그릴 것이 없다. 가짜 0 을 채워 그리면 그 날 팔로워가 전부
+  // 빠진 것으로 읽힌다.
+  if (points.length === 0) {
     return (
       <div className="h-[200px] md:h-[260px] rounded-2xl bg-slate-50 flex flex-col items-center justify-center text-center px-6">
         <p className="text-sm font-black text-slate-900 mb-1">
@@ -552,20 +571,15 @@ const FollowerChart: React.FC<{
         </p>
         <p className="text-[11px] md:text-xs font-medium text-slate-500 leading-relaxed max-w-sm">
           {isEn
-            ? 'Follower counts are recorded once a day. The line appears from the second day onward.'
-            : '팔로워 수는 하루에 한 번 기록됩니다. 이틀치가 쌓이는 날부터 그래프가 그려집니다.'}
+            ? 'Follower counts are recorded once a day. The first point appears as soon as your account is read.'
+            : '팔로워 수는 하루에 한 번 기록됩니다. 계정을 한 번 불러오면 첫 점이 생기고, 이틀치가 쌓이는 날부터 선으로 이어집니다.'}
         </p>
-        {points.length === 1 && (
-          <p className="text-[11px] font-bold text-slate-400 mt-2">
-            {isEn
-              ? `First record: ${shortDate(points[0].date)} · ${points[0].followers.toLocaleString()}`
-              : `첫 기록 ${shortDate(points[0].date)} · ${points[0].followers.toLocaleString()}명`}
-          </p>
-        )}
       </div>
     );
   }
 
+  /** 하루치뿐이면 증감을 말할 수 없다 — 점 하나만 찍고 그 사실을 옆에 적는다. */
+  const single = points.length === 1;
   const values = points.map(p => p.followers);
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -584,15 +598,19 @@ const FollowerChart: React.FC<{
         <span className="text-xl md:text-3xl font-black text-slate-900">
           {values[values.length - 1].toLocaleString()}
         </span>
-        <span
-          className={`text-xs md:text-sm font-black ${
-            change > 0 ? 'text-emerald-600' : change < 0 ? 'text-rose-600' : 'text-slate-400'
-          }`}
-        >
-          {change > 0 ? '+' : change < 0 ? '−' : ''}{Math.abs(change).toLocaleString()}
-        </span>
+        {!single && (
+          <span
+            className={`text-xs md:text-sm font-black ${
+              change > 0 ? 'text-emerald-600' : change < 0 ? 'text-rose-600' : 'text-slate-400'
+            }`}
+          >
+            {change > 0 ? '+' : change < 0 ? '−' : ''}{Math.abs(change).toLocaleString()}
+          </span>
+        )}
         <span className="text-[10px] md:text-xs font-bold text-slate-400">
-          {isEn ? `over ${points.length} days` : `${points.length}일 동안`}
+          {single
+            ? (isEn ? `first record ${shortDate(points[0].date)}` : `첫 기록 ${shortDate(points[0].date)}`)
+            : (isEn ? `over ${points.length} days` : `${points.length}일 동안`)}
         </span>
       </div>
 
@@ -639,7 +657,9 @@ const FollowerChart: React.FC<{
               dataKey="followers"
               stroke="#2563eb"
               strokeWidth={2}
-              dot={false}
+              // 며칠치뿐일 때는 점을 찍는다. 하루치면 선이 아예 없으므로 점이 유일한
+              // 표시이고, 90일치면 점이 선을 덮으므로 끈다.
+              dot={points.length <= 14 ? { r: 3, strokeWidth: 2, stroke: '#ffffff' } : false}
               activeDot={{ r: 4, strokeWidth: 2, stroke: '#ffffff' }}
             />
           </LineChart>
@@ -648,9 +668,13 @@ const FollowerChart: React.FC<{
 
       {partial && (
         <p className="text-[10px] md:text-[11px] font-bold text-slate-400 mt-2">
-          {isEn
-            ? `Only ${points.length} of the last ${range} days have been recorded so far — the rest is still being collected.`
-            : `최근 ${range}일 중 ${points.length}일치만 기록돼 있습니다. 나머지 기간은 데이터 수집 중입니다.`}
+          {single
+            ? (isEn
+                ? 'Only one day has been recorded so far — the line is drawn from the second day onward.'
+                : '아직 하루치만 기록돼 있습니다. 이틀치가 쌓이는 날부터 선으로 이어집니다.')
+            : (isEn
+                ? `Only ${points.length} of the last ${range} days have been recorded so far — the rest is still being collected.`
+                : `최근 ${range}일 중 ${points.length}일치만 기록돼 있습니다. 나머지 기간은 데이터 수집 중입니다.`)}
         </p>
       )}
     </>
