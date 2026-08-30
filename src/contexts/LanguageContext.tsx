@@ -20,6 +20,7 @@ const translations: Record<string, { ko: string; en: string }> = {
   'nav.links': { ko: '링크 관리', en: 'Links' },
   'nav.manage': { ko: '관리', en: 'Manage' },
   'nav.dmAutomation': { ko: 'DM 자동화', en: 'DM Automation' },
+  'nav.insights': { ko: '인사이트', en: 'Insights' },
   // 캠페인은 새 캠페인을 찾아 지원하는 자리, 캠페인 협업은 선정된 캠페인을 굴리는
   // 자리다. 둘 다 '캠페인 협업'으로 부르던 때에는 진행하러 들어온 사람이 남의
   // 캠페인 목록에서 자기 캠페인을 찾아야 했다.

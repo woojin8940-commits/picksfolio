@@ -28,12 +28,21 @@ import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts"
  */
 
 /**
- * 요청 권한.
+ * 요청 권한. 네 개 모두 2026-08-30 메타 앱 심사를 통과했다(insights·comments 신규
+ * 승인, basic·messages 갱신). 하나라도 빼면 그 기능이 조용히 멈추므로 목록을 줄이지
+ * 않는다.
  *
- * instagram_business_manage_insights 는 릴스 조회수를 받기 위한 것이다. 조회수는
- * 미디어 일반 필드가 아니라 인사이트 지표라서, 이 권한 없이는 팔로워·릴스 목록만
- * 오고 평균 조회수가 0 으로 남는다(브랜드 매칭 명단에서 가장 중요한 숫자다).
- * 메타 앱 심사에서 이 권한이 승인돼야 실제 사용자 계정에서도 값이 내려온다.
+ *   instagram_business_basic            계정 기본 정보와 미디어 목록.
+ *   instagram_business_manage_messages  디엠 자동화(발송·수신 웹훅).
+ *   instagram_business_manage_comments  댓글 자동 답글과 댓글 이벤트 웹훅.
+ *   instagram_business_manage_insights  조회수·도달·저장수. 이 셋은 미디어 일반
+ *     필드가 아니라 인사이트 지표라서, 권한 없이는 팔로워·릴스 목록만 오고 숫자가
+ *     0 또는 빈 값으로 남는다(브랜드 매칭 명단의 평균 조회수, 인사이트 화면의
+ *     도달·저장수가 여기에 걸린다).
+ *
+ * 주의: 승인 전에 발급된 토큰에는 새로 승인된 범위가 붙어 있지 않고, 장기 토큰
+ * 갱신으로도 범위는 늘어나지 않는다. 그 계정들은 사람이 이 동의 화면을 한 번 더
+ * 지나야 한다(인사이트 화면이 그 경우를 감지해 재연동을 권한다).
  */
 const SCOPES = [
   "instagram_business_basic",
