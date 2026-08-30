@@ -495,6 +495,11 @@ export interface InsightReel {
   views: number;
   reach: number | null;
   saved: number | null;
+  /**
+   * 공유 수. 인사이트 권한이 통했을 때만 온다 — 도달·저장수와 같은 조건이다.
+   * 예전 판 캐시에서 온 응답에는 이 칸이 없어서 undefined 일 수 있다.
+   */
+  shares?: number | null;
   likes: number;
   comments: number;
   durationSeconds: number | null;
@@ -596,6 +601,10 @@ export interface TaggedMediaResponse {
     monthOwnCount?: number;
     ownCount?: number;
     ownViews?: TaggedMediaSum;
+    /** 태그된 콘텐츠 + 브랜드 계정 게시물을 합친 조회수. 화면의 "총 조회수". */
+    allViews?: TaggedMediaSum;
+    /** 같은 합계의 이번 달 구간. */
+    monthAllViews?: TaggedMediaSum;
   };
   /**
    * 메타 tags 엣지 결과. 인스타그램 로그인 방식 토큰에서는 거부되는 것이 정상이라
@@ -607,6 +616,14 @@ export interface TaggedMediaResponse {
   scannedCreators?: number;
   /** 이번 조회에서 조회수를 직접 받아 채운 콘텐츠 수. */
   viewsFilled?: number;
+  /**
+   * 조회수가 비어 있는 이유를 세어 둔 값.
+   *
+   * '—' 가 나오는 이유는 하나가 아니다 — 올린 계정이 우리 서비스 연동 계정이 아니라
+   * 물어볼 토큰이 없었거나(noToken), 물어봤는데 메타가 아직 값을 주지 않은 경우다.
+   * 화면은 이 값으로 그 둘을 구분해 말한다.
+   */
+  viewsFill?: { candidates: number; attempted: number; filled: number; noToken: number };
   fetchedAt?: string;
   cached?: boolean;
   cacheTtlHours?: number;

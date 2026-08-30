@@ -52,10 +52,12 @@ import {
  * -----------------------------------------
  * ②로 들어온 릴스의 조회수는 creator_channels 에 0 으로 남아 있는 경우가 많다 —
  * 그 계정을 마지막으로 동기화한 시점에 인사이트 권한이 없었거나 올린 직후라 집계
- * 전이었기 때문이다. 저장된 값만 쓰면 브랜드 화면의 조회수는 계속 비고, 사람이
- * 새로고침해도 같은 화면이 나온다. 그래서 목록이 정해진 직후 게시물 주인의 토큰으로
- * 한 편씩 물어 빈 자리를 채운다(fillMissingViews). 첫 로딩 안에서 끝나야 하는 일이라
- * 편 수와 동시 실행 수에 상한을 둔다.
+ * 전이었기 때문이다. 저장된 피드(사진·캐러셀)에는 조회수 칸이 아예 없다. 저장된 값만
+ * 쓰면 브랜드 화면의 조회수는 계속 비고, 사람이 새로고침해도 같은 화면이 나온다.
+ * 그래서 목록이 정해진 직후 게시물 주인의 토큰으로 한 편씩 물어 빈 자리를 채운다
+ * (fillMissingViews). 종류로 자르지 않는다 — 2025년 지표 개편 이후 `views` 는 사진·
+ * 캐러셀에도 내려오는 값이다. 첫 로딩 안에서 끝나야 하는 일이라 편 수와 동시 실행
+ * 수에 상한을 두고, 물어보지 못한 편 수는 세어 화면에 함께 내려보낸다.
  *
  * 브랜드가 직접 올린 게시물도 함께 받는다
  * ---------------------------------------
@@ -83,9 +85,11 @@ const CACHE_STORE = "business-tagged-media";
  * 캐시 형식 판. 저장해 둔 값의 모양이 바뀌면 올린다.
  *
  * 예전 판에는 조회수를 채우지 않은 항목과 브랜드 자기 게시물이 없다. 키를 그대로 두면
- * 이미 캐시가 있는 브랜드는 TTL 이 끝날 때까지 조회수 없는 화면을 계속 본다.
+ * 이미 캐시가 있는 브랜드는 TTL 이 끝날 때까지 조회수 없는 화면을 계속 본다. v3 부터는
+ * 릴스가 아닌 게시물에도 조회수를 물어보고(isReelLike 주석 참고), 왜 비었는지를 함께
+ * 담는다.
  */
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 
 /**
  * 조회수를 지금 채워 볼 콘텐츠 수 상한.
@@ -95,9 +99,9 @@ const CACHE_VERSION = "v2";
  * 목록은 최신순이므로 앞쪽(= 브랜드가 실제로 보는 구간)부터 채운다. 뒤쪽 항목은
  * 저장된 값이 있으면 그 값을, 없으면 '—' 로 남는다.
  */
-const VIEW_FILL_LIMIT = 24;
+const VIEW_FILL_LIMIT = 36;
 /** 조회수 조회 동시 실행 수. 위 상한을 세 번의 왕복으로 끝내는 크기. */
-const VIEW_FILL_CHUNK = 8;
+const VIEW_FILL_CHUNK = 12;
 /**
  * 브랜드 자기 계정 게시물을 몇 페이지까지 받아 오는가.
  *
@@ -159,6 +163,23 @@ export interface TaggedMediaPayload {
   scannedCreators: number;
   /** 조회수를 지금 조회해 채운 콘텐츠 수. 화면이 무엇을 근거로 냈는지 밝힐 수 있게. */
   viewsFilled: number;
+  /**
+   * 조회수가 왜 비었는지.
+   *
+   * "총 조회수" 가 '—' 로 남는 이유는 하나가 아니다 — 물어볼 토큰이 없는 게시물이거나
+   * (연동하지 않은 계정이 올린 것), 물어봤는데 메타가 값을 주지 않은 경우다. 화면이
+   * 그 둘을 구분해 말할 수 있어야 사람이 할 수 있는 일(연동 요청 vs 기다리기)을 안다.
+   */
+  viewsFill: {
+    /** 조회수가 비어 있어 물어볼 후보로 잡힌 콘텐츠 수. */
+    candidates: number;
+    /** 실제로 물어본 수(상한에 걸려 뒤쪽은 빠질 수 있다). */
+    attempted: number;
+    /** 값을 받아 채운 수. */
+    filled: number;
+    /** 올린 계정의 연동을 찾을 수 없어 물어보지도 못한 수. */
+    noToken: number;
+  };
   fetchedAt: string;
 }
 
@@ -378,7 +399,7 @@ export async function scanCreatorMentions(
         authorHandle,
         authorUsername,
         mediaType: String(f?.mediaType || "IMAGE"),
-        // 사진·일반 영상 게시물에는 조회수가 없다.
+        // 저장된 피드에는 조회수 칸이 없다. 아래에서 게시물별로 물어 채운다.
         views: null,
         likes: numOrNull(f?.likes),
         comments: numOrNull(f?.comments),
@@ -407,8 +428,16 @@ async function usableCreatorLink(username: string): Promise<MetaLink | null> {
   return null;
 }
 
-/** 조회수를 조회해 볼 만한 항목인가. 사진 게시물에는 애초에 조회수가 없다. */
-const viewable = (m: TaggedMedia): boolean => {
+/**
+ * 릴스·영상 게시물인가. 조회수를 먼저 물어볼 순서를 정하는 데 쓴다.
+ *
+ * 2025년 4월 메타 지표 개편 이후 `views` 는 릴스 전용 값이 아니다 — 없어진
+ * impressions 를 대신하는 지표라서 사진·캐러셀 게시물에도 내려온다. 그래서 종류로
+ * 후보를 자르지 않고, 값이 큰 릴스를 먼저 물어보는 순서만 이 함수로 정한다. 예전처럼
+ * 릴스만 물어보면 브랜드를 태그한 게시물의 대다수(사진·캐러셀)는 조회수가 영원히
+ * 비고, 화면의 "총 조회수" 는 태그가 쌓여도 계속 '—' 로 남는다.
+ */
+const isReelLike = (m: TaggedMedia): boolean => {
   const type = String(m.mediaType || "").toUpperCase();
   return type === "REELS" || type === "VIDEO";
 };
@@ -418,20 +447,36 @@ const viewable = (m: TaggedMedia): boolean => {
  *
  * 왜 필요한가 — creator_channels 에 굳혀 둔 릴스에는 조회수가 0 으로 남아 있는 경우가
  * 많다. 그 계정을 마지막으로 동기화한 시점에 인사이트 권한이 없었거나, 올린 직후라
- * 집계 전이었기 때문이다. 그 값을 그대로 쓰면 브랜드 화면의 "총 조회수"는 계속 '—' 로
- * 비고, 사람은 새로 불러오기를 눌러도 같은 화면을 본다. 그래서 목록을 만드는 그
- * 자리에서 게시물 주인의 토큰으로 한 편씩 물어본다.
+ * 집계 전이었기 때문이다. 그리고 저장된 피드(사진·캐러셀)에는 조회수 칸이 아예 없다.
+ * 그 값을 그대로 쓰면 브랜드 화면의 "총 조회수" 는 계속 '—' 로 비고, 사람은 새로
+ * 불러오기를 눌러도 같은 화면을 본다. 그래서 목록을 만드는 그 자리에서 게시물 주인의
+ * 토큰으로 한 편씩 물어본다.
+ *
+ * 릴스를 먼저 물어본다. 상한에 걸려 다 못 물어볼 때 남겨야 하는 것은 값이 큰 쪽이고,
+ * 브랜드가 성과로 읽는 숫자도 릴스 조회수다.
  *
  * 못 받은 값은 0 으로 접지 않고 null 로 남긴다 — 조회수 0 과 "조회수를 못 받음" 은
- * 화면에서 다른 말이어야 한다.
+ * 화면에서 다른 말이어야 한다. 대신 몇 편을 물어봤고 몇 편은 물어볼 토큰조차 없었는지
+ * 세어 돌려준다. 화면이 '—' 의 이유를 말할 수 있어야 사람이 할 일을 안다.
  */
-async function fillMissingViews(items: TaggedMedia[]): Promise<number> {
+async function fillMissingViews(items: TaggedMedia[]): Promise<TaggedMediaPayload["viewsFill"]> {
   // 채울 수 있는 후보만 고른다. 우리 서비스 사용자명이 없는 항목(tags 엣지로 들어온
   // 남의 게시물)은 물어볼 토큰 자체가 없다.
-  const targets = items
-    .filter((m) => m.views === null && m.id && m.authorUsername && viewable(m))
-    .slice(0, VIEW_FILL_LIMIT);
-  if (targets.length === 0) return 0;
+  const empty = items.filter((m) => m.views === null && m.id);
+  const candidates = empty.filter((m) => m.authorUsername);
+  const targets = [
+    ...candidates.filter(isReelLike),
+    ...candidates.filter((m) => !isReelLike(m)),
+  ].slice(0, VIEW_FILL_LIMIT);
+
+  const fill: TaggedMediaPayload["viewsFill"] = {
+    candidates: empty.length,
+    attempted: targets.length,
+    filled: 0,
+    // 올린 계정이 우리 서비스 사용자가 아니면 인사이트를 물어볼 토큰이 없다.
+    noToken: empty.length - candidates.length,
+  };
+  if (targets.length === 0) return fill;
 
   // 계정별 연동은 한 번만 읽는다. 한 인플루언서가 여러 편을 올렸을 때 같은 블롭을
   // 편 수만큼 다시 읽을 이유가 없다.
@@ -439,8 +484,14 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<number> {
   for (const username of new Set(targets.map((m) => m.authorUsername))) {
     links.set(username, await usableCreatorLink(username));
   }
+  // 연동이 죽었거나 없는 계정의 게시물은 물어보지 못한 쪽으로 센다.
+  for (const m of targets) {
+    if (!links.get(m.authorUsername)) {
+      fill.attempted -= 1;
+      fill.noToken += 1;
+    }
+  }
 
-  let filled = 0;
   for (let i = 0; i < targets.length; i += VIEW_FILL_CHUNK) {
     const chunk = targets.slice(i, i + VIEW_FILL_CHUNK);
     const views = await Promise.all(
@@ -453,11 +504,11 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<number> {
       const value = views[idx];
       if (value === null) return;
       m.views = value;
-      filled += 1;
+      fill.filled += 1;
     });
   }
 
-  return filled;
+  return fill;
 }
 
 /**
@@ -544,7 +595,12 @@ export async function fetchBrandOwnMedia(
   });
 
   // 확장으로 못 받은 조회수는 자기 게시물별로 물어본다. 브랜드 토큰이므로 권한이 있다.
-  const missing = items.filter((m) => m.views === null && m.id && viewable(m)).slice(0, VIEW_FILL_LIMIT);
+  // 릴스를 먼저 본다 — 상한에 걸리면 값이 큰 쪽이 남아야 한다.
+  const blank = items.filter((m) => m.views === null && m.id);
+  const missing = [...blank.filter(isReelLike), ...blank.filter((m) => !isReelLike(m))].slice(
+    0,
+    VIEW_FILL_LIMIT,
+  );
   let viewsFilled = 0;
   for (let i = 0; i < missing.length; i += VIEW_FILL_CHUNK) {
     const chunk = missing.slice(i, i + VIEW_FILL_CHUNK);
@@ -638,7 +694,7 @@ export async function getTaggedMedia(
 
   // 조회수는 여기서 채운다. 사람이 "새로 불러오기" 를 누를 때만 채우면, 처음 화면을
   // 연 사람은 조회수가 비어 있는 화면을 먼저 보고 왜 비었는지 알 방법이 없다.
-  const filled = await fillMissingViews(items);
+  const fill = await fillMissingViews(items);
 
   const payload: TaggedMediaPayload = {
     igUsername: handle,
@@ -646,7 +702,8 @@ export async function getTaggedMedia(
     ownItems: own.items,
     tagsApi: { ok: tags.ok, reason: tags.reason },
     scannedCreators: scan.creators,
-    viewsFilled: filled + own.viewsFilled,
+    viewsFilled: fill.filled + own.viewsFilled,
+    viewsFill: fill,
     fetchedAt: new Date().toISOString(),
   };
 

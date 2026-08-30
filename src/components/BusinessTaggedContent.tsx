@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ComposedChart, Bar, Line, Cell, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../services/apiService';
 
@@ -25,6 +26,15 @@ import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../s
  * 태그된 콘텐츠만 담는다 — 브랜드가 "그 달에 우리 브랜드로 오간 콘텐츠"를 보려는
  * 그래프와, "누가 우리를 태그했나"를 보려는 목록은 서로 다른 질문에 답한다.
  *
+ * 그래프는 조회수와 콘텐츠 수를 한 화면에 함께 그린다. 브랜드가 먼저 보는 값은
+ * 조회수(성과)이고 콘텐츠 수는 그 성과가 몇 편에서 나왔는지를 읽는 분모다 — 둘을
+ * 번갈아 봐야 하면 "이번 달은 편 수가 줄었는데 조회수가 늘었다" 같은 판단을 한
+ * 화면에서 할 수 없다. 자릿수가 아예 다르므로 조회수는 막대(왼쪽 축), 콘텐츠 수는
+ * 선(오른쪽 축)으로 나눠 둔다.
+ *
+ * 이번 달 막대는 색을 달리 칠하고 지난달 값에 점선을 하나 긋는다. 브랜드가 이 화면에서
+ * 실제로 확인하려는 것은 6개월의 모양이 아니라 "지난달보다 나아졌는가" 하나다.
+ *
  * 목록이 어디까지 덮는지는 화면 아래에 그대로 적는다. 메타의 tags 엣지(태그된 미디어
  * 목록)는 페이스북 로그인 방식 전용이어서 우리 토큰으로는 거부된다. 그래서 실제
  * 목록은 우리 서비스에 연동된 인플루언서들의 최근 콘텐츠에서 우리 계정 언급을 찾아
@@ -34,7 +44,6 @@ import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../s
  */
 
 type SortKey = 'recent' | 'views';
-type ChartMetric = 'count' | 'views';
 
 /** 큰 숫자는 만·억 단위로 접는다. 카드 안에서 자리를 다투지 않게. */
 const compact = (n: number | null | undefined): string => {
@@ -114,7 +123,6 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<SortKey>('recent');
-  const [metric, setMetric] = useState<ChartMetric>('count');
   const [query, setQuery] = useState('');
   const [grouped, setGrouped] = useState(false);
 
@@ -137,6 +145,14 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
   /** 브랜드 계정이 직접 올린 게시물. 목록에는 넣지 않고 월별 추이에서만 함께 센다. */
   const ownItems = data?.ownItems || [];
   const summary = data?.summary;
+  /**
+   * 조회수가 왜 비어 있는지에 대한 집계. 예전 판 응답에는 없다.
+   *
+   * 후보(candidates) / 물어본 수(attempted) / 채운 수(filled) / 토큰이 없어 물어보지도
+   * 못한 수(noToken) 를 들고 있어, 화면이 "조회수가 없다" 와 "물어볼 수 없었다" 를
+   * 구분해 적을 수 있다.
+   */
+  const fill = data?.viewsFill;
 
   /** 검색은 태그한 계정명으로만 한다(2단계). 아이디와 사용자명 양쪽을 본다. */
   const filtered = useMemo(() => {
@@ -178,7 +194,14 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
     const base = new Map(
       keys.map((k) => [
         k,
-        { month: k, count: 0, views: 0, valued: 0, ownCount: 0, ownViews: 0, ownValued: 0 },
+        {
+          month: k,
+          count: 0, views: 0, valued: 0,
+          ownCount: 0, ownViews: 0, ownValued: 0,
+          // 선(콘텐츠 수)과 점선(지난달 조회수)이 읽는 합계. 쌓은 막대의 총합이라
+          // 그래프가 다시 더하지 않도록 여기서 한 번만 만든다.
+          totalCount: 0, totalViews: 0, totalValued: 0,
+        },
       ]),
     );
     const add = (list: TaggedMediaItem[], own: boolean) => {
@@ -187,6 +210,7 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
         if (!row) continue;
         if (own) row.ownCount += 1;
         else row.count += 1;
+        row.totalCount += 1;
         if (typeof m.views === 'number') {
           if (own) {
             row.ownViews += m.views;
@@ -195,6 +219,8 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
             row.views += m.views;
             row.valued += 1;
           }
+          row.totalViews += m.views;
+          row.totalValued += 1;
         }
       }
     };
@@ -203,9 +229,16 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
     return [...base.values()];
   }, [items, ownItems]);
 
-  const chartHasValue = monthly.some((r) =>
-    metric === 'count' ? r.count + r.ownCount > 0 : r.views + r.ownViews > 0,
-  );
+  /**
+   * 이번 달과 지난달. 그래프의 마지막 두 칸이다.
+   *
+   * 지난달에 값이 아예 없으면 증감률은 만들지 않는다 — 0 에서 늘어난 것을 "+100%" 로
+   * 적으면 첫 달의 성과가 실제보다 대단해 보인다.
+   */
+  const thisMonthRow = monthly[monthly.length - 1];
+  const lastMonthRow = monthly.length >= 2 ? monthly[monthly.length - 2] : undefined;
+
+  const chartHasValue = monthly.some((r) => r.totalCount > 0 || r.totalViews > 0);
   /**
    * 조회수를 한 편도 못 받았는가.
    *
@@ -216,6 +249,50 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
   const viewsMissing =
     items.length + ownItems.length > 0 &&
     [...items, ...ownItems].every((m) => m.views === null);
+
+  /**
+   * "총 조회수" 타일이 읽는 값.
+   *
+   * 태그된 콘텐츠만 세면, 브랜드가 자기 릴스로 조회수를 쌓고 있어도(그 값은 브랜드
+   * 토큰으로 확실히 받아온다) 타일은 '—' 만 보여 준다. 그래서 받은 것과 올린 것을
+   * 합친 `allViews` 를 쓰고, 예전 판 응답에는 없는 값이라 `views` 로 물러난다.
+   */
+  const allViews = summary?.allViews ?? summary?.views;
+
+  /**
+   * 조회수가 비어 있을 때 그 이유를 타일에 적는다.
+   *
+   * "릴스가 아니면 조회수가 없습니다" 라고만 적던 때에는 사실도 아니었다 — 2025년
+   * 4월 지표 개편 이후 `views` 는 사진·캐러셀에도 온다. 실제로 비는 이유는 둘 중
+   * 하나다: 올린 계정이 우리 서비스에 연동돼 있지 않아 물어볼 토큰이 없거나, 올린
+   * 직후라 아직 집계되지 않았거나.
+   */
+  const viewsTileNote = (() => {
+    if (!allViews) return '';
+    if (allViews.counted === 0) {
+      if (fill && fill.noToken > 0) return '올린 계정의 연동이 없어 조회할 수 없습니다';
+      return '아직 집계된 조회수가 없습니다';
+    }
+    if (allViews.counted < allViews.of) return `조회수가 있는 ${allViews.counted}개 기준`;
+    return '태그된 콘텐츠 + 브랜드 계정 게시물';
+  })();
+
+  /**
+   * 지난달 대비 증감.
+   *
+   * 지난달이 0 이면 비율을 만들지 않는다 — 0 에서 늘어난 것을 "+100%" 로 적으면 첫
+   * 달의 성과가 실제보다 대단해 보인다. 이때는 값만 보여 준다.
+   */
+  const delta = (now: number, before: number) => {
+    if (before <= 0) return { diff: now, pct: null as number | null };
+    return { diff: now - before, pct: Math.round(((now - before) / before) * 100) };
+  };
+  const viewsDelta = thisMonthRow && lastMonthRow
+    ? delta(thisMonthRow.totalViews, lastMonthRow.totalViews)
+    : null;
+  const countDelta = thisMonthRow && lastMonthRow
+    ? delta(thisMonthRow.totalCount, lastMonthRow.totalCount)
+    : null;
 
   if (loading) {
     return (
@@ -267,17 +344,21 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
 
       {/* 요약 숫자 ------------------------------------------------------- */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-4 mb-5 md:mb-8">
-        <StatTile label="이번 달 태그된 콘텐츠" value={`${(summary?.monthCount ?? 0).toLocaleString()}개`} />
+        <StatTile
+          label="이번 달 태그된 콘텐츠"
+          value={`${(summary?.monthCount ?? 0).toLocaleString()}개`}
+          // 개수만 있으면 "이번 달이 어땠나"에 절반만 답한다. 같은 구간의 조회수를
+          // 아래에 붙여 둔다 — 그래프의 지난달 대비 칸과 같은 값이다.
+          note={
+            summary?.monthAllViews && summary.monthAllViews.counted > 0
+              ? `이번 달 조회수 ${compact(summary.monthAllViews.total)}`
+              : ''
+          }
+        />
         <StatTile
           label="총 조회수"
-          value={summary && summary.views.counted > 0 ? compact(summary.views.total) : '—'}
-          note={
-            summary && summary.views.counted > 0 && summary.views.counted < summary.views.of
-              ? `조회수가 있는 ${summary.views.counted}개 기준`
-              : summary && summary.views.counted === 0
-                ? '릴스가 아니면 조회수가 없습니다'
-                : ''
-          }
+          value={allViews && allViews.counted > 0 ? compact(allViews.total) : '—'}
+          note={viewsTileNote}
         />
         <StatTile
           label="총 좋아요"
@@ -299,44 +380,48 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
           <div>
             <h3 className="text-sm md:text-lg font-black text-slate-900">월별 콘텐츠</h3>
             <p className="text-[10px] md:text-xs font-bold text-slate-400 mt-0.5">
-              최근 {CHART_MONTHS}개월 · 태그된 콘텐츠와 브랜드 계정 게시물을 함께 셉니다
+              최근 {CHART_MONTHS}개월 · 조회수(막대)와 콘텐츠 수(선)를 함께 봅니다
             </p>
-            {/* 막대가 두 색으로 쌓여 있으므로 어느 쪽이 무엇인지 그 자리에서 밝힌다. */}
-            <div className="flex items-center gap-3 mt-2">
-              <LegendDot color="#2563eb" label="태그된 콘텐츠" />
-              <LegendDot color="#93c5fd" label={`브랜드 계정(@${data?.igUsername || '우리 계정'})`} />
+            {/* 막대는 두 색으로 쌓이고 선이 하나 더 지나가므로, 어느 것이 무엇인지
+                그 자리에서 밝힌다. 이번 달은 색이 달라 따로 적어 준다. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
+              <LegendDot color="#2563eb" label="태그된 콘텐츠 조회수" />
+              <LegendDot color="#93c5fd" label={`브랜드 계정 조회수(@${data?.igUsername || '우리 계정'})`} />
+              <LegendDot color="#f59e0b" label="콘텐츠 수" />
+              <LegendDot color="#7c3aed" label="이번 달" />
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 self-start">
-            <Chip active={metric === 'count'} onClick={() => setMetric('count')}>콘텐츠 수</Chip>
-            <Chip
-              active={metric === 'views'}
-              disabled={viewsMissing}
-              onClick={() => setMetric('views')}
-            >
-              조회수
-            </Chip>
-          </div>
+
+          {/* 지난달과의 차이. 그래프에서 눈으로 재는 대신 숫자로 한 번 더 적는다. */}
+          {viewsDelta && countDelta && (
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 self-start shrink-0">
+              <DeltaTile label="조회수" unit="회" now={thisMonthRow.totalViews} delta={viewsDelta} />
+              <DeltaTile label="콘텐츠 수" unit="개" now={thisMonthRow.totalCount} delta={countDelta} />
+            </div>
+          )}
         </div>
 
         {chartHasValue ? (
-          <MonthlyChart rows={monthly} metric={metric} />
+          <MonthlyChart rows={monthly} thisMonth={thisMonthRow?.month} lastViews={lastMonthRow?.totalViews} />
         ) : (
           <div className="h-[180px] md:h-[220px] rounded-2xl bg-slate-50 flex flex-col items-center justify-center text-center px-6">
             <p className="text-sm font-black text-slate-900 mb-1">데이터 수집 중</p>
             <p className="text-[11px] md:text-xs font-medium text-slate-500 leading-relaxed max-w-sm">
-              {metric === 'views'
-                ? '아직 조회수를 받은 릴스가 없습니다. 릴스가 아닌 게시물에는 조회수가 없습니다.'
-                : `최근 ${CHART_MONTHS}개월 안에 우리 계정을 태그한 콘텐츠도, 브랜드 계정이 올린 게시물도 아직 없습니다.`}
+              최근 {CHART_MONTHS}개월 안에 우리 계정을 태그한 콘텐츠도, 브랜드 계정이 올린
+              게시물도 아직 없습니다.
             </p>
           </div>
         )}
 
-        {metric === 'views' && (
-          <p className="text-[10px] md:text-[11px] font-bold text-slate-400 mt-2">
-            조회수는 릴스에만 있습니다. 값이 있는 콘텐츠만 더한 합계입니다.
-          </p>
-        )}
+        <p className="text-[10px] md:text-[11px] font-bold text-slate-400 mt-2">
+          조회수는 값을 받아온 콘텐츠만 더한 합계입니다.
+          {viewsMissing
+            ? ' 아직 조회수를 받은 콘텐츠가 없어 막대가 비어 있습니다.'
+            : ''}
+          {lastMonthRow && lastMonthRow.totalViews > 0
+            ? ` 점선은 지난달 조회수(${compact(lastMonthRow.totalViews)})입니다.`
+            : ''}
+        </p>
       </section>
 
       {/* 목록 ------------------------------------------------------------ */}
@@ -503,33 +588,81 @@ const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label })
 );
 
 /**
- * 월별 막대 그래프.
+ * 지난달 대비 한 칸.
  *
- * 한 번에 한 지표만 그린다 — 콘텐츠 수와 조회수는 자릿수가 아예 달라서 한 축에 함께
- * 두면 콘텐츠 수 막대가 보이지 않는다. 축을 두 개 두는 대신 위에서 하나를 고르게 했다.
- *
- * 고른 지표 안에서는 태그된 콘텐츠와 브랜드 계정 게시물을 한 막대에 쌓는다. 두 값을
- * 미리 더해 하나로 그리면 그 달의 총량은 보이지만 "그중 얼마가 인플루언서에게서 온
- * 것인가" 를 볼 수 없고, 막대를 나란히 두면 6개월×2개 막대가 되어 폭이 좁아진다.
- * 축과 격자는 뒤로 물러나고, 값은 막대를 짚었을 때 나온다.
+ * 값과 증감을 함께 적는다 — 증감만 적으면 "+120%" 가 2회에서 4회로 늘어난 것인지
+ * 5만에서 11만으로 늘어난 것인지 알 수 없다. 지난달이 0 이라 비율을 만들 수 없을
+ * 때는 비율 자리를 비워 둔다.
  */
+const DeltaTile: React.FC<{
+  label: string;
+  unit: string;
+  now: number;
+  delta: { diff: number; pct: number | null };
+}> = ({ label, unit, now, delta }) => {
+  const up = delta.diff > 0;
+  const flat = delta.diff === 0;
+  const tone = flat ? 'text-slate-400' : up ? 'text-emerald-600' : 'text-rose-500';
+  return (
+    <div className="rounded-2xl bg-slate-50 px-3 py-2 min-w-[104px]">
+      <p className="text-[10px] font-black text-slate-400">이번 달 {label}</p>
+      <p className="text-sm md:text-base font-black text-slate-900 leading-tight">
+        {compact(now)}
+        <span className="text-[10px] font-bold text-slate-400 ml-0.5">{unit}</span>
+      </p>
+      <p className={`text-[10px] font-black ${tone} mt-0.5`}>
+        {flat ? '지난달과 같음' : `지난달 대비 ${up ? '+' : '−'}${compact(Math.abs(delta.diff))}${unit}`}
+        {delta.pct !== null && !flat ? ` (${up ? '+' : ''}${delta.pct}%)` : ''}
+      </p>
+    </div>
+  );
+};
+
+/**
+ * 월별 그래프. 조회수와 콘텐츠 수를 한 화면에 함께 그린다.
+ *
+ * 두 값은 자릿수가 아예 다르다(조회수 수만 회 vs 콘텐츠 수 수십 개). 그래서 한 축에
+ * 같이 두면 콘텐츠 수 막대는 바닥에 붙어 보이지 않는다. 축을 둘로 나눠 조회수는
+ * 막대(왼쪽 축), 콘텐츠 수는 선(오른쪽 축)으로 그린다 — 위에서 하나만 고르게 하던
+ * 때에는 브랜드가 두 값을 번갈아 눌러 가며 머릿속에서 맞춰 봐야 했다.
+ *
+ * 조회수 막대 안에서는 태그된 콘텐츠와 브랜드 계정 게시물을 쌓는다. 미리 더해 하나로
+ * 그리면 그 달의 총량은 보이지만 "그중 얼마가 인플루언서에게서 온 것인가" 가 사라진다.
+ *
+ * 이번 달 막대는 색을 달리 칠하고, 지난달 조회수에 점선을 하나 긋는다. 두 막대의
+ * 높이를 눈으로 재는 것보다 선 위/아래로 보는 것이 빠르다.
+ */
+type MonthlyRow = {
+  month: string;
+  count: number; views: number; valued: number;
+  ownCount: number; ownViews: number; ownValued: number;
+  totalCount: number; totalViews: number; totalValued: number;
+};
+
 const MonthlyChart: React.FC<{
-  rows: {
-    month: string;
-    count: number; views: number; valued: number;
-    ownCount: number; ownViews: number; ownValued: number;
-  }[];
-  metric: ChartMetric;
-}> = ({ rows, metric }) => {
+  rows: MonthlyRow[];
+  /** 이번 달 키(`YYYY-MM`). 이 칸만 다른 색으로 칠한다. */
+  thisMonth?: string;
+  /** 지난달 조회수. 점선 자리다. 없으면 선을 긋지 않는다. */
+  lastViews?: number;
+}> = ({ rows, thisMonth, lastViews }) => {
   const label = (key: string) => {
     const m = key.match(/^(\d{4})-(\d{2})$/);
     return m ? `${Number(m[2])}월` : key;
   };
+  const isNow = (key: string) => Boolean(thisMonth) && key === thisMonth;
+
+  /** 계열 이름. 툴팁이 dataKey 를 그대로 보여 주면 영문 필드명이 노출된다. */
+  const seriesName: Record<string, string> = {
+    views: '태그된 콘텐츠 조회수',
+    ownViews: '브랜드 계정 조회수',
+    totalCount: '콘텐츠 수',
+  };
 
   return (
-    <div className="h-[200px] md:h-[240px] w-full">
+    <div className="h-[220px] md:h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           <XAxis
             dataKey="month"
@@ -539,12 +672,24 @@ const MonthlyChart: React.FC<{
             tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
             dy={8}
           />
+          {/* 왼쪽 = 조회수. */}
           <YAxis
+            yAxisId="views"
             axisLine={false}
             tickLine={false}
             tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
             tickFormatter={(v: number) => compact(v)}
             width={44}
+            allowDecimals={false}
+          />
+          {/* 오른쪽 = 콘텐츠 수. 눈금 색을 선 색에 맞춰 어느 축이 선의 축인지 보이게 한다. */}
+          <YAxis
+            yAxisId="count"
+            orientation="right"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#f59e0b' }}
+            width={32}
             allowDecimals={false}
           />
           <Tooltip
@@ -556,31 +701,66 @@ const MonthlyChart: React.FC<{
               fontSize: 12,
               fontWeight: 700,
             }}
-            labelFormatter={(raw) => label(String(raw ?? ''))}
-            formatter={(value, _name, entry) => [
-              metric === 'count'
-                ? `${Number(value ?? 0).toLocaleString()}개`
-                : `${Number(value ?? 0).toLocaleString()}회`,
-              // 쌓은 막대에서는 어느 계열의 값인지가 숫자보다 먼저 필요하다.
-              String(entry?.dataKey || '').startsWith('own') ? '브랜드 계정' : '태그된 콘텐츠',
-            ]}
+            labelFormatter={(raw) => `${label(String(raw ?? ''))}${isNow(String(raw ?? '')) ? ' (이번 달)' : ''}`}
+            formatter={(value, _name, entry) => {
+              const key = String(entry?.dataKey || '');
+              return [
+                key === 'totalCount'
+                  ? `${Number(value ?? 0).toLocaleString()}개`
+                  : `${Number(value ?? 0).toLocaleString()}회`,
+                seriesName[key] || key,
+              ];
+            }}
           />
+
+          {/* 지난달 조회수. 이번 달 막대가 이 선을 넘었는지가 이 화면의 질문이다. */}
+          {typeof lastViews === 'number' && lastViews > 0 && (
+            <ReferenceLine
+              yAxisId="views"
+              y={lastViews}
+              stroke="#7c3aed"
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{
+                value: '지난달',
+                position: 'insideTopLeft',
+                fontSize: 10,
+                fontWeight: 800,
+                fill: '#7c3aed',
+              }}
+            />
+          )}
+
           {/* 태그된 콘텐츠를 아래에 둔다 — 이 화면의 주된 값이라 축에 붙어 있어야
               달마다 높이를 비교할 수 있다. */}
+          <Bar yAxisId="views" dataKey="views" stackId="month" maxBarSize={44}>
+            {rows.map((r) => (
+              <Cell key={r.month} fill={isNow(r.month) ? '#7c3aed' : '#2563eb'} />
+            ))}
+          </Bar>
           <Bar
-            dataKey={metric === 'count' ? 'count' : 'views'}
+            yAxisId="views"
+            dataKey="ownViews"
             stackId="month"
-            fill="#2563eb"
-            maxBarSize={44}
-          />
-          <Bar
-            dataKey={metric === 'count' ? 'ownCount' : 'ownViews'}
-            stackId="month"
-            fill="#93c5fd"
             radius={[4, 4, 0, 0]}
             maxBarSize={44}
+          >
+            {rows.map((r) => (
+              <Cell key={r.month} fill={isNow(r.month) ? '#c4b5fd' : '#93c5fd'} />
+            ))}
+          </Bar>
+
+          {/* 콘텐츠 수. 막대 위를 지나가므로 점을 남겨 어느 달의 값인지 짚을 수 있게 한다. */}
+          <Line
+            yAxisId="count"
+            type="monotone"
+            dataKey="totalCount"
+            stroke="#f59e0b"
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: '#f59e0b', strokeWidth: 0 }}
+            activeDot={{ r: 5 }}
           />
-        </BarChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
@@ -662,6 +842,7 @@ const MiniStat: React.FC<{ label: string; value: string }> = ({ label, value }) 
 const CoverageNote: React.FC<{ data: TaggedMediaResponse | null }> = ({ data }) => {
   if (!data) return null;
   const viaTags = data.tagsApi?.ok;
+  const fill = data.viewsFill;
   return (
     <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3">
       <p className="text-[10px] md:text-[11px] font-bold text-slate-500 leading-relaxed">
@@ -674,12 +855,27 @@ const CoverageNote: React.FC<{ data: TaggedMediaResponse | null }> = ({ data }) 
       </p>
       <p className="text-[10px] md:text-[11px] font-bold text-slate-500 leading-relaxed mt-1">
         조회수는 목록을 불러올 때 콘텐츠를 올린 계정의 인스타그램 인사이트에서 함께
-        받아옵니다. 릴스가 아닌 게시물에는 조회수가 없고, 올린 직후라 아직 집계되지 않은
-        콘텐츠는 값이 비어 있습니다.
+        받아옵니다. 그래서 올린 계정이 우리 서비스에 연동돼 있어야 값을 물어볼 수 있고,
+        올린 직후라 아직 집계되지 않은 콘텐츠는 값이 비어 있습니다.
         {typeof data.ownItems?.length === 'number'
-          ? ` 월별 콘텐츠 그래프에는 브랜드 계정이 올린 게시물 ${data.ownItems.length.toLocaleString()}개가 함께 반영됩니다.`
+          ? ` 월별 콘텐츠 그래프와 총 조회수에는 브랜드 계정이 올린 게시물 ${data.ownItems.length.toLocaleString()}개가 함께 반영됩니다.`
           : ''}
       </p>
+      {/* '—' 을 보고 기능이 고장 났다고 읽지 않도록, 이번 조회에서 무엇을 물어봤고
+          무엇을 못 물어봤는지 그대로 적는다. */}
+      {fill && fill.candidates > 0 && (
+        <p className="text-[10px] md:text-[11px] font-bold text-slate-500 leading-relaxed mt-1">
+          이번 조회에서 조회수가 비어 있던 {fill.candidates.toLocaleString()}개 중{' '}
+          {fill.attempted.toLocaleString()}개를 인스타그램에 다시 물어봐{' '}
+          {fill.filled.toLocaleString()}개를 채웠습니다.
+          {fill.noToken > 0
+            ? ` ${fill.noToken.toLocaleString()}개는 올린 계정의 연동을 찾을 수 없어 조회할 수 없었습니다.`
+            : ''}
+          {fill.attempted > fill.filled
+            ? ' 나머지는 인스타그램이 아직 조회수를 집계하지 않은 콘텐츠입니다.'
+            : ''}
+        </p>
+      )}
       <p className="text-[10px] md:text-[11px] font-bold text-slate-400 leading-relaxed mt-1">
         도달·저장수는 다른 계정이 올린 게시물이라 조회할 수 없어 표시하지 않습니다.
         {typeof data.cacheTtlHours === 'number'
