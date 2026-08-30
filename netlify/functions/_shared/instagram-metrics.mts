@@ -144,7 +144,7 @@ const graphHostFor = (tokenSource?: string) =>
   tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
 
 /** 미디어 목록에서 항상 받을 수 있는 필드들. 조회수는 여기 넣지 않는다(위 주석 참고). */
-const MEDIA_FIELDS =
+export const MEDIA_FIELDS =
   "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp," +
   "like_count,comments_count";
 
@@ -192,6 +192,37 @@ async function fetchReelViews(graphHost: string, token: string, mediaId: string)
     return 0;
   }
 }
+
+/**
+ * 미디어 한 편의 조회수를 지금 조회한다. 못 받으면 null.
+ *
+ * `fetchReelViews` 와 달리 실패를 0 으로 접지 않는다. 브랜드 화면의 태그된 콘텐츠
+ * 목록처럼 "조회수 0" 과 "조회수를 못 받음" 을 구분해 적어야 하는 쪽이 쓴다 —
+ * 0 으로 접으면 그 게시물이 아무도 안 본 것으로 읽힌다.
+ *
+ * 인사이트는 게시물 주인의 토큰으로만 조회된다. 남의 계정 게시물에는 쓸 수 없으므로,
+ * 부르는 쪽이 그 게시물을 올린 계정의 연동을 찾아 넘겨야 한다.
+ */
+export async function fetchMediaViews(link: MetaLink, mediaId: string): Promise<number | null> {
+  const token = String(link.accessToken || "");
+  if (!token || !mediaId) return null;
+  try {
+    const res = await fetch(
+      `https://${graphHostFor(link.tokenSource)}/${encodeURIComponent(mediaId)}/insights?metric=views` +
+        `&access_token=${encodeURIComponent(token)}`,
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) return null;
+    return insightValue(data);
+  } catch {
+    return null;
+  }
+}
+
+/** 목록 요청에 조회수를 함께 받기 위한 필드 조합. 자기 계정 미디어에만 쓴다. */
+export const MEDIA_FIELDS_WITH_VIEWS = `${MEDIA_FIELDS},${VIEWS_EXPANSION}`;
+/** 미디어 항목에 실려 온 조회수. 없으면 null — 부르는 쪽이 따로 조회할지 정한다. */
+export const viewsOnMedia = viewsFromMedia;
 
 /** 사용자별 인스타그램 연동 정보. 스코프에 따라 보관 위치가 다르다(linkLocation 참고). */
 export async function loadMetaLink(

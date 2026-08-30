@@ -21,6 +21,15 @@ const COMPLIMENTARY: Record<string, ComplimentaryTier> = {
   dnwlsdnwls: 'pro',
   dnwlsdnwls123: 'pro',
   // QA / test accounts — granted the top tier so every plan feature is available.
+  //
+  // 키는 **로그인 아이디(profiles.username)** 다. 화면 인사말에 보이는 이름은
+  // profiles.full_name(비즈니스 계정에서는 상호명)이라 아이디와 다를 수 있다 —
+  // 점검 계정 '테스트123' 의 실제 로그인 아이디는 'tester123' 이다. 인사말만 보고
+  // 'test123' 을 넣으면 어디에도 걸리지 않아 그대로 미구독으로 보인다.
+  //
+  // 아래 키는 'biz/' 접두사를 떼고 비교하므로 같은 아이디로 쓰는 비즈니스 계정
+  // (biz/tester123)도 같은 티어를 받는다.
+  tester123: 'pro',
   tester_508070: 'pro',
   tester_711872: 'pro',
 }
