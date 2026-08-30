@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, ComposedChart, Line, Bar, Cell, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
   apiService,
@@ -22,6 +23,14 @@ import { buildReelCoaching, MIN_REELS } from '../utils/reelCoaching';
  * 다시 부르면 사람 한 명이 시간당 호출 한도를 혼자 태우기 때문이다. 그래서 화면은
  * "언제 기준 숫자인지"를 항상 함께 적고, 지금 값을 받고 싶은 사람에게만 버튼을 준다.
  *
+ * 그래프는 콘텐츠 성과가 먼저다. 이 화면에 들어오는 사람이 알고 싶은 것은 대개 "내
+ * 릴스가 어떻게 됐나" 이고, 팔로워 수는 그 결과로 따라오는 값이다. 팔로워 추이는
+ * 탭 하나 뒤로 물러나 있을 뿐 그대로 남아 있다.
+ *
+ * 콘텐츠 그래프는 조회수·도달·좋아요·댓글·저장·공유를 한 그래프에 함께 그린다. 지표를
+ * 하나씩 눌러 보게 하면 "조회수는 늘었는데 저장은 줄었다" 같은 관계가 보이지 않는다.
+ * 자릿수가 다른 두 무리(조회수·도달 vs 반응 지표)는 축을 나눠 둔다.
+ *
  * 기본 정렬은 저장수순이다. 조회수는 인스타그램이 밀어 준 결과에 가깝고, 저장은
  * 본 사람이 "다시 보겠다"고 누른 것이라 다음 편을 만들 때 참고할 값에 더 가깝다.
  * 다만 저장수는 인사이트 권한이 통했을 때만 내려온다 — 못 받은 계정에서는 조회수를
@@ -32,6 +41,93 @@ type SortKey = 'saved' | 'views' | 'recent';
 type RangeDays = 7 | 30 | 90;
 
 const RANGES: RangeDays[] = [7, 30, 90];
+
+/** 그래프 탭. 콘텐츠 성과가 기본이다(파일 위 주석 참고). */
+type InsightTab = 'content' | 'followers';
+
+/**
+ * 콘텐츠 그래프의 기간. 팔로워 추이(7/30/90)와 값이 다르다.
+ *
+ * 릴스는 하루에 여러 편 올라오지 않으므로 90일을 고르면 한 편당 막대가 실 한 올처럼
+ * 얇아지고, 서버가 계정별로 최근 24편만 들고 있어 90일을 채우지도 못한다. 일주일 ·
+ * 2주 · 한 달이 실제로 비교가 되는 폭이다.
+ */
+type ContentRangeDays = 7 | 14 | 30;
+const CONTENT_RANGES: ContentRangeDays[] = [7, 14, 30];
+
+/**
+ * 한 그래프에 함께 그리는 계열.
+ *
+ * `axis: 'big'` 은 조회수·도달(수천~수만), `'small'` 은 좋아요·댓글·저장·공유(수십~수백)
+ * 다. 한 축에 같이 두면 반응 지표는 바닥에 붙어 아무 모양도 보이지 않는다.
+ */
+const CONTENT_SERIES = [
+  { key: 'views', ko: '조회수', en: 'Views', color: '#2563eb', axis: 'big', kind: 'bar' },
+  { key: 'reach', ko: '도달', en: 'Reach', color: '#0ea5e9', axis: 'big', kind: 'line' },
+  { key: 'likes', ko: '좋아요', en: 'Likes', color: '#f43f5e', axis: 'small', kind: 'line' },
+  { key: 'comments', ko: '댓글', en: 'Comments', color: '#f59e0b', axis: 'small', kind: 'line' },
+  { key: 'saved', ko: '저장수', en: 'Saves', color: '#10b981', axis: 'small', kind: 'line' },
+  { key: 'shares', ko: '공유수', en: 'Shares', color: '#6366f1', axis: 'small', kind: 'line' },
+] as const;
+
+type ContentSeriesKey = (typeof CONTENT_SERIES)[number]['key'];
+
+/** 이번 달 막대 색. 지난달까지의 막대(파랑)와 구분해 한눈에 잡히게 한다. */
+const THIS_MONTH_COLOR = '#7c3aed';
+
+/**
+ * 공유수는 예전 판 캐시 응답에 없는 필드다. `undefined` 를 0 으로 세면 "공유가 한
+ * 번도 없었다"로 읽히므로 못 받은 값(null)과 같이 취급한다.
+ */
+const sharesOf = (reel: InsightReel): number | null =>
+  typeof reel.shares === 'number' ? reel.shares : null;
+
+/** '2026-08' — 서울 기준 달 키. 이번 달/지난달을 가르는 기준이 한국 달력이다. */
+const seoulMonthKey = (iso: string | number | Date): string => {
+  const t = iso instanceof Date ? iso.getTime() : typeof iso === 'number' ? iso : Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(new Date(t));
+};
+
+/** 한 달 앞의 키. '2026-01' → '2025-12'. */
+const prevMonthKey = (key: string): string => {
+  const m = key.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return '';
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
+};
+
+/** 'YYYY-MM' → '8월' / 'Aug'. 비교 칸의 제목에 쓴다. */
+const monthLabel = (key: string, isEn: boolean): string => {
+  const m = key.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return key;
+  const month = Number(m[2]);
+  if (!isEn) return `${month}월`;
+  return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month - 1] || key;
+};
+
+/**
+ * 값이 있는 항목만 더한 합계.
+ *
+ * 못 받은 지표를 0 으로 세면 합계가 진짜보다 작게 나오는데 화면에는 "합계"라고
+ * 적힌다. 그래서 몇 편을 근거로 낸 값인지(`counted`)를 함께 들고 다닌다.
+ */
+const sumOf = (reels: InsightReel[], pick: (r: InsightReel) => number | null) => {
+  let total = 0;
+  let counted = 0;
+  for (const r of reels) {
+    const value = pick(r);
+    if (typeof value !== 'number') continue;
+    total += value;
+    counted += 1;
+  }
+  return { total, counted, of: reels.length };
+};
 
 /** 큰 숫자는 만·억 단위로 접는다. 카드 안에서 자리를 다투지 않게. */
 const compact = (n: number | null | undefined): string => {
@@ -95,6 +191,16 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const [seriesLoading, setSeriesLoading] = useState(true);
   const [range, setRange] = useState<RangeDays>(7);
   const [sort, setSort] = useState<SortKey>('saved');
+  /** 콘텐츠 성과가 기본 탭이다. 팔로워 추이는 탭 하나 뒤에 그대로 남아 있다. */
+  const [tab, setTab] = useState<InsightTab>('content');
+  const [contentRange, setContentRange] = useState<ContentRangeDays>(14);
+  /**
+   * 잠시 끈 계열.
+   *
+   * 여섯 계열을 한 그래프에 겹쳐 두면 어떤 조합에서는 선이 서로를 가린다. 처음에는
+   * 전부 켜 두고(그게 이 그래프의 요점이다) 필요할 때만 범례를 눌러 끄게 한다.
+   */
+  const [hiddenSeries, setHiddenSeries] = useState<Partial<Record<ContentSeriesKey, boolean>>>({});
   const [connecting, setConnecting] = useState(false);
   const [notice, setNotice] = useState<string>('');
 
@@ -174,6 +280,68 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     [reels, savedUsable],
   );
   const coaching = useMemo(() => buildReelCoaching(reels, isEn), [reels, isEn]);
+
+  /**
+   * 콘텐츠 그래프가 읽는 줄들. 고른 기간 안의 릴스를 오래된 것부터 늘어놓는다.
+   *
+   * 정렬 칩(저장수순 등)과 따로 계산한다 — 시간 축 그래프에서 순서가 성과순이면
+   * 선은 아무 의미 없이 내려가는 모양이 된다.
+   */
+  const contentRows = useMemo(() => {
+    const since = Date.now() - contentRange * 86_400_000;
+    const nowMonth = seoulMonthKey(Date.now());
+    return reels
+      .filter(r => {
+        const at = Date.parse(r.timestamp || '');
+        return Number.isFinite(at) && at >= since;
+      })
+      .sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''))
+      .map(r => ({
+        id: r.id,
+        label: shortDate(
+          new Date(Date.parse(r.timestamp)).toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+        ),
+        views: r.views,
+        reach: r.reach,
+        likes: r.likes,
+        comments: r.comments,
+        saved: r.saved,
+        shares: sharesOf(r),
+        /** 이번 달에 올린 편인가. 막대 색을 여기서 가른다. */
+        isThisMonth: seoulMonthKey(r.timestamp) === nowMonth,
+      }));
+  }, [reels, contentRange]);
+
+  /**
+   * 이번 달과 지난달 성과.
+   *
+   * 기간 칩과 무엇을 세는지가 다르다 — 칩은 그래프의 가로 폭이고, 이 비교는 달력상의
+   * 두 달이다. 일주일만 보고 있어도 "이번 달이 지난달보다 나은가"는 그대로 답할 수 있어야 한다.
+   */
+  const monthCompare = useMemo(() => {
+    const nowKey = seoulMonthKey(Date.now());
+    const lastKey = prevMonthKey(nowKey);
+    const inMonth = (key: string) => reels.filter(r => seoulMonthKey(r.timestamp) === key);
+    const now = inMonth(nowKey);
+    const before = inMonth(lastKey);
+    const pack = (list: InsightReel[]) => ({
+      reels: list.length,
+      views: sumOf(list, r => r.views),
+      reach: sumOf(list, r => r.reach),
+      engagement: sumOf(list, r => r.likes + r.comments),
+      saved: sumOf(list, r => r.saved),
+      shares: sumOf(list, r => sharesOf(r)),
+    });
+    return { nowKey, lastKey, now: pack(now), before: pack(before) };
+  }, [reels]);
+
+  /** 지난달 릴스 한 편당 평균 조회수. 그래프의 점선 자리다. */
+  const lastMonthAvgViews = monthCompare.before.views.counted > 0
+    ? Math.round(monthCompare.before.views.total / monthCompare.before.views.counted)
+    : null;
+
+  const toggleSeries = (key: ContentSeriesKey) =>
+    setHiddenSeries(prev => ({ ...prev, [key]: !prev[key] }));
 
   const startConnect = async () => {
     setConnecting(true);
@@ -293,34 +461,115 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         )}
       </div>
 
-      {/* ----------------------------------------------- 팔로워 증감 추이 */}
+      {/* --------------------------------------------------------- 그래프 */}
       <section className="bg-white border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-4 md:p-8 shadow-sm mb-5 md:mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 md:mb-6">
-          <div>
-            <h3 className="text-sm md:text-lg font-black text-slate-900">
-              {isEn ? 'Follower trend' : '팔로워 증감 추이'}
-            </h3>
-            <p className="text-[10px] md:text-xs text-slate-400 font-bold mt-0.5">
-              {isEn ? 'One snapshot per day (KST)' : '하루 한 번 기록한 값 (한국 시간 기준)'}
-            </p>
-          </div>
-          <div className="flex gap-1 bg-slate-50 rounded-xl p-1">
-            {RANGES.map(d => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setRange(d)}
-                className={`px-3 py-1.5 rounded-lg text-[11px] md:text-xs font-black transition-all ${
-                  range === d ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                {isEn ? `${d}d` : `${d}일`}
-              </button>
-            ))}
-          </div>
+        {/* 콘텐츠 성과가 앞에 온다. 팔로워 추이는 사라진 것이 아니라 옆 탭에 있다. */}
+        <div className="flex gap-1 bg-slate-50 rounded-xl p-1 mb-4 md:mb-6 self-start w-fit">
+          <SortChip active={tab === 'content'} onClick={() => setTab('content')}>
+            {isEn ? 'Content' : '콘텐츠 성과'}
+          </SortChip>
+          <SortChip active={tab === 'followers'} onClick={() => setTab('followers')}>
+            {isEn ? 'Followers' : '팔로워 추이'}
+          </SortChip>
         </div>
 
-        <FollowerChart series={series} loading={seriesLoading} range={range} isEn={isEn} />
+        {tab === 'content' ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3 md:mb-4">
+              <div>
+                <h3 className="text-sm md:text-lg font-black text-slate-900">
+                  {isEn ? 'Reel performance' : '릴스 성과'}
+                </h3>
+                <p className="text-[10px] md:text-xs text-slate-400 font-bold mt-0.5">
+                  {isEn
+                    ? 'Views, reach, likes, comments, saves and shares per reel'
+                    : '릴스별 조회수 · 도달 · 좋아요 · 댓글 · 저장 · 공유'}
+                </p>
+              </div>
+              <div className="flex gap-1 bg-slate-50 rounded-xl p-1">
+                {CONTENT_RANGES.map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setContentRange(d)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] md:text-xs font-black transition-all ${
+                      contentRange === d ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {isEn
+                      ? d === 7 ? '1 week' : d === 14 ? '2 weeks' : '1 month'
+                      : d === 7 ? '일주일' : d === 14 ? '2주' : '한 달'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 범례가 곧 스위치다. 눌러 끄면 그래프에서 그 계열만 빠진다. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 mb-3">
+              {CONTENT_SERIES.map(sr => (
+                <SeriesChip
+                  key={sr.key}
+                  color={sr.color}
+                  label={isEn ? sr.en : sr.ko}
+                  on={!hiddenSeries[sr.key]}
+                  onClick={() => toggleSeries(sr.key)}
+                />
+              ))}
+              <span className="flex items-center gap-1.5 ml-1">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: THIS_MONTH_COLOR }} />
+                <span className="text-[10px] md:text-[11px] font-black text-slate-500">
+                  {isEn ? 'This month' : '이번 달'}
+                </span>
+              </span>
+            </div>
+
+            <ContentChart
+              rows={contentRows}
+              hidden={hiddenSeries}
+              lastMonthAvgViews={lastMonthAvgViews}
+              range={contentRange}
+              isEn={isEn}
+            />
+
+            {/* 선이 끊겨 있는 이유를 그 자리에서 밝힌다 — 0 이 아니라 못 받은 값이다. */}
+            <p className="text-[10px] md:text-[11px] font-bold text-slate-400 mt-2">
+              {isEn
+                ? 'Reach, saves and shares come from Instagram insights — where a value has not been received the line breaks instead of dropping to zero. Tap a legend item to hide a series.'
+                : '도달 · 저장 · 공유는 인스타그램 인사이트에서 받는 값입니다. 받지 못한 구간은 0 이 아니라 선이 끊겨 표시됩니다. 범례를 누르면 지표를 잠시 숨길 수 있어요.'}
+            </p>
+
+            <MonthCompare compare={monthCompare} isEn={isEn} />
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 md:mb-6">
+              <div>
+                <h3 className="text-sm md:text-lg font-black text-slate-900">
+                  {isEn ? 'Follower trend' : '팔로워 증감 추이'}
+                </h3>
+                <p className="text-[10px] md:text-xs text-slate-400 font-bold mt-0.5">
+                  {isEn ? 'One snapshot per day (KST)' : '하루 한 번 기록한 값 (한국 시간 기준)'}
+                </p>
+              </div>
+              <div className="flex gap-1 bg-slate-50 rounded-xl p-1">
+                {RANGES.map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setRange(d)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] md:text-xs font-black transition-all ${
+                      range === d ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {isEn ? `${d}d` : `${d}일`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <FollowerChart series={series} loading={seriesLoading} range={range} isEn={isEn} />
+          </>
+        )}
       </section>
 
       {/* ------------------------------------------------- 콘텐츠 코칭 */}
@@ -533,6 +782,329 @@ const SortChip: React.FC<{
     {children}
   </button>
 );
+
+/**
+ * 범례 겸 스위치 한 칸.
+ *
+ * 껐다는 것이 보여야 사람이 자기가 무엇을 감췄는지 안다 — 꺼진 칸은 사라지지 않고
+ * 색만 빠진다.
+ */
+const SeriesChip: React.FC<{
+  color: string;
+  label: string;
+  on: boolean;
+  onClick: () => void;
+}> = ({ color, label, on, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 transition-all ${
+      on ? 'bg-slate-50' : 'bg-transparent opacity-40 hover:opacity-70'
+    }`}
+  >
+    <span
+      className="w-2.5 h-2.5 rounded-full"
+      style={{ background: on ? color : '#cbd5e1' }}
+    />
+    <span className="text-[10px] md:text-[11px] font-black text-slate-600 whitespace-nowrap">
+      {label}
+    </span>
+  </button>
+);
+
+type ContentRow = {
+  id: string;
+  label: string;
+  views: number;
+  reach: number | null;
+  likes: number;
+  comments: number;
+  saved: number | null;
+  shares: number | null;
+  isThisMonth: boolean;
+};
+
+/**
+ * 릴스별 성과 그래프. 여섯 지표를 한 그래프에 겹쳐 그린다.
+ *
+ * 가로축은 게시일이다(성과순이 아니다 — 시간 축에서 성과순으로 늘어놓으면 선은
+ * 언제나 내려가는 모양이 되어 아무것도 말하지 않는다).
+ *
+ * 축은 둘이다. 조회수·도달은 수천~수만, 좋아요·댓글·저장·공유는 수십~수백이라 한 축에
+ * 두면 뒤쪽 네 계열이 바닥에 눌린다. 조회수만 막대로 두고 나머지를 선으로 얹은 것도
+ * 같은 이유다 — 막대가 여섯 개면 한 날짜의 폭을 여섯이 나눠 갖는다.
+ *
+ * 이번 달에 올린 릴스의 막대는 색이 다르고, 지난달 한 편당 평균 조회수에 점선을 하나
+ * 긋는다. "이번 달이 지난달보다 나았나"는 그 선 위로 올라간 막대가 몇 개인지로 읽힌다.
+ * 달의 합계가 아니라 한 편당 평균을 쓰는 이유는, 편수가 다른 두 달을 합계로 비교하면
+ * 많이 올린 달이 언제나 이기기 때문이다.
+ *
+ * 못 받은 값은 0 으로 채우지 않고 끊는다. 도달·저장·공유는 인사이트 권한이 통한
+ * 계정에서만 오므로, 0 으로 이으면 "도달이 0 이었다"로 읽힌다.
+ */
+const ContentChart: React.FC<{
+  rows: ContentRow[];
+  hidden: Partial<Record<ContentSeriesKey, boolean>>;
+  lastMonthAvgViews: number | null;
+  range: ContentRangeDays;
+  isEn: boolean;
+}> = ({ rows, hidden, lastMonthAvgViews, range, isEn }) => {
+  if (rows.length === 0) {
+    return (
+      <div className="h-[200px] md:h-[280px] rounded-2xl bg-slate-50 flex flex-col items-center justify-center text-center px-6">
+        <p className="text-sm font-black text-slate-900 mb-1">
+          {isEn ? 'No reels in this period' : '이 기간에 올린 릴스가 없습니다'}
+        </p>
+        <p className="text-[11px] md:text-xs font-medium text-slate-500 leading-relaxed max-w-sm">
+          {isEn
+            ? `Nothing was posted in the last ${range} days. Pick a longer period, or post a reel and refresh.`
+            : `최근 ${range}일 안에 올린 릴스가 없습니다. 기간을 늘려 보거나, 릴스를 올린 뒤 새로 불러오세요.`}
+        </p>
+      </div>
+    );
+  }
+
+  const name = (key: string): string => {
+    const found = CONTENT_SERIES.find(sr => sr.key === key);
+    return found ? (isEn ? found.en : found.ko) : key;
+  };
+  /** 조회수는 '회', 도달은 사람 수다. 반응 지표는 단위를 붙이지 않는다. */
+  const unit = (key: string): string => {
+    if (isEn) return '';
+    if (key === 'views') return '회';
+    if (key === 'reach') return '명';
+    return '';
+  };
+
+  /** 값이 하나도 없는 계열은 축 계산에서 빼야 반응 지표 축이 눌리지 않는다. */
+  const shown = CONTENT_SERIES.filter(sr => !hidden[sr.key]);
+  const hasSmall = shown.some(
+    sr => sr.axis === 'small' && rows.some(r => typeof r[sr.key] === 'number'),
+  );
+
+  return (
+    <div className="h-[240px] md:h-[300px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+          <XAxis
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+            interval="preserveStartEnd"
+            minTickGap={18}
+            dy={8}
+          />
+          <YAxis
+            yAxisId="big"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+            tickFormatter={(v: number) => compact(v)}
+            width={44}
+            allowDecimals={false}
+          />
+          {/* 오른쪽 축은 반응 지표 전용이다. 켜진 계열이 없으면 축도 두지 않는다. */}
+          <YAxis
+            yAxisId="small"
+            orientation="right"
+            hide={!hasSmall}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#f43f5e' }}
+            tickFormatter={(v: number) => compact(v)}
+            width={36}
+            allowDecimals={false}
+          />
+          <Tooltip
+            cursor={{ fill: 'rgba(148,163,184,0.10)' }}
+            contentStyle={{
+              borderRadius: 12,
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 8px 24px rgba(15,23,42,0.08)',
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+            labelFormatter={(raw, payload) => {
+              const row = payload?.[0]?.payload as ContentRow | undefined;
+              const mark = row?.isThisMonth ? (isEn ? ' (this month)' : ' (이번 달)') : '';
+              return `${String(raw ?? '')}${mark}`;
+            }}
+            formatter={(value, _n, entry) => {
+              const key = String(entry?.dataKey || '');
+              return [
+                typeof value === 'number'
+                  ? `${value.toLocaleString()}${unit(key)}`
+                  : '—',
+                name(key),
+              ];
+            }}
+          />
+
+          {/* 지난달 한 편당 평균 조회수. 이번 달 막대가 이 선을 넘었는지가 질문이다. */}
+          {!hidden.views && lastMonthAvgViews !== null && (
+            <ReferenceLine
+              yAxisId="big"
+              y={lastMonthAvgViews}
+              stroke={THIS_MONTH_COLOR}
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{
+                value: isEn ? 'last month avg' : '지난달 평균',
+                position: 'insideTopLeft',
+                fontSize: 10,
+                fontWeight: 800,
+                fill: THIS_MONTH_COLOR,
+              }}
+            />
+          )}
+
+          {!hidden.views && (
+            <Bar yAxisId="big" dataKey="views" radius={[4, 4, 0, 0]} maxBarSize={36}>
+              {rows.map(r => (
+                <Cell key={r.id} fill={r.isThisMonth ? THIS_MONTH_COLOR : '#2563eb'} />
+              ))}
+            </Bar>
+          )}
+
+          {CONTENT_SERIES.filter(sr => sr.kind === 'line' && !hidden[sr.key]).map(sr => (
+            <Line
+              key={sr.key}
+              yAxisId={sr.axis}
+              type="monotone"
+              dataKey={sr.key}
+              stroke={sr.color}
+              strokeWidth={2}
+              dot={rows.length <= 14 ? { r: 2.5, strokeWidth: 0, fill: sr.color } : false}
+              activeDot={{ r: 4 }}
+              // 못 받은 값을 이어 버리면 없는 값이 있는 것처럼 보인다.
+              connectNulls={false}
+            />
+          ))}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+/**
+ * 이번 달 vs 지난달.
+ *
+ * 그래프에서 색과 점선으로 보이는 것을 숫자로 한 번 더 적는다 — 눈으로 잰 차이는
+ * "조금 나아졌다"까지고, 협업 제안에 적어 보낼 수 있는 것은 숫자다.
+ *
+ * 지난달이 0 이면 비율을 만들지 않는다. 0 에서 늘어난 것을 "+100%" 로 적으면 첫 달의
+ * 성과가 실제보다 대단해 보인다.
+ */
+const MonthCompare: React.FC<{
+  compare: {
+    nowKey: string;
+    lastKey: string;
+    now: Record<string, any>;
+    before: Record<string, any>;
+  };
+  isEn: boolean;
+}> = ({ compare, isEn }) => {
+  const { now, before } = compare;
+  if (now.reels === 0 && before.reels === 0) return null;
+
+  const rows: { key: string; label: string; now: number | null; before: number | null }[] = [
+    {
+      key: 'reels',
+      label: isEn ? 'Reels' : '릴스 수',
+      now: now.reels,
+      before: before.reels,
+    },
+    {
+      key: 'views',
+      label: isEn ? 'Views' : '조회수',
+      now: now.views.counted > 0 ? now.views.total : null,
+      before: before.views.counted > 0 ? before.views.total : null,
+    },
+    {
+      key: 'reach',
+      label: isEn ? 'Reach' : '도달',
+      now: now.reach.counted > 0 ? now.reach.total : null,
+      before: before.reach.counted > 0 ? before.reach.total : null,
+    },
+    {
+      key: 'engagement',
+      label: isEn ? 'Likes + comments' : '좋아요 + 댓글',
+      now: now.engagement.counted > 0 ? now.engagement.total : null,
+      before: before.engagement.counted > 0 ? before.engagement.total : null,
+    },
+    {
+      key: 'saved',
+      label: isEn ? 'Saves' : '저장수',
+      now: now.saved.counted > 0 ? now.saved.total : null,
+      before: before.saved.counted > 0 ? before.saved.total : null,
+    },
+    {
+      key: 'shares',
+      label: isEn ? 'Shares' : '공유수',
+      now: now.shares.counted > 0 ? now.shares.total : null,
+      before: before.shares.counted > 0 ? before.shares.total : null,
+    },
+  ];
+
+  return (
+    <div className="mt-4 md:mt-5">
+      <p className="text-[10px] md:text-[11px] font-black text-slate-500 mb-2">
+        {isEn
+          ? `${monthLabel(compare.nowKey, true)} vs ${monthLabel(compare.lastKey, true)}`
+          : `이번 달(${monthLabel(compare.nowKey, false)}) vs 지난달(${monthLabel(compare.lastKey, false)})`}
+      </p>
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+        {rows.map(r => (
+          <CompareTile key={r.key} label={r.label} now={r.now} before={r.before} isEn={isEn} />
+        ))}
+      </div>
+      {before.reels === 0 && (
+        <p className="text-[10px] md:text-[11px] font-bold text-slate-400 mt-2">
+          {isEn
+            ? 'No reels were posted last month, so there is nothing to compare against yet.'
+            : '지난달에 올린 릴스가 없어 아직 비교할 값이 없습니다.'}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** 비교 한 칸. 이번 달 값 아래에 지난달 대비 증감을 적는다. */
+const CompareTile: React.FC<{
+  label: string;
+  now: number | null;
+  before: number | null;
+  isEn: boolean;
+}> = ({ label, now, before, isEn }) => {
+  const known = typeof now === 'number' && typeof before === 'number';
+  const diff = known ? (now as number) - (before as number) : null;
+  const pct = known && (before as number) > 0
+    ? Math.round(((diff as number) / (before as number)) * 100)
+    : null;
+  const tone = diff === null || diff === 0
+    ? 'text-slate-400'
+    : diff > 0 ? 'text-emerald-600' : 'text-rose-500';
+
+  return (
+    <div className="rounded-2xl bg-slate-50 px-2.5 py-2">
+      <p className="text-[9px] md:text-[10px] font-black text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis">
+        {label}
+      </p>
+      <p className="text-sm md:text-base font-black text-slate-900 leading-tight mt-0.5">
+        {typeof now === 'number' ? compact(now) : '—'}
+      </p>
+      <p className={`text-[9px] md:text-[10px] font-black ${tone} mt-0.5 whitespace-nowrap`}>
+        {diff === null
+          ? (isEn ? 'no comparison' : '비교 불가')
+          : diff === 0
+            ? (isEn ? 'same' : '지난달과 같음')
+            : `${diff > 0 ? '+' : '−'}${compact(Math.abs(diff))}${pct !== null ? ` (${diff > 0 ? '+' : ''}${pct}%)` : ''}`}
+      </p>
+    </div>
+  );
+};
 
 /**
  * 팔로워 추이 선 그래프.
@@ -757,6 +1329,9 @@ const ReelCard: React.FC<{ reel: InsightReel; isEn: boolean }> = ({ reel, isEn }
           <MiniStat label={isEn ? 'Saves' : '저장'} value={metricText(reel.saved)} />
           <MiniStat label={isEn ? 'Likes' : '좋아요'} value={compact(reel.likes)} />
           <MiniStat label={isEn ? 'Comments' : '댓글'} value={compact(reel.comments)} />
+          {/* 공유수는 도달·저장수와 같은 조건에서 오는 인사이트 지표다. 예전 판
+              캐시에는 없는 필드라 못 받은 값과 같이 '—' 로 적는다. */}
+          <MiniStat label={isEn ? 'Shares' : '공유'} value={metricText(sharesOf(reel))} />
         </div>
       </div>
     </div>

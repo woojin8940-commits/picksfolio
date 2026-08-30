@@ -30,11 +30,11 @@ import { todayInSeoul } from "./campaign-recruit.mts";
  * 본인이 화면을 새로고침하는 것과 브랜드 명단의 숫자가 바뀌는 것은 같은 일이
  * 아니므로, 조회 경로를 따로 둔다.
  *
- * ── 도달·저장수 ──
+ * ── 도달·저장수·공유 ──
  *
- * 조회수·좋아요·댓글은 기존 경로와 같다. 도달(reach)·저장수(saved)는 미디어의
- * 일반 필드가 아니라 인사이트 지표이고, instagram_business_manage_insights 권한이
- * 있어야 내려온다(instagram-oauth-start.mts 의 SCOPES 에 이미 들어 있다).
+ * 조회수·좋아요·댓글은 기존 경로와 같다. 도달(reach)·저장수(saved)·공유(shares)는
+ * 미디어의 일반 필드가 아니라 인사이트 지표이고, instagram_business_manage_insights
+ * 권한이 있어야 내려온다(instagram-oauth-start.mts 의 SCOPES 에 이미 들어 있다).
  * 권한이 없거나 메타 앱 심사 범위 밖이면 그 항목만 비고, 나머지는 그대로 보인다.
  *
  * ── 왜 캐시하는가 ──
@@ -92,6 +92,13 @@ export interface InsightReel {
   reach: number | null;
   /** 저장수. 권한이 없으면 null. */
   saved: number | null;
+  /**
+   * 공유 수. 권한이 없으면 null.
+   *
+   * 좋아요·댓글과 달리 미디어의 일반 필드가 아니라 인사이트 지표다. 그래서 도달·저장수와
+   * 같은 조건에서 함께 오거나 함께 빈다.
+   */
+  shares: number | null;
   likes: number;
   comments: number;
   /** 영상 길이(초). 메타가 안 주는 계정도 있어 못 받으면 null. */
@@ -132,6 +139,7 @@ const MEDIA_FIELDS =
  * 같이 잃으면 화면은 빈 카드가 되므로, 목록만이라도 남는 조합까지 내려간다.
  */
 const FIELD_LADDER = [
+  `${MEDIA_FIELDS},duration,insights.metric(views,reach,saved,shares)`,
   `${MEDIA_FIELDS},duration,insights.metric(views,reach,saved)`,
   `${MEDIA_FIELDS},insights.metric(views,reach,saved)`,
   `${MEDIA_FIELDS},insights.metric(views)`,
@@ -167,9 +175,14 @@ async function fetchOneInsight(
     return insightsMap((await res.json().catch(() => ({}))) as any);
   };
   try {
-    // 도달·저장수까지 한 번에. 권한이 없으면 그 요청은 통째로 거절되므로
-    // 조회수만이라도 받아 둔다 — 조회수는 예전부터 받아 온 값이다.
-    return (await ask("views,reach,saved")) || (await ask("views")) || {};
+    // 도달·저장수·공유까지 한 번에. 지표 하나가 막히면 그 요청은 통째로 거절되므로
+    // 한 칸씩 줄여 내려간다 — 마지막에는 조회수만이라도 받아 둔다.
+    return (
+      (await ask("views,reach,saved,shares")) ||
+      (await ask("views,reach,saved")) ||
+      (await ask("views")) ||
+      {}
+    );
   } catch {
     return {};
   }
@@ -221,9 +234,15 @@ export async function resolveInsightsLink(
   return { link: fallback, scope: null, needsReauth };
 }
 
-/** 계정별 캐시 키. 사용자명은 소문자 영문·숫자·밑줄·점만 남긴다. */
+/**
+ * 계정별 캐시 키. 사용자명은 소문자 영문·숫자·밑줄·점만 남긴다.
+ *
+ * 판 번호(`v2`)는 굳혀 둔 값의 모양이 바뀔 때 올린다. 예전 판에는 공유 수가 없어서,
+ * 키를 그대로 두면 이미 캐시가 있는 계정은 TTL 이 끝날 때까지 공유 수가 빈 그래프를
+ * 계속 본다.
+ */
 const cacheKey = (username: string) =>
-  `reels_${String(username || "").toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+  `reels_v2_${String(username || "").toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
 
 /** 굳혀 둔 값을 읽는다. TTL 이 지났으면 null. */
 async function readCache(
@@ -391,6 +410,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
     const row = metrics[i] || {};
     const hasReach = typeof row.reach !== "undefined";
     const hasSaved = typeof row.saved !== "undefined";
+    const hasShares = typeof row.shares !== "undefined";
     return {
       id: String(m?.id || ""),
       permalink: String(m?.permalink || ""),
@@ -401,6 +421,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
       views: intOf(row.views ?? 0),
       reach: hasReach ? intOf(row.reach) : null,
       saved: hasSaved ? intOf(row.saved) : null,
+      shares: hasShares ? intOf(row.shares) : null,
       likes: intOf(m?.like_count),
       comments: intOf(m?.comments_count),
       durationSeconds: durationOf(m),

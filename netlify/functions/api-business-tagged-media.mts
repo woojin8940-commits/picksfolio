@@ -129,11 +129,28 @@ export default async (req: Request) => {
         monthOwnCount: thisMonthOwn.length,
         ownCount: ownItems.length,
         ownViews: sum(ownItems, "views"),
+        /**
+         * 받은 것 + 올린 것을 합친 조회수.
+         *
+         * 화면의 "총 조회수" 는 이 값을 쓴다. 태그된 콘텐츠만 세면, 브랜드가 자기
+         * 릴스로 실제 조회수를 쌓고 있어도(그 값은 브랜드 토큰으로 확실히 받아온다)
+         * 태그된 쪽에서 한 편도 못 받은 동안 화면은 '—' 만 보여 준다 — 브랜드는
+         * "조회수 기능이 안 된다"고 읽게 된다. 어디서 온 조회수인지는 카드 안에
+         * 나눠 적는다.
+         */
+        allViews: sum([...payload.items, ...ownItems], "views"),
+        monthAllViews: sum([...thisMonth, ...thisMonthOwn], "views"),
       },
       tagsApi: payload.tagsApi,
       scannedCreators: payload.scannedCreators,
       /** 조회수를 이번 조회에서 직접 채운 콘텐츠 수. */
       viewsFilled: payload.viewsFilled ?? 0,
+      /**
+       * 조회수가 비어 있는 이유. 예전 판 캐시에는 없는 값이라 기본값을 채워 둔다 —
+       * 없는 값을 화면이 세면 "물어본 게 0편" 처럼 읽힌다.
+       */
+      viewsFill:
+        payload.viewsFill ?? { candidates: 0, attempted: 0, filled: 0, noToken: 0 },
       fetchedAt: payload.fetchedAt,
       cached: result.cached,
       cacheTtlHours: CACHE_TTL_HOURS,
