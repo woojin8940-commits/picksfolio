@@ -341,8 +341,10 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
                 : (isEn ? 'by views' : '조회수 기준')}
             </span>
           </div>
-          {/* 다섯 편은 순위가 보여야 의미가 있다. 좁은 화면에서는 옆으로 흐르게 둔다. */}
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-5">
+          {/* 다섯 편은 순위가 보여야 의미가 있다. 좁은 화면에서는 옆으로 흐르게 둔다.
+              넓은 화면에서 5칸이 본문 폭을 다 쓰면 카드(9:16)가 지나치게 커지므로
+              max-w 로 살짝 줄여 다른 섹션과 크기 균형을 맞춘다. */}
+          <div className="flex gap-2.5 md:gap-3 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-5 md:max-w-[52rem]">
             {top5.map((reel, i) => (
               <TopReelCard key={reel.id || i} reel={reel} rank={i + 1} isEn={isEn} savedUsable={savedUsable} />
             ))}
@@ -686,12 +688,12 @@ const TopReelCard: React.FC<{
     <>
       <div className="relative">
         <Thumb src={reel.thumbnailUrl} className="w-full aspect-[9/16] rounded-xl" />
-        <span className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-slate-900/85 text-white text-[11px] font-black flex items-center justify-center">
+        <span className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-slate-900/85 text-white text-[10px] font-black flex items-center justify-center">
           {rank}
         </span>
       </div>
-      <p className="text-[10px] font-bold text-slate-400 mt-2">{postedOn(reel.timestamp)}</p>
-      <p className="text-xs md:text-sm font-black text-slate-900 mt-0.5">
+      <p className="text-[10px] font-bold text-slate-400 mt-1.5">{postedOn(reel.timestamp)}</p>
+      <p className="text-[11px] md:text-xs font-black text-slate-900 mt-0.5">
         {savedUsable
           ? `${isEn ? 'Saves' : '저장'} ${metricText(reel.saved)}`
           : `${isEn ? 'Views' : '조회'} ${compact(reel.views)}`}
@@ -699,7 +701,7 @@ const TopReelCard: React.FC<{
     </>
   );
 
-  const className = 'block w-[128px] shrink-0 md:w-auto';
+  const className = 'block w-[112px] shrink-0 md:w-auto';
   return reel.permalink ? (
     <a href={reel.permalink} target="_blank" rel="noopener noreferrer" className={`${className} group`}>
       {body}

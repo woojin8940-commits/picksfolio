@@ -21,6 +21,9 @@ const COMPLIMENTARY: Record<string, ComplimentaryTier> = {
   dnwlsdnwls: 'pro',
   dnwlsdnwls123: 'pro',
   // QA / test accounts — granted the top tier so every plan feature is available.
+  // 'test123' 은 크리에이터/비즈니스 양쪽으로 쓰는 점검 계정이다. 아래 키는 'biz/'
+  // 접두사를 떼고 비교하므로 비즈니스 계정(biz/test123)도 같은 티어를 받는다.
+  test123: 'pro',
   tester_508070: 'pro',
   tester_711872: 'pro',
 }
