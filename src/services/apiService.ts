@@ -481,6 +481,126 @@ export interface SiteData {
   linkGridCategories?: string[];
 }
 
+// ─── 인사이트 (인플루언서 본인 화면) ────────────────────────────────────────
+//
+// 도달·저장수는 권한(instagram_business_manage_insights)이 통했을 때만 내려온다.
+// 못 받은 항목은 0 이 아니라 null 이다 — 0 으로 두면 아무도 저장하지 않은 릴스로
+// 읽히고, 화면은 "집계 전"과 "실제로 0"을 구분할 수 없게 된다.
+export interface InsightReel {
+  id: string;
+  permalink: string;
+  thumbnailUrl: string;
+  caption: string;
+  timestamp: string;
+  views: number;
+  reach: number | null;
+  saved: number | null;
+  likes: number;
+  comments: number;
+  durationSeconds: number | null;
+}
+
+export interface CreatorInsightsResponse {
+  connected?: boolean;
+  needsReauth?: boolean;
+  igUsername?: string;
+  followers?: number | null;
+  following?: number | null;
+  /** 최근 구간 팔로워 증감. 스냅샷이 두 개 미만이면 null(아직 말할 수 없다). */
+  followerDelta7d?: number | null;
+  /** 증감을 계산한 실제 일수. 스냅샷이 이틀치면 7 이 아니라 2 다. */
+  followerDeltaDays?: number;
+  reels: InsightReel[];
+  viewsAvailable?: boolean;
+  insightsAvailable?: boolean;
+  /**
+   * 도달·저장수가 비어 있는 이유가 "권한 승인 전에 발급된 토큰"인 경우 참.
+   * 이때만 화면이 재연동을 권한다 — 갱신으로는 권한 범위가 늘어나지 않는다.
+   */
+  reconnectForInsights?: boolean;
+  fetchedAt?: string;
+  cached?: boolean;
+  cacheTtlMinutes?: number;
+  error?: string;
+  code?: string;
+}
+
+export interface FollowerSeriesPoint {
+  /** 'YYYY-MM-DD' (한국 날짜) */
+  date: string;
+  followers: number;
+  following: number;
+}
+
+export interface FollowerSeriesResponse {
+  days: number;
+  points: FollowerSeriesPoint[];
+  /** 점이 두 개 미만 — 아직 선을 그릴 수 없다. */
+  collecting?: boolean;
+  /** 스냅샷이 처음 쌓인 날. 이 날 이전 구간은 물어볼 곳이 없다. */
+  firstSnapshotDate?: string;
+  error?: string;
+}
+
+// ─── 태그된 콘텐츠 (브랜드 계정 화면) ───────────────────────────────────────
+//
+// 다른 계정이 올린 게시물이라 도달·저장수는 애초에 조회할 수 없다. 조회수도 릴스가
+// 우리 서비스에 연동된 인플루언서의 것일 때만 있다 — 없는 값은 0 이 아니라 null 이고,
+// 화면은 그 자리를 '—' 로 비운다.
+export interface TaggedMediaItem {
+  id: string;
+  permalink: string;
+  thumbnailUrl: string;
+  caption: string;
+  timestamp: string;
+  /** 태그한 계정의 인스타그램 아이디. */
+  authorHandle: string;
+  /** 그 계정이 우리 서비스 사용자면 사용자명. 아니면 빈 문자열. */
+  authorUsername: string;
+  mediaType: string;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  source: 'tags_api' | 'creator_feed';
+}
+
+/** 값이 있는 항목만 더한 합계. `counted`/`of` 로 몇 개를 근거로 냈는지 밝힌다. */
+export interface TaggedMediaSum {
+  total: number;
+  counted: number;
+  of: number;
+}
+
+export interface TaggedMediaResponse {
+  connected?: boolean;
+  needsReauth?: boolean;
+  /** 브랜드 자신의 인스타그램 아이디. 무엇을 기준으로 찾았는지 화면이 밝힌다. */
+  igUsername?: string;
+  items: TaggedMediaItem[];
+  summary?: {
+    monthCount: number;
+    totalCount: number;
+    monthViews: TaggedMediaSum;
+    views: TaggedMediaSum;
+    likes: TaggedMediaSum;
+    comments: TaggedMediaSum;
+    authors: number;
+  };
+  /**
+   * 메타 tags 엣지 결과. 인스타그램 로그인 방식 토큰에서는 거부되는 것이 정상이라
+   * (메타 문서: "This API setup cannot access ads or tagging") 실패를 오류로 다루지
+   * 않고 사유만 받는다 — 목록은 연동된 인플루언서 피드에서 채워진다.
+   */
+  tagsApi?: { ok: boolean; reason: string | null };
+  /** 캡션에서 우리 계정 언급을 찾은 연동 인플루언서 수. */
+  scannedCreators?: number;
+  fetchedAt?: string;
+  cached?: boolean;
+  cacheTtlHours?: number;
+  error?: string;
+  code?: string;
+}
+
 // 인스타그램 DM 자동화 규칙 및 설정.
 export type DmTrigger = 'welcome' | 'new_follower' | 'comment_keyword' | 'story_reply' | 'new_order';
 
@@ -2794,6 +2914,90 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to disconnect creator channel:', e);
       return { error: '네트워크 오류로 연동을 해제하지 못했습니다.' };
+    }
+  },
+
+  // ─── 인사이트 (인플루언서 본인 화면) ───────────────────────────────────────
+  //
+  // 새 연동을 만들지 않는다. 캠페인 등록에서 붙여 둔 계정(없으면 디엠 자동화 계정)의
+  // 토큰으로 조회만 한다. 서버가 계정별로 굳혀 두므로 화면을 여러 번 열어도 메타를
+  // 다시 부르지 않는다 — `refresh` 는 사람이 새로 불러오기를 누른 경우에만 쓴다.
+
+  /** 계정 요약(팔로워·팔로잉·증감) + 최근 릴스 목록. */
+  async getCreatorInsights(
+    username: string,
+    opts: { refresh?: boolean } = {},
+  ): Promise<CreatorInsightsResponse> {
+    try {
+      const params = new URLSearchParams({ username: username.toLowerCase() });
+      if (opts.refresh) params.set('refresh', '1');
+      const res = await fetch(`/api/creator-insights?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: username }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { reels: [], error: json?.error || '인사이트를 불러오지 못했습니다.', code: json?.code };
+      }
+      return json as CreatorInsightsResponse;
+    } catch (e) {
+      console.error('[API] Failed to get creator insights:', e);
+      return { reels: [], error: '네트워크 오류로 인사이트를 불러오지 못했습니다.' };
+    }
+  },
+
+  /** 팔로워 증감 추이(일별 스냅샷). 배치를 켠 날부터만 값이 있다. */
+  async getCreatorFollowerSeries(
+    username: string,
+    days: 7 | 30 | 90,
+  ): Promise<FollowerSeriesResponse> {
+    try {
+      const params = new URLSearchParams({ username: username.toLowerCase(), days: String(days) });
+      const res = await fetch(`/api/creator-insights/followers?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: username }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { days, points: [], collecting: true, error: json?.error || '추이를 불러오지 못했습니다.' };
+      }
+      return json as FollowerSeriesResponse;
+    } catch (e) {
+      console.error('[API] Failed to get follower series:', e);
+      return { days, points: [], collecting: true, error: '네트워크 오류로 추이를 불러오지 못했습니다.' };
+    }
+  },
+
+  // ─── 태그된 콘텐츠 (브랜드 계정 화면) ─────────────────────────────────────
+  //
+  // 새 연동을 만들지 않는다. 디엠 자동화에서 붙여 둔 브랜드 계정의 토큰으로 조회만
+  // 한다. 사용자명은 `biz/` 접두사를 붙인 그대로 보내야 서버가 브랜드 보관함을
+  // 찾는다. 서버가 몇 시간 단위로 굳혀 두므로 새로고침해도 매번 다시 부르지 않는다.
+
+  /** 우리 브랜드를 태그·언급한 릴스·게시물 목록. */
+  async getBusinessTaggedMedia(
+    username: string,
+    opts: { refresh?: boolean } = {},
+  ): Promise<TaggedMediaResponse> {
+    try {
+      const params = new URLSearchParams({ username: username.toLowerCase() });
+      if (opts.refresh) params.set('refresh', '1');
+      const res = await fetch(`/api/business-tagged-media?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: username }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          items: [],
+          error: json?.error || '태그된 콘텐츠를 불러오지 못했습니다.',
+          code: json?.code,
+        };
+      }
+      return json as TaggedMediaResponse;
+    } catch (e) {
+      console.error('[API] Failed to get tagged media:', e);
+      return { items: [], error: '네트워크 오류로 태그된 콘텐츠를 불러오지 못했습니다.' };
     }
   },
 

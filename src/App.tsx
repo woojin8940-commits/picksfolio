@@ -33,6 +33,7 @@ const LoginPage = lazyWithRetry(() => import('./components/LoginPage'));
 const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
 const LinkManagement = lazyWithRetry(() => import('./components/LinkManagement'));
 const DmAutomation = lazyWithRetry(() => import('./components/DmAutomation'));
+const CreatorInsights = lazyWithRetry(() => import('./components/CreatorInsights'));
 const BusinessProposalForm = lazyWithRetry(() => import('./components/BusinessProposalForm'));
 const BusinessDashboard = lazyWithRetry(() => import('./components/BusinessDashboard'));
 const BusinessCalendar = lazyWithRetry(() => import('./components/BusinessCalendar'));
@@ -57,7 +58,7 @@ import { clearAllLinkCache } from './services/prefetchService';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
-type SubView = 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
+type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
 
 // 지연 로딩 화면은 모두 utils/lazyRoute 의 LazyRoute 로 감싼다 — 로딩 표시와
 // 오류 경계가 항상 함께 붙어야, 청크를 못 받은 화면이 로딩 표시에서 멈춘 것처럼
@@ -1272,6 +1273,12 @@ const App: React.FC = () => {
       setSubView('campaigns');
       return;
     }
+    // 인사이트 화면에서 시작한 연동(?ig_insights)은 그 화면으로 되돌린다. 아래
+    // ig_connected 분기보다 먼저 봐야 한다 — 연동 성공 시 두 파라미터가 함께 붙는다.
+    if (params.get('ig_insights')) {
+      setSubView('insights');
+      return;
+    }
     if (params.get('ig_connected') || params.get('ig_error')) {
       setSubView('dm-automation');
     }
@@ -1700,6 +1707,9 @@ const App: React.FC = () => {
       case 'dm-automation':
         subComponent = <LazyRoute><DmAutomation userName={userName} /></LazyRoute>;
         break;
+      case 'insights':
+        subComponent = <LazyRoute><CreatorInsights userName={userName} /></LazyRoute>;
+        break;
       case 'business':
         subComponent = <LazyRoute><BusinessDashboard userName={userName} /></LazyRoute>;
         break;
@@ -1760,6 +1770,7 @@ const App: React.FC = () => {
         onNavigateDashboard={() => setSubView('dashboard')}
         onNavigateLinks={() => setSubView('links')}
         onNavigateDmAutomation={() => setSubView('dm-automation')}
+        onNavigateInsights={() => setSubView('insights')}
         onNavigateBusiness={() => setSubView('business')}
         onNavigateCalendar={() => setSubView('calendar')}
         onNavigateOpenSchedule={() => setSubView('open-schedule')}

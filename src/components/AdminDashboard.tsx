@@ -16,10 +16,12 @@ import ErrorBoundary from './ErrorBoundary';
 interface AdminDashboardProps {
   userName: string;
   onLogout: () => void;
-  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
+  currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
   onNavigateDashboard: () => void;
   onNavigateLinks: () => void;
   onNavigateDmAutomation: () => void;
+  /** 인플루언서 본인 계정의 릴스 성과 화면. 이 대시보드 자체가 인플루언서용이다. */
+  onNavigateInsights: () => void;
   onNavigateBusiness: () => void;
   onNavigateCalendar: () => void;
   onNavigateMembership: () => void;
@@ -38,6 +40,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateDashboard,
   onNavigateLinks,
   onNavigateDmAutomation,
+  onNavigateInsights,
   onNavigateBusiness,
   onNavigateCalendar,
   onNavigateMembership,
@@ -219,6 +222,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             active={currentSubView === 'dm-automation'}
             onClick={onNavigateDmAutomation}
           />
+          <NavItem
+            icon="📊"
+            label={t('nav.insights', '인사이트', 'Insights')}
+            active={currentSubView === 'insights'}
+            onClick={onNavigateInsights}
+          />
           <div className="my-3 border-t border-white/10" />
           <NavItem
             icon="📢"
@@ -301,7 +310,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <MobileNavItem
             icon="⋯"
             label={t('nav.more', '더보기', 'More')}
-            active={['timeline','calendar','open-schedule','settlement','membership','campaigns'].includes(currentSubView)}
+            active={['timeline','calendar','open-schedule','settlement','membership','campaigns','insights'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
             badge={timelineUnread}
           />
@@ -336,6 +345,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onMouseEnter={() => prefetchLinkData(userName)}
               />
               <NavItem icon="📩" label={t('nav.dmAutomation', 'DM 자동화', 'DM Automation')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} />
