@@ -10,6 +10,12 @@ import {
   sceneAnchor,
   sceneIsEmpty,
 } from '../../utils/collabScenes';
+import {
+  CollabStepTurn,
+  collabStepTurns,
+  nextCollabAction,
+  waitingCollabStep,
+} from '../../utils/collabNextAction';
 
 /**
  * 캠페인 진행 프로세스 — 다섯 단계 하나의 화면.
@@ -110,6 +116,17 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const collab = detail?.collab || {};
   const isInfluencer = role === 'influencer';
   const isBrandSide = role === 'brand' || role === 'manager';
+  /**
+   * 인플루언서가 열어 볼 가이드가 실제로 있는가.
+   *
+   * 파일만 세면 안 된다. 가이드는 파일 · 메모 · 링크 세 가지로 오고, 메모만 적어 둔
+   * 캠페인에서는 파일이 0개다 — 그러면 인플루언서 쪽에 확인 버튼이 서지 않아 이 단계가
+   * 닫히지 않고, 브랜드는 영원히 "가이드를 올려 주세요"를 본다.
+   */
+  const guideReady =
+    guideFiles.length > 0 ||
+    Boolean(String(guideline.note || '').trim()) ||
+    Boolean(String(guideline.url || '').trim());
 
   const stageOf = (step: StepKey) =>
     stages.find((s: any) => STAGE_KEYS[step].includes(String(s.stageKey))) || null;
@@ -156,6 +173,39 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     return stageSubmitted;
   };
 
+  /**
+   * 지금 누가 무엇을 해야 하는가.
+   *
+   * 단계의 완료 여부와는 다른 값이다. 배송 단계는 "아직 안 끝났다"는 것만으로는 아무
+   * 말도 하지 않는다 — 주소를 기다리는 중인지(인플루언서 차례) 발송을 기다리는
+   * 중인지(브랜드 차례)에 따라 화면에 떠야 하는 문장이 정반대다. 판정은 목록 카드와
+   * 같은 함수(collabNextAction)에서 가져온다. 카드에 "배송 정보 입력 필요"가 떠서
+   * 들어왔는데 이 화면이 다른 단계를 펼쳐 두면 다시 찾아 눌러야 한다.
+   */
+  const actionInput = useMemo(
+    () => ({
+      steps: {
+        guide: { status: String(stageOf('guide')?.status || ''), submitted: Boolean(workOf('guide')) },
+        shipping: { status: String(stageOf('shipping')?.status || ''), submitted: Boolean(shipping.filled) },
+        plan: { status: String(stageOf('plan')?.status || ''), submitted: Boolean(workOf('plan')) },
+        video: { status: String(stageOf('video')?.status || ''), submitted: Boolean(workOf('video')) },
+        upload: { status: String(stageOf('upload')?.status || ''), submitted: Boolean(collab.uploadUrl) },
+      },
+      shipping: { filled: Boolean(shipping.filled), status: String(shipping.status || '') },
+      uploadUrl: String(collab.uploadUrl || ''),
+      uploadConfirmedAt: collab.uploadConfirmedAt || null,
+      guideReady,
+      collabStatus: String(collab.status || ''),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [detail],
+  );
+
+  const turns = useMemo(() => collabStepTurns(actionInput, role), [actionInput, role]);
+  const myAction = useMemo(() => nextCollabAction(actionInput, role), [actionInput, role]);
+  const waitingStep = useMemo(() => waitingCollabStep(actionInput, role), [actionInput, role]);
+  const turnOf = (step: StepKey): CollabStepTurn | null => turns[step] || null;
+
   const states = useMemo(() => {
     const done = STEPS.map(s => doneOf(s.key));
     const currentIndex = done.findIndex(d => !d);
@@ -165,11 +215,20 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       submitted: submittedOf(s.key),
       revision: revisionOf(s.key),
       current: i === currentIndex,
+      /** 내가 손대야 하는 단계 하나. 색과 배지가 여기에 붙는다. */
+      action: myAction?.key === s.key,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail]);
+  }, [detail, myAction?.key]);
 
-  const currentKey = states.find(s => s.current)?.key || 'upload';
+  /**
+   * 처음 펼쳐 둘 단계.
+   *
+   * 예전에는 "완료되지 않은 첫 단계"를 펼쳤다. 그러면 브랜드가 가이드를 올리지 않은
+   * 협업에서는 인플루언서가 열 것이 없는 가이드 칸을 보게 되고, 정작 지금 적어야 하는
+   * 배송지 칸은 접힌 채 회색으로 남았다. 내 차례인 단계를 펼친다.
+   */
+  const currentKey = myAction?.key || states.find(s => s.current)?.key || 'upload';
   const [open, setOpen] = useState<StepKey | ''>(focusStep || currentKey);
   useEffect(() => {
     setOpen(currentKey);
@@ -636,7 +695,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               </div>
             )}
 
-            {isInfluencer && guideFiles.length > 0 && !doneOf('guide') && (
+            {isInfluencer && guideReady && !doneOf('guide') && (
               <button
                 onClick={() => act('confirm_step', { stepKey: 'guide' }, '가이드 확인을 표시했습니다.')}
                 disabled={busy}
@@ -671,9 +730,14 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </p>
               </div>
             ) : (
-              <p className="text-xs text-slate-400 font-medium">
-                입력한 주소는 이 캠페인의 브랜드에게만 보입니다.
-              </p>
+              /* 아직 아무것도 저장되지 않은 상태. 이 칸이 회색 안내문 하나였을 때는
+                 "지금 여기를 채워야 제품이 온다"는 것이 어디에도 없었다. */
+              <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5">
+                <p className="text-xs font-black text-blue-700">제품을 받을 주소를 입력해 주세요</p>
+                <p className="text-[11px] text-blue-600/90 font-bold mt-0.5 leading-relaxed">
+                  저장하면 브랜드가 바로 발송합니다. 입력한 주소는 이 캠페인의 브랜드에게만 보입니다.
+                </p>
+              </div>
             )}
             <div className="grid grid-cols-2 gap-2">
               <Field label="받는 분"><input value={ship.recipient} onChange={e => setShip({ ...ship, recipient: e.target.value })} className={fieldCls(ship.recipient)} /></Field>
@@ -998,6 +1062,10 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /** 단계 한 줄에 붙는 상태 한 마디. 길면 읽지 않는다. */
   const statusText = (step: StepKey, done: boolean, current: boolean) => {
     if (done) return '완료';
+    // 내 차례인 단계에는 상태가 아니라 할 일을 적는다. "진행 중"은 무엇을 해야
+    // 하는지 아무것도 말해 주지 않는다 — 배송 줄에서 가장 크게 걸렸던 부분이다.
+    const turn = turnOf(step);
+    if (turn?.mine) return turn.short;
     if (revisionOf(step)) return isInfluencer ? '피드백 반영이 필요합니다' : '수정 요청 전달됨';
     if (step === 'shipping' && shipping.filled) return isInfluencer ? '입력 완료 · 브랜드 발송 대기' : '발송해 주세요';
     if (step === 'plan' && planWork) return isInfluencer ? '입력 완료 · 브랜드 확인 대기' : '확인해 주세요';
@@ -1007,8 +1075,79 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     return current ? '진행 중' : '진행 전';
   };
 
+  /**
+   * 보드 맨 위 한 칸 — "지금 할 일".
+   *
+   * 다섯 줄의 색만으로는 부족했다. 색은 이미 무언가를 말하고 있었지만(완료 · 진행 전),
+   * 처음 이 화면을 여는 사람에게 그 색의 뜻을 알려 주는 것은 아무것도 없었다. 그래서
+   * 할 일을 문장으로 한 번 적고, 그 단계로 바로 가는 버튼을 붙인다. 할 일이 없으면
+   * 무엇을 기다리는 중인지 적는다 — 기다리는 중이라는 것도 정보다.
+   */
+  const renderActionBanner = () => {
+    if (myAction) {
+      const amber = myAction.revision;
+      return (
+        <div
+          className={`px-4 py-3.5 border-b ${
+            amber ? 'bg-amber-50 border-amber-100' : 'bg-blue-50 border-blue-100'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <span className="relative flex h-2.5 w-2.5 mt-1 flex-shrink-0">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
+                  amber ? 'bg-amber-400' : 'bg-blue-400'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                  amber ? 'bg-amber-500' : 'bg-blue-600'
+                }`}
+              />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className={`text-[11px] font-black ${amber ? 'text-amber-700' : 'text-blue-700'}`}>
+                {amber ? '수정 요청' : '진행 요청'} · {myAction.title}
+              </p>
+              <p className="text-xs font-bold text-slate-700 mt-0.5 leading-relaxed break-keep">{myAction.todo}</p>
+            </div>
+            {!solo && open !== myAction.key && (
+              <button
+                type="button"
+                onClick={() => setOpen(myAction.key)}
+                className={`px-3 py-2 rounded-lg text-[11px] font-black text-white flex-shrink-0 transition-colors ${
+                  amber ? 'bg-amber-500 hover:bg-amber-400' : 'bg-blue-600 hover:bg-blue-500'
+                }`}
+              >
+                바로 가기
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (waitingStep) {
+      return (
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+          <p className="text-[11px] font-black text-slate-500">
+            지금은 {waitingStep.owner === 'brand' ? '브랜드' : '인플루언서'}를 기다리는 중입니다 · {waitingStep.title}
+          </p>
+          <p className="text-[11px] font-bold text-slate-400 mt-0.5 break-keep">{waitingStep.waitingNote}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="px-4 py-3 border-b border-emerald-100 bg-emerald-50/70">
+        <p className="text-[11px] font-black text-emerald-700">모든 단계가 끝났습니다 · 더 입력할 것이 없습니다</p>
+      </div>
+    );
+  };
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+      {renderActionBanner()}
       {visibleStates.map((s, pos) => {
         /* 번호는 늘 다섯 단계 안에서의 자리다. 기획안만 보고 있다고 해서 그 줄이 1번이
            되면, 브랜드는 이 사람이 첫 단계에 서 있다고 읽는다. */
@@ -1022,50 +1161,96 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               onClick={() => { if (!solo) setOpen(isOpen ? '' : s.key); }}
               aria-expanded={solo ? undefined : isOpen}
               className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${solo ? 'cursor-default ' : ''}${
-                isOpen
-                  ? 'bg-slate-50'
-                  : s.done
-                    ? 'bg-emerald-50/60 hover:bg-emerald-50'
-                    : s.submitted
-                      ? 'bg-emerald-50/40 hover:bg-emerald-50'
-                      : s.revision
-                        ? 'bg-amber-50/50 hover:bg-amber-50'
-                        : 'hover:bg-slate-50/60'
+                /* 내 차례인 줄은 펼쳐져 있어도 색을 뺏기지 않는다. 펼치면 회색이 되던
+                   예전에는, 배너를 보고 눌러 들어간 순간 그 줄이 다른 줄과 같아졌다. */
+                s.action
+                  ? s.revision
+                    ? 'bg-amber-50 hover:bg-amber-100/70'
+                    : 'bg-blue-50 hover:bg-blue-100/70'
+                  : isOpen
+                    ? 'bg-slate-50'
+                    : s.done
+                      ? 'bg-emerald-50/60 hover:bg-emerald-50'
+                      : s.submitted
+                        ? 'bg-emerald-50/40 hover:bg-emerald-50'
+                        : s.revision
+                          ? 'bg-amber-50/50 hover:bg-amber-50'
+                          : 'hover:bg-slate-50/60'
               }`}
             >
               {/* 동그라미 색이 이 줄의 상태다. 다 채워 넣었지만 상대의 확인을 기다리는
                   단계는 옅은 초록 — 완료(진한 초록)와 진행 전(회색) 사이의 자리다. */}
-              <span
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
-                  s.done
-                    ? 'bg-emerald-500 text-white'
-                    : s.submitted
-                      ? 'bg-emerald-100 text-emerald-600'
-                      : s.revision
-                        ? 'bg-amber-100 text-amber-700'
-                        : s.current
-                          ? 'bg-slate-900 text-white'
-                          : 'bg-slate-100 text-slate-400'
-                }`}
-              >
-                {s.done || s.submitted ? '✓' : i + 1}
+              <span className="relative flex-shrink-0">
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                    s.action
+                      ? s.revision
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-blue-600 text-white'
+                      : s.done
+                        ? 'bg-emerald-500 text-white'
+                        : s.submitted
+                          ? 'bg-emerald-100 text-emerald-600'
+                          : s.revision
+                            ? 'bg-amber-100 text-amber-700'
+                            : s.current
+                              ? 'bg-slate-900 text-white'
+                              : 'bg-slate-100 text-slate-400'
+                  }`}
+                >
+                  {s.done || s.submitted ? '✓' : i + 1}
+                </span>
+                {/* 지금 손대야 하는 줄에만 붙는 점. 접힌 목록에서도 눈이 먼저 간다. */}
+                {s.action && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                    <span
+                      className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-70 ${
+                        s.revision ? 'bg-amber-400' : 'bg-blue-400'
+                      }`}
+                    />
+                    <span
+                      className={`relative inline-flex rounded-full h-2 w-2 ring-2 ring-white ${
+                        s.revision ? 'bg-amber-500' : 'bg-blue-600'
+                      }`}
+                    />
+                  </span>
+                )}
               </span>
               <span className="min-w-0 flex-1">
-                <span className={`block text-sm font-black ${s.done || s.submitted || s.current || s.revision ? 'text-slate-900' : 'text-slate-400'}`}>
-                  {s.title}
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className={`text-sm font-black truncate ${s.action || s.done || s.submitted || s.current || s.revision ? 'text-slate-900' : 'text-slate-400'}`}>
+                    {s.title}
+                  </span>
+                  {/* 진행 요청 배지. 색만으로는 "내 차례"라는 뜻이 전달되지 않는다 —
+                      색을 구분하기 어려운 사람에게도 남는 글자가 있어야 한다. */}
+                  {s.action && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[9px] font-black flex-shrink-0 ${
+                        s.revision ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'
+                      }`}
+                    >
+                      {s.revision ? '수정 요청' : '진행 요청'}
+                    </span>
+                  )}
                 </span>
                 <span
                   className={`block text-[11px] font-bold truncate ${
-                    isOpen
-                      ? 'text-slate-400'
-                      : s.done || s.submitted
-                        ? 'text-emerald-600'
-                        : s.revision
-                          ? 'text-amber-600'
-                          : 'text-slate-400'
+                    s.action
+                      ? s.revision
+                        ? 'text-amber-700'
+                        : 'text-blue-700'
+                      : isOpen
+                        ? 'text-slate-400'
+                        : s.done || s.submitted
+                          ? 'text-emerald-600'
+                          : s.revision
+                            ? 'text-amber-600'
+                            : 'text-slate-400'
                   }`}
                 >
-                  {isOpen ? s.lead : statusText(s.key, s.done, s.current)}
+                  {/* 내 차례인 줄은 펼쳐도 할 일을 그대로 둔다. 펼침 안내문(lead)으로
+                      바뀌면 방금 읽은 요청 문장이 사라진다. */}
+                  {isOpen && !s.action ? s.lead : statusText(s.key, s.done, s.current)}
                 </span>
               </span>
               {stage?.dueDate && !s.done && !s.submitted && (!isOpen || solo) && (
