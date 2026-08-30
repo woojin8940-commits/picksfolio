@@ -16,6 +16,15 @@ import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../s
  * 원래 없다 — 자리를 만들어 '—' 로 비워 두면 "언젠가 채워질 값"으로 읽히므로 아예
  * 넣지 않는다.
  *
+ * 조회수는 서버가 목록을 만드는 그 자리에서 콘텐츠를 올린 계정의 인사이트에서 받아
+ * 채운다. 그래서 화면을 처음 열었을 때 이미 값이 있고, 사람이 새로 불러오기를 눌러야
+ * 채워지는 값이 아니다. 그래도 비는 자리는 있다 — 릴스가 아닌 게시물, 올린 직후라
+ * 집계 전인 릴스, 연동이 끊긴 계정의 게시물이다. 그건 0 이 아니라 '—' 로 둔다.
+ *
+ * 월별 그래프는 태그된 콘텐츠와 브랜드 계정이 직접 올린 게시물을 함께 센다. 목록은
+ * 태그된 콘텐츠만 담는다 — 브랜드가 "그 달에 우리 브랜드로 오간 콘텐츠"를 보려는
+ * 그래프와, "누가 우리를 태그했나"를 보려는 목록은 서로 다른 질문에 답한다.
+ *
  * 목록이 어디까지 덮는지는 화면 아래에 그대로 적는다. 메타의 tags 엣지(태그된 미디어
  * 목록)는 페이스북 로그인 방식 전용이어서 우리 토큰으로는 거부된다. 그래서 실제
  * 목록은 우리 서비스에 연동된 인플루언서들의 최근 콘텐츠에서 우리 계정 언급을 찾아
@@ -125,6 +134,8 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
   useEffect(() => { void load(); }, [load]);
 
   const items = data?.items || [];
+  /** 브랜드 계정이 직접 올린 게시물. 목록에는 넣지 않고 월별 추이에서만 함께 센다. */
+  const ownItems = data?.ownItems || [];
   const summary = data?.summary;
 
   /** 검색은 태그한 계정명으로만 한다(2단계). 아이디와 사용자명 양쪽을 본다. */
@@ -153,27 +164,58 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
   }, [sorted]);
 
   /**
-   * 월별 묶음. 개수는 그 달에 실제로 잡힌 콘텐츠 수이므로 0 도 사실이지만,
-   * 조회수 합계는 값이 있는 항목만 더한 값이다 — 몇 개를 근거로 냈는지 함께 들고
-   * 다녀서 그래프 옆에 밝힌다.
+   * 월별 묶음. 태그된 콘텐츠와 브랜드 계정이 직접 올린 게시물을 나란히 센다.
+   *
+   * 두 값을 합쳐 한 막대로 만들지 않고 쌓아 올린다 — 브랜드가 알아야 하는 것은 그 달의
+   * 총량만이 아니라 "그중 얼마가 인플루언서에게서 온 것인가" 이고, 합계 하나로는 그
+   * 구분이 사라진다.
+   *
+   * 개수는 그 달에 실제로 잡힌 콘텐츠 수이므로 0 도 사실이지만, 조회수 합계는 값이 있는
+   * 항목만 더한 값이다 — 몇 개를 근거로 냈는지 함께 들고 다녀서 그래프 옆에 밝힌다.
    */
   const monthly = useMemo(() => {
     const keys = recentMonthKeys();
-    const base = new Map(keys.map((k) => [k, { month: k, count: 0, views: 0, valued: 0 }]));
-    for (const m of items) {
-      const row = base.get(monthKey(m.timestamp));
-      if (!row) continue;
-      row.count += 1;
-      if (typeof m.views === 'number') {
-        row.views += m.views;
-        row.valued += 1;
+    const base = new Map(
+      keys.map((k) => [
+        k,
+        { month: k, count: 0, views: 0, valued: 0, ownCount: 0, ownViews: 0, ownValued: 0 },
+      ]),
+    );
+    const add = (list: TaggedMediaItem[], own: boolean) => {
+      for (const m of list) {
+        const row = base.get(monthKey(m.timestamp));
+        if (!row) continue;
+        if (own) row.ownCount += 1;
+        else row.count += 1;
+        if (typeof m.views === 'number') {
+          if (own) {
+            row.ownViews += m.views;
+            row.ownValued += 1;
+          } else {
+            row.views += m.views;
+            row.valued += 1;
+          }
+        }
       }
-    }
+    };
+    add(items, false);
+    add(ownItems, true);
     return [...base.values()];
-  }, [items]);
+  }, [items, ownItems]);
 
-  const chartHasValue = monthly.some((r) => (metric === 'count' ? r.count > 0 : r.views > 0));
-  const viewsMissing = items.length > 0 && items.every((m) => m.views === null);
+  const chartHasValue = monthly.some((r) =>
+    metric === 'count' ? r.count + r.ownCount > 0 : r.views + r.ownViews > 0,
+  );
+  /**
+   * 조회수를 한 편도 못 받았는가.
+   *
+   * 브랜드 자기 게시물의 조회수는 브랜드 토큰으로 받을 수 있으므로, 태그된 콘텐츠가
+   * 전부 비어 있어도 그래프의 조회수 계열은 값이 있을 수 있다. 그래서 두 배열을 함께
+   * 보고, 정말 아무 값도 없을 때만 조회수 보기를 잠근다.
+   */
+  const viewsMissing =
+    items.length + ownItems.length > 0 &&
+    [...items, ...ownItems].every((m) => m.views === null);
 
   if (loading) {
     return (
@@ -246,17 +288,24 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
               : ''
           }
         />
-        <StatTile label="태그한 계정" value={`${(summary?.authors ?? 0).toLocaleString()}곳`} />
+        {/* 단위를 붙이지 않는다. "곳" 은 업체를 세는 말이라 인플루언서 계정 수에는
+            맞지 않고, 옆 칸들과 자릿수만 어긋나 보인다. */}
+        <StatTile label="태그한 계정" value={(summary?.authors ?? 0).toLocaleString()} />
       </div>
 
       {/* 월별 추이 ------------------------------------------------------- */}
       <section className="bg-white border border-slate-100 rounded-2xl md:rounded-[1.5rem] p-4 md:p-6 shadow-sm mb-5 md:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-sm md:text-lg font-black text-slate-900">월별 태그된 콘텐츠</h3>
+            <h3 className="text-sm md:text-lg font-black text-slate-900">월별 콘텐츠</h3>
             <p className="text-[10px] md:text-xs font-bold text-slate-400 mt-0.5">
-              최근 {CHART_MONTHS}개월
+              최근 {CHART_MONTHS}개월 · 태그된 콘텐츠와 브랜드 계정 게시물을 함께 셉니다
             </p>
+            {/* 막대가 두 색으로 쌓여 있으므로 어느 쪽이 무엇인지 그 자리에서 밝힌다. */}
+            <div className="flex items-center gap-3 mt-2">
+              <LegendDot color="#2563eb" label="태그된 콘텐츠" />
+              <LegendDot color="#93c5fd" label={`브랜드 계정(@${data?.igUsername || '우리 계정'})`} />
+            </div>
           </div>
           <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 self-start">
             <Chip active={metric === 'count'} onClick={() => setMetric('count')}>콘텐츠 수</Chip>
@@ -278,7 +327,7 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
             <p className="text-[11px] md:text-xs font-medium text-slate-500 leading-relaxed max-w-sm">
               {metric === 'views'
                 ? '아직 조회수를 받은 릴스가 없습니다. 릴스가 아닌 게시물에는 조회수가 없습니다.'
-                : `최근 ${CHART_MONTHS}개월 안에 우리 계정을 태그한 콘텐츠가 아직 없습니다.`}
+                : `최근 ${CHART_MONTHS}개월 안에 우리 계정을 태그한 콘텐츠도, 브랜드 계정이 올린 게시물도 아직 없습니다.`}
             </p>
           </div>
         )}
@@ -445,15 +494,31 @@ const Chip: React.FC<{
   </button>
 );
 
+/** 범례 점 하나. 쌓은 막대가 무엇으로 나뉘는지 그래프 위에서 밝힌다. */
+const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label }) => (
+  <span className="flex items-center gap-1.5 min-w-0">
+    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+    <span className="text-[10px] md:text-[11px] font-bold text-slate-500 truncate">{label}</span>
+  </span>
+);
+
 /**
  * 월별 막대 그래프.
  *
- * 한 계열만 그린다 — 콘텐츠 수와 조회수는 자릿수가 아예 달라서 한 축에 함께 두면
- * 콘텐츠 수 막대가 보이지 않는다. 축을 두 개 두는 대신 위에서 하나를 고르게 했다.
+ * 한 번에 한 지표만 그린다 — 콘텐츠 수와 조회수는 자릿수가 아예 달라서 한 축에 함께
+ * 두면 콘텐츠 수 막대가 보이지 않는다. 축을 두 개 두는 대신 위에서 하나를 고르게 했다.
+ *
+ * 고른 지표 안에서는 태그된 콘텐츠와 브랜드 계정 게시물을 한 막대에 쌓는다. 두 값을
+ * 미리 더해 하나로 그리면 그 달의 총량은 보이지만 "그중 얼마가 인플루언서에게서 온
+ * 것인가" 를 볼 수 없고, 막대를 나란히 두면 6개월×2개 막대가 되어 폭이 좁아진다.
  * 축과 격자는 뒤로 물러나고, 값은 막대를 짚었을 때 나온다.
  */
 const MonthlyChart: React.FC<{
-  rows: { month: string; count: number; views: number; valued: number }[];
+  rows: {
+    month: string;
+    count: number; views: number; valued: number;
+    ownCount: number; ownViews: number; ownValued: number;
+  }[];
   metric: ChartMetric;
 }> = ({ rows, metric }) => {
   const label = (key: string) => {
@@ -492,16 +557,26 @@ const MonthlyChart: React.FC<{
               fontWeight: 700,
             }}
             labelFormatter={(raw) => label(String(raw ?? ''))}
-            formatter={(value) => [
+            formatter={(value, _name, entry) => [
               metric === 'count'
                 ? `${Number(value ?? 0).toLocaleString()}개`
                 : `${Number(value ?? 0).toLocaleString()}회`,
-              metric === 'count' ? '태그된 콘텐츠' : '조회수',
+              // 쌓은 막대에서는 어느 계열의 값인지가 숫자보다 먼저 필요하다.
+              String(entry?.dataKey || '').startsWith('own') ? '브랜드 계정' : '태그된 콘텐츠',
             ]}
           />
+          {/* 태그된 콘텐츠를 아래에 둔다 — 이 화면의 주된 값이라 축에 붙어 있어야
+              달마다 높이를 비교할 수 있다. */}
           <Bar
             dataKey={metric === 'count' ? 'count' : 'views'}
+            stackId="month"
             fill="#2563eb"
+            maxBarSize={44}
+          />
+          <Bar
+            dataKey={metric === 'count' ? 'ownCount' : 'ownViews'}
+            stackId="month"
+            fill="#93c5fd"
             radius={[4, 4, 0, 0]}
             maxBarSize={44}
           />
@@ -595,6 +670,14 @@ const CoverageNote: React.FC<{ data: TaggedMediaResponse | null }> = ({ data }) 
           : `우리 서비스에 연동된 인플루언서의 최근 콘텐츠에서 @${data.igUsername || ''} 언급을 찾아 보여줍니다. 연동하지 않은 계정이 태그한 게시물은 목록에 잡히지 않습니다.`}
         {typeof data.scannedCreators === 'number' && data.scannedCreators > 0
           ? ` (인플루언서 ${data.scannedCreators}명)`
+          : ''}
+      </p>
+      <p className="text-[10px] md:text-[11px] font-bold text-slate-500 leading-relaxed mt-1">
+        조회수는 목록을 불러올 때 콘텐츠를 올린 계정의 인스타그램 인사이트에서 함께
+        받아옵니다. 릴스가 아닌 게시물에는 조회수가 없고, 올린 직후라 아직 집계되지 않은
+        콘텐츠는 값이 비어 있습니다.
+        {typeof data.ownItems?.length === 'number'
+          ? ` 월별 콘텐츠 그래프에는 브랜드 계정이 올린 게시물 ${data.ownItems.length.toLocaleString()}개가 함께 반영됩니다.`
           : ''}
       </p>
       <p className="text-[10px] md:text-[11px] font-bold text-slate-400 leading-relaxed mt-1">

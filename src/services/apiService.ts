@@ -561,7 +561,7 @@ export interface TaggedMediaItem {
   views: number | null;
   likes: number | null;
   comments: number | null;
-  source: 'tags_api' | 'creator_feed';
+  source: 'tags_api' | 'creator_feed' | 'brand_feed';
 }
 
 /** 값이 있는 항목만 더한 합계. `counted`/`of` 로 몇 개를 근거로 냈는지 밝힌다. */
@@ -577,6 +577,13 @@ export interface TaggedMediaResponse {
   /** 브랜드 자신의 인스타그램 아이디. 무엇을 기준으로 찾았는지 화면이 밝힌다. */
   igUsername?: string;
   items: TaggedMediaItem[];
+  /**
+   * 브랜드 계정이 직접 올린 게시물.
+   *
+   * 태그된 콘텐츠 목록과 섞지 않는다 — "누가 우리를 태그했나" 목록에 우리 게시물이
+   * 끼면 그건 틀린 목록이다. 월별 추이만 이 배열을 함께 센다.
+   */
+  ownItems?: TaggedMediaItem[];
   summary?: {
     monthCount: number;
     totalCount: number;
@@ -585,6 +592,10 @@ export interface TaggedMediaResponse {
     likes: TaggedMediaSum;
     comments: TaggedMediaSum;
     authors: number;
+    /** 브랜드 계정이 이번 달 올린 게시물 수. */
+    monthOwnCount?: number;
+    ownCount?: number;
+    ownViews?: TaggedMediaSum;
   };
   /**
    * 메타 tags 엣지 결과. 인스타그램 로그인 방식 토큰에서는 거부되는 것이 정상이라
@@ -594,6 +605,8 @@ export interface TaggedMediaResponse {
   tagsApi?: { ok: boolean; reason: string | null };
   /** 캡션에서 우리 계정 언급을 찾은 연동 인플루언서 수. */
   scannedCreators?: number;
+  /** 이번 조회에서 조회수를 직접 받아 채운 콘텐츠 수. */
+  viewsFilled?: number;
   fetchedAt?: string;
   cached?: boolean;
   cacheTtlHours?: number;

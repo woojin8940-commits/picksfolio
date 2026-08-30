@@ -3,6 +3,7 @@ import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { REAUTH_MESSAGE } from "./_shared/instagram-metrics.mts";
 import {
+  backfillSnapshotFromChannel,
   CACHE_TTL_MINUTES,
   firstSnapshotDate,
   getReelInsights,
@@ -26,8 +27,9 @@ import {
  * 위해 통과된다(requireAccountOwner 의 기존 규칙).
  *
  * 이 경로는 읽기 전용이다. creator_channels(브랜드가 보는 숫자)도, 연동 토큰도
- * 건드리지 않는다. 유일한 쓰기는 오늘자 팔로워 스냅샷 한 줄인데, 이건 본인 화면을
- * 열었다는 사실로 그래프의 오늘 점을 채우는 것이라 다른 화면에 영향이 없다.
+ * 건드리지 않는다. 쓰는 것은 팔로워 스냅샷 표뿐이다 — 오늘자 한 줄과, 이미 확인해 둔
+ * 과거 팔로워 수(creator_channels.synced_at 기준) 한 줄이다. 둘 다 그래프의 점을
+ * 채우는 값이고 다른 화면에 영향이 없다.
  */
 
 const norm = (raw: string) => String(raw || "").trim().toLowerCase();
@@ -59,6 +61,9 @@ export default async (req: Request) => {
     try {
       const asked = Number(url.searchParams.get("days") || 7);
       const days = ALLOWED_DAYS.includes(asked) ? asked : 7;
+      // 이미 확인해 둔 과거 팔로워 수를 먼저 스냅샷으로 옮긴다. 표를 만든 날에도
+      // 그래프가 그려질 수 있는 유일한 근거이고, 없는 값을 만들어 내지는 않는다.
+      await backfillSnapshotFromChannel(db, username);
       const [points, firstOn] = await Promise.all([
         loadFollowerSeries(db, username, days),
         firstSnapshotDate(db, username),
@@ -118,6 +123,7 @@ export default async (req: Request) => {
 
     // 최근 7일 증감. 스냅샷이 두 개 이상 있어야 말할 수 있는 값이라, 없으면 null 로
     // 두고 화면이 이 항목 자체를 생략한다 — 0 으로 적으면 "일주일째 그대로"가 된다.
+    await backfillSnapshotFromChannel(db, username);
     const week = await loadFollowerSeries(db, username, 7);
     const followerDelta7d =
       week.length >= 2 ? week[week.length - 1].followers - week[0].followers : null;
