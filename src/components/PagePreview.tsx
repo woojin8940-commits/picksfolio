@@ -4,14 +4,21 @@ import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
 import { enabledDefaultButtons } from '../utils/pageButtons';
+import {
+  type ThemePreset,
+  PRESET_BACKGROUND,
+  isLightBackground,
+  normalizeHexColor,
+} from '../utils/themeColor';
 
-type ThemePreset = 'midnight' | 'white';
 type LayoutTemplate = 'grid' | 'list';
 type HomePriority = 'curation' | 'portfolio';
 type PortfolioFontSize = 'small' | 'medium' | 'large';
 
 interface PagePreviewProps {
   theme: ThemePreset;
+  /** 자유 배경(theme: 'custom')에서 고른 배경색. 프리셋일 때는 무시된다. */
+  backgroundColor?: string;
   accentColor: string;
   /** Cover header background/image. */
   header: { color?: string; image?: string; imagePosition?: string | number };
@@ -34,6 +41,7 @@ interface PagePreviewProps {
  */
 const PagePreview: React.FC<PagePreviewProps> = ({
   theme,
+  backgroundColor,
   accentColor,
   header,
   profile,
@@ -48,7 +56,14 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const [previewSelectedBlock, setPreviewSelectedBlock] = useState<any | null>(null);
 
-  const themePreset = theme;
+  /**
+   * 미리보기가 밝은 배경인지. 프리셋은 정해져 있고, 자유 배경은 고른 색의 밝기로
+   * 정한다 — 공개 페이지(UserPage)가 쓰는 판단과 같은 함수를 쓴다.
+   */
+  const surface = theme === 'custom'
+    ? (normalizeHexColor(backgroundColor) || PRESET_BACKGROUND.midnight)
+    : PRESET_BACKGROUND[theme === 'white' ? 'white' : 'midnight'];
+  const isLight = theme === 'custom' ? isLightBackground(surface) : theme === 'white';
   const blocks = curationBlocks || [];
 
   const categories = managedCategories ?? (() => {
@@ -76,7 +91,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
         )}
         <div
           className="absolute inset-0"
-          style={{ background: `linear-gradient(to top, ${themePreset === 'white' ? '#ffffff' : '#1E1E2E'} 0%, ${themePreset === 'white' ? '#ffffff' : '#1E1E2E'}88 20%, transparent 50%)` }}
+          style={{ background: `linear-gradient(to top, ${surface} 0%, ${surface}88 20%, transparent 50%)` }}
         />
         <div className="absolute bottom-2 left-3 right-3">
           <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>
@@ -113,7 +128,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
               <span
                 key={btn.key}
                 className={`flex items-center px-1.5 py-0.5 rounded-md text-[5px] font-bold whitespace-nowrap border ${
-                  themePreset === 'white'
+                  isLight
                     ? 'bg-white border-slate-200 text-slate-700'
                     : 'bg-white/10 border-white/15 text-white'
                 }`}
@@ -141,7 +156,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
             <h4 className="text-[6px] font-black uppercase tracking-[0.15em] mb-0.5" style={{ color: accentColor }}>My Curations</h4>
             <h3 className="text-[9px] font-black tracking-tighter">Explore My Picks</h3>
           </div>
-          <div className={`text-[6px] font-black uppercase tracking-widest ${themePreset === 'white' ? 'text-slate-300' : 'text-white/20'}`}>{blocks.length} Items</div>
+          <div className={`text-[6px] font-black uppercase tracking-widest ${isLight ? 'text-slate-300' : 'text-white/20'}`}>{blocks.length} Items</div>
         </div>
       </div>
 
@@ -153,7 +168,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
             {previewCategories.map(cat => (
               <span
                 key={cat}
-                className={`px-2 py-0.5 text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? 'text-white border-transparent' : themePreset === 'white' ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}
+                className={`px-2 py-0.5 text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? 'text-white border-transparent' : isLight ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}
                 style={cat === '전체' ? { backgroundColor: accentColor } : {}}
               >
                 {cat}
@@ -196,12 +211,12 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                           fontWeight: block.bold ? 'bold' : undefined,
                           fontStyle: block.italic ? 'italic' : undefined,
                           textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                          color: block.color || (themePreset === 'white' ? '#37352f' : 'rgba(255,255,255,0.8)'),
+                          color: block.color || (isLight ? '#37352f' : 'rgba(255,255,255,0.8)'),
                         }}
                         dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
                       />
                     ) : (
-                      <div className={`text-[6px] opacity-50 ${themePreset === 'white' ? 'text-slate-300' : 'text-white/30'}`}>텍스트 입력</div>
+                      <div className={`text-[6px] opacity-50 ${isLight ? 'text-slate-300' : 'text-white/30'}`}>텍스트 입력</div>
                     )}
                   </div>
                 );
@@ -212,14 +227,14 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div
                     key={block.id}
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group ${themePreset === 'white' ? 'bg-white border border-slate-200 shadow-[0_2px_7px_-3px_rgba(15,23,42,0.16)]' : 'bg-white/5 border border-white/20 shadow-[0_2px_7px_-3px_rgba(0,0,0,0.5)]'}`}
+                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group ${isLight ? 'bg-white border border-slate-200 shadow-[0_2px_7px_-3px_rgba(15,23,42,0.16)]' : 'bg-white/5 border border-white/20 shadow-[0_2px_7px_-3px_rgba(0,0,0,0.5)]'}`}
                     style={{
                       gridColumn: `span ${gridSpan}`,
                       borderRadius: '0.75rem',
                     }}
                   >
                     {block.coverMedia && (
-                      <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg overflow-hidden shrink-0 ${themePreset === 'white' ? 'border border-slate-200' : 'border border-white/10'}`}>
+                      <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg overflow-hidden shrink-0 ${isLight ? 'border border-slate-200' : 'border border-white/10'}`}>
                         <MediaAuto
                           src={block.coverMedia}
                           alt=""
@@ -269,11 +284,11 @@ const PagePreview: React.FC<PagePreviewProps> = ({
             (block.products || []).map((p: any) => (
               <div
                 key={p.id}
-                className={`flex items-center justify-between p-2 border transition-all ${themePreset === 'white' ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}
+                className={`flex items-center justify-between p-2 border transition-all ${isLight ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}
                 style={{ borderRadius: '0.75rem' }}
               >
                 <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                  <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${themePreset === 'white' ? 'border-slate-200' : 'border-white/10'}`}>
+                  <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${isLight ? 'border-slate-200' : 'border-white/10'}`}>
                     <MediaAuto src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
                   </div>
                   <span className="text-[8px] font-black truncate">{p.name}</span>
@@ -293,7 +308,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       {showBottomSheet && previewSelectedBlock && (
         <div className="absolute inset-0 z-50 flex flex-col justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowBottomSheet(false)}></div>
-          <div className={`relative rounded-t-[2rem] p-4 animate-in slide-in-from-bottom duration-300 ${themePreset === 'white' ? 'bg-white' : 'bg-[#1E1E2E]'}`}>
+          <div className="relative rounded-t-[2rem] p-4 animate-in slide-in-from-bottom duration-300" style={{ background: surface }}>
             <h3 className="text-[10px] font-black mb-3">연결된 상품</h3>
             <div className="space-y-2">
               {(previewSelectedBlock.products || []).map((product: any) => (
@@ -302,7 +317,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   href={product.link?.startsWith('http') ? product.link : `https://${product.link}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`flex items-center justify-between p-2.5 rounded-xl border ${themePreset === 'white' ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
                 >
                   <span className="text-[8px] font-black">{product.name}</span>
                   <ChevronRight size={10} style={{ color: accentColor }} />

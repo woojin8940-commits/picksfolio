@@ -536,7 +536,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       {/* Main Content */}
       <div className={`flex-1 md:ml-60 w-full ${currentSubView === 'timeline' ? 'md:min-h-screen' : 'min-h-screen'}`}>
         {subComponent ? (
-          <ErrorBoundary>
+          /* key 를 메뉴로 둔다. 경계는 한 번 오류를 잡으면 그 상태로 굳으므로, key 가
+             없으면 한 메뉴에서 난 오류가 다른 메뉴로 옮겨 가도 계속 오류 화면으로
+             보인다. 메뉴가 바뀌면 경계도 새로 만들어져 정상 화면부터 다시 그린다. */
+          <ErrorBoundary key={currentSubView}>
             {subComponent}
           </ErrorBoundary>
         ) : (

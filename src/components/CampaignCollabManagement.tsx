@@ -262,6 +262,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCampaignId, campaigns]);
 
+  /**
+   * 가장 최근에 담당자를 적어 둔 캠페인. 등록 화면의 "지난 캠페인과 동일" 버튼에만
+   * 쓴다. 목록은 created_at 내림차순으로 오므로 처음 걸리는 행이 가장 최근이다.
+   *
+   * 훅은 반드시 이 위치(모든 조기 return 앞)에 있어야 한다. 아래쪽 상세/등록 화면은
+   * `if (selectedCampaign)` 처럼 먼저 return 해 버리므로, 훅을 그 뒤에 두면 화면을
+   * 옮길 때마다 훅 개수가 달라져 React 가 렌더를 통째로 실패시킨다(캠페인을 눌렀을 때
+   * "화면을 불러오는 중 오류가 발생했습니다" 가 뜨던 원인).
+   */
+  const lastContact = React.useMemo(() => {
+    const row = campaigns.find(c => c.contact_person && c.contact_phone);
+    if (!row) return null;
+    return {
+      person: row.contact_person || '',
+      phone: row.contact_phone || '',
+      email: row.contact_email || '',
+    };
+  }, [campaigns]);
+
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);
     try {
@@ -1378,20 +1397,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       </main>
     );
   }
-
-  /**
-   * 가장 최근에 담당자를 적어 둔 캠페인. 등록 화면의 "지난 캠페인과 동일" 버튼에만
-   * 쓴다. 목록은 created_at 내림차순으로 오므로 처음 걸리는 행이 가장 최근이다.
-   */
-  const lastContact = React.useMemo(() => {
-    const row = campaigns.find(c => c.contact_person && c.contact_phone);
-    if (!row) return null;
-    return {
-      person: row.contact_person || '',
-      phone: row.contact_phone || '',
-      email: row.contact_email || '',
-    };
-  }, [campaigns]);
 
   // --- 캠페인 등록 ---
   if (showForm) {
