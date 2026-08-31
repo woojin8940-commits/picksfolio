@@ -30,6 +30,14 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface CreatorCampaignCollabsProps {
   userName: string;
+  /**
+   * 열자마자 펼쳐 둘 협업.
+   *
+   * 협업 현황에서 캠페인 협업 한 줄을 눌러 들어올 때 쓴다. 이것이 없으면 방금 본 그
+   * 협업을 카드 목록에서 제목으로 다시 찾아야 한다 — 캠페인이 여러 개면 어느 카드였는지
+   * 부터 헷갈린다.
+   */
+  initialCollabId?: string;
 }
 
 type DetailTab = 'progress' | 'insight' | 'settlement';
@@ -96,7 +104,7 @@ const collabBadge = (c: any): { label: string; cls: string } => {
   return { label: '진행중', cls: 'bg-blue-600 text-white' };
 };
 
-const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName }) => {
+const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName, initialCollabId }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
 
@@ -133,6 +141,20 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   useEffect(() => {
     if (userName) load();
   }, [userName, load]);
+
+  /**
+   * 지목해 들어온 협업을 바로 펼친다. 목록이 온 뒤에 한 번만 — 그 뒤에 사람이 다른
+   * 협업으로 옮겨 갔을 때 같은 id 로 다시 끌어오면 화면이 되돌아간다.
+   */
+  const openedFocusRef = React.useRef('');
+  useEffect(() => {
+    if (!initialCollabId || collabs.length === 0) return;
+    if (openedFocusRef.current === initialCollabId) return;
+    if (!collabs.some(c => String(c.id) === initialCollabId)) return;
+    openedFocusRef.current = initialCollabId;
+    openCollab(initialCollabId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCollabId, collabs]);
 
   const refreshDetail = async (collabId: string) => {
     const res = await apiService.getCollabDetail(collabId, undefined, 'influencer');

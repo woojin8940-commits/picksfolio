@@ -114,6 +114,14 @@ interface Applicant {
 interface CampaignCollabManagementProps {
   businessUsername: string;
   companyName: string;
+  /**
+   * 열자마자 펼쳐 둘 캠페인.
+   *
+   * 현황 화면(비즈니스 제안 현황 · 협업 현황)에서 협업 한 줄을 눌러 들어올 때 쓴다.
+   * 이것이 없으면 사람은 캠페인 목록에서 방금 본 그 캠페인을 이름으로 다시 찾아
+   * 눌러야 했다 — 협업이 스무 건이면 어느 캠페인의 건이었는지부터 헷갈린다.
+   */
+  initialCampaignId?: string;
 }
 
 const CAMPAIGN_TYPES = [
@@ -147,7 +155,7 @@ const categoryLabel = (val: string) => CATEGORIES.find(c => c.value === val)?.la
 // mirroring how the backend matches business_username.
 const normalizeUser = (u: string) => (u || '').replace(/^biz\//, '').toLowerCase();
 
-const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName }) => {
+const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName, initialCampaignId }) => {
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
   const cachedCampaigns = (() => {
@@ -223,6 +231,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   useEffect(() => {
     fetchCampaigns();
   }, [fetchCampaigns]);
+
+  /**
+   * 현황 화면에서 지목해 들어온 캠페인을 진행사항 탭으로 바로 펼친다.
+   *
+   * 목록이 오기 전에는 펼칠 대상이 없으므로 campaigns 가 채워진 뒤에 한 번 실행된다.
+   * 사람이 그 뒤에 다른 캠페인으로 옮겨 갔을 때 다시 끌어오지 않도록, 같은 id 로는
+   * 한 번만 반응한다.
+   */
+  const openedFocusRef = React.useRef('');
+  useEffect(() => {
+    if (!initialCampaignId || campaigns.length === 0) return;
+    if (openedFocusRef.current === initialCampaignId) return;
+    const target = campaigns.find(c => c.id === initialCampaignId);
+    if (!target) return;
+    openedFocusRef.current = initialCampaignId;
+    handleSelectCampaign(target);
+    setDetailTab('progress');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCampaignId, campaigns]);
 
   const fetchApplicants = async (campaignId: string) => {
     setApplicantsLoading(true);

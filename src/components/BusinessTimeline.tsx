@@ -164,15 +164,6 @@ const sourceOfTimeline = (t: TimelineData): 'business_proposal' | 'manager_colla
   return 'business_proposal';
 };
 
-/** 목록 위 탭. 픽스폴리오 협업 탭에는 예전 캠페인 직접 대화방도 함께 담는다. */
-type TimelineSourceFilter = '' | 'business_proposal' | 'collab';
-
-const matchesSourceFilter = (t: TimelineData, filter: TimelineSourceFilter): boolean => {
-  if (!filter) return true;
-  const source = sourceOfTimeline(t);
-  return filter === 'business_proposal' ? source === 'business_proposal' : source !== 'business_proposal';
-};
-
 /** 이 방에서 내가 마주 앉은 상대의 이름. 담당자 채널이면 담당자다. */
 const counterpartOf = (t: TimelineData | null, userType: string): string => {
   if (!t) return '';
@@ -217,7 +208,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const [loading, setLoading] = useState(initialTimelines.length === 0);
   const [showList, setShowList] = useState(!initialProposalId);
   const [searchQuery, setSearchQuery] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<TimelineSourceFilter>('');
   // 대화 삭제 — 목록에서 내린 직후의 "되돌리기" 안내와, 실패했을 때의 알림.
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [recentlyDeleted, setRecentlyDeleted] = useState<TimelineData | null>(null);
@@ -928,8 +918,16 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
   const totalUnread = timelines.reduce((sum, t) => sum + (t.unreadCount || 0), 0);
 
+  /**
+   * 하나의 목록.
+   *
+   * 예전에는 위에 "전체 · 비즈니스 제안 · 픽스폴리오 협업" 탭이 있었고 목록이 경로별로
+   * 나뉘어 있었다. 그런데 이 화면에서 하는 일은 경로와 무관하게 하나다 — 답장이 필요한
+   * 대화를 찾아 답한다. 탭이 있으면 안 읽은 메시지가 지금 열려 있지 않은 탭에 들어가고,
+   * 그쪽 탭을 눌러 보기 전까지는 없는 것과 같았다. 경로는 방마다 붙는 배지로 남긴다
+   * (픽스폴리오 협업은 그대로 담당자와 대화하는 방이다).
+   */
   const filteredTimelines = timelines.filter(t => {
-    if (!matchesSourceFilter(t, sourceFilter)) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -938,22 +936,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       t.proposalTitle.toLowerCase().includes(q)
     );
   });
-
-  // 탭 개수는 검색과 무관하게 전체 기준으로 센다 — 검색 중에 개수가 흔들리면
-  // 그 경로의 협업이 사라진 것처럼 보인다.
-  const SOURCE_TABS: Array<{ value: TimelineSourceFilter; label: string; count: number }> = [
-    { value: '', label: '전체', count: timelines.length },
-    {
-      value: 'business_proposal',
-      label: '비즈니스 제안',
-      count: timelines.filter(t => matchesSourceFilter(t, 'business_proposal')).length,
-    },
-    {
-      value: 'collab',
-      label: '픽스폴리오 협업',
-      count: timelines.filter(t => matchesSourceFilter(t, 'collab')).length,
-    },
-  ];
 
   // Sidebar conversation list
   const renderSidebar = () => (
@@ -988,28 +970,6 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/30 transition-all shadow-[0_3px_10px_-6px_rgba(15,23,42,0.4)]"
           />
-        </div>
-
-        {/* 경로별 보기 — 비즈니스 제안으로 성사된 협업과 담당자가 리스트업해
-            진행하는 협업이 같은 목록에 함께 온다. 둘 다 여기서 대화하지만,
-            상대(브랜드 / 담당자)와 진행 방식이 달라 섞여 보이면 찾기 어렵다. */}
-        <div className="flex gap-1.5 mt-2.5">
-          {SOURCE_TABS.map(tab => (
-            <button
-              key={tab.value || 'all'}
-              onClick={() => setSourceFilter(tab.value)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                sourceFilter === tab.value
-                  ? 'bg-blue-500 text-white shadow-[0_4px_10px_-4px_rgba(37,99,235,0.6)]'
-                  : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
-              }`}
-            >
-              {tab.label}
-              <span className={`ml-1 ${sourceFilter === tab.value ? 'text-white/70' : 'text-gray-400'}`}>
-                {tab.count}
-              </span>
-            </button>
-          ))}
         </div>
       </div>
 
@@ -1086,20 +1046,12 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
               </svg>
             </div>
             <p className="text-xs font-semibold text-gray-400">
-              {searchQuery ? '검색 결과가 없습니다' : sourceFilter ? '이 경로의 대화가 없습니다' : '아직 대화가 없습니다'}
+              {searchQuery ? '검색 결과가 없습니다' : '아직 대화가 없습니다'}
             </p>
-            {!searchQuery && !sourceFilter && (
+            {!searchQuery && (
               <p className="text-[11px] text-gray-400 mt-1">
                 비즈니스 제안이 도착하거나 픽스폴리오 협업이 시작되면 여기에 표시됩니다
               </p>
-            )}
-            {!searchQuery && sourceFilter && (
-              <button
-                onClick={() => setSourceFilter('')}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-[11px] font-bold text-gray-500 hover:bg-gray-100"
-              >
-                전체 보기
-              </button>
             )}
           </div>
         ) : (

@@ -183,3 +183,33 @@ export function directUploadPath(username: string, fileName: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${DIRECT_UPLOAD_PREFIX}/${safeKeyPrefix(username)}/${Date.now()}-${rand}.${ext}`;
 }
+
+/**
+ * 우리가 발급한 자리에 실제로 올라간 파일의 주소인가.
+ *
+ * 제출물·자료함에 남는 `fileUrl` 은 화면에서 그대로 링크가 되므로, 아무 문자열이나
+ * 받으면 협업 기록 안에 외부 주소를 심을 수 있다. 그래서 저장 전에 "우리 저장소의
+ * 주소"인지만 확인한다.
+ *
+ * 두 모양을 받는다 — 업로드 경로가 한 번 바뀌었기 때문이다.
+ *
+ *   · `/api/images/<key>`  예전 경로. 파일이 함수를 거쳐 Blobs 에 저장되던 시절의
+ *     주소다. 그때 올라간 가이드·기획안·초안 영상이 아직 남아 있어서 계속 받아야 한다.
+ *   · 스토리지 공개 주소   지금 경로. 브라우저가 서명된 링크로 스토리지에 직접 올리고
+ *     (`/api/upload-url`), 공개 주소를 받아 온다.
+ *
+ * 두 번째를 빼놓은 것이 실제 사고였다. 파일은 스토리지까지 정상적으로 올라가는데
+ * 저장 단계에서 "업로드한 파일을 선택해 주세요"로 거절돼, 인플루언서 화면에서는
+ * 초안 영상을 몇 번 올려도 등록되지 않았다.
+ */
+export function isUploadedFileUrl(raw: unknown): boolean {
+  const url = String(raw || "").trim();
+  if (!url) return false;
+  if (url.startsWith("/api/images/")) return true;
+
+  const base = String(process.env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+  if (!base) return false;
+  // 버킷 안이기만 하면 받는다. 막아야 하는 것은 "남의 도메인 주소"이고, 경로 안쪽은
+  // 어차피 서버(directUploadPath)가 정한다.
+  return url.startsWith(`${base}/storage/v1/object/public/${DIRECT_UPLOAD_BUCKET}/`);
+}

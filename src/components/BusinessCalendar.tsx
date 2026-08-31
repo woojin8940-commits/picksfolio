@@ -3,6 +3,11 @@ import type { BusinessProposal, CollabRecord, Settlement } from '../types';
 import { apiService } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '../utils/formatters';
 import UserSettlement from './UserSettlement';
+import {
+  CampaignCollabStatus,
+  openCampaignCollab,
+  toCampaignCollabStatuses,
+} from '../utils/campaignCollabStatus';
 
 interface BusinessCalendarProps {
   userName: string;
@@ -12,12 +17,24 @@ interface BusinessCalendarProps {
 //  - manual     : 사용자가 직접 남긴 협업 기록. 수정·삭제 가능
 //  - settlement : 정산금 항목에서 파생된 읽기 전용 항목
 //  - proposal   : 정산 항목이 아직 없는 수락된 제안(과거 데이터 보정)
-type CollabSource = 'manual' | 'settlement' | 'proposal';
+// 협업 내역 한 줄은 네 가지 출처에서 온다(아래 campaign 이 나중에 붙었다).
+type CollabSource = 'manual' | 'settlement' | 'proposal' | 'campaign';
 type CollabListItem = CollabRecord & {
   _source?: CollabSource;
   // 읽기 전용 항목 표시용. 기존 코드가 쓰던 플래그를 그대로 유지한다.
   _fromSettlement?: boolean;
   _proposalId?: string;
+  /**
+   * 캠페인 협업에서 온 줄. 진행사항 보드로 가는 길이 여기에만 있다.
+   *
+   * 이 출처가 없던 동안, 캠페인에 선정돼 촬영을 하고 있어도 협업 현황은 비어 있었다 —
+   * 협업 내역에 줄이 생기는 시점이 "담당자가 일정을 확정한 뒤"였기 때문이다. 정작
+   * 가이드를 받고 기획안을 내는 초반 몇 주가 통째로 빠져 있었다.
+   */
+  _collabId?: string;
+  _campaignId?: string;
+  _progress?: number;
+  _todo?: string;
 };
 
 const COLLAB_CATEGORIES = ['광고', '커머스', '기타'] as const;
@@ -69,6 +86,7 @@ const windowsOverlap = (aStart?: string, aEnd?: string, bStart?: string, bEnd?: 
 const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const [proposals, setProposals] = useState<BusinessProposal[]>([]);
   const [collabRecords, setCollabRecords] = useState<CollabRecord[]>([]);
+  const [campaignCollabs, setCampaignCollabs] = useState<CampaignCollabStatus[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -105,14 +123,18 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const [proposalData, collabData, settlementData] = await Promise.all([
+      const [proposalData, collabData, settlementData, campaignRes] = await Promise.all([
         apiService.getProposals(userName),
         apiService.getCollabRecords(userName),
         apiService.getSettlements(userName),
+        // 캠페인 협업. 실패하면 빈 배열로 두고 나머지는 그대로 그린다 — 이 요청 하나
+        // 때문에 제안·정산까지 못 보게 만들 이유가 없다.
+        apiService.getCollabs('influencer').catch(() => ({ collabs: [] as any[] })),
       ]);
       setProposals(proposalData);
       setCollabRecords(collabData);
       setSettlements(settlementData);
+      setCampaignCollabs(toCampaignCollabStatuses(campaignRes.collabs || [], 'influencer'));
       setLoading(false);
     };
     fetchData();
@@ -261,10 +283,62 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return map;
   }, [acceptedProposals]);
 
+  // 기간이 지났으면 완료, 시작했으면 진행중. 정산이 완료 처리되면 그대로 완료.
+  const derivedStatus = (settlementDone: boolean, start: string, end?: string): CollabRecord['status'] => {
+    if (settlementDone) return 'completed';
+    const from = dayOnly(start);
+    const to = dayOnly(end) || from;
+    if (to && to < today) return 'completed';
+    if (from && from <= today) return 'in_progress';
+    return 'scheduled';
+  };
+
+  /**
+   * 진행 중인 캠페인 협업.
+   *
+   * 담당자가 일정을 확정하면 서버가 같은 협업을 협업 내역에 한 줄로 올린다(그 줄에는
+   * `collab_id` 가 붙는다). 그 줄이 이미 있으면 여기서 또 만들지 않는다 — 하나의
+   * 협업이 두 줄이 되면 총 협업 수와 수익 합계가 두 번 세어진다.
+   */
+  const campaignCollabItems = useMemo<CollabListItem[]>(() => {
+    const recorded = new Set(
+      collabRecords.map(c => String((c as any).collab_id || '')).filter(Boolean),
+    );
+    return campaignCollabs
+      .filter(c => c.state !== 'cancelled' && !recorded.has(c.id))
+      .map(c => {
+        const date = dayOnly(c.startDate);
+        const endDate = dayOnly(c.endDate) || undefined;
+        return {
+          id: `campaign_collab_${c.id}`,
+          title: c.title,
+          company_name: c.companyName,
+          category: c.category,
+          date,
+          end_date: endDate,
+          fee: c.fee,
+          status:
+            c.state === 'completed' ? ('completed' as const) : derivedStatus(false, date, endDate),
+          memo: c.todo,
+          created_at: c.createdAt || date,
+          updated_at: c.updatedAt,
+          _source: 'campaign' as CollabSource,
+          _fromSettlement: true,
+          _collabId: c.id,
+          _campaignId: c.campaignId,
+          _progress: c.progress,
+          _todo: c.todo,
+        };
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignCollabs, collabRecords, today]);
+
   // Map collab records per date
   const collabEventsMap = useMemo(() => {
-    const map: Record<string, CollabRecord[]> = {};
-    collabRecords.forEach(c => {
+    const map: Record<string, CollabListItem[]> = {};
+    // 직접 남긴 기록과 캠페인 협업을 같은 막대로 그린다. 캘린더에만 빠지면 "협업
+    // 내역에는 있는데 그 날짜에는 아무것도 없는" 상태가 된다.
+    [...collabRecords.map(c => ({ ...c, _source: 'manual' as CollabSource })), ...campaignCollabItems].forEach(c => {
       const start = parseYmd(c.date);
       if (!start) return;
       const end = parseYmd(c.end_date) || start;
@@ -277,7 +351,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       }
     });
     return map;
-  }, [collabRecords]);
+  }, [collabRecords, campaignCollabItems]);
 
   // Stable ordering of proposal events
   const eventOrder = useMemo(() => {
@@ -356,6 +430,19 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   // so a deal whose date has passed no longer lingers as "진행중". Explicit
   // 'completed'/'cancelled' records are left untouched. Dates are YYYY-MM-DD, so
   // plain string comparison is correct.
+  /**
+   * 캠페인 협업 줄에 붙는 진행률 배지.
+   *
+   * 협업 내역의 다른 줄(직접 기록 · 정산 · 제안)에는 진행률이라는 개념이 없다. 이
+   * 배지가 있는 줄만 다섯 단계로 굴러가는 협업이고, 눌렀을 때 갈 곳이 있는 줄이다.
+   */
+  const campaignBadge = (c: CollabListItem) =>
+    c._collabId ? (
+      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-violet-100 text-violet-600 shrink-0">
+        캠페인 {c._progress ?? 0}%
+      </span>
+    ) : null;
+
   const effectiveCollabStatus = (c: CollabRecord): CollabRecord['status'] => {
     if (c.status === 'completed' || c.status === 'cancelled') return c.status;
     const end = c.end_date || c.date;
@@ -423,16 +510,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   const asCollabCategory = (value?: string): CollabRecord['category'] =>
     value === '광고' || value === '커머스' ? value : '기타';
-
-  // 기간이 지났으면 완료, 시작했으면 진행중. 정산이 완료 처리되면 그대로 완료.
-  const derivedStatus = (settlementDone: boolean, start: string, end?: string): CollabRecord['status'] => {
-    if (settlementDone) return 'completed';
-    const from = dayOnly(start);
-    const to = dayOnly(end) || from;
-    if (to && to < today) return 'completed';
-    if (from && from <= today) return 'in_progress';
-    return 'scheduled';
-  };
 
   const settlementCollabs = useMemo<CollabListItem[]>(() => {
     const seenProposalIds = new Set<string>();
@@ -512,7 +589,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     const manual: CollabListItem[] = collabRecords.map(c => ({ ...c, _source: 'manual' }));
     // 날짜가 비어 있는 항목(정산 일정이 없는 경우)은 뒤로 밀되 목록에서 빠지지는
     // 않게 한다. new Date('') 는 NaN 이라 예전 정렬에서는 순서가 뒤죽박죽이었다.
-    return [...manual, ...settlementCollabs, ...proposalCollabs].sort((a, b) => {
+    return [...manual, ...settlementCollabs, ...proposalCollabs, ...campaignCollabItems].sort((a, b) => {
       const aDate = dayOnly(a.date);
       const bDate = dayOnly(b.date);
       if (!aDate && !bDate) return 0;
@@ -520,7 +597,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       if (!bDate) return -1;
       return bDate.localeCompare(aDate);
     });
-  }, [collabRecords, settlementCollabs, proposalCollabs]);
+  }, [collabRecords, settlementCollabs, proposalCollabs, campaignCollabItems]);
 
   // Stats — 캘린더 탭의 "일정 현황" 타일과 협업 내역 탭의 요약이 같은 목록
   // (allCollabsSorted)에서 계산된다. 예전에는 캘린더 타일이 "직접 기록 + 수락된
@@ -903,6 +980,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${getCategoryBadge(ev.category)}`}>
                             {ev.category}
                           </span>
+                          {campaignBadge(ev)}
                         </div>
                         <p className="text-xs font-bold text-slate-400">
                           {ev.company_name ? `${ev.company_name} · ` : ''}{formatFee(ev.fee)}
@@ -914,6 +992,19 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         <span className={`text-xs font-black ${getCollabStatusTextColor(effectiveCollabStatus(ev))}`}>
                           {getCollabStatusLabel(effectiveCollabStatus(ev))}
                         </span>
+                        {/* 캠페인 협업은 이 화면에서 고치거나 지울 수 있는 기록이 아니다 —
+                            단계와 일정이 협업 진행에서 나오므로, 진행사항으로 보낸다. */}
+                        {ev._collabId ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCampaignCollab({ campaignId: ev._campaignId, collabId: ev._collabId });
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-violet-100 text-violet-600 text-[11px] font-black hover:bg-violet-200 transition-all"
+                          >
+                            진행사항
+                          </button>
+                        ) : (
                         <div className="flex gap-1">
                           <button
                             onClick={(e) => { e.stopPropagation(); openEditForm(ev); }}
@@ -934,6 +1025,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                             </svg>
                           </button>
                         </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -956,15 +1048,23 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             ) : allCollabsSorted.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-slate-400 text-sm font-bold">아직 기록된 협업이 없습니다.</p>
-                <p className="text-slate-300 text-xs mt-1">상단의 "협업 기록 추가" 버튼으로 첫 기록을 남겨보세요.</p>
+                <p className="text-slate-300 text-xs mt-1">캠페인에 선정되거나 제안을 수락하면 자동으로 올라오고, 그 밖의 협업은 "협업 기록 추가"로 남길 수 있습니다.</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {allCollabsSorted.map(c => (
                   <div
                     key={c.id}
-                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all cursor-pointer group"
+                    className={`flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer group ${
+                      c._collabId ? 'hover:bg-violet-50' : 'hover:bg-slate-50'
+                    }`}
                     onClick={() => {
+                      // 캠페인 협업은 날짜보다 진행사항이 알고 싶은 것이다 — 지금 내
+                      // 차례가 무엇인지는 보드에만 있다.
+                      if (c._collabId) {
+                        openCampaignCollab({ campaignId: c._campaignId, collabId: c._collabId });
+                        return;
+                      }
                       const d = new Date(c.date);
                       setCurrentDate(new Date(d.getFullYear(), d.getMonth(), 1));
                       setSelectedDate(c.date);
@@ -977,15 +1077,19 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${getCategoryBadge(c.category)}`}>
                           {c.category}
                         </span>
+                        {campaignBadge(c)}
                       </div>
                       <p className="text-xs font-bold text-slate-400">
                         {formatDate(c.date)}{c.end_date ? ` ~ ${formatDate(c.end_date)}` : ''} · {c.company_name || '미지정'} · {formatFee(c.fee)}
                       </p>
+                      {c._todo && <p className="text-[10px] font-bold text-violet-500 mt-0.5 truncate">{c._todo}</p>}
                     </div>
                     <span className={`text-xs font-black shrink-0 ${getCollabStatusTextColor(effectiveCollabStatus(c))}`}>
                       {getCollabStatusLabel(effectiveCollabStatus(c))}
                     </span>
-                    {effectiveCollabStatus(c) !== 'completed' && effectiveCollabStatus(c) !== 'cancelled' && (
+                    {/* 캠페인 협업의 상태는 단계 진행에서 나온다. 여기서 손으로 바꾸면
+                        보드의 단계와 어긋나므로 상태 버튼을 두지 않는다. */}
+                    {!c._collabId && effectiveCollabStatus(c) !== 'completed' && effectiveCollabStatus(c) !== 'cancelled' && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1233,7 +1337,12 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 {filteredCollabs.map(c => (
                   <div
                     key={c.id}
-                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all group"
+                    onClick={() => {
+                      if (c._collabId) openCampaignCollab({ campaignId: c._campaignId, collabId: c._collabId });
+                    }}
+                    className={`flex items-center gap-3 p-3 rounded-xl transition-all group ${
+                      c._collabId ? 'cursor-pointer hover:bg-violet-50' : 'hover:bg-slate-50'
+                    }`}
                   >
                     <div className={`w-2 h-10 rounded-full shrink-0 ${getCollabStatusColor(effectiveCollabStatus(c))}`} />
                     <div className="flex-1 min-w-0">
@@ -1242,6 +1351,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${getCategoryBadge(c.category)}`}>
                           {c.category}
                         </span>
+                        {campaignBadge(c)}
                       </div>
                       <p className="text-xs font-bold text-slate-400">
                         {formatDate(c.date)}{c.end_date ? ` ~ ${formatDate(c.end_date)}` : ''} · {c.company_name || '미지정'} · {formatFee(c.fee)}
@@ -1254,11 +1364,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     {c._fromSettlement ? (
                       <span
                         className="text-[10px] font-black text-slate-300 shrink-0 px-2"
-                        title={c._source === 'proposal'
-                          ? '수락한 협업 제안에서 자동 반영된 내역입니다'
-                          : '정산금에서 자동 반영된 내역입니다'}
+                        title={c._source === 'campaign'
+                          ? '진행 중인 캠페인 협업입니다. 눌러서 진행사항을 확인하세요'
+                          : c._source === 'proposal'
+                            ? '수락한 협업 제안에서 자동 반영된 내역입니다'
+                            : '정산금에서 자동 반영된 내역입니다'}
                       >
-                        {c._source === 'proposal' ? '제안' : '정산'}
+                        {c._source === 'campaign' ? '캠페인' : c._source === 'proposal' ? '제안' : '정산'}
                       </span>
                     ) : (
                     <div className="flex gap-1 shrink-0">

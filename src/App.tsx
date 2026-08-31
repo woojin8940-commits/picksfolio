@@ -206,6 +206,8 @@ const App: React.FC = () => {
   const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
   const [view, setView] = useState<View>(() => launchViewRef.current ?? 'home');
   const [subView, setSubView] = useState<SubView>('dashboard');
+  /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
+  const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState('');
   const [initialId, setInitialId] = useState('');
   const [userName, setUserName] = useState(() => sessionGet('picks_user_session') || '');
@@ -1342,6 +1344,23 @@ const App: React.FC = () => {
     }
   }, []);
 
+  /**
+   * 협업 현황에서 "캠페인 진행사항 열기"로 지목한 협업.
+   *
+   * 진행사항 보드는 캠페인 협업(my-collabs) 화면 안에만 있다. 협업 현황이 보드를 한
+   * 벌 더 품으면 같은 협업의 상태가 두 화면에서 갈리므로, 이동만 알리고 그리는 일은
+   * 원래 자리에 맡긴다.
+   */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.collabId) setCollabFocusId(String(detail.collabId));
+      setSubView('my-collabs');
+    };
+    window.addEventListener('navigate-campaign-collab', handler);
+    return () => window.removeEventListener('navigate-campaign-collab', handler);
+  }, []);
+
   // Listen for navigate-timeline custom events from BusinessDashboard
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1781,7 +1800,7 @@ const App: React.FC = () => {
       // (UserCampaignBrowse)에는 이 상자를 얹지 않는다. 새 캠페인을 찾는 자리와
       // 이미 시작한 캠페인을 굴리는 자리는 하는 일이 다르다.
       case 'my-collabs':
-        subComponent = <LazyRoute><CreatorCampaignCollabs userName={userName} /></LazyRoute>;
+        subComponent = <LazyRoute><CreatorCampaignCollabs userName={userName} initialCollabId={collabFocusId || undefined} /></LazyRoute>;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
