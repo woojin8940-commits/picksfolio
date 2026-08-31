@@ -11,6 +11,14 @@ import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
 import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
+import {
+  type ThemePreset,
+  THEME_BG_PRESETS,
+  PRESET_BACKGROUND,
+  DEFAULT_CUSTOM_BACKGROUND,
+  isLightBackground,
+  normalizeHexColor,
+} from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
@@ -153,17 +161,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
     return 2;
   });
-  const [themePreset, setThemePreset] = useState<'midnight' | 'white'>(() => {
+  // 저장된 테마 읽기. 'custom' 은 팔레트에서 배경색을 직접 고른 상태다.
+  // 값이 비었을 때의 기본값은 호출하는 쪽이 정한다 — 예전 동작을 그대로 둔다.
+  const readTheme = (value: unknown, fallback: ThemePreset): ThemePreset =>
+    value === 'midnight' || value === 'white' || value === 'custom' ? value : fallback;
+  const [themePreset, setThemePreset] = useState<ThemePreset>(() => {
     try {
       const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
       if (saved) {
         const design = JSON.parse(saved);
-        return design.theme === 'midnight' ? 'midnight' : 'white';
+        return readTheme(design.theme, 'white');
       }
     } catch (e) {
       console.error('Error parsing design:', e);
     }
     return 'white';
+  });
+  /** 팔레트에서 직접 고른 배경색. 프리셋을 쓰는 동안에도 골라 둔 값은 남는다. */
+  const [customBg, setCustomBg] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
+      if (saved) {
+        const design = JSON.parse(saved);
+        return normalizeHexColor(design.customBackground)
+          || normalizeHexColor(design.customGradient)
+          || DEFAULT_CUSTOM_BACKGROUND;
+      }
+    } catch (e) {
+      console.error('Error parsing design:', e);
+    }
+    return DEFAULT_CUSTOM_BACKGROUND;
   });
   const [accentColor, setAccentColor] = useState(() => {
     try {
@@ -612,9 +639,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         setHomePriority(settings.design.homePriority === 'portfolio' ? 'portfolio' : 'curation');
         setLayoutTemplate(settings.design.templateType === TemplateType.LINK_LIST ? 'list' : 'grid');
         setColumns(settings.design.gridColumns as 1 | 2 | 3 || 2);
-        setThemePreset(settings.design.theme === 'white' ? 'white' : 'midnight');
+        setThemePreset(readTheme(settings.design.theme, 'midnight'));
         setAccentColor(settings.design.accentColor || (settings.design.theme === 'white' ? '#0f172a' : '#3B82F6'));
         setCustomGradient(settings.design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)');
+        setCustomBg(
+          normalizeHexColor(settings.design.customBackground)
+            || normalizeHexColor(settings.design.customGradient)
+            || DEFAULT_CUSTOM_BACKGROUND,
+        );
         setPortfolioFontSize(settings.design.portfolioFontSize || 'medium');
         if (settings.design.portfolioHeaderImage !== undefined) setCoverImage(settings.design.portfolioHeaderImage);
         if (settings.design.portfolioHeaderImagePosition !== undefined) setCoverPosition(settings.design.portfolioHeaderImagePosition);
@@ -726,15 +758,39 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     syncTextContentFromEditor();
   };
 
-  const THEME_DEFAULT_ACCENT = { midnight: '#3B82F6', white: '#0f172a' } as const;
+  const DARK_BG_ACCENT = '#3B82F6';
+  const LIGHT_BG_ACCENT = '#0f172a';
+  /** 지금 미리보기에 깔리는 배경색. 프리셋은 고정색, 자유 배경은 고른 색. */
+  const themeBackground = themePreset === 'custom'
+    ? customBg
+    : PRESET_BACKGROUND[themePreset === 'white' ? 'white' : 'midnight'];
+  /** 배경이 밝으면 글자가 어두워진다 — 공개 페이지와 같은 기준으로 판단한다. */
+  const themeIsLight = themePreset === 'custom' ? isLightBackground(customBg) : themePreset === 'white';
 
-  const handleThemeChange = (theme: 'midnight' | 'white') => {
+  /** 이 배경 위에서 기본값으로 쓸 포인트 색. */
+  const defaultAccentFor = (light: boolean) => (light ? LIGHT_BG_ACCENT : DARK_BG_ACCENT);
+
+  /**
+   * 포인트 색을 아직 손대지 않았는지. 두 기본색 중 하나를 그대로 쓰고 있으면
+   * 배경을 바꿀 때 새 배경에 맞는 기본색으로 따라 옮겨 준다. 팔레트나 색상
+   * 선택기로 직접 고른 색은 배경을 바꿔도 건드리지 않는다.
+   */
+  const usingDefaultAccent = () =>
+    [DARK_BG_ACCENT, LIGHT_BG_ACCENT].some(c => c.toLowerCase() === (accentColor || '').toLowerCase());
+
+  const handleThemeChange = (theme: ThemePreset) => {
     setThemePreset(theme);
-    // 프리셋 기본색을 그대로 쓰고 있었다면 새 프리셋의 기본색으로 바꾼다.
-    // 팔레트로 직접 고른 색은 프리셋을 바꿔도 그대로 유지한다.
-    const isDefaultAccent = Object.values(THEME_DEFAULT_ACCENT)
-      .some(c => c.toLowerCase() === (accentColor || '').toLowerCase());
-    if (isDefaultAccent) setAccentColor(THEME_DEFAULT_ACCENT[theme]);
+    if (usingDefaultAccent()) {
+      setAccentColor(defaultAccentFor(theme === 'custom' ? isLightBackground(customBg) : theme === 'white'));
+    }
+  };
+
+  /** 팔레트나 색상 선택기로 배경색을 고름. 고르는 순간 자유 배경 테마로 넘어간다. */
+  const handleCustomBackground = (hex: string) => {
+    const next = normalizeHexColor(hex) || DEFAULT_CUSTOM_BACKGROUND;
+    setCustomBg(next);
+    setThemePreset('custom');
+    if (usingDefaultAccent()) setAccentColor(defaultAccentFor(isLightBackground(next)));
   };
 
   const showSuccessFeedback = (message: string) => {
@@ -761,6 +817,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       buttonStyle: 'solid',
       backgroundType: 'solid',
       customGradient: customGradient,
+      customBackground: customBg,
       profileLayout: 'center',
       homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
       portfolioFontSize: portfolioFontSize,
@@ -1714,6 +1771,72 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   </button>
                 </div>
 
+                {/* 프리셋 두 개로 끝내지 않는다. 배경색을 팔레트에서 자유롭게 고를 수
+                    있고, 고른 색이 밝으면 글자·카드가 알아서 어두워진다(공개 페이지도
+                    같은 기준으로 그린다). 그래서 어떤 색을 골라도 글씨가 배경에
+                    묻히지 않는다. */}
+                <div className={`p-5 rounded-2xl border-2 space-y-3 transition-all ${themePreset === 'custom' ? 'border-blue-600 bg-blue-50/60 shadow-sm' : 'border-[#E2E8F0] bg-white'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-10 h-10 rounded-xl border-2 border-slate-200 shadow-inner flex items-center justify-center flex-shrink-0"
+                        style={{ background: customBg }}
+                      >
+                        <span className={`text-xs font-black ${isLightBackground(customBg) ? 'text-slate-800' : 'text-white'}`}>Aa</span>
+                      </div>
+                      <div className="text-left min-w-0">
+                        <span className="font-black text-sm block">배경색 직접 선택</span>
+                        <span className="text-xs text-slate-500 font-bold">팔레트에서 고르면 글자 색은 자동으로 맞춰집니다</span>
+                      </div>
+                    </div>
+                    <ColorPicker
+                      value={customBg}
+                      onChange={handleCustomBackground}
+                      triggerClassName="w-11 h-11 rounded-2xl flex-shrink-0"
+                      aria-label="배경색 직접 지정"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-8 gap-2">
+                    {THEME_BG_PRESETS.map(c => (
+                      <button
+                        key={c.value}
+                        onClick={() => handleCustomBackground(c.value)}
+                        title={c.label}
+                        aria-label={`배경색 ${c.label}`}
+                        className={`aspect-square w-full rounded-xl border-2 transition-all ${
+                          themePreset === 'custom' && customBg.toLowerCase() === c.value.toLowerCase()
+                            ? 'border-blue-600 scale-110 shadow-md'
+                            : 'border-slate-200 hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: c.value }}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">배경</span>
+                    <span className="text-xs font-black text-slate-600">
+                      {themePreset === 'custom' ? customBg.toUpperCase() : '프리셋 사용 중'}
+                    </span>
+                    {themePreset === 'custom' ? (
+                      <button
+                        onClick={() => handleThemeChange(isLightBackground(customBg) ? 'white' : 'midnight')}
+                        className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                      >
+                        프리셋으로 되돌리기
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleCustomBackground(customBg)}
+                        className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                      >
+                        이 배경색 쓰기
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {/* 프리셋의 기본 포인트 색상을 그대로 쓰거나, 팔레트로 원하는 색을
                     직접 골라 쓸 수 있다. 프리셋 자체(밝은/어두운 배경)는 유지된다. */}
                 <div className="p-5 rounded-2xl border-2 border-[#E2E8F0] bg-white space-y-3">
@@ -1745,7 +1868,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">현재</span>
                     <span className="text-xs font-black text-slate-600">{accentColor.toUpperCase()}</span>
                     <button
-                      onClick={() => setAccentColor(THEME_DEFAULT_ACCENT[themePreset])}
+                      onClick={() => setAccentColor(defaultAccentFor(themeIsLight))}
                       className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
                     >
                       프리셋 기본색으로
@@ -1770,10 +1893,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           size="xl"
           label="실시간 미리보기"
           liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
-          contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
+          contentClassName={themeIsLight ? 'text-slate-900' : 'text-white'}
+          contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
         >
             <PagePreview
               theme={themePreset}
+              backgroundColor={customBg}
               accentColor={accentColor}
               header={{
                 color: fullDesignRef.current.portfolioHeaderColor,
@@ -2225,10 +2350,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 size="lg"
                 label="실시간 미리보기"
                 liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
-                contentClassName={themePreset === 'white' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#1E1E2E] text-white'}
+                contentClassName={themeIsLight ? 'text-slate-900' : 'text-white'}
+                contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
               >
                 <PagePreview
                   theme={themePreset}
+                  backgroundColor={customBg}
                   accentColor={accentColor}
                   header={{ color: fullDesignRef.current.portfolioHeaderColor, image: coverImage, imagePosition: coverPosition }}
                   profile={profile}

@@ -66,6 +66,12 @@ export interface DesignSettings {
   buttonStyle: 'solid' | 'outline' | 'ghost';
   backgroundType: 'solid' | 'gradient' | 'image';
   customGradient?: string;
+  /**
+   * 테마 프리셋을 쓰지 않고 팔레트에서 직접 고른 배경색(`theme: 'custom'`).
+   * 예전 계정은 이 값이 없고 customGradient 에 배경이 들어 있다 — utils/themeColor 의
+   * customBackgroundOf 가 두 필드를 같은 순서로 읽는다.
+   */
+  customBackground?: string;
   profileLayout: 'center' | 'left';
   homePriority: 'products' | 'portfolio' | 'curation';
   background_image?: string;

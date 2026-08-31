@@ -6,6 +6,7 @@ import { supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
 import { enabledDefaultButtons } from '../utils/pageButtons';
+import { normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
@@ -774,11 +775,19 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
     return 'font-sans tracking-tight';
   };
 
-  const themeBg = design.theme === 'custom' ? (design.customGradient || 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)') : 
-                design.theme === 'midnight' ? '#050a15' : 
-                design.theme === 'white' ? '#ffffff' : '#f3f0ff';
-  
-  const isDark = design.theme === 'midnight' || design.theme === 'custom';
+  // 배경과 명암은 utils/themeColor 한 곳에서 정한다. 자유 배경(theme: 'custom')은
+  // 고른 색의 밝기로 어두운 테마인지를 판단하므로, 크림색을 골라도 글자가 검게 나온다.
+  const themeBg = themeBackgroundOf(design);
+  const isDark = themeIsDark(design);
+  /**
+   * 커버 사진 아래를 배경색으로 자연스럽게 녹이는 그라데이션.
+   *
+   * 예전에는 `${themeBg}88` 처럼 배경 문자열에 알파를 붙였는데, 배경이 색이 아니면
+   * (예전 커스텀 배경의 `linear-gradient(...)`) CSS 가 통째로 무효가 되어 덮개가
+   * 사라졌다. 색으로 읽히는 값만 쓰고, 아니면 테마 명암에 맞는 색으로 대체한다.
+   */
+  const coverFadeHex = normalizeHexColor(themeBg) || (isDark ? '#050A15' : '#FFFFFF');
+  const coverFade = `linear-gradient(to top, ${coverFadeHex} 0%, ${coverFadeHex}88 15%, transparent 50%)`;
   const textColor = isDark ? 'text-white' : 'text-slate-900';
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
@@ -913,7 +922,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   fetchPriority="high"
                 />
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: `linear-gradient(to top, ${themeBg || '#ffffff'} 0%, ${themeBg || '#ffffff'}88 15%, transparent 50%)` }}></div>
+              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
               <div className="absolute bottom-6 left-6 right-6">
                  <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
                  <p className={`font-black uppercase tracking-[0.3em] ${
@@ -1250,7 +1259,7 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
                   style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
                 />
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: `linear-gradient(to top, ${themeBg || '#ffffff'} 0%, ${themeBg || '#ffffff'}88 15%, transparent 50%)` }}></div>
+              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
               <div className="absolute bottom-6 left-6 right-6">
                  <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
                  <p className={`font-black uppercase tracking-[0.3em] ${

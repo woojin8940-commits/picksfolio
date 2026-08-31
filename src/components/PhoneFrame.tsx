@@ -7,6 +7,8 @@ interface PhoneFrameProps {
   label?: string;
   size?: PhoneFrameSize;
   contentClassName?: string;
+  /** 클래스로 못 적는 배경(팔레트에서 고른 임의의 색)을 그릴 때 쓴다. */
+  contentStyle?: React.CSSProperties;
   liveUrl?: string;
 }
 
@@ -23,6 +25,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
   label = '실시간 미리보기',
   size = 'sm',
   contentClassName = '',
+  contentStyle,
   liveUrl,
 }) => {
   // xl(데스크톱 미리보기)은 세로 가용 공간을 기준으로 크기가 정해진다. 화면 높이에서 라벨/링크 등
@@ -46,7 +49,7 @@ const PhoneFrame: React.FC<PhoneFrameProps> = ({
         </div>
 
         {/* Phone Content — flex-1 + min-h-0 으로 남은 공간을 정확히 채워 하단이 잘리지 않게 한다. */}
-        <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`}>
+        <div className={`flex-1 min-h-0 overflow-y-auto rounded-[2rem] pb-8 ${contentClassName}`} style={contentStyle}>
           {children}
         </div>
       </div>
