@@ -1,13 +1,18 @@
 import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { requireAdmin } from './_shared/admin-auth.mts'
 
 /**
- * 알림톡 발송 파이프라인 진단 엔드포인트
+ * 알림톡 발송 파이프라인 진단 엔드포인트 — **운영자 전용**
  * GET /api/alimtalk-diagnose?username=xxx
  * - 환경변수 설정 상태 확인
  * - Supabase profiles 테이블에서 전화번호 조회 확인
  * - Solapi API 키 유효성 확인
  * - 실제 메시지는 발송하지 않음 (dry-run)
+ *
+ * 예전에는 인증이 없었다. 키 값 자체는 !! 로 존재 여부만 반환해서 새지 않았지만,
+ * username 만 넣으면 그 사람의 이름과 내부 id, 그리고 전체 가입자 수까지 누구나
+ * 받아볼 수 있었다. 진단 정보는 운영 상태를 그대로 드러내므로 운영자에게만 준다.
  */
 export default async (req: Request, context: Context) => {
   if (req.method === 'OPTIONS') {
@@ -20,6 +25,10 @@ export default async (req: Request, context: Context) => {
       },
     })
   }
+
+  // 프리플라이트 다음, 어떤 진단도 수행하기 전에 막는다.
+  const auth = await requireAdmin(req)
+  if (!auth.ok) return auth.response
 
   const url = new URL(req.url)
   const username = url.searchParams.get('username')?.toLowerCase()
@@ -242,9 +251,9 @@ export default async (req: Request, context: Context) => {
     : `❌ ${allIssues.length}개 문제 발견`
   diagnostics.allIssues = allIssues
 
-  return Response.json(diagnostics, {
-    headers: { 'Access-Control-Allow-Origin': '*' },
-  })
+  // 와일드카드 CORS 를 붙이지 않는다. 이제 운영자 토큰이 있어야 하는 응답이고,
+  // 아무 출처의 스크립트가 그 응답을 읽을 수 있게 둘 이유가 없다.
+  return Response.json(diagnostics)
 }
 
 export const config: Config = {

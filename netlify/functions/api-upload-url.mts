@@ -33,12 +33,24 @@ import {
  *     → { uploadUrl, contentType, publicUrl, path, maxBytes }
  */
 
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
+
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
+
+  // 링크 발급도 횟수를 묶는다. 링크 하나가 곧 저장소 쓰기 한 번이다.
+  const limited = await checkRateLimit({
+    bucket: "upload-url",
+    key: clientIp(req),
+    limit: 60,
+    windowSeconds: 600,
+    message: "업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+  });
+  if (!limited.ok) return limited.response;
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const filename = String(body.filename || "");

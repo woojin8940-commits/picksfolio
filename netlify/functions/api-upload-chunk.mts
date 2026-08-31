@@ -9,6 +9,7 @@ import {
   safeExtension,
   safeKeyPrefix,
 } from "./_shared/upload-media.mts";
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 
 /**
  * 큰 파일(주로 초안 영상)을 여러 조각으로 나눠 받는다.
@@ -66,6 +67,16 @@ export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
+
+  // 조각 업로드도 횟수를 묶는다. 파일 하나가 조각 여러 개로 오므로 한도는 넉넉히 둔다.
+  const limited = await checkRateLimit({
+    bucket: "upload-chunk",
+    key: clientIp(req),
+    limit: 400,
+    windowSeconds: 600,
+    message: "업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+  });
+  if (!limited.ok) return limited.response;
 
   const contentType = String(req.headers.get("content-type") || "");
 

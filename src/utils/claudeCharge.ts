@@ -1,6 +1,7 @@
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from './formatters';
 import { isNativeApp } from './appEnv';
+import { loadPortOne } from './externalScripts';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
@@ -58,8 +59,13 @@ export async function payClaudePlan(
 
   const orderName = kind === 'activation' ? '클로드 플랜 시작' : `클로드 크레딧 충전 ${amountKrw.toLocaleString()}원`;
 
-  if (typeof window === 'undefined' || !window.PortOne) {
-    return { success: false, error: '결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
+  if (typeof window === 'undefined') {
+    return { success: false, error: '결제 모듈을 불러오지 못했습니다.' };
+  }
+  try {
+    await loadPortOne();
+  } catch {
+    return { success: false, error: '결제 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.' };
   }
 
   // 카드(나이스정보통신) 채널이 아직 연결되지 않았으면 PortOne 호출이 무조건 실패하므로,

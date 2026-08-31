@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { getDatabase } from "@picks/netlify-database";
+import {
+  consumePhoneVerification,
+  findVerifiedPhone,
+  phoneNotVerifiedResponse,
+} from "./_shared/phone-verification.mts";
 
 const SUPABASE_URL =
   "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -55,6 +60,20 @@ export default async (req: Request) => {
     const cleanUsername = username.trim().toLowerCase();
     const email = cleanEmail;
     const cleanPhone = (phone || "").replace(/\D/g, "");
+
+    // 휴대폰 인증은 서버에서 확인한다. 화면의 isVerified 만 믿으면 이 함수로 직접
+    // 요청해 인증하지 않은 번호로 가입할 수 있고, 그러면 그 번호로 계정을 찾아 주는
+    // 기능(find-account)이 남의 번호를 근거로 동작하게 된다.
+    if (!cleanPhone) {
+      return Response.json({
+        success: false,
+        error: "휴대폰 번호를 입력해 주세요.",
+      });
+    }
+    const phoneVerification = await findVerifiedPhone(cleanPhone, "signup");
+    if (!phoneVerification) {
+      return phoneNotVerifiedResponse();
+    }
 
     // 아이디(링크 주소)는 변경할 수 없는 고유 식별자이므로 같은 아이디로는 재가입할 수 없다.
     const { data: existingProfile } = await supabase
@@ -174,6 +193,10 @@ export default async (req: Request) => {
         ON CONFLICT (username) DO NOTHING
       `;
     } catch {}
+
+    // 가입이 끝난 뒤에 인증을 소진시킨다 — 중간에 실패한 시도가 인증을 태우면
+    // 사용자는 이유도 모르고 문자를 다시 받아야 한다.
+    await consumePhoneVerification(phoneVerification.id);
 
     return Response.json({
       success: true,

@@ -1,9 +1,19 @@
 import type { Config, Context } from '@netlify/edge-functions'
 
 // Known app routes that are NOT user pages
+/**
+ * 크리에이터 아이디가 될 수 없는 주소. src/App.tsx 의 같은 이름 목록과 짝이다.
+ *
+ * 비즈니스 · 담당자 · 결제 복귀 주소가 빠져 있어서, 크롤러가 그 주소를 읽으면
+ * "business-login 이라는 크리에이터" 의 미리보기 카드를 만들려 들었다.
+ */
 const RESERVED_PATHS = new Set([
   'signup', 'login', 'admin', 'operator', 'operator-login',
   'terms', 'privacy', 'setup-link', 'api', '.netlify',
+  'business', 'business-login', 'business-signup', 'business-admin',
+  'manager', 'membership', 'settings',
+  'checkout', 'success', 'fail', 'toss', 'portone', 'profile',
+  'assets', 'vendor', 'robots.txt', 'sitemap.xml',
 ])
 
 export default async (req: Request, context: Context) => {
@@ -21,28 +31,54 @@ export default async (req: Request, context: Context) => {
     return
   }
 
-  // Only intercept for social media crawlers / link preview bots
+  /**
+   * 미리보기 카드를 만드는 크롤러만 가로챈다.
+   *
+   * 예전 목록에는 'kakaotalk' · 'naver' · 'daum' · 'line' · 'preview' 같은 조각이
+   * 들어 있었다. 그 문자열은 크롤러뿐 아니라 **실제 인앱 브라우저의 User-Agent 에도**
+   * 들어 있다. 그래서 카카오톡이나 네이버 앱에서 링크를 눌러 들어온 진짜 사용자도
+   * 이 경로를 탔다. 화면은 정상으로 보였지만(context.next 가 앱 HTML 을 돌려준다)
+   * 대가가 있었다 — /api/site 를 먼저 직렬로 한 번 더 부르고, 응답에
+   * `no-cache, no-store` 를 붙여 문서 캐시를 껐다. 실측 TTFB 는 일반 브라우저
+   * 0.057초, 카카오톡 0.266초, 네이버 0.260초였고 재방문에도 개선되지 않았다.
+   * 한국 링크인바이오 서비스에서 트래픽이 가장 많이 들어오는 통로가 바로 그곳이다.
+   *
+   * 그래서 카카오 · 네이버 · 다음은 실제 크롤러 토큰으로 좁혔다.
+   *   · 카카오 링크 크롤러: `kakaotalk-scrap`
+   *   · 네이버 검색 크롤러: `yeti`
+   *   · 다음 크롤러: `daumoa`
+   * 짧고 흔한 조각('line' 은 'inline' · 'Cmdline' 등에도 걸린다)은 뺐다.
+   */
   const ua = (req.headers.get('user-agent') || '').toLowerCase()
-  const isBot =
-    ua.includes('facebookexternalhit') ||
-    ua.includes('facebot') ||
-    ua.includes('twitterbot') ||
-    ua.includes('linkedinbot') ||
-    ua.includes('slackbot') ||
-    ua.includes('telegrambot') ||
-    ua.includes('whatsapp') ||
-    ua.includes('kakaotalk') ||
-    ua.includes('kakaostory') ||
-    ua.includes('daumoa') ||
-    ua.includes('line') ||
-    ua.includes('discord') ||
-    ua.includes('googlebot') ||
-    ua.includes('bingbot') ||
-    ua.includes('yandex') ||
-    ua.includes('naver') ||
-    ua.includes('daum') ||
-    ua.includes('og-image') ||
-    ua.includes('preview')
+  const BOT_TOKENS = [
+    'facebookexternalhit',
+    'facebot',
+    'twitterbot',
+    'linkedinbot',
+    'slackbot',
+    'telegrambot',
+    'whatsapp',
+    'discordbot',
+    'googlebot',
+    'bingbot',
+    'yandexbot',
+    'applebot',
+    'kakaotalk-scrap',
+    'kakaostory',
+    'daumoa',
+    'yeti',
+    'linebot',
+    'linespider',
+    'pinterest',
+    'redditbot',
+    'skypeuripreview',
+    'embedly',
+    'quora link preview',
+    'nuzzel',
+    'vkshare',
+    'og-image',
+  ]
+  const isBot = BOT_TOKENS.some((token) => ua.includes(token))
 
   if (!isBot) {
     return
