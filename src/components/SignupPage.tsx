@@ -110,24 +110,31 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
     setIsLoading(true);
 
     try {
-      const response = await fetch('/.netlify/functions/identity-signup', {
+      // `identity-signup` 은 가입 API 가 아니다. Netlify Identity 가 계정을 만들 때
+      // 스스로 호출하는 예약된 훅 이름이고, 본문에서 `user` 를 읽어 권한(roles)만
+      // 돌려준다. 외부에서 직접 부르면 Netlify 가 403 으로 막는다 — 그래서 이 화면의
+      // 회원가입은 무엇을 입력해도 "회원가입 실패" 로만 끝났다. 실제로 Supabase
+      // 계정 · profiles · site_data · 프로필 코드를 만드는 함수는 `auth-signup` 이다.
+      const response = await fetch('/.netlify/functions/auth-signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id,
+          username: id,
           email,
           password,
-          fullName,
+          full_name: fullName,
           phone,
         }),
       });
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || (isEn ? 'Signup failed' : '회원가입 실패'));
+      // auth-signup 은 실패도 200 으로 알려 준다(본문의 success). 상태 코드만 보면
+      // 실패를 성공으로 읽어 "가입 완료" 를 띄우고 로그인 화면으로 보내 버린다.
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || (isEn ? 'Signup failed' : '회원가입 실패'));
       }
 
       alert(isEn ? 'Signup complete! Please log in.' : '회원가입이 완료되었습니다! 로그인해 주세요.');

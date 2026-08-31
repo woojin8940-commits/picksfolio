@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { PART_SIZE, resolveContentType, safeExtension, safeKeyPrefix } from "./_shared/upload-media.mts";
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 
 /**
  * 업로드는 공개 제안서 폼(비로그인 업체)에서도 쓰기 때문에 로그인을 요구하지 않는다.
@@ -28,6 +29,17 @@ export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
+
+  // 로그인을 요구하지 않으므로 남용은 횟수로 막는다. 없으면 한 사람이 저장소를
+  // 무한히 채울 수 있다.
+  const limited = await checkRateLimit({
+    bucket: "upload-image",
+    key: clientIp(req),
+    limit: 60,
+    windowSeconds: 600,
+    message: "업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+  });
+  if (!limited.ok) return limited.response;
 
   const declaredLength = Number(req.headers.get("content-length") || 0);
   if (declaredLength && declaredLength > MAX_BYTES) {

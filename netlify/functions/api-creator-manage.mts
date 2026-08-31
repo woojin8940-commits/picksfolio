@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { createUniqueProfileCode, generateProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request) => {
   const db = getDatabase();
@@ -91,6 +92,13 @@ export default async (req: Request) => {
       }
 
       const clean = username.trim().toLowerCase();
+
+      // 이 엔드포인트는 본인 확인 없이 body 의 username 만 믿고 있었다. 그래서 아이디만
+      // 알면 남의 표시 이름 · 소개 · SNS 링크를 덮어쓰고(피싱), 페이지를 비공개로 내리고,
+      // 프로필 코드를 바꿀 수 있었다. 쓰기 동작 전체를 계정 소유자(또는 관리자)로 막는다.
+      // GET 은 공개 페이지가 이미 보여 주는 내용이라 그대로 열어 둔다.
+      const auth = await requireAccountOwner(req, clean);
+      if (!auth.ok) return auth.response;
 
       if (action === "regenerate-code") {
         let newCode = generateProfileCode();

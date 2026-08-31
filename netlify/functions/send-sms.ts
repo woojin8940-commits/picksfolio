@@ -49,10 +49,20 @@ export default async (req: Request) => {
       text: `[픽스폴리오] 인증번호는 [${code}] 입니다.`,
     });
 
+    // 아직 인증되지 않은 이전 코드를 무효화한다.
+    //
+    // 여기서 verified = TRUE 로 바꾸면 안 된다. 그 플래그는 이 시스템에서 "이 번호는
+    // 인증을 통과했다"는 뜻이고, find-account 가 그것만 보고 비밀번호를 바꿔 준다.
+    // 즉 같은 번호로 문자를 두 번 요청하는 것만으로 첫 번째 줄이 인증 완료로 승격돼,
+    // 문자를 받지 못한 사람도 이름과 번호만 알면 남의 계정을 가져갈 수 있었다.
+    // 무효화는 플래그가 아니라 만료로 처리한다.
     await db.sql`
       UPDATE sms_verifications
-      SET verified = TRUE
-      WHERE phone = ${cleanPhone} AND purpose = ${smsPurpose} AND verified = FALSE
+      SET expires_at = NOW()
+      WHERE phone = ${cleanPhone}
+        AND purpose = ${smsPurpose}
+        AND verified = FALSE
+        AND expires_at > NOW()
     `;
 
     await db.sql`

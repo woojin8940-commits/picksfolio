@@ -60,6 +60,28 @@ import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
 
+/** 주소 첫 칸이 그대로 화면 이름이 되는 경로. */
+const TOP_LEVEL_VIEWS: View[] = ['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'manager'];
+
+/** 같은 화면을 가리키는 슬래시 표기(sitemap.xml · 외부 링크가 쓰는 형태). */
+const SLASH_ALIASES: Record<string, View> = {
+  'business/login': 'business-login',
+  'business/signup': 'business-signup',
+  'business/admin': 'business-admin',
+};
+
+/**
+ * 크리에이터 아이디로 해석하면 안 되는 주소.
+ *
+ * 라우터의 마지막 갈래는 "그 밖의 모든 것 = 크리에이터 아이디" 다. 그래서 결제 복귀
+ * 주소나 아직 화면이 없는 주소가 전부 "없는 크리에이터의 빈 페이지" 로 보였다.
+ * 여기에 적힌 이름은 홈으로 보낸다. og-image 엣지 함수의 예약어 목록과 같은 뜻이다.
+ */
+const RESERVED_PATHS = new Set([
+  'settings', 'checkout', 'success', 'fail', 'profile', 'business',
+  'api', 'assets', 'toss', 'portone', 'index.html', 'favicon.ico',
+]);
+
 // 지연 로딩 화면은 모두 utils/lazyRoute 의 LazyRoute 로 감싼다 — 로딩 표시와
 // 오류 경계가 항상 함께 붙어야, 청크를 못 받은 화면이 로딩 표시에서 멈춘 것처럼
 // 보이지 않는다.
@@ -1370,12 +1392,31 @@ const App: React.FC = () => {
           setView('setup-link');
         }
       }
-      else if (['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'manager'].includes(path)) setView(path as View);
+      else if (TOP_LEVEL_VIEWS.includes(path as View)) setView(path as View);
+      // sitemap.xml 은 /business/login · /business/signup 을 검색엔진에 제출하는데
+      // 화면 이름은 하이픈 표기(business-login)뿐이었다. 슬래시 표기는 아래 else 로
+      // 떨어져 "business/login" 을 크리에이터 아이디로 취급했으므로, 검색으로 들어온
+      // 업체는 로그인 화면 대신 빈 페이지를 봤다. 두 표기를 같은 화면으로 모은다.
+      else if (SLASH_ALIASES[path]) setView(SLASH_ALIASES[path]);
+      // /membership 은 netlify.toml 에 리다이렉트까지 있는데(=열리도록 의도한 주소)
+      // 화면 이름은 아니다. 멤버십은 대시보드 안의 탭이므로 그 탭을 열어 준다.
+      else if (path === 'membership') {
+        setSubView('membership');
+        setView('admin');
+      }
       else if (path.endsWith('/proposal')) {
         // /:username/proposal route
         setTargetUser(path.replace('/proposal', ''));
         setView('proposal');
-      } else {
+      }
+      // 예약어는 크리에이터 아이디가 될 수 없다. 이 갈래가 없으면 /settings 나
+      // /checkout 같은 주소가 "그 이름의 크리에이터" 로 해석돼, 없는 사람의 빈
+      // 페이지가 뜬다. 사용자에게는 서비스가 깨진 것으로 보인다.
+      else if (RESERVED_PATHS.has(path)) {
+        setView('home');
+        window.history.replaceState(null, '', '/');
+      }
+      else {
         setTargetUser(path);
         setView('user-page');
       }

@@ -1,6 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Config } from "@netlify/functions";
 import { verifyBusinessStatus } from "./_shared/nts-business.mts";
+import {
+  consumePhoneVerification,
+  findVerifiedPhone,
+  phoneNotVerifiedResponse,
+} from "./_shared/phone-verification.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -64,6 +69,18 @@ export default async (req: Request) => {
         return Response.json({ success: false, error: "모든 필수 항목을 입력해 주세요." });
       }
 
+      // 담당자 휴대폰도 서버에서 인증을 확인한다. 사업자번호는 아래에서 국세청에
+      // 재조회하지만 연락처는 아무도 확인하지 않았고, 캠페인 알림 · 정산 안내가
+      // 전부 이 번호로 나간다.
+      const cleanContactPhone = (contact_phone || "").replace(/\D/g, "");
+      if (!cleanContactPhone) {
+        return Response.json({ success: false, error: "담당자 휴대폰 번호를 입력해 주세요." });
+      }
+      const phoneVerification = await findVerifiedPhone(cleanContactPhone, "business_signup");
+      if (!phoneVerification) {
+        return phoneNotVerifiedResponse();
+      }
+
       // 국세청 사업자등록정보 상태조회로 서버 측에서 재검증한다(클라이언트 플래그를 신뢰하지 않음).
       const ntsResult = await verifyBusinessStatus(business_number);
       if (!ntsResult.verified) {
@@ -124,6 +141,8 @@ export default async (req: Request) => {
           { onConflict: "id" }
         );
       }
+
+      await consumePhoneVerification(phoneVerification.id);
 
       return Response.json({ success: true, username: cleanUsername });
     }

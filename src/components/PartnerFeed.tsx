@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ViewerSignaling } from '../services/webrtcSignaling';
 import { apiService } from '../services/apiService';
+import { loadVideoJs } from '../utils/externalScripts';
 
 declare global {
   interface Window {
@@ -126,9 +127,22 @@ export const PartnerFeed: React.FC<PartnerFeedProps> = ({ channel, className, ob
     return () => clearTimeout(t);
   }, [webrtcConnected, hlsUrl, channel]);
 
+  // video.js 가 아직 없으면 불러온다. 예전에는 index.html 이 모든 페이지에서 미리
+  // 받아 줬기 때문에 그냥 있다고 가정하고 빠져나갔는데, 이제는 필요한 화면이 직접
+  // 불러오므로 여기서 기다려야 한다. 준비되면 상태가 바뀌어 아래 effect 가 다시 돈다.
+  const [videojsReady, setVideojsReady] = useState(!!window.videojs);
+  useEffect(() => {
+    if (!hlsActive || videojsReady) return;
+    let cancelled = false;
+    loadVideoJs()
+      .then(() => { if (!cancelled) setVideojsReady(true); })
+      .catch((err) => console.warn('[PartnerFeed] video.js 를 불러올 수 없다', err));
+    return () => { cancelled = true; };
+  }, [hlsActive, videojsReady]);
+
   // ── Build the Video.js HLS player when HLS is active ────────────────────
   useEffect(() => {
-    if (!hlsActive || !hlsUrl || !hlsRef.current || !window.videojs) return;
+    if (!hlsActive || !hlsUrl || !hlsRef.current || !videojsReady || !window.videojs) return;
     if (playerRef.current) {
       playerRef.current.dispose();
       playerRef.current = null;

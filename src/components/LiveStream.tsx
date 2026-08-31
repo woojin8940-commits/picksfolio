@@ -5,6 +5,7 @@ import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import { formatKRW, formatPhoneInput } from '../utils/formatters';
+import { loadPortOne, loadVideoJs } from '../utils/externalScripts';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
@@ -1388,29 +1389,25 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   // Track videojs readiness
   const [videojsLoaded, setVideojsLoaded] = useState(!!window.videojs);
 
+  // video.js 는 index.html 이 아니라 이 화면이 직접 불러온다. 예전에는 모든 페이지가
+  // 일반 <script> 로 183KB 를 받았고, 그 태그가 파싱을 막아 리액트 시작까지 늦췄다.
+  // 라이브 화면에서만 받으므로 나타나기를 기다리는 폴링도 필요 없다.
   useEffect(() => {
-    if (window.videojs) {
-      setVideojsLoaded(true);
-      return;
-    }
-    // Poll for videojs availability (loaded from external script in index.html)
-    let elapsed = 0;
-    const POLL_INTERVAL = 200;
-    const LOAD_TIMEOUT = 20000; // 20s — mobile networks (3G/weak LTE/in-app WebView) often need longer than 8s
-    const interval = setInterval(() => {
-      elapsed += POLL_INTERVAL;
-      if (window.videojs) {
-        setVideojsLoaded(true);
-        clearInterval(interval);
-      } else if (elapsed >= LOAD_TIMEOUT) {
-        console.warn('[LiveStream] Video.js CDN failed to load within timeout — HLS fallback unavailable');
-        // Mark HLS as failed so the error UI shows a reconnect button instead of a spinner
-        recordErrorInfo('hls-videojs-cdn', 'load-timeout', `Video.js CDN did not load within ${LOAD_TIMEOUT}ms — HLS fallback unavailable`);
+    let cancelled = false;
+    loadVideoJs()
+      .then(() => {
+        if (!cancelled) setVideojsLoaded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('[LiveStream] video.js 를 불러올 수 없어 HLS 폴백을 쓸 수 없다', err);
+        // 로딩 표시에서 멈춘 것처럼 보이지 않도록, 재접속 버튼이 있는 오류 화면으로 넘긴다.
+        recordErrorInfo('hls-videojs-cdn', 'load-timeout', err?.message || 'video.js load failed');
         setHlsFailed(true);
-        clearInterval(interval);
-      }
-    }, POLL_INTERVAL);
-    return () => clearInterval(interval);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Initialize Video.js HLS player for high-quality playback — only when HLS mode is active
@@ -2480,8 +2477,11 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   // Run the PortOne V2 simple-pay flow, then verify the payment server-side.
   const handleConfirmCheckout = useCallback(async () => {
     if (!checkoutProduct || !kakaoUser) return;
-    if (typeof window === 'undefined' || !window.PortOne) {
-      setCheckoutError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
+    // 결제 SDK 는 이 버튼을 누른 뒤에 받는다(예전에는 모든 페이지가 미리 받았다).
+    try {
+      await loadPortOne();
+    } catch {
+      setCheckoutError('결제 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.');
       return;
     }
 
@@ -2649,8 +2649,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   // order records server-side. Clears payable cart items on success.
   const handleConfirmBatchCheckout = useCallback(async () => {
     if (!kakaoUser) return;
-    if (typeof window === 'undefined' || !window.PortOne) {
-      setBatchError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
+    try {
+      await loadPortOne();
+    } catch {
+      setBatchError('결제 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.');
       return;
     }
     if (batchPayableItems.length === 0 || batchTotal <= 0) {

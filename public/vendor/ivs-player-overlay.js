@@ -289,26 +289,48 @@
     }, 200);
   }
 
-  function loadIVSPlayerSDK() {
-    var script = document.createElement('script');
-    script.src = 'https://player.live-video.net/1.31.0/amazon-ivs-player.min.js';
-    script.async = true;
-    script.onload = function() {
-      ivsPlayerReady = true;
-      console.log('[IVS Overlay] IVS Player SDK loaded');
-      waitForVideojs();
-    };
-    script.onerror = function() {
-      ivsLoadFailed = true;
-      console.warn('[IVS Overlay] Failed to load IVS Player SDK — Video.js will be used');
-      waitForVideojs();
-    };
-    document.head.appendChild(script);
+  /**
+   * IVS Player SDK 를 받아 videojs 를 감싼다.
+   *
+   * 예전에는 이 함수가 DOMContentLoaded 에서 무조건 실행됐다. 그래서 라이브를 열지
+   * 않은 방문자도 IVS Player SDK 를 매번 내려받았고, 그 다음 waitForVideojs 가
+   * window.videojs 를 200ms 씩 100번(=20초) 기다렸다. video.js 를 필요한 화면에서만
+   * 불러오도록 바꾸면 그 20초 안에 나타나지 않는 경우가 생겨, 라이브를 여는 순간
+   * IVS 재생 경로가 이미 포기된 상태일 수 있다.
+   *
+   * 그래서 지금은 라이브 화면이 video.js 를 불러온 직후에 이 함수를 직접 부른다
+   * (utils/externalScripts.ts 의 loadVideoJs). 여러 번 불러도 한 번만 받는다.
+   */
+  var installPromise = null;
+  function installOverlay() {
+    if (installPromise) return installPromise;
+    installPromise = new Promise(function(resolve) {
+      var script = document.createElement('script');
+      script.src = 'https://player.live-video.net/1.31.0/amazon-ivs-player.min.js';
+      script.async = true;
+      script.onload = function() {
+        ivsPlayerReady = true;
+        console.log('[IVS Overlay] IVS Player SDK loaded');
+        waitForVideojs();
+        resolve(true);
+      };
+      script.onerror = function() {
+        ivsLoadFailed = true;
+        console.warn('[IVS Overlay] Failed to load IVS Player SDK — Video.js will be used');
+        // SDK 가 없어도 videojs 는 그대로 쓸 수 있어야 하므로 실패를 삼킨다.
+        waitForVideojs();
+        resolve(false);
+      };
+      document.head.appendChild(script);
+    });
+    return installPromise;
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadIVSPlayerSDK);
-  } else {
-    loadIVSPlayerSDK();
+  window.__picksInstallIvsOverlay = installOverlay;
+
+  // 예전에 배포된 HTML 이 브라우저에 열려 있을 수 있다. 그 문서에는 video.js 가
+  // 일반 <script> 로 박혀 있으므로, videojs 가 이미 있으면 여기서 바로 감싼다.
+  if (window.videojs) {
+    installOverlay();
   }
 })();

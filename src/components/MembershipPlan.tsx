@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
+import { loadPortOne } from '../utils/externalScripts';
 import { payClaudePlan } from '../utils/claudeCharge';
 import { useLanguage } from '../contexts/LanguageContext';
 import {
@@ -208,8 +209,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
 
     // ── 간편결제(토스페이 / 카카오페이): PortOne 빌링키로 정기결제 등록 ──
-    if (typeof window === 'undefined' || !window.PortOne) {
-      setError('결제 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.');
+    // SDK 는 여기서 받는다. 모든 페이지가 미리 받으면 라이브도 결제도 열지 않는
+    // 방문자까지 77KB 를 기다린다.
+    try {
+      await loadPortOne();
+    } catch {
+      setError('결제 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.');
       return;
     }
 

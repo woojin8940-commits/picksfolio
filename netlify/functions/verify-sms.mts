@@ -54,8 +54,12 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: "인증번호가 일치하지 않습니다." });
     }
 
+    // verified_at 을 여기서만 채운다. 인증 창(아이디 찾기 · 비밀번호 재설정)은
+    // 발송 시각(expires_at)이 아니라 이 시각을 기준으로 열려야 한다.
     await db.sql`
-      UPDATE sms_verifications SET verified = TRUE WHERE id = ${record.id}
+      UPDATE sms_verifications
+      SET verified = TRUE, verified_at = NOW()
+      WHERE id = ${record.id}
     `;
 
     return Response.json({ success: true, message: "인증되었습니다." });
