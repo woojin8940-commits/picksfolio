@@ -95,7 +95,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCollab, setEditingCollab] = useState<CollabRecord | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'proposals' | 'collabs'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'proposals' | 'collabs' | 'settlements'>('all');
   const [jumpYear, setJumpYear] = useState('');
   const [jumpMonth, setJumpMonth] = useState('');
   // Top-level section of the 협업 현황 page: the calendar, the list of collab
@@ -353,6 +353,29 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return map;
   }, [collabRecords, campaignCollabItems]);
 
+  /**
+   * 정산 지급일.
+   *
+   * 협업 기간과 달리 정산은 하루짜리 사건이라 막대가 아니라 점으로 찍는다. 날짜는
+   * 지급이 끝났으면 완료일, 아직이면 담당자가 정한 예정일이다 — 담당자가 진행사항에서
+   * 지급일을 바꾸면 그 값이 그대로 여기로 온다.
+   *
+   * 예정일이 비어 있는 정산(금액 조율 중이거나 담당자가 아직 날짜를 안 잡은 건)은
+   * 달력에 올리지 않는다. 날짜 없는 항목을 억지로 오늘에 찍으면 "오늘 입금"으로 읽힌다.
+   */
+  const settlementEventsMap = useMemo(() => {
+    const map: Record<string, Settlement[]> = {};
+    settlements.forEach(s => {
+      // 취소된 정산은 타입에는 없지만 서버 기록에는 남을 수 있다(옛 항목).
+      if (String(s.status) === 'cancelled') return;
+      const key = dayOnly(s.status === 'completed' ? (s.completed_at || s.scheduled_date) : s.scheduled_date);
+      if (!key) return;
+      if (!map[key]) map[key] = [];
+      map[key].push(s);
+    });
+    return map;
+  }, [settlements]);
+
   // Stable ordering of proposal events
   const eventOrder = useMemo(() => {
     const order: Record<string, number> = {};
@@ -378,6 +401,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   const selectedProposalEvents = selectedDate ? (proposalEventsMap[selectedDate] || []) : [];
   const selectedCollabEvents = selectedDate ? (collabEventsMap[selectedDate] || []) : [];
+  const selectedSettlementEvents = selectedDate ? (settlementEventsMap[selectedDate] || []) : [];
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -830,7 +854,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 const dateStr = getDateStr(day);
                 const pEvents = proposalEventsMap[dateStr] || [];
                 const cEvents = collabEventsMap[dateStr] || [];
-                const totalEvents = pEvents.length + cEvents.length;
+                const sEvents = settlementEventsMap[dateStr] || [];
+                const totalEvents = pEvents.length + cEvents.length + sEvents.length;
                 const isToday = dateStr === today;
                 const isSelected = dateStr === selectedDate;
                 const dayOfWeek = (firstDay + i) % 7;
@@ -893,8 +918,22 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                           </div>
                         );
                       })}
-                      {totalEvents > 2 && (
-                        <p className="text-[11px] font-bold text-slate-400 px-1">+{totalEvents - 2}건</p>
+                      {/* Settlement events — 하루짜리 사건이라 막대가 아니라 한 줄 배지 */}
+                      {sEvents.slice(0, 1).map(ev => (
+                        <div
+                          key={`stl_${ev.id}`}
+                          className={`text-[11px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
+                            ev.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-violet-100 text-violet-700'
+                          }`}
+                        >
+                          💰 {ev.status === 'completed' ? '입금 완료' : '입금 예정'}
+                          {sEvents.length > 1 ? ` ${sEvents.length}건` : ''}
+                        </div>
+                      ))}
+                      {totalEvents > 3 && (
+                        <p className="text-[11px] font-bold text-slate-400 px-1">+{totalEvents - 3}건</p>
                       )}
                     </div>
                   </div>
@@ -926,7 +965,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
               {/* Tab filter */}
               <div className="flex gap-2 mb-4">
-                {(['all', 'proposals', 'collabs'] as const).map(tab => (
+                {(['all', 'proposals', 'collabs', 'settlements'] as const).map(tab => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -934,7 +973,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       activeTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                     }`}
                   >
-                    {tab === 'all' ? '전체' : tab === 'proposals' ? '제안' : '협업 기록'}
+                    {tab === 'all' ? '전체' : tab === 'proposals' ? '제안' : tab === 'collabs' ? '협업 기록' : '정산'}
                   </button>
                 ))}
               </div>
@@ -1032,9 +1071,37 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 </div>
               )}
 
-              {((activeTab === 'all' && selectedProposalEvents.length === 0 && selectedCollabEvents.length === 0) ||
+              {(activeTab === 'all' || activeTab === 'settlements') && selectedSettlementEvents.length > 0 && (
+                <div className="space-y-3 mt-4">
+                  {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">정산</p>}
+                  {selectedSettlementEvents.map(ev => (
+                    <div key={`stl_${ev.id}`} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                      <div className={`w-2 h-12 rounded-full shrink-0 ${ev.status === 'completed' ? 'bg-emerald-500' : 'bg-violet-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-slate-900 text-sm truncate">{ev.title || ev.company_name || '협업 정산'}</p>
+                        <p className="text-xs font-bold text-slate-400">
+                          {ev.company_name ? `${ev.company_name} · ` : ''}
+                          {ev.amount_pending && !Number(ev.amount || 0) ? '금액 협의중' : formatFee(ev.amount)}
+                        </p>
+                        {ev.memo && <p className="text-xs text-slate-400 mt-1 truncate">{ev.memo}</p>}
+                      </div>
+                      <span className={`text-xs font-black shrink-0 ${ev.status === 'completed' ? 'text-emerald-600' : 'text-violet-600'}`}>
+                        {ev.status === 'completed' ? '입금 완료' : '입금 예정'}
+                      </span>
+                    </div>
+                  ))}
+                  {activeTab === 'settlements' && (
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      지급일은 담당자가 진행사항 정산 단계에서 정합니다. 표시 금액은 원천징수 3.3% 차감 전 금액입니다.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {((activeTab === 'all' && selectedProposalEvents.length === 0 && selectedCollabEvents.length === 0 && selectedSettlementEvents.length === 0) ||
                 (activeTab === 'proposals' && selectedProposalEvents.length === 0) ||
-                (activeTab === 'collabs' && selectedCollabEvents.length === 0)) && (
+                (activeTab === 'collabs' && selectedCollabEvents.length === 0) ||
+                (activeTab === 'settlements' && selectedSettlementEvents.length === 0)) && (
                 <p className="text-slate-400 text-sm font-bold text-center py-4">이 날짜에 해당하는 일정이 없습니다.</p>
               )}
             </div>

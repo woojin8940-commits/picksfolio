@@ -3,6 +3,7 @@ import type { Config, Context } from "@netlify/functions";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 
 const STORE = "proposals";
 const BIZ_STORE = "business-proposals";
@@ -27,7 +28,7 @@ export default async (req: Request, context: Context) => {
     const allProposals: any[] = [];
     const seenIds = new Set<string>();
 
-    const [sqlResult, blobData] = await Promise.all([
+    const [sqlResult, blobData, deletedIds] = await Promise.all([
       (async () => {
         try {
           const { getDatabase } = await import("@picks/netlify-database");
@@ -44,10 +45,13 @@ export default async (req: Request, context: Context) => {
         }
       })(),
       store.get(`proposals_${username}`, { type: "json" }).catch(() => null),
+      loadDeletedProposalIds(),
     ]);
 
     if (Array.isArray(sqlResult)) {
       for (const row of sqlResult) {
+        // 수신함에서 지운 제안. SQL 삭제가 실패해 행이 남아 있어도 화면에는 올리지 않는다.
+        if (!isProposalAlive(deletedIds, row.id)) continue;
         seenIds.add(row.id);
         allProposals.push({
           id: row.id,
@@ -75,7 +79,7 @@ export default async (req: Request, context: Context) => {
 
     if (Array.isArray(blobData)) {
       for (const bp of blobData as any[]) {
-        if (bp.id && !seenIds.has(bp.id)) {
+        if (bp.id && !seenIds.has(bp.id) && isProposalAlive(deletedIds, bp.id)) {
           seenIds.add(bp.id);
           allProposals.push(bp);
         }
@@ -93,17 +97,28 @@ export default async (req: Request, context: Context) => {
     // 없는 것만 합친다.
     if (allProposals.length > 0) {
       context.waitUntil(
-        mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
-          const latest = Array.isArray(current) ? current : [];
-          const latestIds = new Set(latest.map((p: any) => p?.id));
-          const merged = [...latest, ...allProposals.filter((p: any) => !latestIds.has(p?.id))];
-          merged.sort(
-            (a: any, b: any) =>
-              new Date(b.created_at || b.createdAt || 0).getTime() -
-              new Date(a.created_at || a.createdAt || 0).getTime()
-          );
-          return merged;
-        }).catch(() => null)
+        (async () => {
+          // 이 쓰기는 응답을 보낸 뒤에 실행된다. 그 사이에 삭제가 들어왔을 수 있으므로
+          // 묘비를 다시 읽는다 — 요청 시작 때 읽은 집합으로 걸렀다면, 조회와 삭제가
+          // 겹친 바로 그 경우에 지운 제안이 캐시에 되살아난다.
+          const fresh = await loadDeletedProposalIds();
+          return mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
+            const latest = (Array.isArray(current) ? current : []).filter((p: any) =>
+              isProposalAlive(fresh, p?.id),
+            );
+            const latestIds = new Set(latest.map((p: any) => p?.id));
+            const merged = [
+              ...latest,
+              ...allProposals.filter((p: any) => !latestIds.has(p?.id) && isProposalAlive(fresh, p?.id)),
+            ];
+            merged.sort(
+              (a: any, b: any) =>
+                new Date(b.created_at || b.createdAt || 0).getTime() -
+                new Date(a.created_at || a.createdAt || 0).getTime()
+            );
+            return merged;
+          });
+        })().catch(() => null)
       );
     }
 

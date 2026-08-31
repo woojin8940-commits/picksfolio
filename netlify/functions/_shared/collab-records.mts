@@ -104,7 +104,65 @@ export async function addSettlementForProposal(settlement: {
   }
 }
 
-/** 제안이 삭제되면 그 제안에서 파생된 정산 항목도 같이 지운다. */export async function removeSettlementsForProposal(
+/**
+ * 이미 있는 정산 항목을 고친다. 없으면 만든다.
+ *
+ * `addSettlementForProposal` 은 proposal_id 로 중복만 막고 값은 절대 건드리지 않는다
+ * — 업로드 확인 때 한 번 예약하고 끝나는 용도라서 그렇게 두었다. 담당자가 실제
+ * 지급일과 지급 완료를 나중에 적어 넣으려면 같은 줄을 갱신해야 한다.
+ *
+ * 업체 키와 인플루언서 키 양쪽에 같은 내용을 쓴다. 한쪽만 고치면 "브랜드는 지급했다는데
+ * 나는 예정으로 보인다"가 화면 차이에서 생긴다.
+ *
+ * @param patch 덮어쓸 필드. undefined 인 필드는 기존 값을 그대로 둔다.
+ * @param fallback 항목이 아직 없을 때 새로 만들 때 쓰는 나머지 필드.
+ */
+export async function upsertSettlementForProposal(
+  proposalId: string,
+  businessUsername: string,
+  influencerUsername: string,
+  patch: Record<string, unknown>,
+  fallback: Record<string, unknown> = {},
+): Promise<void> {
+  if (!proposalId) return;
+  const now = new Date().toISOString();
+  // undefined 를 그대로 펼치면 기존 값을 지운다. 값이 있는 필드만 남긴다.
+  const changes = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+
+  const apply = (records: any[]) => {
+    const idx = records.findIndex((s: any) => s?.proposal_id === proposalId);
+    if (idx === -1) {
+      return [
+        ...records,
+        {
+          id: `stl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          proposal_id: proposalId,
+          business_username: businessUsername,
+          influencer_username: influencerUsername,
+          status: "scheduled",
+          created_at: now,
+          ...fallback,
+          ...changes,
+          updated_at: now,
+        },
+      ];
+    }
+    const next = [...records];
+    next[idx] = { ...records[idx], ...changes, updated_at: now };
+    return next;
+  };
+
+  const targets: string[] = [];
+  if (businessUsername) targets.push(settlementBizKey(businessUsername));
+  if (influencerUsername) targets.push(settlementInfKey(influencerUsername));
+
+  for (const key of targets) {
+    await mutateRecords(SETTLEMENTS_STORE, key, apply);
+  }
+}
+
+/** 제안이 삭제되면 그 제안에서 파생된 정산 항목도 같이 지운다. */
+export async function removeSettlementsForProposal(
   proposalId: string,
   businessUsername: string,
   influencerUsername: string,

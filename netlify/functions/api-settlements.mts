@@ -10,6 +10,7 @@ import {
   settlementInfKey,
 } from "./_shared/collab-records.mts";
 import { normalizeRewardMode } from "./_shared/reward-mode.mts";
+import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 
 /**
  * 캠페인 협업의 정산 금액은 담당자가 확정한 조건(collab_terms.fee)에서 온다.
@@ -222,7 +223,14 @@ export default async (req: Request) => {
         }
       }
 
-      const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements];
+      // 수신함·제안 현황에서 지운 제안에서 파생된 정산은 내보내지 않는다. 삭제 때
+      // 명시 항목은 지우지만, 여기서 SQL 로 다시 만드는 파생 행은 SQL 삭제가
+      // 실패했을 때 되살아난다 — 그러면 지운 협업이 정산금과 협업 현황 캘린더에만
+      // 남아 "지웠는데 아직 있다"가 된다.
+      const deletedIds = await loadDeletedProposalIds();
+      const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements].filter((s: any) =>
+        isProposalAlive(deletedIds, s?.proposal_id),
+      );
       return Response.json({ settlements: combinedSettlements });
     }
 

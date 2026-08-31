@@ -3,6 +3,7 @@ import type { Config, Context } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { markProposalDeleted } from "./_shared/proposal-tombstones.mts";
 import {
   addSettlementForProposal,
   parseAmount,
@@ -216,6 +217,15 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "DELETE") {
+    // 묘비를 먼저 적는다. 아래 삭제 중 어느 단계가 실패하더라도, 그리고 삭제 직전에
+    // 시작된 목록 조회의 지연 캐시 쓰기가 뒤늦게 도착하더라도, 읽는 쪽이 이 id 를
+    // 걸러 내므로 협업 현황·정산금에 다시 올라오지 않는다.
+    try {
+      await markProposalDeleted(proposalId);
+    } catch (tombErr) {
+      console.error("[api-proposal-item] Failed to record delete tombstone:", tombErr);
+    }
+
     const existing = (await store.get(key, { type: "json" })) as any[] || [];
     const proposal = existing.find((p: any) => p.id === proposalId);
     const filtered = existing.filter((p: any) => p.id !== proposalId);
@@ -254,6 +264,15 @@ export default async (req: Request, context: Context) => {
       await db.sql`DELETE FROM proposals WHERE id = ${proposalId}`;
     } catch (dbErr) {
       console.error("[api-proposal-item] Failed to delete from SQL:", dbErr);
+    }
+
+    // 예전 Supabase 미러도 비운다. 남겨 두면 SQL 이 비어 있는 동안 이 미러를 읽는
+    // 경로에서 지운 제안이 다시 살아난다.
+    try {
+      const supabase = getSupabaseServer();
+      if (supabase) await supabase.from("business_proposals").delete().eq("id", proposalId);
+    } catch (mirrorErr) {
+      console.error("[api-proposal-item] Failed to delete Supabase mirror row:", mirrorErr);
     }
 
     return Response.json({ success: true });

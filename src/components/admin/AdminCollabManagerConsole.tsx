@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { digitsOnly, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { normalizeScenes, parseAnchor } from '../../utils/collabScenes';
+import BrandContactCard from '../collab/BrandContactCard';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import AdminCampaignListup from './AdminCampaignListup';
 
@@ -128,6 +129,12 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
   // 협업 내역 일정 체크 — 담당자가 확인한 협업 기간. 확정된 업로드 마감일을 기본값
   // 으로 채워 두고, 실제 촬영·게시 기간으로 담당자가 손보게 한다.
   const [collabSchedule, setCollabSchedule] = useState({ startDate: '', endDate: '', memo: '' });
+  /**
+   * 정산 지급일. 인플루언서가 낸 신분증 사본·계좌를 보고 담당자가 실제 지급일을 적는
+   * 칸이다. 자동으로 잡히는 "다음 달 말일"은 예정일이고, 정산 회차에 따라 앞뒤로
+   * 움직인다 — 그 날짜를 인플루언서가 물어봐야 알 수 있던 것을 여기서 끝낸다.
+   */
+  const [payout, setPayout] = useState({ date: '', memo: '' });
   // 장면·시점에 붙여 검수하는 화면. 목록에서 훑는 것과 한 장면씩 짚는 것은 다른 일이라 따로 띄운다.
   const [reviewTarget, setReviewTarget] = useState<'' | 'script' | 'content'>('');
 
@@ -177,6 +184,10 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
       startDate: res.collab?.scheduleStart || '',
       endDate: res.collab?.scheduleEnd || res.terms?.uploadDue || res.terms?.contentDue || '',
       memo: '',
+    });
+    setPayout({
+      date: res.settlement?.payoutDate || '',
+      memo: res.settlement?.payoutMemo || '',
     });
     return res;
   };
@@ -806,6 +817,16 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                         <p className="text-xs text-slate-400 font-bold text-center py-6">정보를 불러오지 못했습니다.</p>
                       ) : (
                         <div className="space-y-5">
+                          {/* 캠페인을 올린 브랜드 담당자 연락처. 조건을 확정하기 전에
+                              브랜드에게 확인해야 하는 것들(제품 발송 시점, 2차 활용
+                              범위)이 있어서, 조건 칸 바로 위에 둔다. */}
+                          <BrandContactCard
+                            campaignId={c.campaignId}
+                            businessUsername={c.businessUsername}
+                            brandName={c.companyName || c.businessUsername}
+                            token={token}
+                          />
+
                           {/* 조건 확정 */}
                           <div className="bg-white rounded-xl border border-slate-100 p-4">
                             <div className="flex items-center justify-between mb-3">
@@ -1012,6 +1033,123 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                               </button>
                             </div>
                           </div>
+
+                          {/* 정산 — 인플루언서가 낸 서류를 보고 지급일을 정한다.
+                              업로드 확인으로 협업은 끝나지만 돈은 그때부터 움직이고,
+                              그 왕복(서류 → 확인 → 지급일 통보 → 입금)이 전부 앱 밖에
+                              있었다. 신분증 사본과 계좌는 담당자와 본인만 본다 —
+                              브랜드 응답에는 담기지 않는다. */}
+                          {(() => {
+                            const stl = detail.settlement || {};
+                            const paid = Boolean(stl.paidAt);
+                            const fee = Number(detail.terms?.fee || 0);
+                            return (
+                              <div className="bg-white rounded-xl border border-slate-100 p-4">
+                                <div className="flex items-center justify-between mb-1">
+                                  <p className="text-[9px] text-slate-400 font-black uppercase">정산</p>
+                                  <span className={`text-[10px] font-black ${paid ? 'text-emerald-600' : stl.payoutDate ? 'text-blue-600' : 'text-amber-600'}`}>
+                                    {paid ? '지급 완료' : stl.payoutDate ? `지급 예정 ${stl.payoutDate}` : stl.submitted ? '지급일 미정' : '서류 미제출'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-bold mb-3">
+                                  {fee > 0
+                                    ? `${fee.toLocaleString('ko-KR')}원 · 원천징수 3.3% 차감 후 ${Number(stl.netFee || 0).toLocaleString('ko-KR')}원 입금`
+                                    : '확정 보수가 없습니다. 조건에 금액을 저장하면 정산 금액이 잡힙니다.'}
+                                </p>
+
+                                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 space-y-1.5">
+                                  <p className="text-[10px] font-black text-slate-400">인플루언서 제출 서류</p>
+                                  {stl.submitted ? (
+                                    <>
+                                      {stl.idCardUrl ? (
+                                        <a
+                                          href={stl.idCardUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block text-[11px] font-black text-blue-600 hover:underline break-all"
+                                        >
+                                          신분증 사본 열기 · {stl.idCardName || '파일'}
+                                        </a>
+                                      ) : (
+                                        <p className="text-[11px] font-bold text-amber-600">신분증 사본이 없습니다.</p>
+                                      )}
+                                      <p className="text-xs font-bold text-slate-800">
+                                        {stl.bankName} · {stl.accountHolder}
+                                      </p>
+                                      <div className="flex items-center justify-between gap-3">
+                                        <code className="text-xs font-bold text-slate-800 break-all">{stl.accountNumber}</code>
+                                        <button
+                                          onClick={() => navigator.clipboard?.writeText(String(stl.accountNumber || ''))}
+                                          className="text-[10px] font-black text-blue-600 flex-shrink-0"
+                                        >
+                                          복사
+                                        </button>
+                                      </div>
+                                      <p className="text-[10px] font-bold text-slate-400">
+                                        {stl.reviewedAt ? `확인 완료 · ${stl.reviewedBy || '담당자'}` : '아직 확인하지 않았습니다.'}
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-slate-400 font-medium">
+                                      아직 제출 전입니다. 지급일은 서류 없이도 먼저 정할 수 있습니다.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                  <label className="block">
+                                    <span className="text-[10px] text-slate-400 font-bold">지급일</span>
+                                    <input
+                                      type="date"
+                                      value={payout.date}
+                                      onChange={e => setPayout(p => ({ ...p, date: e.target.value }))}
+                                      className="w-full text-xs font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                                    />
+                                  </label>
+                                  <label className="block">
+                                    <span className="text-[10px] text-slate-400 font-bold">메모 (선택)</span>
+                                    <input
+                                      type="text"
+                                      value={payout.memo}
+                                      onChange={e => setPayout(p => ({ ...p, memo: e.target.value }))}
+                                      placeholder="예: 8월 회차 정산"
+                                      className="w-full text-xs font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                                    />
+                                  </label>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-bold mt-2">
+                                  저장하면 인플루언서의 정산금 화면과 협업 현황 캘린더에 그 날짜가 그대로 올라갑니다.
+                                </p>
+                                <div className="flex justify-end gap-1.5 mt-2">
+                                  <button
+                                    onClick={() =>
+                                      act(c.id, 'schedule_settlement', {
+                                        payoutDate: payout.date,
+                                        payoutMemo: payout.memo.trim(),
+                                      }).then(r => r && notify('지급일을 저장했습니다. 인플루언서에게 표시됩니다.'))
+                                    }
+                                    disabled={busy || !payout.date}
+                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 disabled:opacity-40"
+                                  >
+                                    {stl.payoutDate ? '지급일 다시 저장' : '지급일 저장하고 알리기'}
+                                  </button>
+                                  {!paid && stl.submitted && (
+                                    <button
+                                      onClick={() =>
+                                        act(c.id, 'complete_settlement', { paidDate: payout.date }).then(
+                                          r => r && notify('지급 완료로 처리했습니다.'),
+                                        )
+                                      }
+                                      disabled={busy}
+                                      className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-500 disabled:opacity-40"
+                                    >
+                                      지급 완료 처리
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* 단계 · 검수 */}
                           <div>

@@ -18,7 +18,7 @@
  * 알 수 없어진다.
  */
 
-export type CollabStepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
+export type CollabStepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload' | 'settlement';
 
 export type CollabActionRole = 'influencer' | 'brand' | 'manager';
 
@@ -35,6 +35,21 @@ export type CollabActionInput = {
   shipping?: { filled?: boolean; status?: string } | null;
   uploadUrl?: string;
   uploadConfirmedAt?: string | null;
+  /**
+   * 정산 단계의 사실. 이 칸은 collab_stages 가 아니라 collab_settlement_info 로
+   * 판정한다 — 예전 아홉 단계 묶음에는 'settlement' stage 가 이미 다른 뜻으로
+   * 들어가 있어서, 단계 상태를 함께 보면 진행 중인 옛 협업이 정산 단계로 끌려간다.
+   */
+  settlement?: {
+    /** 인플루언서가 신분증 사본과 입금 계좌를 냈는가. */
+    submitted?: boolean;
+    /** 담당자가 적은 실제 지급일 (YYYY-MM-DD). 비면 미정. */
+    payoutDate?: string;
+    /** 지급이 끝난 시각. 채워지면 정산 단계가 닫힌다. */
+    paidAt?: string | null;
+  } | null;
+  /** 광고비. 0원(제품 협찬형)이면 정산 단계 자체가 없다. */
+  fee?: number;
   /** 브랜드가 가이드(파일 · 메모 · 링크)를 올려 두었는가. */
   guideReady?: boolean;
   /** 협업 자체의 상태. 완료 · 취소된 협업에는 할 일이 없다. */
@@ -62,9 +77,17 @@ export type CollabStepTurn = {
   waitingNote: string;
   /** 브랜드 피드백을 반영해야 하는 되돌림인가. 색과 배지 글자가 달라진다. */
   revision: boolean;
+  /**
+   * 브랜드가 아니라 담당자만 할 수 있는 일인가.
+   *
+   * owner 는 인플루언서/브랜드 둘로만 갈라진다(브랜드와 담당자는 같은 편이다).
+   * 그런데 정산 지급은 담당자만 한다 — 브랜드 화면에 "지급일을 입력해 주세요"가
+   * 뜨면 자기가 눌러야 할 일로 읽히지만 누를 버튼이 없다.
+   */
+  managerOnly?: boolean;
 };
 
-export const COLLAB_STEP_ORDER: CollabStepKey[] = ['guide', 'shipping', 'plan', 'video', 'upload'];
+export const COLLAB_STEP_ORDER: CollabStepKey[] = ['guide', 'shipping', 'plan', 'video', 'upload', 'settlement'];
 
 export const COLLAB_STEP_TITLES: Record<CollabStepKey, string> = {
   guide: '콘텐츠 가이드',
@@ -72,6 +95,7 @@ export const COLLAB_STEP_TITLES: Record<CollabStepKey, string> = {
   plan: '기획안',
   video: '영상 초안',
   upload: '업로드',
+  settlement: '정산',
 };
 
 const CLOSED = ['done', 'skipped'];
@@ -203,6 +227,51 @@ const pendingOf = (input: CollabActionInput, step: CollabStepKey): Omit<CollabSt
       };
     }
 
+    /**
+     * 정산. 업로드 확인으로 협업이 끝난 뒤에 남는 마지막 한 칸이다.
+     *
+     * 예전에는 업로드가 확인되면 진행사항에 할 일이 없어졌다. 그런데 실제로는 거기서
+     * 신분증 사본과 계좌를 주고받고 지급일을 잡는 일이 카카오톡·메일로 이어졌고,
+     * 인플루언서는 "언제 들어오나"를 물어봐야 알 수 있었다. 그 왕복을 이 칸으로 옮긴다.
+     */
+    case 'settlement': {
+      const settlement = input.settlement || {};
+      // 광고비가 없는 협업(제품 협찬형)에는 정산할 것이 없다. 서류를 받을 이유도 없다.
+      if (Number(input.fee || 0) <= 0) return null;
+      if (settlement.paidAt) return null;
+      // 업로드 확인 전에는 열지 않는다. 촬영도 시작하지 않은 시점에 신분증을 요구하면
+      // 무엇에 쓰는 서류인지 알 수 없다.
+      if (!input.uploadConfirmedAt) return null;
+
+      if (!settlement.submitted) {
+        return {
+          ...base,
+          owner: 'influencer',
+          todo: '신분증 사본과 입금 계좌를 입력해 주세요. 담당자가 확인하면 지급일이 잡힙니다.',
+          short: '정산 서류 제출 필요',
+          waitingNote: '인플루언서가 신분증 사본과 계좌를 제출하면 담당자가 지급일을 잡습니다.',
+        };
+      }
+      if (!String(settlement.payoutDate || '').trim()) {
+        return {
+          ...base,
+          owner: 'brand',
+          managerOnly: true,
+          todo: '제출된 정산 서류를 확인하고 지급일을 입력해 주세요.',
+          short: '지급일 입력 필요',
+          waitingNote: '담당자가 서류를 확인하고 지급일을 정하면 이 단계에 표시됩니다.',
+        };
+      }
+      return {
+        ...base,
+        owner: 'brand',
+        managerOnly: true,
+        todo: '지정한 지급일에 정산금을 보내고 지급 완료를 눌러 주세요.',
+        short: '지급 대기',
+        waitingNote: `담당자가 정한 지급일(${settlement.payoutDate})에 입금됩니다.`,
+      };
+    }
+
     default:
       return null;
   }
@@ -215,11 +284,23 @@ export const collabStepTurns = (
   input: CollabActionInput,
   role: CollabActionRole,
 ): Record<CollabStepKey, CollabStepTurn | null> => {
-  const finished = ['completed', 'cancelled'].includes(String(input.collabStatus || ''));
+  const status = String(input.collabStatus || '');
+  const cancelled = status === 'cancelled';
+  // 완료된 협업에도 정산은 남아 있다. 업로드 확인이 곧 완료 처리라서, 여기서 정산까지
+  // 닫아 버리면 서류를 내고 돈을 받는 마지막 왕복이 화면에서 사라진다.
+  const closedFor = (step: CollabStepKey) =>
+    cancelled || (status === 'completed' && step !== 'settlement');
   const out = {} as Record<CollabStepKey, CollabStepTurn | null>;
   for (const step of COLLAB_STEP_ORDER) {
-    const pending = finished ? null : pendingOf(input, step);
-    out[step] = pending ? { ...pending, mine: pending.owner === sideOf(role) } : null;
+    const pending = closedFor(step) ? null : pendingOf(input, step);
+    out[step] = pending
+      ? {
+          ...pending,
+          // 담당자만 할 수 있는 일은 브랜드의 차례로 세지 않는다. 브랜드 화면에
+          // 누를 버튼이 없는 '진행 요청'이 뜨면 무엇을 기다리는지 알 수 없어진다.
+          mine: pending.owner === sideOf(role) && (!pending.managerOnly || role === 'manager'),
+        }
+      : null;
   }
   return out;
 };
