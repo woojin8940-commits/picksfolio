@@ -87,6 +87,8 @@ export function toCampaignCollabStatus(row: any, role: CollabActionRole): Campai
     uploadUrl: row?.uploadUrl || '',
     uploadConfirmedAt: row?.uploadConfirmedAt || null,
     guideReady: Boolean(row?.guideReady),
+    settlement: row?.settlement || null,
+    fee: Number(row?.fee || 0),
     collabStatus: raw,
   };
 

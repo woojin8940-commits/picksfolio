@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
+import BrandContactCard from '../collab/BrandContactCard';
 import ListupWorkspace from '../collab/ListupWorkspace';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
@@ -255,6 +256,15 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
               {open.description}
             </p>
           )}
+
+          {/* 캠페인을 올린 브랜드 담당자 연락처. 브리프에서 답이 안 나오는 것(제품
+              수령 방법, 촬영 가능 날짜, 2차 활용 범위)은 결국 전화로 풀어야 하는데,
+              그 번호를 찾으러 운영자에게 물어보던 단계를 없앤다. */}
+          <BrandContactCard
+            className="mt-3"
+            campaignId={open.id}
+            brandName={open.brandName || open.businessUsername}
+          />
 
           {/* 확정 기한. 브랜드 화면의 남은 시간이 이 값을 읽는다. 기한을 정하지
               않아도 명단은 이미 브랜드에게 보인다 — 여기서 정하는 것은 표시뿐이다.

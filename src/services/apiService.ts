@@ -1003,6 +1003,32 @@ export const apiService = {
   },
 
   /**
+   * 비즈니스 제안 현황에서 한 줄 내리기.
+   *
+   * `scope: 'hide'` 는 캠페인 협업 줄이다 — 업체 목록에서만 내리고 협업 자체는
+   * 그대로 둔다(인플루언서 진행사항과 담당자 큐가 함께 사라지면 안 된다).
+   * 그 밖은 업체가 보낸 비즈니스 제안이라 실제로 지운다.
+   */
+  async deleteBusinessProposal(
+    businessUsername: string,
+    itemId: string,
+    scope?: 'hide',
+  ): Promise<boolean> {
+    try {
+      const clean = businessUsername.replace(/^biz\//, '').toLowerCase();
+      const query = scope === 'hide' ? '?scope=hide' : '';
+      const res = await fetch(
+        `/api/business-proposals/${encodeURIComponent(clean)}/${encodeURIComponent(itemId)}${query}`,
+        { method: 'DELETE', headers: await authHeaders() },
+      );
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to delete business proposal:', e);
+      return false;
+    }
+  },
+
+  /**
    * 첨부 파일을 올린다. 파일은 우리 서버를 지나가지 않는다.
    *
    * 예전에는 파일을 함수로 보내고 함수가 저장소에 옮겼다. 함수의 요청 본문 한도가
@@ -2791,6 +2817,32 @@ export const apiService = {
   },
 
   /** 담당자가 보는 브랜드 캠페인 목록. 진행 숫자가 함께 온다. */
+  /**
+   * 캠페인을 올린 브랜드 담당자의 연락처. 담당자 화면이 캠페인 하나를 열었을 때만
+   * 부른다 — 목록에 미리 담아 두면 열어 보지도 않은 브랜드의 개인정보까지 내려온다.
+   */
+  async getBrandContact(
+    opts: { campaignId?: string; businessUsername?: string; token?: string },
+  ): Promise<{ contact?: any; error?: string }> {
+    const params = new URLSearchParams();
+    if (opts.campaignId) params.set('campaign', opts.campaignId);
+    else if (opts.businessUsername) params.set('business', opts.businessUsername.replace(/^biz\//, ''));
+    else return { error: '캠페인 또는 브랜드를 지정해 주세요.' };
+
+    try {
+      const res = await fetch(`/api/manager-brand-contact?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '연락처를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get brand contact:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   async getManagerCampaigns(
     opts: { mine?: boolean; token?: string } = {},
   ): Promise<{ campaigns?: any[]; brandPicks?: any[]; managerUsername?: string; error?: string }> {

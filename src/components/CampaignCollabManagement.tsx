@@ -67,6 +67,13 @@ interface Campaign {
   sns_category?: string;
   follower_tiers?: string;
   min_views?: number;
+  /**
+   * 캠페인마다 받는 담당자. 개인정보라서 로그인이 확인된 브랜드 자신의 조회에만
+   * 응답에 담긴다 — 인플루언서의 캠페인 탐색 응답에는 아예 없다.
+   */
+  contact_person?: string;
+  contact_phone?: string;
+  contact_email?: string;
   influencer_styles?: string;
   exclude_keywords?: string;
   target_audience?: string;
@@ -216,7 +223,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
   const fetchCampaigns = useCallback(async () => {
     try {
-      const res = await fetch(`/api/campaigns?business=${businessUsername}`);
+      // 로그인 정보를 실어 보낸다. 담당자 연락처는 계정 주인으로 확인된 요청에만
+      // 내려오고, 수정 화면이 이미 적어 둔 담당자를 되읽으려면 그 값이 필요하다.
+      const res = await fetch(`/api/campaigns?business=${businessUsername}`, {
+        headers: await authHeaders({}, { account: businessUsername }),
+      });
       const data = await res.json();
       const fresh = data.campaigns || [];
       setCampaigns(fresh);
@@ -1368,6 +1379,20 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     );
   }
 
+  /**
+   * 가장 최근에 담당자를 적어 둔 캠페인. 등록 화면의 "지난 캠페인과 동일" 버튼에만
+   * 쓴다. 목록은 created_at 내림차순으로 오므로 처음 걸리는 행이 가장 최근이다.
+   */
+  const lastContact = React.useMemo(() => {
+    const row = campaigns.find(c => c.contact_person && c.contact_phone);
+    if (!row) return null;
+    return {
+      person: row.contact_person || '',
+      phone: row.contact_phone || '',
+      email: row.contact_email || '',
+    };
+  }, [campaigns]);
+
   // --- 캠페인 등록 ---
   if (showForm) {
     return (
@@ -1381,6 +1406,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           businessUsername={businessUsername}
           companyName={companyName}
           editing={editingCampaign}
+          lastContact={lastContact}
           categories={CATEGORIES}
           onCancel={resetForm}
           onSaved={() => {

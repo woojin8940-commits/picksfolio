@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul } from '../../utils/formatters';
+import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul, formatPhoneInput } from '../../utils/formatters';
 import { authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
@@ -88,6 +88,9 @@ export interface CampaignBriefDraft {
   influencer_styles?: string;
   exclude_keywords?: string;
   target_audience?: string;
+  contact_person?: string;
+  contact_phone?: string;
+  contact_email?: string;
 }
 
 interface CampaignRegisterWizardProps {
@@ -95,6 +98,12 @@ interface CampaignRegisterWizardProps {
   companyName: string;
   /** 수정 모드면 기존 캠페인. 새로 만들면 null. */
   editing: CampaignBriefDraft | null;
+  /**
+   * 지난 캠페인에 적어 둔 담당자. 새 캠페인의 담당자 칸을 미리 채우지는 않고,
+   * "지난 캠페인과 같은 담당자" 버튼으로만 쓴다 — 자동으로 채워 두면 담당이
+   * 바뀐 캠페인에도 예전 사람의 번호가 그대로 저장된다.
+   */
+  lastContact?: { person: string; phone: string; email: string } | null;
   categories: Array<{ value: string; label: string }>;
   onCancel: () => void;
   onSaved: () => void;
@@ -149,6 +158,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   businessUsername,
   companyName,
   editing,
+  lastContact,
   categories,
   onCancel,
   onSaved,
@@ -176,6 +186,12 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     product_url: editing?.product_url || '',
     description: editing?.description || '',
     product_provide: editing?.product_provide || 'provide',
+
+    // 캠페인마다 받는 담당자. 계정 가입자와 다를 수 있어(대행사, 담당 교체) 캠페인
+    // 행에 따로 남긴다 — 픽스폴리오 담당자가 이 캠페인 건으로 연락할 상대다.
+    contact_person: editing?.contact_person || '',
+    contact_phone: formatPhoneInput(String(editing?.contact_phone || '')),
+    contact_email: editing?.contact_email || '',
 
     reward_mode: normalizeRewardMode(editing?.reward_mode),
     upload_channel: editing?.upload_channel || CHANNELS[0],
@@ -260,6 +276,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const budgetKrw = Number(digitsOnly(form.budget_krw) || 0);
   const applyHeadcount = Number(digitsOnly(form.apply_headcount) || 0);
   const commissionRate = Number(digitsOnly(form.commission_rate) || 0);
+  // 담당자 연락처는 보기 좋게 하이픈을 넣은 채로 들고 있고, 검사와 저장은 숫자로 한다.
+  const contactPhoneDigits = digitsOnly(form.contact_phone);
   const counts = form.tier_counts;
   // 모집 인원은 방식에 따라 다른 곳에서 나온다 — 배분한 인원 합계이거나, 직접 받은 인원이다.
   const headcount = picksInfluencer ? totalHeadcount(counts) : applyHeadcount;
@@ -382,6 +400,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제품 URL', done: !!form.product_url.trim(), required: false },
       { label: '제품 소개', done: !!form.description.trim(), required: true },
       { label: '제품 제공 방식', done: !!form.product_provide, required: true },
+      { label: '담당자 이름', done: !!form.contact_person.trim(), required: true },
+      { label: '담당자 연락처', done: digitsOnly(form.contact_phone).length >= 9, required: true },
+      { label: '담당자 이메일', done: !!form.contact_email.trim(), required: false },
     ],
     campaign: [
       { label: '진행 방식', done: !!form.reward_mode, required: true },
@@ -418,6 +439,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (!form.product_name.trim()) return '제품명을 입력해 주세요.';
       if (!form.category) return '제품 카테고리를 선택해 주세요.';
       if (!form.description.trim()) return '제품 소개를 입력해 주세요. 인플루언서가 가장 먼저 읽는 내용입니다.';
+      if (!form.contact_person.trim()) return '캠페인 담당자 이름을 입력해 주세요.';
+      if (!contactPhoneDigits) return '캠페인 담당자 연락처를 입력해 주세요.';
+      // 휴대폰(10~11)뿐 아니라 02 지역번호(9)로 적는 브랜드가 있어 9자리부터 받는다.
+      if (contactPhoneDigits.length < 9) return '담당자 연락처를 끝까지 입력해 주세요.';
       return '';
     }
     if (key === 'campaign') {
@@ -542,6 +567,12 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         influencer_styles: picksInfluencer ? form.influencer_styles : [],
         exclude_keywords: picksInfluencer ? form.exclude_keywords : [],
         target_audience: picksInfluencer ? form.target_audience : '',
+
+        // 담당자는 진행 방식과 무관하게 항상 보낸다. 어떤 방식이든 담당자가 브랜드에
+        // 확인할 일이 생긴다.
+        contact_person: form.contact_person.trim(),
+        contact_phone: contactPhoneDigits,
+        contact_email: form.contact_email.trim(),
       };
 
       const res = await fetch('/api/campaigns', {
@@ -845,6 +876,79 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                       <span className="block text-[11px] text-slate-400 font-medium mt-1 pl-6">{p.hint}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/*
+                캠페인 담당자.
+
+                계정 가입 정보에 적힌 연락처만으로는 부족했다. 대행사 계정 하나로 여러
+                브랜드를 올리거나 가입한 사람이 이미 퇴사한 경우, 담당자가 전화를 걸면
+                이 캠페인을 모르는 사람이 받는다. 그래서 캠페인마다 "이 건으로 물어볼
+                사람"을 받는다.
+
+                지난 캠페인 값을 자동으로 채우지 않고 버튼으로 두는 이유: 미리 채워
+                두면 담당이 바뀐 캠페인에도 예전 사람의 번호가 그대로 저장된다. 대신
+                한 번 누르면 채워지므로 매번 다시 적을 필요는 없다.
+              */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-xs font-black text-slate-900">캠페인 담당자 *</p>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      이 캠페인 진행 중 픽스폴리오 담당자가 연락할 분입니다. 제품 발송,
+                      촬영 일정, 2차 활용처럼 브리프로 답이 안 나오는 건을 여기로 확인합니다.
+                    </p>
+                  </div>
+                  {!editing && lastContact?.person && lastContact?.phone && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({
+                        ...prev,
+                        contact_person: lastContact.person,
+                        contact_phone: formatPhoneInput(lastContact.phone),
+                        contact_email: lastContact.email || prev.contact_email,
+                      }))}
+                      className="px-3 py-2 rounded-xl border border-slate-300 bg-white text-[11px] font-black text-slate-600 hover:border-slate-500 flex-shrink-0"
+                    >
+                      지난 캠페인과 동일
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={LABEL}>담당자 이름 *</label>
+                    <input
+                      type="text"
+                      value={form.contact_person}
+                      onChange={e => patch('contact_person', e.target.value.slice(0, 60))}
+                      className={INPUT}
+                      placeholder="김담당"
+                    />
+                  </div>
+                  <div>
+                    <label className={LABEL}>담당자 연락처 *</label>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      value={form.contact_phone}
+                      onChange={e => patch('contact_phone', formatPhoneInput(e.target.value))}
+                      className={INPUT}
+                      placeholder="010-0000-0000"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label className={LABEL}>담당자 이메일</label>
+                  <input
+                    type="email"
+                    value={form.contact_email}
+                    onChange={e => patch('contact_email', e.target.value.slice(0, 200))}
+                    className={INPUT}
+                    placeholder="비워 두면 계정 이메일을 사용합니다"
+                  />
                 </div>
               </div>
             </>

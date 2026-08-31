@@ -1,7 +1,11 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config, Context } from "@netlify/functions";
 import { resolveIdentities } from "./_shared/manager-auth.mts";
-import { addSettlementForProposal, upsertCollabScheduleRecord } from "./_shared/collab-records.mts";
+import {
+  addSettlementForProposal,
+  upsertCollabScheduleRecord,
+  upsertSettlementForProposal,
+} from "./_shared/collab-records.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
@@ -212,6 +216,59 @@ async function advanceProcessStage(db: any, collab: any, stage: any, actorUserna
 }
 
 /**
+ * 이 협업의 정산 항목을 가리키는 키.
+ *
+ * 비즈니스 제안에서 성사된 협업은 제안 id 를, 캠페인 협업은 캠페인과 인플루언서를
+ * 엮은 합성 id 를 쓴다. 정산 항목을 만들 때와 나중에 고칠 때 같은 규칙으로 계산해야
+ * 같은 줄을 찾는다 — 규칙이 두 곳에서 어긋나면 지급일을 적었는데도 인플루언서
+ * 화면의 예정일이 그대로인 일이 생긴다.
+ */
+/**
+ * 정산 항목을 찾는 키. 정산 목록 API 는 캠페인 협업을 `campaign_<캠페인>_<아이디>`
+ * 로 파생하면서 아이디를 소문자로 낮춘다. 여기서 대문자가 섞인 채로 쓰면 같은 협업이
+ * 파생 행과 명시 행 두 줄로 보이고, 담당자가 정한 지급일 대신 파생된 종료일이 그대로
+ * 남는다 — 그래서 같은 규칙으로 소문자로 맞춘다.
+ */
+const settlementProposalId = (collab: any) =>
+  collab.proposal_id ||
+  `campaign_${collab.campaign_id}_${String(collab.creator_username || "").toLowerCase()}`;
+
+/**
+ * 정산 단계 한 덩어리. 역할에 따라 담는 내용이 다르다.
+ *
+ * 신분증 사본 URL 과 계좌번호는 개인정보다. 본인(인플루언서)과 실제로 돈을 보내는
+ * 담당자만 본다. 브랜드에게는 "제출했는가"와 지급일까지만 내려보낸다 — 브랜드가
+ * 볼 이유가 없는 값을 응답에 담아 두면, 화면에서 가리는 것과 무관하게 개발자 도구로
+ * 열린다.
+ */
+function shapeSettlementInfo(row: any, role: CollabRole, fee: number) {
+  const sensitive = role === "influencer" || role === "manager";
+  const submitted = Boolean(row?.submitted_at);
+  return {
+    /** 인플루언서가 신분증·계좌를 냈는가. 세 역할 모두 본다. */
+    submitted,
+    submittedAt: row?.submitted_at || null,
+    /** 담당자가 제출물을 열어 보고 지급 가능으로 확인한 시각. */
+    reviewedAt: row?.reviewed_at || null,
+    reviewedBy: role === "influencer" ? "" : String(row?.reviewed_by || ""),
+    /** 담당자가 적은 실제 지급일 (YYYY-MM-DD). 비면 아직 미정이다. */
+    payoutDate: row?.payout_date ? String(row.payout_date).split("T")[0] : "",
+    payoutMemo: String(row?.payout_memo || ""),
+    scheduledAt: row?.scheduled_at || null,
+    scheduledBy: role === "influencer" ? "" : String(row?.scheduled_by || ""),
+    paidAt: row?.paid_at || null,
+    fee,
+    netFee: netAfterWithholding(fee),
+    /** 개인정보. 본인과 담당자에게만 담는다. */
+    idCardUrl: sensitive ? String(row?.id_card_url || "") : "",
+    idCardName: sensitive ? String(row?.id_card_name || "") : "",
+    bankName: sensitive ? String(row?.bank_name || "") : "",
+    accountHolder: sensitive ? String(row?.account_holder || "") : "",
+    accountNumber: sensitive ? String(row?.account_number || "") : "",
+  };
+}
+
+/**
  * 정산 예약. 업로드가 확인된 시점에만 부른다.
  *
  * 광고비가 0원인 협업(제품 협찬형)은 예약하지 않는다. 그대로 두면 받을 것이 없는
@@ -226,7 +283,7 @@ async function scheduleSettlementFor(db: any, collab: any) {
     const stlNow = new Date().toISOString();
     await addSettlementForProposal({
       id: newId("stl"),
-      proposal_id: collab.proposal_id || `campaign_${collab.campaign_id}_${collab.creator_username}`,
+      proposal_id: settlementProposalId(collab),
       influencer_username: collab.creator_username,
       business_username: collab.business_username,
       company_name: collab.company_name || "",
@@ -440,6 +497,18 @@ export default async (req: Request, context: Context) => {
       const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
 
       /**
+       * 정산 단계의 사실만. 목록 카드도 "지금 누가 무엇을 해야 하는가"를 이 값으로
+       * 판정하므로(collabNextAction), 상세를 열지 않아도 "정산 서류 제출 필요"가
+       * 카드에 뜬다. 개인정보(신분증 URL · 계좌번호)는 목록에 절대 담지 않는다 —
+       * 목록 응답은 화면이 어디서든 캐시하고, 여기 필요한 것은 제출 여부뿐이다.
+       */
+      const settlementRows = (await db.sql`
+        SELECT collab_id, submitted_at, reviewed_at, payout_date, paid_at
+        FROM collab_settlement_info WHERE collab_id = ANY(${ids})
+      `) as any[];
+      const settlementMap = new Map(settlementRows.map((r) => [r.collab_id, r]));
+
+      /**
        * 캠페인 표지. 협업 행에는 제목과 브랜드 이름만 들어 있어서, 목록을 카드로
        * 그리면 사진 자리가 비고 마감일도 알 수 없다. 브랜드가 보는 캠페인 리스트와
        * 같은 모양으로 그리려면 캠페인 쪽 값이 필요하다.
@@ -617,6 +686,15 @@ export default async (req: Request, context: Context) => {
           fee: Number(termMap.get(row.id)?.fee || 0),
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
           uploadConfirmedAt: row.upload_confirmed_at || null,
+          settlement: (() => {
+            const info = settlementMap.get(row.id);
+            return {
+              submitted: Boolean(info?.submitted_at),
+              reviewedAt: info?.reviewed_at || null,
+              payoutDate: info?.payout_date ? String(info.payout_date).split("T")[0] : "",
+              paidAt: info?.paid_at || null,
+            };
+          })(),
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
           scheduleEnd: row.schedule_end || "",
@@ -664,7 +742,7 @@ export default async (req: Request, context: Context) => {
       if (role === "brand" || role === "manager") {
         await refreshStaleProfileImages(db, [norm(collab.creator_username)]);
       }
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, channelRows, siteRows] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
@@ -673,6 +751,7 @@ export default async (req: Request, context: Context) => {
         db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as Promise<any[]>,
+        db.sql`SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}` as Promise<any[]>,
         // 얼굴과 인스타 아이디. 목록과 같은 곳에서 읽어야 목록에서 누른 사람과 열린
         // 화면의 사람이 같아 보인다.
         db.sql`
@@ -756,6 +835,11 @@ export default async (req: Request, context: Context) => {
           avatarFromSite((siteRows as any[])?.[0]),
         ),
         shipping: shapeShipping((shippingRows as any[])?.[0]),
+        settlement: shapeSettlementInfo(
+          (settlementRows as any[])?.[0],
+          role,
+          Number(terms?.fee || 0),
+        ),
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
           // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
@@ -1002,6 +1086,211 @@ export default async (req: Request, context: Context) => {
           ...actor,
           stageKey: stage?.stage_key || "shipping",
           summary: "배송 정보 입력",
+        });
+        return Response.json({ success: true });
+      }
+
+      // 인플루언서: 정산 서류(신분증 사본 · 입금 계좌) ---------------------
+      //
+      // 원천징수 신고와 실제 이체에 필요한 값이다. 지금까지는 카카오톡·메일로
+      // 오갔고, 어느 협업의 것인지 짝이 맞지 않아 계좌를 잘못 옮겨 적는 일이
+      // 있었다. 협업 한 줄에 붙여 두면 담당자가 그 자리에서 보고 보낸다.
+      case "save_settlement_info": {
+        if (role !== "influencer" && role !== "manager") {
+          return jsonError("정산 서류는 인플루언서가 입력합니다.", 403);
+        }
+        const idCardUrl = String((body as any).idCardUrl || "").trim();
+        const idCardName = String((body as any).idCardName || "").trim().slice(0, 240);
+        const bankName = String((body as any).bankName || "").trim().slice(0, 40);
+        const accountHolder = String((body as any).accountHolder || "").trim().slice(0, 60);
+        // 계좌번호는 숫자와 하이픈만. 은행 앱에서 복사하면 공백과 문자가 섞여 들어온다.
+        const accountNumber = String((body as any).accountNumber || "").replace(/[^0-9-]/g, "").slice(0, 40);
+
+        if (!isUploadedFileUrl(idCardUrl)) {
+          return jsonError("신분증 사본 파일을 올려 주세요.");
+        }
+        if (!bankName) return jsonError("은행명을 입력해 주세요.");
+        if (!accountHolder) return jsonError("예금주명을 입력해 주세요.");
+        if (accountNumber.replace(/-/g, "").length < 6) {
+          return jsonError("계좌번호를 확인해 주세요.");
+        }
+
+        await db.sql`
+          INSERT INTO collab_settlement_info (
+            collab_id, id_card_url, id_card_name, bank_name, account_holder, account_number,
+            submitted_at, submitted_by
+          ) VALUES (
+            ${collabId}, ${idCardUrl}, ${idCardName}, ${bankName}, ${accountHolder}, ${accountNumber},
+            NOW(), ${caller.username}
+          )
+          ON CONFLICT (collab_id) DO UPDATE SET
+            id_card_url = EXCLUDED.id_card_url,
+            id_card_name = EXCLUDED.id_card_name,
+            bank_name = EXCLUDED.bank_name,
+            account_holder = EXCLUDED.account_holder,
+            account_number = EXCLUDED.account_number,
+            submitted_at = NOW(),
+            submitted_by = EXCLUDED.submitted_by,
+            -- 서류를 다시 냈으면 담당자 확인은 무효다. 바뀐 계좌를 확인 없이
+            -- 지급하면 예전 계좌로 보내거나 반송된다.
+            reviewed_at = NULL,
+            reviewed_by = '',
+            updated_at = NOW()
+        `;
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "settlement_info_saved",
+          ...actor,
+          stageKey: "settlement",
+          summary: "정산 서류 제출 (신분증 사본 · 입금 계좌)",
+        });
+        return Response.json({ success: true });
+      }
+
+      // 담당자: 정산 일정 입력 ---------------------------------------------
+      //
+      // 자동으로 잡히는 "다음 달 말일"은 예정일이고, 정산 회차에 따라 앞뒤로
+      // 움직인다. 담당자가 실제 지급일을 적으면 그 값이 정산 항목의 예정일이 되어
+      // 인플루언서 정산금 화면과 협업 현황 캘린더에 그대로 올라간다.
+      case "schedule_settlement": {
+        if (role !== "manager") return jsonError("정산 일정은 담당자가 입력합니다.", 403);
+
+        const payoutDate = (() => {
+          const v = String((body as any).payoutDate || "").trim().split("T")[0];
+          return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "";
+        })();
+        if (!payoutDate) return jsonError("지급일을 선택해 주세요.");
+        const payoutMemo = String((body as any).payoutMemo || "").trim().slice(0, 500);
+        // 서류를 확인했다고 함께 체크할 수 있다. 확인 없이 날짜만 잡는 것도 막지
+        // 않는다 — 서류가 늦게 와도 지급 회차는 미리 정해지는 경우가 있다.
+        const markReviewed = (body as any).markReviewed !== false;
+
+        const infoRows = (await db.sql`
+          SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}
+        `) as any[];
+        const info = infoRows?.[0] || null;
+
+        await db.sql`
+          INSERT INTO collab_settlement_info (
+            collab_id, payout_date, payout_memo, scheduled_at, scheduled_by
+          ) VALUES (
+            ${collabId}, ${payoutDate}, ${payoutMemo}, NOW(), ${caller.username}
+          )
+          ON CONFLICT (collab_id) DO UPDATE SET
+            payout_date = EXCLUDED.payout_date,
+            payout_memo = EXCLUDED.payout_memo,
+            scheduled_at = NOW(),
+            scheduled_by = EXCLUDED.scheduled_by,
+            updated_at = NOW()
+        `;
+
+        if (markReviewed && info?.submitted_at) {
+          await db.sql`
+            UPDATE collab_settlement_info
+            SET reviewed_at = COALESCE(reviewed_at, NOW()), reviewed_by = ${caller.username}, updated_at = NOW()
+            WHERE collab_id = ${collabId}
+          `;
+        }
+
+        // 정산 항목의 예정일을 담당자가 적은 날짜로 맞춘다. 항목이 아직 없으면
+        // (업로드 확인 전에 회차를 먼저 잡은 경우) 여기서 만든다.
+        const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
+        const fee = Number(termsRows?.[0]?.fee || 0);
+        try {
+          await upsertSettlementForProposal(
+            settlementProposalId(collab),
+            collab.business_username,
+            collab.creator_username,
+            {
+              scheduled_date: payoutDate,
+              status: "scheduled",
+              ...(payoutMemo ? { memo: payoutMemo } : {}),
+              ...(fee > 0 ? { amount: fee } : {}),
+            },
+            {
+              company_name: collab.company_name || "",
+              title: collab.campaign_title || "",
+              amount: fee,
+              amount_pending: fee <= 0,
+              memo: payoutMemo || "담당자 지정 지급일",
+            },
+          );
+        } catch (stlErr: any) {
+          console.error("[collab-workflow] 정산 일정 반영 실패:", stlErr);
+          return jsonError(
+            stlErr?.name === "RecordWriteConflictError"
+              ? "정산 내역이 방금 변경되었습니다. 다시 시도해 주세요."
+              : "정산 일정을 반영하지 못했습니다.",
+            stlErr?.name === "RecordWriteConflictError" ? 409 : 500,
+          );
+        }
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "settlement_scheduled",
+          ...actor,
+          stageKey: "settlement",
+          summary: `정산 지급일 ${payoutDate} 지정`,
+        });
+        return Response.json({ success: true, payoutDate });
+      }
+
+      // 담당자: 지급 완료 ---------------------------------------------------
+      case "complete_settlement": {
+        if (role !== "manager") return jsonError("지급 처리는 담당자가 합니다.", 403);
+
+        const infoRows = (await db.sql`
+          SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}
+        `) as any[];
+        const info = infoRows?.[0] || null;
+        if (!info?.submitted_at) {
+          return jsonError("아직 인플루언서가 정산 서류를 제출하지 않았습니다.", 409);
+        }
+
+        const paidDate = (() => {
+          const v = String((body as any).paidDate || "").trim().split("T")[0];
+          return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : todayInSeoul();
+        })();
+
+        await db.sql`
+          UPDATE collab_settlement_info
+          SET paid_at = COALESCE(paid_at, NOW()),
+              paid_by = ${caller.username},
+              payout_date = COALESCE(payout_date, ${paidDate}::date),
+              reviewed_at = COALESCE(reviewed_at, NOW()),
+              reviewed_by = CASE WHEN reviewed_by = '' THEN ${caller.username} ELSE reviewed_by END,
+              updated_at = NOW()
+          WHERE collab_id = ${collabId}
+        `;
+
+        try {
+          await upsertSettlementForProposal(
+            settlementProposalId(collab),
+            collab.business_username,
+            collab.creator_username,
+            {
+              status: "completed",
+              completed_at: new Date().toISOString(),
+              scheduled_date: info.payout_date ? String(info.payout_date).split("T")[0] : paidDate,
+            },
+          );
+        } catch (stlErr: any) {
+          console.error("[collab-workflow] 지급 완료 반영 실패:", stlErr);
+          return jsonError(
+            stlErr?.name === "RecordWriteConflictError"
+              ? "정산 내역이 방금 변경되었습니다. 다시 시도해 주세요."
+              : "지급 완료를 반영하지 못했습니다.",
+            stlErr?.name === "RecordWriteConflictError" ? 409 : 500,
+          );
+        }
+
+        await logCollabEvent(db, {
+          collabId,
+          type: "settlement_completed",
+          ...actor,
+          stageKey: "settlement",
+          summary: "정산 지급 완료",
         });
         return Response.json({ success: true });
       }

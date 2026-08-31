@@ -77,6 +77,52 @@ const stripPrivateFields = (rows: any[]) =>
   rows.map(({ groupbuy_commission_rate: _rate, ...rest }) => rest);
 
 /**
+ * 캠페인 담당자. 등록할 때마다 "이 캠페인에 대해 물어볼 사람"을 받는다.
+ *
+ * 계정에 적힌 가입자 연락처로는 부족했다. 대행사 계정 하나로 여러 브랜드를 올리거나
+ * 가입한 사람이 이미 퇴사한 경우, 담당자가 전화를 걸면 이 캠페인을 모르는 사람이 받는다.
+ *
+ * 번호는 숫자만 남긴다. 화면에서는 하이픈을 넣어 보여 주지만, 저장 형태가 사람마다
+ * 다르면(010-1234-5678 / 01012345678 / +82 10…) 같은 번호인지 비교할 수 없다.
+ */
+const contactName = (raw: unknown) => String(raw ?? "").trim().slice(0, 60);
+const contactPhone = (raw: unknown) => String(raw ?? "").replace(/[^\d]/g, "").slice(0, 11);
+const contactEmail = (raw: unknown) => String(raw ?? "").trim().slice(0, 200);
+
+/**
+ * 담당자 칸 검사. 자릿수는 9~11 로 본다 — 휴대폰(10~11)뿐 아니라 02 지역번호(9)로
+ * 적는 브랜드가 있어서, 휴대폰만 허용하면 유효한 번호가 반려된다.
+ */
+const contactError = (person: string, phone: string): string => {
+  if (!person) return "캠페인 담당자 이름을 입력해 주세요.";
+  if (!phone) return "캠페인 담당자 연락처를 입력해 주세요.";
+  if (phone.length < 9 || phone.length > 11) return "담당자 연락처의 자릿수를 확인해 주세요.";
+  return "";
+};
+
+/**
+ * 담당자 연락처를 응답에서 떼어 낸다.
+ *
+ * 이 함수의 존재 이유: GET 은 `c.*` 로 캠페인 행을 그대로 내려보내고, 같은 응답을
+ * 인플루언서의 캠페인 탐색 화면도 읽는다. 컬럼을 추가한 것만으로 브랜드 담당자의
+ * 이름과 휴대폰 번호가 캠페인을 구경하는 모든 사람에게 흘러가게 되므로, 계정 주인으로
+ * 확인된 요청이 아니면 무조건 떼어 낸다(담당자는 별도 API 로 본다).
+ */
+const stripContact = (rows: any[]) =>
+  rows.map(({ contact_person: _p, contact_phone: _ph, contact_email: _e, ...rest }) => rest);
+
+/**
+ * 요청한 사람이 그 브랜드 계정의 주인인지 확인한다. 조회는 원래 로그인 없이도
+ * 되는 곳이라, 토큰이 없거나 남의 계정이면 조용히 false 를 돌려주고 연락처만 가린다
+ * (401 로 막으면 로그인 안 한 사람의 캠페인 탐색이 통째로 멈춘다).
+ */
+const viewerOwnsAccount = async (req: Request, businessUsername: string): Promise<boolean> => {
+  if (!businessUsername) return false;
+  const auth = await requireAccountOwner(req, businessUsername);
+  return auth.ok;
+};
+
+/**
  * 목록 페이지 나누기. 캠페인이 쌓이면 한 번에 다 내려보내는 것이 무의미해진다
  * (화면도 무한 스크롤이 아니라 페이지 버튼을 쓴다).
  *
@@ -117,8 +163,12 @@ export default async (req: Request) => {
           return Response.json({ error: "Campaign not found" }, { status: 404 });
         }
         const one = withRecruitState(result);
-        const forOwner = url.searchParams.get("business") === String((result[0] as any).business_username || "");
-        return Response.json({ campaign: forOwner ? one[0] : stripPrivateFields(one)[0] });
+        const owner = String((result[0] as any).business_username || "");
+        const forOwner = url.searchParams.get("business") === owner;
+        const shaped = forOwner ? one[0] : stripPrivateFields(one)[0];
+        // 담당자 연락처는 파라미터가 아니라 토큰으로 확인된 주인에게만 남긴다.
+        const verified = forOwner && (await viewerOwnsAccount(req, owner));
+        return Response.json({ campaign: verified ? shaped : stripContact([shaped])[0] });
       }
 
       const type = url.searchParams.get("type") || "";
@@ -159,7 +209,7 @@ export default async (req: Request) => {
       // 그대로 보여 준다 — 수정·재개·삭제해야 하므로.
       if (!business) {
         const open = campaigns.filter((c) => !c.recruit_closed && isOpenApplyMode(c.reward_mode));
-        const paged = paginate(stripPrivateFields(open), pageParam, limitParam);
+        const paged = paginate(stripContact(stripPrivateFields(open)), pageParam, limitParam);
         return Response.json({
           campaigns: paged.rows,
           total: paged.total,
@@ -169,7 +219,10 @@ export default async (req: Request) => {
         });
       }
 
-      const paged = paginate(campaigns, pageParam, limitParam);
+      // 브랜드 자신의 관리 화면. 로그인이 확인되면 담당자 연락처까지 내려보낸다 —
+      // 수정 화면이 이미 적어 둔 담당자를 되읽어야 하기 때문이다.
+      const verified = await viewerOwnsAccount(req, business);
+      const paged = paginate(verified ? campaigns : stripContact(campaigns), pageParam, limitParam);
       return Response.json({
         campaigns: paged.rows,
         total: paged.total,
@@ -193,6 +246,13 @@ export default async (req: Request) => {
       const auth = await requireAccountOwner(req, String(body.business_username));
       if (!auth.ok) return auth.response;
 
+      // 담당자 이름 · 연락처는 등록할 때마다 받는다. 화면에서도 막지만 서버에서
+      // 한 번 더 본다 — 이 값이 비면 담당자는 다시 "누구에게 전화하나"로 돌아간다.
+      const person = contactName(body.contact_person);
+      const phone = contactPhone(body.contact_phone);
+      const contactErr = contactError(person, phone);
+      if (contactErr) return Response.json({ error: contactErr }, { status: 400 });
+
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       // 광고 목적(ad_objective)은 || 가 아니라 ?? 로 받는다. 지원을 받아 고르는 방식
@@ -207,7 +267,8 @@ export default async (req: Request) => {
           package_tier, reward_mode, tier_counts,
           product_provide, ad_objective, budget_krw, seeding_count, groupbuy_commission_rate, fast_track,
           influencer_gender, influencer_ages, sns_category, follower_tiers, min_views,
-          influencer_styles, exclude_keywords, target_audience
+          influencer_styles, exclude_keywords, target_audience,
+          contact_person, contact_phone, contact_email
         )
         VALUES (
           ${id}, ${body.business_username}, ${body.type}, ${body.title}, ${body.description || ""},
@@ -228,7 +289,8 @@ export default async (req: Request) => {
           ${body.influencer_gender || ""}, ${csv(body.influencer_ages)},
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
           ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
-          ${body.target_audience || ""}
+          ${body.target_audience || ""},
+          ${person}, ${phone}, ${contactEmail(body.contact_email)}
         )
       `;
 
@@ -257,6 +319,23 @@ export default async (req: Request) => {
       // 수정할 수 있도록 확인한다.
       const auth = await requireAccountOwner(req, String(c.business_username || ""));
       if (!auth.ok) return auth.response;
+
+      /**
+       * 담당자 칸의 수정 규칙.
+       *
+       * 빈 값이 오면 지우지 않고 기존 값을 유지한다. 이 API 는 마감 토글 · 가이드
+       * 파일 저장처럼 몇 칸만 보내는 PATCH 도 받기 때문에, 안 보낸 것을 "지움"으로
+       * 읽으면 그 호출들이 담당자 연락처를 조용히 비운다.
+       *
+       * 대신 값을 적어 보냈는데 번호 자릿수가 안 맞으면 막는다 — 잘못된 번호가
+       * 저장되면 담당자는 없는 번호로 전화를 건다.
+       */
+      const nextPerson = contactName(updates.contact_person) || contactName(c.contact_person);
+      const nextPhone = contactPhone(updates.contact_phone) || contactPhone(c.contact_phone);
+      const askedPhone = contactPhone(updates.contact_phone);
+      if (askedPhone && (askedPhone.length < 9 || askedPhone.length > 11)) {
+        return Response.json({ error: "담당자 연락처의 자릿수를 확인해 주세요." }, { status: 400 });
+      }
 
       let newStatus = updates.status ?? c.status;
       if (c.status === 'pending_approval' || c.status === 'admin_rejected') {
@@ -306,6 +385,9 @@ export default async (req: Request) => {
             influencer_styles = ${updates.influencer_styles === undefined ? (c.influencer_styles ?? "") : csv(updates.influencer_styles)},
             exclude_keywords = ${updates.exclude_keywords === undefined ? (c.exclude_keywords ?? "") : csv(updates.exclude_keywords)},
             target_audience = ${updates.target_audience ?? c.target_audience ?? ""},
+            contact_person = ${nextPerson},
+            contact_phone = ${nextPhone},
+            contact_email = ${contactEmail(updates.contact_email) || contactEmail(c.contact_email)},
             status = ${newStatus},
             updated_at = NOW()
         WHERE id = ${id}

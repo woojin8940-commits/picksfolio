@@ -18,13 +18,22 @@ import {
 } from '../../utils/collabNextAction';
 
 /**
- * 캠페인 진행 프로세스 — 다섯 단계 하나의 화면.
+ * 캠페인 진행 프로세스 — 한 화면에 모든 단계.
  *
  *   1. 콘텐츠 가이드   브랜드가 가이드 파일을 올리고, 인플루언서가 확인한다
  *   2. 제품 배송       인플루언서가 주소를 적고, 브랜드가 보낸다
  *   3. 기획안 피드백   인플루언서 기획안 입력칸 "바로 밑"에 브랜드 피드백칸
  *   4. 영상 피드백     초안 영상 "바로 밑"에 브랜드 피드백칸
  *   5. 업로드          게시물 링크 · 업로드 확인 · 광고 파트너십 코드
+ *   6. 정산            인플루언서가 신분증 사본 · 계좌를 내고, 담당자가 지급일을 잡는다
+ *
+ * 여섯 번째 칸은 업로드가 확인된 뒤에만 열린다. 업로드 확인으로 협업은 끝나지만 돈은
+ * 그때부터 움직이는데, 그 왕복(서류 제출 → 담당자 확인 → 지급일 통보 → 입금)이
+ * 전부 카카오톡·메일에 있었다. 인플루언서는 "언제 들어오나"를 물어봐야 알 수 있었고,
+ * 담당자는 어느 협업의 계좌인지 짝을 맞춰야 했다. 협업 한 줄 안으로 옮긴다.
+ *
+ * 정산 칸의 브랜드 몫은 없다. 브랜드에게는 "제출 완료 / 지급일"까지만 보이고 신분증
+ * 사본과 계좌번호는 응답에도 담기지 않는다(개인정보이고, 돈을 보내는 것은 담당자다).
  *
  * 브랜드와 인플루언서가 같은 컴포넌트를 쓴다. 예전에는 양쪽 화면이 따로 있어서 같은
  * 단계를 서로 다른 이름과 다른 순서로 보고 있었다 — 브랜드는 "대본 피드백", 인플루언서는
@@ -67,7 +76,7 @@ type Props = {
   onStepComplete?: (step: StepKey) => void;
 };
 
-type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload';
+type StepKey = 'guide' | 'shipping' | 'plan' | 'video' | 'upload' | 'settlement';
 
 const STEPS: { key: StepKey; title: string; lead: string }[] = [
   { key: 'guide', title: '콘텐츠 가이드', lead: '브랜드가 올린 가이드를 확인합니다.' },
@@ -75,6 +84,7 @@ const STEPS: { key: StepKey; title: string; lead: string }[] = [
   { key: 'plan', title: '기획안 피드백', lead: '기획안을 쓰면 바로 아래에 피드백이 붙습니다.' },
   { key: 'video', title: '영상 피드백', lead: '초안 영상에 브랜드가 피드백을 남깁니다.' },
   { key: 'upload', title: '업로드', lead: '게시물 링크와 광고 파트너십 코드를 남깁니다.' },
+  { key: 'settlement', title: '정산', lead: '신분증 사본과 계좌를 내면 담당자가 지급일을 잡습니다.' },
 ];
 
 /** 예전 아홉 단계 협업의 단계 이름까지 같은 칸으로 끌어온다(서버와 같은 표). */
@@ -83,7 +93,12 @@ const STAGE_KEYS: Record<StepKey, string[]> = {
   shipping: ['shipping'],
   plan: ['plan', 'script', 'script_review'],
   video: ['video', 'content', 'content_review'],
+  // 'settlement' 는 예전 아홉 단계 묶음에서 업로드 확인 뒤에 붙던 이름이라 upload
+  // 칸이 그대로 이어받는다. 새 정산 칸은 collab_stages 를 보지 않고
+  // collab_settlement_info 만 본다 — 여기에 'settlement' 를 또 넣으면 옛 협업의
+  // 업로드 칸과 정산 칸이 같은 단계 행을 두고 서로 다른 말을 한다.
   upload: ['upload', 'confirm', 'settlement'],
+  settlement: [],
 };
 
 /**
@@ -137,9 +152,16 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const guideline = detail?.guideline || {};
   const guideFiles: any[] = Array.isArray(guideline.files) ? guideline.files : [];
   const shipping = detail?.shipping || {};
+  const settlement = detail?.settlement || {};
   const collab = detail?.collab || {};
   const isInfluencer = role === 'influencer';
   const isBrandSide = role === 'brand' || role === 'manager';
+  /** 정산 지급은 담당자만 한다. 브랜드는 같은 칸을 읽기만 한다. */
+  const isManager = role === 'manager';
+  /** 확정 보수. 0원(제품 협찬형)이면 정산 칸 자체가 없다. */
+  const settlementFee = Number(detail?.terms?.fee ?? settlement.fee ?? 0);
+  /** 정산 칸을 그릴 수 있는가. 업로드 확인 전에는 무엇에 쓰는 서류인지 알 수 없다. */
+  const settlementOpen = settlementFee > 0 && Boolean(collab.uploadConfirmedAt);
   /**
    * 인플루언서가 열어 볼 가이드가 실제로 있는가.
    *
@@ -174,6 +196,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (step === 'guide') return stageDone;
     if (step === 'shipping') return stageDone || String(shipping.status) === 'shipped';
     if (step === 'upload') return stageDone || Boolean(collab.uploadConfirmedAt);
+    // 정산은 단계 행이 아니라 실제 지급으로 닫힌다. 정산할 것이 없는 협업(0원)은
+    // 열리지 않은 칸이므로 완료로 그려도 진행을 잘못 말하지 않는다.
+    if (step === 'settlement') return !settlementOpen || Boolean(settlement.paidAt);
     return stageDone;
   };
 
@@ -194,6 +219,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (step === 'plan') return Boolean(workOf('plan')) || stageSubmitted;
     if (step === 'video') return Boolean(workOf('video')) || stageSubmitted;
     if (step === 'upload') return Boolean(collab.uploadUrl) || stageSubmitted;
+    if (step === 'settlement') return Boolean(settlement.submitted);
     return stageSubmitted;
   };
 
@@ -218,6 +244,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       shipping: { filled: Boolean(shipping.filled), status: String(shipping.status || '') },
       uploadUrl: String(collab.uploadUrl || ''),
       uploadConfirmedAt: collab.uploadConfirmedAt || null,
+      settlement: {
+        submitted: Boolean(settlement.submitted),
+        payoutDate: String(settlement.payoutDate || ''),
+        paidAt: settlement.paidAt || null,
+      },
+      fee: settlementFee,
       guideReady,
       collabStatus: String(collab.status || ''),
     }),
@@ -276,7 +308,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
   const soloStep = onlyStep && STEPS.some(s => s.key === onlyStep) ? (onlyStep as StepKey) : '';
   const solo = Boolean(soloStep) && !showAllSteps;
-  const visibleStates = solo ? states.filter(s => s.key === soloStep) : states;
+  // 정산 칸은 업로드 확인 전에는 아예 그리지 않는다. 촬영도 시작하지 않은 시점에
+  // "신분증 사본" 줄이 보이면 무엇에 쓰는 서류인지 알 수 없고, 보수가 없는
+  // 협찬형 협업에는 정산할 것이 없다.
+  const shownStates = states.filter(s => s.key !== 'settlement' || settlementOpen);
+  const visibleStates = solo ? shownStates.filter(s => s.key === soloStep) : shownStates;
 
   const [busy, setBusy] = useState(false);
 
@@ -421,6 +457,18 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
+
+  // ── 6. 정산 ─────────────────────────────────────────────────────────
+  /**
+   * 인플루언서가 내는 정산 서류. 신분증 사본은 파일로, 계좌는 세 칸으로 받는다.
+   *
+   * 예금주명을 따로 받는 이유: 본인 명의가 아닌 계좌를 적어 오는 경우가 있고, 그러면
+   * 은행에서 반송된다. 신분증의 이름과 맞춰 보라는 안내를 이 칸 옆에 붙여 둔다.
+   */
+  const [stl, setStl] = useState({ bankName: '', accountHolder: '', accountNumber: '' });
+  const [idCardFile, setIdCardFile] = useState<File | null>(null);
+  /** 담당자가 적는 지급일과 메모. */
+  const [payout, setPayout] = useState({ date: '', memo: '' });
   const [reply, setReply] = useState<Record<string, string>>({});
   /** 파일이 올라가는 중의 진행률(0~1). 큰 영상은 몇십 초가 걸려서 표시가 없으면 멈춘 줄 안다. */
   const [uploadPct, setUploadPct] = useState(-1);
@@ -458,6 +506,68 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     setAdCode(String(collab.adCode || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planWork?.id, videoWork?.id, collab.uploadUrl, collab.adCode]);
+
+  /**
+   * 저장된 정산 값을 칸에 되돌려 놓는다. 배송 칸과 같은 이유로, 저장한 값 전체를 한
+   * 문자열로 묶어 비교한다 — 한 칸만 바뀐 저장이 화면에 되돌아오지 않는 구멍이 없다.
+   */
+  const settlementKey = [
+    settlement.bankName, settlement.accountHolder, settlement.accountNumber,
+    settlement.payoutDate, settlement.payoutMemo, settlement.submittedAt, settlement.paidAt,
+  ].join('|');
+
+  useEffect(() => {
+    setStl({
+      bankName: settlement.bankName || '',
+      accountHolder: settlement.accountHolder || '',
+      accountNumber: settlement.accountNumber || '',
+    });
+    setPayout({ date: settlement.payoutDate || '', memo: settlement.payoutMemo || '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settlementKey]);
+
+  /**
+   * 정산 서류 제출. 신분증 사본을 먼저 올리고, 그 URL 과 계좌를 함께 보낸다.
+   *
+   * 이미 낸 적이 있으면 파일을 다시 고르지 않아도 저장된다(계좌만 고치는 경우).
+   * 서버는 서류가 다시 들어오면 담당자 확인을 무효로 되돌린다 — 바뀐 계좌를 확인 없이
+   * 지급하면 예전 계좌로 나간다.
+   */
+  const saveSettlementInfo = async () => {
+    if (!stl.bankName.trim()) { onNotify('은행명을 입력해 주세요.', 'error'); return; }
+    if (!stl.accountHolder.trim()) { onNotify('예금주명을 입력해 주세요.', 'error'); return; }
+    if (stl.accountNumber.replace(/[^0-9]/g, '').length < 6) { onNotify('계좌번호를 확인해 주세요.', 'error'); return; }
+
+    let idCardUrl = String(settlement.idCardUrl || '');
+    let idCardName = String(settlement.idCardName || '');
+    if (idCardFile) {
+      const up = await putFile(idCardFile);
+      if (!up.url) {
+        onNotify(up.error || '신분증 사본 업로드에 실패했습니다.', 'error');
+        return;
+      }
+      idCardUrl = up.url;
+      idCardName = idCardFile.name;
+    }
+    if (!idCardUrl) { onNotify('신분증 사본 파일을 올려 주세요.', 'error'); return; }
+
+    const ok = await act(
+      'save_settlement_info',
+      { idCardUrl, idCardName, ...stl },
+      '정산 서류를 제출했습니다. 담당자가 확인 후 지급일을 알려 드립니다.',
+    );
+    if (ok) setIdCardFile(null);
+  };
+
+  /** 담당자: 지급일 저장. 이 날짜가 인플루언서 정산금 화면과 협업 현황 캘린더에 그대로 뜬다. */
+  const savePayoutDate = async () => {
+    if (!payout.date) { onNotify('지급일을 선택해 주세요.', 'error'); return; }
+    await act(
+      'schedule_settlement',
+      { payoutDate: payout.date, payoutMemo: payout.memo },
+      '지급일을 저장했습니다. 인플루언서 협업 현황에 일정으로 올라갑니다.',
+    );
+  };
 
   const patchScene = (index: number, key: keyof StoryboardScene, value: string) =>
     setScenes(prev => prev.map((s, i) => (i === index ? { ...s, [key]: value } : s)));
@@ -774,7 +884,10 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    * 안드로이드 WebView 가 카메라와 파일앱을 함께 묶은 선택 창을 자기 글자로 띄우는데,
    * 그 창의 제목·항목은 앱 리소스에서 와서 영어로 남는다. 형식을 하나하나 적으면
    * 기기의 파일·갤러리 선택 화면(시스템이 한국어로 그린다)으로 바로 들어간다.
-   * 카메라로 찍어 올리는 길은 아래 `capture` 버튼으로 따로 낸다.
+   *
+   * 그 자리에서 찍어 올리는 버튼(`capture`)은 두지 않는다. 초안 영상은 편집을 마친
+   * 파일을 내는 자리인데, 촬영 버튼이 있으면 카메라 원본을 그대로 올리는 길이 열려
+   * 검수에서 되돌아오는 일이 반복됐다. 찍은 영상도 갤러리에서 골라 올린다.
    */
   const renderFilePicker = (opts: {
     id: string;
@@ -783,8 +896,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     onPick: (file: File | null) => void;
     label: string;
     hint?: string;
-    /** 그 자리에서 찍어 올리는 버튼. 영상 단계에서만 쓴다. */
-    captureLabel?: string;
   }) => (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -801,24 +912,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
         >
           {opts.label}
         </label>
-        {opts.captureLabel && (
-          <>
-            <input
-              id={`${opts.id}-capture`}
-              type="file"
-              accept="video/*"
-              capture="environment"
-              onChange={e => opts.onPick(e.target.files?.[0] || null)}
-              className="sr-only"
-            />
-            <label
-              htmlFor={`${opts.id}-capture`}
-              className="cursor-pointer px-3 py-2 rounded-lg border border-slate-300 bg-white text-[11px] font-black text-slate-700 hover:border-slate-900 hover:text-slate-900 transition-colors"
-            >
-              {opts.captureLabel}
-            </label>
-          </>
-        )}
         {opts.file && (
           <button
             type="button"
@@ -1171,7 +1264,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   file: videoFile,
                   onPick: setVideoFile,
                   label: '영상 파일 선택',
-                  captureLabel: '지금 촬영하기',
                   hint: `mp4 · mov · webm 파일 · 최대 ${UPLOAD_MAX_MB}MB`,
                 })}
                 <button
@@ -1217,6 +1309,208 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             {videoWork && renderReviewComplete('video', '영상')}
           </div>
         );
+
+      /**
+       * 정산. 인플루언서는 서류를 내고, 담당자는 그것을 보고 지급일을 잡는다.
+       *
+       * 브랜드에게는 입력 칸이 없다. 신분증 사본과 계좌번호는 응답에도 담기지 않고
+       * (서버에서 역할별로 걸러 낸다), 지급을 실행하는 것은 담당자다.
+       */
+      case 'settlement': {
+        const paid = Boolean(settlement.paidAt);
+        const payoutDate = String(settlement.payoutDate || '');
+        return (
+          <div className="space-y-3">
+            {/* 맨 위 한 줄로 "지금 어디까지 왔는가". 세 역할이 같은 문장을 본다. */}
+            <div className={`rounded-lg px-3 py-2.5 ${paid ? 'bg-emerald-50 border border-emerald-100' : payoutDate ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50'}`}>
+              <p className={`text-xs font-black ${paid ? 'text-emerald-700' : payoutDate ? 'text-blue-700' : 'text-slate-500'}`}>
+                {paid
+                  ? `지급 완료 · ${fmtDate(settlement.paidAt)}`
+                  : payoutDate
+                    ? `지급 예정일 ${payoutDate}`
+                    : settlement.submitted
+                      ? '서류 제출 완료 · 담당자가 지급일을 정하는 중'
+                      : '정산 서류 제출 전'}
+              </p>
+              {settlementFee > 0 && (
+                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                  {settlementFee.toLocaleString('ko-KR')}원 · 원천징수 3.3% 차감 후{' '}
+                  {Number(settlement.netFee || Math.floor(settlementFee * 0.967)).toLocaleString('ko-KR')}원 입금
+                </p>
+              )}
+              {settlement.payoutMemo && (
+                <p className="text-[11px] font-medium text-slate-500 mt-1">{settlement.payoutMemo}</p>
+              )}
+            </div>
+
+            {isInfluencer && !paid && (
+              <>
+                {/* 신분증 사본. 원천징수 신고에 필요하고, 예금주 확인에도 쓴다. */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-black text-slate-400">신분증 사본</p>
+                  {settlement.idCardUrl && (
+                    <a
+                      href={settlement.idCardUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-[11px] font-bold text-blue-600 hover:underline break-all"
+                    >
+                      제출한 파일 열기 · {settlement.idCardName || '신분증 사본'}
+                    </a>
+                  )}
+                  {renderFilePicker({
+                    id: `idcard-${collabId}`,
+                    accept: IMAGE_DOC_ACCEPT,
+                    file: idCardFile,
+                    onPick: setIdCardFile,
+                    label: settlement.idCardUrl ? '다른 파일로 교체' : '신분증 사본 선택',
+                    hint: `주민등록증 · 운전면허증 등 · jpg · png · pdf · 최대 ${UPLOAD_MAX_MB}MB`,
+                  })}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="은행명">
+                    <input
+                      value={stl.bankName}
+                      onChange={e => setStl(p => ({ ...p, bankName: e.target.value }))}
+                      placeholder="예: 국민은행"
+                      className={fieldCls(stl.bankName)}
+                    />
+                  </Field>
+                  <Field label="예금주명">
+                    <input
+                      value={stl.accountHolder}
+                      onChange={e => setStl(p => ({ ...p, accountHolder: e.target.value }))}
+                      placeholder="신분증과 같은 이름"
+                      className={fieldCls(stl.accountHolder)}
+                    />
+                  </Field>
+                </div>
+                <Field label="계좌번호">
+                  <input
+                    value={stl.accountNumber}
+                    /* 은행 앱에서 복사하면 공백과 문자가 섞여 온다. 서버도 같은
+                       규칙으로 다시 거른다. */
+                    onChange={e => setStl(p => ({ ...p, accountNumber: e.target.value.replace(/[^0-9-]/g, '') }))}
+                    placeholder="- 없이 입력해도 됩니다"
+                    inputMode="numeric"
+                    className={fieldCls(stl.accountNumber)}
+                  />
+                </Field>
+                <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
+                  예금주가 신분증의 이름과 다르면 은행에서 반송됩니다. 제출한 서류는 담당자만 열어 볼 수 있고
+                  브랜드에게는 제출 여부만 표시됩니다.
+                </p>
+                <button
+                  onClick={saveSettlementInfo}
+                  disabled={busy}
+                  className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
+                >
+                  {settlement.submitted ? '정산 서류 다시 제출' : '정산 서류 제출'}
+                </button>
+                {renderUploadProgress()}
+              </>
+            )}
+
+            {/* 담당자: 제출물 열어 보기 + 지급일 입력 + 지급 완료 */}
+            {isManager && (
+              <>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 space-y-1.5">
+                  <p className="text-[10px] font-black text-slate-400">인플루언서 제출 서류</p>
+                  {settlement.submitted ? (
+                    <>
+                      {settlement.idCardUrl ? (
+                        <a
+                          href={settlement.idCardUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-[11px] font-black text-blue-600 hover:underline break-all"
+                        >
+                          신분증 사본 열기 · {settlement.idCardName || '파일'}
+                        </a>
+                      ) : (
+                        <p className="text-[11px] font-bold text-amber-600">신분증 사본이 없습니다.</p>
+                      )}
+                      <p className="text-xs font-bold text-slate-800">
+                        {settlement.bankName} · {settlement.accountHolder}
+                      </p>
+                      <div className="flex items-center justify-between gap-3">
+                        <code className="text-xs font-bold text-slate-800 break-all">{settlement.accountNumber}</code>
+                        <button
+                          onClick={() => navigator.clipboard?.writeText(String(settlement.accountNumber || ''))}
+                          className="text-[10px] font-black text-blue-600 flex-shrink-0"
+                        >
+                          복사
+                        </button>
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-400">
+                        제출 {fmtDate(settlement.submittedAt)}
+                        {settlement.reviewedAt ? ` · 확인 ${fmtDate(settlement.reviewedAt)}` : ' · 미확인'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400 font-medium">
+                      아직 제출 전입니다. 지급일은 서류 없이도 먼저 정할 수 있습니다.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="지급일">
+                    <input
+                      type="date"
+                      value={payout.date}
+                      onChange={e => setPayout(p => ({ ...p, date: e.target.value }))}
+                      className={fieldCls(payout.date)}
+                    />
+                  </Field>
+                  <Field label="메모 (선택)">
+                    <input
+                      value={payout.memo}
+                      onChange={e => setPayout(p => ({ ...p, memo: e.target.value }))}
+                      placeholder="예: 8월 회차 정산"
+                      className={fieldCls(payout.memo)}
+                    />
+                  </Field>
+                </div>
+                <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
+                  저장하면 인플루언서 정산금 화면의 지급 예정일과 협업 현황 캘린더에 그대로 올라갑니다.
+                </p>
+                <button
+                  onClick={savePayoutDate}
+                  disabled={busy || !payout.date}
+                  className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
+                >
+                  {payoutDate ? '지급일 다시 저장' : '지급일 저장하고 알리기'}
+                </button>
+                {!paid && settlement.submitted && (
+                  <button
+                    onClick={() => act('complete_settlement', { paidDate: payout.date }, '지급 완료로 처리했습니다.')}
+                    disabled={busy}
+                    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-xs font-black disabled:opacity-40 hover:bg-emerald-500 transition-colors"
+                  >
+                    지급 완료 처리
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* 브랜드: 읽기만. 개인정보는 서버에서 이미 빠져 있다. */}
+            {role === 'brand' && (
+              <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+                <p className="text-[10px] font-black text-slate-400 mb-1">정산 진행</p>
+                <p className="text-xs font-bold text-slate-700">
+                  {settlement.submitted ? '인플루언서 서류 제출 완료' : '인플루언서 서류 제출 대기'}
+                  {payoutDate ? ` · 지급 예정일 ${payoutDate}` : ''}
+                </p>
+                <p className="text-[10px] text-slate-400 font-medium mt-1 leading-relaxed">
+                  지급은 담당자가 처리합니다. 신분증 사본과 계좌 정보는 담당자만 열어 볼 수 있습니다.
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      }
 
       case 'upload':
       default:
@@ -1301,6 +1595,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (step === 'video' && videoWork) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
     if (step === 'upload' && collab.uploadUrl) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
     if (step === 'guide' && guideFiles.length === 0) return isBrandSide ? '가이드를 올려 주세요' : '브랜드 준비 중';
+    if (step === 'settlement') {
+      if (settlement.paidAt) return '지급 완료';
+      if (settlement.payoutDate) return `지급 예정일 ${settlement.payoutDate}`;
+      if (settlement.submitted) return isManager ? '지급일을 정해 주세요' : '담당자 확인 대기';
+      return isInfluencer ? '서류를 제출해 주세요' : '인플루언서 서류 대기';
+    }
     return current ? '진행 중' : '진행 전';
   };
 

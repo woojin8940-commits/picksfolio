@@ -92,6 +92,8 @@ const actionOf = (collab: any): CollabStepTurn | null =>
       uploadUrl: collab?.uploadUrl || '',
       uploadConfirmedAt: collab?.uploadConfirmedAt || null,
       guideReady: Boolean(collab?.guideReady),
+      settlement: collab?.settlement || null,
+      fee: Number(collab?.fee || 0),
       collabStatus: String(collab?.status || ''),
     },
     'influencer',

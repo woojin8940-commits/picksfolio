@@ -2,6 +2,8 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
+import { loadHiddenInboxIds } from "./_shared/business-inbox-hidden.mts";
 
 const STORE = "business-proposals";
 
@@ -29,7 +31,7 @@ export default async (req: Request, context: Context) => {
       dbInstance = getDatabase();
     } catch {}
 
-    const [cachedData, sqlProposals, campaignRows] = await Promise.all([
+    const [cachedData, sqlProposals, campaignRows, deletedIds, hiddenIds] = await Promise.all([
       store.get(key, { type: "json" }).catch(() => null),
       dbInstance ? (async () => {
         try {
@@ -52,11 +54,17 @@ export default async (req: Request, context: Context) => {
           ` as any[];
         } catch { return []; }
       })() : Promise.resolve([]),
+      loadDeletedProposalIds(),
+      loadHiddenInboxIds(username),
     ]);
+
+    // 지운 줄(묘비)과 업체가 목록에서 내린 줄은 올리지 않는다. SQL·Blobs·캠페인
+    // 파생 행 어느 쪽에서 되살아나도 같은 자리에서 걸러진다.
+    const visible = (id: unknown) => isProposalAlive(deletedIds, id) && !hiddenIds.has(String(id ?? ""));
 
     if (Array.isArray(sqlProposals)) {
       for (const row of sqlProposals) {
-        if (seenIds.has(row.id)) continue;
+        if (seenIds.has(row.id) || !visible(row.id)) continue;
         seenIds.add(row.id);
         allProposals.push({
           id: row.id,
@@ -84,7 +92,7 @@ export default async (req: Request, context: Context) => {
     if (Array.isArray(campaignRows)) {
       for (const row of campaignRows) {
         const proposalId = `campaign_${row.campaign_id}_${(row.applicant_username || "").toLowerCase()}`;
-        if (seenIds.has(proposalId)) continue;
+        if (seenIds.has(proposalId) || !visible(proposalId)) continue;
         seenIds.add(proposalId);
         allProposals.push({
           id: proposalId,
@@ -107,7 +115,7 @@ export default async (req: Request, context: Context) => {
 
     const cached = Array.isArray(cachedData) ? cachedData as any[] : [];
     for (const item of cached) {
-      if (item.id && !seenIds.has(item.id)) {
+      if (item.id && !seenIds.has(item.id) && visible(item.id)) {
         seenIds.add(item.id);
         allProposals.push(item);
       }
@@ -118,20 +126,33 @@ export default async (req: Request, context: Context) => {
     // 조회 중에 새 제안이 들어올 수 있으므로, 통째로 덮어쓰지 않고 최신 목록에
     // 없는 것만 합친다(덮어쓰면 방금 접수된 제안이 사라진다).
     context.waitUntil(
-      mutateBlobJSON<any[]>(STORE, key, (current) => {
-        const latest = Array.isArray(current) ? current : [];
-        const latestIds = new Set(latest.map((p: any) => p?.id));
-        const merged = [...latest, ...allProposals.filter((p: any) => !latestIds.has(p?.id))];
-        merged.sort(
-          (a: any, b: any) =>
-            new Date(b.createdAt || b.created_at || 0).getTime() -
-            new Date(a.createdAt || a.created_at || 0).getTime()
-        );
-        return merged;
-      }).catch(() => null)
+      (async () => {
+        // 이 쓰기는 응답을 보낸 뒤에 실행된다. 그 사이에 삭제가 들어왔을 수 있으니
+        // 묘비를 다시 읽는다 — 요청 시작 때 읽은 집합으로 걸렀다면, 조회와 삭제가
+        // 겹친 바로 그 경우에 지운 제안이 캐시에 되살아난다.
+        const fresh = await loadDeletedProposalIds();
+        return mutateBlobJSON<any[]>(STORE, key, (current) => {
+          const latest = (Array.isArray(current) ? current : []).filter((p: any) =>
+            isProposalAlive(fresh, p?.id),
+          );
+          const latestIds = new Set(latest.map((p: any) => p?.id));
+          const merged = [
+            ...latest,
+            ...allProposals.filter((p: any) => !latestIds.has(p?.id) && isProposalAlive(fresh, p?.id)),
+          ];
+          merged.sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt || b.created_at || 0).getTime() -
+              new Date(a.createdAt || a.created_at || 0).getTime()
+          );
+          return merged;
+        });
+      })().catch(() => null)
     );
 
-    return Response.json({ proposals: allProposals });
+    // hiddenIds 는 캠페인 협업 줄에도 필요하다. 그 줄은 이 응답이 아니라 협업
+    // 목록 API 에서 오므로, 화면이 직접 걸러야 한다.
+    return Response.json({ proposals: allProposals, hiddenIds: [...hiddenIds] });
   }
 
   if (req.method === "POST") {
