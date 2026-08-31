@@ -4,6 +4,7 @@ import { resolveIdentities } from "./_shared/manager-auth.mts";
 import { addSettlementForProposal, upsertCollabScheduleRecord } from "./_shared/collab-records.mts";
 import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
+import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 import {
   canTransitionStage,
   daysUntil,
@@ -606,12 +607,15 @@ export default async (req: Request, context: Context) => {
           },
           uploadUrl: row.upload_url || "",
           adCode: row.ad_code || "",
-          ...(showAddress
-            ? {
-                fee: Number(termMap.get(row.id)?.fee || 0),
-                feeLocked: Boolean(termMap.get(row.id)?.locked_at),
-              }
-            : {}),
+          /**
+           * 확정 보수. 배송 주소와 같은 칸에 묶여 브랜드·담당자에게만 실려 나갔는데,
+           * 이 값은 인플루언서에게 남의 정보가 아니라 자기 보수다. 목록에만 빠져 있어서
+           * 인플루언서 협업 현황에 캠페인 협업이 0원으로 들어가고, 완료된 협업의 수익
+           * 합계에서 그만큼 비었다. 인플루언서 조회는 위에서 creator_username = 본인으로
+           * 좁혀져 있고 상세 화면은 이미 같은 값을 보여 준다.
+           */
+          fee: Number(termMap.get(row.id)?.fee || 0),
+          feeLocked: Boolean(termMap.get(row.id)?.locked_at),
           uploadConfirmedAt: row.upload_confirmed_at || null,
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
@@ -872,7 +876,7 @@ export default async (req: Request, context: Context) => {
         const allowed = role === "brand" ? ["guide", "other"] : role === "influencer" ? ["plan", "video", "other"] : ["guide", "plan", "video", "other"];
         if (!allowed.includes(kind)) return jsonError("이 역할로 올릴 수 없는 자료입니다.", 403);
         const fileUrl = String((body as any).fileUrl || "").trim();
-        if (!fileUrl.startsWith("/api/images/")) return jsonError("업로드한 파일을 선택해 주세요.");
+        if (!isUploadedFileUrl(fileUrl)) return jsonError("업로드한 파일을 선택해 주세요.");
         const assetId = newId("asset");
         const title = String((body as any).title || "").trim().slice(0, 120);
         const fileName = String((body as any).fileName || "").trim().slice(0, 240);
@@ -1045,7 +1049,7 @@ export default async (req: Request, context: Context) => {
         const link = String((body as any).link || "").trim().slice(0, 1000);
         const fileUrl = String((body as any).fileUrl || "").trim();
         const fileName = String((body as any).fileName || "").trim().slice(0, 240);
-        if (fileUrl && !fileUrl.startsWith("/api/images/")) {
+        if (fileUrl && !isUploadedFileUrl(fileUrl)) {
           return jsonError("업로드한 파일을 선택해 주세요.");
         }
         // 기획안은 장면 단위로 온다 — 장면마다 설명과 자막. 브랜드 피드백이 장면
@@ -1063,7 +1067,10 @@ export default async (req: Request, context: Context) => {
         if (stepKey === "plan" && !text && !fileUrl && scenes.length === 0) {
           return jsonError("기획안 내용을 입력하거나 파일을 올려 주세요.");
         }
-        if (stepKey === "video" && !link && !fileUrl) return jsonError("초안 영상 링크를 넣거나 파일을 올려 주세요.");
+        // 초안 영상은 파일로만 받는다. 링크(유튜브·드라이브)로 받던 시절의 제출물이
+        // 아직 남아 있어 읽기는 계속 되지만, 새로 낼 때는 파일이어야 한다 — 링크는
+        // 권한이 닫히거나 나중에 지워져서, 검수할 때 열리지 않는 일이 잦았다.
+        if (stepKey === "video" && !fileUrl) return jsonError("초안 영상 파일을 올려 주세요.");
         if (stepKey === "upload" && !link) return jsonError("게시물 링크를 입력해 주세요.");
 
         const stage = await resolveStepStage(db, collabId, stepKey);

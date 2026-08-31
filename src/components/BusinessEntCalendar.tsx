@@ -1,13 +1,35 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
-import { authHeaders } from '../services/apiService';
+import { authHeaders, apiService } from '../services/apiService';
 import BusinessSettlement from './BusinessSettlement';
+import {
+  CampaignCollabStatus,
+  campaignCollabsAsProposals,
+  dropProposalsCoveredByCollabs,
+  openCampaignCollab,
+  toCampaignCollabStatuses,
+} from '../utils/campaignCollabStatus';
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
   companyName: string;
 }
+
+/**
+ * 이 화면의 한 줄.
+ *
+ * 비즈니스 제안과 캠페인 협업이 같은 배열에 들어온다. 캘린더 칸 · 인플루언서별 묶음 ·
+ * 마감 임박 · 통계가 모두 이 배열 하나를 보므로, 새 갈래를 넣을 때 다섯 곳을 각각
+ * 고칠 필요가 없다. `_collabId` 가 있으면 캠페인 협업이다.
+ */
+type CollabRow = BusinessProposal & {
+  _collabId?: string;
+  _campaignId?: string;
+  _progress?: number;
+  _stageTitle?: string;
+  _todo?: string;
+};
 
 /** 로컬 시간대 기준 YYYY-MM-DD. UTC 변환으로 날짜가 하루 밀리는 것을 막는다. */
 const ymd = (d: Date) =>
@@ -30,6 +52,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   })();
 
   const [proposals, setProposals] = useState<BusinessProposal[]>(cachedProposals);
+  const [collabs, setCollabs] = useState<CampaignCollabStatus[]>([]);
   const [loading, setLoading] = useState(cachedProposals.length === 0);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -51,8 +74,33 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
       }
       setLoading(false);
     };
+    /**
+     * 캠페인 협업. 캐시에는 넣지 않는다 — 진행 단계가 자주 바뀌는 값이라, 지난번에
+     * 저장해 둔 상태가 잠깐 보이면 그동안 오간 승인·수정요청이 없던 일처럼 읽힌다.
+     */
+    const fetchCollabs = async () => {
+      try {
+        const res = await apiService.getCollabs('brand');
+        setCollabs(toCampaignCollabStatuses(res.collabs || [], 'brand'));
+      } catch (e) {
+        console.error('Failed to fetch campaign collabs:', e);
+      }
+    };
     fetchProposals();
+    fetchCollabs();
   }, [businessUsername]);
+
+  /**
+   * 제안 + 캠페인 협업. 아래 계산은 전부 이 배열만 본다.
+   *
+   * 제안 목록에는 선정된 캠페인 지원자가 제안 한 줄로 접혀서 함께 온다. 그 줄을 빼지
+   * 않으면 같은 협업이 캘린더에 막대 두 개로 그려지고, 진행 건수와 총 협업비도 두 번
+   * 세어진다.
+   */
+  const rows = useMemo<CollabRow[]>(
+    () => [...dropProposalsCoveredByCollabs(proposals, collabs), ...campaignCollabsAsProposals(collabs)],
+    [proposals, collabs],
+  );
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -66,7 +114,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   // Keep the calendar status in sync with the dates: an accepted proposal whose
   // end date has already passed (or which is already settled/completed) is shown
   // as 완료됨 instead of lingering as 진행중. Dates are compared as YYYY-MM-DD.
-  const isCollabDone = (p: BusinessProposal): boolean => {
+  const isCollabDone = (p: CollabRow): boolean => {
     if (p.status === 'completed') return true;
     const end = (p.end_date || '').split('T')[0];
     return !!end && end < today;
@@ -77,10 +125,10 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   };
 
   const calendarDays = useMemo(() => {
-    const days: { day: number; proposals: BusinessProposal[] }[] = [];
+    const days: { day: number; proposals: CollabRow[] }[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = getDateStr(d);
-      const dayProposals = proposals.filter(p => {
+      const dayProposals = rows.filter(p => {
         const start = p.start_date?.split('T')[0] || '';
         const end = p.end_date?.split('T')[0] || '';
         return start <= dateStr && end >= dateStr;
@@ -88,18 +136,18 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
       days.push({ day: d, proposals: dayProposals });
     }
     return days;
-  }, [proposals, year, month, daysInMonth]);
+  }, [rows, year, month, daysInMonth]);
 
   const eventOrder = useMemo(() => {
     const order: Record<string, number> = {};
-    const sorted = [...proposals].sort((a, b) => {
+    const sorted = [...rows].sort((a, b) => {
       const startDiff = new Date(a.start_date).getTime() - new Date(b.start_date).getTime();
       if (startDiff !== 0) return startDiff;
       return new Date(b.end_date).getTime() - new Date(a.end_date).getTime();
     });
     sorted.forEach((p, i) => { order[p.id] = i; });
     return order;
-  }, [proposals]);
+  }, [rows]);
 
   const getEventPosition = (startDate: string, endDate: string, dateStr: string) => {
     const startStr = (startDate || '').split('T')[0];
@@ -122,28 +170,28 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
   // Group accepted proposals by influencer for the list view
   const groupedByInfluencer = useMemo(() => {
-    const groups: Record<string, BusinessProposal[]> = {};
-    proposals.forEach(p => {
+    const groups: Record<string, CollabRow[]> = {};
+    rows.forEach(p => {
       if (!groups[p.influencer_username]) groups[p.influencer_username] = [];
       groups[p.influencer_username].push(p);
     });
     return Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
-  }, [proposals]);
+  }, [rows]);
 
   // Stats
-  const acceptedCount = proposals.filter(p => !isCollabDone(p)).length;
-  const completedCount = proposals.filter(p => isCollabDone(p)).length;
-  const totalInfluencers = new Set(proposals.map(p => p.influencer_username)).size;
-  const totalCollabCost = proposals.filter(p => isCollabDone(p)).reduce((sum, p) => sum + (p.fee || 0), 0);
+  const acceptedCount = rows.filter(p => !isCollabDone(p)).length;
+  const completedCount = rows.filter(p => isCollabDone(p)).length;
+  const totalInfluencers = new Set(rows.map(p => p.influencer_username)).size;
+  const totalCollabCost = rows.filter(p => isCollabDone(p)).reduce((sum, p) => sum + (p.fee || 0), 0);
 
   // Upcoming deadlines
   const upcomingDeadlines = useMemo(() => {
-    return proposals
-      .filter(p => !isCollabDone(p) && new Date(p.end_date) >= new Date())
+    return rows
+      .filter(p => !isCollabDone(p) && p.end_date && new Date(p.end_date) >= new Date())
       .map(p => ({ id: p.id, title: p.title, influencer: p.influencer_username, endDate: p.end_date, fee: p.fee }))
       .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
       .slice(0, 6);
-  }, [proposals]);
+  }, [rows]);
 
   const getDaysLeft = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -163,12 +211,31 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   // Selected date proposals
   const selectedDateProposals = useMemo(() => {
     if (!selectedDate) return [];
-    return proposals.filter(p => {
+    return rows.filter(p => {
       const start = p.start_date?.split('T')[0] || '';
       const end = p.end_date?.split('T')[0] || '';
       return start <= selectedDate && end >= selectedDate;
     });
-  }, [proposals, selectedDate]);
+  }, [rows, selectedDate]);
+
+  /**
+   * 캠페인 협업 줄에 붙는 표시.
+   *
+   * 통합 목록에서 이것이 없으면 "브랜드가 직접 보낸 제안"과 "담당자를 거치는 캠페인
+   * 협업"이 같은 줄로 보인다 — 두 갈래는 연락하는 상대도, 진행을 여는 화면도 다르다.
+   */
+  const collabBadge = (row: CollabRow) =>
+    row._collabId ? (
+      <span className="px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-600 text-[9px] font-black shrink-0">
+        캠페인 {row._progress ?? 0}%
+      </span>
+    ) : null;
+
+  /** 캠페인 협업 줄은 눌러서 진행사항으로 간다. 제안 줄은 눌러도 갈 곳이 없다. */
+  const openIfCollab = (row: CollabRow) => {
+    if (!row._collabId) return;
+    openCampaignCollab({ campaignId: row._campaignId, collabId: row._collabId });
+  };
 
   if (loading) {
     return (
@@ -185,7 +252,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
         <div>
           <h2 className="text-2xl md:text-4xl font-black text-slate-900">협업 현황</h2>
           <p className="text-slate-400 text-sm md:text-base font-bold mt-1.5">
-            협업 캘린더, 협업 내역, 정산금을 한곳에서 관리합니다
+            비즈니스 제안과 진행 중인 캠페인 협업을 캘린더·내역·정산금으로 함께 관리합니다
           </p>
         </div>
       </div>
@@ -319,10 +386,17 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
               ) : (
                 <div className="space-y-3">
                   {selectedDateProposals.map(p => (
-                    <div key={p.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                    <div
+                      key={p.id}
+                      onClick={() => openIfCollab(p)}
+                      className={`flex items-center gap-3 p-4 bg-slate-50 rounded-xl ${p._collabId ? 'cursor-pointer hover:bg-violet-50 transition-colors' : ''}`}
+                    >
                       <div className={`w-2 h-12 rounded-full shrink-0 ${isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                          {collabBadge(p)}
+                        </div>
                         <p className="text-xs font-bold text-slate-400">@{p.influencer_username} · {formatFee(p.fee)}</p>
                         <p className="text-[10px] font-bold text-slate-300 mt-0.5">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</p>
                       </div>
@@ -343,7 +417,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
               <div className="text-center py-8">
                 <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">📅</div>
                 <h4 className="font-black text-slate-900 text-base mb-1">수락된 협업이 없습니다</h4>
-                <p className="text-slate-400 text-sm font-medium">인플루언서가 제안을 수락하면 여기에 일정이 표시됩니다.</p>
+                <p className="text-slate-400 text-sm font-medium">인플루언서가 제안을 수락하거나 캠페인에서 선정되면 여기에 일정이 표시됩니다.</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -360,9 +434,16 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                     </div>
                     <div className="space-y-2">
                       {infProposals.map(p => (
-                        <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-xl p-3">
-                          <div>
-                            <p className="font-bold text-slate-800 text-xs">{p.title}</p>
+                        <div
+                          key={p.id}
+                          onClick={() => openIfCollab(p)}
+                          className={`flex items-center justify-between bg-slate-50 rounded-xl p-3 ${p._collabId ? 'cursor-pointer hover:bg-violet-50 transition-colors' : ''}`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-bold text-slate-800 text-xs truncate">{p.title}</p>
+                              {collabBadge(p)}
+                            </div>
                             <p className="text-slate-400 text-[10px] font-bold">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</p>
                           </div>
                           <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black ${
@@ -399,7 +480,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                 <p className="text-[10px] md:text-xs font-bold text-indigo-500">인플루언서</p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 md:p-4 text-center">
-                <p className="text-xl md:text-2xl font-black text-blue-600">{proposals.length}</p>
+                <p className="text-xl md:text-2xl font-black text-blue-600">{rows.length}</p>
                 <p className="text-[10px] md:text-xs font-bold text-blue-500">총 협업</p>
               </div>
             </div>
@@ -471,7 +552,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
               <p className="text-[10px] md:text-xs font-bold text-blue-500">완료됨</p>
             </div>
             <div className="bg-indigo-50 rounded-2xl p-4 text-center">
-              <p className="text-xl md:text-2xl font-black text-indigo-600">{proposals.length}</p>
+              <p className="text-xl md:text-2xl font-black text-indigo-600">{rows.length}</p>
               <p className="text-[10px] md:text-xs font-bold text-indigo-500">총 협업</p>
             </div>
             <div className="bg-gradient-to-br from-teal-50 to-emerald-50 rounded-2xl p-4 text-center">
@@ -484,24 +565,35 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
           {/* Collab list */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-8">
-            {proposals.length === 0 ? (
+            {rows.length === 0 ? (
               <div className="text-center py-10">
                 <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🤝</div>
                 <p className="text-slate-400 text-sm font-bold">아직 진행 중인 협업이 없습니다.</p>
-                <p className="text-slate-300 text-xs mt-1">인플루언서가 제안을 수락하면 여기에 협업 건들이 표시됩니다.</p>
+                <p className="text-slate-300 text-xs mt-1">제안이 수락되거나 캠페인 인플루언서가 선정되면 여기에 협업 건들이 표시됩니다.</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {[...proposals]
+                {[...rows]
                   .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
                   .map(p => (
-                    <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all">
+                    <div
+                      key={p.id}
+                      onClick={() => openIfCollab(p)}
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all ${p._collabId ? 'cursor-pointer hover:bg-violet-50' : 'hover:bg-slate-50'}`}
+                    >
                       <div className={`w-2 h-10 rounded-full shrink-0 ${isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                          {collabBadge(p)}
+                        </div>
                         <p className="text-xs font-bold text-slate-400">
-                          @{p.influencer_username} · {formatDate(p.start_date)} ~ {formatDate(p.end_date)} · {formatFee(p.fee)}
+                          @{p.influencer_username}
+                          {p.start_date && ` · ${formatDate(p.start_date)}`}
+                          {p.end_date && ` ~ ${formatDate(p.end_date)}`}
+                          {p.fee > 0 && ` · ${formatFee(p.fee)}`}
                         </p>
+                        {p._todo && <p className="text-[10px] font-bold text-violet-500 mt-0.5 truncate">{p._todo}</p>}
                       </div>
                       <span className={`text-xs font-black shrink-0 ${isCollabDone(p) ? 'text-blue-500' : 'text-green-500'}`}>
                         {isCollabDone(p) ? '완료' : '진행중'}

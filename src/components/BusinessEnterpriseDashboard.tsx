@@ -32,6 +32,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
+  /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
+  const [collabCampaignId, setCollabCampaignId] = useState<string | null>(null);
   const [timelineUnread, setTimelineUnread] = useState(0);
 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
@@ -174,11 +176,22 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       setCurrentSubView('timeline');
     };
     const handleNavigateMembership = () => setCurrentSubView('membership');
+    /**
+     * 현황 화면 → 캠페인 진행사항. 진행사항 보드는 캠페인 협업 화면 안에만 있고,
+     * 현황 화면이 보드를 한 벌 더 품으면 같은 협업의 상태가 두 곳에서 갈린다.
+     */
+    const handleNavigateCampaignCollab = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.campaignId) setCollabCampaignId(String(detail.campaignId));
+      setCurrentSubView('campaign-collab');
+    };
     window.addEventListener('navigate-timeline', handleNavigateTimeline);
     window.addEventListener('navigate-membership', handleNavigateMembership);
+    window.addEventListener('navigate-campaign-collab', handleNavigateCampaignCollab);
     return () => {
       window.removeEventListener('navigate-timeline', handleNavigateTimeline);
       window.removeEventListener('navigate-membership', handleNavigateMembership);
+      window.removeEventListener('navigate-campaign-collab', handleNavigateCampaignCollab);
     };
   }, []);
 
@@ -254,7 +267,11 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     case 'campaign-collab':
       subComponent = (
         <LazyRoute>
-          <CampaignCollabManagement businessUsername={businessUsername} companyName={companyName} />
+          <CampaignCollabManagement
+            businessUsername={businessUsername}
+            companyName={companyName}
+            initialCampaignId={collabCampaignId || undefined}
+          />
         </LazyRoute>
       );
       break;

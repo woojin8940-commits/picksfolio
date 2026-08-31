@@ -127,7 +127,21 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
   }, [data, current, stageKey]);
 
   const scenes = useMemo(() => normalizeScenes(current?.payload?.scenes), [current]);
-  const videoUrl = String(current?.payload?.contentUrl || current?.payload?.uploadUrl || '');
+  /**
+   * 검수할 영상의 주소.
+   *
+   * 제출물의 payload 는 단계 보드(save_step_work)가 `fileUrl` 로 남긴다. 예전 아홉
+   * 단계 협업에서 쓰던 `contentUrl` · `uploadUrl` 과 링크로 받던 `link` 도 함께 본다 —
+   * `fileUrl` 을 빼놓았던 동안 담당자 화면에는 인플루언서가 올린 초안 영상이
+   * 한 건도 뜨지 않았다.
+   */
+  const videoUrl = String(
+    current?.payload?.fileUrl ||
+      current?.payload?.contentUrl ||
+      current?.payload?.uploadUrl ||
+      current?.payload?.link ||
+      '',
+  );
 
   const feedbackFor = (predicate: (parsed: ReturnType<typeof parseAnchor>) => boolean) =>
     feedbacks.filter(f => predicate(parseAnchor(f.anchor)));

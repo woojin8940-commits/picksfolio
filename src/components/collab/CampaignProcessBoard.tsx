@@ -86,6 +86,21 @@ const STAGE_KEYS: Record<StepKey, string[]> = {
   upload: ['upload', 'confirm', 'settlement'],
 };
 
+/**
+ * 파일 선택창에 넘길 형식 목록.
+ *
+ * `video/*` 같은 와일드카드를 쓰지 않는다. 와일드카드를 주면 안드로이드 WebView 가
+ * 카메라·파일앱을 묶은 자기 선택 창(영어)을 띄우는데, 형식을 하나씩 적으면 기기의
+ * 파일 선택 화면으로 바로 들어가고 그 화면은 시스템 언어(한국어)로 그려진다.
+ * 목록은 서버가 받아 주는 확장자(_shared/upload-media.mts)와 맞춰 둔다.
+ */
+const VIDEO_ACCEPT = 'video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-matroska';
+const IMAGE_DOC_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,application/pdf';
+const DOC_ACCEPT = `${IMAGE_DOC_ACCEPT},${VIDEO_ACCEPT}`;
+
+/** 서버(`/api/upload-url`)가 막는 크기와 같은 숫자. 안내 문구에만 쓴다. */
+const UPLOAD_MAX_MB = 200;
+
 const inputCls =
   'w-full text-xs font-medium border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:border-slate-400 transition-colors';
 
@@ -403,7 +418,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    */
   const [scenes, setScenes] = useState<StoryboardScene[]>([emptyScene()]);
   const [planFile, setPlanFile] = useState<File | null>(null);
-  const [videoLink, setVideoLink] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
@@ -440,7 +454,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       const legacy = String(planWork?.payload?.body || '');
       setScenes([{ ...emptyScene(), visual: legacy }]);
     }
-    setVideoLink(String(videoWork?.payload?.link || ''));
     setUploadLink(String(collab.uploadUrl || ''));
     setAdCode(String(collab.adCode || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -468,6 +481,20 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       .map((s, i) => `장면 ${i + 1}\n설명: ${s.visual}${s.subtitle.trim() ? `\n자막: ${s.subtitle}` : ''}`)
       .join('\n\n');
     await saveWork('plan', { scenes: filled, body }, planFile);
+  };
+
+  /**
+   * 초안 영상 제출 — 파일만 받는다.
+   *
+   * 서버도 같은 규칙으로 막지만(파일 없으면 거절), 여기서 먼저 잡는다. 서버까지
+   * 갔다 오면 눌렀는데 잠깐 아무 일도 없다가 빨간 글씨가 뜨는 모양이 된다.
+   */
+  const submitVideo = async () => {
+    if (!videoFile) {
+      onNotify('올릴 영상 파일을 선택해 주세요.', 'error');
+      return;
+    }
+    await saveWork('video', {}, videoFile);
   };
 
   const saveWork = async (step: 'plan' | 'video' | 'upload', extra: Record<string, any>, file: File | null) => {
@@ -733,6 +760,85 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     );
   };
 
+  /**
+   * 파일을 고르는 칸.
+   *
+   * 예전에는 `<input type="file">` 을 그대로 화면에 두었다. 그 칸의 버튼 글자와
+   * "선택된 파일 없음"은 우리가 쓰는 글자가 아니라 브라우저·WebView 가 그리는
+   * 글자라서, 앱 안에서는 기기 언어와 무관하게 영어로 떴다("Choose File" ·
+   * "Gallery" · "Choose an option"). 우리 문장으로 바꿀 방법이 없는 자리다.
+   *
+   * 그래서 입력칸은 숨기고 우리 버튼을 세운다. 고른 파일 이름도 우리가 적는다.
+   *
+   * `accept` 에 와일드카드(`video/*`)를 쓰지 않는 것도 같은 이유다. 와일드카드를 주면
+   * 안드로이드 WebView 가 카메라와 파일앱을 함께 묶은 선택 창을 자기 글자로 띄우는데,
+   * 그 창의 제목·항목은 앱 리소스에서 와서 영어로 남는다. 형식을 하나하나 적으면
+   * 기기의 파일·갤러리 선택 화면(시스템이 한국어로 그린다)으로 바로 들어간다.
+   * 카메라로 찍어 올리는 길은 아래 `capture` 버튼으로 따로 낸다.
+   */
+  const renderFilePicker = (opts: {
+    id: string;
+    accept: string;
+    file: File | null;
+    onPick: (file: File | null) => void;
+    label: string;
+    hint?: string;
+    /** 그 자리에서 찍어 올리는 버튼. 영상 단계에서만 쓴다. */
+    captureLabel?: string;
+  }) => (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          id={opts.id}
+          type="file"
+          accept={opts.accept}
+          onChange={e => opts.onPick(e.target.files?.[0] || null)}
+          className="sr-only"
+        />
+        <label
+          htmlFor={opts.id}
+          className="cursor-pointer px-3 py-2 rounded-lg border border-slate-300 bg-white text-[11px] font-black text-slate-700 hover:border-slate-900 hover:text-slate-900 transition-colors"
+        >
+          {opts.label}
+        </label>
+        {opts.captureLabel && (
+          <>
+            <input
+              id={`${opts.id}-capture`}
+              type="file"
+              accept="video/*"
+              capture="environment"
+              onChange={e => opts.onPick(e.target.files?.[0] || null)}
+              className="sr-only"
+            />
+            <label
+              htmlFor={`${opts.id}-capture`}
+              className="cursor-pointer px-3 py-2 rounded-lg border border-slate-300 bg-white text-[11px] font-black text-slate-700 hover:border-slate-900 hover:text-slate-900 transition-colors"
+            >
+              {opts.captureLabel}
+            </label>
+          </>
+        )}
+        {opts.file && (
+          <button
+            type="button"
+            onClick={() => opts.onPick(null)}
+            className="text-[11px] font-black text-slate-400 hover:text-red-500 transition-colors"
+          >
+            선택 취소
+          </button>
+        )}
+      </div>
+      {opts.file ? (
+        <p className="text-[10px] font-bold text-emerald-600 break-all">
+          선택한 파일 · {opts.file.name} ({(opts.file.size / (1024 * 1024)).toFixed(1)}MB)
+        </p>
+      ) : (
+        opts.hint && <p className="text-[10px] font-bold text-slate-400">{opts.hint}</p>
+      )}
+    </div>
+  );
+
   const renderFileLink = (url: string, name: string) => (
     <a
       key={url}
@@ -778,17 +884,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             )}
 
             {isBrandSide && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="file"
-                  accept="image/*,video/*,application/pdf"
-                  onChange={e => setGuideFile(e.target.files?.[0] || null)}
-                  className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-md file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-[10px] file:font-black"
-                />
+              <div className="space-y-2">
+                {renderFilePicker({
+                  id: `guide-file-${collabId}`,
+                  accept: DOC_ACCEPT,
+                  file: guideFile,
+                  onPick: setGuideFile,
+                  label: '가이드 파일 선택',
+                  hint: `이미지 · PDF · 영상 파일 · 최대 ${UPLOAD_MAX_MB}MB`,
+                })}
                 <button
                   onClick={uploadGuide}
                   disabled={busy || !guideFile}
-                  className="px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
+                  className="w-full px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                 >
                   가이드 올리기
                 </button>
@@ -984,17 +1092,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 >
                   + 장면 추가
                 </button>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={e => setPlanFile(e.target.files?.[0] || null)}
-                    className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-md file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-[10px] file:font-black"
-                  />
+                <div className="space-y-2">
+                  {renderFilePicker({
+                    id: `plan-file-${collabId}`,
+                    accept: IMAGE_DOC_ACCEPT,
+                    file: planFile,
+                    onPick: setPlanFile,
+                    label: '참고 파일 선택 (선택)',
+                    hint: '이미지 · PDF 파일',
+                  })}
                   <button
                     onClick={savePlan}
                     disabled={busy}
-                    className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
+                    className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                   >
                     {planWork ? '기획안 수정완료' : '기획안 등록'}
                   </button>
@@ -1052,38 +1162,44 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
           <div className="space-y-3">
             {isInfluencer ? (
               <>
-                <Field label="초안 영상 링크">
-                  <input
-                    value={videoLink}
-                    onChange={e => setVideoLink(e.target.value)}
-                    placeholder="유튜브 · 구글드라이브 등 볼 수 있는 링크"
-                    className={inputCls}
-                  />
-                </Field>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={e => setVideoFile(e.target.files?.[0] || null)}
-                    className="min-w-0 flex-1 text-[11px] text-slate-500 file:mr-2 file:border-0 file:rounded-md file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-[10px] file:font-black"
-                  />
-                  <button
-                    onClick={() => saveWork('video', { link: videoLink }, videoFile)}
-                    disabled={busy}
-                    className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
-                  >
-                    {videoWork ? '영상 다시 올리기' : '초안 영상 올리기'}
-                  </button>
-                </div>
-                {videoFile && uploadPct < 0 && (
-                  <p className="text-[10px] font-bold text-slate-400">
-                    {videoFile.name} · {(videoFile.size / (1024 * 1024)).toFixed(1)}MB
-                  </p>
-                )}
+                {/* 초안 영상은 파일로만 받는다. 링크 칸을 함께 두었을 때는 대부분
+                    링크로 냈고, 권한이 닫힌 드라이브 링크나 나중에 지워진 영상 때문에
+                    브랜드·담당자가 검수할 시점에 열리지 않는 일이 반복됐다. */}
+                {renderFilePicker({
+                  id: `video-file-${collabId}`,
+                  accept: VIDEO_ACCEPT,
+                  file: videoFile,
+                  onPick: setVideoFile,
+                  label: '영상 파일 선택',
+                  captureLabel: '지금 촬영하기',
+                  hint: `mp4 · mov · webm 파일 · 최대 ${UPLOAD_MAX_MB}MB`,
+                })}
+                <button
+                  onClick={submitVideo}
+                  disabled={busy || !videoFile}
+                  className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
+                >
+                  {videoWork ? '영상 다시 올리기' : '초안 영상 올리기'}
+                </button>
                 {renderUploadProgress()}
+                {videoWork && (
+                  <div className="rounded-lg bg-slate-50 p-3 space-y-1">
+                    <p className="text-[10px] font-black text-slate-400">
+                      지금 올라간 안 · {videoWork.version}번째 · {fmtDate(videoWork.createdAt)}
+                    </p>
+                    {videoWork.payload?.fileUrl
+                      ? renderFileLink(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')
+                      : videoWork.payload?.link && (
+                          <a href={videoWork.payload.link} target="_blank" rel="noopener noreferrer" className="block text-[11px] font-bold text-blue-600 hover:underline break-all">
+                            초안 영상 열기
+                          </a>
+                        )}
+                  </div>
+                )}
               </>
             ) : videoWork ? (
               <div className="rounded-lg bg-slate-50 p-3 space-y-2">
+                {/* 링크로 받던 시절의 제출물. 새로 낼 수는 없지만 이미 남은 건 열려야 한다. */}
                 {videoWork.payload?.link && (
                   <a href={videoWork.payload.link} target="_blank" rel="noopener noreferrer" className="block text-xs font-black text-blue-600 hover:underline break-all">
                     초안 영상 열기
