@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
 import { authHeaders, apiService } from '../services/apiService';
-import BusinessSettlement from './BusinessSettlement';
+import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import {
   CampaignCollabStatus,
   campaignCollabsAsProposals,
@@ -13,7 +13,6 @@ import {
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
-  companyName: string;
 }
 
 /**
@@ -35,7 +34,7 @@ type CollabRow = BusinessProposal & {
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername, companyName }) => {
+const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername }) => {
   const cleanUsername = businessUsername.replace(/^biz\//, '');
   const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
 
@@ -606,8 +605,12 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
         </div>
       )}
 
+      {/* 정산금 — 인플루언서별 지급 관리가 아니라, 픽스폴리오에 한 번에 보내는 금액이다.
+          예전에는 이 자리에서 브랜드가 인플루언서별 정산 항목을 직접 만들고 금액과
+          지급일을 고칠 수 있었다. 브랜드는 개별 송금을 하지 않으므로 고칠 것이 없고,
+          고칠 수 있게 두면 담당자가 업로드를 확인해 잡아 둔 지급 근거와 어긋난다. */}
       {topTab === 'settlement' && (
-        <BusinessSettlement businessUsername={businessUsername} companyName={companyName} embedded />
+        <BrandSettlementSummary businessUsername={businessUsername} />
       )}
     </div>
   );

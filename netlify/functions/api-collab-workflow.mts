@@ -242,6 +242,10 @@ const settlementProposalId = (collab: any) =>
  * 열린다.
  */
 function shapeSettlementInfo(row: any, role: CollabRole, fee: number) {
+  // 브랜드에게는 정산 칸이 없다. 사람별 지급일·지급 여부까지 응답에 담아 두면, 화면에서
+  // 칸을 그리지 않아도 개발자 도구로 열린다. 브랜드가 보는 정산은 회차로 묶인 일괄
+  // 정산 화면(BrandSettlementSummary)이고, 그 값은 정산 목록 API 에서 온다.
+  if (role === "brand") return null;
   const sensitive = role === "influencer" || role === "manager";
   const submitted = Boolean(row?.submitted_at);
   return {
@@ -501,6 +505,11 @@ export default async (req: Request, context: Context) => {
        * 판정하므로(collabNextAction), 상세를 열지 않아도 "정산 서류 제출 필요"가
        * 카드에 뜬다. 개인정보(신분증 URL · 계좌번호)는 목록에 절대 담지 않는다 —
        * 목록 응답은 화면이 어디서든 캐시하고, 여기 필요한 것은 제출 여부뿐이다.
+       *
+       * 브랜드에게는 아예 싣지 않는다. 브랜드는 인플루언서에게 각각 송금하지 않고
+       * 픽스폴리오에 한 번에 보내므로, 사람별 지급일·지급 여부는 브랜드가 확인할 일이
+       * 아니다(브랜드가 보는 정산은 회차로 묶인다). 화면에서 가리는 것만으로는 응답에
+       * 그대로 남아 개발자 도구로 열린다.
        */
       const settlementRows = (await db.sql`
         SELECT collab_id, submitted_at, reviewed_at, payout_date, paid_at
@@ -687,6 +696,7 @@ export default async (req: Request, context: Context) => {
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
           uploadConfirmedAt: row.upload_confirmed_at || null,
           settlement: (() => {
+            if (role === "brand") return null;
             const info = settlementMap.get(row.id);
             return {
               submitted: Boolean(info?.submitted_at),
