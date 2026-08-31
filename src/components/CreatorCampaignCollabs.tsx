@@ -416,7 +416,6 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             {/* -------------------------------------------------- 정산 */}
             {activeTab === 'settlement' && (
               <CampaignSettlementPanel
-                viewer="influencer"
                 influencerUsername={userName}
                 campaignId={selected.campaignId}
                 feeKrw={fee}

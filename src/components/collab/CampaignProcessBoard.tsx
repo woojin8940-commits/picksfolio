@@ -32,8 +32,11 @@ import {
  * 전부 카카오톡·메일에 있었다. 인플루언서는 "언제 들어오나"를 물어봐야 알 수 있었고,
  * 담당자는 어느 협업의 계좌인지 짝을 맞춰야 했다. 협업 한 줄 안으로 옮긴다.
  *
- * 정산 칸의 브랜드 몫은 없다. 브랜드에게는 "제출 완료 / 지급일"까지만 보이고 신분증
- * 사본과 계좌번호는 응답에도 담기지 않는다(개인정보이고, 돈을 보내는 것은 담당자다).
+ * 정산 칸은 브랜드에게 아예 없다. 브랜드는 인플루언서마다 송금하지 않고 픽스폴리오에
+ * 한 번에 보내므로 사람별 지급일과 지급 여부는 브랜드가 확인할 일이 아니다(브랜드가
+ * 보는 정산은 회차로 묶은 BrandSettlementSummary 다). 담당자에게는 "제출 완료 / 지급일"
+ * 까지 보이고, 신분증 사본과 계좌번호는 응답에도 담기지 않는다 — 개인정보이고, 실제
+ * 지급은 담당자가 한다.
  *
  * 브랜드와 인플루언서가 같은 컴포넌트를 쓴다. 예전에는 양쪽 화면이 따로 있어서 같은
  * 단계를 서로 다른 이름과 다른 순서로 보고 있었다 — 브랜드는 "대본 피드백", 인플루언서는
@@ -156,12 +159,20 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const collab = detail?.collab || {};
   const isInfluencer = role === 'influencer';
   const isBrandSide = role === 'brand' || role === 'manager';
-  /** 정산 지급은 담당자만 한다. 브랜드는 같은 칸을 읽기만 한다. */
+  /** 정산 지급은 담당자만 한다. 브랜드에게는 정산 칸 자체를 그리지 않는다. */
   const isManager = role === 'manager';
   /** 확정 보수. 0원(제품 협찬형)이면 정산 칸 자체가 없다. */
   const settlementFee = Number(detail?.terms?.fee ?? settlement.fee ?? 0);
-  /** 정산 칸을 그릴 수 있는가. 업로드 확인 전에는 무엇에 쓰는 서류인지 알 수 없다. */
-  const settlementOpen = settlementFee > 0 && Boolean(collab.uploadConfirmedAt);
+  /**
+   * 정산 칸을 그릴 수 있는가. 업로드 확인 전에는 무엇에 쓰는 서류인지 알 수 없다.
+   *
+   * 브랜드에게는 열리지 않는다. 브랜드는 인플루언서에게 각각 송금하지 않고 픽스폴리오에
+   * 한 번에 보내므로, "이 사람은 9월 30일 지급 예정"은 브랜드가 확인할 일이 아니다.
+   * 사람마다 지급 상태를 보여 주면 브랜드는 자기 일이 아닌 일정을 인원 수만큼 확인해야
+   * 하고, 아직 안 나간 건을 자기 잘못으로 읽는다. 브랜드가 보는 정산은 회차로 묶은
+   * 일괄 정산 화면(BrandSettlementSummary)에 있다.
+   */
+  const settlementOpen = settlementFee > 0 && Boolean(collab.uploadConfirmedAt) && role !== 'brand';
   /**
    * 인플루언서가 열어 볼 가이드가 실제로 있는가.
    *

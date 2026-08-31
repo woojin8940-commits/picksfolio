@@ -7,7 +7,7 @@ import CampaignRegisterWizard from './collab/CampaignRegisterWizard';
 import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
-import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
+import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
@@ -1345,10 +1345,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         )}
 
         {/* ------------------------------------------------ 정산
-            제품 협찬형에는 이 탭이 없다(TABS 참고) — 지급할 광고비가 없어 정산도 없다. */}
+            제품 협찬형에는 이 탭이 없다(TABS 참고) — 지급할 광고비가 없어 정산도 없다.
+
+            인플루언서별 지급 내역이 아니라, 픽스폴리오에 한 번에 보내는 금액을 회차로
+            묶어 보여 준다. 브랜드는 인플루언서에게 각각 송금하지 않으므로 사람별
+            지급일·지급 여부는 브랜드가 확인할 일이 아니다(원천징수와 개별 지급은
+            픽스폴리오가 한다). */}
         {activeTab === 'settlement' && (
           isOwner ? (
-            <CampaignSettlementPanel
+            <BrandSettlementSummary
               businessUsername={businessUsername}
               campaignId={selectedCampaign.id}
               budgetKrw={budget}

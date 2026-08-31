@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
-import BrandContactCard from '../collab/BrandContactCard';
+import BrandCollabProgress from '../BrandCollabProgress';
+import { parseGuidelineFiles } from '../collab/CampaignGuidelineEditor';
 import ListupWorkspace from '../collab/ListupWorkspace';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
@@ -12,13 +13,18 @@ import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
  * 목록은 담당자가 없는 캠페인을 위에 둔다. 아무도 맡지 않은 캠페인은 브랜드 쪽에서
  * 보면 아무 일도 일어나지 않는 것과 같으므로, 가장 먼저 눈에 띄어야 한다.
  *
- * 캠페인 하나를 열면 세 가지가 한 화면에 있다.
+ * 캠페인 하나를 열면 네 가지가 한 화면에 있다.
  *   1. 브리프 — 무엇을 원하는 캠페인인지
  *   2. 배정 — 후보를 명단에 올리고 브랜드가 고른 사람에게 제안하거나 바로 진행
- *   3. 진행 중인 협업 — 인플루언서가 낸 대본·영상을 그 자리에서 확인하고,
- *      기획안·영상 파일을 브랜드·인플루언서와 주고받는다
+ *   3. 진행사항 — 브랜드가 보는 것과 같은 보드(BrandCollabProgress). 맨 위에 브랜드
+ *      담당자 연락처가 붙는다
+ *   4. 검수 — 인플루언서가 낸 대본·영상을 그 자리에서 확인하고, 기획안·영상 파일을
+ *      브랜드·인플루언서와 주고받는다
  *
- * 3번을 다른 화면으로 빼지 않는 이유는, 담당자가 "이 캠페인은 지금 어디까지 왔나"를
+ * 3번은 브랜드 화면을 그대로 가져다 쓴다. 담당자가 브랜드와 전화로 진행을 이야기할 때
+ * 서로 다른 그림을 보고 있으면, 같은 협업을 다른 이름과 다른 순서로 부르게 된다.
+ *
+ * 3·4번을 다른 화면으로 빼지 않는 이유는, 담당자가 "이 캠페인은 지금 어디까지 왔나"를
  * 물을 때 답이 두 화면에 나뉘어 있으면 안 되기 때문이다.
  */
 
@@ -257,15 +263,6 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
             </p>
           )}
 
-          {/* 캠페인을 올린 브랜드 담당자 연락처. 브리프에서 답이 안 나오는 것(제품
-              수령 방법, 촬영 가능 날짜, 2차 활용 범위)은 결국 전화로 풀어야 하는데,
-              그 번호를 찾으러 운영자에게 물어보던 단계를 없앤다. */}
-          <BrandContactCard
-            className="mt-3"
-            campaignId={open.id}
-            brandName={open.brandName || open.businessUsername}
-          />
-
           {/* 확정 기한. 브랜드 화면의 남은 시간이 이 값을 읽는다. 기한을 정하지
               않아도 명단은 이미 브랜드에게 보인다 — 여기서 정하는 것은 표시뿐이다.
               제품 협찬형에는 명단이 없으므로 이 줄도 없다. */}
@@ -305,14 +302,35 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
 
         <ListupWorkspace campaignId={open.id} onNotify={onNotify} />
 
-        {/* 진행 중인 협업 — 인플루언서가 올린 가이드·대본·영상 확인 */}
+        {/* 진행사항 — 브랜드가 보는 것과 똑같은 보드.
+            담당자용 보드를 따로 만들지 않는다. 담당자는 브랜드에게 정산을 받아야 해서
+            카톡·유선으로 진행을 설명하는데, 두 사람이 다른 화면을 보고 있으면 "기획안
+            단계"가 서로 다른 것을 가리킨다.
+
+            브랜드 담당자 연락처는 이 보드 맨 위에 붙는다(viewer='manager'). 브리프에서
+            답이 안 나오는 것(제품 수령 방법, 촬영 가능 날짜, 2차 활용 범위)과 정산
+            이야기는 결국 전화로 풀어야 하는데, 그 번호를 찾으러 운영자에게 물어보던
+            단계를 없앤다. */}
+        <BrandCollabProgress
+          viewer="manager"
+          campaignId={open.id}
+          businessUsername={open.businessUsername}
+          brandName={open.brandName || open.businessUsername}
+          guidelineFiles={parseGuidelineFiles(open.guidelineFiles)}
+          guidelineNote={open.guidelineNote || ''}
+          guidelineUrl={open.guidelineUrl || ''}
+          onNotify={onNotify}
+        />
+
+        {/* 검수 — 인플루언서가 올린 대본·영상 확인, 기획안·영상 파일 주고받기.
+            위 보드가 "어디까지 왔나"를 답하고, 이 아래가 담당자만 할 수 있는 일이다. */}
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <div className="px-4 py-3.5 border-b border-slate-100">
             <h4 className="text-sm font-black text-slate-900">
-              진행 중인 협업 ({campaignCollabs.length})
+              제출물 검수 ({campaignCollabs.length})
             </h4>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-              인플루언서가 제출한 대본과 영상을 여기서 바로 검수합니다.
+              인플루언서가 제출한 대본과 영상을 여기서 바로 검수합니다. 진행 단계는 위 보드에서 봅니다.
             </p>
           </div>
           <div className="p-3 space-y-2 bg-slate-50/60">
