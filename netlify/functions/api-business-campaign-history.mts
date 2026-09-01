@@ -31,6 +31,18 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  * 집계됐는지(matched / uploaded)를 함께 보낸다. 절반만 집계된 조회수를 전체 예산으로
  * 나누면 CPV 가 실제보다 두 배로 나쁘게 보인다.
  *
+ * ── 지급액을 두 개로 보내는 이유 ──
+ *
+ * spend 는 취소되지 않은 협업의 확정 지급액 전부이고, measuredSpend 는 그중 지표가
+ * 맞춰진 게시물의 지급액만이다. CPV 는 measuredSpend 로 계산한다 — 분자와 분모가 같은
+ * 게시물에서 나와야 단가가 뜻을 갖는다(캠페인 성과 패널 api-campaign-metrics 와 같은
+ * 기준이다). 예전에는 전체 지급액을 집계된 조회수로 나눠서, 지표가 아직 안 잡힌 협업이
+ * 섞인 캠페인은 같은 캠페인을 성과 패널에서 볼 때보다 CPV 가 나쁘게 나왔다.
+ *
+ * 그러면서도 spend 를 계속 보내는 이유는 브랜드가 "이 캠페인에 얼마가 확정됐나"를
+ * 보는 자리가 따로 있기 때문이다. CPV 를 맞추려고 그 숫자를 집계된 건으로 줄이면
+ * 실제로 나가는 돈이 실제보다 적게 보인다.
+ *
  *   GET /api/business/campaign-history/:username
  */
 
@@ -172,6 +184,8 @@ export default async (req: Request, context: Context) => {
       let matched = 0;
       let uploaded = 0;
       let spend = 0;
+      // CPV 의 분자. 지표가 맞춰진 게시물의 지급액만 들어간다.
+      let measuredSpend = 0;
 
       const posts = list.map((collab) => {
         const creator = norm(collab.creator_username);
@@ -188,6 +202,7 @@ export default async (req: Request, context: Context) => {
           views += metric.views;
           likes += metric.likes;
           comments += metric.comments;
+          measuredSpend += intOf(collab.fee);
         }
 
         return {
@@ -215,7 +230,8 @@ export default async (req: Request, context: Context) => {
         };
       });
 
-      const cpv = views > 0 && spend > 0 ? Math.round(spend / views) : 0;
+      const cpv =
+        views > 0 && measuredSpend > 0 ? Math.round(measuredSpend / views) : 0;
 
       totals.campaigns++;
       totals.collabs += list.length;
@@ -224,6 +240,7 @@ export default async (req: Request, context: Context) => {
       totals.views += views;
       totals.reactions += likes + comments;
       totals.spend += spend;
+      totals.measuredSpend += measuredSpend;
 
       return {
         id: String(c.id),
@@ -244,12 +261,16 @@ export default async (req: Request, context: Context) => {
         likes,
         comments,
         spend,
+        measuredSpend,
         cpv,
         posts,
       };
     });
 
-    totals.cpv = totals.views > 0 && totals.spend > 0 ? Math.round(totals.spend / totals.views) : 0;
+    totals.cpv =
+      totals.views > 0 && totals.measuredSpend > 0
+        ? Math.round(totals.measuredSpend / totals.views)
+        : 0;
 
     return Response.json({
       totals,
@@ -271,6 +292,7 @@ function emptyTotals() {
     views: 0,
     reactions: 0,
     spend: 0,
+    measuredSpend: 0,
     cpv: 0,
   };
 }

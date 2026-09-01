@@ -12,9 +12,9 @@ import type { Settlement } from '../../types';
  * 인원수만큼 확인해야 했고, "이 사람에게는 아직 안 나갔다"를 자기 잘못으로 읽을 수밖에
  * 없었다.
  *
- * 그래서 사람이 아니라 회차로 묶는다. 회차의 기준은 지급 예정일이다 — 정산은 업로드가
- * 확인된 달의 익월 말일로 자동 예약되므로(서버 settlementDateFrom), 같은 달에 업로드가
- * 확인된 인플루언서들은 같은 날짜를 공유하고 그 날짜가 곧 브랜드가 한 번 보내는 회차다.
+ * 그래서 사람이 아니라 회차로 묶는다. 회차의 기준은 지급 예정일이다 — 정산은 콘텐츠가
+ * 올라간 달의 익월 말일로 자동 예약되므로(서버 settlementDateFrom), 같은 달에 업로드한
+ * 인플루언서들은 같은 날짜를 공유하고 그 날짜가 곧 브랜드가 한 번 보내는 회차다.
  *
  * 맨 위는 일괄 정산 총액과 "인플루언서에게 각각 보내지 않습니다"라는 설명이고, 그 아래에
  * 입금 예정 · 입금 완료 합계를 둔다. 회차 줄에는 금액과 상태, 그리고 인원 수를 남긴다 —
@@ -166,7 +166,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
           <p className="text-sm text-slate-500 font-bold">아직 정산 예정 내역이 없습니다</p>
           <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
             정산은 담당자가 업로드를 확인한 뒤 예약됩니다.<br />
-            지급일은 확인한 달의 다음 달 말일입니다.
+            지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
           </p>
         </div>
       ) : (
@@ -210,8 +210,8 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
 
       <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
         표시된 금액은 픽스폴리오로 입금하는 금액입니다{headcount > 0 && ` (인플루언서 ${headcount}명)`}. 인플루언서
-        개별 지급과 원천징수(3.3%)는 픽스폴리오가 처리하며, 세금계산서는 입금 확인 후 발행됩니다. 지급일은 업로드가
-        확인된 달의 다음 달 말일입니다.
+        개별 지급과 원천징수(3.3%)는 픽스폴리오가 처리하며, 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를
+        올린 달의 다음 달 말일입니다.
       </p>
     </div>
   );

@@ -28,6 +28,26 @@ export function todayInSeoul(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
+/**
+ * 타임스탬프(DB 의 timestamptz, ISO 문자열)를 한국 날짜 'YYYY-MM-DD' 로 바꾼다.
+ *
+ * `String(ts).split("T")[0]` 로 자르면 UTC 기준이 된다. 한국 시간 오전 9시 이전에
+ * 일어난 일은 UTC 로는 전날이므로 하루 전으로 읽힌다 — 9월 1일 새벽 1시에 올라간
+ * 게시물이 8월 31일로 읽히면 정산이 9월 말일로 한 달 앞당겨 잡힌다.
+ *
+ * 이미 'YYYY-MM-DD' 만 온 값은 그 자체가 한국 날짜이므로 그대로 돌려준다.
+ */
+export function seoulDayOf(value?: string | number | Date | null): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  }
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
 /** end_date 값에서 'YYYY-MM-DD' 부분만 추출. 형식이 다르면 null. */
 export function toDateKey(value?: string | null): string | null {
   if (!value) return null;

@@ -16,6 +16,7 @@ import {
   normalizePayout,
   normalizeQuote,
   offerFromCampaign,
+  loadManagerContacts,
   refreshListupSnapshots,
   registeredPayoutFee,
   shapeChannel,
@@ -334,6 +335,28 @@ export default async (req: Request) => {
             return (b.followers || 0) - (a.followers || 0);
           })
           .slice(0, 60);
+      }
+
+      // 담당자 카드에는 성함과 연락처를 함께 내려보낸다. 명단을 보다가 마음에 드는
+      // 사람이 나오면 그 자리에서 전화를 거는 것이 담당자 일의 다음 한 걸음이고,
+      // 지금은 그 번호를 찾으러 등록서 화면을 따로 열어야 한다.
+      //
+      // 브랜드 화면에는 절대 실리지 않는다 — viewerRole 이 manager 일 때만 붙이고,
+      // 이유는 loadManagerContacts 주석에 있다.
+      if (viewerRole === "manager") {
+        const poolItems = (payload.pool as any[]) || [];
+        const contacts = await loadManagerContacts(
+          db,
+          [
+            ...(candidates as any[]).map((c) => c.influencerUsername),
+            ...poolItems.map((p) => p.username),
+          ],
+          campaignId,
+        );
+        for (const c of candidates as any[]) {
+          c.contact = contacts.get(norm(c.influencerUsername)) || null;
+        }
+        for (const p of poolItems) p.contact = contacts.get(norm(p.username)) || null;
       }
 
       return Response.json(payload);

@@ -69,6 +69,8 @@ type HistoryCampaign = {
   likes: number;
   comments: number;
   spend: number;
+  /** CPV 의 분자 — 지표가 맞춰진 게시물의 지급액만. spend 는 확정 지급액 전부다. */
+  measuredSpend: number;
   cpv: number;
   posts: HistoryPost[];
 };
@@ -81,11 +83,13 @@ type HistoryTotals = {
   views: number;
   reactions: number;
   spend: number;
+  measuredSpend: number;
   cpv: number;
 };
 
 const EMPTY_TOTALS: HistoryTotals = {
-  campaigns: 0, collabs: 0, uploaded: 0, matched: 0, views: 0, reactions: 0, spend: 0, cpv: 0,
+  campaigns: 0, collabs: 0, uploaded: 0, matched: 0, views: 0, reactions: 0, spend: 0,
+  measuredSpend: 0, cpv: 0,
 };
 
 /** 지표를 못 붙인 이유를 브랜드가 할 일로 바꿔서 적는다. */
@@ -195,8 +199,13 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       base.views += c.views;
       base.reactions += c.likes + c.comments;
       base.spend += c.spend;
+      base.measuredSpend += c.measuredSpend ?? 0;
     }
-    base.cpv = base.views > 0 && base.spend > 0 ? Math.round(base.spend / base.views) : 0;
+    // 서버와 같은 기준으로 나눈다 — 집계된 게시물의 지급액 ÷ 그 게시물의 조회수.
+    base.cpv =
+      base.views > 0 && base.measuredSpend > 0
+        ? Math.round(base.measuredSpend / base.views)
+        : 0;
     return base;
   }, [visible]);
 
@@ -264,8 +273,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           unit={shown.cpv > 0 ? '원' : undefined}
           pending={shown.cpv === 0}
           hint={
-            shown.spend > 0
-              ? `집행 ${formatKoreanWon(shown.spend)} ÷ 집계된 조회수`
+            shown.measuredSpend > 0
+              ? `집계된 게시물 지급액 ${formatKoreanWon(shown.measuredSpend)} ÷ 그 게시물 조회수`
               : '확정 지급액이 등록되면 계산됩니다'
           }
         />

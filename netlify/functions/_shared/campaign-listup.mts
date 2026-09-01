@@ -441,6 +441,117 @@ export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[
   });
 }
 
+/**
+ * 담당자 카드에 붙는 연락처.
+ *
+ * 담당자는 명단을 보고 그 자리에서 전화를 건다. 그래서 성함과 연락처가 카드
+ * 안에 있어야 하는데, 이 두 값은 스냅샷에 굳히지 않는다. 이유가 둘이다.
+ *
+ * 하나, 스냅샷은 "브랜드가 무엇을 보고 골랐나"의 기록이고 브랜드에게도(가려서)
+ * 내려간다. 연락처가 그 안에 들어가면 가리는 규칙 하나만 새도 브랜드가 인플루언서
+ * 번호를 갖게 되고, 중개 구조가 무너진다.
+ *
+ * 둘, 번호는 바뀐다. 명단에 올린 날의 번호로 굳히면 몇 달 뒤 담당자가 없는 번호로
+ * 전화한다. 그래서 볼 때마다 지금 값을 읽는다.
+ */
+export type ContactEntry = {
+  /** phone·email 은 화면에서 tel:·mailto: 로 건다. text 는 카카오 아이디처럼 걸 수 없는 값. */
+  kind: "phone" | "email" | "text";
+  value: string;
+  /** 어디에 적어 낸 값인지. 두 곳의 번호가 다를 때 담당자가 판단할 근거가 된다. */
+  source: string;
+};
+
+export type ManagerContact = {
+  name: string;
+  entries: ContactEntry[];
+};
+
+const digitsOf = (raw: unknown) => String(raw ?? "").replace(/[^\d]/g, "");
+
+/** 적어 낸 값의 모양을 보고 걸 수 있는 종류를 정한다. 연락처 칸은 자유 입력이다. */
+function contactKind(value: string): ContactEntry["kind"] {
+  if (value.includes("@") && !value.includes(" ")) return "email";
+  // 010-1234-5678 은 11자리, 02-123-4567 은 9자리다. 국가번호가 붙어도 통과한다.
+  if (digitsOf(value).length >= 9) return "phone";
+  return "text";
+}
+
+/**
+ * 여러 사람의 연락처를 한 번에 모은다. 담당자 응답에만 쓴다.
+ *
+ * 같은 번호가 등록서와 지원서에 함께 적혀 있는 경우가 대부분이라 값 기준으로
+ * 겹치는 것을 걷어낸다(번호는 하이픈 유무만 다른 경우가 많아 숫자만 비교한다).
+ */
+export async function loadManagerContacts(
+  db: any,
+  usernames: string[],
+  campaignId?: string,
+): Promise<Map<string, ManagerContact>> {
+  const names = Array.from(new Set((usernames || []).map((u) => norm(u)).filter(Boolean)));
+  const out = new Map<string, ManagerContact>();
+  if (!names.length) return out;
+
+  const [dirRows, applyRows, siteRows] = await Promise.all([
+    // 등록서는 사람마다 여러 장일 수 있다. 가장 최근 것만 본다(buildSnapshots 와 같은 규칙).
+    db.sql`
+      SELECT DISTINCT ON (applicant_username) applicant_username, name, contact
+      FROM collab_directory_applications
+      WHERE role = 'influencer' AND applicant_username = ANY(${names})
+      ORDER BY applicant_username, created_at DESC
+    ` as Promise<any[]>,
+    campaignId
+      ? (db.sql`
+          SELECT DISTINCT ON (applicant_username) applicant_username, contact
+          FROM campaign_applications
+          WHERE campaign_id = ${campaignId} AND applicant_username = ANY(${names})
+          ORDER BY applicant_username, created_at DESC
+        ` as Promise<any[]>)
+      : Promise.resolve([] as any[]),
+    db.sql`SELECT username, data FROM site_data WHERE username = ANY(${names})` as Promise<any[]>,
+  ]);
+
+  for (const name of names) out.set(name, { name: "", entries: [] });
+
+  const seen = new Map<string, Set<string>>();
+  const push = (username: string, raw: unknown, source: string, onlyIfContactable = false) => {
+    const card = out.get(norm(username));
+    if (!card) return;
+    const value = String(raw ?? "").trim();
+    if (!value) return;
+    const kind = contactKind(value);
+    // 픽스폴리오 페이지의 연락처 칸은 남에게 보여 주는 자리라 아무 글자나 들어 있다.
+    // 전화·메일로 읽히는 값만 담당자 카드에 올린다.
+    if (onlyIfContactable && kind === "text") return;
+    const key = kind === "phone" ? digitsOf(value) : value.toLowerCase();
+    let bag = seen.get(norm(username));
+    if (!bag) seen.set(norm(username), (bag = new Set<string>()));
+    if (bag.has(key)) return;
+    bag.add(key);
+    card.entries.push({ kind, value, source });
+  };
+
+  for (const row of (dirRows as any[]) || []) {
+    const key = norm(row.applicant_username);
+    const card = out.get(key);
+    if (card && !card.name) card.name = String(row.name || "").trim();
+    push(key, row.contact, "등록서");
+  }
+  for (const row of (applyRows as any[]) || []) {
+    push(row.applicant_username, row.contact, "이 캠페인 지원서");
+  }
+  for (const row of (siteRows as any[]) || []) {
+    const key = norm(row.username);
+    const profile = (row.data as any)?.profile || {};
+    const card = out.get(key);
+    if (card && !card.name) card.name = String(profile.name || "").trim();
+    push(key, profile.email, "픽스폴리오 페이지", true);
+    push(key, profile?.links?.phone, "픽스폴리오 페이지", true);
+  }
+
+  return out;
+}
+
 /** campaign_listups 행 → 화면용. 인플루언서에게는 다른 후보 이야기가 가지 않는다. */
 export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer") {
   const snapshot = (row.snapshot && typeof row.snapshot === "object" ? row.snapshot : {}) as any;

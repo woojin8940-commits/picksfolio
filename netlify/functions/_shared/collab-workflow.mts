@@ -54,7 +54,7 @@ const AD_COLLAB: StageTemplateSet = {
     { key: "content_review", title: "콘텐츠 검수", owner: "manager", dueOffsetDays: 14, hint: "수정 요청이 있으면 항목별로 전달합니다." },
     { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 17, deliverable: "upload", hint: "업로드 후 게시물 링크를 등록해 주세요." },
     { key: "confirm", title: "업로드 확인", owner: "manager", dueOffsetDays: 18, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
-    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 19, hint: "확인 월의 익월 말일에 지급됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 19, hint: "업로드한 달의 익월 말일에 지급됩니다." },
   ],
 };
 
@@ -79,7 +79,7 @@ const AD_COLLAB_LITE: StageTemplateSet = {
     { key: "content_review", title: "콘텐츠 검수", owner: "manager", dueOffsetDays: 10, hint: "수정 요청이 있으면 항목별로 전달합니다." },
     { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 13, deliverable: "upload", hint: "업로드 후 게시물 링크를 등록해 주세요." },
     { key: "confirm", title: "업로드 확인", owner: "manager", dueOffsetDays: 14, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
-    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 15, hint: "확인 월의 익월 말일에 지급됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 15, hint: "업로드한 달의 익월 말일에 지급됩니다." },
   ],
 };
 
@@ -101,7 +101,7 @@ const SEEDING: StageTemplateSet = {
     { key: "guide", title: "가이드 전달", owner: "manager", dueOffsetDays: 2, hint: "필수 표기와 촬영 가이드를 전달합니다." },
     { key: "upload", title: "업로드", owner: "influencer", dueOffsetDays: 10, deliverable: "upload", hint: "가이드에 맞춰 업로드하고 게시물 링크를 등록해 주세요." },
     { key: "confirm", title: "업로드 확인", owner: "manager", dueOffsetDays: 11, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
-    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 12, hint: "확인 월의 익월 말일에 지급됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 12, hint: "업로드한 달의 익월 말일에 지급됩니다." },
   ],
 };
 
@@ -119,7 +119,7 @@ const GROUP_BUY: StageTemplateSet = {
     { key: "content_review", title: "콘텐츠 검수", owner: "manager", dueOffsetDays: 10, hint: "표기 의무 사항까지 함께 확인합니다." },
     { key: "upload", title: "판매 시작", owner: "influencer", dueOffsetDays: 12, deliverable: "upload", hint: "업로드 후 게시물 링크를 등록해 주세요." },
     { key: "confirm", title: "게시 확인", owner: "manager", dueOffsetDays: 13, hint: "담당자가 게시물을 확인하면 정산이 예약됩니다." },
-    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 14, hint: "확인 월의 익월 말일에 지급됩니다." },
+    { key: "settlement", title: "정산", owner: "manager", dueOffsetDays: 14, hint: "업로드한 달의 익월 말일에 지급됩니다." },
   ],
 };
 
@@ -223,12 +223,17 @@ export function addDays(dateKey: string, days: number): string {
 }
 
 /**
- * 정산 지급일 = 업로드 확인 월의 익월 말일.
- * 지금까지는 수락 시점 +30일 고정이었다. 실제로 업로드가 늦어지면 아직 게시도
- * 되지 않은 협업의 정산이 예약돼 있는 상태가 됐다.
+ * 정산 지급일 = 콘텐츠가 올라간 달의 익월 말일.
+ *
+ * 기준은 담당자가 확인을 누른 날이 아니라 게시물이 실제로 올라간 날이다. 확인이
+ * 며칠 늦어 달을 넘기면(9월 30일 업로드 · 10월 2일 확인) 확인일 기준으로는 정산이
+ * 11월 말로 밀려, 인플루언서는 담당자가 늦게 누른 만큼 한 달을 더 기다리게 된다.
+ *
+ * 그 전에는 수락 시점 +30일 고정이었다. 그러면 업로드가 늦어질 때 아직 게시도 되지
+ * 않은 협업의 정산이 예약돼 있는 상태가 됐다.
  */
-export function settlementDateFrom(confirmedDateKey: string = todayInSeoul()): string {
-  const [y, m] = confirmedDateKey.split("-").map(Number);
+export function settlementDateFrom(uploadDateKey: string = todayInSeoul()): string {
+  const [y, m] = uploadDateKey.split("-").map(Number);
   // 다음 달의 0일 = 다음 달 말일. (m 은 1~12, Date.UTC 의 월은 0~11이므로 m+1 = 다음달)
   const lastDay = new Date(Date.UTC(y, m + 1, 0));
   return lastDay.toISOString().slice(0, 10);

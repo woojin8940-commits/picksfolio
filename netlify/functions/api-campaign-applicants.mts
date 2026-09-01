@@ -298,7 +298,8 @@ export default async (req: Request) => {
       // 3) 정산은 여기서 만들지 않는다.
       //    예전에는 수락 시점 +30일로 예약했는데, 업로드가 그보다 늦어지면 아직
       //    게시되지도 않은 협업의 정산이 잡혀 있는 상태가 됐다. 이제 담당자가
-      //    업로드를 확인한 단계(confirm)에서 익월 말일 기준으로 예약한다.
+      //    업로드를 확인한 단계(confirm)에서, 게시물이 올라간 달의 익월 말일로
+      //    예약한다.
       await logCollabEvent(db, {
         collabId: collab.id,
         type: "applicant_selected",
