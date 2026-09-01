@@ -140,7 +140,7 @@ const avg = (nums: number[]) => {
 };
 
 /** "Instagram API with Instagram Login" 토큰은 graph.instagram.com 을 쓴다(페이스북 그래프 아님). */
-const graphHostFor = (tokenSource?: string) =>
+export const graphHostFor = (tokenSource?: string) =>
   tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
 
 /**

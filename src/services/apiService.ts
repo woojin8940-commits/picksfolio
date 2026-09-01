@@ -2860,6 +2860,52 @@ export const apiService = {
     }
   },
 
+  /**
+   * 캠페인 성과(게시물 조회수 · 좋아요 · 댓글, 단가).
+   *
+   * 브랜드 · 담당자 · 인플루언서가 같은 엔드포인트를 부르고, 서버가 부르는 사람에
+   * 맞춰 범위를 자른다(인플루언서는 자기 게시물만, 금액 없음). 화면이 역할별로
+   * 다른 주소를 부르면 권한 판정이 화면 쪽 논리가 되어 버린다.
+   */
+  async getCampaignMetrics(
+    campaignId: string,
+    opts: { token?: string } = {},
+  ): Promise<any> {
+    try {
+      const res = await authedGet(
+        `/api/campaign-metrics?campaignId=${encodeURIComponent(campaignId)}`,
+        () => collabHeaders(opts.token),
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '캠페인 성과를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get campaign metrics:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** "지금 수집" — 메타에 다시 물어 성과를 갱신한다. */
+  async refreshCampaignMetrics(
+    campaignId: string,
+    opts: { token?: string } = {},
+  ): Promise<any> {
+    try {
+      const res = await fetch('/api/campaign-metrics', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token),
+        body: JSON.stringify({ campaignId, action: 'refresh' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '성과를 갱신하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to refresh campaign metrics:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   /** 캠페인 맡기 · 놓기 · 명단 공개(담당자). */
   async managerCampaignAction(
     campaignId: string,
