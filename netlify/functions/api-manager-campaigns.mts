@@ -54,6 +54,8 @@ const shape = (row: any) => ({
   // 담당자 화면이 이 값으로 명단 관련 자리를 감춘다.
   rewardMode: normalizeRewardMode(row.reward_mode),
   managerListup: isManagerListupMode(row.reward_mode),
+  // 집행 예산. 담당자 화면의 인사이트 탭이 단가 설명에 쓴다(브랜드 화면과 같은 값이다).
+  budgetKrw: Number(row.budget_krw || 0),
   approvedAt: row.admin_approved_at || null,
   createdAt: row.created_at,
   listupConfirmDue: row.listup_confirm_due || null,

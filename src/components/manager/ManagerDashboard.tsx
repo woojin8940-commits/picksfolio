@@ -138,7 +138,13 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-6">
+      {/* 캠페인 탭만 폭을 넓게 쓴다. 그 안의 진행 보드가 단계를 가로로 늘어놓은
+          형태라(BrandCollabProgress) 1280px 에 맞추면 다섯 칸 중 두어 칸만 보이고
+          나머지는 가로로 밀어 봐야 한다 — 브랜드 화면이 1560px 를 쓰는 것과 같은
+          이유다. 나머지 탭(명부 · 대화)은 지금 폭에 맞춰 만든 목록이라 그대로 둔다. */}
+      <div
+        className={`mx-auto px-4 md:px-8 py-6 ${tab === 'campaigns' ? 'max-w-[1560px]' : 'max-w-7xl'}`}
+      >
         <div className="flex gap-2 mb-2 flex-wrap">
           {TABS.map((t) => (
             <button

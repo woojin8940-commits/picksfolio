@@ -1350,6 +1350,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         {/* ------------------------------------------------ 인사이트 */}
         {activeTab === 'insight' && (
           <CampaignInsightPanel
+            campaignId={selectedCampaign.id}
             budgetKrw={budget}
             uploadedCount={uploadedCount}
             totalCollabs={collabSummary.length}

@@ -407,6 +407,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             {activeTab === 'insight' && (
               <CampaignInsightPanel
                 viewer="influencer"
+                campaignId={selected.campaignId}
                 budgetKrw={0}
                 uploadedCount={detail.collab?.uploadConfirmedAt ? 1 : 0}
                 totalCollabs={1}
