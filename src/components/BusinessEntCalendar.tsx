@@ -34,6 +34,25 @@ type CollabRow = BusinessProposal & {
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/** 'YYYY-MM-DDTHH:mm:ss' 든 'YYYY-MM-DD' 든 날짜 부분만. */
+const dayOnly = (v?: string) => (v || '').split('T')[0];
+
+/**
+ * 달력 한 칸에 찍히는 업로드 일정.
+ *
+ * 칸이 답해야 하는 질문은 "이 날 누가 올리나" 하나다. 기간은 협업 내역 탭이 이미
+ * 보여 주므로, 여기서는 날짜 하나에 점 하나만 놓는다.
+ */
+type UploadChip = {
+  id: string;
+  /** 콘텐츠를 올리는 날(YYYY-MM-DD). */
+  date: string;
+  /** 업로드가 끝났는가. 남은 일을 앞으로 올리고 색을 가르는 데 쓴다. */
+  done: boolean;
+  /** 칸을 눌렀을 때 아래 상세가 그리는 원래 협업 줄. */
+  row: CollabRow;
+};
+
 const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername }) => {
   const cleanUsername = businessUsername.replace(/^biz\//, '');
   const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
@@ -123,39 +142,91 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   };
 
-  const calendarDays = useMemo(() => {
-    const days: { day: number; proposals: CollabRow[] }[] = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = getDateStr(d);
-      const dayProposals = rows.filter(p => {
-        const start = p.start_date?.split('T')[0] || '';
-        const end = p.end_date?.split('T')[0] || '';
-        return start <= dateStr && end >= dateStr;
-      });
-      days.push({ day: d, proposals: dayProposals });
-    }
-    return days;
-  }, [rows, year, month, daysInMonth]);
+  /**
+   * 협업 줄에 붙은 원래 협업. 업로드 날짜와 확인 여부가 여기에만 있다.
+   *
+   * `campaignCollabsAsProposals` 는 제안 모양으로 맞추느라 기간과 금액만 옮겨 온다.
+   * 달력이 보는 값은 기간이 아니라 업로드 마감이므로 원본을 한 번 더 짚는다.
+   */
+  const byCollabId = useMemo(
+    () => new Map(collabs.map(c => [c.id, c])),
+    [collabs],
+  );
 
-  const eventOrder = useMemo(() => {
-    const order: Record<string, number> = {};
-    const sorted = [...rows].sort((a, b) => {
-      const startDiff = new Date(a.start_date).getTime() - new Date(b.start_date).getTime();
-      if (startDiff !== 0) return startDiff;
-      return new Date(b.end_date).getTime() - new Date(a.end_date).getTime();
-    });
-    sorted.forEach((p, i) => { order[p.id] = i; });
-    return order;
-  }, [rows]);
-
-  const getEventPosition = (startDate: string, endDate: string, dateStr: string) => {
-    const startStr = (startDate || '').split('T')[0];
-    const endStr = (endDate || '').split('T')[0];
-    const dayOfWeek = new Date(dateStr).getDay();
-    const isFirst = dateStr === startStr || dayOfWeek === 0;
-    const isLast = dateStr === endStr || dayOfWeek === 6;
-    return { isFirst, isLast };
+  /**
+   * 이 협업을 올리는 날.
+   *
+   * 이미 올렸으면 올린 날, 아직이면 확정 조건의 업로드 마감이다. 둘 다 없는 줄(브랜드가
+   * 직접 보낸 제안)은 종료일을 쓴다 — 서버는 일정을 확정할 때 업로드 마감을 협업
+   * 종료일로 옮겨 적으므로 둘은 같은 날을 가리킨다.
+   */
+  const uploadDateOf = (p: CollabRow): string => {
+    const linked = p._collabId ? byCollabId.get(p._collabId) : undefined;
+    return (
+      dayOnly(linked?.uploadedDay) ||
+      dayOnly(linked?.uploadDue) ||
+      dayOnly(p.end_date) ||
+      dayOnly(p.start_date)
+    );
   };
+
+  /** 업로드가 끝났는가. 캠페인 협업은 확인 기록으로, 직접 보낸 제안은 기존 완료 판정으로 가른다. */
+  const isUploadDone = (p: CollabRow): boolean => {
+    const linked = p._collabId ? byCollabId.get(p._collabId) : undefined;
+    if (linked) {
+      return (
+        linked.state === 'completed' ||
+        Boolean(linked.uploadConfirmedAt) ||
+        Boolean(linked.uploadedDay)
+      );
+    }
+    // 직접 보낸 제안에는 업로드를 확인하는 단계가 없다. 옆의 '완료됨' 집계와 같은
+    // 규칙을 써야 달력의 색과 사이드바 숫자가 어긋나지 않는다.
+    return isCollabDone(p);
+  };
+
+  /**
+   * 달력에 찍는 날 — 콘텐츠가 올라가는 날 하나뿐이다.
+   *
+   * 예전에는 협업 기간을 막대로 그렸다. 그런데 담당자가 일정을 확정하기 전의 협업은
+   * 기간이 "협업이 만들어진 날 ~ 캠페인 종료일"까지 벌어져서, 인플루언서 한 명과 네 건만
+   * 진행해도 막대가 달 전체를 덮고 칸마다 '+2'가 붙었다. 정작 브랜드가 달력에서 알고
+   * 싶은 것 — 언제 콘텐츠가 올라오나 — 는 그 막대 어디에도 적혀 있지 않았다.
+   *
+   * 그래서 기간은 버리고 업로드하는 날만 점으로 찍는다. 기간과 금액 합계는 협업 내역
+   * 탭이, 회차별 지급액은 정산금 탭이 이미 보여 준다.
+   */
+  const dayChipsMap = useMemo(() => {
+    const map: Record<string, UploadChip[]> = {};
+    rows.forEach(p => {
+      const date = uploadDateOf(p);
+      if (!date) return;
+      if (!map[date]) map[date] = [];
+      map[date].push({ id: p.id, date, done: isUploadDone(p), row: p });
+    });
+    // 남은 일이 먼저다. 같은 날 여러 명이 올리면 아직 안 올린 쪽부터 보여 준다.
+    Object.values(map).forEach(list =>
+      list.sort(
+        (a, b) =>
+          Number(a.done) - Number(b.done) ||
+          a.row.influencer_username.localeCompare(b.row.influencer_username),
+      ),
+    );
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, byCollabId, today]);
+
+  /** 점의 색. 마감이 지났는데 안 올라온 건을 회색으로 두면 놓친 것을 놓친 줄 모른다. */
+  const chipClass = (ev: UploadChip) => {
+    if (ev.done) return 'bg-emerald-100 text-emerald-700';
+    if (ev.date < today) return 'bg-red-100 text-red-700';
+    return 'bg-blue-100 text-blue-700';
+  };
+
+  const chipLabel = (ev: UploadChip) =>
+    ev.done ? '업로드 완료' : ev.date < today ? '마감 지남 (미업로드)' : '업로드 예정';
+
+  const chipIcon = (ev: UploadChip) => (ev.done ? '✅' : ev.date < today ? '⚠️' : '⬆️');
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
@@ -207,15 +278,11 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
   const formatFee = (fee: number) => formatKRW(fee);
 
-  // Selected date proposals
-  const selectedDateProposals = useMemo(() => {
-    if (!selectedDate) return [];
-    return rows.filter(p => {
-      const start = p.start_date?.split('T')[0] || '';
-      const end = p.end_date?.split('T')[0] || '';
-      return start <= selectedDate && end >= selectedDate;
-    });
-  }, [rows, selectedDate]);
+  // 고른 날에 업로드가 잡힌 협업. 기간이 걸쳐 있다고 뜨지 않는다 — 달력의 점과 같은 목록이다.
+  const selectedDateChips = useMemo(
+    () => (selectedDate ? dayChipsMap[selectedDate] || [] : []),
+    [dayChipsMap, selectedDate],
+  );
 
   /**
    * 캠페인 협업 줄에 붙는 표시.
@@ -318,8 +385,10 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                 <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50" />
               ))}
 
-              {calendarDays.map(({ day, proposals: dayProposals }) => {
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1;
                 const dateStr = getDateStr(day);
+                const chips = dayChipsMap[dateStr] || [];
                 const isToday = dateStr === today;
                 const isSelected = dateStr === selectedDate;
                 const dayOfWeek = (firstDayOfWeek + day - 1) % 7;
@@ -328,7 +397,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                   <div
                     key={day}
                     onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                    className={`p-2 md:p-3 min-h-[100px] md:min-h-[130px] border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                    className={`p-2 md:p-3 min-h-[100px] md:min-h-[130px] overflow-hidden border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
                       isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
                     }`}
                   >
@@ -343,29 +412,22 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                     }`}>
                       {day}
                     </span>
+                    {/* 올리는 날(⬆️)만 찍는다. 세 건이 넘는 날은 개수로 접고, 자세한
+                        내용은 칸을 눌렀을 때 아래 상세에서 본다. */}
                     <div className="mt-1.5">
-                      {dayProposals
-                        .sort((a, b) => (eventOrder[a.id] ?? 0) - (eventOrder[b.id] ?? 0))
-                        .slice(0, 2)
-                        .map(p => {
-                          const { isFirst, isLast } = getEventPosition(p.start_date, p.end_date, dateStr);
-                          const colorClass = isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500';
-                          return (
-                            <div
-                              key={p.id}
-                              className={`relative z-10 ${colorClass} text-white text-[9px] md:text-[11px] font-bold py-0.5 leading-tight overflow-hidden whitespace-nowrap mb-[2px] ${
-                                isFirst && isLast ? 'rounded px-1.5 mx-0' :
-                                isFirst ? 'rounded-l pl-1.5 -mr-[9px] md:-mr-[13px]' :
-                                isLast ? 'rounded-r pr-1.5 -ml-[9px] md:-ml-[13px]' :
-                                '-mx-[9px] md:-mx-[13px]'
-                              }`}
-                            >
-                              {isFirst ? `@${p.influencer_username}` : ' '}
-                            </div>
-                          );
-                        })}
-                      {dayProposals.length > 2 && (
-                        <p className="text-[9px] font-black text-blue-500 mt-0.5">+{dayProposals.length - 2}</p>
+                      {chips.slice(0, 3).map(ev => (
+                        <div
+                          key={ev.id}
+                          title={[chipLabel(ev), ev.row.title, `@${ev.row.influencer_username}`]
+                            .filter(Boolean)
+                            .join(' · ')}
+                          className={`text-[10px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)}`}
+                        >
+                          {chipIcon(ev)} @{ev.row.influencer_username}
+                        </div>
+                      ))}
+                      {chips.length > 3 && (
+                        <p className="text-[10px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
                       )}
                     </div>
                   </div>
@@ -378,32 +440,47 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
           {selectedDate && (
             <div className="mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-8 animate-in fade-in slide-in-from-top-2 duration-300">
               <h4 className="font-black text-slate-900 text-base mb-4">
-                {formatDate(selectedDate)} 일정
+                {formatDate(selectedDate)} 업로드 일정
               </h4>
-              {selectedDateProposals.length === 0 ? (
-                <p className="text-slate-400 text-sm font-bold text-center py-4">이 날짜에 해당하는 일정이 없습니다.</p>
+              {selectedDateChips.length === 0 ? (
+                <p className="text-slate-400 text-sm font-bold text-center py-4">이 날짜에 예정된 업로드가 없습니다.</p>
               ) : (
                 <div className="space-y-3">
-                  {selectedDateProposals.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => openIfCollab(p)}
-                      className={`flex items-center gap-3 p-4 bg-slate-50 rounded-xl ${p._collabId ? 'cursor-pointer hover:bg-violet-50 transition-colors' : ''}`}
-                    >
-                      <div className={`w-2 h-12 rounded-full shrink-0 ${isCollabDone(p) ? 'bg-blue-500' : 'bg-green-500'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
-                          {collabBadge(p)}
+                  {selectedDateChips.map(ev => {
+                    const p = ev.row;
+                    return (
+                      <div
+                        key={ev.id}
+                        onClick={() => openIfCollab(p)}
+                        className={`flex items-center gap-3 p-4 bg-slate-50 rounded-xl ${p._collabId ? 'cursor-pointer hover:bg-violet-50 transition-colors' : ''}`}
+                      >
+                        <div
+                          className={`w-2 h-12 rounded-full shrink-0 ${
+                            ev.done ? 'bg-emerald-500' : ev.date < today ? 'bg-red-500' : 'bg-blue-500'
+                          }`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-black text-slate-900 text-sm truncate">{p.title}</p>
+                            {collabBadge(p)}
+                          </div>
+                          <p className="text-xs font-bold text-slate-400">@{p.influencer_username} · {formatFee(p.fee)}</p>
+                          {/* 협업 기간은 달력에서 빼는 대신 여기 한 줄로 남긴다 — 점 하나만
+                              보고는 이 협업이 언제부터 돌고 있는지 알 수 없다. */}
+                          <p className="text-[10px] font-bold text-slate-300 mt-0.5">
+                            협업 기간 {formatDate(p.start_date)} ~ {formatDate(p.end_date)}
+                          </p>
                         </div>
-                        <p className="text-xs font-bold text-slate-400">@{p.influencer_username} · {formatFee(p.fee)}</p>
-                        <p className="text-[10px] font-bold text-slate-300 mt-0.5">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</p>
+                        <span
+                          className={`text-xs font-black shrink-0 ${
+                            ev.done ? 'text-emerald-500' : ev.date < today ? 'text-red-500' : 'text-blue-500'
+                          }`}
+                        >
+                          {chipLabel(ev)}
+                        </span>
                       </div>
-                      <span className={`text-xs font-black shrink-0 ${isCollabDone(p) ? 'text-blue-500' : 'text-green-500'}`}>
-                        {isCollabDone(p) ? '완료' : '진행중'}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -520,17 +597,26 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
             )}
           </div>
 
-          {/* Legend */}
+          {/* Legend — 달력이 찍는 것은 콘텐츠가 올라가는 날, 하나뿐이다. */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
+            <p className="text-[11px] font-bold text-slate-400 mb-3 leading-relaxed">
+              달력에는 인플루언서의 업로드 일정만 표시됩니다. 일정이 확정되기 전에는 캠페인 종료일에
+              놓이고, 담당자가 업로드 마감을 확정하면 그 날짜로 옮겨집니다. 협업 기간과 금액 합계는
+              협업 내역, 회차별 지급액은 정산금 탭에서 볼 수 있습니다.
+            </p>
             <div className="space-y-2.5">
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-green-500" />
-                <span className="text-sm font-bold text-slate-600">진행중 (수락됨)</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-blue-400" />
+                <span className="text-sm font-bold text-slate-600">⬆️ 업로드 예정</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-500" />
-                <span className="text-sm font-bold text-slate-600">완료됨</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-red-400" />
+                <span className="text-sm font-bold text-slate-600">⚠️ 마감 지남 (미업로드)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3.5 h-3.5 rounded-full bg-emerald-400" />
+                <span className="text-sm font-bold text-slate-600">✅ 업로드 완료</span>
               </div>
             </div>
           </div>
