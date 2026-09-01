@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
 import BrandCollabProgress from '../BrandCollabProgress';
+import BrandSettlementSummary from '../collab/BrandSettlementSummary';
 import { parseGuidelineFiles } from '../collab/CampaignGuidelineEditor';
 import ListupWorkspace from '../collab/ListupWorkspace';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
@@ -13,19 +14,22 @@ import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
  * 목록은 담당자가 없는 캠페인을 위에 둔다. 아무도 맡지 않은 캠페인은 브랜드 쪽에서
  * 보면 아무 일도 일어나지 않는 것과 같으므로, 가장 먼저 눈에 띄어야 한다.
  *
- * 캠페인 하나를 열면 네 가지가 한 화면에 있다.
+ * 캠페인 하나를 열면 다섯 가지가 한 화면에 있다.
  *   1. 브리프 — 무엇을 원하는 캠페인인지
  *   2. 배정 — 후보를 명단에 올리고 브랜드가 고른 사람에게 제안하거나 바로 진행
  *   3. 진행사항 — 브랜드가 보는 것과 같은 보드(BrandCollabProgress). 맨 위에 브랜드
  *      담당자 연락처가 붙는다
- *   4. 검수 — 인플루언서가 낸 대본·영상을 그 자리에서 확인하고, 기획안·영상 파일을
+ *   4. 정산 — 브랜드가 픽스폴리오에 한 번에 보낼 회차 금액과, 회차마다 조율하는
+ *      입금일(BrandSettlementSummary). 브랜드가 보는 화면과 같다
+ *   5. 검수 — 인플루언서가 낸 대본·영상을 그 자리에서 확인하고, 기획안·영상 파일을
  *      브랜드·인플루언서와 주고받는다
  *
- * 3번은 브랜드 화면을 그대로 가져다 쓴다. 담당자가 브랜드와 전화로 진행을 이야기할 때
- * 서로 다른 그림을 보고 있으면, 같은 협업을 다른 이름과 다른 순서로 부르게 된다.
+ * 3·4번은 브랜드 화면을 그대로 가져다 쓴다. 담당자가 브랜드와 전화로 진행과 입금일을
+ * 이야기할 때 서로 다른 그림을 보고 있으면, 같은 협업을 다른 이름으로 부르고 같은
+ * 회차를 다른 금액으로 부르게 된다.
  *
- * 3·4번을 다른 화면으로 빼지 않는 이유는, 담당자가 "이 캠페인은 지금 어디까지 왔나"를
- * 물을 때 답이 두 화면에 나뉘어 있으면 안 되기 때문이다.
+ * 3·4·5번을 다른 화면으로 빼지 않는 이유는, 담당자가 "이 캠페인은 지금 어디까지 왔나"를
+ * 물을 때 답이 여러 화면에 나뉘어 있으면 안 되기 때문이다.
  */
 
 interface ManagerCampaignsPanelProps {
@@ -319,6 +323,20 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
           guidelineFiles={parseGuidelineFiles(open.guidelineFiles)}
           guidelineNote={open.guidelineNote || ''}
           guidelineUrl={open.guidelineUrl || ''}
+          onNotify={onNotify}
+        />
+
+        {/* 정산 — 브랜드가 픽스폴리오에 보낼 금액과 입금일. 브랜드가 보는 화면과 같은
+            것을 쓰고, 담당자에게만 '입금 확인'이 있다.
+
+            입금일은 미리 정해 두지 않는다. 자동으로 잡히는 날짜는 인플루언서 지급
+            예정일(익월 말일)이고, 브랜드가 우리에게 보내는 날은 브랜드의 세금계산서
+            발행·내부 지급 규정에 달려 있다. 카카오톡·유선으로 이야기한 뒤 결론을 여기에
+            제안·동의로 남긴다 — 통화가 끝나고 "며칠이라고 했었지"를 다시 묻지 않도록. */}
+        <BrandSettlementSummary
+          viewer="manager"
+          businessUsername={open.businessUsername}
+          campaignId={open.id}
           onNotify={onNotify}
         />
 

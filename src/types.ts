@@ -200,6 +200,44 @@ export interface MembershipBillingHistoryEntry {
 
 export type SettlementStatus = 'scheduled' | 'pending' | 'completed';
 
+/**
+ * 브랜드가 픽스폴리오에 보내는 입금일 — 회차마다 양쪽이 조율한 결과.
+ *
+ * 인플루언서 지급일(익월 말일)과 다른 날짜다. 그 날짜는 픽스폴리오가 개인에게 보내는
+ * 날이고, 이 날짜는 브랜드가 픽스폴리오에 한 번에 보내는 날이다. 브랜드의 세금계산서
+ * 발행·내부 지급 규정에 따라 정해지므로 미리 박아 두지 않고, 어느 쪽이 제안하고 상대가
+ * 동의하면 그때 확정된다.
+ */
+export interface BrandRemitSchedule {
+  /** 마지막으로 올라온 제안 (YYYY-MM-DD). 비면 아직 아무도 날짜를 내지 않았다. */
+  proposedDate: string;
+  /** 제안한 쪽. 상대만 동의할 수 있으므로 화면은 이 값으로 버튼을 고른다. */
+  proposedSide: 'brand' | 'manager' | '';
+  proposedNote: string;
+  proposedAt: string | null;
+  /** 담당자에게만 담긴다(브랜드 화면에서는 빈 문자열). */
+  proposedBy: string;
+  /** 확정된 입금일. 채워져 있으면 약속된 날짜다. */
+  agreedDate: string;
+  agreedSide: 'brand' | 'manager' | '';
+  agreedAt: string | null;
+  agreedBy: string;
+  /** 담당자가 입금을 확인한 시각. 브랜드 화면의 '입금 완료'는 이 값으로만 판단한다. */
+  receivedAt: string | null;
+  receivedBy: string;
+}
+
+/** 브랜드가 한 번에 보내는 정산 회차. 인플루언서 개인 정보는 담기지 않는다. */
+export interface BrandSettlementRound {
+  /** 'YYYY-MM'. 비어 있으면 담당자가 아직 지급일을 잡지 않은 건들이다. */
+  roundKey: string;
+  amount: number;
+  headcount: number;
+  /** 금액 조율 중인 건수. 확정되면 회차 금액에 더해진다. */
+  pendingCount: number;
+  schedule: BrandRemitSchedule | null;
+}
+
 export interface Settlement {
   id: string;
   proposal_id: string;

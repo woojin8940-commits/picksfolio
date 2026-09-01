@@ -40,7 +40,7 @@ type ManagerTab = 'picks' | 'influencers' | 'campaigns' | 'chat';
 const TABS: { key: ManagerTab; label: string; hint: string }[] = [
   { key: 'picks', label: '브랜드 선택', hint: '브랜드가 고른 인플루언서 · 진행하기' },
   { key: 'influencers', label: '인플루언서', hint: '카테고리별 전체 명부' },
-  { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정 · 진행사항 · 검수' },
+  { key: 'campaigns', label: '브랜드 캠페인', hint: '캠페인별 배정 · 진행사항 · 정산 · 검수' },
   { key: 'chat', label: '대화', hint: '인플루언서 · 브랜드 채널' },
 ];
 

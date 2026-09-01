@@ -1,4 +1,4 @@
-import { Block, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
+import { Block, BrandRemitSchedule, BrandSettlementRound, DesignSettings, BusinessProposal, CollabRecord, ProductFolder, OpenScheduleItem, SellerVerification, Settlement } from '../types';
 import type { MembershipTier } from '../utils/membershipTiers';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY, withTimeout } from './supabase';
 import { scopedKey } from '../utils/accountScope';
@@ -2839,6 +2839,75 @@ export const apiService = {
       return json;
     } catch (e) {
       console.error('[API] Failed to get brand contact:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 브랜드 → 픽스폴리오 일괄 정산. 회차 금액과 회차별 입금일 조율 상태를 함께 읽는다.
+   *
+   * 브랜드와 담당자가 같은 엔드포인트를 부른다. 브랜드는 자기 계정 토큰으로,
+   * 담당자는 담당자 자격으로 통과한다 — 두 화면이 같은 숫자를 보게 하려면 응답을
+   * 만드는 곳이 한 군데여야 한다.
+   */
+  async getBrandSettlement(
+    opts: { businessUsername: string; campaignId?: string; token?: string },
+  ): Promise<{ rounds?: BrandSettlementRound[]; isManager?: boolean; error?: string }> {
+    const business = String(opts.businessUsername || '').replace(/^biz\//, '');
+    if (!business) return { error: '브랜드를 지정해 주세요.' };
+    const params = new URLSearchParams({ business });
+    if (opts.campaignId) params.set('campaign', opts.campaignId);
+
+    try {
+      const res = await fetch(`/api/brand-settlement?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token, { account: `biz/${business}` }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '정산 정보를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get brand settlement:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /**
+   * 회차 입금일 조율. `side` 는 "어느 쪽으로 말하는지"다 — 담당자 자격과 브랜드
+   * 계정을 함께 쥔 사람이 있어서, 알려주지 않으면 서버가 브랜드의 제안을 담당자의
+   * 제안으로 기록하고 브랜드가 자기 제안에 동의할 수 있게 된다.
+   */
+  async updateBrandSettlementRound(
+    opts: {
+      businessUsername: string;
+      roundKey: string;
+      action: 'propose' | 'agree' | 'reset' | 'receive' | 'unreceive';
+      side: 'brand' | 'manager';
+      date?: string;
+      note?: string;
+      token?: string;
+    },
+  ): Promise<{ schedule?: BrandRemitSchedule | null; error?: string }> {
+    const business = String(opts.businessUsername || '').replace(/^biz\//, '');
+    try {
+      const res = await fetch('/api/brand-settlement', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(opts.token, { account: `biz/${business}` }),
+        body: JSON.stringify({
+          business,
+          roundKey: opts.roundKey,
+          action: opts.action,
+          side: opts.side,
+          date: opts.date || '',
+          note: opts.note || '',
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '입금일을 저장하지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to update brand settlement round:', e);
       return { error: '네트워크 오류' };
     }
   },

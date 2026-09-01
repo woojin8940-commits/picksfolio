@@ -608,7 +608,10 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
       {/* 정산금 — 인플루언서별 지급 관리가 아니라, 픽스폴리오에 한 번에 보내는 금액이다.
           예전에는 이 자리에서 브랜드가 인플루언서별 정산 항목을 직접 만들고 금액과
           지급일을 고칠 수 있었다. 브랜드는 개별 송금을 하지 않으므로 고칠 것이 없고,
-          고칠 수 있게 두면 담당자가 업로드를 확인해 잡아 둔 지급 근거와 어긋난다. */}
+          고칠 수 있게 두면 담당자가 업로드를 확인해 잡아 둔 지급 근거와 어긋난다.
+
+          회차 금액은 우리가 계산하지만, 브랜드가 보내는 입금일은 회차마다 담당자와
+          조율해 정한다 — 미리 박아 두면 합의하지 않은 날짜가 약속처럼 보인다. */}
       {topTab === 'settlement' && (
         <BrandSettlementSummary businessUsername={businessUsername} />
       )}

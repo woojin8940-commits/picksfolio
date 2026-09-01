@@ -1350,13 +1350,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             인플루언서별 지급 내역이 아니라, 픽스폴리오에 한 번에 보내는 금액을 회차로
             묶어 보여 준다. 브랜드는 인플루언서에게 각각 송금하지 않으므로 사람별
             지급일·지급 여부는 브랜드가 확인할 일이 아니다(원천징수와 개별 지급은
-            픽스폴리오가 한다). */}
+            픽스폴리오가 한다).
+
+            입금일은 회차마다 담당자와 조율해 정한다. 자동으로 잡히는 날짜는 인플루언서
+            지급 예정일이라 브랜드의 입금일이 아니고, 그것을 여기에 적어 두면 약속하지
+            않은 날짜가 약속처럼 걸린다. */}
         {activeTab === 'settlement' && (
           isOwner ? (
             <BrandSettlementSummary
               businessUsername={businessUsername}
               campaignId={selectedCampaign.id}
               budgetKrw={budget}
+              onNotify={notify}
             />
           ) : (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 shadow-sm text-center">
