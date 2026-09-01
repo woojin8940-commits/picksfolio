@@ -127,15 +127,22 @@ const ManagerInfluencerDirectory: React.FC<ManagerInfluencerDirectoryProps> = ({
             return (
               <div key={p.username} className="bg-white rounded-2xl border border-slate-100 p-4">
                 <div className="flex items-start justify-between gap-2">
+                  {/* 인스타 계정이 맨 위다. 등록 이름으로는 이 사람을 어디서도
+                      다시 찾을 수 없어서, 담당자는 이름을 읽고 나서 계정을 한 번 더
+                      찾아야 했다. 이름은 아래 한 줄로 접는다. */}
                   <div className="min-w-0">
                     <p className="text-sm font-black text-slate-900 truncate">
-                      {p.name || `@${p.username}`}
+                      @{p.instagramHandle || p.username}
                     </p>
                     <p className="text-[11px] text-slate-400 font-bold truncate">
-                      @{p.username}
-                      {p.instagramHandle && p.instagramHandle !== p.username
-                        ? ` · 인스타 @${p.instagramHandle}`
-                        : ''}
+                      {[
+                        p.name || '',
+                        p.instagramHandle && p.instagramHandle !== p.username
+                          ? `픽스폴리오 @${p.username}`
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || `@${p.username}`}
                     </p>
                   </div>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-black flex-shrink-0 ${source.cls}`}>

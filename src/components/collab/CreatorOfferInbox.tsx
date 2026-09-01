@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
+import { contentFormatLabel } from '../../utils/campaignBrief';
 
 /**
  * 인플루언서가 받은 리스트업 제안함.
@@ -172,7 +173,7 @@ const CreatorOfferInbox: React.FC<CreatorOfferInboxProps> = ({ userName, onNotif
                     }
                   />
                   <Row label="채널" value={offer.uploadChannel} />
-                  <Row label="형식" value={offer.contentFormat} />
+                  <Row label="형식" value={contentFormatLabel(offer.contentFormat)} />
                 </div>
 
                 {(offer.videoConcept || offer.guideNote || offer.note || offer.guideUrl) && (

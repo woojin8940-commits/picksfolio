@@ -54,6 +54,8 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
   const [settings, setSettings] = useState<TargetSettings>(DEFAULT_SETTINGS);
   const [usage, setUsage] = useState<UsageStats>(DEFAULT_USAGE);
   const [subscriberCount, setSubscriberCount] = useState<number>(0);
+  /** 플랫폼 쪽에서 알림톡 발송을 멈춰 둔 기간인가. 서버가 알려 준다. */
+  const [pauseNotice, setPauseNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -72,6 +74,7 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
           if (data.settings) setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
           if (data.usage) setUsage({ ...DEFAULT_USAGE, ...data.usage });
           if (typeof data.subscriberCount === 'number') setSubscriberCount(data.subscriberCount);
+          setPauseNotice(data.paused ? String(data.pauseNotice || '') : '');
         }
       } catch (e) {
         console.warn('[NotifySettings] load failed', e);
@@ -138,6 +141,21 @@ const NotifySettings: React.FC<NotifySettingsProps> = ({ userName }) => {
 
   return (
     <div className="animate-in fade-in duration-500 space-y-6 md:space-y-8">
+      {/*
+        발송 중지 안내.
+        맨 위에 둔다 — 아래의 구독자 수와 발송량을 먼저 읽으면 "설정은 되어 있는데
+        왜 안 갔지"로 이어지고, 그 답이 화면 어디에도 없었다.
+      */}
+      {pauseNotice && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6 md:py-5">
+          <p className="text-xs md:text-sm font-black text-amber-800">알림톡 발송 일시 중지</p>
+          <p className="text-[11px] md:text-xs font-bold text-amber-700/90 mt-1 leading-relaxed">{pauseNotice}</p>
+          <p className="text-[11px] md:text-xs font-bold text-amber-700/70 mt-1 leading-relaxed">
+            아래 설정은 그대로 저장되고, 발송이 재개되면 저장해 둔 조건으로 다시 나갑니다.
+          </p>
+        </section>
+      )}
+
       {/* Subscriber Count */}
       <section className="bg-white rounded-2xl md:rounded-[2.5rem] border border-slate-100 shadow-sm p-6 md:p-10">
         <div className="flex items-center justify-between mb-4 md:mb-6">

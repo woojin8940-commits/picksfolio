@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { readAlimtalkUsage } from "./_shared/alimtalk-usage.mts";
+import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused } from "./_shared/alimtalk-pause.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -60,10 +61,15 @@ export default async (req: Request, context: Context) => {
       })(),
     ]);
 
+    // 발송 중지 상태를 설정 화면에도 내려준다. 중지 기간에 이 화면이 예전과 똑같이
+    // 보이면, 라이브를 켜고 알림이 안 갔을 때 사용자는 자기 설정이나 구독자 수를
+    // 의심한다 — 멈춘 것은 플랫폼 쪽이라는 사실을 이 화면이 말해야 한다.
     return Response.json({
       settings: (stored as Record<string, unknown> | null) || null,
       usage,
       subscriberCount,
+      paused: alimtalkPaused(),
+      pauseNotice: alimtalkPaused() ? ALIMTALK_PAUSE_NOTICE : "",
     });
   }
 

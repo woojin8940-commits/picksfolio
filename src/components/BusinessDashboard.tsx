@@ -100,8 +100,20 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     setDeletingId(null);
   };
 
+  /**
+   * 목록에서 내리는 제안은 "이제 답할 수 없는" 것 하나다.
+   *
+   * 예전에는 시작 희망일(end_date)이 지난 제안을 상태와 무관하게 전부 숨겼다. 그런데
+   * 이 화면의 제안서는 end_date 를 마감일이 아니라 시작 희망일로 쓴다 — 즉 수락해서
+   * 협업이 시작되면 그 날짜는 바로 "지난 날짜"가 된다. 그래서 수락한 제안이 시작
+   * 다음 날부터 수신함에서 사라졌고, 수락 개수도 함께 줄었다. 진행 중인 계약의 원문
+   * 조건(금액 · 담당자 · 요구사항)을 확인할 자리가 없어진다는 뜻이다.
+   *
+   * 답을 하지 않은 채(pending) 시작일이 지난 것만 내린다. 수락 · 완료 · 거절은 이미
+   * 결론이 난 기록이므로 날짜와 무관하게 남는다.
+   */
   const openProposals = useMemo(
-    () => proposals.filter(p => !isPastDeadline(p.end_date)),
+    () => proposals.filter(p => p.status !== 'pending' || !isPastDeadline(p.end_date)),
     [proposals]
   );
 
@@ -412,7 +424,9 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
             )}
           </p>
           <p className="text-slate-300 text-[10px] md:text-xs font-bold mt-1">
-            {isEn ? 'Expired proposals are hidden automatically; declined proposals appear under "Declined".' : '진행 일정이 끝난 제안은 자동으로 숨겨지고, 거절한 제안은 \'거절됨\'에서만 볼 수 있습니다'}
+            {isEn
+              ? 'Unanswered proposals past their start date are hidden automatically; accepted ones stay here, and declined proposals appear under "Declined".'
+              : '답하지 않은 채 시작일이 지난 제안은 자동으로 숨겨지고, 수락한 제안은 계속 남습니다. 거절한 제안은 \'거절됨\'에서만 볼 수 있습니다'}
           </p>
         </div>
         <button

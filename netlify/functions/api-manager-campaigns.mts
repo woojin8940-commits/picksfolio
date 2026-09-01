@@ -59,6 +59,7 @@ const shape = (row: any) => ({
     accepted: Number(row.accepted_count || 0),
     applications: Number(row.application_count || 0),
     collabs: Number(row.collab_count || 0),
+    review: Number(row.review_count || 0),
   },
 });
 
@@ -75,7 +76,7 @@ const loadBrandPicks = async (db: any, me: string, mineOnly: boolean) =>
   ((await db.sql`
     SELECT l.*, c.title AS campaign_title, c.brand_name, c.business_username,
            c.manager_username, c.type AS campaign_type, c.reward_mode,
-           c.listup_confirm_due
+           c.content_format, c.listup_confirm_due
     FROM campaign_listups l
     JOIN campaigns c ON c.id = l.campaign_id
     WHERE l.brand_decision = 'pick'
@@ -93,6 +94,9 @@ const loadBrandPicks = async (db: any, me: string, mineOnly: boolean) =>
       brandName: row.brand_name || "",
       businessUsername: norm(row.business_username),
       campaignType: row.campaign_type || "",
+      // 캠페인 형식(숏폼 · 피드). 후보 카드가 이 캠페인에 해당하는 등록 단가를
+      // 앞세워 보여 주는 데 쓴다 — 형식이 없으면 두 단가가 나란히 보인다.
+      contentFormat: row.content_format || "",
       managerUsername: norm(row.manager_username),
       // 내가 맡지 않은 캠페인의 선택도 보여 준다. 담당자가 비어 있는 캠페인을
       // 브랜드가 먼저 고르는 일이 흔한데, 그 요청이 아무 화면에도 안 뜨면
@@ -110,7 +114,14 @@ const loadCampaigns = async (db: any, me: string, mineOnly: boolean) =>
       (SELECT COUNT(*)::int FROM campaign_listups l WHERE l.campaign_id = c.id AND l.outreach_status = 'sent') AS sent_count,
       (SELECT COUNT(*)::int FROM campaign_listups l WHERE l.campaign_id = c.id AND l.outreach_status = 'accepted') AS accepted_count,
       (SELECT COUNT(*)::int FROM campaign_applications a WHERE a.campaign_id = c.id AND COALESCE(a.source, 'apply') = 'apply') AS application_count,
-      (SELECT COUNT(*)::int FROM campaign_collabs cc WHERE cc.campaign_id = c.id AND cc.status = 'in_progress') AS collab_count
+      (SELECT COUNT(*)::int FROM campaign_collabs cc WHERE cc.campaign_id = c.id AND cc.status = 'in_progress') AS collab_count,
+      -- 지금 담당자가 봐야 할 제출물이 있는 협업 수. 캠페인이 많아지면 "협업 3건"
+      -- 이라는 숫자만으로는 그 중 무엇이 나를 기다리는지 알 수 없어서, 담당자는
+      -- 캠페인을 하나씩 열어 보고 있었다.
+      (SELECT COUNT(DISTINCT cc.id)::int
+         FROM campaign_collabs cc
+         JOIN collab_stages s ON s.collab_id = cc.id
+        WHERE cc.campaign_id = c.id AND cc.status = 'in_progress' AND s.status = 'submitted') AS review_count
     FROM campaigns c
     WHERE c.status = 'active'
       AND c.admin_approved_at IS NOT NULL

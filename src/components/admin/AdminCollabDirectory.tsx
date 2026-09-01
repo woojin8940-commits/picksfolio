@@ -113,6 +113,17 @@ function fmtDate(d: string) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * 지원자의 인스타 계정. 계정을 직접 적어 두지 않은 지원서에서는 인스타 링크에서
+ * 아이디를 뽑아 쓴다 — 명단에서 먼저 읽히는 값이라 비어 있으면 안 된다.
+ */
+const handleOf = (it: { applicant_username?: string; instagram_url?: string }) => {
+  const direct = String(it.applicant_username || '').trim();
+  if (direct) return direct.replace(/^@/, '');
+  const hit = String(it.instagram_url || '').trim().match(/instagram\.com\/([^/?#]+)/i);
+  return hit ? hit[1] : '';
+};
+
 const LinkChip: React.FC<{ label: string; url: string }> = ({ label, url }) => {
   if (!url) return null;
   const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
@@ -355,9 +366,17 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
               {shownInfluencers.map(({ item: it, insight }) => (
                 <div key={it.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                   <div className="flex items-start justify-between gap-3 mb-2">
-                    <div>
-                      <p className="font-black text-slate-900 text-sm">{it.name || '(이름 미입력)'}</p>
-                      <p className="text-xs text-slate-400 font-medium">{formatContact(it.contact) || '연락처 없음'}</p>
+                    {/* 인스타 계정이 맨 위다. 지원자를 다시 찾을 때 쓰는 단서는
+                        이름이 아니라 계정이라, 이름·연락처는 아래 줄로 내린다. */}
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-900 text-sm truncate">
+                        {handleOf(it) ? `@${handleOf(it)}` : it.name || '(이름 미입력)'}
+                      </p>
+                      <p className="text-xs text-slate-400 font-medium truncate">
+                        {[handleOf(it) ? it.name : '', formatContact(it.contact) || '연락처 없음']
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 text-[11px] font-black whitespace-nowrap">

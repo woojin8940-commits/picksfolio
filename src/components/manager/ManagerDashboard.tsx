@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import ManagerInfluencerDirectory from './ManagerInfluencerDirectory';
-import ManagerCampaignsPanel from './ManagerCampaignsPanel';
+import ManagerCampaignsPanel, { isMyTurn } from './ManagerCampaignsPanel';
 import ManagerBrandPicksPanel from './ManagerBrandPicksPanel';
 import ManagerChatPanel from './ManagerChatPanel';
+import { apiService } from '../../services/apiService';
 
 /**
  * 담당자 대시보드.
@@ -53,11 +54,46 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   const [tab, setTab] = useState<ManagerTab>('picks');
   const [openCampaignId, setOpenCampaignId] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  /**
+   * 탭에 붙는 숫자.
+   *
+   * 담당자는 한 번에 한 탭만 본다. 캠페인이 몇 건일 때는 탭을 옮겨 다니며 확인할 수
+   * 있었지만, 승인된 캠페인이 쌓이면 "다른 탭에 나를 기다리는 일이 있는지"를 알
+   * 방법이 탭을 눌러 보는 것뿐이다. 그래서 브랜드가 고른 후보 수와 내 차례인 캠페인
+   * 수를 탭 위에 적는다 — 판정은 캠페인 목록의 "내 차례" 묶음과 같은 함수를 쓴다.
+   */
+  const [badges, setBadges] = useState<{ picks: number; campaigns: number }>({
+    picks: 0,
+    campaigns: 0,
+  });
 
   const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  // 탭을 옮길 때마다 다시 센다. 숫자가 바뀌는 시점이 곧 담당자가 무언가를 처리한
+  // 직후라, 이때 맞춰 두면 배지가 실제 남은 일과 어긋나 있는 시간이 거의 없다.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await apiService.getManagerCampaigns({});
+      if (!alive || res.error) return;
+      const campaigns = res.campaigns || [];
+      const picks = res.brandPicks || [];
+      setBadges({
+        // 내가 맡은 캠페인의 선택 + 아직 담당자가 없는 캠페인의 선택. 주인 없는
+        // 요청도 누군가 집어야 하므로 숫자에 넣는다.
+        picks: picks.filter((p: any) => p.mine || p.unassigned).length,
+        campaigns: campaigns.filter(
+          (c: any) => (c.managerUsername === username || !c.managerUsername) && isMyTurn(c),
+        ).length,
+      });
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [tab, username]);
 
   const active = TABS.find((t) => t.key === tab);
 
@@ -108,13 +144,22 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2.5 rounded-xl font-black text-sm transition-all ${
+              className={`px-4 py-2.5 rounded-xl font-black text-sm transition-all flex items-center gap-1.5 ${
                 tab === t.key
                   ? 'bg-slate-900 text-white shadow-lg'
                   : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-300'
               }`}
             >
               {t.label}
+              {(t.key === 'picks' || t.key === 'campaigns') && badges[t.key] > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                    tab === t.key ? 'bg-white/20 text-white' : 'bg-red-50 text-red-500'
+                  }`}
+                >
+                  {badges[t.key]}
+                </span>
+              )}
             </button>
           ))}
         </div>

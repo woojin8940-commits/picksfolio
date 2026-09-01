@@ -1,7 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
-import { digitsOnly, formatNumberWithCommas, formatSignedKRW } from '../../utils/formatters';
-import InfluencerCandidateCard from './InfluencerCandidateCard';
+import { digitsOnly, formatCountKo, formatNumberWithCommas, formatSignedKRW } from '../../utils/formatters';
+import InfluencerCandidateCard, {
+  candidateSortValues,
+  formatKindOf,
+  metricsFrom,
+  registeredPriceOf,
+} from './InfluencerCandidateCard';
+import { CONTENT_FORMATS } from '../../utils/campaignBrief';
 
 /**
  * 리스트업 작업대 — 후보를 찾아 명단에 올리고, 골라진 후보에게 제안한다.
@@ -90,8 +96,6 @@ const emptyQuote = {
   fee: '',
   secondUseFee: '',
   guaranteedViews: '',
-  badge: '',
-  profileLine: '',
   payoutFee: '',
   payoutSecondUseFee: '',
 };
@@ -106,8 +110,6 @@ const quoteFrom = (c: any): QuoteForm => ({
   fee: c?.quotedFee ? String(c.quotedFee) : '',
   secondUseFee: c?.quotedSecondUseFee ? String(c.quotedSecondUseFee) : '',
   guaranteedViews: c?.guaranteedViews ? String(c.guaranteedViews) : '',
-  badge: c?.badge || '',
-  profileLine: c?.profileLine || '',
   payoutFee: String(c?.payoutFee || c?.registeredPayoutFee || '') || '',
   payoutSecondUseFee: c?.payoutSecondUseFee ? String(c.payoutSecondUseFee) : '',
 });
@@ -127,14 +129,20 @@ const registeredFrom = (c: any): RegisteredRates => ({
   adPrice: c?.registeredAdPrice || c?.snapshot?.adPrice || '',
 });
 
-/** 서버로 보내는 두 덩어리. 견적은 컬럼으로, 지급액은 제안 초안으로 들어간다. */
+/**
+ * 서버로 보내는 두 덩어리. 견적은 컬럼으로, 지급액은 제안 초안으로 들어간다.
+ *
+ * 배지("인기")와 한 줄 소개("뷰티 · 20대 · 여성")는 더 이상 담당자가 적지 않는다.
+ * 배지는 무엇을 근거로 붙는 말인지 정한 적이 없어 브랜드 카드에서 아무 뜻도 없는
+ * 꼬리표였고, 한 줄 소개는 인플루언서가 등록해 둔 카테고리를 사람이 다시 옮겨
+ * 적는 칸이었다 — 옮기다 어긋나면 카드가 등록서와 다른 말을 한다. 브랜드 카드는
+ * 값이 없으면 등록 정보(snapshot.categories)를 그대로 쓴다.
+ */
 const quotePayload = (q: QuoteForm) => ({
   quote: {
     fee: q.fee,
     secondUseFee: q.secondUseFee,
     guaranteedViews: q.guaranteedViews,
-    badge: q.badge,
-    profileLine: q.profileLine,
   },
   payout: { fee: q.payoutFee, secondUseFee: q.payoutSecondUseFee },
 });
@@ -150,7 +158,9 @@ const QuoteFields: React.FC<{
   registered?: RegisteredRates;
   /** 지급 단가를 비워도 되는 자리(여러 명을 한 번에 올릴 때)임을 알린다. */
   payoutOptional?: boolean;
-}> = ({ value, onChange, hint, payoutLocked, registered, payoutOptional }) => {
+  /** 이 캠페인의 콘텐츠 형식. 어느 등록 단가가 들어가는지가 이 값으로 갈린다. */
+  contentFormat?: string;
+}> = ({ value, onChange, hint, payoutLocked, registered, payoutOptional, contentFormat }) => {
   const set = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [key]: e.target.value });
   /**
@@ -175,9 +185,22 @@ const QuoteFields: React.FC<{
   // 두 값이 모두 있을 때만 차액을 말한다. 지급액이 비어 있는데 차액을 보여 주면
   // 제시가 전액이 우리 수익으로 읽힌다.
   const margin = brandAmount > 0 && payoutAmount > 0 ? brandAmount - payoutAmount : null;
-  // 등록서 원문 표기. 게시물·숏폼이 따로 적혀 있으면 둘 다 보여 준다 —
-  // 캠페인 형식과 다른 칸을 채워 넣지 않았는지 담당자가 눈으로 확인해야 한다.
-  const registeredLine = [
+  /**
+   * 등록서 원문 표기 — 이 캠페인의 형식에 해당하는 단가를 앞세운다.
+   *
+   * 인플루언서는 피드 단가와 숏폼(릴스) 단가를 따로 등록한다. 지급 단가 칸에 채워지는
+   * 금액도 캠페인 형식을 보고 골라진다(서버의 registeredPayoutFee). 그런데 예전에는
+   * 두 단가를 "게시물 30만 · 숏폼 50만" 처럼 나란히만 적어서, 채워진 숫자가 어느
+   * 쪽에서 왔는지 담당자가 알 수 없었다 — 릴스 캠페인에 피드 단가를 그대로 적어 보낸
+   * 일이 여기서 나왔다. 형식을 알면 해당하는 줄만 본문으로 올리고 나머지는 참고로
+   * 내린다. 판정 기준은 서버와 같게 둔다.
+   */
+  const formatKind = formatKindOf(contentFormat);
+  const formatName = formatKind === 'short' ? '숏폼(릴스)' : formatKind === 'post' ? '피드 게시물' : '';
+  const matchedPrice = formatKind === 'short' ? registered?.shortPrice : formatKind === 'post' ? registered?.postPrice : '';
+  const otherLabel = formatKind === 'short' ? '게시물' : '숏폼';
+  const otherPrice = formatKind === 'short' ? registered?.postPrice : registered?.shortPrice;
+  const bothLine = [
     registered?.postPrice ? `게시물 ${registered.postPrice}` : '',
     registered?.shortPrice ? `숏폼 ${registered.shortPrice}` : '',
     !registered?.postPrice && !registered?.shortPrice && registered?.adPrice
@@ -186,6 +209,7 @@ const QuoteFields: React.FC<{
   ]
     .filter(Boolean)
     .join(' · ');
+  const hasRegistered = Boolean(registered && (registered.postPrice || registered.shortPrice || registered.adPrice));
   const rate = margin !== null && brandAmount > 0 ? Math.round((margin / brandAmount) * 100) : 0;
 
   return (
@@ -220,15 +244,36 @@ const QuoteFields: React.FC<{
             />
           </div>
         </div>
-        {registeredLine && (
-          <p className="text-[10px] font-bold text-slate-400 mt-1.5">
-            등록 단가 {registeredLine}
-            {registered?.payoutFee ? ' · 비워 두면 이 금액으로 들어갑니다' : ''}
-          </p>
+        {hasRegistered && (
+          <div className="mt-1.5 space-y-0.5">
+            {formatKind ? (
+              <>
+                <p className="text-[10px] font-bold text-slate-500">
+                  이 캠페인은 {formatName} · 등록 단가 {matchedPrice || (registered?.adPrice || '미기재')}
+                  {registered?.payoutFee ? ' · 비워 두면 이 금액으로 들어갑니다' : ''}
+                </p>
+                {otherPrice && (
+                  <p className="text-[10px] font-bold text-slate-300">
+                    참고 · {otherLabel} {otherPrice} (이 캠페인 형식이 아닙니다)
+                  </p>
+                )}
+                {!matchedPrice && (
+                  <p className="text-[10px] font-bold text-amber-600 leading-relaxed break-keep">
+                    {formatName} 단가를 등록하지 않은 후보입니다. 금액을 직접 확인해 적어 주세요.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-[10px] font-bold text-slate-400">
+                등록 단가 {bothLine}
+                {registered?.payoutFee ? ' · 비워 두면 이 금액으로 들어갑니다' : ''}
+              </p>
+            )}
+          </div>
         )}
         {payoutOptional && (
           <p className="text-[10px] font-bold text-slate-400 mt-1">
-            비워 두면 후보마다 각자 등록해 둔 단가가 들어갑니다.
+            비워 두면 후보마다 각자 등록해 둔 {formatName ? `${formatName} ` : ''}단가가 들어갑니다.
           </p>
         )}
         {payoutLocked && (
@@ -271,26 +316,6 @@ const QuoteFields: React.FC<{
               type="number"
               value={value.guaranteedViews}
               onChange={set('guaranteedViews')}
-              className={cls}
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] text-slate-400 font-black mb-1">배지</label>
-            <input
-              type="text"
-              value={value.badge}
-              onChange={set('badge')}
-              placeholder="인기"
-              className={cls}
-            />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-[10px] text-slate-400 font-black mb-1">한 줄 소개</label>
-            <input
-              type="text"
-              value={value.profileLine}
-              onChange={set('profileLine')}
-              placeholder="뷰티 · 20대 · 여성"
               className={cls}
             />
           </div>
@@ -337,6 +362,26 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const [query, setQuery] = useState('');
+  /**
+   * 후보 풀을 훑는 방법. 검색은 서버가 하고(계정·이름·분야), 여기서 정하는 것은
+   * 순서와 조건이다.
+   *
+   * 풀은 팔로워 많은 순으로 60명이 한꺼번에 내려온다. 인플루언서가 몇십 명일 때는
+   * 그대로 훑을 수 있었지만, 등록이 쌓이면 담당자는 "이 캠페인 예산에 맞는 사람"을
+   * 찾으려고 카드 60장의 단가를 눈으로 비교해야 한다. 그래서 이 캠페인 형식의
+   * 등록 단가순 정렬과, 연동된 계정·단가가 적힌 사람만 남기는 조건을 둔다.
+   */
+  const [poolSort, setPoolSort] = useState<'recommend' | 'followers' | 'views' | 'price'>(
+    'recommend',
+  );
+  const [poolOnly, setPoolOnly] = useState<'' | 'applicant' | 'connected' | 'priced'>('');
+  /**
+   * 줄 보기 · 카드 보기. 기본은 줄 보기다 — 카드는 한 명을 판단하는 데는 좋지만
+   * 한 화면에 두세 명밖에 들어가지 않아, 여러 명을 견주는 첫 단계에는 맞지 않는다.
+   * 줄에서 눈에 걸린 사람만 눌러 카드를 펼친다.
+   */
+  const [poolRows, setPoolRows] = useState(true);
+  const [poolOpen, setPoolOpen] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   const [addNote, setAddNote] = useState('');
   const [addQuote, setAddQuote] = useState<QuoteForm>(emptyQuote);
@@ -492,6 +537,73 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
     </div>
   );
 
+  /**
+   * 콘텐츠 형식은 고르게 한다.
+   *
+   * 예전에는 자유 입력칸이었다. 그런데 이 값은 글자 그대로 인플루언서에게 보이는
+   * 동시에, 지급 단가를 인플루언서의 등록 단가(피드 · 릴스)에서 고르는 기준이기도
+   * 하다. 손으로 적은 "카드뉴스 1건" 같은 값은 어느 쪽도 가리키지 못해서 엉뚱한
+   * 단가가 들어갔다. 캠페인이 정한 형식이 기본값이고, 필요하면 여기서 바꾼다.
+   */
+  const contentFormatField = (
+    <div>
+      <label className="block text-[10px] text-slate-400 font-black uppercase mb-1">콘텐츠 형식</label>
+      <select
+        value={offer.contentFormat}
+        onChange={(e) => setOffer((p) => ({ ...p, contentFormat: e.target.value }))}
+        className="w-full text-[11px] font-bold text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+      >
+        {/* 예전 제안에는 목록에 없는 값이 적혀 있다. 고르지 않는 한 그대로 남는다. */}
+        {CONTENT_FORMATS.some((f) => f.value === offer.contentFormat) ? null : (
+          <option value={offer.contentFormat}>
+            {offer.contentFormat ? `${offer.contentFormat} (직접 적은 값)` : '고르지 않음'}
+          </option>
+        )}
+        {CONTENT_FORMATS.map((f) => (
+          <option key={f.value} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  /**
+   * 화면에 그릴 후보 순서. 서버가 준 순서(지원자 먼저 · 팔로워 많은 순)를 기본으로
+   * 두고, 담당자가 고른 기준으로 다시 세운다.
+   *
+   * 단가순은 이 캠페인 형식의 등록 단가만 본다(숏폼 캠페인이면 릴스 단가). 단가를
+   * 적어 두지 않은 사람은 0 이 아니라 맨 뒤로 보낸다 — 0 원으로 읽으면 "가장 싼
+   * 후보"가 되어 정렬의 뜻이 뒤집힌다.
+   */
+  const poolView = useMemo(() => {
+    const priced = (p: any) => registeredPriceOf(p, campaign?.contentFormat);
+    const filtered = pool.filter((p: any) => {
+      if (poolOnly === 'applicant') return !!p.isApplicant;
+      if (poolOnly === 'connected') return metricsFrom(p).metricsSource === 'meta_api';
+      if (poolOnly === 'priced') return priced(p) > 0;
+      return true;
+    });
+    if (poolSort === 'recommend') return filtered;
+    return [...filtered].sort((a, b) => {
+      if (poolSort === 'price') {
+        const pa = priced(a) || Number.MAX_SAFE_INTEGER;
+        const pb = priced(b) || Number.MAX_SAFE_INTEGER;
+        return pa - pb;
+      }
+      const va = candidateSortValues(a);
+      const vb = candidateSortValues(b);
+      return poolSort === 'views' ? vb.avgViews - va.avgViews : vb.followers - va.followers;
+    });
+  }, [pool, poolSort, poolOnly, campaign?.contentFormat]);
+
+  const poolFormatName =
+    formatKindOf(campaign?.contentFormat) === 'post'
+      ? '피드'
+      : formatKindOf(campaign?.contentFormat) === 'short'
+        ? '릴스'
+        : '';
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
@@ -541,10 +653,21 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           <div className="px-4 py-3.5 border-b border-slate-100">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <h4 className="text-sm font-black text-slate-900">후보 풀 ({pool.length})</h4>
-              {picked.length > 0 && (
-                <span className="text-[11px] text-blue-600 font-black">{picked.length}명 선택</span>
-              )}
+              <h4 className="text-sm font-black text-slate-900">
+                후보 풀 ({poolView.length}
+                {poolView.length !== pool.length ? ` / ${pool.length}` : ''})
+              </h4>
+              <div className="flex items-center gap-1.5">
+                {picked.length > 0 && (
+                  <span className="text-[11px] text-blue-600 font-black">{picked.length}명 선택</span>
+                )}
+                <button
+                  onClick={() => setPoolRows((v) => !v)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-black hover:bg-slate-200"
+                >
+                  {poolRows ? '카드로 보기' : '줄로 보기'}
+                </button>
+              </div>
             </div>
             <div className="flex gap-1.5">
               <input
@@ -564,6 +687,54 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 검색
               </button>
             </div>
+
+            {/* 순서와 조건. 인플루언서가 많아지면 "누가 있나"보다 "이 캠페인에 맞는
+                사람이 누구인가"가 문제라, 예산(단가)과 신뢰할 수 있는 지표(연동)로
+                먼저 좁힐 수 있어야 한다. */}
+            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+              {[
+                { key: 'recommend' as const, label: '추천순' },
+                { key: 'followers' as const, label: '팔로워' },
+                { key: 'views' as const, label: '평균 조회수' },
+                {
+                  key: 'price' as const,
+                  label: poolFormatName ? `${poolFormatName} 단가 낮은순` : '단가 낮은순',
+                },
+              ].map((s2) => (
+                <button
+                  key={s2.key}
+                  onClick={() => setPoolSort(s2.key)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
+                    poolSort === s2.key
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {s2.label}
+                </button>
+              ))}
+              <span className="w-px h-4 bg-slate-200 mx-0.5" />
+              {[
+                { key: 'applicant' as const, label: '지원자' },
+                { key: 'connected' as const, label: '인스타 연동' },
+                {
+                  key: 'priced' as const,
+                  label: poolFormatName ? `${poolFormatName} 단가 있음` : '단가 있음',
+                },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setPoolOnly(poolOnly === f.key ? '' : f.key)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
+                    poolOnly === f.key
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {picked.length > 0 && (
@@ -581,6 +752,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 value={addQuote}
                 onChange={setAddQuote}
                 payoutOptional
+                contentFormat={campaign?.contentFormat}
                 hint="선택한 후보 전체에 같은 값으로 적용됩니다. 올린 뒤 한 명씩 고칠 수 있습니다."
               />
               <div className="flex justify-end">
@@ -595,39 +767,113 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
             </div>
           )}
 
-          <div className="p-3 space-y-2.5 max-h-[720px] overflow-y-auto bg-slate-50/60">
-            {pool.length === 0 ? (
+          <div className="p-3 space-y-2 max-h-[720px] overflow-y-auto bg-slate-50/60">
+            {poolView.length === 0 ? (
               <p className="text-[11px] text-slate-400 font-bold text-center py-8">
-                조건에 맞는 후보가 없습니다. 검색어를 바꿔 보세요.
+                {pool.length > 0
+                  ? '고른 조건에 맞는 후보가 없습니다. 조건을 지워 보세요.'
+                  : '조건에 맞는 후보가 없습니다. 검색어를 바꿔 보세요.'}
               </p>
             ) : (
-              pool.map((p) => {
+              poolView.map((p) => {
                 const on = picked.includes(p.username);
+                const selectButton = (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPicked((prev) =>
+                        on ? prev.filter((u) => u !== p.username) : [...prev, p.username],
+                      );
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex-shrink-0 ${
+                      on
+                        ? 'bg-slate-900 text-white hover:bg-slate-700'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {on ? '선택 해제' : '명단 후보'}
+                  </button>
+                );
+                const applicantBadge = p.isApplicant ? (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600 flex-shrink-0">
+                    이 캠페인 지원자
+                  </span>
+                ) : null;
+
+                // 줄 보기에서도 눌러 펼치면 같은 카드가 나온다. 판단에 쓰는 화면이
+                // 두 벌이 되면 골라 놓은 근거를 나중에 맞춰 볼 수 없다.
+                if (poolRows && poolOpen !== p.username) {
+                  const m = metricsFrom(p);
+                  const price = registeredPriceOf(p, campaign?.contentFormat);
+                  return (
+                    <button
+                      key={p.username}
+                      onClick={() => setPoolOpen(p.username)}
+                      className={`w-full text-left bg-white rounded-xl border px-3 py-2.5 hover:border-slate-300 ${
+                        on ? 'border-slate-900' : 'border-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {/* 인스타 계정이 맨 앞이다. 담당자가 이 줄에서 사람을
+                            알아보는 단서는 이름이 아니라 계정이다. */}
+                        <span className="text-[12px] font-black text-slate-900 truncate">
+                          @{m.instagramHandle || m.username}
+                        </span>
+                        {applicantBadge}
+                        <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+                          {selectButton}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap mt-1">
+                        {m.categories && (
+                          <span className="text-[10px] font-bold text-slate-400 truncate max-w-[9rem]">
+                            {m.categories}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-black text-slate-400">
+                          팔로워 <span className="text-slate-700">{formatCountKo(m.followers || 0)}</span>
+                        </span>
+                        {(m.avgViews || 0) > 0 && (
+                          <span className="text-[10px] font-black text-slate-400">
+                            평균 조회수{' '}
+                            <span className="text-slate-700">{formatCountKo(m.avgViews || 0)}</span>
+                          </span>
+                        )}
+                        {price > 0 ? (
+                          <span className="text-[10px] font-black text-blue-600">
+                            {poolFormatName ? `${poolFormatName} 단가 ` : '단가 '}
+                            {formatNumberWithCommas(price)}원
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black text-amber-600">
+                            {poolFormatName ? `${poolFormatName} 단가 미등록` : '단가 미등록'}
+                          </span>
+                        )}
+                        {m.metricsSource === 'meta_api' && (
+                          <span className="text-[10px] font-black text-emerald-600">연동</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                }
+
                 return (
                   <InfluencerCandidateCard
                     key={p.username}
                     data={p}
+                    contentFormat={campaign?.contentFormat}
                     badges={
                       <>
-                        {p.isApplicant && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600">
-                            이 캠페인 지원자
-                          </span>
+                        {applicantBadge}
+                        {poolRows && (
+                          <button
+                            onClick={() => setPoolOpen('')}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-100 text-slate-500 hover:bg-slate-200"
+                          >
+                            접기
+                          </button>
                         )}
-                        <button
-                          onClick={() =>
-                            setPicked((prev) =>
-                              on ? prev.filter((u) => u !== p.username) : [...prev, p.username],
-                            )
-                          }
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
-                            on
-                              ? 'bg-slate-900 text-white hover:bg-slate-700'
-                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          }`}
-                        >
-                          {on ? '선택 해제' : '명단 후보'}
-                        </button>
+                        {selectButton}
                       </>
                     }
                   />
@@ -672,6 +918,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                     key={c.id}
                     data={c}
                     note={c.managerNote}
+                    contentFormat={campaign?.contentFormat}
                     badges={
                       <>
                         {c.brandFavorite && (
@@ -814,6 +1061,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                               onChange={setQuoteDraft}
                               payoutLocked={c.outreachStatus !== 'not_sent'}
                               registered={registeredFrom(c)}
+                              contentFormat={campaign?.contentFormat}
                               hint="지급 단가는 인플루언서가 등록해 둔 단가로 채워져 있습니다. 브랜드에게 제시할 금액만 적으면 됩니다. 보장 조회수를 비우면 채널 평균 조회수로 채워집니다."
                             />
                             <div className="flex justify-end mt-2">
@@ -908,7 +1156,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                               {field('uploadFrom', '게시 시작', 'date')}
                               {field('uploadTo', '게시 종료', 'date')}
                               {field('uploadChannel', '업로드 채널')}
-                              {field('contentFormat', '콘텐츠 형식')}
+                              {contentFormatField}
                             </div>
                             <div className="mt-2 space-y-2">
                               {field('guideUrl', '가이드라인 링크')}

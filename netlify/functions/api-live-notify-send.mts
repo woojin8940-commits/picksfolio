@@ -3,6 +3,7 @@ import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { SolapiMessageService } from 'solapi'
 import { incrementAlimtalkUsage } from './_shared/alimtalk-usage.mts'
+import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused } from './_shared/alimtalk-pause.mts'
 import { requireAccountOwner } from './_shared/user-auth.mts'
 
 /**
@@ -40,6 +41,22 @@ export default async (req: Request, context: Context) => {
 
   const auth = await requireAccountOwner(req, influencer)
   if (!auth.ok) return auth.response
+
+  // 이 함수는 솔라피를 직접 부른다(다른 알림은 send-kakao-alimtalk 를 거친다).
+  // 그래서 중지 판정도 여기서 한 번 더 한다. 구독자 목록을 읽거나 발송 한도를
+  // 태우기 전에 멈춰야 한다 — 보내지 않은 발송이 한도에서 깎이면 재개한 뒤에
+  // 라이브 알림이 조용히 끊긴다.
+  if (alimtalkPaused()) {
+    console.log('[live-notify-send] ⏸️ 발송 중지 중 —', ALIMTALK_PAUSE_NOTICE)
+    return Response.json({
+      success: true,
+      sent: 0,
+      failed: 0,
+      skipped: true,
+      paused: true,
+      message: ALIMTALK_PAUSE_NOTICE,
+    })
+  }
 
   // Format start time in Korean (e.g. "4월 27일 오후 8:30")
   let startedAtLabel = startedAtIso

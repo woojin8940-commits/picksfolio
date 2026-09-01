@@ -397,6 +397,45 @@ export const AD_OBJECTIVES = [
  */
 export const CHANNELS = ['인스타그램'] as const;
 
+/**
+ * 콘텐츠 형식 — 숏폼(릴스)인가 피드 게시물인가.
+ *
+ * 예전에는 이 값을 묻지 않고 등록 화면이 늘 'shortform' 을 보냈다. 그래서 피드
+ * 게시물로 진행할 캠페인도 서버에는 숏폼으로 남았고, 그 값이 두 곳에서 실제 금액을
+ * 정한다 — 인플루언서는 피드 단가와 릴스 단가를 따로 등록하는데, 담당자가 명단을 올릴
+ * 때 채워지는 지급 단가가 캠페인 형식을 보고 골라진다(registeredPayoutFee). 형식이
+ * 전부 숏폼이면 피드 캠페인에도 릴스 단가가 들어가고, 그 숫자로 제안이 나간다.
+ *
+ * 값은 서버가 단가를 고를 때 읽는 문자열이므로 바꾸지 않는다. 화면에 보일 이름은
+ * contentFormatLabel() 로 따로 만든다.
+ */
+export const CONTENT_FORMATS = [
+  {
+    value: 'shortform',
+    label: '숏폼 (릴스)',
+    hint: '세로 영상 한 편. 인플루언서의 릴스 단가로 계산합니다',
+  },
+  {
+    value: 'feed',
+    label: '피드 게시물',
+    hint: '피드에 남는 사진·이미지 게시물. 인플루언서의 피드 단가로 계산합니다',
+  },
+] as const;
+
+/**
+ * 저장된 형식 값을 사람이 읽는 이름으로.
+ *
+ * 목록에 없는 값도 그대로 돌려준다 — 담당자가 제안서에 형식을 직접 적는 자리가 있고
+ * (콘텐츠 형식 입력칸), 예전 캠페인에는 임의의 문자열이 들어 있다. 빈 값은 빈 문자열로
+ * 남겨 부르는 쪽이 줄 자체를 그리지 않게 한다.
+ */
+export const contentFormatLabel = (value?: string | null): string => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const hit = CONTENT_FORMATS.find(f => f.value === raw.toLowerCase());
+  return hit ? hit.label : raw;
+};
+
 export const GENDERS = [
   { value: 'female', label: '여성' },
   { value: 'male', label: '남성' },

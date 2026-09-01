@@ -179,9 +179,10 @@ const AdminOperatorOverview: React.FC<Props> = ({ data, loading, onNavigate }) =
                 return (
                   <div key={r.id} className="px-4 py-2 flex items-center gap-3">
                     <span className={`${meta.cls} px-1.5 py-0.5 rounded text-[9px] font-black shrink-0`}>{meta.label}</span>
-                    <p className="text-[11px] font-black text-slate-900 truncate">{r.name || `@${r.username}`}</p>
+                    {/* 계정이 먼저다 — 지원자를 다시 찾는 단서는 이름이 아니라 계정이다. */}
+                    <p className="text-[11px] font-black text-slate-900 truncate">@{r.username}</p>
                     <p className="text-[10px] font-bold text-slate-400 truncate flex-1">
-                      @{r.username}{r.category ? ` · ${r.category}` : ''}
+                      {r.name || ''}{r.name && r.category ? ' · ' : ''}{r.category || ''}
                     </p>
                     <p className="text-[10px] font-black text-slate-600 shrink-0">
                       {r.followers > 0 ? `팔로워 ${compact(r.followers)}` : '지표 미연동'}

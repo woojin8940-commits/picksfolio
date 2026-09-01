@@ -1,9 +1,14 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { markProposalDeleted } from "./_shared/proposal-tombstones.mts";
+import {
+  isProposalAlive,
+  loadDeletedProposalIds,
+  markProposalDeleted,
+} from "./_shared/proposal-tombstones.mts";
 import {
   addSettlementForProposal,
   parseAmount,
@@ -34,19 +39,101 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const store = getStore("proposals");
+  const STORE = "proposals";
+  const store = getStore(STORE);
   const key = `proposals_${username}`;
 
   if (req.method === "PATCH") {
     const body = await req.json();
-    const existing = (await store.get(key, { type: "json" })) as any[] || [];
-    const idx = existing.findIndex((p: any) => p.id === proposalId);
-    if (idx === -1) {
-      return Response.json({ error: "Not found" }, { status: 404 });
+    const updatedAt = new Date().toISOString();
+
+    /**
+     * 고칠 제안을 찾는다 — Blobs 캐시 먼저, 없으면 SQL.
+     *
+     * 수신함 목록(api-proposals GET)은 SQL 과 Blobs 를 합쳐 보여 주고, SQL 에만 있던
+     * 제안은 응답을 보낸 뒤에(waitUntil) Blobs 캐시로 옮겨 적는다. 그래서 캐시에
+     * 아직 없는 제안이 화면에는 이미 떠 있는 순간이 존재한다 — 그 사이에 수락을
+     * 누르면 예전 코드는 404 를 돌려주고 화면에는 "상태 업데이트에 실패했습니다"가
+     * 떴다. 제안은 분명히 보이는데 수락이 안 되는 상태이고, 다시 눌러도 캐시 쓰기가
+     * 실패했다면 계속 실패한다.
+     *
+     * 조건부 쓰기(mutateBlobJSON)를 쓰는 이유: 통째로 덮어쓰면 수락을 처리하는 동안
+     * 도착한 새 제안이 캐시에서 지워진다.
+     */
+    let updatedProposal: any = null;
+    await mutateBlobJSON<any[]>(STORE, key, (current) => {
+      const list = Array.isArray(current) ? [...current] : [];
+      const idx = list.findIndex((p: any) => p?.id === proposalId);
+      if (idx === -1) return null;
+      updatedProposal = { ...list[idx], ...body, updatedAt };
+      list[idx] = updatedProposal;
+      return list;
+    });
+
+    if (!updatedProposal) {
+      const [rows, deletedIds] = await Promise.all([
+        (async () => {
+          try {
+            const { getDatabase } = await import("@picks/netlify-database");
+            const db = getDatabase();
+            // 소유자 조건을 SQL 에도 건다. 목록과 달리 여기는 id 하나로 들어오므로,
+            // 남의 제안 id 를 넣어 상태를 바꾸는 길이 열려 있으면 안 된다.
+            return (await db.sql`
+              SELECT * FROM proposals
+              WHERE id = ${proposalId}
+                AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
+              LIMIT 1
+            `) as any[];
+          } catch (dbErr) {
+            console.error("[api-proposal-item] Failed to look up proposal in SQL:", dbErr);
+            return null;
+          }
+        })(),
+        loadDeletedProposalIds().catch(() => new Set<string>()) as Promise<Set<string>>,
+      ]);
+
+      const row = Array.isArray(rows) ? rows[0] : null;
+      // 지운 제안은 되살리지 않는다. 캐시에 없는 이유가 "삭제됨"일 수도 있다.
+      if (!row || !isProposalAlive(deletedIds, proposalId)) {
+        return Response.json({ error: "Not found" }, { status: 404 });
+      }
+
+      updatedProposal = {
+        id: row.id,
+        influencer_username: row.influencer_username || row.username || username,
+        category: row.category || "광고",
+        company_name: row.company_name || "",
+        contact_person: row.contact_person || "",
+        contact_email: row.contact_email || "",
+        contact_phone: row.contact_phone || "",
+        title: row.title || "",
+        content: row.content || row.description || "",
+        start_date: row.start_date || "",
+        end_date: row.end_date || "",
+        fee: row.fee || 0,
+        business_username: row.business_username || "",
+        status: row.status || "pending",
+        rejection_reason: row.rejection_reason || "",
+        created_at: row.created_at || updatedAt,
+        createdAt: row.created_at || updatedAt,
+        ...body,
+        updatedAt,
+      };
+
+      // 캐시에도 넣어 둔다. 다음 PATCH·DELETE 가 같은 자리에서 찾을 수 있어야 한다.
+      await mutateBlobJSON<any[]>(STORE, key, (current) => {
+        const list = Array.isArray(current) ? [...current] : [];
+        const idx = list.findIndex((p: any) => p?.id === proposalId);
+        if (idx === -1) list.push(updatedProposal);
+        else list[idx] = { ...list[idx], ...body, updatedAt };
+        return list;
+      }).catch((cacheErr) => {
+        // 캐시 쓰기가 실패해도 상태 변경은 계속한다. SQL 이 원본이고, 목록 조회가
+        // 다음 번에 다시 옮겨 적는다.
+        console.error("[api-proposal-item] Failed to cache proposal for PATCH:", cacheErr);
+        return null;
+      });
     }
-    const updatedProposal = { ...existing[idx], ...body, updatedAt: new Date().toISOString() };
-    existing[idx] = updatedProposal;
-    await store.setJSON(key, existing);
 
     const bizUsername = (updatedProposal.business_username || "").toLowerCase().replace(/^biz\//, "");
     if (bizUsername) {
@@ -140,7 +227,16 @@ export default async (req: Request, context: Context) => {
           date: startDate,
           endDate,
           fee: parseAmount(updatedProposal.fee),
-          status: endDate && endDate < today ? "completed" : startDate <= today ? "in_progress" : "scheduled",
+          /**
+           * 수락한 제안은 "예정" 또는 "진행중"까지만 된다.
+           *
+           * 예전에는 종료일이 지났으면 완료로 적었다. 그런데 제안서 폼은 end_date 에
+           * 마감일이 아니라 "시작 희망일"을 넣는다(시작일과 같은 값이다). 그래서 지난
+           * 날짜로 제안된 건을 수락하면 방금 시작한 협업이 캘린더에 곧바로 완료로
+           * 찍혔고, 정산이 남아 있는데도 끝난 일처럼 보였다. 완료는 업로드 확인과
+           * 정산으로 닫힌다.
+           */
+          status: startDate <= today ? "in_progress" : "scheduled",
           memo: "비즈니스 제안 수락 시 자동 등록",
           source: "business_proposal",
           // 제안은 담당자가 아니라 인플루언서 본인의 수락으로 확정된다.

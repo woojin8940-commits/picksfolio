@@ -184,7 +184,7 @@ const pendingOf = (input: CollabActionInput, step: CollabStepKey): Omit<CollabSt
           owner: 'influencer',
           todo: step === 'plan'
             ? '장면별로 기획안을 작성해 저장해 주세요.'
-            : '완성된 초안 영상을 올려 주세요.',
+            : '완성된 초안 영상과 인스타 본문 캡션을 올려 주세요.',
           short: `${label} 등록 필요`,
           waitingNote: `인플루언서가 ${label}을 올리면 검토할 수 있습니다.`,
         };
@@ -213,8 +213,11 @@ const pendingOf = (input: CollabActionInput, step: CollabStepKey): Omit<CollabSt
         return {
           ...base,
           owner: 'influencer',
-          todo: '업로드한 게시물 링크와 광고 파트너십 코드를 남겨 주세요.',
-          short: '업로드 정보 입력 필요',
+          // 영상 검토가 끝나 이 단계가 열렸다는 것 자체가 게시 허락이다. 예전 문장은
+          // 이미 올린 사람에게 하는 말이어서, 아직 안 올린 사람은 "올려도 되나"를
+          // 다시 확인하고 하루를 보냈다.
+          todo: '검토가 끝난 영상과 본문 캡션 그대로 게시하고, 게시물 링크와 광고 파트너십 코드를 남겨 주세요.',
+          short: '업로드 · 링크 등록 필요',
           waitingNote: '인플루언서가 게시물 링크를 남기면 확인할 수 있습니다.',
         };
       }

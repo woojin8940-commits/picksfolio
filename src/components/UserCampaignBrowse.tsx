@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
 import { apiService } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
-import { rewardModeOf } from '../utils/campaignBrief';
+import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -28,6 +28,8 @@ interface Campaign {
   recruit_closed?: boolean;
   reward_mode?: string;
   seeding_count?: number;
+  /** 숏폼(릴스) 인지 피드 게시물인지. 내 어느 단가가 쓰이는지가 여기서 갈린다. */
+  content_format?: string;
 }
 
 interface UserCampaignBrowseProps {
@@ -546,6 +548,20 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   <div className="flex items-center px-5 py-3.5">
                     <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Brand' : '브랜드'}</span>
                     <span className="text-sm text-slate-900 font-bold">{selectedCampaign.brand_name}</span>
+                  </div>
+                )}
+                {/* 콘텐츠 형식. 숏폼이면 내 릴스 단가, 피드면 내 게시물 단가로 제안이
+                    오므로 지원 전에 알아야 하는 값이다. */}
+                {selectedCampaign.content_format && (
+                  <div className="flex items-center px-5 py-3.5">
+                    <span className="text-xs text-slate-400 font-bold w-24 flex-shrink-0">{isEn ? 'Format' : '콘텐츠 형식'}</span>
+                    <span className="text-sm text-slate-900 font-bold">
+                      {isEn
+                        ? selectedCampaign.content_format === 'feed'
+                          ? 'Feed post'
+                          : 'Short-form (Reels)'
+                        : contentFormatLabel(selectedCampaign.content_format)}
+                    </span>
                   </div>
                 )}
                 {selectedCampaign.reward_type && (

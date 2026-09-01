@@ -195,6 +195,32 @@ async function resolveStepStage(db: any, collabId: string, stepKey: string) {
 }
 
 /**
+ * 아직 열리지 않은 단계를 막는 근거를 찾는다 — 앞에서 끝나지 않은 단계 하나.
+ *
+ * 단계는 순서가 있다. 협업이 생길 때 첫 단계만 active 로 두고 나머지는 pending 이며,
+ * 앞 단계의 검토가 끝날 때(confirm_step → advanceProcessStage → openNextStage)만 다음
+ * 칸이 열린다. 그런데 제출 요청(save_step_work)은 그 상태를 보지 않았다. 즉 화면을
+ * 지나쳐 요청을 직접 보내거나, 화면이 잠금을 그리지 못한 자리에서는 기획안 검토가
+ * 끝나지 않았는데도 영상 초안이 먼저 올라갈 수 있었다. 그러면 브랜드는 확정되지 않은
+ * 기획안으로 찍은 영상을 받고, 기획안 피드백은 이미 찍은 영상을 되돌리라는 말이 된다.
+ *
+ * 막을 때는 "지금 무엇이 끝나야 하는지"를 함께 돌려준다. "지금 진행할 수 있는 단계가
+ * 아닙니다" 만으로는 인플루언서가 다음에 무엇을 해야 할지 알 수 없다.
+ *
+ * 단계 행이 없는 요청(예전 아홉 단계 묶음 등)은 막지 않는다 — 그 묶음은 담당자
+ * 승인으로 움직이고, 여기서 걸면 진행 중인 협업이 멈춘다.
+ */
+async function earlierUnfinishedStage(db: any, collabId: string, stage: any) {
+  if (!stage || String(stage.status) !== "pending") return null;
+  const rows = (await db.sql`
+    SELECT * FROM collab_stages
+    WHERE collab_id = ${collabId} AND seq < ${stage.seq} AND status NOT IN ('done', 'skipped')
+    ORDER BY seq ASC LIMIT 1
+  `) as any[];
+  return rows?.[0] || null;
+}
+
+/**
  * 단계 하나를 닫고 다음을 연다 — 다섯 단계 묶음에서만.
  *
  * 예전 묶음은 담당자 승인(approve_stage)으로만 움직인다. 그 묶음에는 "구성안 검수",
@@ -1343,6 +1369,16 @@ export default async (req: Request, context: Context) => {
         }
         // 기획안은 장면 단위로 온다 — 장면마다 설명과 자막. 브랜드 피드백이 장면
         // 번호에 붙기 때문에 그 번호가 제출물 안에 함께 남아 있어야 한다.
+        /**
+         * 영상과 함께 올라오는 인스타 본문 캡션.
+         *
+         * 영상만 검토받고 본문은 업로드 당일에 처음 쓰이면, 브랜드가 못 본 문장이
+         * 광고 게시물의 본문이 된다(필수 문구 · 해시태그 · 파트너십 표기가 여기에
+         * 들어간다). 그래서 초안 단계의 제출물에 함께 담아 같이 검토받는다.
+         *
+         * 2,200자는 인스타그램 본문 한도다. 화면에서도 같은 숫자를 세어 준다.
+         */
+        const caption = String((body as any).caption || "").trim().slice(0, 2200);
         const scenes = Array.isArray((body as any).scenes)
           ? ((body as any).scenes as any[])
               .slice(0, 40)
@@ -1356,16 +1392,47 @@ export default async (req: Request, context: Context) => {
         if (stepKey === "plan" && !text && !fileUrl && scenes.length === 0) {
           return jsonError("기획안 내용을 입력하거나 파일을 올려 주세요.");
         }
-        // 초안 영상은 파일로만 받는다. 링크(유튜브·드라이브)로 받던 시절의 제출물이
-        // 아직 남아 있어 읽기는 계속 되지만, 새로 낼 때는 파일이어야 한다 — 링크는
-        // 권한이 닫히거나 나중에 지워져서, 검수할 때 열리지 않는 일이 잦았다.
-        if (stepKey === "video" && !fileUrl) return jsonError("초안 영상 파일을 올려 주세요.");
+        const stage = await resolveStepStage(db, collabId, stepKey);
+        // 앞 단계의 검토가 끝나기 전에는 이 칸을 낼 수 없다.
+        const blocking = await earlierUnfinishedStage(db, collabId, stage);
+        if (blocking) {
+          return jsonError(
+            `${blocking.title || "앞 단계"}가 아직 끝나지 않았습니다. ${blocking.title || "앞 단계"} 검토가 완료되면 이 단계를 진행할 수 있습니다.`,
+            409,
+          );
+        }
+        const stageKey = stage?.stage_key || stepKey;
+
+        /**
+         * 초안 영상은 파일로만 받는다. 링크(유튜브·드라이브)로 받던 시절의 제출물이
+         * 아직 남아 있어 읽기는 계속 되지만, 새로 낼 때는 파일이어야 한다 — 링크는
+         * 권한이 닫히거나 나중에 지워져서, 검수할 때 열리지 않는 일이 잦았다.
+         *
+         * 단, 두 번째 저장부터는 이미 올라간 영상을 그대로 이어받는다. 본문 캡션만
+         * 고쳐 다시 내는 일이 자주 생기는데(브랜드가 문구 하나를 지적했을 때), 그때마다
+         * 수백 MB 영상을 다시 올리게 하면 한 줄 고치는 데 몇 분이 들고 모바일
+         * 데이터로는 아예 포기하게 된다.
+         */
+        let carriedFileUrl = fileUrl;
+        let carriedFileName = fileName;
+        if (stepKey === "video" && !carriedFileUrl) {
+          const prevRows = (await db.sql`
+            SELECT payload FROM collab_deliverables
+            WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
+            ORDER BY version DESC LIMIT 1
+          `) as any[];
+          const rawPrev = prevRows?.[0]?.payload;
+          const prev = (typeof rawPrev === "string" ? JSON.parse(rawPrev || "{}") : rawPrev) || {};
+          if (String(prev.fileUrl || "")) {
+            carriedFileUrl = String(prev.fileUrl);
+            carriedFileName = String(prev.fileName || "");
+          }
+        }
+        if (stepKey === "video" && !carriedFileUrl) return jsonError("초안 영상 파일을 올려 주세요.");
         if (stepKey === "upload" && !link) return jsonError("게시물 링크를 입력해 주세요.");
 
-        const stage = await resolveStepStage(db, collabId, stepKey);
-        const stageKey = stage?.stage_key || stepKey;
         const adCode = String((body as any).adCode || "").trim().slice(0, 500);
-        const payload = { body: text, link, fileUrl, fileName, adCode, step: stepKey, scenes };
+        const payload = { body: text, link, fileUrl: carriedFileUrl, fileName: carriedFileName, adCode, caption, step: stepKey, scenes };
 
         // 덮어쓰지 않고 버전을 쌓는다. 피드백이 "몇 번째 안"에 붙은 말인지가
         // 남지 않으면 수정 왕복이 기억 싸움이 된다.
@@ -1451,11 +1518,19 @@ export default async (req: Request, context: Context) => {
          *
          * 기획안은 장면으로 나뉘어 있어서 "몇 번 장면에 대한 말인지"가 피드백 자체에
          * 남아야 한다. 자리를 비워 보내면 예전처럼 단계 전체에 대한 말이 된다.
-         * `scene:3` 꼴만 받는다 — 화면이 읽을 수 있는 형식은 그것뿐이다.
+         * 받는 형식은 `scene:3` 과 `caption` 둘뿐이다 — 화면이 읽을 수 있는 것이
+         * 그것뿐이고, 읽지 못하는 위치로 저장되면 그 피드백은 어느 칸에도 뜨지 않는다.
+         *
+         * `caption` 은 영상 단계의 본문 캡션 칸이다. 영상 자체에 대한 의견과 섞이면
+         * 인플루언서가 영상을 다시 편집해야 하는지 글만 고치면 되는지 알 수 없다.
          */
         const readAnchor = (raw: unknown): { anchor: string; scene: string | null } | null => {
           const rawAnchor = String(raw || "").trim();
           if (!rawAnchor) return { anchor: stepKey, scene: null };
+          if (rawAnchor === "caption") {
+            if (stepKey !== "video") return null;
+            return { anchor: "caption", scene: null };
+          }
           const m = /^scene:(\d{1,3})$/.exec(rawAnchor);
           if (!m) return null;
           return { anchor: rawAnchor, scene: m[1] };
@@ -1548,6 +1623,15 @@ export default async (req: Request, context: Context) => {
         }
 
         const stage = await resolveStepStage(db, collabId, stepKey);
+        // 열리지도 않은 단계를 확인 처리하면 그 앞 단계가 통째로 건너뛰어진다
+        // (advanceProcessStage 가 이 단계를 done 으로 닫고 다음 칸을 연다).
+        const blockingConfirm = await earlierUnfinishedStage(db, collabId, stage);
+        if (blockingConfirm) {
+          return jsonError(
+            `${blockingConfirm.title || "앞 단계"}가 아직 끝나지 않았습니다. 순서대로 진행해 주세요.`,
+            409,
+          );
+        }
         let settlement: any = null;
 
         if (stepKey === "upload") {
