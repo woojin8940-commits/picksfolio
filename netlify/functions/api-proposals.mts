@@ -204,6 +204,27 @@ export default async (req: Request, context: Context) => {
       }
     }
 
+    /**
+     * 앱 푸시 — 제안이 도착한 그 순간 닿는 유일한 경로.
+     *
+     * 아래 알림톡은 지금 일시 중지 상태다(템플릿 재심사). 그 상태에서 새 제안 알림이
+     * 알림톡 하나뿐이면, 제안은 수신함에 올라와 있는데 인플루언서는 다음에 앱을 열
+     * 때까지 그 사실을 모른다 — 답변 기한이 있는 제안에서 그 며칠이 곧 기회 손실이다.
+     * 푸시는 솔라피를 거치지 않으므로 중지와 무관하게 나간다.
+     */
+    try {
+      const { sendPushToUser } = await import("./_shared/push.mts");
+      await sendPushToUser(username, {
+        title: `새 협업 제안 · ${body.company_name || "브랜드"}`,
+        body: `"${body.title || "협업 제안"}" 제안이 도착했습니다. 조건을 확인해 주세요.`,
+        // 알림톡이 쓰는 링크와 같은 자리로 보낸다(아래 magicLink). 두 채널이 서로
+        // 다른 화면으로 데려가면 같은 알림이 두 번 온 것처럼 읽힌다.
+        data: { type: "proposal", proposalId: proposal.id, path: "/admin?tab=proposals" },
+      });
+    } catch (pushErr) {
+      console.error("[api-proposals] Failed to send proposal push:", pushErr);
+    }
+
     // 비즈니스 수신 알림 - 카카오 알림톡
     try {
       const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";

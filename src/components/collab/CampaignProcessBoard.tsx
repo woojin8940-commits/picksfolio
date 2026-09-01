@@ -3,6 +3,8 @@ import { apiService } from '../../services/apiService';
 import { openPostcodeSearch } from '../../utils/daumPostcode';
 import { formatPhone, formatPhoneInput } from '../../utils/formatters';
 import {
+  CAPTION_ANCHOR,
+  CAPTION_MAX_LENGTH,
   StoryboardScene,
   emptyScene,
   normalizeScenes,
@@ -23,7 +25,7 @@ import {
  *   1. 콘텐츠 가이드   브랜드가 가이드 파일을 올리고, 인플루언서가 확인한다
  *   2. 제품 배송       인플루언서가 주소를 적고, 브랜드가 보낸다
  *   3. 기획안 피드백   인플루언서 기획안 입력칸 "바로 밑"에 브랜드 피드백칸
- *   4. 영상 피드백     초안 영상 "바로 밑"에 브랜드 피드백칸
+ *   4. 영상 피드백     초안 영상과 인스타 본문 캡션 "바로 밑"에 브랜드 피드백칸
  *   5. 업로드          게시물 링크 · 업로드 확인 · 광고 파트너십 코드
  *   6. 정산            인플루언서가 신분증 사본 · 계좌를 내고, 담당자가 지급일을 잡는다
  *
@@ -82,7 +84,7 @@ const STEPS: { key: StepKey; title: string; lead: string }[] = [
   { key: 'guide', title: '콘텐츠 가이드', lead: '브랜드가 올린 가이드를 확인합니다.' },
   { key: 'shipping', title: '제품 배송', lead: '받을 주소를 남기면 브랜드가 발송합니다.' },
   { key: 'plan', title: '기획안 피드백', lead: '기획안을 쓰면 바로 아래에 피드백이 붙습니다.' },
-  { key: 'video', title: '영상 피드백', lead: '초안 영상에 브랜드가 피드백을 남깁니다.' },
+  { key: 'video', title: '영상 피드백', lead: '초안 영상과 본문 캡션에 브랜드가 피드백을 남깁니다.' },
   { key: 'upload', title: '업로드', lead: '게시물 링크와 광고 파트너십 코드를 남깁니다.' },
   { key: 'settlement', title: '정산', lead: '신분증 사본과 계좌를 내면 담당자가 지급일을 잡습니다.' },
 ];
@@ -204,6 +206,37 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
   /** 브랜드가 이 단계에 피드백을 남겨 다시 인플루언서 차례가 된 상태. */
   const revisionOf = (step: StepKey): boolean => String(stageOf(step)?.status || '') === 'revision';
+
+  /**
+   * 아직 열리지 않은 단계라면, 무엇이 끝나야 열리는지.
+   *
+   * 단계에는 순서가 있다. 기획안 검토가 끝나기 전에는 영상 초안을 낼 수 없고, 영상
+   * 검토가 끝나기 전에는 업로드를 할 수 없다 — 확정되지 않은 기획안으로 찍은 영상은
+   * 브랜드가 피드백을 남기는 순간 다시 찍어야 하는 영상이 되기 때문이다. 서버도 같은
+   * 판정으로 제출을 막는다(save_step_work).
+   *
+   * 그런데 예전에는 잠긴 단계에도 입력칸이 그대로 펼쳐져 있었다. 그러면 인플루언서는
+   * 순서를 모른 채 영상을 다 올린 뒤에야 거절을 만나고, 그 시점에 이미 촬영은 끝나
+   * 있다. 열리지 않은 칸은 입력칸 대신 "무엇이 끝나야 열리는지"를 보여 준다.
+   *
+   * 잠금은 기획안 · 영상 · 업로드에만 건다. 가이드와 배송은 앞 단계와 무관하게 미리
+   * 채워 두는 편이 서로 빠르고(주소를 먼저 남겨 두는 일이 흔하다), 서버도 그 둘은
+   * 막지 않는다. 정산은 업로드 확인으로만 열린다(settlementOpen).
+   */
+  const lockedBy = (step: StepKey): string => {
+    if (!['plan', 'video', 'upload'].includes(step)) return '';
+    const stage = stageOf(step);
+    // 단계 행이 없으면(예전 아홉 단계 묶음 등) 순서를 판정할 근거가 없다 — 막지 않는다.
+    if (!stage || String(stage.status) !== 'pending') return '';
+    const seq = Number(stage.seq ?? 0);
+    const blocker = stages
+      .filter((s: any) => Number(s.seq ?? 0) < seq && !['done', 'skipped'].includes(String(s.status)))
+      .sort((a: any, b: any) => Number(a.seq ?? 0) - Number(b.seq ?? 0))[0];
+    if (!blocker) return '';
+    // 화면의 다섯 칸 이름으로 말한다. 단계 행의 title 은 예전 이름일 수 있다.
+    const mapped = STEPS.find(st => STAGE_KEYS[st.key].includes(String(blocker.stageKey)));
+    return mapped?.title || String(blocker.title || '앞 단계');
+  };
 
   /**
    * 입력을 마쳤고 상대의 차례가 된 단계인가.
@@ -455,6 +488,14 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const [scenes, setScenes] = useState<StoryboardScene[]>([emptyScene()]);
   const [planFile, setPlanFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  /**
+   * 영상 아래에 들어갈 인스타그램 본문.
+   *
+   * 초안 영상만 검토받고 본문은 업로드 당일에 처음 쓰이면, 브랜드가 한 번도 보지 못한
+   * 문장이 광고 게시물의 본문이 된다 — 필수 문구와 파트너십 표기, 해시태그가 전부
+   * 여기에 들어가는데도. 그래서 영상과 같은 칸에서 같이 받고 같이 검토받는다.
+   */
+  const [caption, setCaption] = useState('');
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
 
@@ -502,6 +543,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       const legacy = String(planWork?.payload?.body || '');
       setScenes([{ ...emptyScene(), visual: legacy }]);
     }
+    // 캡션은 고쳐 다시 내는 일이 잦다. 저장한 글이 칸에 되돌아와 있지 않으면 브랜드가
+    // 지적한 한 줄을 고치려고 본문 전체를 다시 써야 한다.
+    setCaption(String(videoWork?.payload?.caption || ''));
     setUploadLink(String(collab.uploadUrl || ''));
     setAdCode(String(collab.adCode || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -593,18 +637,39 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     await saveWork('plan', { scenes: filled, body }, planFile);
   };
 
+  /** 저장한 캡션과 지금 칸에 적힌 글이 다른가. 캡션만 고쳐 다시 내는 경우를 위해. */
+  const captionDirty = caption.trim() !== String(videoWork?.payload?.caption || '').trim();
+
   /**
-   * 초안 영상 제출 — 파일만 받는다.
+   * 초안 영상 제출 — 영상 파일과 본문 캡션을 한 번에 낸다.
    *
-   * 서버도 같은 규칙으로 막지만(파일 없으면 거절), 여기서 먼저 잡는다. 서버까지
-   * 갔다 오면 눌렀는데 잠깐 아무 일도 없다가 빨간 글씨가 뜨는 모양이 된다.
+   * 첫 제출에는 영상 파일이 있어야 한다(서버도 같은 규칙으로 막지만 여기서 먼저
+   * 잡는다 — 서버까지 갔다 오면 눌렀는데 잠깐 아무 일도 없다가 빨간 글씨가 뜨는
+   * 모양이 된다). 두 번째부터는 파일 없이도 낼 수 있다: 브랜드 피드백이 캡션 한 줄에
+   * 대한 것일 때 수백 MB 영상을 다시 올리게 할 이유가 없고, 서버가 이미 올라간
+   * 영상을 그대로 이어받는다.
    */
   const submitVideo = async () => {
-    if (!videoFile) {
+    const text = caption.trim();
+    if (!videoFile && !videoWork?.payload?.fileUrl) {
       onNotify('올릴 영상 파일을 선택해 주세요.', 'error');
       return;
     }
-    await saveWork('video', {}, videoFile);
+    if (text.length > CAPTION_MAX_LENGTH) {
+      onNotify(`본문 캡션이 인스타그램 한도(${CAPTION_MAX_LENGTH.toLocaleString()}자)를 넘었습니다.`, 'error');
+      return;
+    }
+    // 캡션을 막지는 않는다 — 영상은 다 됐는데 문구가 아직 안 나온 경우가 있고, 막으면
+    // 검토 자체가 늦어진다. 대신 비워 두면 어떻게 되는지 한 번 말해 준다.
+    if (
+      !text &&
+      !window.confirm(
+        '본문 캡션을 비워 두고 영상만 올릴까요?\n\n인스타에 올릴 때 영상 아래 들어가는 본문도 브랜드 검토를 받아야 합니다. 지금 비워 두면 나중에 이 칸에 적어 다시 저장해 주세요.',
+      )
+    ) {
+      return;
+    }
+    await saveWork('video', { caption: text }, videoFile);
   };
 
   const saveWork = async (step: 'plan' | 'video' | 'upload', extra: Record<string, any>, file: File | null) => {
@@ -676,10 +741,15 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   // 컴포넌트가 아니라 함수로 둔다. 컴포넌트로 만들면 입력할 때마다 상태가 바뀌면서
   // 새 타입으로 인식돼 통째로 다시 마운트되고, 피드백을 한 글자 칠 때마다 커서가
   // 칸 밖으로 튀어나간다.
-  const renderFeedbackThread = (step: StepKey, sceneIndex = -2) => {
+  const renderFeedbackThread = (step: StepKey, sceneIndex = -2, only: 'default' | 'caption' = 'default') => {
     // sceneIndex 가 -2 면 그 단계의 "자리 없는" 피드백만, 0 이상이면 그 장면의 것만.
+    // only='caption' 이면 본문 캡션에 붙은 것만 — 그리고 기본 묶음에서는 빠진다.
+    // 캡션 의견이 영상 전체 피드백 사이에 섞여 있으면, 영상을 다시 편집해야 하는지
+    // 글만 고치면 되는지를 인플루언서가 문장으로 판단해야 한다.
     const rows = feedbacksOf(step).filter((f: any) => {
       const parsed = parseAnchor(f.anchor);
+      if (only === 'caption') return parsed.kind === 'caption';
+      if (parsed.kind === 'caption') return false;
       const at = parsed.kind === 'scene' ? parsed.sceneIndex : -1;
       return sceneIndex === -2 ? at === -1 : at === sceneIndex;
     });
@@ -748,6 +818,38 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   );
 
   /**
+   * 특정 자리에 붙는 피드백 칸 — 지금은 영상 단계의 본문 캡션 하나다.
+   *
+   * 단계 전체 칸(renderFeedbackBox)과 따로 두는 이유는 저장되는 위치가 다르기
+   * 때문이다. 여기 쓴 말은 `caption` 위치로 저장되어 인플루언서 화면의 캡션 칸 바로
+   * 아래에 붙는다. 같은 칸을 공유하면 브랜드는 "영상 얘기"와 "본문 얘기"를 한
+   * 글상자에 섞어 쓰게 되고, 받는 쪽에서 다시 나눠 읽어야 한다.
+   */
+  const renderAnchoredFeedbackBox = (step: StepKey, anchor: string, title: string, placeholder: string) => {
+    const key = `${step}:${anchor}`;
+    const text = reply[key] || '';
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+        <p className="text-[10px] font-black text-slate-500 mb-1.5">{title}</p>
+        <textarea
+          value={text}
+          onChange={e => setReply(prev => ({ ...prev, [key]: e.target.value }))}
+          rows={3}
+          placeholder={placeholder}
+          className={`${inputCls} resize-none`}
+        />
+        <button
+          onClick={() => sendFeedback(step, anchor)}
+          disabled={busy || !text.trim()}
+          className="mt-2 px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
+        >
+          피드백 보내기
+        </button>
+      </div>
+    );
+  };
+
+  /**
    * 적어 둔 기획안 피드백을 한 번에 저장하는 줄.
    *
    * 장면 칸들과 전체 칸 아래에 하나만 선다. 몇 개가 저장될지 숫자로 적어 두는 것이
@@ -794,30 +896,44 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    * 정리하고 넘어가기로 한 경우가 있어서, 막으면 진행이 여기서 멈춘다. 대신 몇 개가
    * 남았는지 세어 보여 주고 한 번 더 묻는다.
    */
-  const completeReview = async (step: StepKey, stepName: string) => {
+  const completeReview = async (step: StepKey, stepName: string, nextNote = '') => {
     const remaining = openFeedbackCount(step);
     const question = remaining > 0
       ? `전달했지만 아직 수정본이 오지 않은 피드백이 ${remaining}개 있습니다.\n\n그래도 ${stepName} 검토를 완료하고 다음 단계로 넘어갈까요?`
       : `${stepName}에 더 수정할 부분이 없다면 검토를 완료합니다.\n\n다음 단계로 넘어갈까요?`;
-    if (!window.confirm(question)) return;
+    // 영상 다음 단계는 업로드다. 즉 이 버튼은 "다음 칸을 연다"가 아니라 "지금 이대로
+    // 게시해도 된다"는 허락이고, 누르는 사람이 그 사실을 알고 눌러야 한다.
+    if (!window.confirm(nextNote ? `${question}\n\n${nextNote}` : question)) return;
     const ok = await act('confirm_step', { stepKey: step }, `${stepName} 검토를 완료했습니다. 다음 단계로 넘어갑니다.`);
     // 끝낸 단계의 상세를 계속 띄워 둘 이유가 없다. 다음 할 일은 목록에 있다.
     if (ok) onStepComplete?.(step);
   };
 
-  /** 검토 완료 줄. 브랜드·담당자 화면에서 제출물이 올라온 단계에만 선다. */
-  const renderReviewComplete = (step: StepKey, stepName: string) => {
+  /**
+   * 검토 완료 줄. 브랜드·담당자 화면에서 제출물이 올라온 단계에만 선다.
+   *
+   * `note` 는 "완료하면 무엇이 일어나는지"다. 단계마다 그 결과가 다른데 예전에는 모든
+   * 단계가 "다음 단계가 열립니다"라는 같은 문장을 썼다. 영상 단계에서 그것은 사실을
+   * 절반만 말한 것이다 — 영상 다음은 업로드이고, 열리는 것이 곧 게시 허락이다.
+   * `doneNote` 는 이미 닫힌 뒤에 남는 한 줄이다.
+   */
+  const renderReviewComplete = (step: StepKey, stepName: string, note = '', doneNote = '') => {
     if (!isBrandSide) return null;
 
     if (doneOf(step)) {
       return (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-          <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-          </svg>
-          <p className="text-[11px] font-black text-emerald-700">
-            {stepName} 검토 완료 · 다음 단계로 넘어갔습니다
-          </p>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+            </svg>
+            <p className="text-[11px] font-black text-emerald-700">
+              {stepName} 검토 완료 · 다음 단계로 넘어갔습니다
+            </p>
+          </div>
+          {doneNote && (
+            <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed pl-6">{doneNote}</p>
+          )}
         </div>
       );
     }
@@ -827,7 +943,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
         <p className="text-[11px] font-black text-emerald-800">더 이상 수정할 부분이 없나요?</p>
         <p className="text-[10px] font-bold text-emerald-700/80 mt-0.5 leading-relaxed">
-          검토를 완료하면 이 단계가 닫히고, 인플루언서에게 다음 단계가 열립니다.
+          {note || '검토를 완료하면 이 단계가 닫히고, 인플루언서에게 다음 단계가 열립니다.'}
         </p>
         {remaining > 0 && (
           <p className="text-[10px] font-black text-amber-700 mt-1.5">
@@ -835,7 +951,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
           </p>
         )}
         <button
-          onClick={() => completeReview(step, stepName)}
+          onClick={() => completeReview(step, stepName, note)}
           disabled={busy}
           className="mt-2 w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-500 disabled:opacity-40 transition-colors"
         >
@@ -932,6 +1048,31 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     </div>
   );
 
+  /**
+   * 저장된 본문 캡션을 읽는 칸.
+   *
+   * 복사 버튼을 함께 둔다. 인플루언서가 업로드할 때 실제로 하는 일은 이 글을 인스타
+   * 본문에 붙여넣는 것이고, 그때 화면에서 손으로 긁어 옮기면 줄바꿈과 해시태그가
+   * 깨진다 — 그러면 검토받은 본문과 게시된 본문이 달라진다.
+   */
+  const renderCaptionView = (text: string, label: string) => (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-3 mb-1.5">
+        <p className="text-[10px] font-black text-slate-400">{label}</p>
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(text);
+            onNotify('본문 캡션을 복사했습니다.');
+          }}
+          className="text-[10px] font-black text-blue-600 flex-shrink-0"
+        >
+          복사
+        </button>
+      </div>
+      <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed break-words">{text}</p>
+    </div>
+  );
+
   const renderFileLink = (url: string, name: string) => (
     <a
       key={url}
@@ -946,8 +1087,31 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     </a>
   );
 
+  /**
+   * 잠긴 단계의 본문. 입력칸 자리에 "무엇이 끝나야 열리는지" 한 칸이 선다.
+   */
+  const renderLocked = (step: StepKey, blocker: string) => {
+    const title = STEPS.find(s => s.key === step)?.title || '이 단계';
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <p className="text-[11px] font-black text-slate-700">{blocker} 검토가 완료되면 열립니다</p>
+        </div>
+        <p className="text-[10px] font-bold text-slate-500 mt-1.5 leading-relaxed break-keep">
+          단계는 순서대로 진행합니다. {blocker} 단계에서 브랜드가 검토 완료를 누르면 이 칸이 열리고, 그때부터 {title}을(를) 낼 수 있습니다.
+          {isInfluencer ? ' 지금은 앞 단계의 피드백을 반영해 다시 저장해 주세요.' : ''}
+        </p>
+      </div>
+    );
+  };
+
   // ── 단계별 본문 ─────────────────────────────────────────────────────
   const renderStep = (step: StepKey) => {
+    const blocker = lockedBy(step);
+    if (blocker) return renderLocked(step, blocker);
     switch (step) {
       case 'guide':
         return (
@@ -1266,12 +1430,44 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   label: '영상 파일 선택',
                   hint: `mp4 · mov · webm 파일 · 최대 ${UPLOAD_MAX_MB}MB`,
                 })}
+                {/*
+                  본문 캡션. 영상 칸 바로 아래에 둔다.
+                  인스타에 올릴 때 영상과 본문은 한 게시물이므로, 검토도 한 칸에서
+                  같이 받아야 한다 — 따로 두면 영상만 승인된 채 업로드 당일에 본문을
+                  처음 쓰게 되고, 그 문장은 아무도 못 본 광고 문구가 된다.
+                */}
+                <Field label="인스타 본문 캡션">
+                  <textarea
+                    value={caption}
+                    onChange={e => setCaption(e.target.value)}
+                    rows={6}
+                    placeholder={'영상 아래에 들어갈 본문을 그대로 적어 주세요.\n\n예)\n요즘 아침마다 챙겨 먹는 것 🌿\n· 하루 한 포로 간단하게\n· 물 없이도 먹을 수 있어요\n\n#광고 #브랜드명 #제품명'}
+                    className={`${inputCls} resize-none leading-relaxed`}
+                  />
+                </Field>
+                <div className="flex items-center justify-between gap-2 -mt-1">
+                  <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
+                    해시태그와 광고 표기(#광고 · 유료광고 포함)까지 함께 적어 주세요. 브랜드가 이 글에도
+                    피드백을 남깁니다.
+                  </p>
+                  <p
+                    className={`text-[10px] font-black flex-shrink-0 ${
+                      caption.length > CAPTION_MAX_LENGTH ? 'text-red-500' : 'text-slate-400'
+                    }`}
+                  >
+                    {caption.length.toLocaleString()} / {CAPTION_MAX_LENGTH.toLocaleString()}
+                  </p>
+                </div>
                 <button
                   onClick={submitVideo}
-                  disabled={busy || !videoFile}
+                  disabled={busy || (!videoFile && (!videoWork || !captionDirty))}
                   className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                 >
-                  {videoWork ? '영상 다시 올리기' : '초안 영상 올리기'}
+                  {!videoWork
+                    ? '초안 영상 · 본문 올리기'
+                    : videoFile
+                      ? '영상 · 본문 다시 올리기'
+                      : '본문 캡션만 다시 저장'}
                 </button>
                 {renderUploadProgress()}
                 {videoWork && (
@@ -1286,6 +1482,15 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                             초안 영상 열기
                           </a>
                         )}
+                    {videoWork.payload?.caption ? (
+                      <p className="text-[10px] font-bold text-slate-400 pt-0.5">
+                        본문 캡션 {String(videoWork.payload.caption).length.toLocaleString()}자 함께 제출
+                      </p>
+                    ) : (
+                      <p className="text-[10px] font-black text-amber-600 pt-0.5">
+                        본문 캡션이 아직 비어 있습니다 · 위 칸에 적어 저장해 주세요
+                      </p>
+                    )}
                   </div>
                 )}
               </>
@@ -1298,15 +1503,66 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   </a>
                 )}
                 {videoWork.payload?.fileUrl && renderFileLink(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')}
+                {videoWork.payload?.caption ? (
+                  renderCaptionView(String(videoWork.payload.caption), '인스타 본문 캡션 · 이 글이 영상 아래에 게시됩니다')
+                ) : (
+                  <p className="text-[11px] font-black text-amber-600">
+                    본문 캡션이 비어 있습니다. 아래 칸으로 본문도 함께 요청해 주세요 — 검토하지 않으면 업로드
+                    당일에 처음 보게 됩니다.
+                  </p>
+                )}
                 <p className="text-[10px] text-slate-400 font-bold">{videoWork.version}번째 안 · {fmtDate(videoWork.createdAt)}</p>
               </div>
             ) : (
-              <p className="text-xs text-slate-400 font-medium">인플루언서가 초안 영상을 올리면 여기에 표시됩니다.</p>
+              <p className="text-xs text-slate-400 font-medium">
+                인플루언서가 초안 영상과 본문 캡션을 올리면 여기에 표시됩니다.
+              </p>
             )}
 
             {renderFeedbackThread('video')}
             {isBrandSide && videoWork && renderFeedbackBox('video', '수정이 필요한 장면과 이유를 적어 주세요.')}
-            {videoWork && renderReviewComplete('video', '영상')}
+
+            {/* 본문 캡션에 대한 의견은 캡션 아래에만 모인다. 영상 편집 얘기와 섞이면
+                무엇을 고쳐야 하는지 인플루언서가 문장으로 판단해야 한다. */}
+            {(videoWork?.payload?.caption || feedbacksOf('video').some((f: any) => parseAnchor(f.anchor).kind === 'caption')) && (
+              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 space-y-2">
+                <p className="text-[10px] font-black text-slate-500">본문 캡션 피드백</p>
+                {renderFeedbackThread('video', -2, 'caption')}
+                {isBrandSide && videoWork && renderAnchoredFeedbackBox(
+                  'video',
+                  CAPTION_ANCHOR,
+                  '본문 캡션에 남기는 피드백',
+                  '고쳤으면 하는 문장과 이유를 적어 주세요. (예: 첫 줄에 제품명이 들어가야 합니다 / #광고 표기를 맨 앞으로)',
+                )}
+              </div>
+            )}
+
+            {videoWork && renderReviewComplete(
+              'video',
+              '영상',
+              '검토를 완료하면 인플루언서에게 바로 업로드 단계가 열립니다. 지금 올라온 영상과 본문 캡션이 그대로 게시된다는 뜻이니, 두 가지를 모두 확인한 뒤 눌러 주세요.',
+              '인플루언서가 이 영상과 본문으로 업로드합니다. 게시물 링크가 올라오면 업로드 단계에서 확인해 주세요.',
+            )}
+
+            {/* 인플루언서에게 주는 초록불. 브랜드가 검토를 닫는 순간 다음 할 일은
+                "올려도 되는지 물어보기"가 아니라 "올리기"다 — 그 문장이 화면에 없으면
+                대부분 카카오톡으로 한 번 더 확인하고 하루가 지나간다. */}
+            {isInfluencer && doneOf('video') && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-[11px] font-black text-emerald-800">
+                  브랜드 검토 완료 · 이제 업로드해도 됩니다
+                </p>
+                <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
+                  검토를 마친 영상과 본문 캡션 그대로 인스타그램에 올려 주세요. 따로 확인받을 것은 없습니다.
+                  올린 뒤 업로드 단계에 게시물 링크와 광고 파트너십 코드만 남기면 끝입니다.
+                </p>
+                {videoWork?.payload?.caption && (
+                  <div className="mt-2">
+                    {renderCaptionView(String(videoWork.payload.caption), '검토 완료된 본문 캡션 · 이대로 붙여넣어 주세요')}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
 
@@ -1531,6 +1787,26 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               )}
             </div>
 
+            {/*
+              업로드 허락. 영상 검토가 닫혀 있고 아직 게시물이 안 올라온 그 사이에만 선다.
+              이 구간이 실제로 가장 오래 멈춰 있던 자리다 — 브랜드는 검토를 끝냈고
+              인플루언서는 "올려도 된다"는 말을 기다리고 있었다.
+            */}
+            {isInfluencer && doneOf('video') && !collab.uploadUrl && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-xs font-black text-emerald-800">브랜드 검토 완료 · 지금 업로드해 주세요</p>
+                <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
+                  검토를 마친 초안 영상과 본문 캡션을 그대로 올리시면 됩니다. 올린 뒤 아래에 게시물 링크와
+                  광고 파트너십 코드를 남겨 주세요.
+                </p>
+                {videoWork?.payload?.caption && (
+                  <div className="mt-2">
+                    {renderCaptionView(String(videoWork.payload.caption), '검토 완료된 본문 캡션 · 이대로 붙여넣어 주세요')}
+                  </div>
+                )}
+              </div>
+            )}
+
             {isInfluencer ? (
               <>
                 <Field label="게시물 링크">
@@ -1585,6 +1861,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /** 단계 한 줄에 붙는 상태 한 마디. 길면 읽지 않는다. */
   const statusText = (step: StepKey, done: boolean, current: boolean) => {
     if (done) return '완료';
+    // 잠긴 줄에는 "진행 전"이 아니라 무엇을 기다리는지 적는다.
+    const blocker = lockedBy(step);
+    if (blocker) return `${blocker} 검토 후 진행`;
     // 내 차례인 단계에는 상태가 아니라 할 일을 적는다. "진행 중"은 무엇을 해야
     // 하는지 아무것도 말해 주지 않는다 — 배송 줄에서 가장 크게 걸렸던 부분이다.
     const turn = turnOf(step);

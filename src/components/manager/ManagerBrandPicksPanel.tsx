@@ -37,27 +37,54 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
   const [picks, setPicks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
-  const [mineOnly, setMineOnly] = useState(false);
+  /**
+   * 목록 범위. 예전에는 "내 캠페인만" 버튼 하나였는데, 캠페인이 많아지면 끈 상태는
+   * 남의 캠페인까지 섞인 벽이 되고 켠 상태에서는 주인 없는 캠페인의 선택 — 아무도
+   * 답하지 않는 요청 — 이 보이지 않는다. 담당자가 오가는 두 화면에 각각 자리를 준다.
+   */
+  const [scope, setScope] = useState<'mine' | 'unassigned' | 'all'>('all');
+  const [query, setQuery] = useState('');
+  /** 담당자가 직접 접거나 펼친 캠페인. 손대지 않은 캠페인은 기본값을 따른다. */
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiService.getManagerCampaigns({ mine: mineOnly });
+    const res = await apiService.getManagerCampaigns({ mine: scope === 'mine' });
     setLoading(false);
     if (res.error) {
       onNotify(res.error, 'error');
       return;
     }
     setPicks(res.brandPicks || []);
-  }, [mineOnly, onNotify]);
+  }, [scope, onNotify]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  /** 캠페인별로 묶는다. 담당자가 연락을 돌릴 때의 단위가 캠페인이다. */
+  /**
+   * 캠페인별로 묶는다. 담당자가 연락을 돌릴 때의 단위가 캠페인이다.
+   *
+   * 순서는 내 담당 → 담당자 없음 → 나머지다. 선택이 여러 캠페인에 걸쳐 쌓이면
+   * 화면 맨 위에 있어야 하는 것은 내가 답할 차례인 캠페인이고, 그다음이 아무도
+   * 답하지 않는 캠페인이다.
+   */
   const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = (pick: any) =>
+      !q ||
+      [
+        pick.campaignTitle,
+        pick.brandName,
+        pick.businessUsername,
+        pick.influencerUsername,
+        pick.snapshot?.instagramHandle,
+      ].some((v) => String(v || '').toLowerCase().includes(q));
+
     const map = new Map<string, { campaignId: string; title: string; brand: string; mine: boolean; unassigned: boolean; rows: any[] }>();
     for (const pick of picks) {
+      if (scope === 'unassigned' && !pick.unassigned) continue;
+      if (!matches(pick)) continue;
       const key = String(pick.campaignId || '');
       if (!map.has(key)) {
         map.set(key, {
@@ -71,8 +98,19 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
       }
       map.get(key)!.rows.push(pick);
     }
-    return Array.from(map.values());
-  }, [picks]);
+    const rank = (g: { mine: boolean; unassigned: boolean }) => (g.mine ? 0 : g.unassigned ? 1 : 2);
+    return Array.from(map.values()).sort((a, b) => rank(a) - rank(b));
+  }, [picks, scope, query]);
+
+  const totalRows = useMemo(() => groups.reduce((sum, g) => sum + g.rows.length, 0), [groups]);
+
+  /**
+   * 캠페인 하나를 펼쳐 둘지. 후보 카드는 크므로, 캠페인이 셋을 넘으면 접은 채로
+   * 시작한다 — 어느 캠페인에 몇 명이 걸려 있는지는 접힌 머리줄만으로 읽히고,
+   * 카드가 필요한 것은 그중 지금 처리할 한 캠페인뿐이다.
+   */
+  const isOpen = (campaignId: string) =>
+    toggled[campaignId] !== undefined ? toggled[campaignId] : groups.length <= 3;
 
   const startCollab = async (pick: any) => {
     if (
@@ -99,10 +137,12 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 flex items-center justify-between gap-3 flex-wrap">
+      <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <h3 className="text-base font-black text-slate-900">
-            브랜드가 선택한 인플루언서 ({picks.length})
+            브랜드가 선택한 인플루언서 ({totalRows}
+            {totalRows !== picks.length ? ` / ${picks.length}` : ''})
           </h3>
           <p className="text-[11px] text-slate-400 font-medium mt-0.5">
             브랜드가 진행을 요청한 사람들입니다. 진행하기를 누르면 협업이 만들어지고 브랜드·인플루언서
@@ -110,14 +150,23 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={() => setMineOnly(v => !v)}
-            className={`px-3 py-2 rounded-lg text-[10px] font-black ${
-              mineOnly ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-            }`}
-          >
-            내 캠페인만
-          </button>
+          {[
+            { key: 'mine' as const, label: '내 담당' },
+            { key: 'unassigned' as const, label: '담당자 없음' },
+            { key: 'all' as const, label: '전체' },
+          ].map(sc => (
+            <button
+              key={sc.key}
+              onClick={() => setScope(sc.key)}
+              className={`px-3 py-2 rounded-lg text-[10px] font-black ${
+                scope === sc.key
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {sc.label}
+            </button>
+          ))}
           <button
             onClick={load}
             disabled={loading}
@@ -126,6 +175,16 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
             새로고침
           </button>
         </div>
+        </div>
+        {/* 검색은 캠페인과 인플루언서 계정을 함께 본다. 담당자가 이 화면을 다시 여는
+            이유는 대개 "그 사람 건이 어디 있었지"이고, 그때 기억하는 것은 계정이다. */}
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="캠페인 · 브랜드 · 인플루언서 계정 검색"
+          className="mt-3 w-full text-[12px] font-medium text-slate-700 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400"
+        />
       </div>
 
       {loading ? (
@@ -137,21 +196,40 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
           <p className="text-sm text-slate-500 font-black">아직 브랜드가 고른 후보가 없습니다.</p>
           <p className="mt-1 text-[11px] font-medium text-slate-400">
-            {mineOnly
-              ? '내가 맡은 캠페인에는 선택이 없습니다. 전체로 바꿔 보세요.'
-              : '캠페인에 명단을 올리면 브랜드가 이 자리에서 고릅니다.'}
+            {query
+              ? '검색어에 맞는 선택이 없습니다. 검색어를 지워 보세요.'
+              : scope === 'mine'
+                ? '내가 맡은 캠페인에는 선택이 없습니다. 전체로 바꿔 보세요.'
+                : scope === 'unassigned'
+                  ? '주인 없는 캠페인의 선택은 없습니다.'
+                  : '캠페인에 명단을 올리면 브랜드가 이 자리에서 고릅니다.'}
           </p>
         </div>
       ) : (
         groups.map(group => (
           <div key={group.campaignId} className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
             <div className="px-4 py-3.5 border-b border-slate-100 flex items-start justify-between gap-2 flex-wrap">
-              <div className="min-w-0">
-                <p className="text-sm font-black text-slate-900 truncate">{group.title}</p>
-                <p className="text-[11px] text-slate-400 font-bold truncate">
-                  {group.brand} · 선택 {group.rows.length}명
-                </p>
-              </div>
+              {/* 머리줄을 눌러 접고 펼친다. 캠페인이 많을 때 필요한 것은 카드가 아니라
+                  "어느 캠페인에 몇 명이 걸려 있는지"다. */}
+              <button
+                onClick={() =>
+                  setToggled(prev => ({ ...prev, [group.campaignId]: !isOpen(group.campaignId) }))
+                }
+                className="min-w-0 text-left flex items-center gap-2"
+              >
+                <span className="text-[10px] font-black text-slate-300 flex-shrink-0">
+                  {isOpen(group.campaignId) ? '▾' : '▸'}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-black text-slate-900 truncate">
+                    {group.title}
+                  </span>
+                  <span className="block text-[11px] text-slate-400 font-bold truncate">
+                    {group.brand} · 선택 {group.rows.length}명
+                    {!isOpen(group.campaignId) ? ' · 눌러서 펼치기' : ''}
+                  </span>
+                </span>
+              </button>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* 담당자가 없는 캠페인의 선택은 아무도 답하지 않는다. 눈에 띄게 둔다. */}
                 {group.unassigned ? (
@@ -174,6 +252,7 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
               </div>
             </div>
 
+            {isOpen(group.campaignId) && (
             <div className="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch bg-slate-50/60">
               {group.rows.map(pick => {
                 const outreach = OUTREACH_BADGE[pick.outreachStatus] || OUTREACH_BADGE.not_sent;
@@ -182,6 +261,7 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
                     key={pick.id}
                     data={pick}
                     note={pick.managerNote}
+                    contentFormat={pick.contentFormat}
                     badges={
                       <>
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-600">
@@ -231,6 +311,7 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
                 );
               })}
             </div>
+            )}
           </div>
         ))
       )}

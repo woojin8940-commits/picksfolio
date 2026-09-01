@@ -295,11 +295,13 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0">
                       <span className="text-[11px] font-black text-white">{(p.name || p.username || '?').slice(0, 1).toUpperCase()}</span>
                     </div>
+                    {/* 인스타 계정이 먼저다 — 명단을 훑는 사람이 찾는 단서는 이름이 아니라 계정이다. */}
                     <div className="min-w-0">
-                      <p className="text-[12px] font-black text-slate-900 truncate">{p.name || `@${p.username}`}</p>
+                      <p className="text-[12px] font-black text-slate-900 truncate">@{p.instagramHandle || p.username}</p>
                       <p className="text-[10px] font-bold text-slate-400 truncate">
-                        @{p.username}
-                        {p.instagramHandle && p.instagramHandle !== p.username ? ` · 인스타 @${p.instagramHandle}` : ''}
+                        {[p.name || '', p.instagramHandle && p.instagramHandle !== p.username ? `픽스폴리오 @${p.username}` : '']
+                          .filter(Boolean)
+                          .join(' · ') || `@${p.username}`}
                       </p>
                     </div>
                   </div>
@@ -386,10 +388,11 @@ const AdminInfluencerDatabase: React.FC<Props> = ({ token }) => {
           <div className="bg-white rounded-2xl w-full max-w-xl my-8 overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-100">
               <div className="min-w-0">
-                <p className="text-sm font-black text-slate-900 truncate">{open.name || `@${open.username}`}</p>
+                <p className="text-sm font-black text-slate-900 truncate">@{open.instagramHandle || open.username}</p>
                 <p className="text-[11px] font-bold text-slate-400 truncate">
-                  @{open.username}
-                  {open.instagramHandle && open.instagramHandle !== open.username ? ` · 인스타 @${open.instagramHandle}` : ''}
+                  {[open.name || '', open.instagramHandle && open.instagramHandle !== open.username ? `픽스폴리오 @${open.username}` : '']
+                    .filter(Boolean)
+                    .join(' · ') || `@${open.username}`}
                 </p>
               </div>
               <button onClick={() => setOpenUser('')} className="shrink-0 px-2.5 py-1.5 bg-slate-100 rounded-lg text-[10px] font-black text-slate-500 hover:bg-slate-200">

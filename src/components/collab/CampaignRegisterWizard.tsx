@@ -6,11 +6,11 @@ import DateRangeCalendar from './DateRangeCalendar';
 import {
   REWARD_MODES, rewardModeOf, normalizeRewardMode, COMMISSION_RANGE,
   TIERS, tierFeeLabel, stageMarksFor,
-  PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, GENDERS, AGE_BANDS,
+  PRODUCT_PROVIDE, AD_OBJECTIVES, CHANNELS, CONTENT_FORMATS, GENDERS, AGE_BANDS,
   INFLUENCER_STYLES, EXCLUDE_KEYWORDS,
   parseTierCounts, serializeTierCounts, chosenTiers, totalHeadcount,
   allocatedFloor, allocatedCeiling, remainingBudget, canAddOne, affordableCount,
-  derivedTitle, derivedRequirements, derivedUnitFee,
+  derivedTitle, derivedRequirements, derivedUnitFee, contentFormatLabel,
   type TierCounts, type TierKey,
 } from '../../utils/campaignBrief';
 
@@ -195,6 +195,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
     reward_mode: normalizeRewardMode(editing?.reward_mode),
     upload_channel: editing?.upload_channel || CHANNELS[0],
+    // 숏폼(릴스)인가 피드 게시물인가. 인플루언서의 지급 단가가 이 값으로 갈린다.
+    content_format: editing?.content_format || CONTENT_FORMATS[0].value,
     budget_krw: formatNumberWithCommas(digitsOnly(editing?.budget_krw || '')),
     // 지원을 받아 고르는 방식의 인원. 제품 협찬형은 협찬 인원, 공동구매는 모집 인원이고
     // 세는 대상은 둘 다 사람이다 — 예전에는 제품 수(개)를 받았는데, 한 사람에게 제품
@@ -385,6 +387,16 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
 
   // ------------------------------------------------------------------ 작성 상태
   /**
+   * 숏폼 캠페인인가.
+   *
+   * 컨셉 칸의 이름이 여기서 갈린다. 피드 게시물 캠페인에서 "영상 컨셉"을 물으면
+   * 브랜드는 찍지도 않을 영상의 흐름을 적게 된다 — 실제로 받아야 하는 것은 사진에
+   * 담길 장면과 본문의 결이다. 저장하는 칸(video_concept)은 하나로 둔다.
+   */
+  const isShortformFormat = form.content_format !== 'feed';
+  const conceptLabel = isShortformFormat ? '영상 컨셉' : '게시물 컨셉';
+
+  /**
    * 사이드바가 보여 주는 항목별 상태.
    *
    * 필수 항목이 어디에 남았는지 항목 단위로 보이지 않으면, 브랜드는 "다음"을 누른
@@ -407,6 +419,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     campaign: [
       { label: '진행 방식', done: !!form.reward_mode, required: true },
       { label: '업로드 채널', done: !!form.upload_channel, required: true },
+      { label: '콘텐츠 형식', done: !!form.content_format, required: true },
       ...(picksInfluencer
         ? [{ label: '광고 집행 예산', done: budgetKrw >= cheapestFee, required: true }]
         : [{ label: mode.headcountLabel, done: applyHeadcount > 0, required: true }]),
@@ -414,7 +427,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         ? [{ label: '판매 수수료', done: commissionRate > 0 && !badCommission, required: true }]
         : []),
       { label: '희망 업로드 일정', done: !!form.upload_from, required: true },
-      { label: '영상 컨셉', done: !!form.video_concept.trim(), required: true },
+      { label: conceptLabel, done: !!form.video_concept.trim(), required: true },
     ],
     influencer: [
       { label: '성별', done: !!form.influencer_gender, required: true },
@@ -460,7 +473,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (form.upload_from && form.upload_to && form.upload_from > form.upload_to) {
         return '희망 업로드 일정의 시작일이 마감일보다 늦습니다.';
       }
-      if (!form.video_concept.trim()) return '원하는 영상 컨셉을 적어 주세요.';
+      if (!form.content_format) return '콘텐츠 형식을 골라 주세요.';
+      if (!form.video_concept.trim()) return `원하는 ${conceptLabel}을 적어 주세요.`;
       return '';
     }
     if (key === 'influencer') {
@@ -531,7 +545,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         // 모집은 등록 즉시 시작하고, 희망 업로드 시작일까지 받는다.
         start_date: todayInSeoul(),
         end_date: form.upload_from || '',
-        content_format: 'shortform',
+        content_format: form.content_format,
         second_use_fee: 0,
         second_use_note: mode.secondUseNote,
 
@@ -1032,6 +1046,36 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </p>
               </div>
 
+              {/* 콘텐츠 형식. 인플루언서의 지급 단가(릴스 단가 · 피드 단가)가 이
+                  선택으로 갈리므로, 예산을 적기 전에 고르는 자리에 둔다. */}
+              <div>
+                <label className={LABEL}>콘텐츠 형식 *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {CONTENT_FORMATS.map(f => {
+                    const active = form.content_format === f.value;
+                    return (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => patch('content_format', f.value)}
+                        className={`text-left px-4 py-3 rounded-xl border transition-colors ${
+                          active
+                            ? 'bg-slate-900 border-slate-900'
+                            : 'bg-white border-slate-200 hover:border-slate-400'
+                        }`}
+                      >
+                        <span className={`block text-xs font-black ${active ? 'text-white' : 'text-slate-700'}`}>
+                          {f.label}
+                        </span>
+                        <span className={`block text-[11px] font-medium mt-0.5 leading-relaxed break-keep ${active ? 'text-white/60' : 'text-slate-400'}`}>
+                          {f.hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {picksInfluencer ? (
                 <div>
                   <label className={LABEL}>광고 집행 예산 *</label>
@@ -1110,14 +1154,18 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               </div>
 
               <div>
-                <label className={LABEL}>영상 컨셉 *</label>
+                <label className={LABEL}>{conceptLabel} *</label>
                 <textarea
                   value={form.video_concept}
                   onChange={e => patch('video_concept', e.target.value)}
                   rows={4}
                   maxLength={500}
                   className={INPUT}
-                  placeholder="예) 아침 세안 후 바르는 장면으로 시작해, 발림성과 흡수력을 클로즈업으로 보여 주세요."
+                  placeholder={
+                    isShortformFormat
+                      ? '예) 아침 세안 후 바르는 장면으로 시작해, 발림성과 흡수력을 클로즈업으로 보여 주세요.'
+                      : '예) 세면대에 제품을 놓고 찍은 사진 한 장과 텍스처 클로즈업을 함께 올려 주세요.'
+                  }
                 />
                 <p className="text-[11px] text-slate-400 font-medium mt-1 text-right">
                   {form.video_concept.length}/500
@@ -1441,6 +1489,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-white/50">채널</span>
                 <span>{form.upload_channel}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-white/50">형식</span>
+                <span>{contentFormatLabel(form.content_format)}</span>
               </div>
               {form.upload_from && (
                 <div className="flex items-center justify-between">

@@ -1,6 +1,7 @@
 import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { requireAdmin } from './_shared/admin-auth.mts'
+import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused } from './_shared/alimtalk-pause.mts'
 
 /**
  * 알림톡 발송 파이프라인 진단 엔드포인트 — **운영자 전용**
@@ -36,6 +37,13 @@ export default async (req: Request, context: Context) => {
   const diagnostics: Record<string, any> = {
     timestamp: new Date().toISOString(),
     username: username || '(미지정)',
+    // 발송 중지 여부를 맨 앞에 둔다. 중지 기간에는 환경변수도 전화번호도 키도 모두
+    // 정상인데 메시지만 안 나가므로, 이 줄이 없으면 진단 결과를 아무리 봐도
+    // 원인을 찾을 수 없다.
+    paused: alimtalkPaused(),
+    pauseNotice: alimtalkPaused()
+      ? `⏸️ ${ALIMTALK_PAUSE_NOTICE} (ALIMTALK_PAUSED=false 로 재개)`
+      : '발송 중 (중지 아님)',
     steps: [],
   }
 

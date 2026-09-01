@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatCountKo, formatNumberWithCommas } from '../../utils/formatters';
+import { formatCountKo, formatNumberWithCommas, parseWonText } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 
 /**
@@ -104,6 +104,35 @@ export const metricsFrom = (raw: any): CandidateMetrics => {
     postPrice: snap.postPrice || raw?.postPrice || '',
     shortPrice: snap.shortPrice || raw?.shortPrice || '',
   };
+};
+
+/**
+ * 캠페인 형식이 숏폼 계열인지 피드 계열인지. 판정 기준은 서버가 지급 단가를 채울 때
+ * 쓰는 것과 같다(campaign-listup.mts 의 registeredPayoutFee). 같은 기준으로 갈라야
+ * 화면에서 강조된 단가와 실제로 제안에 들어가는 금액이 어긋나지 않는다.
+ */
+export const formatKindOf = (contentFormat?: string | null): 'short' | 'post' | '' =>
+  /short|reel|릴스|숏|영상|video/i.test(String(contentFormat || ''))
+    ? 'short'
+    : /post|feed|피드|게시물|이미지|image/i.test(String(contentFormat || ''))
+      ? 'post'
+      : '';
+
+/**
+ * 이 캠페인 형식에 해당하는 등록 단가를 원 단위 숫자로. 후보를 단가순으로 세우는
+ * 쪽과 카드가 같은 값을 봐야 "싼 순서"가 카드에 적힌 금액과 맞는다. 형식을 모르는
+ * 캠페인에서는 숏폼 단가를 먼저 보고, 없으면 게시물 단가를 쓴다.
+ */
+export const registeredPriceOf = (raw: any, contentFormat?: string | null): number => {
+  const m = metricsFrom(raw);
+  const kind = formatKindOf(contentFormat);
+  const pick =
+    kind === 'post'
+      ? m.postPrice || ''
+      : kind === 'short'
+        ? m.shortPrice || ''
+        : m.shortPrice || m.postPrice || '';
+  return parseWonText(pick);
 };
 
 /** 정렬에 쓰는 값. 목록을 정렬하는 쪽과 카드가 같은 규칙으로 숫자를 꺼내야 한다. */
@@ -233,6 +262,17 @@ interface InfluencerCandidateCardProps {
    *           보는 자리에서 쓴다. 피드 사진 영역도 함께 접힌다.
    */
   mediaMode?: 'mixed' | 'reels';
+  /**
+   * 이 카드를 보고 있는 캠페인의 콘텐츠 형식('shortform' · 'feed').
+   *
+   * 인플루언서는 피드 단가와 숏폼 단가를 따로 등록한다. 그 둘을 나란히 적어 두면
+   * 어느 쪽이 이 캠페인의 값인지는 보는 사람이 매번 머리로 맞춰야 하고, 실제로
+   * 명단에 올릴 때 다른 형식의 단가를 그대로 옮겨 적는 일이 생겼다. 형식을 넘겨
+   * 주면 해당하는 줄을 위로 올려 강조하고, 다른 형식은 참고용으로 내려 둔다.
+   * 캠페인 맥락이 없는 화면(인플루언서 검색 등)은 넘기지 않으면 예전대로 나란히
+   * 보인다.
+   */
+  contentFormat?: string;
 }
 
 const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
@@ -243,6 +283,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   note,
   defaultExpanded,
   mediaMode = 'mixed',
+  contentFormat,
 }) => {
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   const m = metricsFrom(data);
@@ -271,7 +312,7 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
    * 합쳐 만든 문장이므로 같이 적지 않는다(같은 값이 두 번 보인다). 둘 다 없을 때만
    * 광고비 문장을 '/' 로 갈라 줄별로 적는다.
    */
-  const priceLines: Array<{ label: string; value: string }> =
+  const rawPriceLines: Array<{ label: string; value: string }> =
     m.postPrice || m.shortPrice
       ? ([
           m.postPrice ? { label: '게시물', value: m.postPrice } : null,
@@ -288,6 +329,31 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               ? { label: matched[1], value: matched[2] }
               : { label: '광고', value: part };
           });
+
+  /**
+   * 이 캠페인의 형식에 해당하는 단가 줄을 앞으로.
+   *
+   * 판정 기준은 서버가 지급 단가를 채울 때 쓰는 것과 같다
+   * (registeredPayoutFee — 숏폼 계열이면 숏폼 단가, 피드 계열이면 게시물 단가).
+   * 같은 기준으로 갈라야 화면에서 강조된 줄과 실제로 제안에 들어가는 금액이 어긋나지
+   * 않는다.
+   */
+  const formatKind = formatKindOf(contentFormat);
+  const matchesFormat = (label: string) =>
+    formatKind === 'short'
+      ? ['숏폼', '릴스', '영상'].includes(label)
+      : formatKind === 'post'
+        ? ['게시물', '피드'].includes(label)
+        : false;
+  const priceLines = (
+    formatKind
+      ? [...rawPriceLines].sort(
+          (a, b) => Number(matchesFormat(b.label)) - Number(matchesFormat(a.label)),
+        )
+      : rawPriceLines
+  ).map(line => ({ ...line, match: formatKind ? matchesFormat(line.label) : false }));
+  /** 캠페인 형식은 아는데 그 형식의 단가가 등록되지 않은 사람. 담당자가 물어봐야 한다. */
+  const formatPriceMissing = Boolean(formatKind) && priceLines.length > 0 && !priceLines[0].match;
 
   /**
    * 카드 맨 위 한 줄은 인스타 아이디다.
@@ -480,11 +546,27 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               {priceLines.map((p, i) => (
                 <div key={`${p.label}-${i}`} className="flex items-baseline gap-1.5">
                   <span className="shrink-0 text-[10px] text-slate-400 font-black">{p.label}</span>
-                  <span className="text-[15px] md:text-[17px] text-blue-600 font-black break-keep leading-snug">
+                  <span
+                    className={`font-black break-keep leading-snug ${
+                      formatKind && !p.match
+                        ? 'text-[13px] text-slate-400'
+                        : 'text-[15px] md:text-[17px] text-blue-600'
+                    }`}
+                  >
                     {p.value}
                   </span>
+                  {p.match && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[9px] font-black">
+                      이 캠페인
+                    </span>
+                  )}
                 </div>
               ))}
+              {formatPriceMissing && (
+                <p className="text-[10px] font-bold text-amber-600 leading-relaxed break-keep">
+                  이 캠페인 형식({formatKind === 'short' ? '숏폼' : '피드 게시물'})의 단가는 등록되어 있지 않습니다. 금액을 직접 확인해 주세요.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-[15px] md:text-[17px] text-slate-300 font-black">미기재</p>

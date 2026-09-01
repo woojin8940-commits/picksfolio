@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
-import { isManagerListupMode, rewardModeOf } from '../../utils/campaignBrief';
+import { isManagerListupMode, rewardModeOf, contentFormatLabel } from '../../utils/campaignBrief';
 import ListupWorkspace from '../collab/ListupWorkspace';
 
 /**
@@ -94,7 +94,7 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
               <span className="text-[11px] text-slate-500 font-bold">채널 {selected.upload_channel}</span>
             )}
             {selected.content_format && (
-              <span className="text-[11px] text-slate-500 font-bold">형식 {selected.content_format}</span>
+              <span className="text-[11px] text-slate-500 font-bold">형식 {contentFormatLabel(selected.content_format)}</span>
             )}
             {selected.upload_from && (
               <span className="text-[11px] text-slate-500 font-bold">

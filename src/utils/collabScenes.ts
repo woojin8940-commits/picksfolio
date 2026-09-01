@@ -2,8 +2,9 @@
  * 협업 제출물의 "위치"를 다루는 공통 규칙.
  *
  * 피드백이 협업 전체에 붙으면 "두 번째 장면 자막이 어색하다"는 말이 어디에 대한
- * 것인지 알 수 없다. 그래서 피드백에는 위치(anchor)를 함께 저장한다. 위치는 두
- * 종류뿐이다 — 대본의 장면 번호(`scene:2`)와 영상의 시점(`t:00:12`). 이 파일은 그
+ * 것인지 알 수 없다. 그래서 피드백에는 위치(anchor)를 함께 저장한다. 위치는 세
+ * 종류뿐이다 — 대본의 장면 번호(`scene:2`), 영상의 시점(`t:00:12`), 그리고 영상과
+ * 함께 올리는 인스타 본문 캡션(`caption`). 이 파일은 그
  * 문자열을 만들고 읽고 사람이 읽는 말로 바꾸는 곳이다. 각 화면이 제 나름대로
  * 문자열을 조립하면 브랜드가 남긴 위치를 인플루언서 화면이 못 읽는 일이 생긴다.
  */
@@ -52,13 +53,27 @@ export const sceneAnchor = (index: number) => `scene:${index + 1}`;
 /** `MM:SS` 또는 `HH:MM:SS` 를 그대로 담는다. 초 단위 정규화는 하지 않는다. */
 export const timeAnchor = (timecode: string) => `t:${timecode}`;
 
+/**
+ * 인스타 본문 캡션에 붙는 위치.
+ *
+ * 영상 단계에는 검토받는 것이 두 개다 — 영상과 그 아래 들어갈 본문이다. 캡션에 대한
+ * 의견("첫 줄에 브랜드명을 넣어 주세요")이 영상 전체 피드백과 같은 자리에 쌓이면,
+ * 인플루언서는 그 말이 영상 편집에 대한 것인지 글에 대한 것인지 다시 물어야 한다.
+ */
+export const CAPTION_ANCHOR = 'caption';
+
+/** 인스타그램 본문 길이 한도. 넘으면 붙여넣을 때 뒤가 잘린다. */
+export const CAPTION_MAX_LENGTH = 2200;
+
 export type ParsedAnchor =
   | { kind: 'scene'; sceneIndex: number; label: string }
   | { kind: 'time'; seconds: number; label: string }
+  | { kind: 'caption'; label: string }
   | { kind: 'whole'; label: string };
 
 export const parseAnchor = (anchor?: string | null): ParsedAnchor => {
   const raw = String(anchor || '').trim();
+  if (raw === CAPTION_ANCHOR) return { kind: 'caption', label: '본문 캡션' };
   const scene = /^scene:(\d+)$/.exec(raw);
   if (scene) {
     const n = Number(scene[1]);
@@ -98,7 +113,9 @@ export const isValidTimecode = (timecode: string) =>
 export const compareByAnchor = (a: { anchor?: string; createdAt?: string }, b: { anchor?: string; createdAt?: string }) => {
   const pa = parseAnchor(a.anchor);
   const pb = parseAnchor(b.anchor);
-  const rank = (p: ParsedAnchor) => (p.kind === 'whole' ? 2 : p.kind === 'scene' ? 0 : 1);
+  // 캡션은 영상 다음에 읽는 것이므로 시점 피드백 뒤, 전체 피드백 앞에 둔다.
+  const rank = (p: ParsedAnchor) =>
+    p.kind === 'whole' ? 3 : p.kind === 'scene' ? 0 : p.kind === 'time' ? 1 : 2;
   if (rank(pa) !== rank(pb)) return rank(pa) - rank(pb);
   if (pa.kind === 'scene' && pb.kind === 'scene') {
     if (pa.sceneIndex !== pb.sceneIndex) return pa.sceneIndex - pb.sceneIndex;

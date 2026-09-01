@@ -1,6 +1,7 @@
 import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { SolapiMessageService } from 'solapi'
+import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused, alimtalkPausedResponse } from './_shared/alimtalk-pause.mts'
 
 /**
  * 솔라피(Solapi) SMS를 통한 메시지 발송
@@ -55,6 +56,13 @@ export default async (req: Request, context: Context) => {
 
   if (req.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  // 친구톡도 같은 카카오 채널(발신 프로필)로 나간다. 알림톡 심사 기간에 이 채널로
+  // 계속 발송하면 심사와 무관한 문구까지 같은 채널의 발송 이력에 쌓인다.
+  if (alimtalkPaused()) {
+    console.log('[send-kakao-friendtalk] ⏸️ 발송 중지 중 —', ALIMTALK_PAUSE_NOTICE)
+    return alimtalkPausedResponse('friendtalk')
   }
 
   const apiKey = process.env.SOLAPI_API_KEY || ''

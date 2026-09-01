@@ -50,6 +50,13 @@ const formatRemaining = (ms: number) => {
  * 카드에 찍는 한 줄 소개. 담당자가 캠페인에 맞춰 적어 둔 줄이 우선이고, 비워
  * 뒀으면 채널에 등록된 카테고리로 되돌아간다.
  */
+/**
+ * 이름 아래 한 줄.
+ *
+ * 담당자가 직접 적던 "한 줄 소개" 입력칸은 없앴다 — 인플루언서가 등록해 둔 카테고리를
+ * 사람이 다시 옮겨 적는 칸이었고, 옮기는 과정에서 등록서와 다른 말이 카드에 남았다.
+ * 예전에 적어 둔 값이 있는 후보는 그것을 그대로 쓰고, 나머지는 등록 카테고리를 쓴다.
+ */
 const profileLine = (c: any) => String(c?.profileLine || c?.snapshot?.categories || '').trim();
 
 const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, onNotify, onConfirmed }) => {
@@ -258,11 +265,6 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         <span className="text-sm font-black text-slate-900 truncate">
                           {snap.instagramHandle ? `@${snap.instagramHandle}` : snap.name || '비공개'}
                         </span>
-                        {c.badge && (
-                          <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-black">
-                            {c.badge}
-                          </span>
-                        )}
                       </div>
                       {(snap.instagramHandle ? snap.name : '') && (
                         <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">

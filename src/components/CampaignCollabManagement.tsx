@@ -11,7 +11,7 @@ import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
-  parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor,
+  parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor, contentFormatLabel,
 } from '../utils/campaignBrief';
 import Toast from './Toast';
 
@@ -813,6 +813,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     {selectedCampaign.max_applicants > 0 ? `${selectedCampaign.max_applicants}명` : '담당자 조율'}
                   </p>
                 </div>
+                {/* 콘텐츠 형식. 이 값이 인플루언서에게 어느 단가(릴스 · 피드)로
+                    제안이 나가는지를 정하므로, 등록한 브랜드도 확인할 수 있어야 한다. */}
+                {selectedCampaign.content_format && (
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-[11px] text-slate-400 font-black uppercase">콘텐츠 형식</p>
+                    <p className="text-sm font-black text-slate-900">
+                      {contentFormatLabel(selectedCampaign.content_format)}
+                    </p>
+                  </div>
+                )}
                 {selectedCampaign.upload_channel && (
                   <div className="bg-slate-50 rounded-xl p-3">
                     <p className="text-[11px] text-slate-400 font-black uppercase">업로드 채널</p>
@@ -1148,6 +1158,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             username: app.applicant_username,
                             instagramUrl: app.insights?.instagramUrl || app.instagram_url || '',
                           }}
+                          /* 이 캠페인이 숏폼인지 피드인지에 따라 지원자가 등록해 둔
+                             단가 중 해당하는 쪽을 앞세운다. */
+                          contentFormat={selectedCampaign?.content_format}
                           /* 지원자 카드는 릴스·숏폼만 세 편 싣는다. 지원은 이미
                              "이 캠페인을 하겠다"는 뜻이라, 브랜드가 여기서 판단하는
                              것은 계정 톤이 아니라 이 사람이 만드는 영상이다. 피드

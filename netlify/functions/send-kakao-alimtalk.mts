@@ -1,6 +1,7 @@
 import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { SolapiMessageService } from 'solapi'
+import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused, alimtalkPausedResponse } from './_shared/alimtalk-pause.mts'
 
 /**
  * 솔라피(Solapi)를 통한 카카오 알림톡 / SMS 발송
@@ -51,6 +52,14 @@ export default async (req: Request, context: Context) => {
 
   if (req.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  // 템플릿 재심사 기간에는 여기서 멈춘다. 알림톡을 부르는 자리가 여섯 곳(제안 접수 ·
+  // 수락/거절 · 타임라인 대기열 · 라이브 알림 · 협업 단계 알림)이라, 부르는 쪽마다
+  // 조건을 넣으면 한 곳을 빠뜨리는 순간 심사 중인 템플릿으로 발송이 나간다.
+  if (alimtalkPaused()) {
+    console.log('[send-kakao-alimtalk] ⏸️ 발송 중지 중 —', ALIMTALK_PAUSE_NOTICE)
+    return alimtalkPausedResponse('alimtalk')
   }
 
   const apiKey = process.env.SOLAPI_API_KEY || ''

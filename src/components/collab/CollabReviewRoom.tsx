@@ -10,6 +10,8 @@ import {
   secondsToTimecode,
   timecodeToSeconds,
   isPlayableVideo,
+  CAPTION_ANCHOR,
+  CAPTION_MAX_LENGTH,
 } from '../../utils/collabScenes';
 
 /**
@@ -24,8 +26,12 @@ import {
  *
  * 의견을 제출물 옆에 붙이는 것이 이 화면의 전부다. 예전에는 대화창에 "두 번째 장면
  * 자막이 좀…"이라고 적었고, 며칠 뒤에는 그게 어느 버전의 몇 번 장면이었는지 아무도
- * 확정하지 못했다. 이제 의견은 `scene:2` / `t:00:12` 이라는 위치를 갖고, 그 위치
- * 바로 아래에 놓인다.
+ * 확정하지 못했다. 이제 의견은 `scene:2` / `t:00:12` / `caption` 이라는 위치를 갖고,
+ * 그 위치 바로 아래에 놓인다.
+ *
+ * 영상 검수에는 두 가지가 함께 올라온다 — 영상과 그 아래 들어갈 인스타 본문 캡션이다.
+ * 캡션이 이 화면에 안 보이면 브랜드는 영상만 보고 검토를 마치고, 본문은 아무도 읽지
+ * 않은 채로 게시된다. 그래서 영상 아래에 캡션 카드를 함께 둔다.
  */
 
 interface CollabReviewRoomProps {
@@ -142,6 +148,9 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
       current?.payload?.link ||
       '',
   );
+
+  /** 영상과 함께 제출된 인스타 본문. 없으면 빈 문자열이고, 화면이 비었다고 알려 준다. */
+  const captionText = String(current?.payload?.caption || '');
 
   const feedbackFor = (predicate: (parsed: ReturnType<typeof parseAnchor>) => boolean) =>
     feedbacks.filter(f => predicate(parseAnchor(f.anchor)));
@@ -659,6 +668,73 @@ const CollabReviewRoom: React.FC<CollabReviewRoomProps> = ({ collabId, target, t
                   </div>
                 </div>
               )}
+
+              {/* 인스타 본문 캡션 — 영상과 함께 검토받는 두 번째 항목 */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[9px] text-slate-400 font-black uppercase">인스타 본문 캡션</p>
+                  <div className="flex items-center gap-2">
+                    {captionText && (
+                      <span
+                        className={`text-[10px] font-bold ${
+                          captionText.length > CAPTION_MAX_LENGTH ? 'text-red-500' : 'text-slate-400'
+                        }`}
+                      >
+                        {captionText.length.toLocaleString()}자
+                      </span>
+                    )}
+                    {canComment && captionText && (
+                      <button
+                        onClick={() => setOpenComposer(openComposer === 'caption' ? '' : 'caption')}
+                        className="px-2.5 py-1 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700"
+                      >
+                        {openComposer === 'caption' ? '접기' : '본문에 의견'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-100 p-3.5">
+                  {captionText ? (
+                    <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                      {captionText}
+                    </p>
+                  ) : (
+                    <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5">
+                      <p className="text-[11px] text-amber-700 font-bold mb-0.5">
+                        본문 캡션이 비어 있습니다
+                      </p>
+                      <p className="text-[11px] text-amber-600 font-medium">
+                        영상 아래 들어갈 본문이 아직 안 올라왔습니다. 검토를 끝내기 전에 본문도 함께
+                        올려 달라고 남겨 주세요.
+                      </p>
+                    </div>
+                  )}
+
+                  {captionText.length > CAPTION_MAX_LENGTH && (
+                    <p className="text-[11px] text-red-500 font-bold mt-2">
+                      인스타그램 본문 한도({CAPTION_MAX_LENGTH.toLocaleString()}자)를 넘었습니다. 붙여
+                      넣을 때 뒤가 잘립니다.
+                    </p>
+                  )}
+
+                  {openComposer === 'caption' && canComment && (
+                    <Composer
+                      anchorKey="caption"
+                      anchor={CAPTION_ANCHOR}
+                      placeholder="본문에서 바꾸고 싶은 점을 적어 주세요. (예: 첫 줄에 브랜드명을 넣어 주세요)"
+                    />
+                  )}
+                </div>
+
+                {feedbackFor(p => p.kind === 'caption').length > 0 && (
+                  <div className="mt-2.5 space-y-2">
+                    {feedbackFor(p => p.kind === 'caption').map(f => (
+                      <FeedbackCard key={f.id} f={f} />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

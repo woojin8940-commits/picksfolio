@@ -85,8 +85,6 @@ export type ListupQuote = {
   fee: number;
   secondUseFee: number;
   guaranteedViews: number;
-  badge: string;
-  profileLine: string;
 };
 
 export type ListupPayout = { fee: number; secondUseFee: number };
@@ -133,8 +131,15 @@ const singleAmount = (raw: unknown): number => {
  * 그래서 담당자가 비워 두면 등록 단가를 기본값으로 쓰고, 담당자는 브랜드에게 제시할
  * 금액만 적는다.
  *
- * 게시물 단가와 숏폼 단가 중 어느 쪽을 쓸지는 캠페인의 콘텐츠 형식이 정한다. 형식을
- * 알 수 없으면 숏폼을 먼저 본다 — 지금 등록되는 캠페인은 사실상 전부 숏폼이다.
+ * 게시물 단가와 숏폼 단가 중 어느 쪽을 쓸지는 캠페인의 콘텐츠 형식이 정한다. 브랜드가
+ * 등록 화면에서 숏폼(릴스)과 피드 게시물 중 하나를 고르고(content_format), 그 값이
+ * 여기까지 온다 — 예전에는 등록 화면이 형식을 묻지 않고 늘 'shortform' 을 보내서,
+ * 피드 캠페인에도 릴스 단가가 들어갔다.
+ *
+ * 해당하는 단가가 등록되어 있지 않으면 다른 쪽 값이라도 채운다. 0 을 채우면 담당자가
+ * 그 자리를 알아채지 못한 채 "미입력"으로 제안이 나가는 편이 더 잦았기 때문이다. 대신
+ * 담당자 화면에서 그 사실을 노란 글씨로 알린다("이 캠페인 형식의 단가는 등록되어
+ * 있지 않습니다") — 채워진 숫자가 다른 형식에서 왔다는 것을 보는 사람이 알아야 한다.
  */
 export function registeredPayoutFee(snapshot: any, contentFormat?: unknown): number {
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
@@ -176,8 +181,6 @@ export function normalizeQuote(raw: any): ListupQuote {
     fee: money(q.fee),
     secondUseFee: money(q.secondUseFee),
     guaranteedViews: money(q.guaranteedViews),
-    badge: String(q.badge || "").trim().slice(0, 20),
-    profileLine: String(q.profileLine || "").trim().slice(0, 60),
   };
 }
 
@@ -464,6 +467,9 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
     guaranteedViews,
     // 조회수당 단가. 나눗셈을 화면마다 다시 하면 반올림이 어긋나므로 여기서 한 번만 한다.
     cpv: guaranteedViews > 0 && quotedFee > 0 ? Math.round(quotedFee / guaranteedViews) : 0,
+    // 배지와 한 줄 소개는 더 이상 담당자가 적지 않는다(입력칸을 없앴다). 예전에 적힌
+    // 값이 있는 행은 그대로 읽어 주고, 새 행은 비어 있다 — 브랜드 카드는 비면 등록
+    // 정보(스냅샷의 카테고리)를 쓴다.
     badge: row.badge || "",
     // 카드 이름 아래 한 줄. 비어 있으면 화면이 스냅샷의 카테고리로 되돌아간다.
     profileLine: row.profile_line || "",

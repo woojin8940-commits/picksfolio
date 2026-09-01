@@ -435,13 +435,12 @@ export default async (req: Request) => {
           INSERT INTO campaign_listups (
             id, campaign_id, influencer_username, source, snapshot, snapshot_at,
             manager_note, listed_by,
-            quoted_fee, quoted_second_use_fee, guaranteed_views, badge, profile_line,
+            quoted_fee, quoted_second_use_fee, guaranteed_views,
             offer
           ) VALUES (
             ${newId("lst")}, ${campaignId}, ${username}, ${source},
             ${JSON.stringify(snapshot)}, NOW(), ${note}, ${manager.managerUsername},
-            ${quote.fee}, ${quote.secondUseFee}, ${guaranteedViews}, ${quote.badge},
-            ${quote.profileLine},
+            ${quote.fee}, ${quote.secondUseFee}, ${guaranteedViews},
             ${JSON.stringify(offerDraft)}
           )
           ON CONFLICT (campaign_id, influencer_username) DO NOTHING
@@ -607,8 +606,6 @@ export default async (req: Request) => {
           SET quoted_fee = ${quote.fee},
               quoted_second_use_fee = ${quote.secondUseFee},
               guaranteed_views = ${guaranteedViews},
-              badge = ${quote.badge},
-              profile_line = ${quote.profileLine},
               updated_at = NOW()
           WHERE id = ${id}
         `;
