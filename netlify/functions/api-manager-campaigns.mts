@@ -37,6 +37,12 @@ const shape = (row: any) => ({
   rewardType: row.reward_type || "",
   secondUseFee: Number(row.second_use_fee || 0),
   uploadChannel: row.upload_channel || "",
+  // 브랜드가 올려 둔 콘텐츠 가이드. 담당자도 브랜드와 같은 진행 보드를 보는데, 그
+  // 보드의 가이드 줄이 이 값을 읽는다 — 담당자 응답에 없으면 브랜드가 이미 올린
+  // 파일이 담당자 화면에서는 "올리기 전"으로 보인다.
+  guidelineUrl: row.guideline_url || "",
+  guidelineNote: row.guideline_note || "",
+  guidelineFiles: row.guideline_files ?? [],
   contentFormat: row.content_format || "",
   uploadFrom: row.upload_from || "",
   uploadTo: row.upload_to || "",

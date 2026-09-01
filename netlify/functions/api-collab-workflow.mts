@@ -263,11 +263,16 @@ const settlementProposalId = (collab: any) =>
  * 정산 단계 한 덩어리. 역할에 따라 담는 내용이 다르다.
  *
  * 신분증 사본 URL 과 계좌번호는 개인정보다. 본인(인플루언서)과 실제로 돈을 보내는
- * 담당자만 본다. 브랜드에게는 "제출했는가"와 지급일까지만 내려보낸다 — 브랜드가
- * 볼 이유가 없는 값을 응답에 담아 두면, 화면에서 가리는 것과 무관하게 개발자 도구로
- * 열린다.
+ * 담당자만 본다. 브랜드에게는 아무것도 내려보내지 않는다 — 브랜드는 인플루언서에게
+ * 개별 송금을 하지 않고(픽스폴리오에 회차마다 한 번 보낸다) 서류를 받고 지급일을 잡고
+ * 입금하는 것은 담당자의 일이다. 한동안 "제출했는가"와 지급일까지는 담아 보냈지만,
+ * 그것은 브랜드가 손댈 수 없는 남의 일정을 사람 수만큼 확인하게 만들었다. 볼 이유가
+ * 없는 값을 응답에 담아 두면, 화면에서 가리는 것과 무관하게 개발자 도구로 열린다.
  */
 function shapeSettlementInfo(row: any, role: CollabRole, fee: number) {
+  // 브랜드 응답에는 정산 덩어리가 아예 없다. 화면도 이 값이 비면 정산 칸을 그리지
+  // 않는다(CampaignProcessBoard 의 shownStates).
+  if (role === "brand") return null;
   const sensitive = role === "influencer" || role === "manager";
   const submitted = Boolean(row?.submitted_at);
   return {
@@ -527,12 +532,17 @@ export default async (req: Request, context: Context) => {
        * 판정하므로(collabNextAction), 상세를 열지 않아도 "정산 서류 제출 필요"가
        * 카드에 뜬다. 개인정보(신분증 URL · 계좌번호)는 목록에 절대 담지 않는다 —
        * 목록 응답은 화면이 어디서든 캐시하고, 여기 필요한 것은 제출 여부뿐이다.
+       *
+       * 브랜드 행에는 이 덩어리를 싣지 않는다(showSettlement). 사람별 지급 상태와
+       * 지급일은 브랜드가 손댈 수 없는 담당자의 일이고, 브랜드는 회차로 묶인 일괄
+       * 정산만 확인한다.
        */
       const settlementRows = (await db.sql`
         SELECT collab_id, submitted_at, reviewed_at, payout_date, paid_at
         FROM collab_settlement_info WHERE collab_id = ANY(${ids})
       `) as any[];
       const settlementMap = new Map(settlementRows.map((r) => [r.collab_id, r]));
+      const showSettlement = role !== "brand";
 
       /**
        * 캠페인 표지. 협업 행에는 제목과 브랜드 이름만 들어 있어서, 목록을 카드로
@@ -712,15 +722,19 @@ export default async (req: Request, context: Context) => {
           fee: Number(termMap.get(row.id)?.fee || 0),
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
           uploadConfirmedAt: row.upload_confirmed_at || null,
-          settlement: (() => {
-            const info = settlementMap.get(row.id);
-            return {
-              submitted: Boolean(info?.submitted_at),
-              reviewedAt: info?.reviewed_at || null,
-              payoutDate: info?.payout_date ? String(info.payout_date).split("T")[0] : "",
-              paidAt: info?.paid_at || null,
-            };
-          })(),
+          ...(showSettlement
+            ? {
+                settlement: (() => {
+                  const info = settlementMap.get(row.id);
+                  return {
+                    submitted: Boolean(info?.submitted_at),
+                    reviewedAt: info?.reviewed_at || null,
+                    payoutDate: info?.payout_date ? String(info.payout_date).split("T")[0] : "",
+                    paidAt: info?.paid_at || null,
+                  };
+                })(),
+              }
+            : {}),
           confirmedAt: row.confirmed_at,
           scheduleStart: row.schedule_start || "",
           scheduleEnd: row.schedule_end || "",

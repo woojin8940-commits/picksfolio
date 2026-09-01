@@ -293,9 +293,13 @@ export const collabStepTurns = (
   // 닫아 버리면 서류를 내고 돈을 받는 마지막 왕복이 화면에서 사라진다.
   const closedFor = (step: CollabStepKey) =>
     cancelled || (status === 'completed' && step !== 'settlement');
+  // 정산은 브랜드의 칸이 아니다. 브랜드는 픽스폴리오에 회차마다 한 번 보내고, 서류를
+  // 받고 지급일을 잡고 입금하는 것은 담당자가 한다. 브랜드 화면에 이 칸이 열리면
+  // 손댈 수 없는 남의 일정이 "기다리는 중"으로 남는다.
+  const hiddenFor = (step: CollabStepKey) => role === 'brand' && step === 'settlement';
   const out = {} as Record<CollabStepKey, CollabStepTurn | null>;
   for (const step of COLLAB_STEP_ORDER) {
-    const pending = closedFor(step) ? null : pendingOf(input, step);
+    const pending = closedFor(step) || hiddenFor(step) ? null : pendingOf(input, step);
     out[step] = pending
       ? {
           ...pending,
