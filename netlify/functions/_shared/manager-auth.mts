@@ -65,29 +65,33 @@ export async function isAssignedManager(username: string): Promise<boolean> {
 }
 
 /**
- * 담당자 권한이 필요한 요청에 쓴다. 세 인증 경로를 차례로 시도한다.
- * 실패 응답은 마지막으로 시도한 경로의 것이 아니라 담당자 전용 메시지로 통일한다 —
- * 호출자는 "관리자 로그인이 필요하다"는 사실만 알면 되고, 어떤 인증 체계를 쓰는지는
- * 알 필요가 없다.
+ * 담당자 권한이 필요한 요청에 쓴다. 세 인증 경로를 차례로 시도하고, 실패 응답은
+ * 마지막으로 시도한 경로의 것이 아니라 담당자 전용 메시지로 통일한다 — 호출자는
+ * "관리자 로그인이 필요하다"는 사실만 알면 되고, 어떤 인증 체계를 쓰는지는 알
+ * 필요가 없다.
+ *
+ * 순서를 resolveIdentities 에 맡긴다. 예전에는 여기서 운영 콘솔(Netlify Identity)을
+ * **먼저** 봤는데, 그 인증은 `nf_jwt` 쿠키로도 성립한다. 그래서 운영 콘솔에 한 번
+ * 로그인한 브라우저에서는 어떤 서비스 계정으로 로그인하든 담당자 아이디가 운영자
+ * 이메일 앞부분으로 바뀌었다. 권한 판정은 통과하니 화면은 열리는데, 그 아이디로
+ * "내 담당"을 조회하면 campaigns.manager_username 과 아무것도 맞지 않아 목록이
+ * 통째로 빈다 — 배정된 담당자가 "담당되었는데 캠페인이 안 보인다"고 하던 것이
+ * 이것이다. 탭 배지는 화면이 자기 아이디로 세므로 숫자만 남고 목록은 비어,
+ * 증상이 데이터 문제처럼 보였다.
+ *
+ * 그래서 서비스 계정을 먼저 본다. 배정된 담당자는 서비스 계정으로 로그인하므로 그
+ * 사람의 아이디가 자원을 찾는 기준과 같아야 한다. 운영 콘솔 경로는 서비스 계정이
+ * 담당자가 아닐 때만 쓴다(운영자가 담당자 화면을 대신 열어 보는 경우).
  */
 export async function requireManager(req: Request): Promise<ManagerAuth> {
-  const identity = await requireAdmin(req);
-  if (identity.ok) {
-    const email = (identity.user as any)?.email || "";
-    return { ok: true, managerUsername: usernameFromEmail(email), via: "identity", isAdmin: true };
-  }
-
-  const supabase = await requireSignedInUser(req);
-  if (supabase.ok) {
-    if (supabase.isAdmin) {
-      return { ok: true, managerUsername: supabase.username, via: "supabase", isAdmin: true };
-    }
-    if (await isAssignedManager(supabase.username)) {
-      return { ok: true, managerUsername: supabase.username, via: "assigned", isAdmin: false };
-    }
-  }
-
-  return { ok: false, response: forbidden() };
+  const { manager } = await resolveIdentities(req);
+  if (!manager) return { ok: false, response: forbidden() };
+  return {
+    ok: true,
+    managerUsername: manager.username,
+    via: manager.via,
+    isAdmin: manager.isAdmin,
+  };
 }
 
 /**
