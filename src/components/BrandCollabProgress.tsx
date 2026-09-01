@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService, authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatPhone, formatCountKo } from '../utils/formatters';
+import BrandContactCard from './collab/BrandContactCard';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
-import type { Settlement } from '../types';
 
 /**
- * 브랜드가 보는 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
+ * 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
  *
  * 칸(열) 하나가 한 단계이고, 그 칸에 지금 서 있는 인플루언서가 카드로 들어간다.
  * 가로로 늘어놓으면 "어느 단계에 몇 명이 몰려 있는지"가 스크롤 없이 한눈에 들어오고,
@@ -19,7 +19,7 @@ import type { Settlement } from '../types';
  * 확인이므로, 손댈 카드와 같은 무게로 그리지 않고 아래쪽 완료 줄로 내려 둔다. 아직
  * 오지 않은 칸에는 여전히 아무것도 적지 않는다 — 그건 확인할 것이 없는 일이다.
  *
- * 칸은 다섯이다 — 제품 배송 · 기획안 · 영상 초안 · 업로드 · 정산. 콘텐츠 가이드는
+ * 칸은 다섯이다 — 제품 배송 · 기획안 · 영상 초안 · 업로드 · 진행 완료. 콘텐츠 가이드는
  * 칸이 아니다. 가이드는 사람마다 진행되는 일이 아니라 캠페인에 한 번 올려 두는
  * 파일이고, "인플루언서가 가이드를 확인했는지"를 단계로 세면 아무도 누르지 않는 확인
  * 버튼 때문에 모두가 첫 칸에 멈춰 있는 것처럼 보였다. 그래서 가이드는 보드 위쪽의
@@ -33,6 +33,13 @@ import type { Settlement } from '../types';
  * 안에서 따로 꾸민 프로필을 쓰면, 인스타만 연동하고 페이지를 안 만든 사람은 회색
  * 동그라미로 남고 브랜드가 리스트업에서 보고 고른 그 계정과도 달라 보인다.
  *
+ * 브랜드와 담당자가 같은 보드를 본다(viewer). 담당자용 진행 화면을 따로 만들지 않는
+ * 이유는, 둘이 묻는 것이 같은 질문이기 때문이다 — "지금 어느 단계에 누가 서 있나".
+ * 화면이 둘이면 같은 협업을 서로 다른 모양으로 보게 되고, 브랜드가 "저기 멈춰 있다"고
+ * 말하는 자리를 담당자가 자기 화면에서 찾지 못한다. 다른 것은 두 가지뿐이다 — 담당자
+ * 화면 맨 위에는 브랜드 담당자의 이름과 연락처가 붙고(정산을 받아야 하니 카톡·유선으로
+ * 연락할 상대다), 마지막 칸의 사람별 지급 상태와 금액은 담당자에게만 남는다.
+ *
  * 카드를 누르면 그 사람의 진행사항이 그 단계가 펼쳐진 채로 열리고
  * (CampaignProcessBoard), 기획안·영상 밑에 바로 피드백을 적는다. 조건 · 마감 · 정산처럼
  * 사람 사이를 조율하는 일은 여전히 담당자가 맡는다. 다만 "이 기획안의 이 부분을 고쳐
@@ -41,8 +48,18 @@ import type { Settlement } from '../types';
  */
 
 interface BrandCollabProgressProps {
-  /** 특정 캠페인의 협업만 볼 때. 비우면 이 브랜드의 전체 협업. */
+  /**
+   * 이 보드를 누가 보는가.
+   *
+   * 협업 목록·상세를 어느 역할로 읽을지와, 마지막 칸에 지급 정보를 그릴지가 이 값으로
+   * 갈린다. 서버도 같은 값으로 응답을 좁힌다 — 브랜드 응답에는 지급 기록이 아예
+   * 담기지 않는다.
+   */
+  viewer?: 'brand' | 'manager';
+  /** 특정 캠페인의 협업만 볼 때. 비우면 이 계정(담당자면 담당 전체)의 협업. */
   campaignId?: string;
+  /** 담당자 화면 맨 위 연락처 칸에 적을 브랜드명. 연락처를 못 찾았을 때의 폴백이다. */
+  brandName?: string;
   /** 캠페인에 올려 둔 가이드라인. 보드 위쪽 가이드 줄이 이것을 그대로 연다. */
   guidelineFiles?: GuidelineFile[];
   guidelineNote?: string;
@@ -56,8 +73,6 @@ interface BrandCollabProgressProps {
    * 얼마나 남았는지가 브랜드가 다음 사람을 더 넣을지 정하는 근거다.
    */
   budgetKrw?: number;
-  /** 브랜드 계정 아이디. 정산 칸이 이 계정의 정산 현황을 읽어 온다. */
-  businessUsername?: string;
   onNotify?: (message: string, type?: 'success' | 'error') => void;
 }
 
@@ -129,6 +144,12 @@ type CollabRow = {
   feeLocked?: boolean;
   /** 목록에 함께 실려 오는 배송 요약. 줄을 열지 않아도 주소가 왔는지 알 수 있다. */
   shipping?: ShippingRow;
+  /**
+   * 정산 단계의 사실. 담당자 응답에만 실려 온다 — 브랜드는 개별 지급을 하지 않으므로
+   * 서버가 브랜드 응답에서 이 덩어리를 비운다. 개인정보(신분증 · 계좌)는 어느 역할의
+   * 목록에도 담기지 않는다.
+   */
+  settlement?: { submitted?: boolean; payoutDate?: string; paidAt?: string | null };
 };
 
 /**
@@ -138,10 +159,15 @@ type CollabRow = {
  * 올려 두는 파일이고, "확인했는지"를 단계로 세면 아무도 누르지 않는 확인 버튼 때문에
  * 모두가 첫 칸에 멈춰 있는 것처럼 보였다. 그 자리는 보드 위쪽 파일 줄이 대신한다.
  *
- * 정산은 협업 단계가 아니다 — 담당자가 업로드를 확인한 시점에 예약되는 지급 기록이라
- * (collab_stages 에는 없다) 마지막 칸은 정산 기록을 읽어 그린다. 그래도 칸으로 두는
- * 이유는, 업로드까지 끝난 사람이 보드에서 사라지면 브랜드가 "이 사람 정산은 어떻게
- * 됐나"를 다른 탭에서 다시 찾아야 하기 때문이다.
+ * 마지막 칸은 협업 단계가 아니다 — 네 칸을 모두 지난 사람이 서는 자리다. 업로드까지
+ * 끝난 사람이 보드에서 통째로 사라지면 "이 사람은 어떻게 됐나"를 다른 탭에서 다시
+ * 찾아야 한다.
+ *
+ * 한동안 이 칸은 '정산'이었고, 카드마다 지급 예정일과 금액, 지급 완료 배지가 브랜드에게
+ * 그려졌다. 브랜드는 인플루언서에게 개별 송금을 하지 않으므로(픽스폴리오에 한 번 보낸다)
+ * 그 줄은 자기 일이 아닌 일정을 인원수만큼 확인하게 만들었다. 브랜드에게는 '진행 완료'와
+ * 업로드 확인 날짜만 남기고, 사람별 지급은 담당자 화면에만 둔다 — 서류를 받고 지급일을
+ * 잡고 입금하는 것이 담당자의 일이다.
  *
  * stageKeys 에는 예전 아홉 단계 묶음의 이름도 함께 적어 둔다. 그 묶음으로 시작한
  * 협업은 단계 이름이 영원히 예전 것이라, 새 이름만 보면 보드에서 통째로 사라진다.
@@ -161,7 +187,7 @@ type Column = {
   title: string;
   /** 이 칸에 들어가는 협업 단계 키. 앞이 새 이름, 뒤가 예전 이름. */
   stageKeys: string[];
-  /** 카드를 눌렀을 때 상세에서 펼칠 단계. 정산 칸은 업로드를 펼친다. */
+  /** 카드를 눌렀을 때 상세에서 펼칠 단계. 마지막 칸은 업로드를 펼친다. */
   focus: ProcessStepKey;
   /** 브랜드가 볼 것이 올라오는 칸인지. 그 카드에만 검은 버튼이 붙는다. */
   review?: boolean;
@@ -169,11 +195,11 @@ type Column = {
   reviewLabel?: string;
   /** 인플루언서가 아직 작업 중일 때 카드에 적는 말. */
   workingLabel?: string;
-  /** 이 칸을 지나간 사람의 카드에 적는 말. 정산 칸에서만 쓴다. */
+  /** 이 칸을 지나간 사람의 카드에 적는 말. 마지막 칸에서만 쓴다. */
   doneLabel?: string;
   /** 아무도 없는 칸에 적는 한 마디. */
   emptyLabel: string;
-  /** 마지막 칸인지. 협업 단계가 아니라 정산 기록으로 그린다. */
+  /** 마지막 칸인지. 협업 단계가 아니라 "네 칸을 다 지났다"로 그린다. */
   terminal?: boolean;
   icon: React.ReactNode;
 };
@@ -233,7 +259,7 @@ const COLUMNS: Column[] = [
   },
   {
     key: 'settlement',
-    title: '정산',
+    title: '진행 완료',
     stageKeys: ['settlement'],
     focus: 'upload',
     terminal: true,
@@ -245,7 +271,7 @@ const COLUMNS: Column[] = [
   },
 ];
 
-/** 카드가 실제로 굴러가는 네 칸. 정산 칸은 협업 단계가 아니라 정산 기록으로 그린다. */
+/** 카드가 실제로 굴러가는 네 칸. 마지막 칸은 이 네 칸을 다 지난 사람이 서는 자리다. */
 const PROCESS_COLUMNS = COLUMNS.filter(c => !c.terminal);
 
 /** 인스타 아이콘. 아이디 옆에 붙어 "이 계정은 인스타에서 왔다"를 한 글자도 안 쓰고 말한다. */
@@ -383,20 +409,22 @@ const STATE_ORDER: Record<StepState, number> = { review: 0, working: 1, waiting:
  * 보드 카드 하나 — 사람 한 명.
  *
  * 카드로 그려지는 것은 지금 서 있는 칸 하나뿐이고, 지나온 칸에는 같은 사람이 완료
- * 줄(doneCards)로 한 번 더 들어간다. settlement 는 마지막 칸에서만 쓴다(정산 기록이
- * 있는 사람만 들어 있다).
+ * 줄(doneCards)로 한 번 더 들어간다.
  */
-type Card = { collab: CollabRow; state: StepState; due: string; settlement?: Settlement };
+type Card = { collab: CollabRow; state: StepState; due: string };
 
 /**
- * 정산 칸의 상태 말. 정산 탭(CampaignSettlementPanel)과 같은 말·같은 색을 쓴다 —
- * 같은 지급 기록을 두 화면이 다르게 부르면 브랜드는 서로 다른 일로 읽는다.
+ * 마지막 칸의 지급 상태 — 담당자 화면에만 그린다.
+ *
+ * 재료는 협업 목록이 함께 싣는 정산 단계의 사실(collab.settlement)이다. 브랜드 응답에는
+ * 이 덩어리가 아예 없으므로, 브랜드 화면에서는 이 함수가 불리지 않는다.
  */
-const SETTLEMENT_LABEL: Record<string, { label: string; cls: string }> = {
-  scheduled: { label: '지급 예정', cls: 'bg-blue-50 text-blue-600' },
-  completed: { label: '지급 완료', cls: 'bg-emerald-50 text-emerald-600' },
-  pending: { label: '확인 대기', cls: 'bg-amber-50 text-amber-600' },
-  cancelled: { label: '취소', cls: 'bg-slate-100 text-slate-400' },
+const payoutBadge = (collab: CollabRow): { label: string; cls: string } => {
+  const info = collab.settlement || {};
+  if (info.paidAt) return { label: '지급 완료', cls: 'bg-emerald-50 text-emerald-600' };
+  if (String(info.payoutDate || '').trim()) return { label: '지급 예정', cls: 'bg-blue-50 text-blue-600' };
+  if (info.submitted) return { label: '지급일 미정', cls: 'bg-amber-50 text-amber-600' };
+  return { label: '서류 대기', cls: 'bg-slate-100 text-slate-500' };
 };
 
 /**
@@ -452,15 +480,18 @@ const OUTREACH_STEP: Record<string, { label: string; cls: string; hint: string }
 type Snapshot = { name: string; instagramHandle: string; instagramUrl: string; profileImage: string };
 
 const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
+  viewer = 'brand',
   campaignId,
+  brandName = '',
   guidelineFiles = [],
   guidelineNote = '',
   guidelineUrl = '',
   onGuidelineFilesChange,
   budgetKrw = 0,
-  businessUsername = '',
   onNotify,
 }) => {
+  /** 담당자만 하는 일(브랜드 연락처 확인)과 브랜드만 하는 일(가이드 올리기)이 갈린다. */
+  const isManager = viewer === 'manager';
   const [collabs, setCollabs] = useState<CollabRow[]>([]);
   const [picks, setPicks] = useState<PickRow[]>([]);
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
@@ -476,14 +507,6 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const [guideOpen, setGuideOpen] = useState(false);
   /** 진행사항 화면에서 바로 올리는 가이드 파일. */
   const [guideUploading, setGuideUploading] = useState(false);
-  /**
-   * 마지막 칸(정산)의 재료. 인플루언서 아이디로 찾는다.
-   *
-   * 정산은 협업 단계가 아니라 따로 쌓이는 지급 기록이라 협업 목록에 실려 오지 않는다.
-   * 그래서 정산 탭과 같은 방법으로 한 번 더 읽는다 — 브랜드 계정의 정산을 통째로
-   * 받아 proposal_id 에 이 캠페인 ID 가 들어 있는 것만 남긴다.
-   */
-  const [settlements, setSettlements] = useState<Record<string, Settlement>>({});
 
   const notify = useCallback(
     (message: string, type: 'success' | 'error' = 'success') => {
@@ -494,7 +517,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiService.getCollabs('brand');
+    const res = await apiService.getCollabs(viewer);
     setLoadError(res.error || '');
     const rows: CollabRow[] = res.collabs || [];
     const mine = campaignId ? rows.filter(c => c.campaignId === campaignId) : rows;
@@ -541,42 +564,15 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       setSnapshots({});
     }
     setLoading(false);
-  }, [campaignId]);
+  }, [campaignId, viewer]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      // 화면에 따라 'biz/브랜드' 꼴로 넘어온다. 정산 API 는 경로에 아이디를 넣으므로
-      // 슬래시를 먼저 뗀다 — 정산 탭도 같은 처리를 한다.
-      const clean = String(businessUsername || '').replace(/^biz\//, '');
-      if (!clean) {
-        setSettlements({});
-        return;
-      }
-      const all = await apiService.getSettlements(clean, 'business');
-      if (!alive) return;
-      const byUser: Record<string, Settlement> = {};
-      for (const row of all) {
-        if (campaignId && !String(row.proposal_id || '').includes(campaignId)) continue;
-        const key = String(row.influencer_username || '').toLowerCase();
-        if (!key) continue;
-        // 한 사람에게 기록이 둘 이상이면 지급 완료 쪽을 남긴다. 예약과 완료가 함께
-        // 있을 때 "지급 예정"으로 그리면 이미 보낸 돈을 아직 보낼 돈으로 읽는다.
-        if (byUser[key] && byUser[key].status === 'completed') continue;
-        byUser[key] = row;
-      }
-      setSettlements(byUser);
-    })();
-    return () => { alive = false; };
-  }, [businessUsername, campaignId]);
-
   const refreshDetail = useCallback(
     async (collabId: string) => {
-      const res = await apiService.getCollabDetail(collabId, undefined, 'brand');
+      const res = await apiService.getCollabDetail(collabId, undefined, viewer);
       if (res.error) {
         notify(res.error, 'error');
         return null;
@@ -584,7 +580,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       setDetail(res);
       return res;
     },
-    [notify],
+    [notify, viewer],
   );
 
   const openDetail = async (collabId: string, step: ProcessStepKey | '' = '') => {
@@ -726,16 +722,14 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
    * 아무것도 넣지 않는다 — 대기는 확인할 것이 없고, 넣으면 다섯 번 나오던 화면으로
    * 되돌아간다.
    *
-   * 네 칸을 모두 지난 사람과 완료된 협업은 마지막 정산 칸으로 간다. 업로드 확인까지
-   * 끝난 사람이 보드에서 사라지면 브랜드는 "이 사람 정산은 어떻게 됐나"를 다른 탭에서
-   * 다시 찾아야 한다. 취소된 협업만 보드에서 빠져 아래 목록으로 내려간다.
+   * 네 칸을 모두 지난 사람과 완료된 협업은 마지막 칸으로 간다. 업로드 확인까지 끝난
+   * 사람이 보드에서 사라지면 "이 사람은 어떻게 됐나"를 다른 탭에서 다시 찾아야 한다.
+   * 취소된 협업만 보드에서 빠져 아래 목록으로 내려간다.
    */
   const board = useMemo(() => {
     const buckets: Record<ColumnKey, Card[]> = { shipping: [], plan: [], video: [], upload: [], settlement: [] };
     /** 칸을 이미 지나간 사람들. 카드가 아니라 한 줄짜리 완료 명단으로 그린다. */
     const passed: Record<ColumnKey, Card[]> = { shipping: [], plan: [], video: [], upload: [], settlement: [] };
-    const settlementOf = (collab: CollabRow) =>
-      settlements[String(collab.creatorUsername || '').toLowerCase()];
 
     for (const collab of collabs) {
       if (collab.status !== 'in_progress' && collab.status !== 'completed') continue;
@@ -743,14 +737,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       // 완료된 협업은 단계를 볼 것도 없이 마지막 칸이다.
       const placed = collab.status === 'completed' ? null : states.find(r => r.state !== 'done') || null;
       if (!placed) {
-        buckets.settlement.push({ collab, state: 'done', due: '', settlement: settlementOf(collab) });
+        buckets.settlement.push({ collab, state: 'done', due: '' });
       } else {
-        buckets[placed.column.key].push({
-          collab,
-          state: placed.state,
-          due: placed.due,
-          settlement: settlementOf(collab),
-        });
+        buckets[placed.column.key].push({ collab, state: placed.state, due: placed.due });
       }
       // 지나온 칸에도 이름을 남긴다. 지금 서 있는 칸에만 나오게 하면, 브랜드는 배송을
       // 이미 보낸 사람의 이름이 배송 칸에서 사라진 것을 "빠졌다"로 읽는다. 앞 칸에서
@@ -759,7 +748,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       for (const r of states) {
         if (r.state !== 'done') continue;
         if (placed && r.column.key === placed.column.key) continue;
-        passed[r.column.key].push({ collab, state: 'done', due: '', settlement: settlementOf(collab) });
+        passed[r.column.key].push({ collab, state: 'done', due: '' });
       }
     }
 
@@ -778,7 +767,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         reviewCount: cards.filter(c => c.state === 'review').length,
       };
     });
-  }, [collabs, settlements]);
+  }, [collabs]);
 
   /** 진행 중인 사람 수와, 그중 지금 브랜드가 손대야 하는 건수. 화면 맨 위 한 줄. */
   const runningCount = collabs.filter(c => c.status === 'in_progress').length;
@@ -969,7 +958,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     지난 단계는 보드 안의 "전체 단계 보기"로 되돌아온다. */}
                 <CampaignProcessBoard
                   collabId={openId}
-                  role="brand"
+                  role={viewer}
                   detail={detail}
                   focusStep={focusStep}
                   onlyStep={focusStep}
@@ -990,7 +979,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                 />
 
                 <p className="text-xs text-slate-400 font-bold px-1">
-                  기획안 · 영상 피드백은 인플루언서에게 바로 전달됩니다. 조건 · 일정 · 정산 문의는 담당자에게 남겨 주세요.
+                  {isManager
+                    ? '조건 · 일정 · 정산은 담당자가 정리합니다. 브랜드 의견은 단계별 피드백으로 들어옵니다.'
+                    : '기획안 · 영상 피드백은 인플루언서에게 바로 전달됩니다. 조건 · 일정 · 정산 문의는 담당자에게 남겨 주세요.'}
                 </p>
               </div>
             )}
@@ -1001,6 +992,14 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
           {/* ── 맨 위 한 줄 ──────────────────────────────────────────────
               브랜드가 이 화면을 열고 먼저 확인하는 두 값 — 지금 몇 명이 굴러가는지,
               그 사람들에게 나갈 돈이 얼마인지. 그다음이 "오늘 내가 손댈 것이 있는지"다. */}
+          {/* 담당자 화면에만 붙는 줄 — 브랜드 담당자의 이름과 연락처.
+              브랜드에게서 정산금을 받아야 하고 조건 · 일정도 결국 카톡이나 유선으로
+              풀리는데, 그 번호를 찾으러 캠페인 목록으로 되돌아가던 걸음을 없앤다.
+              브랜드↔담당자 대화방은 만들지 않는다(서버 threads.brandSupport). */}
+          {isManager && campaignId && (
+            <BrandContactCard campaignId={campaignId} brandName={brandName} />
+          )}
+
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
             <p className="text-base md:text-lg font-black text-slate-900">
               진행 중 인플루언서 {runningCount}명
@@ -1067,14 +1066,19 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                   </div>
                 )}
                 <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*,video/*,application/pdf,.doc,.docx,.ppt,.pptx"
-                    disabled={guideUploading}
-                    onChange={e => { uploadGuideFiles(e.target.files); e.target.value = ''; }}
-                    className="max-w-[210px] text-xs text-slate-500 file:mr-2 file:border-0 file:rounded-lg file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-black file:text-slate-700 disabled:opacity-50"
-                  />
+                  {/* 가이드는 캠페인을 등록한 브랜드가 올린다. 담당자에게는 올리기 칸을
+                      두지 않는다 — 캠페인 저장은 소유 브랜드 권한이라 눌러도 막히고,
+                      담당자가 여기서 할 일은 올라온 파일을 여는 것이다. */}
+                  {!isManager && (
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*,video/*,application/pdf,.doc,.docx,.ppt,.pptx"
+                      disabled={guideUploading}
+                      onChange={e => { uploadGuideFiles(e.target.files); e.target.value = ''; }}
+                      className="max-w-[210px] text-xs text-slate-500 file:mr-2 file:border-0 file:rounded-lg file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-black file:text-slate-700 disabled:opacity-50"
+                    />
+                  )}
                   {guideUploading && <span className="text-xs font-bold text-slate-400">올리는 중...</span>}
                   {hasGuideline && (
                     <button
@@ -1088,7 +1092,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               </div>
               {!hasGuideline && (
                 <p className="text-xs text-slate-400 font-medium mt-2">
-                  가이드 파일(PDF·이미지)을 올려 두면 진행 중인 인플루언서가 자기 진행사항에서 바로 엽니다. 따로 확인 체크는 받지 않습니다.
+                  {isManager
+                    ? '브랜드가 아직 가이드 파일을 올리지 않았습니다. 올라오면 진행 중인 인플루언서가 자기 진행사항에서 바로 엽니다.'
+                    : '가이드 파일(PDF·이미지)을 올려 두면 진행 중인 인플루언서가 자기 진행사항에서 바로 엽니다. 따로 확인 체크는 받지 않습니다.'}
                 </p>
               )}
             </section>
@@ -1098,7 +1104,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               되풀이하면 화면이 비어 있다는 사실보다 문장이 먼저 읽힌다. */}
           {runningCount === 0 && (
             <p className="px-1 text-sm text-slate-400 font-medium">
-              담당자가 진행을 확정하면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.
+              {isManager
+                ? '진행을 확정하면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.'
+                : '담당자가 진행을 확정하면 아래 보드의 제품 배송 칸에 카드가 한 장씩 들어옵니다.'}
               {picks.length > 0 && " 확정 전 후보는 아래 '제안 진행 중'에서 볼 수 있습니다."}
             </p>
           )}
@@ -1144,13 +1152,13 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                         {column.emptyLabel}
                       </p>
                     ) : (
-                      cards.map(({ collab, state: cardState, due, settlement }) => {
+                      cards.map(({ collab, state: cardState, due }) => {
                         const who = identityOf(collab);
                         const cardDue = due || collab.dueDate;
                         const left = daysUntil(cardDue);
                         /* 마감이 지났거나 이틀 안이면 붉은 테, 닷새 안이면 노란 테.
                            카드가 수십 장 늘어서 있어도 손이 급한 것이 먼저 눈에 들어와야
-                           한다. 정산 칸과 다 끝난 카드에는 급할 마감이 없다. */
+                           한다. 마지막 칸과 다 끝난 카드에는 급할 마감이 없다. */
                         const urgency =
                           column.terminal || cardState === 'done' || left === null
                             ? ''
@@ -1167,7 +1175,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                             : urgency === 'near'
                               ? 'border-amber-200'
                               : 'border-slate-200/70';
-                        const badge = settlement ? SETTLEMENT_LABEL[settlement.status] : null;
+                        /* 사람별 지급 상태는 담당자 화면에만. 브랜드는 이 칸에서
+                           "업로드 확인까지 끝났다"만 확인한다. */
+                        const badge = column.terminal && isManager ? payoutBadge(collab) : null;
                         return (
                           <div key={collab.id} className={`rounded-xl border bg-white ${frame}`}>
                             <button
@@ -1202,9 +1212,11 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                                 {column.terminal ? (
                                   <>
                                     <p className="text-[11px] font-bold text-slate-500 truncate">
-                                      {settlement
-                                        ? `지급 예정일 ${settlement.scheduled_date || '미정'}`
-                                        : '업로드 확인 후 정산이 예약됩니다'}
+                                      {isManager
+                                        ? `지급 예정일 ${collab.settlement?.payoutDate || '미정'}`
+                                        : collab.uploadConfirmedAt
+                                          ? `업로드 확인 완료 · ${korDate(collab.uploadConfirmedAt)}`
+                                          : '업로드 확인 완료'}
                                     </p>
                                     {badge && (
                                       <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-black flex-shrink-0 ${badge.cls}`}>
@@ -1245,13 +1257,15 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                                   {collab.adCode ? `광고 코드 ${collab.adCode}` : '광고 코드 대기'}
                                 </p>
                               )}
-                              {column.terminal && settlement && (
+                              {/* 지급 금액도 담당자 화면에만 남는다. 브랜드는 회차로
+                                  묶인 일괄 정산 금액을 정산 탭에서 본다. */}
+                              {column.terminal && isManager && (
                                 <p className="mt-1.5 text-sm font-black text-slate-900">
-                                  {settlement.amount_pending && !Number(settlement.amount || 0)
-                                    ? /* 담당자가 조율 중인 금액. 0원으로 그리면 지급할
-                                         것이 없는 협업으로 읽힌다. */
-                                      <span className="text-amber-600">협의중</span>
-                                    : formatKoreanWon(settlement.amount)}
+                                  {Number(collab.fee || 0) > 0
+                                    ? formatKoreanWon(collab.fee)
+                                    : /* 담당자가 아직 조건을 정리하지 않은 협업. 0원으로
+                                         그리면 지급할 것이 없는 협업으로 읽힌다. */
+                                      <span className="text-amber-600">금액 조율 중</span>}
                                 </p>
                               )}
                             </button>

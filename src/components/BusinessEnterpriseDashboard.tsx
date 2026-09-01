@@ -255,7 +255,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       );
       break;
     case 'calendar':
-      subComponent = <LazyRoute><BusinessEntCalendar businessUsername={businessUsername} companyName={companyName} /></LazyRoute>;
+      subComponent = <LazyRoute><BusinessEntCalendar businessUsername={businessUsername} /></LazyRoute>;
       break;
     case 'timeline':
       subComponent = (

@@ -34,8 +34,11 @@ import {
  * 전부 카카오톡·메일에 있었다. 인플루언서는 "언제 들어오나"를 물어봐야 알 수 있었고,
  * 담당자는 어느 협업의 계좌인지 짝을 맞춰야 했다. 협업 한 줄 안으로 옮긴다.
  *
- * 정산 칸의 브랜드 몫은 없다. 브랜드에게는 "제출 완료 / 지급일"까지만 보이고 신분증
- * 사본과 계좌번호는 응답에도 담기지 않는다(개인정보이고, 돈을 보내는 것은 담당자다).
+ * 정산 칸은 브랜드에게 열리지 않는다. 브랜드는 인플루언서에게 개별 송금을 하지 않고
+ * (픽스폴리오에 회차마다 한 번 보낸다) 서류를 받고 지급일을 잡고 입금하는 것은 담당자의
+ * 일이다. 한동안 브랜드에게도 "제출 완료 / 지급 예정일"까지는 보여 줬지만, 그것은 브랜드가
+ * 손댈 수 없는 남의 일정을 사람 수만큼 확인하게 만들었다. 서버도 브랜드 응답에서는 정산
+ * 덩어리를 비워 보낸다 — 화면에서 가리는 것만으로는 개발자 도구로 그대로 열린다.
  *
  * 브랜드와 인플루언서가 같은 컴포넌트를 쓴다. 예전에는 양쪽 화면이 따로 있어서 같은
  * 단계를 서로 다른 이름과 다른 순서로 보고 있었다 — 브랜드는 "대본 피드백", 인플루언서는
@@ -343,8 +346,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const solo = Boolean(soloStep) && !showAllSteps;
   // 정산 칸은 업로드 확인 전에는 아예 그리지 않는다. 촬영도 시작하지 않은 시점에
   // "신분증 사본" 줄이 보이면 무엇에 쓰는 서류인지 알 수 없고, 보수가 없는
-  // 협찬형 협업에는 정산할 것이 없다.
-  const shownStates = states.filter(s => s.key !== 'settlement' || settlementOpen);
+  // 협찬형 협업에는 정산할 것이 없다. 브랜드에게는 확인된 뒤에도 열리지 않는다 —
+  // 개별 지급은 브랜드의 일이 아니고, 서버도 브랜드 응답에서 정산을 비워 보낸다.
+  const shownStates = states.filter(
+    s => s.key !== 'settlement' || (settlementOpen && role !== 'brand'),
+  );
   const visibleStates = solo ? shownStates.filter(s => s.key === soloStep) : shownStates;
 
   const [busy, setBusy] = useState(false);
@@ -1749,20 +1755,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   </button>
                 )}
               </>
-            )}
-
-            {/* 브랜드: 읽기만. 개인정보는 서버에서 이미 빠져 있다. */}
-            {role === 'brand' && (
-              <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-                <p className="text-[10px] font-black text-slate-400 mb-1">정산 진행</p>
-                <p className="text-xs font-bold text-slate-700">
-                  {settlement.submitted ? '인플루언서 서류 제출 완료' : '인플루언서 서류 제출 대기'}
-                  {payoutDate ? ` · 지급 예정일 ${payoutDate}` : ''}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium mt-1 leading-relaxed">
-                  지급은 담당자가 처리합니다. 신분증 사본과 계좌 정보는 담당자만 열어 볼 수 있습니다.
-                </p>
-              </div>
             )}
           </div>
         );

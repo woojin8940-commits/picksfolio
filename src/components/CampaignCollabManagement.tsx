@@ -7,7 +7,7 @@ import CampaignRegisterWizard from './collab/CampaignRegisterWizard';
 import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
-import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
+import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
@@ -1329,7 +1329,6 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
               guidelineNote={selectedCampaign.guideline_note || ''}
               guidelineUrl={selectedCampaign.guideline_url || ''}
               budgetKrw={budget}
-              businessUsername={businessUsername}
               onGuidelineFilesChange={files => {
                 // 진행사항 안에서 올린 가이드도 같은 캠페인 가이드라인이다. 위쪽
                 // 가이드라인 카드가 곧바로 같은 목록을 보여 주지 않으면 방금 올린
@@ -1358,13 +1357,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         )}
 
         {/* ------------------------------------------------ 정산
-            제품 협찬형에는 이 탭이 없다(TABS 참고) — 지급할 광고비가 없어 정산도 없다. */}
+            제품 협찬형에는 이 탭이 없다(TABS 참고) — 지급할 광고비가 없어 정산도 없다.
+
+            인플루언서별 지급 내역이 아니라 회차 요약을 그린다. 브랜드는 픽스폴리오에
+            한 번 보내고 개별 지급은 픽스폴리오가 하므로, 사람마다 줄을 세우면 자기 일이
+            아닌 일정을 인원수만큼 확인하게 된다. */}
         {activeTab === 'settlement' && (
           isOwner ? (
-            <CampaignSettlementPanel
+            <BrandSettlementSummary
               businessUsername={businessUsername}
               campaignId={selectedCampaign.id}
-              budgetKrw={budget}
             />
           ) : (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 shadow-sm text-center">
