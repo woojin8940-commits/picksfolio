@@ -104,7 +104,7 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
           <p className="text-sm text-slate-500 font-bold">아직 정산 예정 내역이 없습니다</p>
           <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
             정산은 담당자가 업로드를 확인한 뒤 예약됩니다.<br />
-            지급일은 확인한 달의 다음 달 말일입니다.
+            지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
           </p>
         </div>
       ) : (
@@ -143,7 +143,7 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
       )}
 
       <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-        표시된 금액은 지급 전 금액입니다. 원천징수(3.3%)를 뺀 금액이 입금되며, 지급일은 업로드가 확인된 달의
+        표시된 금액은 지급 전 금액입니다. 원천징수(3.3%)를 뺀 금액이 입금되며, 지급일은 콘텐츠를 올린 달의
         다음 달 말일입니다.
       </p>
     </div>

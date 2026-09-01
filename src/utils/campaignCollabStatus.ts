@@ -50,6 +50,25 @@ export type CampaignCollabStatus = {
   /** 진행 기간. 확정된 일정이 없으면 캠페인 종료일로 대신한다. */
   startDate: string;
   endDate: string;
+  /**
+   * 업로드 마감일. 협업 현황 달력이 찍는 날짜다.
+   *
+   * 확정 조건의 업로드 마감(collab_terms.upload_due)이 먼저고, 없으면 담당자가 체크한
+   * 협업 종료일, 그다음이 캠페인 종료일이다. 뒤의 두 값을 대신 쓰는 이유는 서버가
+   * 종료일을 정할 때 업로드 마감을 그대로 옮겨 적기 때문이다(confirm_schedule) —
+   * 즉 셋 다 "이 날까지 올려야 한다"는 같은 날을 가리킨다.
+   */
+  uploadDue: string;
+  /** 업로드를 확인받은 시각. 달력에서 남은 일과 끝난 일을 가른다. */
+  uploadConfirmedAt: string;
+  /**
+   * 콘텐츠가 실제로 올라간 날('YYYY-MM-DD', 한국 기준). 아직 올리지 않았으면 빈 값.
+   *
+   * 올린 뒤에는 달력이 마감일이 아니라 이 날에 점을 찍는다. 정산 예정일이 이 날에서
+   * 계산되므로(올린 달의 익월 말일), 두 점이 어긋나면 "9월 28일 업로드인데 정산이
+   * 9월 30일"처럼 규칙과 맞지 않아 보인다.
+   */
+  uploadedDay: string;
   /** 확정 보수(원). 브랜드·인플루언서 본인에게만 응답에 실려 온다. */
   fee: number;
   /**
@@ -68,6 +87,22 @@ const STATE_LABEL: Record<CampaignCollabState, string> = {
 };
 
 const asDate = (raw: unknown) => String(raw || '').slice(0, 10);
+
+/**
+ * 타임스탬프를 한국 날짜 'YYYY-MM-DD' 로. 날짜 칸('2026-09-01')은 그대로 둔다.
+ *
+ * UTC 로 자르면(asDate) 한국 시간 오전 9시 이전에 일어난 일이 하루 전으로 읽힌다 —
+ * 9월 1일 새벽에 올린 게시물이 8월 31일로 보이면 정산 달까지 한 달 어긋난다.
+ */
+const asSeoulDay = (raw: unknown) => {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? ''
+    : parsed.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+};
 
 /**
  * 협업 응답 한 줄 → 현황 항목.
@@ -118,6 +153,10 @@ export function toCampaignCollabStatus(row: any, role: CollabActionRole): Campai
     // 일정이 확정되지 않은 협업이 많다. 그때는 캠페인 종료일이 사실상의 마감이라
     // 캘린더에 놓을 수 있는 유일한 날짜다 — 비워 두면 캘린더에서 아예 사라진다.
     endDate: asDate(row?.scheduleEnd) || asDate(row?.campaignEndDate),
+    uploadDue:
+      asDate(row?.uploadDue) || asDate(row?.scheduleEnd) || asDate(row?.campaignEndDate),
+    uploadConfirmedAt: String(row?.uploadConfirmedAt || ''),
+    uploadedDay: asSeoulDay(row?.uploadedAt) || asSeoulDay(row?.uploadConfirmedAt),
     fee: Number(row?.fee || 0),
     category:
       row?.campaignType === 'ad_collab' ? '광고' : row?.campaignType === 'group_buy' ? '커머스' : '기타',

@@ -6,7 +6,7 @@ import {
   upsertCollabScheduleRecord,
   upsertSettlementForProposal,
 } from "./_shared/collab-records.mts";
-import { todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 import {
@@ -300,6 +300,33 @@ function shapeSettlementInfo(row: any, role: CollabRole, fee: number) {
 }
 
 /**
+ * 콘텐츠가 실제로 올라간 날(한국 날짜).
+ *
+ * 정산 회차는 게시물이 올라간 달을 기준으로 잡힌다. 게시물 링크가 등록된 시각이
+ * 업로드일이고, 담당자가 확인을 누른 시각은 아니다 — 확인이 며칠 늦어 달을 넘기면
+ * 인플루언서가 그만큼 한 달을 더 기다리게 된다.
+ *
+ * 여러 판이 있으면 첫 판을 본다. 수정 요청을 받아 다시 올렸더라도 게시물이 세상에
+ * 나온 날은 첫 등록일이다. 링크 기록이 없는 옛 협업은 업로드 확인 시각 → 오늘로
+ * 되돌아간다.
+ */
+async function uploadDayOf(db: any, collab: any): Promise<string> {
+  try {
+    const rows = (await db.sql`
+      SELECT created_at FROM collab_deliverables
+      WHERE collab_id = ${collab.id} AND kind = 'upload'
+      ORDER BY version ASC, created_at ASC
+      LIMIT 1
+    `) as any[];
+    const day = seoulDayOf(rows?.[0]?.created_at);
+    if (day) return day;
+  } catch (err) {
+    console.error("[collab-workflow] 업로드일 조회 실패:", err);
+  }
+  return seoulDayOf(collab?.upload_confirmed_at) || todayInSeoul();
+}
+
+/**
  * 정산 예약. 업로드가 확인된 시점에만 부른다.
  *
  * 광고비가 0원인 협업(제품 협찬형)은 예약하지 않는다. 그대로 두면 받을 것이 없는
@@ -309,7 +336,8 @@ async function scheduleSettlementFor(db: any, collab: any) {
   const termsRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collab.id}`) as any[];
   const fee = Number(termsRows?.[0]?.fee || 0);
   if (fee <= 0) return null;
-  const scheduledDate = settlementDateFrom(todayInSeoul());
+  const uploadDay = await uploadDayOf(db, collab);
+  const scheduledDate = settlementDateFrom(uploadDay);
   try {
     const stlNow = new Date().toISOString();
     await addSettlementForProposal({
@@ -322,7 +350,7 @@ async function scheduleSettlementFor(db: any, collab: any) {
       amount: fee,
       scheduled_date: scheduledDate,
       status: "scheduled",
-      memo: `업로드 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
+      memo: `업로드(${uploadDay}) 확인 완료 · 원천징수 3.3% 차감 후 ${netAfterWithholding(fee).toLocaleString("ko-KR")}원 지급 예정`,
       created_at: stlNow,
       updated_at: stlNow,
     });
@@ -497,6 +525,22 @@ export default async (req: Request, context: Context) => {
       `) as any[];
 
       /**
+       * 게시물이 처음 등록된 시각 = 콘텐츠가 올라간 날.
+       *
+       * 최신 제출물만 보는 위의 목록(DISTINCT ON ... version DESC)으로는 알 수 없다.
+       * 수정 요청을 받아 다시 올리면 그 날짜가 뒤로 밀리는데, 게시물이 세상에 나온
+       * 날은 첫 등록일이고 정산 회차도 그 날을 기준으로 잡힌다(업로드한 달의 익월
+       * 말일). 달력이 업로드 점을 이 날에 찍어야 정산 점과 한 줄로 읽힌다.
+       */
+      const uploadedRows = (await db.sql`
+        SELECT collab_id, MIN(created_at) AS uploaded_at
+        FROM collab_deliverables
+        WHERE collab_id = ANY(${ids}) AND kind = 'upload'
+        GROUP BY collab_id
+      `) as any[];
+      const uploadedMap = new Map(uploadedRows.map((r) => [r.collab_id, r.uploaded_at]));
+
+      /**
        * 배송 정보 요약.
        *
        * 목록에 실어 보내는 이유는 하나다 — 브랜드는 인플루언서 줄을 하나씩 열어 보기
@@ -523,7 +567,7 @@ export default async (req: Request, context: Context) => {
        * 정리 중인) 협업은 0원으로 들어오므로, 화면은 잠긴 건수를 함께 센다.
        */
       const termRows = (await db.sql`
-        SELECT collab_id, fee, locked_at FROM collab_terms WHERE collab_id = ANY(${ids})
+        SELECT collab_id, fee, locked_at, upload_due FROM collab_terms WHERE collab_id = ANY(${ids})
       `) as any[];
       const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
 
@@ -721,7 +765,18 @@ export default async (req: Request, context: Context) => {
            */
           fee: Number(termMap.get(row.id)?.fee || 0),
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
+          /**
+           * 확정된 업로드 마감일. 협업 현황 달력이 이 날짜 하나만 찍는다.
+           *
+           * 예전에는 목록에 없어서 달력이 협업 기간(schedule_start~schedule_end)을
+           * 막대로 그렸는데, 일정이 확정되지 않은 협업은 그 기간이 "만든 날 ~ 캠페인
+           * 종료일"로 벌어져 한 달 내내 칸을 덮었다. 정작 인플루언서가 알아야 하는
+           * "언제 올려야 하나"는 그 막대 어디에도 없었다.
+           */
+          uploadDue: String(termMap.get(row.id)?.upload_due || "").split("T")[0],
           uploadConfirmedAt: row.upload_confirmed_at || null,
+          /** 게시물이 처음 등록된 시각. 정산 예정일이 이 날에서 계산된다. */
+          uploadedAt: uploadedMap.get(row.id) || null,
           ...(showSettlement
             ? {
                 settlement: (() => {

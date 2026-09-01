@@ -5,6 +5,7 @@ import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '..
 import UserSettlement from './UserSettlement';
 import {
   CampaignCollabStatus,
+  dropProposalsCoveredByCollabs,
   openCampaignCollab,
   toCampaignCollabStatuses,
 } from '../utils/campaignCollabStatus';
@@ -35,6 +36,30 @@ type CollabListItem = CollabRecord & {
   _campaignId?: string;
   _progress?: number;
   _todo?: string;
+  /** 확정된 업로드 마감일. 달력이 이 날짜에 점을 찍는다. */
+  _uploadDue?: string;
+  _uploadedDay?: string;
+};
+
+/**
+ * 달력 한 칸에 찍히는 업로드 일정.
+ *
+ * 제안·협업·정산을 각각 다른 모양으로 그리던 자리를 이 하나로 바꾼다. 달력이 답해야
+ * 하는 질문은 "언제 올려야 하나" 하나이므로, 출처가 달라도 화면에서는 같은 점이다.
+ */
+type DayChip = {
+  id: string;
+  /** 업로드하는 날 / 정산이 들어오는 날(YYYY-MM-DD). */
+  date: string;
+  /** 업로드 일정인가 정산 일정인가. 아이콘과 색이 갈린다. */
+  kind: 'upload' | 'settlement';
+  title: string;
+  company: string;
+  /** 끝났는가 — 업로드는 확인 완료, 정산은 입금 완료. */
+  done: boolean;
+  cancelled: boolean;
+  /** 정산 금액(원). 칸에는 안 쓰고 말풍선에만 적는다. */
+  amount?: number;
 };
 
 const COLLAB_CATEGORIES = ['광고', '커머스', '기타'] as const;
@@ -328,6 +353,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
           _campaignId: c.campaignId,
           _progress: c.progress,
           _todo: c.todo,
+          _uploadDue: c.uploadDue,
+          _uploadedDay: c.uploadedDay,
         };
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -375,29 +402,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     });
     return map;
   }, [settlements]);
-
-  // Stable ordering of proposal events
-  const eventOrder = useMemo(() => {
-    const order: Record<string, number> = {};
-    const sorted = [...acceptedProposals].sort((a, b) => {
-      const startDiff = new Date(a.start_date).getTime() - new Date(b.start_date).getTime();
-      if (startDiff !== 0) return startDiff;
-      return new Date(b.end_date).getTime() - new Date(a.end_date).getTime();
-    });
-    sorted.forEach((p, i) => { order[p.id] = i; });
-    return order;
-  }, [acceptedProposals]);
-
-  const getEventPosition = (startDate: string, endDate: string, dateStr: string) => {
-    // 문자열 그대로 비교하고 요일도 로컬 날짜로 구한다. toISOString() 을 쓰면
-    // 타임존에 따라 시작/끝 판정이 하루씩 밀려 막대의 둥근 모서리가 엉켰다.
-    const startStr = dayOnly(startDate);
-    const endStr = dayOnly(endDate);
-    const dayOfWeek = (parseYmd(dateStr) || new Date(dateStr)).getDay();
-    const isFirst = dateStr === startStr || dayOfWeek === 0;
-    const isLast = dateStr === endStr || dayOfWeek === 6;
-    return { isFirst, isLast };
-  };
 
   const selectedProposalEvents = selectedDate ? (proposalEventsMap[selectedDate] || []) : [];
   const selectedCollabEvents = selectedDate ? (collabEventsMap[selectedDate] || []) : [];
@@ -480,6 +484,127 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     if (p.status === 'completed') return true;
     const end = (p.end_date || '').split('T')[0];
     return !!end && end < today;
+  };
+
+  /**
+   * 달력에 찍는 두 가지 날 — 올리는 날과 돈이 들어오는 날.
+   *
+   * 예전에는 제안 기간·협업 기간을 막대로 그렸다. 그런데 담당자가 일정을 확정하기
+   * 전의 협업은 기간이 "협업이 만들어진 날 ~ 캠페인 종료일"까지 벌어져서, 두 건만
+   * 있어도 막대가 달 전체를 덮고 칸마다 '+1건'이 붙었다. 정작 인플루언서가 달력에서
+   * 알고 싶은 것 — 언제 올리고 언제 받나 — 는 그 막대 어디에도 적혀 있지 않았다.
+   *
+   * 그래서 기간은 버리고 날짜 두 개만 점으로 찍는다. 기간과 금액 합계는 아래 협업
+   * 내역 탭이 이미 보여 준다.
+   *
+   * 업로드하는 날은 이미 올렸으면 올린 날, 아직이면 확정 조건의 업로드 마감이다. 둘 다
+   * 없는 줄(직접 남긴 기록, 브랜드가 보낸 제안)은 종료일을 쓴다 — 서버도 일정을 확정할
+   * 때 업로드 마감을 협업 종료일로 옮겨 적으므로 둘은 같은 날을 가리킨다.
+   *
+   * 정산이 들어오는 날은 정산 항목의 예정일을 그대로 쓴다. 그 예정일은 서버가
+   * "콘텐츠가 올라간 달의 익월 말일"로 잡고(api-settlements · settlementDateFrom),
+   * 담당자가 회차를 따로 정하면 그 날짜로 바뀐다. 여기서 다시 계산하면 정산금 탭에
+   * 적힌 날짜와 달력의 날짜가 갈라진다.
+   */
+  const dayChipsMap = useMemo(() => {
+    const map: Record<string, DayChip[]> = {};
+    const add = (ev: DayChip) => {
+      if (!ev.date) return;
+      if (!map[ev.date]) map[ev.date] = [];
+      map[ev.date].push(ev);
+    };
+
+    // 협업 내역에 이미 올라간 줄도 원래 협업의 업로드 마감을 봐야, 일정 확정 전과 후에
+    // 점이 다른 날로 옮겨 다니지 않는다.
+    const byCollabId = new Map(campaignCollabs.map(c => [c.id, c]));
+
+    const rows: CollabListItem[] = [
+      ...collabRecords.map(c => ({ ...c, _source: 'manual' as CollabSource })),
+      ...campaignCollabItems,
+    ];
+    rows.forEach(c => {
+      const linked = byCollabId.get(String(c._collabId || (c as any).collab_id || ''));
+      add({
+        id: `up_${c.id}`,
+        kind: 'upload',
+        // 이미 올린 협업은 올린 날에, 아직인 협업은 마감일에 찍는다. 올린 뒤에도
+        // 마감일에 남겨 두면 정산 점(올린 달의 익월 말일)과 한 달이 어긋나 보인다.
+        date: dayOnly(
+          c._uploadedDay ||
+            linked?.uploadedDay ||
+            c._uploadDue ||
+            linked?.uploadDue ||
+            c.end_date ||
+            c.date,
+        ),
+        title: c.title,
+        company: c.company_name,
+        done:
+          effectiveCollabStatus(c) === 'completed' || Boolean(linked?.uploadConfirmedAt),
+        cancelled: c.status === 'cancelled',
+      });
+    });
+
+    // 브랜드가 직접 보낸 제안. 캠페인 협업으로 이미 찍히는 건은 뺀다 — 같은 일이 제안과
+    // 협업 두 점으로 찍히면 달력이 다시 두 배가 된다.
+    dropProposalsCoveredByCollabs(acceptedProposals, campaignCollabs).forEach(p => {
+      add({
+        id: `up_p_${p.id}`,
+        kind: 'upload',
+        date: dayOnly(p.end_date) || dayOnly(p.start_date),
+        title: p.title || p.company_name,
+        company: p.company_name,
+        done: isProposalDone(p),
+        cancelled: false,
+      });
+    });
+
+    // 정산 점. 날짜 판정(지급 완료면 완료일, 아니면 예정일)은 위의 정산 맵이 이미
+    // 한 번 했으므로 그 결과를 그대로 쓴다 — 같은 규칙을 두 번 적으면 달력의 점과
+    // 아래 상세 목록이 다른 날에 놓인다.
+    Object.entries(settlementEventsMap).forEach(([date, list]) =>
+      list.forEach(stl =>
+        add({
+          id: `stl_${stl.id}`,
+          kind: 'settlement',
+          date,
+          title: stl.title || stl.company_name || '협업 정산',
+          company: stl.company_name,
+          done: stl.status === 'completed',
+          cancelled: false,
+          amount: Number(stl.amount || 0),
+        }),
+      ),
+    );
+
+    // 남은 일이 먼저다. 한 날에 여러 건이면 아직 끝나지 않은 것부터, 그리고 정산보다
+    // 업로드가 먼저 — 올리는 일이 내가 지금 해야 하는 일이다.
+    Object.values(map).forEach(list =>
+      list.sort(
+        (a, b) =>
+          Number(a.done) - Number(b.done) ||
+          (a.kind === b.kind ? a.title.localeCompare(b.title) : a.kind === 'upload' ? -1 : 1),
+      ),
+    );
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collabRecords, campaignCollabItems, campaignCollabs, acceptedProposals, settlementEventsMap, today]);
+
+  /**
+   * 점의 색. 지난 업로드 마감을 회색으로 두면 놓친 것을 놓친 줄 모른다.
+   *
+   * 예정일이 지난 정산은 빨강으로 두지 않는다. 지급 회차는 담당자가 앞뒤로 조정하는
+   * 값이고, 인플루언서가 오늘 할 수 있는 일이 없는 날짜에 경고색을 쓰면 자기 마감을
+   * 놓친 날과 구별되지 않는다.
+   */
+  const chipClass = (ev: DayChip) => {
+    if (ev.cancelled) return 'bg-slate-100 text-slate-400 line-through';
+    if (ev.kind === 'settlement') {
+      return ev.done ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700';
+    }
+    if (ev.done) return 'bg-emerald-100 text-emerald-700';
+    if (ev.date < today) return 'bg-red-100 text-red-700';
+    return 'bg-blue-100 text-blue-700';
   };
 
   const getCategoryBadge = (category: string) => {
@@ -852,10 +977,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
                 const dateStr = getDateStr(day);
-                const pEvents = proposalEventsMap[dateStr] || [];
-                const cEvents = collabEventsMap[dateStr] || [];
-                const sEvents = settlementEventsMap[dateStr] || [];
-                const totalEvents = pEvents.length + cEvents.length + sEvents.length;
+                const chips = dayChipsMap[dateStr] || [];
                 const isToday = dateStr === today;
                 const isSelected = dateStr === selectedDate;
                 const dayOfWeek = (firstDay + i) % 7;
@@ -879,61 +1001,37 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     }`}>
                       {day}
                     </span>
+                    {/* 올리는 날(⬆️)과 정산이 들어오는 날(💰)만 찍는다. 세 건이 넘는
+                        날은 개수로 접고, 자세한 내용은 칸을 눌렀을 때 아래 상세에서 본다. */}
                     <div className="mt-1.5">
-                      {/* Proposal events */}
-                      {pEvents
-                        .sort((a, b) => (eventOrder[a.id] ?? 0) - (eventOrder[b.id] ?? 0))
-                        .slice(0, 1)
-                        .map(ev => {
-                          const { isFirst, isLast } = getEventPosition(ev.start_date, ev.end_date, dateStr);
-                          return (
-                            <div
-                              key={ev.id}
-                              className={`${getProposalStatusColor(isProposalDone(ev) ? 'completed' : ev.status)} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
-                                isFirst && isLast ? 'rounded px-1.5 mx-0' :
-                                isFirst ? 'rounded-l pl-1.5 -mr-[13px] md:-mr-[13px]' :
-                                isLast ? 'rounded-r pr-1.5 -ml-[13px] md:-ml-[13px]' :
-                                '-mx-[13px] md:-mx-[13px]'
-                              }`}
-                            >
-                              {isFirst ? ev.title : '\u00A0'}
-                            </div>
-                          );
-                        })}
-                      {/* Collab events */}
-                      {cEvents.slice(0, 1).map(ev => {
-                        const endDate = ev.end_date || ev.date;
-                        const { isFirst, isLast } = getEventPosition(ev.date, endDate, dateStr);
-                        return (
-                          <div
-                            key={ev.id}
-                            className={`${getCollabStatusColor(effectiveCollabStatus(ev))} text-white text-[11px] md:text-xs font-bold py-1 leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
-                              isFirst && isLast ? 'rounded px-1.5 mx-0' :
-                              isFirst ? 'rounded-l pl-1.5 -mr-[13px] md:-mr-[13px]' :
-                              isLast ? 'rounded-r pr-1.5 -ml-[13px] md:-ml-[13px]' :
-                              '-mx-[13px] md:-mx-[13px]'
-                            }`}
-                          >
-                            {isFirst ? ev.title : '\u00A0'}
-                          </div>
-                        );
-                      })}
-                      {/* Settlement events — 하루짜리 사건이라 막대가 아니라 한 줄 배지 */}
-                      {sEvents.slice(0, 1).map(ev => (
+                      {chips.slice(0, 3).map(ev => (
                         <div
-                          key={`stl_${ev.id}`}
-                          className={`text-[11px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap mb-[1px] ${
-                            ev.status === 'completed'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-violet-100 text-violet-700'
-                          }`}
+                          key={ev.id}
+                          title={[
+                            ev.kind === 'settlement'
+                              ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
+                              : ev.done
+                                ? '업로드 완료'
+                                : '업로드 예정',
+                            ev.title,
+                            ev.company,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                          className={`text-[11px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)}`}
                         >
-                          💰 {ev.status === 'completed' ? '입금 완료' : '입금 예정'}
-                          {sEvents.length > 1 ? ` ${sEvents.length}건` : ''}
+                          {ev.kind === 'settlement'
+                            ? ev.done
+                              ? '💸'
+                              : '💰'
+                            : ev.done
+                              ? '✅'
+                              : '⬆️'}{' '}
+                          {ev.title}
                         </div>
                       ))}
-                      {totalEvents > 3 && (
-                        <p className="text-[11px] font-bold text-slate-400 px-1">+{totalEvents - 3}건</p>
+                      {chips.length > 3 && (
+                        <p className="text-[11px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
                       )}
                     </div>
                   </div>
@@ -1246,35 +1344,33 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             )}
           </div>
 
-          {/* Legend */}
+          {/* Legend — 달력이 찍는 것은 업로드하는 날과 정산이 들어오는 날, 둘뿐이다. */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
+            <p className="text-[11px] font-bold text-slate-400 mb-3 leading-relaxed">
+              달력에는 업로드 일정과 정산 예정일만 표시됩니다. 정산일은 콘텐츠를 올린 달의 다음 달
+              말일이라, 업로드가 밀리면 정산일도 함께 밀립니다. 협업 기간과 금액 합계는 협업 내역
+              탭에서 볼 수 있습니다.
+            </p>
             <div className="space-y-2.5">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">제안</p>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-green-500" />
-                <span className="text-sm font-bold text-slate-600">진행중 (수락됨)</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-blue-400" />
+                <span className="text-sm font-bold text-slate-600">⬆️ 업로드 예정</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-500" />
-                <span className="text-sm font-bold text-slate-600">완료됨</span>
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-100" />
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">협업 기록</p>
-              <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-amber-500" />
-                <span className="text-sm font-bold text-slate-600">예정</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-red-400" />
+                <span className="text-sm font-bold text-slate-600">마감 지남 (미업로드)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-orange-500" />
-                <span className="text-sm font-bold text-slate-600">진행중</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-violet-400" />
+                <span className="text-sm font-bold text-slate-600">💰 정산 예정 (업로드 익월 말일)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-teal-500" />
-                <span className="text-sm font-bold text-slate-600">완료됨</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-emerald-400" />
+                <span className="text-sm font-bold text-slate-600">✅ 업로드 완료 · 💸 입금 완료</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-slate-400" />
+                <div className="w-3.5 h-3.5 rounded-full bg-slate-300" />
                 <span className="text-sm font-bold text-slate-600">취소</span>
               </div>
             </div>

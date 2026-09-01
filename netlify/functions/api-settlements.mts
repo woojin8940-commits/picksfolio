@@ -10,6 +10,8 @@ import {
   settlementInfKey,
 } from "./_shared/collab-records.mts";
 import { normalizeRewardMode } from "./_shared/reward-mode.mts";
+import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
+import { settlementDateFrom } from "./_shared/collab-workflow.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 
 /**
@@ -33,6 +35,65 @@ function derivedAmount(row: any): { amount: number; pending: boolean } {
 }
 
 
+/**
+ * 정산 예정일 = 콘텐츠가 올라간 달의 익월 말일.
+ *
+ * 예전에는 파생 정산의 예정일이 캠페인 종료일(end_date)이었다. 종료일은 "이 날까지
+ * 올려 주세요"라는 업로드 마감이지 입금일이 아니라서, 협업 현황 캘린더와 정산금
+ * 화면에는 업로드하는 날에 돈이 들어오는 것처럼 찍혔다. 실제 지급은 그 달을 마감하고
+ * 다음 달 말에 나간다.
+ *
+ * 기준일은 뒤로 갈수록 흐릿해지는 순서로 찾는다.
+ *
+ *   1. 게시물 링크가 등록된 날 — 실제 업로드일.
+ *   2. 담당자가 업로드를 확인한 날 — 링크 기록이 없는 옛 협업.
+ *   3. 확정 조건의 업로드 마감일(collab_terms.upload_due) — 아직 올리지 않은 협업.
+ *   4. 캠페인 종료일 → 시작일 — 조건도 확정되지 않은 협업.
+ *
+ * 3·4번은 예정이므로 업로드가 밀리면 정산일도 함께 밀린다. 그래도 비워 두지는
+ * 않는다 — 날짜가 없는 정산은 캘린더에서 아예 사라져서 "내 정산이 언제인지 모른다"가
+ * 된다.
+ *
+ * 담당자가 회차를 직접 잡은 협업은 여기까지 오지 않는다. 그 경우는 명시 정산 항목이
+ * 있고(schedule_settlement), 파생 행은 만들지 않는다.
+ */
+function derivedSettlementDate(row: any): { date: string; estimated: boolean } {
+  const uploaded = seoulDayOf(row?.uploaded_at) || seoulDayOf(row?.upload_confirmed_at);
+  if (uploaded) return { date: settlementDateFrom(uploaded), estimated: false };
+
+  const planned =
+    toDayKey(row?.upload_due) || toDayKey(row?.end_date) || toDayKey(row?.start_date);
+  if (planned) return { date: settlementDateFrom(planned), estimated: true };
+
+  const created = seoulDayOf(row?.created_at) || todayInSeoul();
+  return { date: settlementDateFrom(created), estimated: true };
+}
+
+/** 'YYYY-MM-DD' 부분만. 날짜 칸(date)은 시간대 변환 없이 그대로 쓴다. */
+function toDayKey(value: any): string {
+  const raw =
+    value instanceof Date ? value.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }) : String(value || "");
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+/**
+ * 비즈니스 제안 협업의 정산 예정일.
+ *
+ * 제안 협업에는 단계별 업로드 기록이 없다. 협업 종료일이 콘텐츠가 올라가는 날이므로
+ * 그 날을 업로드일로 본다 — 아직 종료일이 오지 않았으면 예정으로 표시한다.
+ */
+function proposalSettlementDate(row: any, today: string): { date: string; estimated: boolean } {
+  const endDay = toDayKey(row?.end_date);
+  const uploaded = endDay && endDay <= today ? endDay : "";
+  return derivedSettlementDate({
+    uploaded_at: uploaded || null,
+    upload_due: endDay,
+    start_date: row?.start_date,
+    created_at: row?.created_at,
+  });
+}
+
 export default async (req: Request) => {
   const url = new URL(req.url);
   const role = url.searchParams.get("role") || "influencer";
@@ -55,6 +116,7 @@ export default async (req: Request) => {
 
   try {
     if (req.method === "GET") {
+      const today = todayInSeoul();
       const explicitRecords = await readRecords(SETTLEMENTS_STORE, role === "business" ? bizKey : infKey);
       const seenProposalIds = new Set<string>();
       for (const s of explicitRecords || []) {
@@ -87,7 +149,12 @@ export default async (req: Request) => {
                 SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
                        c.business_username as biz_user, c.brand_name, c.title as campaign_title,
                        c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
-                       ct.fee as manager_fee
+                       ct.fee as manager_fee,
+                       -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
+                       -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
+                       ct.upload_due, cc.upload_confirmed_at,
+                       (SELECT MIN(cd.created_at) FROM collab_deliverables cd
+                         WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
                 FROM campaign_applications ca
                 JOIN campaigns c ON c.id = ca.campaign_id
                 LEFT JOIN campaign_collabs cc
@@ -106,6 +173,7 @@ export default async (req: Request) => {
           const propId = row.id || `prop_${Date.now()}`;
           if (seenProposalIds.has(propId)) continue;
           seenProposalIds.add(propId);
+          const payout = proposalSettlementDate(row, today);
           autoDerivedSettlements.push({
             id: `stl_derived_${propId}`,
             proposal_id: propId,
@@ -114,9 +182,9 @@ export default async (req: Request) => {
             company_name: row.company_name || '비즈니스 제안',
             title: row.title || '비즈니스 제안 협업',
             amount: parseAmount(row.fee || 0),
-            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            scheduled_date: payout.date,
             status: row.status === 'completed' ? 'completed' : 'scheduled',
-            memo: '비즈니스 제안 협업',
+            memo: `비즈니스 제안 협업${payout.estimated ? ' · 업로드 예정일 기준' : ''}`,
             created_at: row.created_at || new Date().toISOString(),
             updated_at: row.created_at || new Date().toISOString(),
           });
@@ -128,6 +196,7 @@ export default async (req: Request) => {
           seenProposalIds.add(propId);
           const isListup = row.source === 'listup';
           const { amount, pending } = derivedAmount(row);
+          const payout = derivedSettlementDate(row);
           autoDerivedSettlements.push({
             id: `stl_derived_${propId}`,
             proposal_id: propId,
@@ -137,9 +206,9 @@ export default async (req: Request) => {
             title: row.campaign_title || '캠페인 협업',
             amount,
             amount_pending: pending,
-            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            scheduled_date: payout.date,
             status: 'scheduled',
-            memo: isListup ? '담당자 리스트업' : '캠페인 협업',
+            memo: `${isListup ? '담당자 리스트업' : '캠페인 협업'}${payout.estimated ? ' · 업로드 예정일 기준' : ' · 업로드한 달의 익월 말일 지급'}`,
             created_at: row.created_at || new Date().toISOString(),
             updated_at: row.created_at || new Date().toISOString(),
           });
@@ -163,7 +232,12 @@ export default async (req: Request) => {
                 SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
                        c.business_username as biz_user, c.brand_name, c.title as campaign_title,
                        c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
-                       ct.fee as manager_fee
+                       ct.fee as manager_fee,
+                       -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
+                       -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
+                       ct.upload_due, cc.upload_confirmed_at,
+                       (SELECT MIN(cd.created_at) FROM collab_deliverables cd
+                         WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
                 FROM campaign_applications ca
                 JOIN campaigns c ON c.id = ca.campaign_id
                 LEFT JOIN campaign_collabs cc
@@ -190,7 +264,7 @@ export default async (req: Request) => {
             company_name: row.company_name || '비즈니스 제안',
             title: row.title || '비즈니스 제안 협업',
             amount: parseAmount(row.fee || 0),
-            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            scheduled_date: proposalSettlementDate(row, today).date,
             status: row.status === 'completed' ? 'completed' : 'scheduled',
             memo: '비즈니스 제안 협업',
             created_at: row.created_at || new Date().toISOString(),
@@ -205,6 +279,7 @@ export default async (req: Request) => {
           seenProposalIds.add(propId);
           const isListup = row.source === 'listup';
           const { amount, pending } = derivedAmount(row);
+          const payout = derivedSettlementDate(row);
           autoDerivedSettlements.push({
             id: `stl_derived_${propId}`,
             proposal_id: propId,
@@ -214,9 +289,9 @@ export default async (req: Request) => {
             title: row.campaign_title || '캠페인 협업',
             amount,
             amount_pending: pending,
-            scheduled_date: row.end_date || row.start_date || (row.created_at ? String(row.created_at).split('T')[0] : new Date().toISOString().split('T')[0]),
+            scheduled_date: payout.date,
             status: 'scheduled',
-            memo: isListup ? '담당자 리스트업' : '캠페인 협업',
+            memo: `${isListup ? '담당자 리스트업' : '캠페인 협업'}${payout.estimated ? ' · 업로드 예정일 기준' : ' · 업로드한 달의 익월 말일 지급'}`,
             created_at: row.created_at || new Date().toISOString(),
             updated_at: row.created_at || new Date().toISOString(),
           });

@@ -241,6 +241,139 @@ const Stat: React.FC<{ label: string; value: string; title?: string; hint?: stri
   </div>
 );
 
+/**
+ * 담당자에게만 내려오는 성함·연락처.
+ *
+ * 명단을 훑다가 마음에 드는 사람이 나오면 담당자가 하는 다음 한 걸음은 전화다.
+ * 그 번호를 찾으러 등록서 화면을 따로 열게 하지 않기 위해 카드 펼침 안에 둔다.
+ * 겉이 아니라 펼침인 이유는 고를 때 필요한 것은 숫자와 릴스이고, 연락처는 고른
+ * 뒤에 쓰는 값이기 때문이다 — 겉에 두면 카드 하나가 화면을 다 차지한다.
+ *
+ * 서버가 담당자 응답에만 contact 를 싣는다(campaign-listup.mts 의 loadManagerContacts).
+ * 브랜드·인플루언서 응답에는 이 값이 아예 없으므로 이 자리도 그려지지 않는다.
+ */
+const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
+  contact,
+  fallbackName,
+}) => {
+  const [copied, setCopied] = useState('');
+  const entries: any[] = Array.isArray(contact?.entries) ? contact.entries : [];
+  const name = String(contact?.name || fallbackName || '').trim();
+
+  // 담당자는 대부분 컴퓨터로 명단을 본다. tel: 링크만 두면 번호를 손으로 다시
+  // 적어야 하므로 누르면 바로 복사되게 한다. 클립보드를 못 쓰는 환경에서는
+  // 링크 동작만 남는다.
+  const copy = (value: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard
+      .writeText(value)
+      .then(() => {
+        setCopied(value);
+        window.setTimeout(() => setCopied(''), 1500);
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
+      <p className="text-[10px] text-slate-400 font-black">연락처 · 담당자만 보임</p>
+
+      <div className="flex items-center gap-2">
+        <svg
+          className="w-3.5 h-3.5 text-slate-400 flex-shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+          />
+        </svg>
+        {name ? (
+          <span className="text-xs text-slate-800 font-bold">{name}</span>
+        ) : (
+          <span className="text-xs text-slate-400 font-medium">성함 미등록</span>
+        )}
+      </div>
+
+      {entries.map((e, i) => {
+        const value = String(e?.value || '');
+        const kind = e?.kind === 'phone' || e?.kind === 'email' ? e.kind : 'text';
+        const href =
+          kind === 'phone'
+            ? `tel:${value.replace(/[^\d+]/g, '')}`
+            : kind === 'email'
+              ? `mailto:${value}`
+              : '';
+        return (
+          <div key={`${value}-${i}`} className="flex items-center gap-2">
+            {kind === 'email' ? (
+              <svg
+                className="w-3.5 h-3.5 text-blue-500 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                />
+              </svg>
+            )}
+            {href ? (
+              <a
+                href={href}
+                className="text-xs text-slate-800 font-bold hover:underline break-all"
+              >
+                {value}
+              </a>
+            ) : (
+              <span className="text-xs text-slate-800 font-bold break-all">{value}</span>
+            )}
+            {/* 어디에 적어 낸 값인지. 등록서와 지원서의 번호가 다를 때 어느 쪽으로
+                걸지는 담당자가 판단한다. */}
+            {e?.source && (
+              <span className="text-[10px] text-slate-400 font-bold flex-shrink-0">{e.source}</span>
+            )}
+            <button
+              type="button"
+              onClick={() => copy(value)}
+              className="ml-auto px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-100 text-slate-500 hover:bg-slate-200 flex-shrink-0"
+            >
+              {copied === value ? '복사됨' : '복사'}
+            </button>
+          </div>
+        );
+      })}
+
+      {entries.length === 0 && (
+        <p className="text-[11px] text-slate-400 font-medium">
+          등록된 연락처가 없습니다. 인스타 DM 으로 연락해 주세요.
+        </p>
+      )}
+    </div>
+  );
+};
+
 interface InfluencerCandidateCardProps {
   /** 명단 행 또는 후보 풀 항목. 둘 다 그대로 넣을 수 있다. */
   data: any;
@@ -378,11 +511,15 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
   // 펼침 안에 실을 것이 하나도 없으면 버튼을 만들지 않는다. 눌러도 아무 일이 없는
   // 버튼이 목록에 줄줄이 있으면 다른 카드의 펼침까지 안 눌러 보게 된다.
   // 추천 이유(note)는 겉에 두므로 여기서 세지 않는다.
+  // 연락처는 담당자 응답에만 실려 온다. 지표가 비어 있는 후보라도 연락처가 있으면
+  // 펼칠 것이 있는 카드다.
+  const contact = data?.contact && typeof data.contact === 'object' ? data.contact : null;
   const hasMore = !!(
     feed.length > 0 ||
     trend ||
     m.intro ||
     m.instagramUrl ||
+    contact ||
     details
   );
 
@@ -676,6 +813,8 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               {m.instagramUrl}
             </a>
           )}
+
+          {contact && <ContactPanel contact={contact} fallbackName={m.name} />}
 
           {details}
         </div>

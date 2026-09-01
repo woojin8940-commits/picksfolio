@@ -2411,7 +2411,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "지급 예정": "To be paid",
   "지급 예정일": "Payment due date",
   "지급 완료": "Payment completed",
-  "지급일은 확인한 달의 다음 달 말일입니다.": "The payment date is the last day of the month following the month you confirmed.",
+  "지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.": "The payment date is the last day of the month following the month the content was posted.",
   "지난 달": "Last month",
   "지난 버전도 그대로 남습니다": "The previous version will remain as is.",
   "지난달 대비 15% 상승": "15% increase compared to last month",
