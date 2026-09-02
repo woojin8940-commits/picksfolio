@@ -485,8 +485,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>디엠 자동화</strong>(인스타그램 댓글 → 자동 DM) 이용</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>키워드별 자동 응답 · 발송 이력 확인 · 수동 DM 발송</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>인사이트 메뉴</strong> 이용 — 릴스 조회 · 도달 · 저장 지표를 한눈에</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>반응 좋은 릴스 TOP 5 · AI 콘텐츠 코칭 제공</li>
-              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>비즈니스 계정은 우리 계정을 태그한 콘텐츠까지 인사이트로 확인</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>협업 타임라인 AI 어시스턴트 포함</li>
             </ul>
 

@@ -16,7 +16,7 @@ import type { Settlement } from '../../types';
  * 올라간 달의 익월 말일로 자동 예약되므로(서버 settlementDateFrom), 같은 달에 업로드한
  * 인플루언서들은 같은 날짜를 공유하고 그 날짜가 곧 브랜드가 한 번 보내는 회차다.
  *
- * 맨 위는 일괄 정산 총액과 "인플루언서에게 각각 보내지 않습니다"라는 설명이고, 그 아래에
+ * 맨 위는 일괄 정산 총액 한 칸이고, 그 아래에
  * 입금 예정 · 입금 완료 합계를 둔다. 회차 줄에는 금액과 상태, 그리고 인원 수를 남긴다 —
  * 인원 수는 청구 금액이 맞는지 대조할 근거이지, 누가 언제 얼마를 받는지가 아니다.
  *
@@ -140,9 +140,6 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
         <p className="text-[10px] font-black text-slate-400">일괄 정산 총액</p>
         <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(total)}</p>
-        <p className="text-[11px] text-slate-500 font-bold mt-2 leading-relaxed">
-          픽스폴리오에 한 번 보내시면 됩니다. 인플루언서에게 각각 보내지 않습니다.
-        </p>
         {pendingCount > 0 && (
           <p className="text-[11px] text-amber-600 font-bold mt-1">
             금액 조율 중 {pendingCount}건이 총액에 아직 포함되지 않았습니다.

@@ -8,6 +8,7 @@ import ListupWorkspace from '../collab/ListupWorkspace';
 import CampaignInsightPanel from '../collab/CampaignInsightPanel';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
+import ManagerCampaignSettlementPanel from './ManagerCampaignSettlementPanel';
 
 /**
  * 브랜드 캠페인 — 목록에서 캠페인을 눌러 들어가 인플루언서를 배정한다.
@@ -228,7 +229,9 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
   const [busy, setBusy] = useState(false);
   const [confirmDue, setConfirmDue] = useState('');
   /** 상세의 탭. 브랜드 · 인플루언서 화면과 같은 자리에 같은 이름으로 둔다. */
-  const [detailTab, setDetailTab] = useState<'listup' | 'progress' | 'insight' | 'review'>('listup');
+  const [detailTab, setDetailTab] = useState<
+    'listup' | 'progress' | 'insight' | 'review' | 'settlement'
+  >('listup');
   /**
    * 브리프를 펼쳤는지. 접어 두는 이유는 담당자가 캠페인을 열 때 찾는 것이 조건이
    * 아니라 할 일이기 때문이다 — 조건은 처음 한 번 읽고, 그 뒤로는 명단과 검수만 본다.
@@ -405,16 +408,31 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
     const reviewCount = open.counts?.review || 0;
 
     /**
-     * 탭. 브랜드 화면과 같은 순서 · 같은 이름이다(브랜드에만 있는 정산 탭 자리에
-     * 담당자는 검수가 온다 — 정산은 담당자의 일이 아니고, 검수는 담당자만의 일이다).
+     * 아직 지급하지 않은 사람 수. 정산 탭에 적는다.
+     *
+     * 브랜드는 회차 하나를 한 번에 보내지만 인플루언서 지급은 사람 단위로 닫히므로,
+     * 캠페인이 끝난 뒤에도 며칠씩 몇 명이 남는다. 탭 숫자가 없으면 담당자는 남은
+     * 사람이 있는지 확인하려고 캠페인마다 정산 탭을 눌러 봐야 한다.
+     */
+    const unpaidCount = campaignCollabs.filter(
+      (c: any) =>
+        (c.status === 'in_progress' || c.status === 'completed') && !c.settlement?.paidAt,
+    ).length;
+
+    /**
+     * 탭. 브랜드 화면과 같은 순서 · 같은 이름이고, 검수는 담당자에게만 있다.
      * 검수 탭에는 지금 나를 기다리는 제출물 수를 적는다. 목록의 "검수 대기" 묶음과
      * 같은 숫자라, 목록에서 눌러 들어온 담당자가 어디로 가야 하는지 바로 보인다.
+     *
+     * 정산이 맨 끝인 이유는 순서가 곧 일의 순서이기 때문이다 — 명단을 넘기고,
+     * 진행을 보고, 성과를 확인하고, 검수를 마친 다음에야 지급이 열린다.
      */
     const TABS = [
       { key: 'listup' as const, label: '인플루언서', count: open.counts?.listed || 0 },
       { key: 'progress' as const, label: '진행사항', count: 0 },
       { key: 'insight' as const, label: '인사이트', count: 0 },
       { key: 'review' as const, label: '검수', count: reviewCount },
+      { key: 'settlement' as const, label: '정산', count: unpaidCount },
     ];
     const activeTab = TABS.some((t) => t.key === detailTab) ? detailTab : 'listup';
 
@@ -636,6 +654,18 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
             budgetKrw={Number(open.budgetKrw || 0)}
             uploadedCount={uploadedCount}
             totalCollabs={campaignCollabs.length}
+          />
+        )}
+
+        {/* -------------------------------------------------------- 정산 */}
+        {/* 사람별 지급을 닫는 자리. 같은 동작이 진행사항 보드의 정산 단계에도 있지만,
+            거기서는 한 명을 열어야 한 명이 보인다. 목록으로 두면 "누구에게 아직 안
+            보냈는지"가 한 화면에 남는다. */}
+        {activeTab === 'settlement' && (
+          <ManagerCampaignSettlementPanel
+            collabs={campaignCollabs}
+            onNotify={onNotify}
+            onChanged={loadCollabs}
           />
         )}
 
