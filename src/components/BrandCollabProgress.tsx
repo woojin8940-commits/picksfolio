@@ -438,10 +438,10 @@ const payoutBadge = (collab: CollabRow): { label: string; cls: string } => {
 type PickRow = {
   id: string;
   username: string;
-  name: string;
   instagramHandle: string;
   instagramUrl: string;
   profileImage: string;
+  followers: number;
   outreachStatus: string;
   quotedFee: number;
 };
@@ -474,10 +474,20 @@ const OUTREACH_STEP: Record<string, { label: string; cls: string; hint: string }
  * 리스트업에 굳어 있는 인플루언서 표시 정보.
  *
  * 얼굴과 인스타 아이디는 협업 목록이 실어 주는 연동 정보(collab.creator)가 먼저다.
- * 이 스냅샷은 그것이 아직 없는 사람(연동 전·동기화 전)에게만 쓰는 보조 자료이고,
- * 이름은 여기에만 있다.
+ * 이 스냅샷은 그것이 아직 없는 사람(연동 전·동기화 전)에게만 쓰는 보조 자료다.
+ *
+ * 실명(snapshot.name)은 담지 않는다. 이 화면이 사람을 부르는 이름은 인스타 계정명
+ * 하나로 통일했다 — 브랜드는 리스트업에서 계정명을 보고 골랐으므로, 진행사항에서
+ * 갑자기 실명이 나오면 자기가 고른 사람인지 확인하려고 담당자에게 되묻게 된다.
+ * 팔로워는 그 자리를 대신 채우는 값이라 여기서 함께 받는다(연동 정보에 팔로워가
+ * 아직 없는 사람도 있다).
  */
-type Snapshot = { name: string; instagramHandle: string; instagramUrl: string; profileImage: string };
+type Snapshot = {
+  instagramHandle: string;
+  instagramUrl: string;
+  profileImage: string;
+  followers: number;
+};
 
 const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   viewer = 'brand',
@@ -530,17 +540,17 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       const listup = await apiService.getCampaignListup(campaignId);
       const candidates = (listup?.candidates || []) as any[];
 
-      // 이름과 (연동 정보가 아직 없을 때의) 얼굴. 협업 목록 API 는 계정 아이디와
-      // 인스타 연동 정보를 주지만 사람 이름은 리스트업에만 있다.
+      // 연동 정보가 아직 없을 때 쓸 얼굴 · 계정명 · 팔로워. 협업 목록 API 가 연동
+      // 정보를 주지 못하는 사람(연동 전·동기화 전)이 있어서 리스트업 쪽 값을 함께 쥔다.
       const snaps: Record<string, Snapshot> = {};
       for (const c of candidates) {
         const key = String(c.snapshot?.username || c.influencerUsername || '').toLowerCase();
         if (!key) continue;
         snaps[key] = {
-          name: String(c.snapshot?.name || ''),
           instagramHandle: String(c.snapshot?.instagramHandle || ''),
           instagramUrl: String(c.snapshot?.instagramUrl || ''),
           profileImage: String(c.snapshot?.profileImage || ''),
+          followers: Number(c.snapshot?.followers || 0),
         };
       }
       setSnapshots(snaps);
@@ -551,10 +561,10 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         .map(c => ({
           id: String(c.id),
           username: String(c.influencerUsername || ''),
-          name: String(c.snapshot?.name || ''),
           instagramHandle: String(c.snapshot?.instagramHandle || ''),
           instagramUrl: String(c.snapshot?.instagramUrl || ''),
           profileImage: String(c.snapshot?.profileImage || ''),
+          followers: Number(c.snapshot?.followers || 0),
           outreachStatus: String(c.outreachStatus || 'not_sent'),
           quotedFee: Number(c.quotedFee || 0),
         }));
@@ -642,7 +652,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
       ['인스타 계정', '받는 분', '연락처', '우편번호', '주소', '상세주소', '요청사항'].map(cell).join(','),
       ...filled.map(c =>
         [
-          identityOf(c).title,
+          // 표에는 @ 를 붙이지 않는다. 다른 시트로 옮겨 붙이는 값이다.
+          identityOf(c).handle || String(c.creatorUsername || ''),
           c.shipping?.recipient || '',
           formatPhone(c.shipping?.phone),
           c.shipping?.postcode || '',
@@ -803,6 +814,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const identityOf = (collab: CollabRow) => {
     const snap = snapshots[String(collab.creatorUsername || '').toLowerCase()];
     const handle = collab.creator?.instagramHandle || snap?.instagramHandle || '';
+    const followers = Number(collab.creator?.followers || snap?.followers || 0);
     return {
       handle,
       instagramUrl:
@@ -810,16 +822,18 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         snap?.instagramUrl ||
         (handle ? `https://www.instagram.com/${handle}/` : ''),
       image: collab.creator?.profileImage || snap?.profileImage || '',
-      name: snap?.name || '',
-      /** 인스타 아이디가 없으면 계정 아이디로 대신한다. 빈 줄로 두면 누구인지 알 수 없다. */
-      title: handle || snap?.name || `@${collab.creatorUsername}`,
+      followers,
       /**
-       * 아랫줄은 사람 이름, 없으면 팔로워 수. 굵은 줄에 이미 아이디가 있는데 아이디를
-       * 한 번 더 쓰면 두 줄이 같은 말을 한다. 둘 다 없으면 아예 안 그린다.
+       * 굵은 줄은 인스타 계정명 하나다.
+       *
+       * 실명은 여기 두지 않는다. 브랜드가 리스트업 카드에서 보고 고른 이름이 계정명
+       * 이어서, 진행사항에서만 실명으로 부르면 같은 사람이 두 사람처럼 읽힌다.
+       * 계정명을 아직 못 받은 사람만 픽스폴리오 아이디로 대신한다 — 빈 줄로 두면
+       * 누구인지 알 수 없다.
        */
-      sub:
-        snap?.name ||
-        (collab.creator?.followers ? `팔로워 ${formatCountKo(collab.creator.followers)}` : ''),
+      title: handle ? `@${handle}` : `@${collab.creatorUsername}`,
+      /** 아랫줄은 팔로워. 못 받았으면 그리지 않는다(0명이라고 적을 수는 없다). */
+      sub: followers > 0 ? `팔로워 ${formatCountKo(followers)}` : '',
     };
   };
 
@@ -861,7 +875,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
           handle: live.instagramHandle || base.handle,
           instagramUrl: live.instagramUrl || base.instagramUrl,
           image: live.profileImage || base.image,
-          title: live.instagramHandle || base.title,
+          title: live.instagramHandle ? `@${live.instagramHandle}` : base.title,
         };
       })()
     : null;
@@ -914,9 +928,11 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     </a>
                   )}
                 </p>
+                {/* 팔로워와 캠페인 이름. 팔로워를 못 받았으면 캠페인 이름만 남는다 —
+                    굵은 줄에 이미 계정명이 있는데 아이디를 한 번 더 쓰면 두 줄이 같은
+                    말을 한다. */}
                 <p className="text-xs text-slate-400 font-bold truncate">
-                  {openedIdentity?.sub || `@${openedCollab?.creatorUsername || ''}`}
-                  {openedCollab?.campaignTitle ? ` · ${openedCollab.campaignTitle}` : ''}
+                  {[openedIdentity?.sub, openedCollab?.campaignTitle].filter(Boolean).join(' · ')}
                 </p>
               </div>
               {openedNeedsReview && (
@@ -1372,21 +1388,30 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
               <div className="space-y-1.5">
                 {picks.map(p => {
                   const step = OUTREACH_STEP[p.outreachStatus] || OUTREACH_STEP.not_sent;
-                  const pickTitle =
-                    p.instagramHandle || p.name || (p.username ? `@${p.username}` : '선정한 인플루언서');
+                  const pickTitle = p.instagramHandle
+                    ? `@${p.instagramHandle}`
+                    : p.username
+                      ? `@${p.username}`
+                      : '선정한 인플루언서';
                   return (
                     <div key={p.id} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5">
                       <CreatorAvatar src={p.profileImage} label={pickTitle} size="w-9 h-9" />
                       <div className="min-w-0 flex-1">
-                        {/* 확정 전 후보도 위 카드와 같은 이름으로 부른다 — 인스타 아이디.
-                            여기서는 이름, 위에서는 아이디로 부르면 같은 사람이 두 사람으로 읽힌다. */}
+                        {/* 확정 전 후보도 위 카드와 같은 이름으로 부른다 — 인스타 계정명.
+                            여기서는 실명, 위에서는 계정명으로 부르면 같은 사람이 두 사람으로 읽힌다. */}
                         <div className="flex items-center gap-1.5 min-w-0">
                           <p className="text-sm font-black text-slate-900 truncate">{pickTitle}</p>
                           {p.instagramHandle && (
                             <span className="text-pink-500 flex-shrink-0"><InstagramMark /></span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400 font-bold truncate">{step.hint}</p>
+                        {/* 위 카드와 같은 값(팔로워)을 같은 자리에 둔다. 진행 안내는
+                            그 뒤에 이어 붙인다 — 둘 다 한 줄에 들어갈 만큼 짧다. */}
+                        <p className="text-xs text-slate-400 font-bold truncate">
+                          {[p.followers > 0 ? `팔로워 ${formatCountKo(p.followers)}` : '', step.hint]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <span className={`px-2 py-0.5 rounded-md text-[11px] font-black ${step.cls}`}>{step.label}</span>

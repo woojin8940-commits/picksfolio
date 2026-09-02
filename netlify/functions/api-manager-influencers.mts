@@ -138,6 +138,15 @@ export default async (req: Request) => {
           syncedAt: "",
           intro: "",
           categories: "",
+          /**
+           * 카테고리는 두 곳에 적힌다 — 본인이 등록한 채널 지표와 협업 등록서.
+           * 카드에 찍는 대표 문구(categories)는 새 값인 채널 쪽을 쓰지만, 칩을
+           * 눌렀을 때의 필터는 두 곳 중 하나라도 맞으면 걸린다. 그래서 카드에 다는
+           * 태그는 두 곳을 합집합으로 모은다 — 안 그러면 "뷰티" 칩으로 걸러 낸
+           * 사람의 카드에 뷰티가 안 적혀 있는 화면이 된다.
+           */
+          channelCategories: "",
+          directoryCategories: "",
           categoryTags: [] as string[],
           adPrice: "",
           postPrice: "",
@@ -160,6 +169,7 @@ export default async (req: Request) => {
       item.name = row.name || item.name;
       item.instagramUrl = row.instagram_url || item.instagramUrl;
       item.categories = row.category || item.categories;
+      item.directoryCategories = row.category || item.directoryCategories;
       item.adPrice = row.ad_price || "";
       item.postPrice = row.post_price || "";
       item.shortPrice = row.short_price || "";
@@ -197,11 +207,17 @@ export default async (req: Request) => {
       item.syncedAt = shaped.syncedAt;
       item.intro = shaped.intro;
       item.categories = shaped.categories || item.categories;
+      item.channelCategories = shaped.categories || item.channelCategories;
     }
 
     const list = Array.from(people.values()).map((p) => {
       const stat = collabMap.get(p.username);
-      p.categoryTags = splitCategories(p.categories);
+      p.categoryTags = Array.from(
+        new Set([
+          ...splitCategories(p.channelCategories),
+          ...splitCategories(p.directoryCategories),
+        ]),
+      );
       p.runningCollabs = Number(stat?.running || 0);
       p.completedCollabs = Number(stat?.completed || 0);
       return p;
@@ -209,20 +225,51 @@ export default async (req: Request) => {
 
     list.sort((a, b) => (b.followers || 0) - (a.followers || 0));
 
-    // 카테고리 집계는 필터가 걸리지 않은 전체 기준이어야 한다. 필터 결과로 세면
-    // "뷰티"를 고른 순간 다른 카테고리가 목록에서 사라져 되돌아갈 길이 없어진다.
+    /**
+     * 카테고리 집계.
+     *
+     * 두 가지를 지킨다.
+     *
+     * ① 필터가 걸리지 않은 전체 기준으로 센다. 필터 결과로 세면 "뷰티"를 고른 순간
+     *    다른 카테고리가 목록에서 사라져 되돌아갈 길이 없어진다.
+     *
+     * ② 사람을 센다. 칸을 세지 않는다. 예전에는 두 표를 UNION ALL 로 이어 붙인
+     *    뒤 줄마다 태그를 세서, 채널 지표와 협업 등록서에 모두 있는 사람이 카테고리마다
+     *    두 번 계산됐다 — 위 목록은 username 으로 한 명으로 겹쳐 놓았으니, 칩에는
+     *    12명이라고 적혀 있는데 눌러 보면 7명이 나왔다. 사람별로 태그를 모아 집합으로
+     *    만든 다음 세면 한 사람이 같은 카테고리에서 한 번만 세어진다(한 사람의 등록서와
+     *    채널 지표에 "뷰티"가 둘 다 적혀 있어도 한 번).
+     *
+     * 계정 이름을 겹치는 방법도 목록과 같아야 한다. SQL 의 LOWER 만으로는 'biz/'
+     * 접두어가 붙은 계정이 다른 사람으로 남으므로 JS 의 norm 을 한 번 더 통과시킨다.
+     */
     const catRows = (await db.sql`
-      SELECT categories FROM creator_channels WHERE COALESCE(categories, '') <> ''
+      SELECT username AS person, categories AS tags
+      FROM creator_channels
+      WHERE COALESCE(username, '') <> '' AND COALESCE(categories, '') <> ''
       UNION ALL
-      SELECT category FROM collab_directory_applications
-      WHERE role = 'influencer' AND COALESCE(category, '') <> ''
+      SELECT applicant_username AS person, category AS tags
+      FROM collab_directory_applications
+      WHERE role = 'influencer'
+        AND COALESCE(applicant_username, '') <> ''
+        AND COALESCE(category, '') <> ''
     `) as any[];
 
-    const counts = new Map<string, number>();
+    const tagsByPerson = new Map<string, Set<string>>();
     for (const row of catRows) {
-      for (const tag of splitCategories(row.categories || row.category)) {
-        counts.set(tag, (counts.get(tag) || 0) + 1);
+      const key = norm(row.person);
+      if (!key) continue;
+      let set = tagsByPerson.get(key);
+      if (!set) {
+        set = new Set<string>();
+        tagsByPerson.set(key, set);
       }
+      for (const tag of splitCategories(row.tags)) set.add(tag);
+    }
+
+    const counts = new Map<string, number>();
+    for (const set of tagsByPerson.values()) {
+      for (const tag of set) counts.set(tag, (counts.get(tag) || 0) + 1);
     }
 
     return Response.json({

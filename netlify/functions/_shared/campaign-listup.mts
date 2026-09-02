@@ -84,7 +84,6 @@ export function normalizeOffer(raw: any): ListupOffer {
 export type ListupQuote = {
   fee: number;
   secondUseFee: number;
-  guaranteedViews: number;
 };
 
 export type ListupPayout = { fee: number; secondUseFee: number };
@@ -180,7 +179,6 @@ export function normalizeQuote(raw: any): ListupQuote {
   return {
     fee: money(q.fee),
     secondUseFee: money(q.secondUseFee),
-    guaranteedViews: money(q.guaranteedViews),
   };
 }
 
@@ -658,7 +656,7 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
 /**
  * 브랜드 화면에 나가는 후보의 신원을 가린다.
  *
- * 수락 전까지 브랜드는 계정 이름·인스타 주소·릴스 링크를 받지 않는다. 지표와
+ * 수락 전까지 브랜드는 실명·픽스폴리오 아이디·릴스 링크를 받지 않는다. 지표와
  * 영상 미리보기는 그대로 나가므로 고르는 데 필요한 판단 재료는 줄지 않는다.
  * 가리는 이유는 순서다. 브랜드가 명단만 받고 직접 연락하면 조건을 조율하는
  * 사람이 사라지고, 인플루언서는 담당자가 합의한 단가를 보장받지 못한다.
@@ -666,11 +664,19 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
  * 화면에서만 별표로 덮는 방식은 쓰지 않는다. 응답에 값이 실려 있으면 가린 것이
  * 아니다. 수락된 뒤에는 이미 협업이 시작된 사이이므로 그대로 내보낸다.
  *
- * 프로필 사진은 가리지 않는다. 예전에는 지웠는데, 그러면 브랜드가 받는 명단이
- * 회색 동그라미만 늘어선 화면이 되어 후보를 고를 마음 자체가 안 생긴다. 사진은
- * 릴스 썸네일과 같은 성질의 판단 재료이고, 계정을 찾아가는 열쇠(아이디·주소·
- * permalink)는 그대로 막아 두므로 가리는 목적 — 브랜드가 우리를 건너뛰고 직접
- * 연락하는 것 — 은 그대로 지켜진다.
+ * 인스타 계정명(handle)과 그 주소는 가리지 않는다 — 제품 결정이다. 예전에는
+ * 지웠는데, 그러면 카드 첫 줄이 "**진" 같은 별표가 되어 브랜드는 세 후보를
+ * 서로 구별할 수도, 어떤 계정을 봤는지 기억할 수도 없었다. 계정명은 이 시장에서
+ * 사람을 부르는 이름 자체이므로, 그것 없이 명단을 고르라는 것은 사실상 프로필
+ * 사진만 보고 고르라는 뜻이었다. 계정명이 나가면 브랜드가 직접 찾아갈 수는
+ * 있지만, 그것을 막는 실질적 장치는 이 가리개가 아니라 담당자가 쥐고 있는
+ * 단가·일정·가이드 합의다.
+ *
+ * 실명은 계속 가린다. 계정명과 달리 실명은 고르는 데 쓰이지 않고, 계약·정산
+ * 단계에서야 필요한 정보다. 릴스 permalink 도 계속 막는다. 캡션에는 협업 문의
+ * 연락처가 적혀 있는 경우가 많아, 링크 하나가 곧 담당자를 건너뛰는 경로가 된다.
+ *
+ * 프로필 사진도 가리지 않는다. 릴스 썸네일과 같은 성질의 판단 재료다.
  */
 function maskSnapshot(snapshot: any, outreachStatus: string) {
   if (outreachStatus === "accepted") return snapshot;
@@ -680,9 +686,10 @@ function maskSnapshot(snapshot: any, outreachStatus: string) {
   return {
     ...snapshot,
     name: maskName(name),
+    // 픽스폴리오 아이디는 계속 지운다. 인스타 계정명과 달리 이 값은 우리 서비스
+    // 안에서 그 사람의 페이지·API 를 가리키는 키라서, 고르는 데 쓸모가 없으면서
+    // 넘겨줄 이유도 없다.
     username: "",
-    instagramHandle: "",
-    instagramUrl: "",
     recentReels: reels.map((r: any) => ({
       id: r?.id || "",
       thumbnailUrl: r?.thumbnailUrl || "",

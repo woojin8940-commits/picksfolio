@@ -21,11 +21,11 @@ export const MIN_REELS = 5;
 /** 공통점을 뽑아볼 상위 릴스 수. 전체의 3분의 1 정도, 최소 3편. */
 const topCount = (total: number) => Math.max(3, Math.round(total / 3));
 
-const WEEKDAYS_KO = ['일', '월', '화', '수', '목', '금', '토'];
-const WEEKDAYS_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export const WEEKDAYS_KO = ['일', '월', '화', '수', '목', '금', '토'];
+export const WEEKDAYS_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /** 한국 시간 기준 요일 인덱스(0=일). 파싱 실패하면 null. */
-const seoulWeekday = (iso: string): number | null => {
+export const seoulWeekday = (iso: string): number | null => {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return null;
   const label = new Date(t).toLocaleDateString('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' });
@@ -34,7 +34,7 @@ const seoulWeekday = (iso: string): number | null => {
 };
 
 /** 한국 시간 기준 시(0-23). 파싱 실패하면 null. */
-const seoulHour = (iso: string): number | null => {
+export const seoulHour = (iso: string): number | null => {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return null;
   const hh = new Date(t).toLocaleString('en-GB', {
@@ -47,7 +47,7 @@ const seoulHour = (iso: string): number | null => {
 };
 
 /** 시간대 구간. "14시"보다 "오후"가 다음 편을 올릴 때 쓸 수 있는 말이다. */
-const TIME_BANDS: { from: number; to: number; ko: string; en: string }[] = [
+export const TIME_BANDS: { from: number; to: number; ko: string; en: string }[] = [
   { from: 5, to: 8, ko: '이른 아침', en: 'early morning' },
   { from: 9, to: 11, ko: '오전', en: 'the morning' },
   { from: 12, to: 14, ko: '점심때', en: 'around lunchtime' },
@@ -57,7 +57,7 @@ const TIME_BANDS: { from: number; to: number; ko: string; en: string }[] = [
   { from: 0, to: 4, ko: '새벽', en: 'the small hours' },
 ];
 
-const bandOf = (hour: number) =>
+export const bandOf = (hour: number) =>
   TIME_BANDS.find((b) => (b.from <= b.to ? hour >= b.from && hour <= b.to : hour >= b.from || hour <= b.to));
 
 /** 가장 많이 나온 값과 그 횟수. 동수면 먼저 나온 값. */

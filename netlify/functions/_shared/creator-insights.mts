@@ -621,3 +621,211 @@ export async function firstSnapshotDate(db: any, username: string): Promise<stri
     return "";
   }
 }
+
+// ---------------------------------------------------------------------------
+// 팔로워 인구통계 (1단계 — 팔로워 분석 탭)
+// ---------------------------------------------------------------------------
+
+/**
+ * 팔로워의 성별·연령대·국가 분포를 받아 온다.
+ *
+ * ── 무슨 호출인가 ──
+ *
+ *   GET /me/insights
+ *       ?metric=follower_demographics
+ *       &period=lifetime
+ *       &metric_type=total_value
+ *       &breakdown=age|gender|country
+ *       &timeframe=last_30_days
+ *
+ * 필요한 권한은 instagram_business_basic + instagram_business_manage_insights 둘뿐이고,
+ * 둘 다 이미 승인받아 쓰고 있다(INSIGHTS_APPROVED_AT). 새 권한 신청은 필요 없다.
+ *
+ * ── breakdown 을 세 번 나눠 부르는 이유 ──
+ *
+ * `breakdown=age,gender` 처럼 묶어 보내면 메타는 교차표(20대 여성 …)를 준다. 화면이
+ * 그리려는 것은 축별 분포 셋이라, 교차표를 받아 다시 합치면 반올림된 값을 우리가 또
+ * 더하는 셈이 된다. 세 번 부르고 각각 독립적으로 실패하게 두는 편이 낫다 — 국가가
+ * 막혀도 성별·연령대는 그려진다.
+ *
+ * ── 메타가 값을 안 주는 경우들 ──
+ *
+ * 1. 팔로워 100명 미만: 아예 지표가 안 나온다. 개인 식별을 막는 선이라 우리가 넘을
+ *    방법이 없다. 그래서 호출 전에 팔로워 수로 먼저 걸러 낸다 — 안 될 호출로 메타의
+ *    호출 한도를 태우지 않고, 화면에도 "권한 문제"가 아니라 진짜 이유를 적어 준다.
+ * 2. 상위 45개까지만: 국가는 45개국에서 잘린다. 그래서 합계가 팔로워 수와 다르고,
+ *    화면은 백분율을 "받은 값 안에서의 비율"로만 말해야 한다.
+ * 3. 최대 48시간 지연: 오늘 늘어난 팔로워는 아직 안 섞여 있다.
+ * 4. 값이 없으면 0 이 아니라 빈 배열이 온다. 없는 칸을 0 으로 채우면 "그 나이대는
+ *    한 명도 없다"가 되는데, 실제로는 "메타가 말해 주지 않았다"다. 그대로 비운다.
+ */
+export const DEMOGRAPHICS_MIN_FOLLOWERS = 100;
+
+/**
+ * 인구통계 캐시 유효 시간(분).
+ *
+ * 릴스 지표(30분)보다 훨씬 길게 둔다. 이 값은 메타 쪽에서 하루 단위로 갱신되고
+ * 최대 48시간 늦게 반영되므로, 자주 다시 불러도 같은 숫자가 온다. 여섯 시간이면
+ * 하루에 계정당 네 번이고, 그 안에서 화면을 몇 번 열든 호출은 한 번이다.
+ */
+export const DEMOGRAPHICS_TTL_MINUTES = 6 * 60;
+
+export type DemographicAxis = "age" | "gender" | "country";
+
+/** 분포 한 칸. `key` 는 메타가 준 값 그대로(18-24 / F / KR), 이름 붙이기는 화면 몫이다. */
+export interface DemographicSlice {
+  key: string;
+  value: number;
+}
+
+export interface FollowerDemographics {
+  age: DemographicSlice[];
+  gender: DemographicSlice[];
+  country: DemographicSlice[];
+  /**
+   * 왜 비었는가. 빈 화면에 이유를 적기 위한 값이고, 셋 중 하나라도 값이 왔으면 빈
+   * 문자열이다.
+   *
+   * - few_followers: 팔로워 100명 미만(메타가 정한 선)
+   * - empty: 조건은 맞는데 메타가 빈 집합을 줬다(새 계정·집계 대기)
+   * - denied: 요청이 거절됐다(권한·계정 종류)
+   * - error: 네트워크 등 그 외
+   */
+  reason: "" | "few_followers" | "empty" | "denied" | "error";
+  /** 이 값을 받아 온 시각. 화면이 "48시간까지 늦을 수 있음"을 함께 적는 근거. */
+  fetchedAt: string;
+}
+
+const demographicsCacheKey = (username: string) =>
+  `demographics_v1_${String(username || "").toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+
+/** 축 하나를 받아 온다. 실패는 축 하나만 비우고 나머지에 영향을 주지 않는다. */
+async function fetchOneBreakdown(
+  graphHost: string,
+  token: string,
+  node: string,
+  axis: DemographicAxis,
+): Promise<{ slices: DemographicSlice[]; denied: boolean }> {
+  const params = new URLSearchParams({
+    metric: "follower_demographics",
+    period: "lifetime",
+    metric_type: "total_value",
+    breakdown: axis,
+    // 인구통계 지표에는 timeframe 이 필수다. 빼면 요청 자체가 거절된다.
+    timeframe: "last_30_days",
+    access_token: token,
+  });
+  try {
+    const res = await fetch(
+      `https://${graphHost}/${encodeURIComponent(node)}/insights?${params.toString()}`,
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      console.warn(
+        `[creator-insights] 인구통계(${axis}) 거절:`,
+        String(data?.error?.message || res.status),
+      );
+      return { slices: [], denied: true };
+    }
+    // total_value.breakdowns[].results[] → { dimension_values: ["18-24"], value: 12 }
+    const rows = Array.isArray(data?.data) ? data.data : [];
+    const breakdowns = rows[0]?.total_value?.breakdowns;
+    const results = Array.isArray(breakdowns) ? breakdowns[0]?.results : null;
+    if (!Array.isArray(results)) return { slices: [], denied: false };
+    const slices: DemographicSlice[] = [];
+    for (const row of results) {
+      const key = String(row?.dimension_values?.[0] || "").trim();
+      if (!key) continue;
+      const value = intOf(row?.value);
+      // 0 인 칸은 버린다. 메타가 값을 준 축에서 0 은 "그 칸에 아무도 없다"는 뜻이라
+      // 사실이지만, 도넛·막대에 0 조각을 그리면 범례만 길어지고 읽을 게 없다.
+      if (value > 0) slices.push({ key, value });
+    }
+    slices.sort((a, b) => b.value - a.value);
+    return { slices, denied: false };
+  } catch (e) {
+    console.warn(`[creator-insights] 인구통계(${axis}) 조회 실패:`, (e as Error)?.message);
+    return { slices: [], denied: false };
+  }
+}
+
+/**
+ * 팔로워 인구통계를 받아 온다(캐시 우선).
+ *
+ * `followers` 는 방금 프로필에서 받은 팔로워 수다. 100명 미만이면 메타를 부르지
+ * 않는다. 못 받았으면(null) 걸러 내지 않고 그냥 불러 본다 — 팔로워 수를 모르는 것과
+ * 100명 미만인 것은 다른 상황이고, 후자로 단정해 화면에 잘못된 이유를 적을 이유가 없다.
+ */
+export async function getFollowerDemographics(
+  username: string,
+  link: MetaLink,
+  followers: number | null,
+  opts: { force?: boolean } = {},
+): Promise<FollowerDemographics> {
+  const empty = (reason: FollowerDemographics["reason"]): FollowerDemographics => ({
+    age: [],
+    gender: [],
+    country: [],
+    reason,
+    fetchedAt: new Date().toISOString(),
+  });
+
+  if (typeof followers === "number" && followers < DEMOGRAPHICS_MIN_FOLLOWERS) {
+    return empty("few_followers");
+  }
+
+  const store = (() => {
+    try {
+      return getStore({ name: CACHE_STORE, consistency: "eventual" });
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!opts.force && store) {
+    try {
+      const cached = (await store.get(demographicsCacheKey(username), {
+        type: "json",
+      })) as FollowerDemographics | null;
+      const age = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : NaN;
+      if (Number.isFinite(age) && age >= 0 && age <= DEMOGRAPHICS_TTL_MINUTES * 60 * 1000) {
+        return cached as FollowerDemographics;
+      }
+    } catch (e) {
+      console.warn("[creator-insights] 인구통계 캐시 읽기 실패:", (e as Error)?.message);
+    }
+  }
+
+  const token = String(link.accessToken || "");
+  const graphHost = graphHostFor(link.tokenSource);
+  // 계정 아이디를 알면 그것으로 부른다. `me` 는 토큰이 가리키는 사용자로 풀리는데,
+  // 페이스북 로그인으로 받은 토큰에서는 그게 인스타 계정이 아니라 페이스북 사용자다.
+  const node = String(link.igUserId || link.igAccountId || "me");
+  const [gender, age, country] = await Promise.all([
+    fetchOneBreakdown(graphHost, token, node, "gender"),
+    fetchOneBreakdown(graphHost, token, node, "age"),
+    fetchOneBreakdown(graphHost, token, node, "country"),
+  ]);
+
+  const got = gender.slices.length + age.slices.length + country.slices.length;
+  const payload: FollowerDemographics = {
+    age: age.slices,
+    gender: gender.slices,
+    country: country.slices,
+    reason: got > 0 ? "" : gender.denied && age.denied && country.denied ? "denied" : "empty",
+    fetchedAt: new Date().toISOString(),
+  };
+
+  // 빈 결과도 굳혀 둔다. 새 계정은 며칠 동안 계속 빈 집합이 오는데, 그때마다 세 번씩
+  // 다시 부르면 아무 값도 못 얻고 호출 한도만 쓴다. 거절(denied)은 남기지 않는다 —
+  // 재연동으로 바로 풀릴 수 있는 상태를 여섯 시간 붙잡아 둘 이유가 없다.
+  if (store && payload.reason !== "denied") {
+    try {
+      await store.setJSON(demographicsCacheKey(username), payload);
+    } catch (e) {
+      console.warn("[creator-insights] 인구통계 캐시 쓰기 실패:", (e as Error)?.message);
+    }
+  }
+
+  return payload;
+}

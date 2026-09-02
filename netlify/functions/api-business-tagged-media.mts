@@ -1,13 +1,19 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { REAUTH_MESSAGE, linkNeedsReauth } from "./_shared/instagram-metrics.mts";
+import { REAUTH_MESSAGE, linkNeedsReauth, type MetaLink } from "./_shared/instagram-metrics.mts";
 import {
   CACHE_TTL_HOURS,
   brandLinkUsable,
   getTaggedMedia,
   loadBrandLink,
 } from "./_shared/tagged-media.mts";
+import {
+  fetchProfileCounts,
+  loadFollowerSeries,
+  recordFollowerSnapshot,
+} from "./_shared/creator-insights.mts";
+import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 
 /**
  * 브랜드 계정용 "태그된 콘텐츠" 조회.
@@ -33,6 +39,96 @@ function seoulMonthStart(now = new Date()): number {
   const [year, month] = parts.split("-").map(Number);
   // 서울은 UTC+9 고정(서머타임 없음)이므로 1일 00:00 KST = 전달 말일 15:00 UTC.
   return Date.UTC(year, month - 1, 1, 0, 0, 0) - 9 * 3600_000;
+}
+
+/**
+ * 브랜드 계정 추이를 몇 일 구간으로 볼 것인가.
+ *
+ * 인플루언서 인사이트는 7일을 쓴다(그쪽은 릴스 단위로 자주 움직이는 화면이다).
+ * 브랜드 계정은 팔로워가 하루 단위로 크게 뛰지 않아 7일 증감이 대부분 0 에 가깝게
+ * 나온다 — 그러면 카드가 "이 기능은 안 도는 것 같다"로 읽힌다. 한 달 구간이
+ * 브랜드가 실제로 판단에 쓰는 단위다.
+ */
+const ACCOUNT_WINDOW_DAYS = 30;
+
+/**
+ * 블록1(브랜드 계정 추이)에 쓸 팔로워·팔로잉·증감.
+ *
+ * ── 값이 어디서 오는가 ──
+ *
+ * 인스타그램은 "지금 팔로워 몇 명"만 알려주고 어제 몇 명이었는지는 알려주지 않는다.
+ * 그래서 증감은 우리가 매일 남겨 둔 줄(creator_follower_snapshots)에서만 나온다.
+ * 그 표는 이름이 creator_* 지만 키가 우리 사용자명이고, 매일 도는 배치가 디엠
+ * 자동화 연동(브랜드가 계정을 연동해 두는 바로 그 보관함)까지 훑는다 — 즉 브랜드
+ * 계정 줄은 이미 쌓이고 있다. 표를 새로 만들지 않는 이유가 이것이다.
+ *
+ * ── 왜 오늘 줄이 없을 때만 메타를 부르는가 ──
+ *
+ * 이 화면의 목록은 캐시로 도므로(TTL) 대부분의 방문은 메타를 한 번도 부르지 않는다.
+ * 팔로워 수를 매번 물으면 그 성질이 깨진다. 오늘 줄이 이미 있으면 그 값이 오늘의
+ * 관측값이므로 그걸 쓰고, 없을 때만 한 번 불러 그 자리에서 남긴다(하루 최대 한 번).
+ *
+ * 실패하면 null 이다 — 0 이 아니다. 팔로워 0 명인 계정과 "못 받았다"는 다른 말이고,
+ * null 이면 화면이 블록 자체를 생략한다.
+ */
+async function loadBrandAccount(
+  db: any,
+  username: string,
+  link: MetaLink,
+): Promise<{
+  followers: number | null;
+  following: number | null;
+  followerDelta: number | null;
+  followerDeltaDays: number;
+} | null> {
+  let series: { date: string; followers: number; following: number }[] = [];
+  try {
+    series = await loadFollowerSeries(db, username, ACCOUNT_WINDOW_DAYS);
+  } catch (e) {
+    // 표를 못 읽어도 오늘 숫자는 메타에서 받을 수 있다. 증감만 비게 된다.
+    console.warn("[business-tagged-media] 팔로워 스냅샷 조회 실패:", (e as Error)?.message);
+  }
+
+  const today = todayInSeoul();
+  const hasToday = series.length > 0 && series[series.length - 1].date === today;
+
+  if (!hasToday) {
+    const profile = await fetchProfileCounts(link);
+    if (profile.ok && profile.followers !== null) {
+      await recordFollowerSnapshot(db, username, profile.followers, profile.following, "live");
+      series = [
+        ...series,
+        { date: today, followers: profile.followers, following: profile.following ?? 0 },
+      ];
+    }
+  }
+
+  if (series.length === 0) return null;
+
+  const latest = series[series.length - 1];
+  const oldest = series[0];
+
+  /**
+   * 증감은 줄이 두 개 이상일 때만 말할 수 있다. 한 줄뿐이면 null 로 두고 화면이
+   * 그 카드를 "수집 중"으로 적는다 — 0 으로 적으면 "한 달째 그대로"가 된다.
+   *
+   * 일수는 줄 수가 아니라 첫 줄과 마지막 줄 사이의 실제 날짜 차이다. 배치가 하루
+   * 빠진 날이 있으면 둘이 달라지고, 카드에 적히는 것은 "며칠 동안 변한 값인가"다.
+   */
+  const spanDays =
+    series.length >= 2
+      ? Math.max(
+          1,
+          Math.round((Date.parse(latest.date) - Date.parse(oldest.date)) / 86_400_000),
+        )
+      : 0;
+
+  return {
+    followers: latest.followers,
+    following: latest.following > 0 ? latest.following : null,
+    followerDelta: series.length >= 2 ? latest.followers - oldest.followers : null,
+    followerDeltaDays: spanDays,
+  };
 }
 
 export default async (req: Request) => {
@@ -77,6 +173,17 @@ export default async (req: Request) => {
     }
 
     const { payload } = result;
+
+    /**
+     * 블록1 에 쓸 계정 숫자. 실패해도 목록은 그대로 내려간다 — 팔로워 카드 하나
+     * 때문에 태그된 콘텐츠 화면 전체가 오류로 바뀌면 손해가 더 크다.
+     */
+    let account: Awaited<ReturnType<typeof loadBrandAccount>> = null;
+    try {
+      account = await loadBrandAccount(getDatabase(), rawUsername, link!);
+    } catch (e) {
+      console.warn("[business-tagged-media] 계정 추이 조회 실패:", (e as Error)?.message);
+    }
     // 예전 판 캐시에는 없는 배열이다. 키에 판 번호가 붙어 있어 보통은 걸리지 않지만,
     // 없는 값을 그대로 내려보내면 화면이 undefined 를 세게 된다.
     const ownItems = Array.isArray(payload.ownItems) ? payload.ownItems : [];
@@ -109,6 +216,11 @@ export default async (req: Request) => {
       connected: true,
       needsReauth: false,
       igUsername: payload.igUsername,
+      /**
+       * 브랜드 계정 자체의 숫자(팔로워·팔로잉·최근 증감). 못 받으면 null 이고,
+       * 그때 화면은 블록을 그리지 않는다 — 0 으로 채운 카드는 사실 주장이 된다.
+       */
+      account,
       items: payload.items,
       /**
        * 브랜드 계정이 직접 올린 게시물. 목록과 요약 숫자는 태그된 콘텐츠 기준 그대로

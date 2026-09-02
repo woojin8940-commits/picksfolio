@@ -248,29 +248,27 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     {snap.profileImage ? (
                       <img
                         src={snap.profileImage}
-                        alt={`${snap.name || '인플루언서'} 프로필`}
+                        alt={`${snap.instagramHandle ? `@${snap.instagramHandle}` : '인플루언서'} 프로필`}
                         loading="lazy"
                         className="w-10 h-10 rounded-full object-cover bg-slate-100 flex-shrink-0"
                       />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-[13px] font-black text-slate-300">
-                        {String(snap.name || '?').slice(-1)}
+                        {String(snap.instagramHandle || '?').slice(0, 1).toUpperCase()}
                       </div>
                     )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {/* 계정 아이디가 카드의 첫 줄이다. 수락 전에는 서버가 아이디를
-                            지워 보내므로 그 자리를 가려진 이름이 대신한다. */}
+                        {/* 계정명이 카드의 첫 줄이다. 이 시장에서 사람을 부르는 이름은
+                            실명이 아니라 인스타 계정명이고, 브랜드가 나중에 담당자와
+                            "그 계정"을 이야기할 때 쓰는 말도 이것이다. 실명은 여기 두지
+                            않는다 — 고르는 데 쓰이지 않고, 서버도 수락 전까지 가려서
+                            보낸다(campaign-listup.mts 의 maskSnapshot). */}
                         <span className="text-sm font-black text-slate-900 truncate">
-                          {snap.instagramHandle ? `@${snap.instagramHandle}` : snap.name || '비공개'}
+                          {snap.instagramHandle ? `@${snap.instagramHandle}` : '비공개'}
                         </span>
                       </div>
-                      {(snap.instagramHandle ? snap.name : '') && (
-                        <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">
-                          {snap.name}
-                        </p>
-                      )}
                       {line && (
                         <p className="text-[11px] text-slate-400 font-bold truncate mt-0.5">{line}</p>
                       )}
@@ -305,8 +303,52 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </button>
                   </div>
 
-                  {/* 그림을 먼저 둔다. 브랜드가 후보를 거르는 첫 동작은 "이 계정 톤이
-                      우리 제품과 맞나"를 보는 것이고, 그건 숫자가 아니라 그림이 답한다.
+                  {/* 계정명 바로 아래가 값 자리다. 팔로워·평균 조회수·광고비를 한 줄에
+                      나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세 숫자에서 멈추게 한다.
+                      이 셋이면 "예산 안에 들어오는 규모인가"가 카드를 펼치지 않고
+                      끝난다. */}
+                  <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">팔로워</p>
+                      <p
+                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
+                        title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
+                      >
+                        {snap.followers ? formatCountKo(snap.followers) : '—'}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">평균 조회수</p>
+                      <p
+                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
+                        title={snap.avgViews ? formatNumberWithCommas(snap.avgViews) : ''}
+                      >
+                        {snap.avgViews ? formatCountKo(snap.avgViews) : '—'}
+                      </p>
+                      {snap.reelsCount > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold truncate">릴스 {snap.reelsCount}편 기준</p>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-slate-400 font-black">광고비</p>
+                      {/* 값을 자르지 않는다. "1억2,000만원"처럼 자릿수가 커질수록 문자열이
+                          길어지는데, 브랜드가 이 카드에서 마지막으로 확인하는 값이 이것이라
+                          말줄임으로 끊기면 카드를 열어 봐야 알 수 있게 된다. */}
+                      <p className="text-[16px] md:text-[18px] text-blue-600 font-black leading-snug break-keep">
+                        {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
+                      </p>
+                      {c.quotedSecondUseFee > 0 && (
+                        <p className="text-[10px] text-slate-400 font-bold break-keep leading-snug">
+                          2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
+                        </p>
+                      )}
+                    </div>
+
+                  {/* 숫자 아래에 그림을 둔다. 계정명 → 세 숫자 → 최근 릴스 순서는
+                      "누구인지 → 규모가 맞는지 → 톤이 맞는지"로 좁혀 가는 판단 순서와
+                      같다. 계정명이 카드 첫 줄에 나오기 전에는 숫자보다 그림이 먼저
+                      필요했는데(별표 이름으로는 후보를 구별할 수 없었으므로), 이제
+                      첫 줄이 계정을 특정해 주므로 값이 먼저 와도 길을 잃지 않는다.
                       칸 수는 항상 셋이다. 릴스가 한 편뿐인 계정에서 칸을 줄이면 그
                       한 칸이 카드 폭 절반을 먹어 카드만 커지고, 옆 카드와 높이가 달라져
                       후보를 나란히 견줄 수 없다. 모자란 칸은 최근 피드로 채운다.
@@ -376,45 +418,6 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </div>
                   )}
 
-                  {/* 그림으로 한 번 거르고 나면 남는 것은 값이다. 팔로워·평균 조회수·
-                      광고비를 한 줄에 나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세
-                      숫자에서 멈추게 한다. */}
-                  <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] text-slate-400 font-black">팔로워</p>
-                      <p
-                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
-                        title={snap.followers ? formatNumberWithCommas(snap.followers) : ''}
-                      >
-                        {snap.followers ? formatCountKo(snap.followers) : '—'}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] text-slate-400 font-black">평균 조회수</p>
-                      <p
-                        className="text-[17px] md:text-[19px] text-blue-600 font-black truncate"
-                        title={snap.avgViews ? formatNumberWithCommas(snap.avgViews) : ''}
-                      >
-                        {snap.avgViews ? formatCountKo(snap.avgViews) : '—'}
-                      </p>
-                      {snap.reelsCount > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold truncate">릴스 {snap.reelsCount}편 기준</p>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] text-slate-400 font-black">광고비</p>
-                      {/* 값을 자르지 않는다. "1억2,000만원"처럼 자릿수가 커질수록 문자열이
-                          길어지는데, 브랜드가 이 카드에서 마지막으로 확인하는 값이 이것이라
-                          말줄임으로 끊기면 카드를 열어 봐야 알 수 있게 된다. */}
-                      <p className="text-[16px] md:text-[18px] text-blue-600 font-black leading-snug break-keep">
-                        {c.quotedFee ? formatKoreanWon(c.quotedFee) : '협의'}
-                      </p>
-                      {c.quotedSecondUseFee > 0 && (
-                        <p className="text-[10px] text-slate-400 font-bold break-keep leading-snug">
-                          2차 활용 {formatKoreanWon(c.quotedSecondUseFee)}
-                        </p>
-                      )}
-                    </div>
                   </div>
 
 

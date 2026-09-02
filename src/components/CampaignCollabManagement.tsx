@@ -1564,6 +1564,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             const deadline = deadlineInfo(campaign.end_date);
             const closed = isClosedCampaign(campaign);
             const cardMode = rewardModeOf(campaign.reward_mode);
+            /**
+             * 카드에 적는 금액은 총 예산 하나다.
+             *
+             * 예전에는 reward_amount(1인 리워드)를 적었다. 그 값은 체험단·협찬형에만
+             * 있는 값인데, 광고비 지급형 카드에서는 아무것도 안 나와서 브랜드가
+             * "예산을 얼마로 적었지"를 확인하려면 캠페인을 하나씩 열어야 했다. 반대로
+             * 체험단 카드에서는 1인 금액이 캠페인 전체 규모처럼 읽혔다.
+             *
+             * 그래서 카드가 말하는 금액을 총 예산으로 통일하고 이름을 붙였다. 총 예산이
+             * 없는 진행 방식(협찬·공동구매)은 그 자리를 비운다 — 성격이 다른 숫자를
+             * 같은 자리에 대신 넣으면 카드끼리 비교가 안 된다.
+             */
+            const cardBudget = Number(campaign.budget_krw || 0);
             return (
               <div
                 key={campaign.id}
@@ -1624,9 +1637,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1">
                     {campaign.title}
                   </h3>
-                  <div className="flex items-center justify-between">
-                    {campaign.reward_amount ? (
-                      <span className="text-sm font-black text-blue-600">{formatKoreanWon(campaign.reward_amount)}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    {cardBudget > 0 ? (
+                      <span className="text-sm font-black text-blue-600 truncate">
+                        <span className="text-[10px] text-slate-400 font-black mr-1">총 예산</span>
+                        {formatKoreanWon(cardBudget)}
+                      </span>
                     ) : <span />}
                     <span className="text-xs text-slate-400 font-bold">
                       {/* 지원을 받지 않는 캠페인(광고비 지급형)에 "N명 신청중"을 적으면

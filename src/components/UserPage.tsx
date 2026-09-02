@@ -788,6 +788,24 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
    */
   const coverFadeHex = normalizeHexColor(themeBg) || (isDark ? '#050A15' : '#FFFFFF');
   const coverFade = `linear-gradient(to top, ${coverFadeHex} 0%, ${coverFadeHex}88 15%, transparent 50%)`;
+  /**
+   * 커버 사진이 뜨기 전에 그 자리를 채우는 배경.
+   *
+   * 커버가 파랗게 번쩍이던 이유가 여기 있었다. design 은 처음에 기본값(파란
+   * 그라데이션)으로 시작해서 — 첫 방문이면 localStorage 에도 저장된 값이 없다 —
+   * 서버에서 실제 설정이 오기 전까지 커버 칸이 파랗게 칠해진다. 그 위에 사진이
+   * 디코딩되는 순간 통째로 갈리니, 페이지를 열 때마다 파란 판이 한 번 스쳤다.
+   *
+   * 그래서 커버 사진이 있는 페이지에서는 사진 밑을 테마 배경색으로 둔다. 사진이
+   * 늦게 와도 갈리는 것은 흰 판(또는 검은 판)에서 사진으로이고, 그건 로딩처럼
+   * 보인다. 사진 없이 색만 쓰는 페이지는 그 색이 최종 결과이므로 그대로 칠한다.
+   *
+   * 문자열 폴백도 고쳤다. 'to br' 은 CSS 에 없는 값이라(bottom right 이어야 한다)
+   * 그 선언이 통째로 무효가 됐고, 커버 칸이 아무 색도 없이 남았다.
+   */
+  const coverPlaceholder = design.portfolioHeaderImage
+    ? coverFadeHex
+    : design.portfolioHeaderColor || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)';
   const textColor = isDark ? 'text-white' : 'text-slate-900';
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
@@ -901,25 +919,28 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
             <div
               className="relative aspect-[4/5] flex-shrink-0 -mx-4 md:-mx-8"
-              style={{
-                background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
-              }}
+              style={{ background: coverPlaceholder }}
             >
               {design.portfolioHeaderImage && (
                 <MediaAuto
                   src={design.portfolioHeaderImage}
                   priority
+                  fadeIn
                   width={1280}
                   className="w-full h-full object-cover"
                   style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
                 />
               )}
+              {/* 커버도 색도 정하지 않은 페이지의 기본 사진. 아래 큐레이션 커버와 같은
+                  컴포넌트로 그린다 — 예전에는 이 한 곳만 SafeImage 라서, 같은 사진이
+                  레이아웃에 따라 한쪽은 번쩍이고 한쪽은 스며들었다. */}
               {!design.portfolioHeaderImage && !design.portfolioHeaderColor && (
-                <SafeImage
+                <MediaAuto
                   src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"
+                  priority
+                  fadeIn
+                  width={1280}
                   className="w-full h-full object-cover"
-                  loading="eager"
-                  fetchPriority="high"
                 />
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
@@ -1246,14 +1267,13 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
               className="relative aspect-[4/5] flex-shrink-0 -mx-4 md:-mx-8"
-              style={{
-                background: design.portfolioHeaderColor || 'linear-gradient(to br, #2563EB, #4f46e5)'
-              }}
+              style={{ background: coverPlaceholder }}
             >
               {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
                 <MediaAuto
                   src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"}
                   priority
+                  fadeIn
                   width={1280}
                   className="w-full h-full object-cover"
                   style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
