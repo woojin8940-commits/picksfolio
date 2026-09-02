@@ -212,7 +212,22 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [showBrief, setShowBrief] = useState(false);
   // 하단 요약 바와 인사이트 탭이 읽는 협업 요약. 상세 진행 내역은 BrandCollabProgress
   // 가 따로 읽고, 여기서는 건수만 쓴다.
-  const [collabSummary, setCollabSummary] = useState<Array<{ id: string; uploadUrl: string; confirmedAt: string | null }>>([]);
+  const [collabSummary, setCollabSummary] = useState<
+    Array<{ id: string; uploadUrl: string; confirmedAt: string | null; fee: number; status: string }>
+  >([]);
+  /**
+   * 캠페인별 실제 집행 예산 — 확정된 사람들의 보수 합계다.
+   *
+   * 카드와 하단 바에 적던 총 예산(budget_krw)은 등록할 때 브랜드가 적은 계획 금액이다.
+   * 실제로는 담당자가 올린 명단에서 몇 명을 고르느냐에 따라 그보다 적게 끝나는 일이
+   * 대부분이고(10명 예산으로 6명만 진행), 조건 협의에서 사람마다 보수가 달라지기도
+   * 한다. 그래서 마감된 캠페인에서 계획 금액만 보이면 브랜드는 실제로 나간 돈을
+   * 알 수 없었다 — 진행사항 화면을 열어 사람 수만큼 더해야 했다.
+   *
+   * 진행 중인 캠페인은 계획 금액을 그대로 둔다. 아직 사람을 모으는 중에 "지금까지
+   * 확정된 합계"를 총 예산 자리에 넣으면 예산이 줄어든 것처럼 읽힌다.
+   */
+  const [actualSpend, setActualSpend] = useState<Record<string, { total: number; count: number }>>({});
   const [activeTypeFilter, setActiveTypeFilter] = useState('');
   // 카테고리·모집 상태 필터. 캠페인이 쌓이면 진행 방식만으로는 원하는 캠페인을 찾을
   // 수 없다("지난달 뷰티 캠페인 중 마감된 것"처럼 두 조건이 겹친다).
@@ -239,9 +254,40 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     }
   }, [businessUsername, cacheKey]);
 
+  /**
+   * 캠페인별 실제 집행액을 한 번에 만든다. 협업 목록 API 는 브랜드의 협업을 캠페인
+   * 구분 없이 모두 내려 주므로, 캠페인마다 부르지 않고 한 번 읽어 나눠 담는다.
+   *
+   * 집계 대상은 진행 중 · 완료된 협업이다. 제안만 보내 둔 건(pending)과 거절 · 취소된
+   * 건은 나갈 돈이 아니다.
+   */
+  const collabSpendMap = (rows: Array<{ campaignId: string; fee: number; status: string }>) => {
+    const map: Record<string, { total: number; count: number }> = {};
+    rows.forEach(c => {
+      if (c.status !== 'in_progress' && c.status !== 'completed') return;
+      const key = String(c.campaignId || '');
+      if (!key) return;
+      const cur = map[key] || { total: 0, count: 0 };
+      map[key] = { total: cur.total + Number(c.fee || 0), count: cur.count + 1 };
+    });
+    return map;
+  };
+
+  const fetchActualSpend = useCallback(async () => {
+    try {
+      const res = await apiService.getCollabs('brand');
+      setActualSpend(collabSpendMap((res.collabs || []) as any[]));
+    } catch {
+      // 실집행 합계는 곁들이는 숫자다. 못 읽으면 계획 금액만 보이면 된다.
+    }
+    // collabSpendMap 은 상태를 읽지 않는 순수 함수다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetchCampaigns();
-  }, [fetchCampaigns]);
+    fetchActualSpend();
+  }, [fetchCampaigns, fetchActualSpend]);
 
   /**
    * 현황 화면에서 지목해 들어온 캠페인을 진행사항 탭으로 바로 펼친다.
@@ -322,12 +368,24 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fetchCollabSummary = async (campaignId: string) => {
     try {
       const res = await apiService.getCollabs('brand');
-      const rows = (res.collabs || []) as Array<{ id: string; campaignId: string; uploadUrl: string; confirmedAt: string | null }>;
+      const rows = (res.collabs || []) as Array<{
+        id: string; campaignId: string; uploadUrl: string; confirmedAt: string | null; fee: number; status: string;
+      }>;
       setCollabSummary(
         rows
           .filter(c => c.campaignId === campaignId)
-          .map(c => ({ id: c.id, uploadUrl: c.uploadUrl || '', confirmedAt: c.confirmedAt })),
+          .map(c => ({
+            id: c.id,
+            uploadUrl: c.uploadUrl || '',
+            confirmedAt: c.confirmedAt,
+            // 실제 집행 예산을 세는 값. 조건표가 확정되기 전에는 0원으로 온다.
+            fee: Number(c.fee || 0),
+            status: String(c.status || ''),
+          })),
       );
+      // 같은 응답으로 목록 카드가 읽는 맵도 맞춰 둔다 — 상세에서 사람을 확정하고
+      // 목록으로 돌아갔을 때 카드 금액이 한 박자 늦게 따라오지 않게 한다.
+      setActualSpend(collabSpendMap(rows));
     } catch {
       console.error('Failed to fetch collab summary');
     }
@@ -650,6 +708,17 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const barterHeadcount = Number(selectedCampaign.seeding_count || 0) || Number(selectedCampaign.max_applicants || 0);
     const commissionRate = Number(selectedCampaign.groupbuy_commission_rate || 0);
     const budget = mode.pickInfluencer ? Number(selectedCampaign.budget_krw || 0) : 0;
+    /**
+     * 실제 집행 예산. 확정된 사람들의 보수 합계이고, 마감된 뒤에만 총 예산 자리를
+     * 대신 쓴다(모집 중에는 계획 금액이 맞는 숫자다).
+     *
+     * 보수가 아직 0원인 협업은 조건표가 확정되지 않은 건이라 합계에 들어가지 않는다.
+     * 그 인원은 따로 세서 옆에 적는다 — 합계만 보이면 브랜드는 그 금액이 최종인 줄 안다.
+     */
+    const spentRows = collabSummary.filter(c => c.status === 'in_progress' || c.status === 'completed');
+    const spent = spentRows.reduce((sum, c) => sum + Number(c.fee || 0), 0);
+    const spentPending = spentRows.filter(c => Number(c.fee || 0) <= 0).length;
+    const showSpent = mode.pickInfluencer && isClosedCampaign(selectedCampaign) && spentRows.length > 0;
     const stageMarks = stageMarksFor(mode.value);
     const uploadedCount = collabSummary.filter(c => c.uploadUrl).length;
     const provideLabel = PRODUCT_PROVIDE.find(p => p.value === selectedCampaign.product_provide)?.label || '';
@@ -1396,8 +1465,19 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     ? barterHeadcount > 0 && ` · 협찬 ${barterHeadcount}명`
                     : isGroupBuy
                       ? ' · 수수료 담당자 협의'
-                      : budget > 0 && ` · ${formatKoreanWon(budget)}`}
+                      : showSpent
+                        ? ` · 실제 집행 ${formatKoreanWon(spent) || '0원'}`
+                        : budget > 0 && ` · ${formatKoreanWon(budget)}`}
                 </p>
+                {/* 마감된 캠페인에서만 계획 금액을 아래 줄로 내린다. 위의 숫자가
+                    바뀐 이유("왜 총예산보다 적지")를 같은 자리에서 알 수 있어야 한다. */}
+                {showSpent && (
+                  <p className="text-[10px] font-bold text-slate-400 truncate">
+                    확정 {spentRows.length - spentPending}명 집행액
+                    {budget > 0 && ` · 총 예산 ${formatKoreanWon(budget)}`}
+                    {spentPending > 0 && ` · ${spentPending}명 금액 미확정`}
+                  </p>
+                )}
               </div>
               <button
                 onClick={openProgress}
@@ -1565,7 +1645,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             const closed = isClosedCampaign(campaign);
             const cardMode = rewardModeOf(campaign.reward_mode);
             /**
-             * 카드에 적는 금액은 총 예산 하나다.
+             * 카드에 적는 금액은 하나다 — 모집 중이면 총 예산, 마감됐으면 실제 집행액.
              *
              * 예전에는 reward_amount(1인 리워드)를 적었다. 그 값은 체험단·협찬형에만
              * 있는 값인데, 광고비 지급형 카드에서는 아무것도 안 나와서 브랜드가
@@ -1577,6 +1657,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
              * 같은 자리에 대신 넣으면 카드끼리 비교가 안 된다.
              */
             const cardBudget = Number(campaign.budget_krw || 0);
+            /**
+             * 마감된 캠페인은 계획 금액 대신 실제 집행액을 적는다. 끝난 캠페인에서
+             * 브랜드가 확인하려는 숫자는 "얼마로 잡았나"가 아니라 "얼마가 나갔나"다.
+             * 확정된 사람이 아직 없거나 보수가 잡히지 않은 캠페인은 바꿀 숫자가 없어
+             * 계획 금액을 그대로 둔다.
+             */
+            const cardSpend = actualSpend[campaign.id];
+            const showCardSpend = closed && !!cardSpend && cardSpend.total > 0;
             return (
               <div
                 key={campaign.id}
@@ -1638,7 +1726,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     {campaign.title}
                   </h3>
                   <div className="flex items-center justify-between gap-2">
-                    {cardBudget > 0 ? (
+                    {showCardSpend ? (
+                      <span className="text-sm font-black text-slate-900 truncate">
+                        <span className="text-[10px] text-slate-400 font-black mr-1">실제 집행</span>
+                        {formatKoreanWon(cardSpend.total)}
+                      </span>
+                    ) : cardBudget > 0 ? (
                       <span className="text-sm font-black text-blue-600 truncate">
                         <span className="text-[10px] text-slate-400 font-black mr-1">총 예산</span>
                         {formatKoreanWon(cardBudget)}
