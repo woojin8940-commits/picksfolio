@@ -46,6 +46,19 @@ import {
  * 상태로 무기한 대기하게 된다. 그 압박을 사람(담당자)이 받아야 시스템이 멈추지 않는다.
  */
 
+/**
+ * 조건표의 산출물 명세(deliverable_spec)에서 날짜 한 칸을 꺼낸다.
+ *
+ * 이 JSON 은 등록 화면이 적어 준 값을 그대로 담고 있어서, 날짜 칸에 빈 문자열이나
+ * 타임스탬프가 섞여 들어온다. 'YYYY-MM-DD' 가 아닌 값은 빈 값으로 떨군다 — 달력이
+ * 기간을 그리는 데 쓰는 값이라 반쪽짜리 날짜가 들어가면 칸이 엉뚱하게 칠해진다.
+ */
+const specDate = (spec: unknown, key: string): string => {
+  const raw = spec && typeof spec === "object" ? (spec as Record<string, unknown>)[key] : "";
+  const day = String(raw ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+};
+
 type CallerContext = {
   /**
    * 자원을 찾을 때 쓰는 아이디. **서비스 계정이 있으면 항상 그 아이디**이고,
@@ -567,7 +580,8 @@ export default async (req: Request, context: Context) => {
        * 정리 중인) 협업은 0원으로 들어오므로, 화면은 잠긴 건수를 함께 센다.
        */
       const termRows = (await db.sql`
-        SELECT collab_id, fee, locked_at, upload_due FROM collab_terms WHERE collab_id = ANY(${ids})
+        SELECT collab_id, fee, locked_at, upload_due, deliverable_spec
+        FROM collab_terms WHERE collab_id = ANY(${ids})
       `) as any[];
       const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
 
@@ -774,6 +788,14 @@ export default async (req: Request, context: Context) => {
            * "언제 올려야 하나"는 그 막대 어디에도 없었다.
            */
           uploadDue: String(termMap.get(row.id)?.upload_due || "").split("T")[0],
+          /**
+           * 브랜드가 등록 때 적은 희망 게시 기간(23일~26일). 조건표의 업로드 마감은
+           * 이 기간의 시작일 하나만 들고 있어서, 목록만 보고는 26일까지 여유가 있는
+           * 일정인지 23일 당일치기인지 구별할 수 없었다 — 달력이 23일 하루에만 점을
+           * 찍은 것도 그래서다. 기간을 그대로 실어 보내 화면이 23~26을 이어 그린다.
+           */
+          uploadFrom: specDate(termMap.get(row.id)?.deliverable_spec, "uploadFrom"),
+          uploadTo: specDate(termMap.get(row.id)?.deliverable_spec, "uploadTo"),
           uploadConfirmedAt: row.upload_confirmed_at || null,
           /** 게시물이 처음 등록된 시각. 정산 예정일이 이 날에서 계산된다. */
           uploadedAt: uploadedMap.get(row.id) || null,

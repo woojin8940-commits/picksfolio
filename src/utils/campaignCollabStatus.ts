@@ -59,6 +59,18 @@ export type CampaignCollabStatus = {
    * 즉 셋 다 "이 날까지 올려야 한다"는 같은 날을 가리킨다.
    */
   uploadDue: string;
+  /**
+   * 브랜드가 캠페인 등록 때 고른 희망 게시 기간. 달력이 이 기간을 칸에 이어 칠한다.
+   *
+   * `uploadDue` 는 이 기간의 시작일 하나만 들고 있다(서버가 조건표의 업로드 마감을
+   * 시작일로 잡는다). 그래서 "23일~26일 사이에 올려 주세요" 로 등록한 캠페인이 달력에
+   * 23일 하루로만 찍혔고, 26일까지 여유가 있는 일정인지 그날 하루짜리인지 구별되지
+   * 않았다. 기간을 따로 들고 있으면 달력이 23일부터 26일까지 쭉 칠할 수 있다.
+   *
+   * 예전 협업(조건표에 기간이 없는 건)은 빈 값이므로 시작일 하루로 되돌아간다.
+   */
+  uploadFrom: string;
+  uploadTo: string;
   /** 업로드를 확인받은 시각. 달력에서 남은 일과 끝난 일을 가른다. */
   uploadConfirmedAt: string;
   /**
@@ -155,6 +167,8 @@ export function toCampaignCollabStatus(row: any, role: CollabActionRole): Campai
     endDate: asDate(row?.scheduleEnd) || asDate(row?.campaignEndDate),
     uploadDue:
       asDate(row?.uploadDue) || asDate(row?.scheduleEnd) || asDate(row?.campaignEndDate),
+    uploadFrom: asDate(row?.uploadFrom),
+    uploadTo: asDate(row?.uploadTo),
     uploadConfirmedAt: String(row?.uploadConfirmedAt || ''),
     uploadedDay: asSeoulDay(row?.uploadedAt) || asSeoulDay(row?.uploadConfirmedAt),
     fee: Number(row?.fee || 0),
@@ -163,6 +177,68 @@ export function toCampaignCollabStatus(row: any, role: CollabActionRole): Campai
     createdAt: String(row?.createdAt || ''),
     updatedAt: String(row?.updatedAt || row?.createdAt || ''),
   };
+}
+
+/**
+ * 달력이 한 협업에 칠할 수 있는 업로드 기간의 최대 길이(일).
+ *
+ * 예전에 달력은 협업 기간(schedule_start~schedule_end)을 막대로 그렸다. 일정이 확정되지
+ * 않은 협업은 그 기간이 "협업이 만들어진 날 ~ 캠페인 종료일"까지 벌어져서, 두세 건만
+ * 있어도 막대가 달 전체를 덮고 칸마다 '+N건'이 붙었다. 그래서 기간을 버리고 점 하나만
+ * 찍게 바꿨다.
+ *
+ * 희망 게시 기간은 브랜드가 달력에서 직접 고른 값이라 보통 며칠~두 주다. 그래서 이 값은
+ * 다시 펼쳐도 안전하다. 다만 잘못 적힌 값(반년짜리 기간)이 예전과 같은 상태를 만들지
+ * 않도록 상한을 둔다 — 넘으면 시작일 하루로 되돌린다.
+ */
+const UPLOAD_WINDOW_MAX_DAYS = 21;
+
+const spanDays = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+
+/**
+ * 달력이 칠할 업로드 기간 한 칸 → [시작, 끝].
+ *
+ * 달력 두 개(인플루언서 협업 현황 · 브랜드 업로드 일정)가 같은 협업을 각자 해석하면
+ * 같은 캠페인이 한쪽에서는 23일 하루, 다른 쪽에서는 23~26일로 보인다. 판정은 여기서
+ * 한 번만 한다.
+ *
+ * `fallbackDay` 는 조건표도 희망 기간도 없는 줄(직접 남긴 기록, 브랜드가 보낸 제안)이
+ * 쓰는 날짜다 — 비워 두면 그 줄이 달력에서 아예 사라진다.
+ */
+export function uploadWindow(
+  input: {
+    uploadedDay?: string;
+    uploadFrom?: string;
+    uploadTo?: string;
+    uploadDue?: string;
+  },
+  fallbackDay = '',
+): { from: string; to: string } {
+  // 이미 올렸으면 올린 날 하루다. 희망 기간은 지나간 약속이고, 그 시점부터 달력이
+  // 답해야 하는 질문은 "언제 올라갔나"로 바뀐다(정산 예정일이 이 날에서 나온다).
+  const uploaded = asDate(input.uploadedDay);
+  if (uploaded) return { from: uploaded, to: uploaded };
+
+  const from = asDate(input.uploadFrom) || asDate(input.uploadDue) || asDate(fallbackDay);
+  if (!from) return { from: '', to: '' };
+
+  const to = asDate(input.uploadTo);
+  // 마감일이 없거나 거꾸로 적혀 있으면 예전처럼 시작일 하루만 찍는다.
+  if (!to || to <= from) return { from, to: from };
+  return { from, to: spanDays(from, to) > UPLOAD_WINDOW_MAX_DAYS ? from : to };
+}
+
+/** 기간에 걸친 날짜 전부('YYYY-MM-DD'). 달력이 칸마다 같은 일정을 찍는 데 쓴다. */
+export function daysInWindow(from: string, to: string): string[] {
+  if (!from) return [];
+  const end = to && to > from ? to : from;
+  const out: string[] = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${end}T00:00:00Z`); t += 86_400_000) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+    if (out.length > 400) break; // 잘못된 값으로 달력이 멈추지 않게.
+  }
+  return out;
 }
 
 /** 목록 전체 변환. 취소된 건은 현황에서 뒤로 밀고, 내 차례인 것을 앞으로 올린다. */

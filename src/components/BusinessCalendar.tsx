@@ -5,9 +5,11 @@ import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '..
 import UserSettlement from './UserSettlement';
 import {
   CampaignCollabStatus,
+  daysInWindow,
   dropProposalsCoveredByCollabs,
   openCampaignCollab,
   toCampaignCollabStatuses,
+  uploadWindow,
 } from '../utils/campaignCollabStatus';
 
 interface BusinessCalendarProps {
@@ -36,8 +38,14 @@ type CollabListItem = CollabRecord & {
   _campaignId?: string;
   _progress?: number;
   _todo?: string;
-  /** 확정된 업로드 마감일. 달력이 이 날짜에 점을 찍는다. */
+  /** 확정된 업로드 마감일 = 희망 게시 기간의 시작일. */
   _uploadDue?: string;
+  /**
+   * 브랜드가 고른 희망 게시 기간. 달력이 이 기간을 칸에 이어 칠한다 — 마감일만 찍으면
+   * "23일~26일 사이" 로 등록된 캠페인이 23일 하루짜리로 보인다.
+   */
+  _uploadFrom?: string;
+  _uploadTo?: string;
   _uploadedDay?: string;
 };
 
@@ -49,8 +57,20 @@ type CollabListItem = CollabRecord & {
  */
 type DayChip = {
   id: string;
-  /** 업로드하는 날 / 정산이 들어오는 날(YYYY-MM-DD). */
+  /** 이 chip 이 놓인 칸의 날짜(YYYY-MM-DD). */
   date: string;
+  /**
+   * 이 일정이 걸쳐 있는 기간. 하루짜리면 from === to === date.
+   *
+   * 희망 게시 기간이 23~26일이면 칸 네 개에 같은 일정이 놓이고, 각 칸은 자기가 기간의
+   * 어디인지를 isStart · isEnd 로 안다 — 양 끝만 둥글게 그려야 네 칸이 한 덩어리로
+   * 읽힌다. 마감이 지났는지도 시작일이 아니라 `to` 로 판정한다(24일에 23~26일 일정을
+   * 빨갛게 칠하면 아직 남은 시간이 지난 것처럼 보인다).
+   */
+  from: string;
+  to: string;
+  isStart: boolean;
+  isEnd: boolean;
   /** 업로드 일정인가 정산 일정인가. 아이콘과 색이 갈린다. */
   kind: 'upload' | 'settlement';
   title: string;
@@ -354,6 +374,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
           _progress: c.progress,
           _todo: c.todo,
           _uploadDue: c.uploadDue,
+          _uploadFrom: c.uploadFrom,
+          _uploadTo: c.uploadTo,
           _uploadedDay: c.uploadedDay,
         };
       });
@@ -494,12 +516,17 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
    * 있어도 막대가 달 전체를 덮고 칸마다 '+1건'이 붙었다. 정작 인플루언서가 달력에서
    * 알고 싶은 것 — 언제 올리고 언제 받나 — 는 그 막대 어디에도 적혀 있지 않았다.
    *
-   * 그래서 기간은 버리고 날짜 두 개만 점으로 찍는다. 기간과 금액 합계는 아래 협업
+   * 그래서 협업 기간은 버리고 날짜 두 개만 점으로 찍는다. 기간과 금액 합계는 아래 협업
    * 내역 탭이 이미 보여 준다.
    *
-   * 업로드하는 날은 이미 올렸으면 올린 날, 아직이면 확정 조건의 업로드 마감이다. 둘 다
-   * 없는 줄(직접 남긴 기록, 브랜드가 보낸 제안)은 종료일을 쓴다 — 서버도 일정을 확정할
-   * 때 업로드 마감을 협업 종료일로 옮겨 적으므로 둘은 같은 날을 가리킨다.
+   * 다만 브랜드가 등록 화면에서 고른 희망 게시 기간은 다시 펼친다. 며칠짜리 값이라 달을
+   * 덮을 일이 없고, 시작일 하나로 접으면 "23~26일 사이에 올려 주세요" 라는 약속이 달력에
+   * 23일 하루로 보인다 — 26일까지 여유가 있는 일정과 당일치기가 구별되지 않았다.
+   *
+   * 업로드하는 날은 이미 올렸으면 올린 날 하루, 아직이면 희망 게시 기간이다. 기간이 없는
+   * 예전 협업은 확정 조건의 업로드 마감 하루로 되돌아가고, 그것도 없는 줄(직접 남긴 기록,
+   * 브랜드가 보낸 제안)은 종료일을 쓴다 — 서버도 일정을 확정할 때 업로드 마감을 협업
+   * 종료일로 옮겨 적으므로 둘은 같은 날을 가리킨다.
    *
    * 정산이 들어오는 날은 정산 항목의 예정일을 그대로 쓴다. 그 예정일은 서버가
    * "콘텐츠가 올라간 달의 익월 말일"로 잡고(api-settlements · settlementDateFrom),
@@ -508,10 +535,30 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
    */
   const dayChipsMap = useMemo(() => {
     const map: Record<string, DayChip[]> = {};
-    const add = (ev: DayChip) => {
-      if (!ev.date) return;
-      if (!map[ev.date]) map[ev.date] = [];
-      map[ev.date].push(ev);
+    /**
+     * 일정 하나를 기간에 걸친 칸 전부에 놓는다. `to` 를 생략하면 하루짜리다.
+     *
+     * 같은 일정이 여러 칸에 놓이므로 칸마다 id 를 달리 붙인다 — 같은 key 가 여러 칸에
+     * 있으면 React 가 칸을 재사용하다가 엉뚱한 칸을 다시 그린다.
+     */
+    const add = (
+      ev: Omit<DayChip, 'date' | 'from' | 'to' | 'isStart' | 'isEnd'>,
+      from: string,
+      to?: string,
+    ) => {
+      const days = daysInWindow(from, to || from);
+      days.forEach((date, i) => {
+        if (!map[date]) map[date] = [];
+        map[date].push({
+          ...ev,
+          id: days.length > 1 ? `${ev.id}_${date}` : ev.id,
+          date,
+          from: days[0],
+          to: days[days.length - 1],
+          isStart: i === 0,
+          isEnd: i === days.length - 1,
+        });
+      });
     };
 
     // 협업 내역에 이미 올라간 줄도 원래 협업의 업로드 마감을 봐야, 일정 확정 전과 후에
@@ -524,39 +571,47 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     ];
     rows.forEach(c => {
       const linked = byCollabId.get(String(c._collabId || (c as any).collab_id || ''));
-      add({
-        id: `up_${c.id}`,
-        kind: 'upload',
-        // 이미 올린 협업은 올린 날에, 아직인 협업은 마감일에 찍는다. 올린 뒤에도
-        // 마감일에 남겨 두면 정산 점(올린 달의 익월 말일)과 한 달이 어긋나 보인다.
-        date: dayOnly(
-          c._uploadedDay ||
-            linked?.uploadedDay ||
-            c._uploadDue ||
-            linked?.uploadDue ||
-            c.end_date ||
-            c.date,
-        ),
-        title: c.title,
-        company: c.company_name,
-        done:
-          effectiveCollabStatus(c) === 'completed' || Boolean(linked?.uploadConfirmedAt),
-        cancelled: c.status === 'cancelled',
-      });
+      // 이미 올린 협업은 올린 날 하루에, 아직인 협업은 희망 게시 기간(23~26일) 전체에
+      // 찍는다. 올린 뒤에도 기간에 남겨 두면 정산 점(올린 달의 익월 말일)과 한 달이
+      // 어긋나 보인다. 기간이 없는 예전 협업은 시작일 하루로 되돌아간다.
+      const win = uploadWindow(
+        {
+          uploadedDay: c._uploadedDay || linked?.uploadedDay,
+          uploadFrom: c._uploadFrom || linked?.uploadFrom,
+          uploadTo: c._uploadTo || linked?.uploadTo,
+          uploadDue: c._uploadDue || linked?.uploadDue,
+        },
+        dayOnly(c.end_date || c.date),
+      );
+      add(
+        {
+          id: `up_${c.id}`,
+          kind: 'upload',
+          title: c.title,
+          company: c.company_name,
+          done:
+            effectiveCollabStatus(c) === 'completed' || Boolean(linked?.uploadConfirmedAt),
+          cancelled: c.status === 'cancelled',
+        },
+        win.from,
+        win.to,
+      );
     });
 
     // 브랜드가 직접 보낸 제안. 캠페인 협업으로 이미 찍히는 건은 뺀다 — 같은 일이 제안과
     // 협업 두 점으로 찍히면 달력이 다시 두 배가 된다.
     dropProposalsCoveredByCollabs(acceptedProposals, campaignCollabs).forEach(p => {
-      add({
-        id: `up_p_${p.id}`,
-        kind: 'upload',
-        date: dayOnly(p.end_date) || dayOnly(p.start_date),
-        title: p.title || p.company_name,
-        company: p.company_name,
-        done: isProposalDone(p),
-        cancelled: false,
-      });
+      add(
+        {
+          id: `up_p_${p.id}`,
+          kind: 'upload',
+          title: p.title || p.company_name,
+          company: p.company_name,
+          done: isProposalDone(p),
+          cancelled: false,
+        },
+        dayOnly(p.end_date) || dayOnly(p.start_date),
+      );
     });
 
     // 정산 점. 날짜 판정(지급 완료면 완료일, 아니면 예정일)은 위의 정산 맵이 이미
@@ -564,16 +619,18 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     // 아래 상세 목록이 다른 날에 놓인다.
     Object.entries(settlementEventsMap).forEach(([date, list]) =>
       list.forEach(stl =>
-        add({
-          id: `stl_${stl.id}`,
-          kind: 'settlement',
+        add(
+          {
+            id: `stl_${stl.id}`,
+            kind: 'settlement',
+            title: stl.title || stl.company_name || '협업 정산',
+            company: stl.company_name,
+            done: stl.status === 'completed',
+            cancelled: false,
+            amount: Number(stl.amount || 0),
+          },
           date,
-          title: stl.title || stl.company_name || '협업 정산',
-          company: stl.company_name,
-          done: stl.status === 'completed',
-          cancelled: false,
-          amount: Number(stl.amount || 0),
-        }),
+        ),
       ),
     );
 
@@ -603,7 +660,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       return ev.done ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700';
     }
     if (ev.done) return 'bg-emerald-100 text-emerald-700';
-    if (ev.date < today) return 'bg-red-100 text-red-700';
+    // 기간짜리 일정은 마지막 날이 지나야 놓친 것이다.
+    if (ev.to < today) return 'bg-red-100 text-red-700';
     return 'bg-blue-100 text-blue-700';
   };
 
@@ -1002,34 +1060,50 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       {day}
                     </span>
                     {/* 올리는 날(⬆️)과 정산이 들어오는 날(💰)만 찍는다. 세 건이 넘는
-                        날은 개수로 접고, 자세한 내용은 칸을 눌렀을 때 아래 상세에서 본다. */}
+                        날은 개수로 접고, 자세한 내용은 칸을 눌렀을 때 아래 상세에서 본다.
+
+                        희망 게시 기간이 여러 날이면 같은 일정이 칸마다 놓인다. 기간의
+                        가운데 칸은 칸 여백만큼 좌우로 넘겨(-mx) 옆 칸의 막대와 맞붙게
+                        하고, 양 끝만 둥글게 둔다 — 그래야 23~26일이 네 개의 점이 아니라
+                        하나의 기간으로 읽힌다. 아이콘과 제목은 시작 칸에만 적는다. */}
                     <div className="mt-1.5">
-                      {chips.slice(0, 3).map(ev => (
-                        <div
-                          key={ev.id}
-                          title={[
-                            ev.kind === 'settlement'
-                              ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
-                              : ev.done
-                                ? '업로드 완료'
-                                : '업로드 예정',
-                            ev.title,
-                            ev.company,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                          className={`text-[11px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)}`}
-                        >
-                          {ev.kind === 'settlement'
+                      {chips.slice(0, 3).map(ev => {
+                        const spanned = ev.from !== ev.to;
+                        const icon =
+                          ev.kind === 'settlement'
                             ? ev.done
                               ? '💸'
                               : '💰'
                             : ev.done
                               ? '✅'
-                              : '⬆️'}{' '}
-                          {ev.title}
-                        </div>
-                      ))}
+                              : '⬆️';
+                        return (
+                          <div
+                            key={ev.id}
+                            title={[
+                              ev.kind === 'settlement'
+                                ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
+                                : ev.done
+                                  ? '업로드 완료'
+                                  : '업로드 예정',
+                              spanned ? `희망 게시 ${ev.from} ~ ${ev.to}` : '',
+                              ev.title,
+                              ev.company,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                            className={`text-[11px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)} ${
+                              !spanned
+                                ? 'rounded'
+                                : `${ev.isStart ? 'rounded-l' : '-ml-2 md:-ml-3'} ${
+                                    ev.isEnd ? 'rounded-r' : '-mr-2 md:-mr-3'
+                                  }`
+                            }`}
+                          >
+                            {spanned && !ev.isStart ? ev.title : `${icon} ${ev.title}`}
+                          </div>
+                        );
+                      })}
                       {chips.length > 3 && (
                         <p className="text-[11px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
                       )}
@@ -1348,9 +1422,10 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
             <p className="text-[11px] font-bold text-slate-400 mb-3 leading-relaxed">
-              달력에는 업로드 일정과 정산 예정일만 표시됩니다. 정산일은 콘텐츠를 올린 달의 다음 달
-              말일이라, 업로드가 밀리면 정산일도 함께 밀립니다. 협업 기간과 금액 합계는 협업 내역
-              탭에서 볼 수 있습니다.
+              달력에는 업로드 일정과 정산 예정일만 표시됩니다. 브랜드가 희망 게시 기간을 23~26일처럼
+              범위로 적어 두면 그 기간 내내 이어서 표시되고, 콘텐츠를 올린 뒤에는 올린 날 하루로
+              바뀝니다. 정산일은 콘텐츠를 올린 달의 다음 달 말일이라, 업로드가 밀리면 정산일도 함께
+              밀립니다. 협업 기간과 금액 합계는 협업 내역 탭에서 볼 수 있습니다.
             </p>
             <div className="space-y-2.5">
               <div className="flex items-center gap-2">
