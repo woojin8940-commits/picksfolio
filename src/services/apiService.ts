@@ -547,6 +547,77 @@ export interface FollowerSeriesResponse {
   error?: string;
 }
 
+/**
+ * 팔로워 인구통계 한 칸. `key` 는 메타가 준 값 그대로다 — 18-24 / F / KR.
+ *
+ * 이름 붙이기(남성·여성, 대한민국)는 화면에서 한다. 서버가 한글 이름을 실어 보내면
+ * 국가 이름 표가 서버·화면 두 곳에 생기고, 둘이 어긋나는 날이 온다.
+ */
+export interface DemographicSlice {
+  key: string;
+  value: number;
+}
+
+export interface FollowerDemographicsResponse {
+  age: DemographicSlice[];
+  gender: DemographicSlice[];
+  country: DemographicSlice[];
+  /**
+   * 비어 있는 이유. 값이 하나라도 왔으면 빈 문자열이다.
+   *
+   * few_followers(팔로워 100명 미만) · empty(집계 대기) · denied(요청 거절) ·
+   * error(그 외). 화면은 이 값으로 빈 자리에 적을 말을 고른다 — "0명"이라고 적으면
+   * 안 되는 자리이기 때문이다.
+   */
+  reason?: '' | 'few_followers' | 'empty' | 'denied' | 'error';
+  /** 메타가 인구통계를 주기 시작하는 팔로워 수(=100). 문구를 서버 기준에 맞춘다. */
+  minFollowers?: number;
+  /** 판정에 쓴 팔로워 수(스냅샷의 마지막 값). */
+  followers?: number | null;
+  connected?: boolean;
+  needsReauth?: boolean;
+  /** 이 값을 메타에서 받아 온 시각. 최대 48시간 늦을 수 있음을 함께 적기 위한 값. */
+  fetchedAt?: string;
+  error?: string;
+}
+
+/** 벤치마킹 지표. 분모가 없는 값은 0 이 아니라 null 이다. */
+export interface BenchmarkMetrics {
+  /** 참여율(%) — (평균 좋아요 + 평균 댓글) ÷ 팔로워 */
+  engagement: number | null;
+  /** 조회율(%) — 평균 조회수 ÷ 팔로워. 팔로워 밖 도달이 있어 100%를 넘을 수 있다. */
+  viewRate: number | null;
+  /** 댓글률(%) — 평균 댓글 ÷ 평균 조회수 */
+  commentRate: number | null;
+  /** 주당 업로드 편수 */
+  uploads: number | null;
+}
+
+export type BenchmarkMetricKey = keyof BenchmarkMetrics;
+
+export interface BenchmarkResponse {
+  /** false 면 견줄 준비가 안 된 상태다 — reason 을 보고 화면이 할 말을 고른다. */
+  ok?: boolean;
+  reason?: 'no_channel' | 'error';
+  /** 표본이 최소선 미만 — 내 값만 보여 주고 평균은 그리지 않는다. */
+  collecting?: boolean;
+  tier?: 'nano' | 'micro' | 'macro';
+  followers?: number;
+  me?: BenchmarkMetrics;
+  peer?: BenchmarkMetrics | null;
+  /** 지표별로 평균에 들어간 계정 수. */
+  counted?: Partial<Record<BenchmarkMetricKey, number>>;
+  /** 지표별 "상위 O%". 같은 규모 계정 중 내 값 이상인 비율. */
+  topPercent?: Partial<Record<BenchmarkMetricKey, number | null>> | null;
+  /** 같은 규모의 다른 계정 수(나 제외). */
+  sample?: number;
+  /** 평균을 말하기 위해 필요한 최소 표본. */
+  minSample?: number;
+  /** 채널 지표가 있는 전체 인플루언서 수. "쌓이는 중" 안내의 근거. */
+  totalCreators?: number;
+  error?: string;
+}
+
 // ─── 태그된 콘텐츠 (브랜드 계정 화면) ───────────────────────────────────────
 //
 // 다른 계정이 올린 게시물이라 도달·저장수는 애초에 조회할 수 없다. 조회수도 릴스가
@@ -581,6 +652,19 @@ export interface TaggedMediaResponse {
   needsReauth?: boolean;
   /** 브랜드 자신의 인스타그램 아이디. 무엇을 기준으로 찾았는지 화면이 밝힌다. */
   igUsername?: string;
+  /**
+   * 브랜드 계정 자체의 추이. 태그된 콘텐츠 요약과 다른 질문에 답하는 값이라
+   * (저쪽은 "누가 우리를 걸었나", 이쪽은 "우리 계정이 자라고 있나") 따로 둔다.
+   * 조회에 실패하면 null 이고, 그때 화면은 이 블록을 그리지 않는다.
+   */
+  account?: {
+    followers: number | null;
+    following: number | null;
+    /** 최근 구간 팔로워 증감. 스냅샷이 두 줄 미만이면 null — 0 과 다른 뜻이다. */
+    followerDelta: number | null;
+    /** 증감을 계산한 실제 일수. 문구가 "7일"이라고 단정하지 않도록 함께 온다. */
+    followerDeltaDays: number;
+  } | null;
   items: TaggedMediaItem[];
   /**
    * 브랜드 계정이 직접 올린 게시물.
@@ -3193,6 +3277,63 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to get follower series:', e);
       return { days, points: [], collecting: true, error: '네트워크 오류로 추이를 불러오지 못했습니다.' };
+    }
+  },
+
+  /**
+   * 팔로워의 성별·연령대·국가 분포.
+   *
+   * 기간 버튼과 무관한 값이라 추이와 따로 부른다. 서버가 여섯 시간 굳혀 두므로
+   * 탭을 여닫아도 메타를 다시 부르지 않는다.
+   */
+  async getCreatorFollowerDemographics(
+    username: string,
+    opts: { refresh?: boolean } = {},
+  ): Promise<FollowerDemographicsResponse> {
+    const blank = (error: string): FollowerDemographicsResponse => ({
+      age: [],
+      gender: [],
+      country: [],
+      reason: 'error',
+      error,
+    });
+    try {
+      const params = new URLSearchParams({ username: username.toLowerCase() });
+      if (opts.refresh) params.set('refresh', '1');
+      const res = await fetch(`/api/creator-insights/demographics?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: username }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return blank(json?.error || '팔로워 분포를 불러오지 못했습니다.');
+      return json as FollowerDemographicsResponse;
+    } catch (e) {
+      console.error('[API] Failed to get follower demographics:', e);
+      return blank('네트워크 오류로 팔로워 분포를 불러오지 못했습니다.');
+    }
+  },
+
+  /**
+   * 같은 팔로워 규모 인플루언서들의 평균과 내 값.
+   *
+   * 메타를 부르지 않는 조회다(우리 DB 의 채널 표만 읽는다). 표본이 최소선 미만이면
+   * `collecting: true` 로 오고, 그때 화면은 평균을 그리지 않는다.
+   */
+  async getCreatorBenchmark(username: string): Promise<BenchmarkResponse> {
+    try {
+      const params = new URLSearchParams({ username: username.toLowerCase() });
+      const res = await fetch(`/api/creator-insights/benchmark?${params.toString()}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: username }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, reason: 'error', error: json?.error || '비교 데이터를 불러오지 못했습니다.' };
+      }
+      return json as BenchmarkResponse;
+    } catch (e) {
+      console.error('[API] Failed to get creator benchmark:', e);
+      return { ok: false, reason: 'error', error: '네트워크 오류로 비교 데이터를 불러오지 못했습니다.' };
     }
   },
 

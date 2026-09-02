@@ -30,15 +30,39 @@ interface MediaAutoProps {
   priority?: boolean;
   // Target render width in CSS px; used to size the on-demand image transform.
   width?: number;
+  /**
+   * Cross-fade the image in once it has decoded, instead of letting it snap
+   * over whatever was painted underneath.
+   *
+   * Only worth it where the element underneath is a placeholder the visitor
+   * will notice being replaced — the page cover. A thumbnail in a grid is
+   * small and arrives with dozens of siblings, so fading each one in just
+   * makes the grid shimmer. Off by default for that reason.
+   */
+  fadeIn?: boolean;
 }
 
-const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, forceVideo, priority, width }) => {
+const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, forceVideo, priority, width, fadeIn }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoReady, setVideoReady] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [imgReady, setImgReady] = useState(false);
 
   useEffect(() => {
     setVideoReady(false);
   }, [src]);
+
+  useEffect(() => {
+    setImgReady(false);
+  }, [src]);
+
+  // A cached image can finish decoding before React attaches onLoad, which
+  // would leave it faded out forever. `complete` is the only reliable check
+  // for that case, and it has to run after the ref exists.
+  useEffect(() => {
+    if (!fadeIn) return;
+    if (imgRef.current?.complete) setImgReady(true);
+  }, [fadeIn, src]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -109,14 +133,23 @@ const MediaAuto: React.FC<MediaAutoProps> = ({ src, className, style, alt, force
   }
   return (
     <img
+      ref={imgRef}
       src={optimizeImageUrl(src, { width: width ?? 1280 })}
       className={className}
-      style={style}
+      style={
+        fadeIn
+          ? { ...style, opacity: imgReady ? 1 : 0, transition: 'opacity 0.35s ease' }
+          : style
+      }
       alt={alt}
       referrerPolicy="no-referrer"
       decoding="async"
       loading={priority ? 'eager' : 'lazy'}
       fetchPriority={priority ? 'high' : 'auto'}
+      // A broken image reveals too. Staying at opacity 0 would hide the
+      // browser's own broken-image state and look like an empty cover.
+      onLoad={fadeIn ? () => setImgReady(true) : undefined}
+      onError={fadeIn ? () => setImgReady(true) : undefined}
     />
   );
 };

@@ -95,7 +95,6 @@ const asForm = (raw: any): OfferForm => ({
 const emptyQuote = {
   fee: '',
   secondUseFee: '',
-  guaranteedViews: '',
   payoutFee: '',
   payoutSecondUseFee: '',
 };
@@ -109,7 +108,6 @@ type QuoteForm = typeof emptyQuote;
 const quoteFrom = (c: any): QuoteForm => ({
   fee: c?.quotedFee ? String(c.quotedFee) : '',
   secondUseFee: c?.quotedSecondUseFee ? String(c.quotedSecondUseFee) : '',
-  guaranteedViews: c?.guaranteedViews ? String(c.guaranteedViews) : '',
   payoutFee: String(c?.payoutFee || c?.registeredPayoutFee || '') || '',
   payoutSecondUseFee: c?.payoutSecondUseFee ? String(c.payoutSecondUseFee) : '',
 });
@@ -132,6 +130,13 @@ const registeredFrom = (c: any): RegisteredRates => ({
 /**
  * 서버로 보내는 두 덩어리. 견적은 컬럼으로, 지급액은 제안 초안으로 들어간다.
  *
+ * 보장 조회수도 더 이상 담당자가 적지 않는다. 그 칸은 "이만큼은 나옵니다"라는
+ * 약속으로 읽히는데, 우리가 약속할 수 있는 값이 아니었다 — 실제로는 대부분 비워
+ * 두고 채널 평균 조회수가 그대로 들어갔고, 그러면 브랜드 카드의 CPV 는 "평균
+ * 조회수로 나눈 값"이라는 뜻밖에 없으면서 보장처럼 보였다. 담당자가 못 지킬 숫자를
+ * 적을 자리를 없애는 편이 낫다. 컬럼(guaranteed_views)은 그대로 두고 서버가 채널
+ * 평균으로 채운다 — 지우면 예전 명단의 값까지 사라진다.
+ *
  * 배지("인기")와 한 줄 소개("뷰티 · 20대 · 여성")는 더 이상 담당자가 적지 않는다.
  * 배지는 무엇을 근거로 붙는 말인지 정한 적이 없어 브랜드 카드에서 아무 뜻도 없는
  * 꼬리표였고, 한 줄 소개는 인플루언서가 등록해 둔 카테고리를 사람이 다시 옮겨
@@ -142,7 +147,6 @@ const quotePayload = (q: QuoteForm) => ({
   quote: {
     fee: q.fee,
     secondUseFee: q.secondUseFee,
-    guaranteedViews: q.guaranteedViews,
   },
   payout: { fee: q.payoutFee, secondUseFee: q.payoutSecondUseFee },
 });
@@ -161,8 +165,6 @@ const QuoteFields: React.FC<{
   /** 이 캠페인의 콘텐츠 형식. 어느 등록 단가가 들어가는지가 이 값으로 갈린다. */
   contentFormat?: string;
 }> = ({ value, onChange, hint, payoutLocked, registered, payoutOptional, contentFormat }) => {
-  const set = (key: keyof QuoteForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    onChange({ ...value, [key]: e.target.value });
   /**
    * 금액 칸은 보이는 값과 담기는 값이 다르다.
    *
@@ -175,10 +177,6 @@ const QuoteFields: React.FC<{
   const money = (raw: string) => formatNumberWithCommas(raw);
   const cls =
     'w-full text-[11px] font-bold text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400';
-  const cpv =
-    Number(value.fee || 0) > 0 && Number(value.guaranteedViews || 0) > 0
-      ? Math.round(Number(value.fee) / Number(value.guaranteedViews))
-      : 0;
 
   const brandAmount = Number(value.fee || 0) + Number(value.secondUseFee || 0);
   const payoutAmount = Number(value.payoutFee || 0) + Number(value.payoutSecondUseFee || 0);
@@ -288,7 +286,8 @@ const QuoteFields: React.FC<{
         <p className="text-[10px] font-black text-blue-600 mb-1.5">
           브랜드 제시가 <span className="text-blue-300 font-bold">· 브랜드 카드에 찍히는 금액</span>
         </p>
-        <div className="grid grid-cols-3 gap-2">
+        {/* 두 칸이다. 보장 조회수 칸이 여기 있었다 — 없앤 이유는 위 quotePayload 주석에. */}
+        <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-[10px] text-slate-400 font-black mb-1">제시 광고비(원)</label>
             <input
@@ -308,15 +307,6 @@ const QuoteFields: React.FC<{
               value={money(value.secondUseFee)}
               onChange={setMoney('secondUseFee')}
               className={`${cls} text-right`}
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] text-slate-400 font-black mb-1">보장 조회수</label>
-            <input
-              type="number"
-              value={value.guaranteedViews}
-              onChange={set('guaranteedViews')}
-              className={cls}
             />
           </div>
         </div>
@@ -343,10 +333,7 @@ const QuoteFields: React.FC<{
         )}
       </div>
 
-      <p className="text-[10px] text-slate-400 font-bold">
-        {cpv > 0 ? `CPV ${formatNumberWithCommas(cpv)}원으로 표시됩니다. ` : ''}
-        {hint || ''}
-      </p>
+      <p className="text-[10px] text-slate-400 font-bold">{hint || ''}</p>
     </div>
   );
 };
@@ -747,7 +734,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 className="w-full text-[11px] font-medium text-slate-700 border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:border-blue-400"
               />
               {/* 여기 적은 값이 브랜드 카드에 그대로 찍힌다. 비워 두면 광고비는
-                  "협의"로, 보장 조회수는 채널 평균 조회수로 나간다. */}
+                  "협의"로 나간다. */}
               <QuoteFields
                 value={addQuote}
                 onChange={setAddQuote}
@@ -958,12 +945,6 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                           차액 {formatSignedKRW(c.margin)}
                         </span>
                       )}
-                      {c.guaranteedViews ? (
-                        <span className="text-[11px] text-slate-500 font-bold">
-                          보장 조회수 {formatNumberWithCommas(c.guaranteedViews)}
-                          {c.cpv ? ` · CPV ${formatNumberWithCommas(c.cpv)}원` : ''}
-                        </span>
-                      ) : null}
                       {c.quotedSecondUseFee ? (
                         <span className="text-[11px] text-slate-500 font-bold">
                           2차 활용 {formatNumberWithCommas(c.quotedSecondUseFee)}원
@@ -1062,7 +1043,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                               payoutLocked={c.outreachStatus !== 'not_sent'}
                               registered={registeredFrom(c)}
                               contentFormat={campaign?.contentFormat}
-                              hint="지급 단가는 인플루언서가 등록해 둔 단가로 채워져 있습니다. 브랜드에게 제시할 금액만 적으면 됩니다. 보장 조회수를 비우면 채널 평균 조회수로 채워집니다."
+                              hint="지급 단가는 인플루언서가 등록해 둔 단가로 채워져 있습니다. 브랜드에게 제시할 금액만 적으면 됩니다."
                             />
                             <div className="flex justify-end mt-2">
                               <button

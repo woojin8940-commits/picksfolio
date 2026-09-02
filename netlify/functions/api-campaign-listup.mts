@@ -436,10 +436,11 @@ export default async (req: Request) => {
             ? "directory"
             : "manager";
         const quote = quoteByUser[username] || quoteDefaults;
-        // 보장 조회수를 담당자가 비워 두면 최근 릴스 평균으로 채운다. 브랜드가
-        // 고를 때 CPV 칸이 비어 있으면 금액만 보고 고르게 되는데, 그 판단은
-        // 팔로워가 많은 쪽으로만 쏠린다.
-        const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
+        // guaranteed_views 는 채널 평균 조회수다. 담당자가 적는 칸이 있었지만
+        // 없앴다 — 우리가 "이만큼 나옵니다"를 약속할 수 있는 값이 아니었고,
+        // 실제로는 대부분 비워 두고 이 평균이 그대로 들어갔다. 컬럼은 예전 명단의
+        // 값을 살려 두려고 남기고, 앞으로는 언제나 측정값으로만 채운다.
+        const guaranteedViews = Number(snapshot.avgViews || 0);
         // 지급액은 아직 보내지 않은 제안 초안(offer)에 담는다. 제안 폼이 이 초안을
         // 그대로 불러오므로 담당자가 같은 금액을 두 번 적지 않는다.
         //
@@ -616,14 +617,16 @@ export default async (req: Request) => {
       }
 
       // --- 브랜드에게 보여 줄 견적 -----------------------------------------
-      // 광고비 · 2차 활용비 · 보장 조회수 · 배지. 명단에 올린 뒤에도 고칠 수 있어야
+      // 광고비 · 2차 활용비. 명단에 올린 뒤에도 고칠 수 있어야
       // 한다 — 협의는 명단을 만든 다음에 끝나는 경우가 더 많다.
       if (action === "quote") {
         if (!isManager) return managerRequired();
         const quote = normalizeQuote(body.quote ?? body);
         const snapshot =
           listup.snapshot && typeof listup.snapshot === "object" ? (listup.snapshot as any) : {};
-        const guaranteedViews = quote.guaranteedViews || Number(snapshot.avgViews || 0);
+        // 견적을 고칠 때도 보장 조회수는 담당자 입력이 아니라 채널 평균이다.
+        // 스냅샷이 갱신되면 이 값도 따라 올라간다.
+        const guaranteedViews = Number(snapshot.avgViews || 0);
         await db.sql`
           UPDATE campaign_listups
           SET quoted_fee = ${quote.fee},
