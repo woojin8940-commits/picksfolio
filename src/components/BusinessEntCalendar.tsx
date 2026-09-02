@@ -6,9 +6,11 @@ import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import {
   CampaignCollabStatus,
   campaignCollabsAsProposals,
+  daysInWindow,
   dropProposalsCoveredByCollabs,
   openCampaignCollab,
   toCampaignCollabStatuses,
+  uploadWindow,
 } from '../utils/campaignCollabStatus';
 
 interface BusinessEntCalendarProps {
@@ -40,13 +42,23 @@ const dayOnly = (v?: string) => (v || '').split('T')[0];
 /**
  * 달력 한 칸에 찍히는 업로드 일정.
  *
- * 칸이 답해야 하는 질문은 "이 날 누가 올리나" 하나다. 기간은 협업 내역 탭이 이미
- * 보여 주므로, 여기서는 날짜 하나에 점 하나만 놓는다.
+ * 칸이 답해야 하는 질문은 "이 날 누가 올리나" 하나다. 협업 기간은 협업 내역 탭이 이미
+ * 보여 주므로 여기서 그리지 않는다 — 다만 희망 게시 기간은 다르다. "23일~26일 사이에
+ * 올려 주세요" 로 등록한 캠페인을 23일 하루로만 찍으면, 26일까지 여유가 있는 일정이
+ * 당일치기로 보인다. 그래서 희망 게시 기간만은 걸친 칸 전부에 놓는다.
  */
 type UploadChip = {
   id: string;
-  /** 콘텐츠를 올리는 날(YYYY-MM-DD). */
+  /** 이 chip 이 놓인 칸의 날짜(YYYY-MM-DD). */
   date: string;
+  /**
+   * 희망 게시 기간. 하루짜리면 from === to === date. 기간의 어느 칸인지는 isStart ·
+   * isEnd 로 안다 — 양 끝만 둥글게 그려야 여러 칸이 한 덩어리로 읽힌다.
+   */
+  from: string;
+  to: string;
+  isStart: boolean;
+  isEnd: boolean;
   /** 업로드가 끝났는가. 남은 일을 앞으로 올리고 색을 가르는 데 쓴다. */
   done: boolean;
   /** 칸을 눌렀을 때 아래 상세가 그리는 원래 협업 줄. */
@@ -154,19 +166,23 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   );
 
   /**
-   * 이 협업을 올리는 날.
+   * 이 협업을 올리는 기간.
    *
-   * 이미 올렸으면 올린 날, 아직이면 확정 조건의 업로드 마감이다. 둘 다 없는 줄(브랜드가
+   * 이미 올렸으면 올린 날 하루, 아직이면 브랜드가 고른 희망 게시 기간이다. 기간이 없는
+   * 예전 협업은 확정 조건의 업로드 마감 하루로 되돌아가고, 조건표조차 없는 줄(브랜드가
    * 직접 보낸 제안)은 종료일을 쓴다 — 서버는 일정을 확정할 때 업로드 마감을 협업
    * 종료일로 옮겨 적으므로 둘은 같은 날을 가리킨다.
    */
-  const uploadDateOf = (p: CollabRow): string => {
+  const uploadWindowOf = (p: CollabRow): { from: string; to: string } => {
     const linked = p._collabId ? byCollabId.get(p._collabId) : undefined;
-    return (
-      dayOnly(linked?.uploadedDay) ||
-      dayOnly(linked?.uploadDue) ||
-      dayOnly(p.end_date) ||
-      dayOnly(p.start_date)
+    return uploadWindow(
+      {
+        uploadedDay: linked?.uploadedDay,
+        uploadFrom: linked?.uploadFrom,
+        uploadTo: linked?.uploadTo,
+        uploadDue: linked?.uploadDue,
+      },
+      dayOnly(p.end_date) || dayOnly(p.start_date),
     );
   };
 
@@ -186,23 +202,40 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   };
 
   /**
-   * 달력에 찍는 날 — 콘텐츠가 올라가는 날 하나뿐이다.
+   * 달력에 찍는 것 — 콘텐츠가 올라가는 날, 그리고 그 날을 아직 정하지 않았다면 브랜드가
+   * 열어 준 희망 게시 기간.
    *
    * 예전에는 협업 기간을 막대로 그렸다. 그런데 담당자가 일정을 확정하기 전의 협업은
    * 기간이 "협업이 만들어진 날 ~ 캠페인 종료일"까지 벌어져서, 인플루언서 한 명과 네 건만
    * 진행해도 막대가 달 전체를 덮고 칸마다 '+2'가 붙었다. 정작 브랜드가 달력에서 알고
    * 싶은 것 — 언제 콘텐츠가 올라오나 — 는 그 막대 어디에도 적혀 있지 않았다.
    *
-   * 그래서 기간은 버리고 업로드하는 날만 점으로 찍는다. 기간과 금액 합계는 협업 내역
-   * 탭이, 회차별 지급액은 정산금 탭이 이미 보여 준다.
+   * 그래서 협업 기간은 버렸다. 다만 희망 게시 기간은 브랜드가 등록 화면에서 직접 고른
+   * 며칠짜리 값이라 그 문제가 없고, 시작일 하나로 접으면 "23~26일 사이" 라는 약속이
+   * 달력에서 사라진다. 그래서 이 기간만 걸친 칸 전부에 놓는다(상한은 uploadWindow).
+   * 협업 기간과 금액 합계는 협업 내역 탭이, 회차별 지급액은 정산금 탭이 보여 준다.
    */
   const dayChipsMap = useMemo(() => {
     const map: Record<string, UploadChip[]> = {};
     rows.forEach(p => {
-      const date = uploadDateOf(p);
-      if (!date) return;
-      if (!map[date]) map[date] = [];
-      map[date].push({ id: p.id, date, done: isUploadDone(p), row: p });
+      const win = uploadWindowOf(p);
+      const days = daysInWindow(win.from, win.to);
+      const done = isUploadDone(p);
+      days.forEach((date, i) => {
+        if (!map[date]) map[date] = [];
+        map[date].push({
+          // 같은 일정이 여러 칸에 놓이므로 칸마다 id 를 달리 붙인다 — 같은 key 가 여러
+          // 칸에 있으면 React 가 칸을 재사용하다가 엉뚱한 칸을 다시 그린다.
+          id: days.length > 1 ? `${p.id}_${date}` : p.id,
+          date,
+          from: days[0],
+          to: days[days.length - 1],
+          isStart: i === 0,
+          isEnd: i === days.length - 1,
+          done,
+          row: p,
+        });
+      });
     });
     // 남은 일이 먼저다. 같은 날 여러 명이 올리면 아직 안 올린 쪽부터 보여 준다.
     Object.values(map).forEach(list =>
@@ -216,17 +249,22 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, byCollabId, today]);
 
-  /** 점의 색. 마감이 지났는데 안 올라온 건을 회색으로 두면 놓친 것을 놓친 줄 모른다. */
+  /**
+   * 점의 색. 마감이 지났는데 안 올라온 건을 회색으로 두면 놓친 것을 놓친 줄 모른다.
+   *
+   * 기간짜리 일정은 마지막 날(`to`)을 기준으로 본다 — 24일에 23~26일 일정을 빨갛게
+   * 칠하면 아직 이틀 남은 약속이 이미 깨진 것처럼 보인다.
+   */
   const chipClass = (ev: UploadChip) => {
     if (ev.done) return 'bg-emerald-100 text-emerald-700';
-    if (ev.date < today) return 'bg-red-100 text-red-700';
+    if (ev.to < today) return 'bg-red-100 text-red-700';
     return 'bg-blue-100 text-blue-700';
   };
 
   const chipLabel = (ev: UploadChip) =>
-    ev.done ? '업로드 완료' : ev.date < today ? '마감 지남 (미업로드)' : '업로드 예정';
+    ev.done ? '업로드 완료' : ev.to < today ? '마감 지남 (미업로드)' : '업로드 예정';
 
-  const chipIcon = (ev: UploadChip) => (ev.done ? '✅' : ev.date < today ? '⚠️' : '⬆️');
+  const chipIcon = (ev: UploadChip) => (ev.done ? '✅' : ev.to < today ? '⚠️' : '⬆️');
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
@@ -278,7 +316,8 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
 
   const formatFee = (fee: number) => formatKRW(fee);
 
-  // 고른 날에 업로드가 잡힌 협업. 기간이 걸쳐 있다고 뜨지 않는다 — 달력의 점과 같은 목록이다.
+  // 고른 날에 업로드가 잡힌 협업. 달력 칸과 정확히 같은 목록이므로, 희망 게시 기간의
+  // 가운데 날(24·25일)을 눌러도 그 기간에 걸린 협업이 함께 나온다.
   const selectedDateChips = useMemo(
     () => (selectedDate ? dayChipsMap[selectedDate] || [] : []),
     [dayChipsMap, selectedDate],
@@ -413,19 +452,40 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                       {day}
                     </span>
                     {/* 올리는 날(⬆️)만 찍는다. 세 건이 넘는 날은 개수로 접고, 자세한
-                        내용은 칸을 눌렀을 때 아래 상세에서 본다. */}
+                        내용은 칸을 눌렀을 때 아래 상세에서 본다.
+
+                        희망 게시 기간이 여러 날이면 같은 일정이 칸마다 놓인다. 가운데 칸은
+                        칸 여백만큼 좌우로 넘겨(-mx) 옆 칸의 막대와 맞붙게 하고 양 끝만
+                        둥글게 둔다 — 그래야 23~26일이 네 개의 점이 아니라 하나의 기간으로
+                        읽힌다. 아이디는 시작 칸에만 아이콘과 함께 적는다. */}
                     <div className="mt-1.5">
-                      {chips.slice(0, 3).map(ev => (
-                        <div
-                          key={ev.id}
-                          title={[chipLabel(ev), ev.row.title, `@${ev.row.influencer_username}`]
-                            .filter(Boolean)
-                            .join(' · ')}
-                          className={`text-[10px] md:text-xs font-bold py-1 px-1.5 rounded leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)}`}
-                        >
-                          {chipIcon(ev)} @{ev.row.influencer_username}
-                        </div>
-                      ))}
+                      {chips.slice(0, 3).map(ev => {
+                        const spanned = ev.from !== ev.to;
+                        return (
+                          <div
+                            key={ev.id}
+                            title={[
+                              chipLabel(ev),
+                              spanned ? `희망 게시 ${ev.from} ~ ${ev.to}` : '',
+                              ev.row.title,
+                              `@${ev.row.influencer_username}`,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                            className={`text-[10px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)} ${
+                              !spanned
+                                ? 'rounded'
+                                : `${ev.isStart ? 'rounded-l' : '-ml-2 md:-ml-3'} ${
+                                    ev.isEnd ? 'rounded-r' : '-mr-2 md:-mr-3'
+                                  }`
+                            }`}
+                          >
+                            {spanned && !ev.isStart
+                              ? `@${ev.row.influencer_username}`
+                              : `${chipIcon(ev)} @${ev.row.influencer_username}`}
+                          </div>
+                        );
+                      })}
                       {chips.length > 3 && (
                         <p className="text-[10px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
                       )}
@@ -456,7 +516,7 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                       >
                         <div
                           className={`w-2 h-12 rounded-full shrink-0 ${
-                            ev.done ? 'bg-emerald-500' : ev.date < today ? 'bg-red-500' : 'bg-blue-500'
+                            ev.done ? 'bg-emerald-500' : ev.to < today ? 'bg-red-500' : 'bg-blue-500'
                           }`}
                         />
                         <div className="flex-1 min-w-0">
@@ -470,10 +530,17 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                           <p className="text-[10px] font-bold text-slate-300 mt-0.5">
                             협업 기간 {formatDate(p.start_date)} ~ {formatDate(p.end_date)}
                           </p>
+                          {/* 이 줄이 기간짜리면 어느 기간에 걸려 나온 것인지 밝힌다 —
+                              고른 날이 기간의 가운데면 "왜 이 날에 뜨나"가 안 보인다. */}
+                          {ev.from !== ev.to && (
+                            <p className="text-[10px] font-bold text-blue-400 mt-0.5">
+                              희망 게시 기간 {formatDate(ev.from)} ~ {formatDate(ev.to)}
+                            </p>
+                          )}
                         </div>
                         <span
                           className={`text-xs font-black shrink-0 ${
-                            ev.done ? 'text-emerald-500' : ev.date < today ? 'text-red-500' : 'text-blue-500'
+                            ev.done ? 'text-emerald-500' : ev.to < today ? 'text-red-500' : 'text-blue-500'
                           }`}
                         >
                           {chipLabel(ev)}
@@ -601,9 +668,11 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
             <p className="text-[11px] font-bold text-slate-400 mb-3 leading-relaxed">
-              달력에는 인플루언서의 업로드 일정만 표시됩니다. 일정이 확정되기 전에는 캠페인 종료일에
-              놓이고, 담당자가 업로드 마감을 확정하면 그 날짜로 옮겨집니다. 협업 기간과 금액 합계는
-              협업 내역, 회차별 지급액은 정산금 탭에서 볼 수 있습니다.
+              달력에는 인플루언서의 업로드 일정만 표시됩니다. 등록할 때 희망 게시 기간을 23~26일처럼
+              범위로 적어 두면 그 기간 내내 이어서 표시되고, 콘텐츠가 올라간 뒤에는 올라간 날 하루로
+              바뀝니다. 기간을 적지 않은 협업은 캠페인 종료일에 놓이고, 담당자가 업로드 마감을
+              확정하면 그 날짜로 옮겨집니다. 협업 기간과 금액 합계는 협업 내역, 회차별 지급액은
+              정산금 탭에서 볼 수 있습니다.
             </p>
             <div className="space-y-2.5">
               <div className="flex items-center gap-2">
