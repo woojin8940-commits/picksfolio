@@ -306,7 +306,56 @@ export default async (req: Request) => {
       const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements].filter((s: any) =>
         isProposalAlive(deletedIds, s?.proposal_id),
       );
-      return Response.json({ settlements: combinedSettlements });
+
+      /**
+       * 브랜드에게는 "내가 보낸 일괄 정산금이 접수됐는가"를 함께 내려보낸다.
+       *
+       * 브랜드는 인플루언서에게 개별 송금을 하지 않는다 — 픽스폴리오에 회차마다 한 번
+       * 보내고 개별 지급과 원천징수는 픽스폴리오가 한다. 그런데 정산 화면의 상태는
+       * 인플루언서 지급이 끝났는지(status)만 말하고 있어서, 브랜드가 확인하고 싶은
+       * "내 입금이 접수됐나"는 담당자에게 물어봐야 알 수 있었다.
+       *
+       * 수납은 캠페인 단위로 기록된다(campaign_brand_settlements). 캠페인 협업의 정산
+       * 항목은 proposal_id 가 `campaign_<캠페인>_<아이디>` 이므로 캠페인 아이디로 앞을
+       * 맞춰 찾는다 — 캠페인 아이디 자체에 밑줄이 들어가므로 잘라 나누지 않는다.
+       *
+       * 비즈니스 제안에서 온 정산(`prop_...`)은 브랜드가 인플루언서에게 직접 지급하는
+       * 건이라 일괄 정산 대상이 아니다. 그 줄에는 아무것도 붙이지 않는다.
+       */
+      let annotated = combinedSettlements;
+      if (role === "business") {
+        let receipts: any[] = [];
+        if (dbInstance) {
+          try {
+            receipts = (await dbInstance.sql`
+              SELECT campaign_id, invoice_amount, received_amount, received_date, received_at, memo
+              FROM campaign_brand_settlements
+              WHERE LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
+            `) as any[];
+          } catch {
+            receipts = [];
+          }
+        }
+        annotated = combinedSettlements.map((s: any) => {
+          const proposalId = String(s?.proposal_id || "");
+          if (!proposalId.startsWith("campaign_")) return s;
+          const hit = receipts.find((r: any) => proposalId.startsWith(`campaign_${r.campaign_id}_`));
+          return {
+            ...s,
+            brand_settlement: {
+              campaign_id: hit ? String(hit.campaign_id) : "",
+              /** 담당자가 입금을 확인했는가. 브랜드 화면의 '정산완료'가 이 값이다. */
+              received: Boolean(hit?.received_at),
+              received_date: hit?.received_date ? String(hit.received_date).split("T")[0] : "",
+              received_amount: Number(hit?.received_amount || 0),
+              invoice_amount: Number(hit?.invoice_amount || 0),
+              memo: String(hit?.memo || ""),
+            },
+          };
+        });
+      }
+
+      return Response.json({ settlements: annotated });
     }
 
     if (req.method === "POST" && role === "business") {

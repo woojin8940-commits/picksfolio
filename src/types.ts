@@ -218,6 +218,22 @@ export interface Settlement {
   status: SettlementStatus;
   completed_at?: string;
   memo?: string;
+  /**
+   * 브랜드가 픽스폴리오에 보내는 일괄 정산금의 수납 상태. 브랜드 화면(role=business)
+   * 응답에만 실리고, 캠페인 협업에서 온 정산에만 붙는다.
+   *
+   * `status` 와 다른 사실을 말한다 — `status` 는 인플루언서에게 지급이 끝났는지이고,
+   * 이 값은 브랜드가 보낸 돈이 접수됐는지다. 브랜드가 자기 화면에서 확인하고 싶은
+   * 것은 뒤쪽이다.
+   */
+  brand_settlement?: {
+    campaign_id: string;
+    received: boolean;
+    received_date: string;
+    received_amount: number;
+    invoice_amount: number;
+    memo: string;
+  };
   created_at: string;
   updated_at?: string;
 }
