@@ -136,6 +136,12 @@ export default async (req: Request) => {
         membership_plan: normalizedTier,
         membership_started_at: current?.membership_started_at || now,
         membership_amount_krw: charge.amountKrw,
+        // 해지 예약이 걸린 상태에서 다시 구독(또는 업그레이드)하면 예약을 풀어
+        // 정기결제를 되살린다 — 아니면 다음 결제일에 방금 산 구독이 종료된다.
+        membership_cancel_at_period_end: false,
+        membership_canceled_at: null,
+        membership_ends_at: null,
+        membership_ended_at: null,
         last_billing_at: now,
         next_billing_date: addOneMonth(now),
         billing_failures: 0,

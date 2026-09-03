@@ -175,6 +175,13 @@ export interface SellerVerification {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingHistoryEntry[];
+  // 해지 예약 — 해지는 즉시 차단이 아니라 결제한 이용 기간이 끝나는 날 종료된다.
+  // 예약이 걸리면 다음 달 결제가 나가지 않고, membership_ends_at 까지는
+  // membership_active 가 true 로 유지되어 남은 기간을 그대로 쓸 수 있다.
+  membership_cancel_at_period_end?: boolean;
+  membership_canceled_at?: string | null;
+  membership_ends_at?: string | null;
+  membership_ended_at?: string | null;
   // 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다. 아래 필드는 예전 구독자
   // 기록에만 남아 있는 레거시 값이며 새로 쓰이지 않는다.
   live_plan_active?: boolean;

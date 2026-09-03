@@ -26,6 +26,10 @@ const STORE = "seller-verification";
  * 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다 — `live_plan_*` 필드는 더 이상
  * 청구 대상이 아니므로 예전 구독자에게도 추가 청구가 발생하지 않는다.
  *
+ * 해지(`membership_cancel_at_period_end`)한 구독은 결제일이 와도 청구하지 않고
+ * 그 자리에서 멤버십을 끈다 — 결제한 달의 남은 기간은 그대로 쓰고, 다음 달부터
+ * 결제가 나가지 않는다.
+ *
  * The Claude plan is deliberately NOT handled here — it is a prepaid credit wallet
  * in a different store with balance-based top-ups, not a monthly subscription.
  */
@@ -33,6 +37,9 @@ const STORE = "seller-verification";
 interface SellerRecord {
   membership_active?: boolean;
   membership_plan?: string | null;
+  membership_cancel_at_period_end?: boolean;
+  membership_ends_at?: string | null;
+  membership_ended_at?: string | null;
   billing_key?: string | null;
   next_billing_date?: string | null;
   billing_failures?: number;
@@ -62,6 +69,7 @@ export default async () => {
 
   let charged = 0;
   let failed = 0;
+  let canceled = 0;
   let skipped = 0;
 
   for (const blob of blobs) {
@@ -69,8 +77,10 @@ export default async () => {
       const record = (await store.get(blob.key, { type: "json" })) as SellerRecord | null;
       if (!record) continue;
 
-      // Records without a billing key (e.g. complimentary memberships) are never charged.
-      if (!record.billing_key) {
+      // Records without a billing key (e.g. complimentary memberships) are never
+      // charged — but a canceled subscription still has to be ended on its date,
+      // so the key is only required for the charge itself (step 2 below).
+      if (!record.billing_key && !record.membership_cancel_at_period_end) {
         skipped++;
         continue;
       }
@@ -96,6 +106,46 @@ export default async () => {
       const username = blob.key.replace(/^seller_/, "");
 
       for (const sub of due) {
+        // ── 0) 해지 예약된 구독은 청구하지 않고 여기서 끝낸다 ─────────────
+        // 사용자가 해지를 누르면 결제한 이용 기간(= 다음 결제일)까지는 그대로
+        // 열어 두고 예약만 걸어 둔다. 그 날짜가 되면 카드를 긁는 대신 멤버십을
+        // 끈다 — 다음 달 결제가 나가지 않고, 남은 기간은 모두 사용한 상태가 된다.
+        if (record.membership_cancel_at_period_end) {
+          const at = new Date().toISOString();
+          const ended: { done: boolean } = { done: false };
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            if (!latest || !latest.membership_cancel_at_period_end) return null;
+            if (!latest[sub.activeField]) return null;
+            if (!isDue(latest[sub.nextField] as string | null | undefined, now)) return null;
+            ended.done = true;
+            return {
+              ...latest,
+              [sub.activeField]: false,
+              [sub.nextField]: null,
+              membership_cancel_at_period_end: false,
+              membership_ends_at: (latest.membership_ends_at as string | null) || at,
+              membership_ended_at: at,
+              updated_at: at,
+            };
+          });
+          if (ended.done) {
+            canceled++;
+            console.log(
+              `[membership-billing] Ended ${username} (${sub.plan}) — canceled by member, paid period over`,
+            );
+          } else {
+            skipped++;
+          }
+          continue;
+        }
+
+        // 빌링키 없이 청구할 수는 없다(해지 예약 처리만 빌링키 없이 지나간다).
+        const billingKey = record.billing_key;
+        if (!billingKey) {
+          skipped++;
+          continue;
+        }
+
         // ── 1) 결제일 선점 ────────────────────────────────────────────────
         // 카드를 긁기 전에 다음 결제일을 먼저 한 달 밀어 둔다. 순서를 이렇게
         // 두는 이유: 청구를 먼저 하고 저장에 실패하면(쓰기 오류 · 다른 요청과
@@ -131,7 +181,7 @@ export default async () => {
         // ── 2) 청구 ──────────────────────────────────────────────────────
         const charge = await chargeMembershipMonthly(
           username,
-          record.billing_key,
+          billingKey,
           sub.plan,
           (record.billing_provider as string | undefined) ?? "portone",
           (record.toss_customer_key as string | undefined) ?? null,
@@ -207,7 +257,7 @@ export default async () => {
   }
 
   console.log(
-    `[membership-billing] Done — charged ${charged}, failed ${failed}, skipped ${skipped} of ${blobs.length}`,
+    `[membership-billing] Done — charged ${charged}, failed ${failed}, canceled ${canceled}, skipped ${skipped} of ${blobs.length}`,
   );
 };
 

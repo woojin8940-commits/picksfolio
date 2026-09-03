@@ -77,5 +77,8 @@ export function applyComplimentaryMembership<T extends MembershipOverlayInput | 
   base.membership_active = true
   base.membership_plan = tier
   base.membership_started_at = base.membership_started_at || new Date().toISOString()
+  // 증정 멤버십은 결제가 없어 해지 예약(다음 결제 중단)이 적용될 대상이 아니다.
+  base.membership_cancel_at_period_end = false
+  base.membership_ends_at = null
   return base as any
 }

@@ -9,6 +9,7 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
 import { readSellerMembership } from "./_shared/seller-membership-store.mts";
+import { resolveCancellation } from "./_shared/membership-billing.mts";
 
 const STORE = "seller-verification";
 
@@ -54,11 +55,39 @@ export default async (req: Request, context: Context) => {
       // 멤버십은 결제를 거쳐야 시작된다(빌링키 발급 → 첫 결제 성공 시 서버가 직접 켠다).
       // 그래서 여기서는 해지(false)만 받는다. true 를 받아주면 결제 없이 유료 기능이
       // 열려버린다.
+      //
+      // 해지는 즉시 차단이 아니라 "결제한 이용 기간이 끝나는 날 종료"다. 이미 한 달치를
+      // 받아 두었으므로 남은 기간은 그대로 쓰게 두고(membership_active 유지), 예약만
+      // 걸어 다음 달 결제를 막는다. 종료일에 정기결제 스케줄러가 청구 대신 멤버십을 끈다.
+      const at = new Date().toISOString();
+
       if (body.membership_active === false) {
-        next.membership_active = false;
+        const decision = resolveCancellation(next, new Date());
+        if (decision.mode === "scheduled") {
+          next.membership_cancel_at_period_end = true;
+          next.membership_canceled_at = next.membership_canceled_at || at;
+          next.membership_ends_at = decision.endsAt;
+        } else {
+          // 남은 결제 기간이 없는 경우(증정 멤버십처럼 결제일이 없거나 이미 지난 경우)
+          // 는 그 자리에서 끝낸다.
+          next.membership_active = false;
+          next.membership_cancel_at_period_end = false;
+          next.membership_canceled_at = at;
+          next.membership_ends_at = at;
+          next.membership_ended_at = at;
+          next.next_billing_date = null;
+        }
+      } else if (body.membership_cancel_at_period_end === false) {
+        // 해지 예약 취소(= 구독 계속하기). 아직 이용 기간이 남아 활성인 구독만 되돌릴 수
+        // 있으므로, 이 경로로 결제 없이 멤버십이 켜지는 일은 없다.
+        if (next.membership_active && next.membership_cancel_at_period_end) {
+          next.membership_cancel_at_period_end = false;
+          next.membership_canceled_at = null;
+          next.membership_ends_at = null;
+        }
       }
 
-      next.updatedAt = new Date().toISOString();
+      next.updatedAt = at;
       return next;
     })) as Record<string, any>;
 
