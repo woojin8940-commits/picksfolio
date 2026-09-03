@@ -22,6 +22,14 @@ import type { Settlement } from '../../types';
  *
  * 사람별 지급 상태와 금액은 담당자 화면에만 남는다. 서류를 받고 지급일을 잡고 입금하는
  * 것이 담당자의 일이다.
+ *
+ * ── 무엇을 '완료'라고 부르는가 ──
+ * 한동안 이 화면의 상태는 인플루언서 지급이 끝났는지(정산 항목의 status)를 말했다.
+ * 그건 브랜드가 확인할 수 없고 손댈 수도 없는 남의 진행이었고, 정작 브랜드가 알고
+ * 싶은 "내가 보낸 돈이 접수됐나"는 담당자에게 전화해야 알 수 있었다. 그래서 상태의
+ * 기준을 브랜드 입금 수납(brand_settlement)으로 바꿨다 — 담당자가 통장을 확인하고
+ * '입금 확인 완료'를 누르면 이 화면의 회차가 '정산완료'가 된다. 인플루언서 개별
+ * 지급은 그 뒤에 픽스폴리오가 처리한다.
  */
 
 interface BrandSettlementSummaryProps {
@@ -47,8 +55,10 @@ type Round = {
   amount: number;
   /** 금액이 아직 조율 중인 건수(공동구매 수수료 등). */
   pendingCount: number;
-  /** 이 회차가 전부 입금 완료됐는가. */
+  /** 이 회차의 브랜드 입금이 전부 접수됐는가. */
   paid: boolean;
+  /** 담당자가 입금을 확인한 날짜. 회차 안에서 가장 늦은 날을 남긴다. */
+  receivedDate: string;
 };
 
 /** 회차 라벨 — "2026년 3월 31일". 날짜가 없으면 아직 잡히지 않은 회차다. */
@@ -65,6 +75,17 @@ const roundLabel = (date: string) => {
  * 없는 회차로 읽힌다.
  */
 const isAmountPending = (s: Settlement) => Boolean(s.amount_pending) && !Number(s.amount || 0);
+
+/**
+ * 이 정산의 브랜드 입금이 접수됐는가.
+ *
+ * 캠페인 협업에는 수납 기록이 붙어 온다(brand_settlement) — 담당자가 통장을 확인한
+ * 사실이고, 브랜드가 이 화면에서 알고 싶은 것이 그것이다. 비즈니스 제안에서 성사된
+ * 협업은 브랜드가 인플루언서에게 직접 지급하므로 일괄 정산 수납이라는 것이 없다.
+ * 그 줄은 예전 그대로 정산 항목의 상태를 쓴다.
+ */
+const isBrandPaid = (s: Settlement) =>
+  s.brand_settlement ? s.brand_settlement.received : s.status === 'completed';
 
 const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
   businessUsername,
@@ -91,39 +112,61 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
     return () => { alive = false; };
   }, [businessUsername, campaignId]);
 
-  const { rounds, total, scheduledSum, completedSum, pendingCount, headcount } = useMemo(() => {
-    const byDate = new Map<string, Round>();
-    const people = new Set<string>();
-    let total = 0;
-    let scheduledSum = 0;
-    let completedSum = 0;
-    let pendingCount = 0;
+  const { rounds, total, scheduledSum, completedSum, pendingCount, headcount, allReceived, lastReceivedDate } =
+    useMemo(() => {
+      const byDate = new Map<string, Round>();
+      const people = new Set<string>();
+      let total = 0;
+      let scheduledSum = 0;
+      let completedSum = 0;
+      let pendingCount = 0;
+      let receivedRows = 0;
+      let lastReceivedDate = '';
 
-    for (const s of rows) {
-      const date = String(s.scheduled_date || '').slice(0, 10);
-      const amount = Number(s.amount || 0);
-      const paid = s.status === 'completed';
-      const pending = isAmountPending(s);
+      for (const s of rows) {
+        const date = String(s.scheduled_date || '').slice(0, 10);
+        const amount = Number(s.amount || 0);
+        // '완료'의 기준은 브랜드 입금 수납이다(isBrandPaid 참고).
+        const paid = isBrandPaid(s);
+        const pending = isAmountPending(s);
+        const receivedDate = String(s.brand_settlement?.received_date || '');
 
-      total += amount;
-      if (paid) completedSum += amount;
-      else scheduledSum += amount;
-      if (pending) pendingCount += 1;
-      people.add(String(s.influencer_username || '').toLowerCase());
+        total += amount;
+        if (paid) completedSum += amount;
+        else scheduledSum += amount;
+        if (pending) pendingCount += 1;
+        if (paid) {
+          receivedRows += 1;
+          if (receivedDate > lastReceivedDate) lastReceivedDate = receivedDate;
+        }
+        people.add(String(s.influencer_username || '').toLowerCase());
 
-      const round = byDate.get(date) || { date, headcount: 0, amount: 0, pendingCount: 0, paid: true };
-      round.headcount += 1;
-      round.amount += amount;
-      if (pending) round.pendingCount += 1;
-      // 한 건이라도 입금 전이면 회차는 아직 입금 전이다.
-      if (!paid) round.paid = false;
-      byDate.set(date, round);
-    }
+        const round =
+          byDate.get(date) ||
+          { date, headcount: 0, amount: 0, pendingCount: 0, paid: true, receivedDate: '' };
+        round.headcount += 1;
+        round.amount += amount;
+        if (pending) round.pendingCount += 1;
+        // 한 건이라도 입금 전이면 회차는 아직 입금 전이다.
+        if (!paid) round.paid = false;
+        if (receivedDate > round.receivedDate) round.receivedDate = receivedDate;
+        byDate.set(date, round);
+      }
 
-    // 가까운 회차가 위로. 날짜가 아직 없는 묶음은 맨 아래에 둔다.
-    const rounds = [...byDate.values()].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
-    return { rounds, total, scheduledSum, completedSum, pendingCount, headcount: people.size };
-  }, [rows]);
+      // 가까운 회차가 위로. 날짜가 아직 없는 묶음은 맨 아래에 둔다.
+      const rounds = [...byDate.values()].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+      return {
+        rounds,
+        total,
+        scheduledSum,
+        completedSum,
+        pendingCount,
+        headcount: people.size,
+        /** 이 화면에 있는 정산이 전부 접수됐는가. 맨 위 칸의 배지가 이 값이다. */
+        allReceived: rows.length > 0 && receivedRows === rows.length,
+        lastReceivedDate,
+      };
+    }, [rows]);
 
   if (loading) {
     return (
@@ -136,10 +179,30 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 맨 위 한 칸. 브랜드가 이 화면에서 확인하는 것은 "얼마를 어디로 보내는가" 하나다. */}
+      {/* 맨 위 한 칸. 브랜드가 이 화면에서 확인하는 것은 "얼마를 어디로 보내는가"와
+          "보낸 것이 접수됐는가" 둘이다. */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <p className="text-[10px] font-black text-slate-400">일괄 정산 총액</p>
-        <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(total)}</p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black text-slate-400">일괄 정산 총액</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(total)}</p>
+          </div>
+          {rows.length > 0 && (
+            <span
+              className={`px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0 ${
+                allReceived ? 'bg-emerald-600 text-white' : 'bg-blue-50 text-blue-600'
+              }`}
+            >
+              {allReceived ? '정산완료' : '입금 확인 대기'}
+            </span>
+          )}
+        </div>
+        {allReceived && (
+          <p className="text-[11px] text-emerald-600 font-bold mt-1">
+            {lastReceivedDate ? `${lastReceivedDate} 입금 확인 완료` : '입금 확인 완료'} · 인플루언서 지급은
+            픽스폴리오가 진행합니다.
+          </p>
+        )}
         {pendingCount > 0 && (
           <p className="text-[11px] text-amber-600 font-bold mt-1">
             금액 조율 중 {pendingCount}건이 총액에 아직 포함되지 않았습니다.
@@ -171,7 +234,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
           <div className="px-4 py-3">
             <p className="text-[11px] font-black text-slate-900">정산 회차 {rounds.length}건</p>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-              같은 지급일의 협업이 한 회차로 묶입니다. 인원 수는 청구 금액을 대조할 때만 쓰입니다.
+              같은 지급일의 협업이 한 회차로 묶입니다. '정산완료'는 픽스폴리오가 입금을 확인한 회차입니다.
             </p>
           </div>
           {rounds.map(round => (
@@ -184,12 +247,13 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
                       round.paid ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
                     }`}
                   >
-                    {round.paid ? '입금 완료' : '입금 예정'}
+                    {round.paid ? '정산완료' : '입금 예정'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-bold mt-0.5">
                   인플루언서 {round.headcount}명
                   {round.pendingCount > 0 && ` · 금액 조율 중 ${round.pendingCount}명`}
+                  {round.paid && round.receivedDate && ` · ${round.receivedDate} 입금 확인`}
                 </p>
               </div>
               <p className="text-sm font-black text-slate-900 flex-shrink-0">
@@ -206,9 +270,9 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
       )}
 
       <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-        표시된 금액은 픽스폴리오로 입금하는 금액입니다{headcount > 0 && ` (인플루언서 ${headcount}명)`}. 인플루언서
-        개별 지급과 원천징수(3.3%)는 픽스폴리오가 처리하며, 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를
-        올린 달의 다음 달 말일입니다.
+        표시된 금액은 픽스폴리오로 입금하는 금액입니다{headcount > 0 && ` (인플루언서 ${headcount}명)`}. 입금이
+        확인되면 회차가 '정산완료'로 바뀌고, 인플루언서 개별 지급과 원천징수(3.3%)는 그 뒤에 픽스폴리오가
+        처리합니다. 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
       </p>
     </div>
   );

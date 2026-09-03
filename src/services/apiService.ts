@@ -2990,6 +2990,54 @@ export const apiService = {
     }
   },
 
+  /**
+   * 브랜드 일괄 정산금 수납(담당자).
+   *
+   * 브랜드는 인플루언서 한 명 한 명에게 송금하지 않고 픽스폴리오에 한 번 보낸다.
+   * 그 입금이 확인되기 전에 인플루언서 지급을 닫으면 픽스폴리오 돈이 먼저 나가므로,
+   * 담당자 정산 화면의 사람별 '정산완료' 버튼이 이 기록으로 잠긴다.
+   */
+  async getCampaignBrandSettlement(
+    campaignId: string,
+    opts: { token?: string } = {},
+  ): Promise<{ settlement?: any; billing?: any; campaign?: any; error?: string }> {
+    try {
+      const res = await authedGet(
+        `/api/campaign-brand-settlement?campaignId=${encodeURIComponent(campaignId)}`,
+        () => collabHeaders(opts.token),
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '브랜드 정산 상태를 불러오지 못했습니다.' };
+      return json;
+    } catch (e) {
+      console.error('[API] Failed to get campaign brand settlement:', e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
+  /** 브랜드 입금 확인 · 확인 되돌리기 · 청구액 저장(담당자). */
+  async campaignBrandSettlementAction(
+    campaignId: string,
+    action: 'mark_received' | 'reopen' | 'save_invoice',
+    payload: Record<string, any> = {},
+    token?: string,
+  ): Promise<{ success?: boolean; settlement?: any; billing?: any; error?: string }> {
+    try {
+      const res = await fetch('/api/campaign-brand-settlement', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: JSON.stringify({ campaignId, action, ...payload }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json?.error || '처리에 실패했습니다.' };
+      return json;
+    } catch (e) {
+      console.error(`[API] Brand settlement action failed (${action}):`, e);
+      return { error: '네트워크 오류' };
+    }
+  },
+
   /** 캠페인 맡기 · 놓기 · 명단 공개(담당자). */
   async managerCampaignAction(
     campaignId: string,

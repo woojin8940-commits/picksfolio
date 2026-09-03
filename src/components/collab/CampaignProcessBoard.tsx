@@ -158,6 +158,16 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const guideFiles: any[] = Array.isArray(guideline.files) ? guideline.files : [];
   const shipping = detail?.shipping || {};
   const settlement = detail?.settlement || {};
+  /**
+   * 브랜드가 픽스폴리오에 보내는 일괄 정산금이 들어왔는가(담당자 응답에만 있다).
+   *
+   * 인플루언서 지급은 이 입금 뒤에만 할 수 있는 일이다 — 먼저 보내면 픽스폴리오 돈이
+   * 나가고, 브랜드가 늦게 보내거나 금액이 어긋나도 회수할 방법이 없다. 서버도 같은
+   * 규칙으로 막지만(complete_settlement), 담당자가 눌러 보고 거절 메시지로 배우는
+   * 대신 버튼이 처음부터 잠겨 있어야 한다. 입금 확인은 캠페인 정산 탭에서 한다.
+   */
+  const brandSettlement = detail?.brandSettlement || null;
+  const brandPaid = !brandSettlement || Boolean(brandSettlement.received);
   const collab = detail?.collab || {};
   const isInfluencer = role === 'influencer';
   const isBrandSide = role === 'brand' || role === 'manager';
@@ -1746,13 +1756,25 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   {payoutDate ? '지급일 다시 저장' : '지급일 저장하고 알리기'}
                 </button>
                 {!paid && settlement.submitted && (
-                  <button
-                    onClick={() => act('complete_settlement', { paidDate: payout.date }, '지급 완료로 처리했습니다.')}
-                    disabled={busy}
-                    className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-xs font-black disabled:opacity-40 hover:bg-emerald-500 transition-colors"
-                  >
-                    지급 완료 처리
-                  </button>
+                  brandPaid ? (
+                    <button
+                      onClick={() => act('complete_settlement', { paidDate: payout.date }, '지급 완료로 처리했습니다.')}
+                      disabled={busy}
+                      className="w-full px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-xs font-black disabled:opacity-40 hover:bg-emerald-500 transition-colors"
+                    >
+                      지급 완료 처리
+                    </button>
+                  ) : (
+                    /* 브랜드 입금 전. 버튼을 감추는 대신 잠근 이유를 적어 둔다 —
+                       버튼이 사라지면 담당자는 화면이 고장 난 줄로 읽는다. */
+                    <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5">
+                      <p className="text-[11px] font-black text-amber-700">브랜드 입금 확인 전입니다</p>
+                      <p className="text-[10px] font-bold text-amber-600 mt-0.5 leading-relaxed">
+                        브랜드가 픽스폴리오에 보낸 일괄 정산금을 캠페인 정산 탭에서 먼저 확인해 주세요. 확인하면
+                        지급 완료 처리가 열립니다.
+                      </p>
+                    </div>
+                  )
                 )}
               </>
             )}

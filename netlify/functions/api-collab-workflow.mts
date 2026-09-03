@@ -859,7 +859,7 @@ export default async (req: Request, context: Context) => {
       if (role === "brand" || role === "manager") {
         await refreshStaleProfileImages(db, [norm(collab.creator_username)]);
       }
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, channelRows, siteRows] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, brandSettlementRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
@@ -869,6 +869,13 @@ export default async (req: Request, context: Context) => {
         db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
         db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as Promise<any[]>,
         db.sql`SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}` as Promise<any[]>,
+        // 브랜드 일괄 정산금이 들어왔는가. 지급 완료 버튼이 이 값으로 잠긴다 —
+        // 서버가 막는 규칙(complete_settlement)을 화면이 미리 알고 있어야, 담당자가
+        // 눌러 보고 나서 거절 메시지로 배우지 않는다.
+        db.sql`
+          SELECT received_at, received_date, received_amount, invoice_amount, memo
+          FROM campaign_brand_settlements WHERE campaign_id = ${collab.campaign_id}
+        ` as Promise<any[]>,
         // 얼굴과 인스타 아이디. 목록과 같은 곳에서 읽어야 목록에서 누른 사람과 열린
         // 화면의 사람이 같아 보인다.
         db.sql`
@@ -957,6 +964,25 @@ export default async (req: Request, context: Context) => {
           role,
           Number(terms?.fee || 0),
         ),
+        /**
+         * 브랜드 일괄 정산금 수납 상태. 담당자에게만 싣는다.
+         *
+         * 브랜드에게는 자기 캠페인 정산 화면에 같은 사실이 회차 줄로 보인다
+         * (api-settlements). 인플루언서는 브랜드와 픽스폴리오 사이의 입금과 무관하다 —
+         * 자기 지급일과 지급 상태만 본다.
+         */
+        brandSettlement:
+          role === "manager"
+            ? {
+                received: Boolean((brandSettlementRows as any[])?.[0]?.received_at),
+                receivedDate: (brandSettlementRows as any[])?.[0]?.received_date
+                  ? String((brandSettlementRows as any[])[0].received_date).split("T")[0]
+                  : "",
+                receivedAmount: Number((brandSettlementRows as any[])?.[0]?.received_amount || 0),
+                invoiceAmount: Number((brandSettlementRows as any[])?.[0]?.invoice_amount || 0),
+                memo: String((brandSettlementRows as any[])?.[0]?.memo || ""),
+              }
+            : null,
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
           // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
@@ -1363,6 +1389,27 @@ export default async (req: Request, context: Context) => {
         const info = infoRows?.[0] || null;
         if (!info?.submitted_at) {
           return jsonError("아직 인플루언서가 정산 서류를 제출하지 않았습니다.", 409);
+        }
+
+        /**
+         * 브랜드 입금이 먼저다.
+         *
+         * 브랜드는 회차마다 픽스폴리오에 한 번 보내고 개별 지급은 픽스폴리오가 한다.
+         * 그 입금이 확인되기 전에 지급을 닫으면 픽스폴리오 돈이 먼저 나가고, 브랜드가
+         * 늦게 보내거나 금액이 어긋나면 회수할 방법이 없다. 화면에서도 버튼을 잠그지만
+         * (ManagerCampaignSettlementPanel) 지급을 닫는 자리는 진행사항 보드와 운영
+         * 콘솔에도 있어서, 규칙은 세 화면이 공유하는 이 자리에 있어야 한다.
+         */
+        const brandPaid = (await db.sql`
+          SELECT received_at FROM campaign_brand_settlements
+          WHERE campaign_id = ${collab.campaign_id} AND received_at IS NOT NULL
+          LIMIT 1
+        `) as any[];
+        if (!brandPaid?.length) {
+          return jsonError(
+            "브랜드 정산 입금이 확인되지 않았습니다. 캠페인 정산 탭에서 브랜드 입금을 먼저 확인해 주세요.",
+            409,
+          );
         }
 
         const paidDate = (() => {

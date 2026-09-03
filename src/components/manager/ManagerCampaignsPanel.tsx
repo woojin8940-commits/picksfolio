@@ -658,11 +658,14 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
         )}
 
         {/* -------------------------------------------------------- 정산 */}
-        {/* 사람별 지급을 닫는 자리. 같은 동작이 진행사항 보드의 정산 단계에도 있지만,
-            거기서는 한 명을 열어야 한 명이 보인다. 목록으로 두면 "누구에게 아직 안
-            보냈는지"가 한 화면에 남는다. */}
+        {/* 브랜드 입금을 확인하고 사람별 지급을 닫는 자리. 순서가 곧 돈의 순서다 —
+            브랜드가 픽스폴리오에 보낸 일괄 정산금이 확인되기 전에는 사람별 지급이
+            잠긴다. 같은 지급 동작이 진행사항 보드의 정산 단계에도 있지만, 거기서는
+            한 명을 열어야 한 명이 보인다. 목록으로 두면 "누구에게 아직 안 보냈는지"가
+            한 화면에 남는다. */}
         {activeTab === 'settlement' && (
           <ManagerCampaignSettlementPanel
+            campaignId={open.id}
             collabs={campaignCollabs}
             onNotify={onNotify}
             onChanged={loadCollabs}
