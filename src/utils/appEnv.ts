@@ -7,6 +7,8 @@
  * synchronously on first render.
  */
 
+import { isKeepLoginEnabled, type LoginKind } from './loginPersistence';
+
 /**
  * True when the web app is running inside the native app's WebView.
  *
@@ -53,7 +55,12 @@ export function isMobileDevice(): boolean {
  * come back. So mobile sessions are kept alive for as long as Supabase can
  * refresh the token, and the 2-hour idle logout only applies on desktop, where
  * a browser is much more likely to be shared or left unattended.
+ *
+ * On desktop the same holds once the user asks for it: ticking "로그인 정보 저장"
+ * on the login screen is an explicit "this is my machine, keep me signed in", so
+ * the idle timer is skipped for that account kind too and the session lasts until
+ * an explicit logout.
  */
-export function isPersistentLoginEnv(): boolean {
-  return isMobileDevice();
+export function isPersistentLoginEnv(kind: LoginKind = 'user'): boolean {
+  return isMobileDevice() || isKeepLoginEnabled(kind);
 }

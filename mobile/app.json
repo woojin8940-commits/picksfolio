@@ -82,6 +82,7 @@
           "color": "#2563EB"
         }
       ],
+      "./plugins/withKakaoTalkQueries",
       "./plugins/withDisableBitcode"
     ],
     "experiments": {

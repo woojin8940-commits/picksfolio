@@ -18,6 +18,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
   currentSubView: 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
   onNavigateDashboard: () => void;
+  onViewMyPage: () => void;
   onNavigateLinks: () => void;
   onNavigateDmAutomation: () => void;
   /** 인플루언서 본인 계정의 릴스 성과 화면. 이 대시보드 자체가 인플루언서용이다. */
@@ -38,6 +39,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onLogout,
   currentSubView,
   onNavigateDashboard,
+  onViewMyPage,
   onNavigateLinks,
   onNavigateDmAutomation,
   onNavigateInsights,
@@ -409,10 +411,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                 </div>
                 <button
-                  onClick={() => {
-                    const url = `${window.location.origin}/${userName}`;
-                    window.open(url, '_blank');
-                  }}
+                  onClick={onViewMyPage}
                   className="bg-slate-900 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-xl font-black text-[10px] md:text-sm hover:bg-slate-800 transition-all shadow-lg flex items-center gap-2"
                 >
                   <span className="hidden md:inline">{t('nav.myPage', '내 페이지 보기', 'View My Page')}</span>

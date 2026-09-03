@@ -16,7 +16,6 @@ hand-off, 결제 앱 전환, 권한, 뒤로가기, 새로고침) are handled by 
 - `expo-router` (typed, file-based routing)
 - `react-native-webview`
 - `amazon-ivs-react-native-broadcast` (native live broadcast)
-- `@react-native-seoul/kakao-login` (카카오톡 앱 연동 로그인)
 - TypeScript (strict)
 
 ## Native live broadcast (Amazon IVS)
@@ -43,43 +42,14 @@ reached with the `picksfolio://broadcast?username=…` deep link.
 
 ## 카카오톡 앱 연동 로그인 (간편로그인)
 
-로그인은 웹앱 화면을 그대로 쓰지만, 카카오 로그인만 네이티브 SDK
-(`@react-native-seoul/kakao-login`)를 거친다. 인앱 WebView 에서 카카오톡으로
-넘어가면 카카오톡은 인가 코드를 **기본 브라우저**로 돌려보내기 때문에 — 우리
-WebView 가 아니라 사파리·크롬이 열린다 — 웹 흐름만으로는 앱 안에서 왕복이
-끝나지 않고, 결국 카카오계정 아이디·비밀번호를 직접 입력하는 화면으로 떨어졌다.
+로그인은 웹앱의 카카오 JS SDK/REST OAuth 흐름을 그대로 사용한다. WebView가
+`kakaokompassauth://`, `kakaotalk://`, Android `intent://`, KakaoTalk 유니버설
+링크를 감지하면 해당 요청만 `Linking.openURL()`로 OS에 넘겨 카카오톡 앱을 연다.
+인가 코드 교환과 Supabase 세션 생성은 기존 웹 콜백이 계속 담당한다.
 
-셸은 `window.PicksFolioNative.kakaoLogin()` 을 주입한다. 웹앱이 이걸 부르면
-셸이 카카오톡과 앱-to-앱으로 로그인하고 ID 토큰을 돌려주고, 세션은 웹앱이
-`signInWithIdToken` 으로 만든다. 그래서 만들어지는 계정·연동 데이터는 웹에서
-로그인한 것과 완전히 같다.
-
-빌드하기 전에 네이티브 앱 키를 넣어야 한다(EAS 시크릿, 로컬은 `mobile/.env`):
-
-```
-EXPO_PUBLIC_KAKAO_NATIVE_APP_KEY=<카카오 개발자 콘솔 > 앱 키 > 네이티브 앱 키>
-```
-
-이 값이 있으면 `app.config.js` 가 카카오 플러그인을 붙여
-`kakao{네이티브앱키}://oauth` 스킴과 iOS `KAKAO_APP_KEY`,
-Android `kakao_app_key` 문자열 자원을 넣고, `plugins/withKakaoTalkQueries.js` 가
-Android 11+ 패키지 조회(`<queries>`)를 선언한다. 이 `<queries>` 선언이 없으면
-카카오톡이 깔려 있어도 SDK 가 못 찾아서 조용히 계정 로그인으로 넘어간다.
-
-값이 없으면 플러그인은 빠지고, 앱은 예전처럼 웹 로그인 흐름을 쓴다(빌드는 된다).
-
-콘솔 쪽 준비물:
-
-- **플랫폼 등록** — iOS 번들 ID `com.picksfolio.app`, Android 패키지
-  `com.picksfolio.app` + 릴리스/디버그 키 해시
-- **카카오 로그인 활성화**, **OpenID Connect 활성화** (ID 토큰이 여기서 나온다)
-- **동의 항목** — 닉네임·이메일·이름·전화번호
-- Supabase 카카오 provider 의 Client ID 에 REST API 키와 **네이티브 앱 키를
-  콤마로 함께** 넣는다. 네이티브 SDK 가 준 ID 토큰의 `aud` 는 네이티브 앱 키라서,
-  등록해 두지 않으면 Supabase 가 토큰을 거부한다.
-
-네이티브 모듈이므로 Development/EAS 빌드가 필요하다 — Expo Go 에서는 동작하지
-않고, 그 경우 셸이 아예 알리지 않아서 웹 로그인 흐름이 그대로 쓰인다.
+따라서 네이티브 카카오 SDK와 네이티브 앱 키는 필요하지 않다. Android 11+에서
+카카오톡 앱을 찾을 수 있도록 `plugins/withKakaoTalkQueries.js`만 적용하며, iOS는
+`app.json`의 `LSApplicationQueriesSchemes` 선언을 사용한다.
 
 ## Getting started
 
@@ -97,7 +67,6 @@ runs):
 
 ```
 EXPO_PUBLIC_WEB_URL=https://picks-folio.com
-EXPO_PUBLIC_KAKAO_NATIVE_APP_KEY=<카카오 네이티브 앱 키>
 ```
 
 Point it at a deploy preview or `http://<your-lan-ip>:5173` to test against a

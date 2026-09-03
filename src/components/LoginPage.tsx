@@ -7,6 +7,7 @@ import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
 import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
+import { getSavedLoginId, isKeepLoginEnabled, rememberLoginId, setKeepLogin } from '../utils/loginPersistence';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
 const ADMIN_USERNAMES = ['picksfolio'];
@@ -23,9 +24,21 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   const [isLoading, setIsLoading] = useState(false);
   const [showFindAccount, setShowFindAccount] = useState(false);
   const [formData, setFormData] = useState({
-    id: '',
+    // 저장해 둔 아이디가 있으면 채워 둔다("로그인 정보 저장"). 비밀번호는 저장하지
+    // 않으므로 항상 비어 있다 — 브라우저 비밀번호 관리자가 채워 줄 자리다.
+    id: getSavedLoginId('user'),
     password: ''
   });
+  // 체크 상태는 저장된 값에서 되살린다. 한 번 켜 두면 계속 켜져 있어야 한다.
+  const [keepLogin, setKeepLoginState] = useState(() => isKeepLoginEnabled('user'));
+
+  // 체크를 만지는 즉시 기록한다. 카카오 간편로그인은 이 화면을 떠나 카카오로 갔다
+  // 오기 때문에, 로그인이 끝난 뒤에 기록하려 하면 기록할 순간이 없다. 체크를 끄면
+  // 저장해 둔 아이디까지 그 자리에서 지워진다.
+  const handleKeepLoginChange = (enabled: boolean) => {
+    setKeepLoginState(enabled);
+    setKeepLogin('user', enabled);
+  };
 
   // 카카오 간편로그인이 콜백에서 끝내 실패하면 main.tsx 가 `?kakao_login=fail` 을
   // 남기고 이 화면으로 돌려보낸다. 조용히 로그인 폼만 보여 주면 사용자는 왜
@@ -50,14 +63,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
       return;
     }
     setIsLoading(true);
+    // 카카오로 넘어가면 이 화면은 사라진다. 체크 상태는 이미 저장돼 있지만(위
+    // handleKeepLoginChange) 한 번도 만지지 않았을 수도 있으니 여기서 못 박는다.
+    setKeepLogin('user', keepLogin);
     try {
-      // 휴대폰에서는 카카오톡 앱과 연동해 한 번 눌러 로그인한다(간편로그인).
-      // 네이티브 앱이면 카카오 네이티브 SDK, 모바일 웹이면 카카오 JS SDK 를 쓰고,
-      // 데스크톱이나 설정이 없을 때만 기존 OAuth 리다이렉트로 간다.
-      const route = await startKakaoLogin('/login');
-      // 'native' 는 이 자리에서 세션이 만들어진 경우다. App.tsx 의 인증 리스너가
-      // 프로필 연동과 화면 이동을 이어서 처리하므로 여기서는 스피너만 유지한다.
-      if (route !== 'native') return;
+      // 카카오 JS SDK 또는 서버가 만든 인가 주소로 이동한다. 앱 WebView 에서는
+      // 셸이 카카오 스킴/인텐트만 가로채 카카오톡을 외부 앱으로 연다.
+      await startKakaoLogin('/login');
+      return;
     } catch (err: any) {
       if (!isKakaoLoginCancelled(err)) {
         alert('카카오 로그인 중 오류가 발생했습니다: ' + (err?.message || '알 수 없는 오류'));
@@ -82,6 +95,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
             return;
           }
           if (onAdminLoginSuccess) {
+            rememberLoginId('user', formData.id.trim());
             // Netlify Identity 로 들어온 운영자도 이 탭을 운영자 슬롯으로 쓴다.
             setAccountScope('operator');
             onAdminLoginSuccess();
@@ -119,6 +133,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
       }
 
       if (result.success) {
+        // 로그인에 성공한 아이디만 저장한다(체크가 켜져 있을 때).
+        rememberLoginId('user', formData.id.trim());
         const username = result.username || formData.id.trim().toLowerCase();
         const hasSiteData = !!result.has_site_data;
         const phone = result.phone || '';
@@ -263,11 +279,28 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
                 autoComplete="current-password"
               />
             </div>
-            <div className="text-right">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={keepLogin}
+                  onChange={(e) => handleKeepLoginChange(e.target.checked)}
+                  disabled={isLoading}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 accent-blue-600 cursor-pointer"
+                />
+                <span className="text-xs text-slate-500 font-bold">
+                  {language === 'en' ? 'Save login info' : '로그인 정보 저장'}
+                </span>
+              </label>
               <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
                 {language === 'en' ? 'Find ID/Password' : '아이디/비밀번호 찾기'}
               </button>
             </div>
+            <p className="text-[11px] text-slate-400 font-medium ml-1 leading-snug">
+              {language === 'en'
+                ? 'Keeps your ID filled in and stays signed in — including Kakao login — until you log out.'
+                : '아이디가 저장되고, 카카오 로그인까지 직접 로그아웃할 때까지 로그인이 유지됩니다.'}
+            </p>
           </div>
 
           <button

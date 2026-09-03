@@ -57,6 +57,7 @@ const ManagerDashboard = lazyWithRetry(() => import('./components/manager/Manage
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
+import { LOGIN_PERSISTENCE_KEYS } from './utils/loginPersistence';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
@@ -760,7 +761,7 @@ const App: React.FC = () => {
         // 다른 탭에 띄워 둔 비즈니스 · 운영자 계정까지 끊어 버리면 안 된다.
         const prevSessionUser = sessionGet('picks_user_session');
         if (prevSessionUser && prevSessionUser !== existingUsername) {
-          const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS]);
+          const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS, ...LOGIN_PERSISTENCE_KEYS]);
           staleKeys.forEach(key => localStorage.removeItem(key));
           console.log('[Auth] Cleared stale localStorage from previous user:', prevSessionUser);
         }
@@ -1015,8 +1016,10 @@ const App: React.FC = () => {
     };
   }, []); // Only run once on mount
 
-  // Persistent auto-logout after 2 hours of inactivity — desktop only.
-  // On mobile (native shell or mobile web) the login is meant to last: see
+  // Persistent auto-logout after 2 hours of inactivity — desktop only, and only
+  // when the user has not asked to stay signed in.
+  // On mobile (native shell or mobile web), and on any device where the login
+  // screen's "로그인 정보 저장" is ticked, the login is meant to last: see
   // isPersistentLoginEnv(). There the effect exits immediately and drops the
   // stored timestamp, so a session that predates this behaviour can't be
   // logged out by a stale value either.
@@ -1054,7 +1057,7 @@ const App: React.FC = () => {
       clearCreatorIntent();
       setManagerDisplayName('');
       // 이 탭 슬롯의 키만 지운다(다른 탭의 계정은 그대로 살아 있어야 한다).
-      ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+      ownPicksKeys([...BUSINESS_SESSION_KEYS, ...LOGIN_PERSISTENCE_KEYS]).forEach(key => localStorage.removeItem(key));
       ownSupabaseKeys().forEach(key => localStorage.removeItem(key));
       clearTabStateKeepScope();
       clearAllLinkCache();
@@ -1143,10 +1146,11 @@ const App: React.FC = () => {
   }, [isLoggedIn]);
 
   // Business account inactivity timer (separate from regular user timer).
-  // Same rule as above: desktop only, mobile logins stay signed in.
+  // Same rule as above: desktop only, mobile logins stay signed in — plus the
+  // business login screen's own "로그인 정보 저장" opt-in.
   useEffect(() => {
     if (!isBusinessLoggedIn) return;
-    if (isPersistentLoginEnv()) {
+    if (isPersistentLoginEnv('business')) {
       localStorage.removeItem('picks_business_last_activity');
       return;
     }
@@ -1506,7 +1510,7 @@ const App: React.FC = () => {
     setProfileChecked(false);
     setIsLoggedIn(false);
     setUserName('');
-    ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+    ownPicksKeys([...BUSINESS_SESSION_KEYS, ...LOGIN_PERSISTENCE_KEYS]).forEach(key => localStorage.removeItem(key));
     clearTabStateKeepScope();
     clearAllLinkCache();
     console.log('User picks_ localStorage keys cleared (business keys preserved)');
@@ -1716,7 +1720,19 @@ const App: React.FC = () => {
   if (view === 'terms') return <LazyRoute><TermsOfService onNavigateHome={() => navigate('home')} /></LazyRoute>;
   if (view === 'privacy') return <LazyRoute><PrivacyPolicy onNavigateHome={() => navigate('home')} /></LazyRoute>;
   if (view === 'proposal') return <LazyRoute><BusinessProposalForm username={targetUser} /></LazyRoute>;
-  if (view === 'user-page') return <LazyRoute><UserPage username={targetUser} /></LazyRoute>;
+  if (view === 'user-page') return (
+    <LazyRoute>
+      <UserPage
+        username={targetUser}
+        onBackToDashboard={isLoggedIn && targetUser.toLowerCase() === userName.toLowerCase()
+          ? () => {
+              setSubView('dashboard');
+              navigate('admin');
+            }
+          : undefined}
+      />
+    </LazyRoute>
+  );
   if (view === 'setup-link') {
     // If user already has a username (existing user), skip setup and go to admin dashboard
     const savedUser = (userName || sessionGet('picks_user_session') || '').trim();
@@ -1855,6 +1871,7 @@ const App: React.FC = () => {
         onLogout={handleLogout}
         currentSubView={subView}
         onNavigateDashboard={() => setSubView('dashboard')}
+        onViewMyPage={() => navigate('user-page', userName)}
         onNavigateLinks={() => setSubView('links')}
         onNavigateDmAutomation={() => setSubView('dm-automation')}
         onNavigateInsights={() => setSubView('insights')}
@@ -1932,7 +1949,7 @@ const App: React.FC = () => {
               // 지우는 범위는 이 탭 슬롯 · 비즈니스 키 제외로 제한한다.
               const prevUser = sessionGet('picks_user_session');
               if (prevUser && prevUser !== id) {
-                const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS]);
+                const staleKeys = ownPicksKeys(['picks_user_session', ...BUSINESS_SESSION_KEYS, ...LOGIN_PERSISTENCE_KEYS]);
                 staleKeys.forEach(key => localStorage.removeItem(key));
                 console.log('[Auth] Cleared previous user localStorage data, switching from', prevUser, 'to', id);
               }

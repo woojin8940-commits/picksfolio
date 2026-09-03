@@ -169,21 +169,16 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
             <label className="block text-[14px] font-black text-slate-300 mb-2.5 ml-1">
               {isEn ? 'Username / Handle' : '사용자 아이디 (페이지 주소)'}
             </label>
-            <div className="relative flex items-center">
-              <input
-                type="text"
-                value={id}
-                onChange={handleIdChange}
-                className="w-full bg-white/5 border border-white/10 p-4 pr-28 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                placeholder={isEn ? 'myname' : 'myname'}
-                required
-              />
-              <span className="absolute right-4 text-slate-500 font-bold text-sm pointer-events-none">
-                .picks.me
-              </span>
-            </div>
+            <input
+              type="text"
+              value={id}
+              onChange={handleIdChange}
+              className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl font-bold text-lg text-white placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              placeholder={isEn ? 'Enter your username' : '사용할 아이디를 입력해 주세요'}
+              required
+            />
             <p className="text-xs text-slate-500 mt-2 font-bold ml-1">
-              {isEn ? `Your site address will be ${id || 'username'}.picks.me` : `완성될 나의 주소: ${id || 'myname'}.picks.me`}
+              {isEn ? 'Enter only the username you will use to log in.' : '로그인할 때 사용할 아이디만 입력해 주세요.'}
             </p>
           </div>
 
