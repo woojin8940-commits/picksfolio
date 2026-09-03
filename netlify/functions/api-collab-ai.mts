@@ -12,6 +12,10 @@ import {
 } from "./_shared/claude-credits.mts";
 import { resolveContentType } from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import {
+  applyOperatorMembershipGrant,
+  getOperatorMembershipGrant,
+} from "./_shared/operator-membership-grants.mts";
 
 // Collaboration AI assistant.
 //
@@ -514,10 +518,12 @@ export default async (req: Request) => {
     // They are still bounded by the per-user daily quota below.
     if (userType !== "business") {
       const sellerStore = getStore("seller-verification");
-      const record = applyComplimentaryMembership(
+      const complimentary = applyComplimentaryMembership(
         username,
         (await sellerStore.get(`seller_${username}`, { type: "json" })) as any,
       );
+      const grant = await getOperatorMembershipGrant({ authUserId: auth.userId, username });
+      const record = applyOperatorMembershipGrant(complimentary, grant);
       // AI 협업 멤버십 이상(커머스·프로 포함)이면 사용할 수 있다.
       const aiEnabled =
         !!record?.membership_active && tierAtLeast(record?.membership_plan, "standard_ai");

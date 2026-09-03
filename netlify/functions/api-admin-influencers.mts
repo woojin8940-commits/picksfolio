@@ -2,6 +2,12 @@ import { getStore } from '@netlify/blobs'
 import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import { applyComplimentaryMembership } from './_shared/complimentary-memberships.mts'
+import {
+  applyOperatorMembershipGrant,
+  listOperatorMembershipGrants,
+  setOperatorMembershipGrant,
+  type OperatorMembershipGrant,
+} from './_shared/operator-membership-grants.mts'
 import type { Config, Context } from '@netlify/functions'
 
 type MembershipPlan = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live'
@@ -12,6 +18,33 @@ interface SellerVerificationBlob {
   membership_started_at?: string | null
   updated_at?: string
   [key: string]: any
+}
+
+async function readSellerMembership(
+  store: ReturnType<typeof getStore>,
+  username: string,
+): Promise<SellerVerificationBlob | null> {
+  const clean = username.toLowerCase()
+  const canonicalKey = `seller_${clean}`
+  const canonical = (await store.get(canonicalKey, { type: 'json' })) as SellerVerificationBlob | null
+  if (canonical) return canonical
+
+  const legacy = (await store.get(clean, { type: 'json' })) as SellerVerificationBlob | null
+  if (!legacy) return null
+  await store.setJSON(canonicalKey, legacy)
+  try { await store.delete(clean) } catch {}
+  return legacy
+}
+
+function membershipSource(
+  stored: SellerVerificationBlob | null,
+  complimentary: SellerVerificationBlob | null,
+  grant: OperatorMembershipGrant | null,
+): 'operator' | 'complimentary' | 'paid' | null {
+  if (grant?.active) return 'operator'
+  if (complimentary?.membership_active && !stored?.membership_active) return 'complimentary'
+  if (stored?.membership_active) return 'paid'
+  return null
 }
 
 // Admin member management:
@@ -96,6 +129,12 @@ export default async (req: Request, context: Context) => {
         if (s in proposalMap[u]) (proposalMap[u] as any)[s]++
       }
 
+      const operatorGrants = await listOperatorMembershipGrants().catch((error) => {
+        console.warn('[admin-influencers] operator membership grants query failed:', error)
+        return []
+      })
+      const grantByUserId = new Map(operatorGrants.map((grant) => [grant.auth_user_id, grant]))
+
       const canonicalUsernames = new Set<string>(
         (profiles || [])
           .map((p: any) => String(p.username || '').toLowerCase())
@@ -114,8 +153,7 @@ export default async (req: Request, context: Context) => {
           // panel display a stale "not granted" status even though the grant
           // itself landed under the correct lowercase key.
           const blobKey = String(p.username || '').toLowerCase()
-          let sv =
-            ((await sellerStore.get(blobKey, { type: 'json' })) as SellerVerificationBlob | null) || null
+          let stored = await readSellerMembership(sellerStore, blobKey)
           // Heal orphaned membership grants. Earlier flows (or admins clicking
           // before profile.username was set) could have written the blob under
           // a synthesized fallback key — email-local, auth.id slice, or the
@@ -125,7 +163,7 @@ export default async (req: Request, context: Context) => {
           // If the canonical key has no active membership but a synthesized
           // alternate does, migrate the blob into the canonical key (and
           // delete the orphan) so future reads succeed.
-          if (!sv?.membership_active && blobKey) {
+          if (!stored?.membership_active && blobKey) {
             const altKeys: string[] = []
             const emailLocal = String(p.email || '').split('@')[0].trim().toLowerCase()
             if (emailLocal) altKeys.push(emailLocal)
@@ -138,16 +176,15 @@ export default async (req: Request, context: Context) => {
               // Don't hijack another user's canonical key.
               if (canonicalUsernames.has(fk)) continue
               try {
-                const fallbackSv =
-                  (await sellerStore.get(fk, { type: 'json' })) as SellerVerificationBlob | null
+                const fallbackSv = await readSellerMembership(sellerStore, fk)
                 if (fallbackSv?.membership_active) {
                   const migrated: SellerVerificationBlob = {
                     ...fallbackSv,
                     updated_at: new Date().toISOString(),
                   }
-                  await sellerStore.setJSON(blobKey, migrated)
-                  try { await sellerStore.delete(fk) } catch {}
-                  sv = migrated
+                  await sellerStore.setJSON(`seller_${blobKey}`, migrated)
+                  try { await sellerStore.delete(`seller_${fk}`) } catch {}
+                  stored = migrated
                   console.log(`[admin-influencers] migrated membership "${fk}" → "${blobKey}" for @${p.username}`)
                   break
                 }
@@ -160,7 +197,9 @@ export default async (req: Request, context: Context) => {
           // Apply complimentary memberships so admin display matches what
           // the user sees on their account (the user-side read overlays the
           // same allowlist).
-          sv = applyComplimentaryMembership(blobKey, sv) as SellerVerificationBlob | null
+          const complimentary = applyComplimentaryMembership(blobKey, stored) as SellerVerificationBlob | null
+          const operatorGrant = grantByUserId.get(String(p.id)) || null
+          const effective = applyOperatorMembershipGrant(complimentary, operatorGrant) as SellerVerificationBlob | null
 
           return {
             id: p.id,
@@ -183,10 +222,15 @@ export default async (req: Request, context: Context) => {
             proposals_pending: pr.pending,
             proposals_completed: pr.completed,
             acceptance_rate: acceptanceRate,
-            membership_active: !!sv?.membership_active,
+            membership_active: !!effective?.membership_active,
             // Surface legacy 'live' as 'commerce' so the panel renders the current tier name.
-            membership_plan: sv?.membership_plan === 'live' ? 'commerce' : (sv?.membership_plan || null),
-            membership_started_at: sv?.membership_started_at || null,
+            membership_plan: effective?.membership_plan === 'live' ? 'commerce' : (effective?.membership_plan || null),
+            membership_started_at: effective?.membership_started_at || null,
+            membership_source: membershipSource(stored, complimentary, operatorGrant),
+            paid_membership_plan: stored?.membership_active
+              ? (stored.membership_plan === 'live' ? 'commerce' : stored.membership_plan || null)
+              : null,
+            operator_membership_plan: operatorGrant?.active ? operatorGrant.plan : null,
           }
         }),
       )
@@ -252,10 +296,13 @@ export default async (req: Request, context: Context) => {
             if (seenUsernames.has(username)) username = `${username}-${u.id.slice(0, 4)}`
             seenUsernames.add(username)
 
-            const sv = applyComplimentaryMembership(
+            const stored = await readSellerMembership(sellerStore, username)
+            const complimentary = applyComplimentaryMembership(
               username,
-              ((await sellerStore.get(username, { type: 'json' })) as SellerVerificationBlob | null) || null,
+              stored,
             ) as SellerVerificationBlob | null
+            const operatorGrant = grantByUserId.get(String(u.id)) || null
+            const effective = applyOperatorMembershipGrant(complimentary, operatorGrant) as SellerVerificationBlob | null
 
             influencers.push({
               id: u.id,
@@ -278,9 +325,14 @@ export default async (req: Request, context: Context) => {
               proposals_pending: 0,
               proposals_completed: 0,
               acceptance_rate: 0,
-              membership_active: !!sv?.membership_active,
-              membership_plan: sv?.membership_plan === 'live' ? 'commerce' : (sv?.membership_plan || null),
-              membership_started_at: sv?.membership_started_at || null,
+              membership_active: !!effective?.membership_active,
+              membership_plan: effective?.membership_plan === 'live' ? 'commerce' : (effective?.membership_plan || null),
+              membership_started_at: effective?.membership_started_at || null,
+              membership_source: membershipSource(stored, complimentary, operatorGrant),
+              paid_membership_plan: stored?.membership_active
+                ? (stored.membership_plan === 'live' ? 'commerce' : stored.membership_plan || null)
+                : null,
+              operator_membership_plan: operatorGrant?.active ? operatorGrant.plan : null,
             })
           }
           if (users.length < perPage) break
@@ -357,6 +409,7 @@ export default async (req: Request, context: Context) => {
         featured?: boolean
         featured_note?: string
         membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null
+        auth_user_id?: string
       }
 
       const profileUpdate: Record<string, any> = {}
@@ -392,6 +445,9 @@ export default async (req: Request, context: Context) => {
         membership_active: boolean
         membership_plan: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null
         membership_started_at: string | null
+        membership_source: 'operator' | 'complimentary' | 'paid' | null
+        paid_membership_plan: MembershipPlan | null
+        operator_membership_plan: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null
       } | null = null
 
       if (membershipProvided) {
@@ -409,47 +465,42 @@ export default async (req: Request, context: Context) => {
           )
         }
 
-        // The user-side membership read keys off `profiles.username`. If no
-        // such profile exists, the synthesized username we may have shown in
-        // the admin list (auth.users backfill) won't match the user's actual
-        // session, and the grant would land on a key the user can never read.
-        // Refuse the write rather than silently writing to the wrong key.
-        // Tier === null (revoke) is allowed regardless so an orphan key can
-        // still be cleared.
-        if (tier !== null) {
-          const { data: profileExists } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('username', username)
-            .maybeSingle()
-          if (!profileExists) {
-            return Response.json(
-              {
-                error:
-                  '이 계정에는 프로필이 없어 멤버십을 부여할 수 없습니다. 사용자가 먼저 프로필을 생성해야 합니다.',
-              },
-              { status: 409 },
-            )
-          }
+        const authUserId = String(body.auth_user_id || '').trim()
+        if (!authUserId) {
+          return Response.json({ error: 'auth_user_id is required for membership updates' }, { status: 400 })
         }
 
-        const existing =
-          ((await sellerStore.get(username, { type: 'json' })) as SellerVerificationBlob | null) || {}
-        const now = new Date().toISOString()
-
-        const merged: SellerVerificationBlob = {
-          ...existing,
-          membership_active: tier !== null,
-          membership_plan: tier,
-          membership_started_at: tier !== null ? existing.membership_started_at || now : null,
-          updated_at: now,
+        const { data: targetAuth, error: targetAuthError } = await supabase.auth.admin.getUserById(authUserId)
+        if (targetAuthError || !targetAuth?.user) {
+          return Response.json({ error: '회원 계정을 찾을 수 없습니다.' }, { status: 404 })
         }
 
-        await sellerStore.setJSON(username, merged)
+        const { data: targetProfile } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', authUserId)
+          .maybeSingle()
+        const grantUsername = String(targetProfile?.username || username).toLowerCase()
+        const grant = await setOperatorMembershipGrant({
+          authUserId,
+          username: grantUsername,
+          plan: tier,
+          grantedBy: String((auth.user as any)?.email || (auth.user as any)?.id || ''),
+        })
+        const stored = targetProfile?.username
+          ? await readSellerMembership(sellerStore, grantUsername)
+          : null
+        const complimentary = applyComplimentaryMembership(grantUsername, stored) as SellerVerificationBlob | null
+        const effective = applyOperatorMembershipGrant(complimentary, grant) as SellerVerificationBlob | null
         membershipResult = {
-          membership_active: !!merged.membership_active,
-          membership_plan: merged.membership_plan as 'standard' | 'standard_ai' | 'commerce' | 'pro' | null,
-          membership_started_at: merged.membership_started_at || null,
+          membership_active: !!effective?.membership_active,
+          membership_plan: (effective?.membership_plan || null) as 'standard' | 'standard_ai' | 'commerce' | 'pro' | null,
+          membership_started_at: effective?.membership_started_at || null,
+          membership_source: membershipSource(stored, complimentary, grant),
+          paid_membership_plan: stored?.membership_active
+            ? (stored.membership_plan === 'live' ? 'commerce' : stored.membership_plan || null)
+            : null,
+          operator_membership_plan: grant.active ? grant.plan : null,
         }
       }
 

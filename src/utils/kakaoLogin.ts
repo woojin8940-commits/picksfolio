@@ -49,6 +49,42 @@ const FALLBACK_KEY = 'picks_kakao_fallback';
 /** 위 표시들의 유효 시간. 로그인 한 번에 쓰고 버리는 값이라 짧게 잡는다. */
 const HANDOFF_TTL = 10 * 60 * 1000;
 
+type KakaoDiagnosticFlow = 'javascript-sdk' | 'rest-fallback';
+
+async function clientIdFingerprint(clientId: string): Promise<string> {
+  if (!clientId || !globalThis.crypto?.subtle) return 'unavailable';
+  const digest = await globalThis.crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(clientId),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 12);
+}
+
+async function recordKakaoAuthDiagnostic(
+  flow: KakaoDiagnosticFlow,
+  clientId: string,
+  redirectUri: string,
+): Promise<void> {
+  try {
+    const bundlePath = Array.from(document.scripts)
+      .map((script) => script.src)
+      .find((src) => /\/assets\/index-[^/]+\.js(?:\?|$)/.test(src));
+    const payload = JSON.stringify({
+      flow,
+      clientIdFingerprint: await clientIdFingerprint(clientId),
+      redirectUri,
+      pageOrigin: window.location.origin,
+      bundlePath: bundlePath ? new URL(bundlePath).pathname : '',
+      nativeApp: (window as unknown as { __PICKSFOLIO_NATIVE__?: boolean }).__PICKSFOLIO_NATIVE__ === true,
+    });
+    navigator.sendBeacon('/api/kakao-auth-diagnostic', new Blob([payload], { type: 'application/json' }));
+  } catch {
+    // 진단 실패가 로그인을 막으면 안 된다.
+  }
+}
+
 /**
  * 카카오로 넘어갔다 돌아올 때까지 남겨 둘 값을 적는다.
  *
@@ -203,8 +239,12 @@ async function startKakaoSdkLogin(destination: string): Promise<boolean> {
   // state 를 보관할 수 없으면 콜백에서 대조가 안 된다 → 다음 경로로 간다.
   if (!rememberHandoff(STATE_KEY, nonce)) return false;
 
+  const redirectUri = window.location.origin + CALLBACK_PATH;
+  const javascriptKey = (import.meta.env.VITE_KAKAO_JS_KEY as string | undefined)?.trim() || '';
+  await recordKakaoAuthDiagnostic('javascript-sdk', javascriptKey, redirectUri);
+
   kakao.Auth.authorize({
-    redirectUri: window.location.origin + CALLBACK_PATH,
+    redirectUri,
     scope: KAKAO_SCOPES,
     state: encodeState({ n: nonce, d: safeDestination(destination) }),
     // 카카오톡 앱으로 넘기는 간편로그인. 기본값이지만 의도를 남겨 둔다.
@@ -244,6 +284,12 @@ async function startKakaoRestLogin(destination: string): Promise<boolean> {
     return false;
   }
 
+  const authorizeUrl = new URL(result.url);
+  await recordKakaoAuthDiagnostic(
+    'rest-fallback',
+    authorizeUrl.searchParams.get('client_id') || '',
+    authorizeUrl.searchParams.get('redirect_uri') || redirectUri,
+  );
   window.location.href = result.url;
   return true;
 }

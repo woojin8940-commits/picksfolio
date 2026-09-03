@@ -297,7 +297,7 @@ export default async (req: Request, context: Context) => {
       // 감지됐다면 함께 내려준다. 화면에서 "왜 설정과 다른 문구가 오는지" 안내한다.
       externalDm: await readForeignDm(username),
       // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
-      entitled: await dmAutomationAllowed(username),
+      entitled: await dmAutomationAllowed(username, auth.userId),
       requiredTier: DM_AUTOMATION_TIER,
     });
   }
@@ -350,7 +350,7 @@ export default async (req: Request, context: Context) => {
 
     // 자동화 저장/켜기는 프로 플랜에서만 가능하다. (연동 해제는 위에서 이미 처리 — 플랜과
     // 무관하게 언제든 계정을 끊을 수 있어야 한다.)
-    if (!(await dmAutomationAllowed(username))) {
+    if (!(await dmAutomationAllowed(username, auth.userId))) {
       return Response.json(
         {
           error: DM_AUTOMATION_REQUIRED_MESSAGE,

@@ -14,6 +14,7 @@
 
 import { getStore } from '@netlify/blobs'
 import { applyComplimentaryMembership } from './complimentary-memberships.mts'
+import { applyOperatorMembershipGrant, getOperatorMembershipGrant } from './operator-membership-grants.mts'
 import { tierAtLeast, type MembershipTier } from './membership-billing.mts'
 
 /** 디엠 자동화에 필요한 최소 티어. */
@@ -27,7 +28,10 @@ export const isBusinessAccountName = (username: string | null | undefined): bool
   !!username && username.toLowerCase().startsWith('biz/')
 
 /** 이 사용자가 디엠 자동화를 이용할 수 있는지. */
-export const dmAutomationAllowed = async (username: string | null | undefined): Promise<boolean> => {
+export const dmAutomationAllowed = async (
+  username: string | null | undefined,
+  authUserId?: string | null,
+): Promise<boolean> => {
   if (!username) return false
   if (isBusinessAccountName(username)) return true
 
@@ -37,7 +41,9 @@ export const dmAutomationAllowed = async (username: string | null | undefined): 
     const stored = (await store
       .get(`seller_${clean}`, { type: 'json' })
       .catch(() => null)) as Record<string, any> | null
-    const record = applyComplimentaryMembership(clean, stored)
+    const complimentary = applyComplimentaryMembership(clean, stored)
+    const grant = await getOperatorMembershipGrant({ authUserId, username: clean })
+    const record = applyOperatorMembershipGrant(complimentary, grant)
     return !!record?.membership_active && tierAtLeast(record?.membership_plan, DM_AUTOMATION_TIER)
   } catch (e) {
     console.warn('[dm-access] membership lookup failed:', (e as Error)?.message)

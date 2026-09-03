@@ -2079,8 +2079,13 @@ export const apiService = {
   async updateAdminInfluencer(
     token: string,
     username: string,
-    body: { featured?: boolean; featured_note?: string; membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null }
-  ): Promise<{ ok: boolean; error?: string }> {
+    body: {
+      featured?: boolean;
+      featured_note?: string;
+      membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null;
+      auth_user_id?: string;
+    }
+  ): Promise<{ ok: boolean; error?: string; membership?: any }> {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -2090,7 +2095,10 @@ export const apiService = {
         headers,
         body: JSON.stringify(body),
       });
-      if (res.ok) return { ok: true };
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        return { ok: true, membership: json?.membership || undefined };
+      }
       let errorMsg: string | undefined;
       try {
         const json = await res.json();

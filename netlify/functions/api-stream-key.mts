@@ -30,7 +30,7 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     // 멤버십/사업자 인증 게이트. 관리자는 운영 목적으로 통과시킨다.
     if (!auth.isAdmin) {
-      const access = await checkLiveBroadcastAccess(username);
+      const access = await checkLiveBroadcastAccess(username, auth.userId);
       if (!access.allowed) {
         return Response.json(
           {

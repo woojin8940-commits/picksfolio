@@ -1719,7 +1719,14 @@ const App: React.FC = () => {
   }
   if (view === 'terms') return <LazyRoute><TermsOfService onNavigateHome={() => navigate('home')} /></LazyRoute>;
   if (view === 'privacy') return <LazyRoute><PrivacyPolicy onNavigateHome={() => navigate('home')} /></LazyRoute>;
-  if (view === 'proposal') return <LazyRoute><BusinessProposalForm username={targetUser} /></LazyRoute>;
+  if (view === 'proposal') return (
+    <LazyRoute>
+      <BusinessProposalForm
+        username={targetUser}
+        onBack={() => targetUser ? navigate('user-page', targetUser) : navigate('home')}
+      />
+    </LazyRoute>
+  );
   if (view === 'user-page') return (
     <LazyRoute>
       <UserPage
