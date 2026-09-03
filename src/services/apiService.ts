@@ -2039,16 +2039,38 @@ export const apiService = {
   },
 
   // ───────────────────── Admin: Influencer management ─────────────────────
-  async getAdminInfluencers(token: string): Promise<{ influencers: any[]; businesses?: any[]; liveCustomers?: any[] }> {
+  async getAdminInfluencers(token: string): Promise<{
+    influencers: any[];
+    businesses?: any[];
+    liveCustomers?: any[];
+    /** 운영자가 직접 부여한 멤버십 목록(활성만). matched=false 면 회원 목록에서 계정을 찾지 못한 부여다. */
+    operatorGrants?: any[];
+    /** 부여 목록 조회가 실패한 경우의 사유. 실패를 "0명"으로 오해하지 않도록 화면에서 구분해 쓴다. */
+    operatorGrantsError?: string | null;
+  }> {
     try {
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/admin/influencers', { credentials: 'same-origin', headers });
-      if (!res.ok) return { influencers: [], businesses: [], liveCustomers: [] };
+      if (!res.ok) {
+        return {
+          influencers: [],
+          businesses: [],
+          liveCustomers: [],
+          operatorGrants: [],
+          operatorGrantsError: `회원 목록을 불러오지 못했습니다 (${res.status})`,
+        };
+      }
       return await res.json();
     } catch (e) {
       console.error('[API] Failed to get admin influencers:', e);
-      return { influencers: [], businesses: [], liveCustomers: [] };
+      return {
+        influencers: [],
+        businesses: [],
+        liveCustomers: [],
+        operatorGrants: [],
+        operatorGrantsError: '회원 목록을 불러오지 못했습니다.',
+      };
     }
   },
 
@@ -2082,7 +2104,7 @@ export const apiService = {
     body: {
       featured?: boolean;
       featured_note?: string;
-      membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null;
+      membership_plan?: 'standard' | 'standard_ai' | 'pro' | null;
       auth_user_id?: string;
     }
   ): Promise<{ ok: boolean; error?: string; membership?: any }> {
