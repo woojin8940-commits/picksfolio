@@ -80,7 +80,10 @@ export default async (req: Request, context: Context) => {
       } else if (body.membership_cancel_at_period_end === false) {
         // 해지 예약 취소(= 구독 계속하기). 아직 이용 기간이 남아 활성인 구독만 되돌릴 수
         // 있으므로, 이 경로로 결제 없이 멤버십이 켜지는 일은 없다.
-        if (next.membership_active && next.membership_cancel_at_period_end) {
+        //
+        // 빌링키(정기결제 수단)가 있어야 되돌릴 수 있다. 빌링키 없는 레코드(예전 결제
+        // 연동 잔재 등)에서 종료일만 지우면 청구할 수단도 없이 멤버십이 무기한 열린다.
+        if (next.membership_active && next.membership_cancel_at_period_end && next.billing_key) {
           next.membership_cancel_at_period_end = false;
           next.membership_canceled_at = null;
           next.membership_ends_at = null;

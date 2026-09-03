@@ -1,18 +1,16 @@
 /**
  * 결제 취소(환불) 조회 — 서버 전용.
  *
- * 환불은 우리 서비스 화면이 아니라 PG 관리자 콘솔(포트원/토스페이먼츠)이나 카드사 취소로
- * 처리되는 경우가 많다. 그래서 "결제는 취소됐는데 지급된 크레딧(포인트)은 그대로 남아 있는"
- * 상태가 생긴다. 이 모듈은 결제건 하나의 취소 금액을 PG 에 물어보는 단일 창구를 제공하고,
- * 크레딧 지갑(claude-credits)이 이를 이용해 지급분을 환수한다.
+ * 환불은 우리 서비스 화면이 아니라 PG 관리자 콘솔(포트원)이나 카드사 취소로 처리되는 경우가
+ * 많다. 그래서 "결제는 취소됐는데 지급된 크레딧(포인트)은 그대로 남아 있는" 상태가 생긴다.
+ * 이 모듈은 결제건 하나의 취소 금액을 PG 에 물어보는 단일 창구를 제공하고, 크레딧
+ * 지갑(claude-credits)이 이를 이용해 지급분을 환수한다.
  *
- * 결제 수단별 식별자가 다르다 — 포트원은 paymentId, 토스페이먼츠는 paymentKey. 지급 기록에
- * provider 가 없는 과거 데이터는 포트원 → 토스페이먼츠 순으로 조회를 시도한다.
+ * 결제는 모두 포트원(카드 = 나이스정보통신 / 간편결제 = 카카오페이)으로 처리하므로 결제건은
+ * 포트원 paymentId 로만 조회한다.
  */
 
-import { tossAuthHeader } from './toss-payments.mts'
-
-export type PaymentProvider = 'portone' | 'toss'
+export type PaymentProvider = 'portone'
 
 export interface PaymentCancellation {
   /** 조회 성공 여부. false 면 취소 금액을 신뢰할 수 없으므로 환수하지 않는다. */
@@ -27,7 +25,6 @@ export interface PaymentCancellation {
 }
 
 const PORTONE_API_BASE = 'https://api.portone.io'
-const TOSS_API_BASE = 'https://api.tosspayments.com/v1'
 
 /** 포트원 V2 결제건의 취소 금액. */
 export const lookupPortOneCancellation = async (
@@ -60,46 +57,14 @@ export const lookupPortOneCancellation = async (
   }
 }
 
-/** 토스페이먼츠 결제건(paymentKey)의 취소 금액. */
-export const lookupTossCancellation = async (
-  paymentKey: string,
-): Promise<PaymentCancellation> => {
-  try {
-    const res = await fetch(`${TOSS_API_BASE}/payments/${encodeURIComponent(paymentKey)}`, {
-      method: 'GET',
-      headers: { Authorization: tossAuthHeader() },
-    })
-    const data = (await res.json().catch(() => ({}))) as Record<string, any>
-    if (res.status === 404 || data?.code === 'NOT_FOUND_PAYMENT') {
-      return { ok: false, cancelledKrw: 0, notFound: true }
-    }
-    if (!res.ok) {
-      return { ok: false, cancelledKrw: 0, error: `${data?.code || res.status}` }
-    }
-    const status = String(data?.status || '')
-    const total = Number(data?.totalAmount ?? 0) || 0
-    // balanceAmount = 취소되지 않고 남은 금액. 부분 취소도 이 차이로 계산된다.
-    const balance = Number(data?.balanceAmount ?? total) || 0
-    const cancelledKrw = Math.max(0, total - balance)
-    return { ok: true, cancelledKrw, status }
-  } catch (e: any) {
-    return { ok: false, cancelledKrw: 0, error: e?.message || '토스페이먼츠 결제 조회 실패' }
-  }
-}
-
 /**
- * 결제건의 취소 금액을 조회한다. provider 를 모르는(과거) 결제건은 포트원 → 토스페이먼츠
- * 순서로 시도하고, 어느 쪽에서도 찾지 못하면 notFound 로 알린다.
+ * 결제건의 취소 금액을 조회한다. 결제는 모두 포트원을 거치므로 provider 는 기록용이며,
+ * 포트원에서 찾지 못하면 notFound 로 알린다(= 환수하지 않는다).
  */
 export const lookupPaymentCancellation = async (
   paymentId: string,
-  provider?: PaymentProvider | string | null,
+  _provider?: PaymentProvider | string | null,
 ): Promise<PaymentCancellation> => {
   if (!paymentId) return { ok: false, cancelledKrw: 0, notFound: true }
-  if (provider === 'toss') return lookupTossCancellation(paymentId)
-  if (provider === 'portone') return lookupPortOneCancellation(paymentId)
-
-  const portone = await lookupPortOneCancellation(paymentId)
-  if (portone.ok || !portone.notFound) return portone
-  return lookupTossCancellation(paymentId)
+  return lookupPortOneCancellation(paymentId)
 }

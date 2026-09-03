@@ -75,7 +75,7 @@ export async function payClaudePlan(
   }
 
   const paymentId = genPortOneId(`claude-${kind}`, username);
-  // 카드(나이스정보통신) / 토스페이 / 카카오페이 모두 PortOne V2 로 처리한다.
+  // 카드(나이스정보통신) / 카카오페이 모두 PortOne V2 로 처리한다.
   const ppMethod = payMethod;
 
   // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 결제창으로 페이지를 넘기고, 돌아온

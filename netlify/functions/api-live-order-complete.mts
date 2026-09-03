@@ -12,7 +12,7 @@ import { mutateBlobJSON } from './_shared/blob-write.mts'
  * settlement layer can later reconcile what to pay out.
  *
  * Flow:
- *   1. Viewer taps "바로 결제" on a live product; chooses Toss/Kakao/Card.
+ *   1. Viewer taps "바로 결제" on a live product; pays with 카카오페이.
  *   2. Client calls PortOne.requestPayment(...) with a merchant-generated paymentId.
  *   3. On success, client POSTs order details here for verification.
  *   4. We GET /payments/{paymentId}, confirm status=PAID + amount match,

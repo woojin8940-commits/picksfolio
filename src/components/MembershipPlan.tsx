@@ -33,9 +33,13 @@ interface MembershipPlanProps {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
-// 멤버십 실결제는 신용카드(나이스정보통신 = 나이스페이)와 카카오페이 두 가지로만 운영한다.
-// 카드는 서버에서 나이스정보통신 정기결제 채널로 빌링키를 발급하고(수기/키인), 카카오페이는
-// PortOne V2 브라우저 SDK 로 빌링키를 발급해 리다이렉트 방식으로 처리한다.
+// 멤버십은 월 단위 정기결제(매월 자동결제)이며, 실결제 수단은 신용카드(나이스페이)와
+// 카카오페이 두 가지다.
+//   • 신용카드(나이스정보통신): PortOne V2 나이스정보통신은 결제창으로 카드 빌링키를 발급할 수
+//     없다(결제창 빌링키 발급은 간편결제만 지원). 그래서 카드 정기결제는 카드 정보를 입력받아
+//     서버에서 수기(키인) 빌링키를 발급하고, 이후 매월 그 빌링키로 자동결제한다.
+//     카드 정보는 발급 요청에만 쓰고 어디에도 저장하지 않는다.
+//   • 카카오페이: PortOne V2 브라우저 SDK 로 빌링키를 발급해 매월 자동결제한다.
 
 // Claude plan (separate prepaid AI add-on) — activated by its own PortOne payment
 // window opened from this page. Keep these figures in sync with the server's
@@ -56,11 +60,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   // 실제 운영 결제수단은 신용카드(나이스정보통신)와 카카오페이 두 가지다.
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY'>('CARD');
+  // 자동결제 등록용 카드 정보. 입력값은 등록 요청에만 쓰고 화면을 닫을 때 비운다
+  // (브라우저·서버 어디에도 저장하지 않는다).
+  const [cardForm, setCardForm] = useState({ number: '', expiry: '', birth: '', pw2: '' });
   // 결제 대상 플랜 — 멤버십 티어.
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
-  // 카드(신용카드) 정기결제 등록용 카드 정보. NICE V2 는 카드 빌링키를 수기(키인) 방식으로만
-  // 발급하므로 카드 정보를 직접 입력받아 서버로 전달한다(저장하지 않음).
-  const [cardForm, setCardForm] = useState({ number: '', expiry: '', birth: '', pw2: '' });
 
   // Claude plan (prepaid AI add-on, billed separately from the memberships above).
   // Activating it opens a PortOne payment window right here; the base monthly grant
@@ -169,22 +173,27 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     const tierAmount = TIER_PRICE[selectedTier];
     const nextBillingOf = (v: SellerVerification | null | undefined) => v?.next_billing_date || null;
 
-    // ── 카드(신용카드): NICE 키인 방식으로 카드 빌링키를 발급해 정기결제로 등록 ──
-    // NICE V2 는 브라우저 SDK(requestIssueBillingKey)로 카드 빌링키를 발급할 수 없어(간편결제만
-    // 지원) 카드 정보를 서버로 보내 수기(키인) `POST /billing-keys` 로 빌링키를 발급받고, 첫 달을
-    // 즉시 결제한 뒤 가입일 기준 매월 자동결제한다. 카드 정보는 저장하지 않고 PortOne 으로만
-    // 전달된다. 카카오페이는 아래 SDK 빌링키 경로를 사용한다.
+    // ── 카드(신용카드) · 매월 자동결제(정기결제) ──
+    // 멤버십은 월 구독이므로 카드도 매월 같은 날 자동으로 청구된다. PortOne V2 나이스정보통신은
+    // 결제창으로 카드 빌링키를 발급할 수 없어(결제창 빌링키 발급은 간편결제만 지원) 카드 자동결제는
+    // 카드 정보를 서버로 보내 수기(키인) 빌링키를 발급받는 방식만 가능하다. 카드 정보는 서버에
+    // 저장하지 않고 PortOne 으로만 전달하며, 첫 달 결제까지 성공하면 그 날짜를 기준으로 매월
+    // 자동결제된다(이후 청구는 정기결제 스케줄러가 발급된 빌링키로 처리).
     if (payMethod === 'CARD') {
-      const number = cardForm.number.replace(/\D/g, '');
-      const exp = cardForm.expiry.replace(/\D/g, ''); // MMYY
-      const birth = cardForm.birth.replace(/\D/g, '');
-      const pw2 = cardForm.pw2.replace(/\D/g, '');
-      if (number.length < 13 || number.length > 16) {
-        setError('카드 번호를 정확히 입력해 주세요.');
+      const number = cardForm.number.replace(/[^0-9]/g, '');
+      const expiry = cardForm.expiry.replace(/[^0-9]/g, '');
+      const birth = cardForm.birth.replace(/[^0-9]/g, '');
+      const pw2 = cardForm.pw2.replace(/[^0-9]/g, '');
+      if (number.length < 14 || number.length > 16) {
+        setError('카드번호를 정확히 입력해 주세요.');
         return;
       }
-      if (exp.length !== 4 || Number(exp.slice(0, 2)) < 1 || Number(exp.slice(0, 2)) > 12) {
-        setError('카드 유효기간을 MM/YY 형식으로 입력해 주세요.');
+      if (expiry.length !== 4) {
+        setError('유효기간을 MM/YY 형식으로 입력해 주세요.');
+        return;
+      }
+      if (Number(expiry.slice(0, 2)) < 1 || Number(expiry.slice(0, 2)) > 12) {
+        setError('유효기간의 월(MM)을 확인해 주세요.');
         return;
       }
       if (birth.length !== 6 && birth.length !== 10) {
@@ -198,16 +207,19 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       setSaving(true);
       try {
-        const res = await apiService.subscribeMembershipCard(normalizedUserName, selectedTier, {
-          number,
-          expiryMonth: exp.slice(0, 2),
-          expiryYear: exp.slice(2, 4),
-          birthOrBusinessRegistrationNumber: birth,
-          passwordTwoDigits: pw2,
-        });
+        const res = await apiService.subscribeMembershipCard(
+          normalizedUserName,
+          {
+            number,
+            expiryMonth: expiry.slice(0, 2),
+            expiryYear: expiry.slice(2, 4),
+            birthOrBusinessRegistrationNumber: birth,
+            passwordTwoDigits: pw2,
+          },
+          selectedTier,
+        );
         if (!res.success) {
-          setError(res.error || '카드 정기결제 등록에 실패했습니다. 카드 정보를 확인해 주세요.');
-          setSaving(false);
+          setError(res.error || '카드 등록·결제에 실패했습니다. 카드 정보를 확인해 주세요.');
           return;
         }
         if (res.data) setVerification(res.data);
@@ -218,11 +230,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           : null;
         flashSuccess(
           `카드로 ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`
-            + (nextDate ? ` 다음 결제일은 ${nextDate}이며, 가입일 기준 매월 자동결제됩니다.` : ' 가입일 기준 매월 자동결제됩니다.'),
+            + (nextDate
+              ? ` 다음 결제일은 ${nextDate}이며, 가입일 기준 매월 자동결제됩니다.`
+              : ' 가입일 기준 매월 자동결제됩니다.'),
         );
       } catch (e) {
-        console.error('[Membership] card billing error:', e);
-        setError('카드 정기결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+        console.error('[Membership] card billing key error:', e);
+        setError('결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
       } finally {
         setSaving(false);
       }
@@ -680,7 +694,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <ul className="space-y-1.5 text-sm text-slate-600">
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>{ACTIVATION_PRICE_KRW.toLocaleString()}원 단건 결제 · <strong>{ACTIVATION_GRANT_CREDITS.toLocaleString()} 크레딧</strong> 충전</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>사용한 토큰만큼만 차감 · 남은 크레딧은 이월</li>
-                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>결제수단은 <strong>신용/체크카드만 가능</strong> · 네이버페이, 페이코, 토스페이, 카카오페이 등 간편결제 제외</li>
+                <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>결제수단은 <strong>신용/체크카드만 가능</strong> · 네이버페이, 페이코, 카카오페이 등 간편결제 제외</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 충전 경로: 이 플랜 화면에서 첫 결제 후 협업 타임라인 AI의 클로드 관리 화면에서 추가 충전</li>
                 <li className="flex items-start gap-2"><span className="text-orange-500 font-bold shrink-0">✓</span>크레딧 사용 경로: 협업 타임라인 AI에서 Claude 선택 후 질문 시 답변별 사용량만큼 차감</li>
               </ul>
@@ -738,6 +752,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
             <li>스탠다드 멤버십은 월 {STANDARD_PRICE.toLocaleString()}원, AI 협업 멤버십은 월 {STANDARD_AI_PRICE.toLocaleString()}원, 프로 플랜은 월 {PRO_PRICE.toLocaleString()}원이며, 언제든 해지할 수 있습니다.</li>
+            <li><strong>멤버십은 가입일 기준 매월 자동결제(정기결제)됩니다.</strong> 신용·체크카드는 입력한 카드로, 카카오페이는 등록한 카카오페이로 매월 같은 날 자동 결제되며(첫 달은 가입 시 즉시 결제) 언제든 해지할 수 있습니다.</li>
             <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단되면서 멤버십이 해지됩니다. 이미 결제한 이용료는 환불되지 않고 남은 기간 이용으로 대체됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>
             <li><strong>표시된 모든 금액은 부가세(VAT 10%)가 포함된 금액</strong>입니다. 결제 시 추가로 청구되는 금액은 없습니다.</li>
             <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
@@ -885,7 +900,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-1">월 구독료 (부가세 포함)</p>
                 <p className="text-3xl font-black text-blue-700">{TIER_PRICE[selectedTier].toLocaleString()}<span className="text-sm font-bold ml-1">원 / 월</span></p>
-                <p className="text-xs font-bold text-blue-500 mt-2">지금 첫 달 결제 · 가입일 기준 매월 자동결제 · 언제든 해지 가능</p>
+                <p className="text-xs font-bold text-blue-500 mt-2">
+                  지금 첫 달 결제 · 가입일 기준 매월 자동결제 · 언제든 해지 가능
+                </p>
               </div>
 
               <div>
@@ -919,51 +936,49 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 {payMethod === 'CARD' && (
                   <div className="mt-3 space-y-2">
                     <input
-                      type="tel"
+                      type="text"
                       inputMode="numeric"
                       autoComplete="cc-number"
+                      maxLength={19}
                       value={cardForm.number}
-                      onChange={(e) =>
-                        setCardForm((f) => ({ ...f, number: e.target.value.replace(/[^\d\s-]/g, '').slice(0, 19) }))
-                      }
-                      placeholder="카드 번호 (숫자만)"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                      onChange={(e) => setCardForm({ ...cardForm, number: e.target.value })}
+                      placeholder="카드번호 (숫자만)"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-blue-400"
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <input
-                        type="tel"
+                        type="text"
                         inputMode="numeric"
                         autoComplete="cc-exp"
+                        maxLength={5}
                         value={cardForm.expiry}
-                        onChange={(e) =>
-                          setCardForm((f) => ({ ...f, expiry: e.target.value.replace(/[^\d/]/g, '').slice(0, 5) }))
-                        }
+                        onChange={(e) => setCardForm({ ...cardForm, expiry: e.target.value })}
                         placeholder="유효기간 MM/YY"
-                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-blue-400"
                       />
                       <input
-                        type="password"
+                        type="text"
                         inputMode="numeric"
-                        value={cardForm.pw2}
-                        onChange={(e) =>
-                          setCardForm((f) => ({ ...f, pw2: e.target.value.replace(/\D/g, '').slice(0, 2) }))
-                        }
-                        placeholder="비밀번호 앞 2자리"
-                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                        maxLength={10}
+                        value={cardForm.birth}
+                        onChange={(e) => setCardForm({ ...cardForm, birth: e.target.value })}
+                        placeholder="생년월일 6자리"
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-blue-400"
                       />
                     </div>
                     <input
-                      type="tel"
+                      type="password"
                       inputMode="numeric"
-                      value={cardForm.birth}
-                      onChange={(e) =>
-                        setCardForm((f) => ({ ...f, birth: e.target.value.replace(/\D/g, '').slice(0, 10) }))
-                      }
-                      placeholder="생년월일 6자리(YYMMDD) 또는 사업자번호 10자리"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-blue-400 focus:outline-none"
+                      maxLength={2}
+                      value={cardForm.pw2}
+                      onChange={(e) => setCardForm({ ...cardForm, pw2: e.target.value })}
+                      placeholder="카드 비밀번호 앞 2자리"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-blue-400"
                     />
-                    <p className="text-[11px] text-slate-400 font-medium">
-                      신용·체크카드로 첫 달을 결제하고 가입일 기준 매월 자동결제됩니다. 카드 정보는 저장되지 않고 결제사(나이스정보통신)로만 전달됩니다.
+                    <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+                      입력한 카드로 <strong className="text-slate-600">매월 같은 날 자동으로 결제</strong>됩니다(첫 달은 지금 결제).
+                      카드 정보는 결제사로만 전달되어 자동결제용 결제키로 바뀌며 픽스폴리오에는 저장되지 않습니다.
+                      법인카드는 생년월일 대신 사업자등록번호 10자리를 입력하세요.
                     </p>
                   </div>
                 )}
@@ -975,6 +990,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </div>
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
+                <p>✓ 가입일 기준 매월 자동결제되며, 해지하면 결제한 기간이 끝나는 날 종료됩니다.</p>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {selectedTier === 'pro'
@@ -1005,7 +1021,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               >
                 {saving
                   ? '처리 중...'
-                  : `${TIER_PRICE[selectedTier].toLocaleString()}원으로 구독 시작`}
+                  : payMethod === 'CARD'
+                    ? `${TIER_PRICE[selectedTier].toLocaleString()}원 결제하고 자동결제 시작`
+                    : `${TIER_PRICE[selectedTier].toLocaleString()}원으로 구독 시작`}
               </button>
             </div>
           </div>
@@ -1047,7 +1065,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   <span>신용/체크카드 전용</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium mt-2">
-                  클로드 플랜은 네이버페이, 페이코, 토스페이, 카카오페이 등 간편결제를 지원하지 않습니다.
+                  클로드 플랜은 네이버페이, 페이코, 카카오페이 등 간편결제를 지원하지 않습니다.
                 </p>
               </div>
               <div className="text-xs text-slate-500 space-y-1">

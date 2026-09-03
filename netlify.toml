@@ -11,7 +11,7 @@
   # 공개 키이므로 스캔 대상에서 제외해 배포가 항상 성공하도록 한다. (시크릿 키는 서버 전용
   # PORTONE_V2_API_SECRET / *_API_SECRET 등으로 분리돼 있고 여기에 포함하지 않는다.)
   [build.environment]
-    SECRETS_SCAN_OMIT_KEYS = "VITE_PORTONE_NICE_CHANNEL_KEY,VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m,VITE_PORTONE_NICE_CHANNEL_KEY_IM0029309m,VITE_TOSS_CLIENT_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_IVS_PLAYBACK_URL,VITE_BANUBA_TOKEN,VITE_KAKAO_JS_KEY"
+    SECRETS_SCAN_OMIT_KEYS = "VITE_PORTONE_NICE_CHANNEL_KEY,VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m,VITE_PORTONE_NICE_CHANNEL_KEY_IM0029309m,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_IVS_PLAYBACK_URL,VITE_BANUBA_TOKEN,VITE_KAKAO_JS_KEY"
 
 [functions]
   node_bundler = "esbuild"
@@ -31,34 +31,7 @@
   to = "/profile.html"
   status = 200
 
-# 토스페이먼츠 결제위젯 페이지 (정적 HTML). SPA catch-all 보다 먼저 매칭되어야 한다.
-[[redirects]]
-  from = "/checkout"
-  to = "/checkout.html"
-  status = 200
-
-[[redirects]]
-  from = "/success"
-  to = "/success.html"
-  status = 200
-
-[[redirects]]
-  from = "/fail"
-  to = "/fail.html"
-  status = 200
-
-# 토스페이먼츠 직접 연동(카드) 결제 후 돌아오는 정적 페이지. SPA catch-all 보다 먼저 매칭.
-[[redirects]]
-  from = "/toss/return"
-  to = "/toss-return.html"
-  status = 200
-
-[[redirects]]
-  from = "/toss/fail"
-  to = "/toss-fail.html"
-  status = 200
-
-# PortOne(토스페이·카카오페이) 간편결제 리다이렉트 복귀 정적 페이지. SPA catch-all 보다 먼저 매칭.
+# PortOne(포트원) 결제 리다이렉트 복귀 정적 페이지. SPA catch-all 보다 먼저 매칭.
 [[redirects]]
   from = "/portone/return"
   to = "/portone-return.html"

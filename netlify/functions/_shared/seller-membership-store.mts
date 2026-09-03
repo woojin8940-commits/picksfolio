@@ -21,7 +21,6 @@ const LEGACY_MEMBERSHIP_FIELDS = [
   'billing_key',
   'billing_key_issued_at',
   'billing_provider',
-  'toss_customer_key',
   'billing_history',
   'live_plan_active',
   'live_plan_started_at',

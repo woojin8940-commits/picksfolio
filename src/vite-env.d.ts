@@ -22,7 +22,6 @@ declare global {
           | string;
         easyPay?: {
           easyPayProvider?:
-            | 'TOSSPAY'
             | 'KAKAOPAY'
             | 'NAVERPAY'
             | 'SAMSUNGPAY'
@@ -69,7 +68,6 @@ declare global {
         currency?: 'KRW' | 'USD' | 'JPY' | string;
         easyPay?: {
           easyPayProvider?:
-            | 'TOSSPAY'
             | 'KAKAOPAY'
             | 'NAVERPAY'
             | 'SAMSUNGPAY'

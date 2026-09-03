@@ -127,7 +127,6 @@ export const isDue = (dueIso: string | null | undefined, now: Date): boolean => 
 // ── PortOne billing-key charge ───────────────────────────────────────────────
 // storeId is the public PortOne V2 identifier (same one the browser SDK uses);
 // the API secret is server-only.
-import { chargeTossBillingKey } from './toss-payments.mts'
 
 const PORTONE_API_BASE = 'https://api.portone.io'
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5'
@@ -251,57 +250,13 @@ export const issueNiceCardBillingKey = async (
   }
 }
 
-/**
- * Charge one month of a membership against a stored TossPayments billing key
- * (토스페이먼츠 카드, 토스페이먼츠 직접 연동). Mirrors `chargeMembershipBillingKey`
- * but uses the TossPayments billing API; requires the customerKey captured when the
- * billing key was issued.
- */
-export const chargeTossMembershipBillingKey = async (
-  username: string,
-  billingKey: string,
-  customerKey: string,
-  tier: MembershipTier,
-): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
-  const amountKrw = TIER_PRICE_KRW[tier]
-  const orderId = `membership-${asciiSafe(username)}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`
-  const charge = await chargeTossBillingKey(
-    billingKey,
-    customerKey,
-    amountKrw,
-    orderId,
-    `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
-  )
-  if (!charge.ok) return { success: false, amountKrw, error: charge.error }
-  return { success: true, paymentId: charge.paymentKey || orderId, amountKrw }
-}
-
-/**
- * Charge one month of a membership using whichever provider issued the billing key.
- * `provider === 'toss'` uses TossPayments (and needs `tossCustomerKey`); anything
- * else uses PortOne. Recurring billing (the daily scheduler) calls this so it never
- * has to know which provider a member used at subscribe time.
- */
-export const chargeMembershipMonthly = async (
-  username: string,
-  billingKey: string,
-  tier: MembershipTier,
-  provider?: string | null,
-  tossCustomerKey?: string | null,
-): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
-  if (provider === 'toss') {
-    if (!tossCustomerKey) return { success: false, amountKrw: TIER_PRICE_KRW[tier], error: '토스페이먼츠 customerKey 누락' }
-    return chargeTossMembershipBillingKey(username, billingKey, tossCustomerKey, tier)
-  }
-  return chargeMembershipBillingKey(username, billingKey, tier)
-}
-
-// ── Subscription record shape (stored on the seller-verification blob) ────────
+// 멤버십 청구 기록 한 건. 첫 결제(initial)와 매월 자동결제(recurring) 모두 같은 형태로
+// 레코드의 billing_history 앞에 쌓인다(최대 50건). 화면 쪽 타입은 src/types.ts 의
+// MembershipBillingHistoryEntry 와 대응한다.
 export interface MembershipBillingEntry {
   at: string
-  tier: MembershipTier
+  // 'live_plan' 은 판매 종료된 라이브 커머스 멤버십의 과거 청구 기록에만 남는다.
+  tier: MembershipTier | 'live_plan'
   amountKrw: number
   kind: 'initial' | 'recurring'
   success: boolean
@@ -309,33 +264,9 @@ export interface MembershipBillingEntry {
   error?: string
 }
 
-// ── 해지(구독 종료) ──────────────────────────────────────────────────────────
-/**
- * 해지는 즉시 차단이 아니라 "이미 결제한 이용 기간이 끝나는 날 종료"다.
- * 한 달치를 미리 받아 두었으므로 남은 기간은 그대로 쓸 수 있어야 하고, 막아야
- * 하는 것은 다음 달 결제다. 그래서 해지 요청은 아래 세 값만 남기고
- * `membership_active` 는 종료일까지 그대로 켜 둔다 — 기능 접근 판정
- * (membershipCovers · tierAtLeast 등)은 손대지 않아도 남은 기간 동안 그대로 통과한다.
- *
- *   membership_cancel_at_period_end  해지 예약됨(= 다음 결제 없음)
- *   membership_canceled_at           해지를 요청한 시각
- *   membership_ends_at               이용이 끝나는 날(= 원래 다음 결제일)
- *
- * 종료일이 되면 정기결제 스케줄러(`scheduled-membership-billing`)가 청구 대신
- * `membership_active` 를 끈다(그때 `membership_ended_at` 을 남긴다).
- */
-export interface MembershipCancellationFields {
-  membership_cancel_at_period_end?: boolean
-  membership_canceled_at?: string | null
-  membership_ends_at?: string | null
-  membership_ended_at?: string | null
-}
-
-/**
- * 해지 요청을 "기간 만료 해지"로 받을 수 있는지 판단한다.
- * 남은 결제 기간이 있으면(다음 결제일이 미래) 그 날짜까지 유지하고, 남은 기간이
- * 없으면(무료·증정 멤버십처럼 결제일이 없거나 이미 지난 경우) 즉시 해지한다.
- */
+// 해지 처리 방식을 정한다. 결제한 이용 기간이 남아 있으면 그 기간이 끝나는 날(=다음 결제일)
+// 종료되도록 예약하고, 남은 기간이 없으면(증정 멤버십처럼 결제일이 없거나 이미 지난 경우)
+// 즉시 종료한다.
 export const resolveCancellation = (
   record:
     | { membership_active?: boolean; next_billing_date?: string | null }

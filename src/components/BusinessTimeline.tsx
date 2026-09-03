@@ -2092,7 +2092,7 @@ const ClaudePlanModal: React.FC<{
               <span>신용/체크카드 전용</span>
             </div>
             <p className="text-[11px] text-slate-400 font-medium mt-2">
-              클로드 플랜과 크레딧 충전은 네이버페이, 페이코, 토스페이, 카카오페이 등 간편결제를 지원하지 않습니다.
+              클로드 플랜과 크레딧 충전은 네이버페이, 페이코, 카카오페이 등 간편결제를 지원하지 않습니다.
             </p>
           </div>
 
