@@ -35,7 +35,7 @@ function membershipSource(
 //                                         (people who subscribed to a live broadcaster) so the operator dashboard can
 //                                         render three segments: 유저 / 비즈니스 / 라이브 고객.
 // - POST /api/admin/influencers/:username → toggle featured / update note / grant or revoke membership
-//   body: { featured?: boolean, featured_note?: string, membership_plan?: 'standard' | 'commerce' | null }
+//   body: { featured?: boolean, featured_note?: string, membership_plan?: 'standard' | 'standard_ai' | 'pro' | null }
 export default async (req: Request, context: Context) => {
   const auth = await requireAdmin(req)
   if (!auth.ok) return auth.response
@@ -111,11 +111,19 @@ export default async (req: Request, context: Context) => {
         if (s in proposalMap[u]) (proposalMap[u] as any)[s]++
       }
 
+      // 운영자 부여 현황. 조회가 실패하면 부여한 계정이 하나도 없는 것처럼 보이는데,
+      // 그러면 운영자는 "부여했는데 현황에 안 보인다"는 상태와 구분할 수 없다.
+      // 실패 사실을 응답에 담아 화면이 "0명" 대신 오류를 말하게 한다.
+      let operatorGrantsError: string | null = null
       const operatorGrants = await listOperatorMembershipGrants().catch((error) => {
         console.warn('[admin-influencers] operator membership grants query failed:', error)
-        return []
+        operatorGrantsError = error?.message || '운영자 부여 목록을 불러오지 못했습니다.'
+        return [] as OperatorMembershipGrant[]
       })
       const grantByUserId = new Map(operatorGrants.map((grant) => [grant.auth_user_id, grant]))
+      // 부여 한 건이 목록의 어느 줄에 붙었는지 기록한다. 끝까지 아무 줄에도 붙지
+      // 않은 부여는 계정을 찾지 못한 것이므로 별도로 드러낸다.
+      const matchedGrantIds = new Set<string>()
 
       const canonicalUsernames = new Set<string>(
         (profiles || [])
@@ -181,6 +189,7 @@ export default async (req: Request, context: Context) => {
           // same allowlist).
           const complimentary = applyComplimentaryMembership(blobKey, stored) as SellerVerificationBlob | null
           const operatorGrant = grantByUserId.get(String(p.id)) || null
+          if (operatorGrant?.active) matchedGrantIds.add(operatorGrant.auth_user_id)
           const effective = applyOperatorMembershipGrant(complimentary, operatorGrant) as SellerVerificationBlob | null
 
           return {
@@ -284,6 +293,7 @@ export default async (req: Request, context: Context) => {
               stored,
             ) as SellerVerificationBlob | null
             const operatorGrant = grantByUserId.get(String(u.id)) || null
+            if (operatorGrant?.active) matchedGrantIds.add(operatorGrant.auth_user_id)
             const effective = applyOperatorMembershipGrant(complimentary, operatorGrant) as SellerVerificationBlob | null
 
             influencers.push({
@@ -329,6 +339,57 @@ export default async (req: Request, context: Context) => {
       } catch (e) {
         console.warn('[admin-influencers] auth.admin.listUsers failed:', e)
       }
+
+      // 비즈니스 계정에 부여한 멤버십. 유저 목록에는 없는 계정이라 아이디로도 붙지
+      // 않는다 — "계정을 못 찾은 부여"와 섞이지 않도록 비즈니스로 표시해 둔다.
+      const businessGrantIds = new Set<string>()
+      for (const b of businessProfiles || []) {
+        const grant = grantByUserId.get(String(b.id))
+        if (!grant?.active) continue
+        businessGrantIds.add(grant.auth_user_id)
+        matchedGrantIds.add(grant.auth_user_id)
+      }
+
+      // 아이디(auth_user_id)로 붙지 못한 부여는 아이디 기준으로 한 번 더 붙인다.
+      // 부여 당시의 계정 식별자가 지금 목록의 줄과 어긋나면(프로필 생성 전에 부여했거나
+      // 계정을 다시 만든 경우) 부여는 살아 있는데 화면에는 미가입으로 보인다.
+      for (const grant of operatorGrants) {
+        if (!grant.active || matchedGrantIds.has(grant.auth_user_id)) continue
+        const grantUsername = grant.username.trim().toLowerCase()
+        if (!grantUsername) continue
+        const row = influencers.find(
+          (r: any) =>
+            String(r.username || '').toLowerCase() === grantUsername &&
+            !r.operator_membership_plan,
+        )
+        if (!row) continue
+        matchedGrantIds.add(grant.auth_user_id)
+        row.membership_active = true
+        row.membership_plan = grant.plan
+        row.membership_started_at = grant.granted_at || row.membership_started_at
+        row.membership_source = 'operator'
+        row.operator_membership_plan = grant.plan
+        console.log(`[admin-influencers] grant matched by username for @${row.username} (auth id drift)`)
+      }
+
+      // 어떤 줄에도 붙지 못한 부여 = 계정을 찾지 못한 부여. 숫자만 보여 주면 운영자가
+      // 알 수 없으므로 부여 목록 자체를 함께 내려보낸다.
+      const operatorGrantList = operatorGrants
+        .filter((grant) => grant.active)
+        .map((grant) => ({
+          auth_user_id: grant.auth_user_id,
+          username: grant.username,
+          plan: grant.plan,
+          granted_at: grant.granted_at,
+          granted_by: grant.granted_by,
+          matched: matchedGrantIds.has(grant.auth_user_id),
+          scope: businessGrantIds.has(grant.auth_user_id)
+            ? 'business'
+            : matchedGrantIds.has(grant.auth_user_id)
+              ? 'user'
+              : 'unknown',
+        }))
+        .sort((a, b) => new Date(b.granted_at || 0).getTime() - new Date(a.granted_at || 0).getTime())
 
       const businesses = (businessProfiles || []).map((p: any) => ({
         id: p.id,
@@ -379,7 +440,13 @@ export default async (req: Request, context: Context) => {
         return tb - ta
       })
 
-      return Response.json({ influencers, businesses, liveCustomers })
+      return Response.json({
+        influencers,
+        businesses,
+        liveCustomers,
+        operatorGrants: operatorGrantList,
+        operatorGrantsError,
+      })
     } catch (e: any) {
       return Response.json({ error: e?.message || 'Failed to fetch influencers' }, { status: 500 })
     }
@@ -390,7 +457,7 @@ export default async (req: Request, context: Context) => {
       const body = (await req.json()) as {
         featured?: boolean
         featured_note?: string
-        membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null
+        membership_plan?: 'standard' | 'standard_ai' | 'pro' | null
         auth_user_id?: string
       }
 
@@ -433,16 +500,12 @@ export default async (req: Request, context: Context) => {
       } | null = null
 
       if (membershipProvided) {
+        // 커머스(라이브 커머스) 멤버십은 판매를 종료했다 — 새로 부여할 수 없다.
+        // 이미 커머스로 부여·구독된 계정의 표시는 그대로 유지한다.
         const tier = body.membership_plan
-        if (
-          tier !== null &&
-          tier !== 'standard' &&
-          tier !== 'standard_ai' &&
-          tier !== 'commerce' &&
-          tier !== 'pro'
-        ) {
+        if (tier !== null && tier !== 'standard' && tier !== 'standard_ai' && tier !== 'pro') {
           return Response.json(
-            { error: 'membership_plan must be "standard", "standard_ai", "commerce", "pro", or null' },
+            { error: 'membership_plan must be "standard", "standard_ai", "pro", or null' },
             { status: 400 },
           )
         }

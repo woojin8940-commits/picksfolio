@@ -84,6 +84,12 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
 
   const share = (v: number) => (totalProfit > 0 ? Math.round((v / totalProfit) * 100) : 0);
 
+  // 커머스(라이브 커머스) 멤버십은 판매를 종료했다. 과거 구독자가 남아 있을 때만
+  // 줄을 남긴다 — 인원이 있는데 감추면 플랜별 합계가 멤버십 순수익과 어긋난다.
+  const visibleTiers = (Object.keys(PLAN_PRICE) as MembershipTier[]).filter(
+    tier => tier !== 'commerce' || membershipBreakdown.commerce > 0,
+  );
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
@@ -109,7 +115,8 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
           <p className="text-2xl font-black text-pink-600">{loaded ? won(membership) : '—'}</p>
           {loaded && (
             <p className="text-[9px] font-bold text-pink-400/80 mt-1">
-              스탠다드 {membershipBreakdown.standard} · AI 협업 {membershipBreakdown.standard_ai} · 커머스 {membershipBreakdown.commerce} · 프로 {membershipBreakdown.pro}
+              스탠다드 {membershipBreakdown.standard} · AI 협업 {membershipBreakdown.standard_ai} · 프로 {membershipBreakdown.pro}
+              {membershipBreakdown.commerce > 0 && ` · 커머스 ${membershipBreakdown.commerce}`}
             </p>
           )}
         </div>
@@ -146,7 +153,7 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
         <div className="bg-slate-50 rounded-xl p-3">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">멤버십</p>
           <div className="space-y-1">
-            {(Object.keys(PLAN_PRICE) as MembershipTier[]).map(tier => (
+            {visibleTiers.map(tier => (
               <div key={tier} className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-500">
                   {tier === 'standard' ? '스탠다드' : tier === 'standard_ai' ? 'AI 협업' : tier === 'commerce' ? '커머스' : '프로'} × {membershipBreakdown[tier]}
