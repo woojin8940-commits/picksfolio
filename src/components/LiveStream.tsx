@@ -6,6 +6,7 @@ import MediaAuto from './MediaAuto';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import { formatKRW, formatPhoneInput } from '../utils/formatters';
 import { loadPortOne, loadVideoJs } from '../utils/externalScripts';
+import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
@@ -2183,26 +2184,24 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       // Save redirect info so we can restore live stream after OAuth callback
       localStorage.setItem('picks_live_kakao_redirect', username);
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-          redirectTo: window.location.origin + '/' + username,
-          scopes: 'openid profile_nickname account_email phone_number name',
-          queryParams: {
-            // Force Kakao to present its consent (agreement) screen on every
-            // login so viewers always see and approve the requested items.
-            prompt: 'login',
-            auth_type: 'reauthenticate',
-          },
-        },
-      });
-
-      if (error) {
-        localStorage.removeItem('picks_live_kakao_redirect');
-        setKakaoLoginError('카카오 로그인 실패: ' + error.message);
+      // 시청자도 카카오톡 앱과 연동해 한 번 눌러 로그인한다. 예전에는 여기서
+      // `prompt=login` + `auth_type=reauthenticate` 로 재인증을 강제했는데, 그러면
+      // 카카오가 계정 로그인 화면을 띄우면서 "카카오톡으로 로그인" 버튼을 감춘다 —
+      // 동의 화면을 다시 띄우려던 설정이 정작 앱 연동을 막고 있었다. 동의 항목은
+      // 카카오 콘솔에 등록된 대로 카카오가 알아서 확인한다.
+      const route = await startKakaoLogin('/' + username);
+      if (route === 'native') {
+        // 앱에서는 카카오톡이 곧바로 이 화면으로 돌아오므로 세션이 이미 만들어져
+        // 있다. 방송 주소로 다시 들어가면 리다이렉트로 돌아온 것과 똑같은 상태가
+        // 되고, UserPage 의 카카오 콜백 처리(링크네임 조회 → 시청자 로그인 →
+        // 방송 자동 열기)를 그대로 태울 수 있다. 위에 저장한
+        // `picks_live_kakao_redirect` 가 그 처리를 켜는 열쇠다.
+        window.location.href = '/' + username;
       }
+      // 나머지 경로는 페이지가 카카오로 넘어간 상태다.
     } catch (e: any) {
       localStorage.removeItem('picks_live_kakao_redirect');
+      if (isKakaoLoginCancelled(e)) return;
       console.error('Kakao login error:', e);
       setKakaoLoginError('카카오 로그인 중 오류가 발생했습니다. 다시 시도해주세요.');
     }

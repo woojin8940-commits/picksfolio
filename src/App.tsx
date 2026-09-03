@@ -24,6 +24,7 @@ import {
 // 실패한 dynamic import() 를 재시도하고, 그래도 안 되면 오류를 던져 오류 경계가
 // 안내하게 하는 래퍼. 구현과 이유는 utils/lazyRoute.tsx 에 있다.
 import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
+import { isKakaoSdkSignedIn } from './utils/kakaoLogin';
 
 const UserPage = lazyWithRetry(() => import('./components/UserPage'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
@@ -224,8 +225,14 @@ const App: React.FC = () => {
 
   // Track whether this page load involves a fresh OAuth callback (code or access_token in URL).
   // Used to prevent stale sessions from auto-redirecting to setup-link on the login page.
+  // 카카오 간편로그인은 앱을 그리기 전에 세션을 만들고 주소를 `?kakao_login=1` 로
+  // 되돌리므로(main.tsx) URL 에 `code` 가 남아 있지 않다. 그것도 방금 끝난 OAuth
+  // 콜백으로 함께 세어야, 처음 가입한 카카오 사용자가 링크네임 설정 화면으로
+  // 넘어간다.
   const isOAuthCallbackRef = useRef<boolean>(
-    !!new URLSearchParams(window.location.search).get('code') || window.location.hash.includes('access_token')
+    !!new URLSearchParams(window.location.search).get('code')
+      || window.location.hash.includes('access_token')
+      || isKakaoSdkSignedIn()
   );
 
   // profileChecked: true once we've verified the user's profile from Supabase.
@@ -235,7 +242,9 @@ const App: React.FC = () => {
   const [profileChecked, setProfileChecked] = useState(() => {
     const hasCache = !!sessionGet('picks_user_session');
     const params = new URLSearchParams(window.location.search);
-    const isOAuthCallback = !!params.get('code') || window.location.hash.includes('access_token');
+    const isOAuthCallback = !!params.get('code')
+      || window.location.hash.includes('access_token')
+      || isKakaoSdkSignedIn();
     return hasCache && !isOAuthCallback;
   });
 
@@ -258,7 +267,10 @@ const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const hasCode = !!params.get('code');
     const hasHashToken = window.location.hash.includes('access_token');
-    return hasCode || hasHashToken;
+    // 카카오 간편로그인은 앱을 그리기 전에 세션까지 만들고 주소를 되돌린다
+    // (main.tsx → completeKakaoSdkLogin). 그때 남겨 둔 표시를 보고, 대시보드로
+    // 넘어가기 전에 로그인 폼이 한 번 번쩍이지 않도록 로딩 화면을 유지한다.
+    return hasCode || hasHashToken || isKakaoSdkSignedIn();
   });
 
   // 담당자 여부. 운영자가 배정한 일반 계정은 관리자가 아니면서 담당자 대시보드를
@@ -278,6 +290,21 @@ const App: React.FC = () => {
   useEffect(() => { userNameRef.current = userName; }, [userName]);
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
   useEffect(() => { managerCheckedRef.current = managerChecked; }, [managerChecked]);
+
+  // `?kakao_login=1` 은 첫 렌더에 "방금 간편로그인으로 들어왔다"를 알리기 위한
+  // 표시일 뿐이다(main.tsx 가 붙인다). 위 초기 상태들이 이미 읽었으니 주소에서
+  // 지운다 — 남겨 두면 사용자가 새로고침할 때마다 로그인 직후처럼 취급된다.
+  useEffect(() => {
+    if (!isKakaoSdkSignedIn()) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('kakao_login');
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (query ? `?${query}` : '') + window.location.hash
+    );
+  }, []);
 
   /**
    * 담당자 배정 여부를 서버에 물어 화면 상태에 반영한다.

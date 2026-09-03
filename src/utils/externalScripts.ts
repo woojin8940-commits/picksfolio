@@ -17,6 +17,21 @@ declare global {
   interface Window {
     videojs?: any;
     PortOne?: any;
+    /** 카카오 JS SDK. 카카오톡 앱 연동 간편로그인(`Kakao.Auth.authorize`)에 쓴다. */
+    Kakao?: {
+      init: (javascriptKey: string) => void;
+      isInitialized: () => boolean;
+      cleanup?: () => void;
+      Auth?: {
+        authorize: (settings: {
+          redirectUri: string;
+          scope?: string;
+          state?: string;
+          prompt?: string;
+          throughTalk?: boolean;
+        }) => void;
+      };
+    };
     /** vendor/ivs-player-overlay.js 가 노출한다. IVS Player SDK 를 받아 videojs 를 감싼다. */
     __picksInstallIvsOverlay?: () => Promise<boolean>;
   }
@@ -26,6 +41,11 @@ const VIDEOJS_VERSION = '8.10.0';
 const VIDEOJS_JS = `https://vjs.zencdn.net/${VIDEOJS_VERSION}/video.min.js`;
 const VIDEOJS_CSS = `https://vjs.zencdn.net/${VIDEOJS_VERSION}/video-js.css`;
 const PORTONE_JS = 'https://cdn.portone.io/v2/browser-sdk.js';
+
+const KAKAO_SDK_VERSION = '2.8.3';
+const KAKAO_SDK_JS = `https://t1.kakaocdn.net/kakao_js_sdk/${KAKAO_SDK_VERSION}/kakao.min.js`;
+/** 위 버전 파일의 실제 해시. 로그인에 쓰는 스크립트라 무결성까지 확인한다. */
+const KAKAO_SDK_INTEGRITY = 'sha384-oroumrnFVE0xtgqyDZJARgERibXg2C28380uaUZz2kHDS5CR7tu20eGiOU6GkTpy';
 
 /** 로드 상한. 넘기면 거부한다 — 호출부가 폴백(대체 재생 경로 · 안내문)으로 갈 수 있어야 한다. */
 const LOAD_TIMEOUT = 15000;
@@ -40,7 +60,7 @@ function injectStyle(href: string): void {
   document.head.appendChild(link);
 }
 
-function injectScript(src: string): Promise<void> {
+function injectScript(src: string, integrity?: string): Promise<void> {
   const existing = pending.get(src);
   if (existing) return existing;
 
@@ -77,6 +97,10 @@ function injectScript(src: string): Promise<void> {
     if (!already) {
       el.src = src;
       el.async = true;
+      if (integrity) {
+        el.integrity = integrity;
+        el.crossOrigin = 'anonymous';
+      }
       document.head.appendChild(el);
     }
   });
@@ -110,4 +134,35 @@ export async function loadPortOne(): Promise<any> {
   await injectScript(PORTONE_JS);
   if (!window.PortOne) throw new Error('결제 모듈을 초기화할 수 없습니다.');
   return window.PortOne;
+}
+
+/**
+ * 카카오 JS SDK. 카카오 로그인 버튼을 누른 뒤에 부른다.
+ *
+ * 초기화에는 자바스크립트 키를 쓴다(REST API 키가 아니다). 이 키는 브라우저에
+ * 공개되는 클라이언트 식별자라서 번들에 들어가도 문제가 없다 — 실제 보호는
+ * 카카오 콘솔의 플랫폼(도메인) 등록과 Redirect URI 화이트리스트가 한다.
+ * 키가 설정돼 있지 않으면 `null` 을 돌려준다: 호출부가 기존 로그인 경로로
+ * 폴백할 수 있어야 하므로 예외를 던지지 않는다.
+ */
+export async function loadKakaoSdk(): Promise<NonNullable<Window['Kakao']> | null> {
+  const javascriptKey = (import.meta.env.VITE_KAKAO_JS_KEY as string | undefined)?.trim();
+  if (!javascriptKey) return null;
+
+  try {
+    await injectScript(KAKAO_SDK_JS, KAKAO_SDK_INTEGRITY);
+  } catch (err) {
+    console.warn('[externalScripts] 카카오 SDK 를 불러오지 못했습니다', err);
+    return null;
+  }
+
+  const kakao = window.Kakao;
+  if (!kakao) return null;
+  try {
+    if (!kakao.isInitialized()) kakao.init(javascriptKey);
+  } catch (err) {
+    console.warn('[externalScripts] 카카오 SDK 초기화 실패', err);
+    return null;
+  }
+  return kakao;
 }

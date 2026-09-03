@@ -1,11 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { setAccountScope, sessionSet } from '../utils/accountScope';
 import { primeSupabaseSession } from '../services/apiService';
 import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
+import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
 const ADMIN_USERNAMES = ['picksfolio'];
@@ -26,6 +27,18 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     password: ''
   });
 
+  // 카카오 간편로그인이 콜백에서 끝내 실패하면 main.tsx 가 `?kakao_login=fail` 을
+  // 남기고 이 화면으로 돌려보낸다. 조용히 로그인 폼만 보여 주면 사용자는 왜
+  // 돌아왔는지 알 수 없으므로 한 번 알려 주고 주소는 정리한다.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('kakao_login') !== 'fail') return;
+    params.delete('kakao_login');
+    const query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+    alert('카카오 로그인을 완료하지 못했습니다. 다시 시도하거나 아이디/비밀번호로 로그인해 주세요.');
+  }, []);
+
   const isAdminEmail = (input: string) => {
     return ADMIN_EMAILS.includes(input.trim().toLowerCase());
   };
@@ -38,24 +51,17 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     }
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-          redirectTo: window.location.origin + '/login',
-          scopes: 'openid profile_nickname account_email phone_number name',
-          // No prompt=login / reauthenticate here: forcing re-authentication
-          // makes Kakao show the manual ID/password form and skip the app
-          // hand-off. Letting it default surfaces the "카카오톡으로 로그인" button so
-          // users with the KakaoTalk app installed sign in with a single tap
-          // (the in-app WebView delegates the kakaotalk:// scheme to the OS).
-        },
-      });
-      if (error) {
-        alert('카카오 로그인 실패: ' + error.message);
-      }
+      // 휴대폰에서는 카카오톡 앱과 연동해 한 번 눌러 로그인한다(간편로그인).
+      // 네이티브 앱이면 카카오 네이티브 SDK, 모바일 웹이면 카카오 JS SDK 를 쓰고,
+      // 데스크톱이나 설정이 없을 때만 기존 OAuth 리다이렉트로 간다.
+      const route = await startKakaoLogin('/login');
+      // 'native' 는 이 자리에서 세션이 만들어진 경우다. App.tsx 의 인증 리스너가
+      // 프로필 연동과 화면 이동을 이어서 처리하므로 여기서는 스피너만 유지한다.
+      if (route !== 'native') return;
     } catch (err: any) {
-      alert('카카오 로그인 중 오류가 발생했습니다: ' + err.message);
-    } finally {
+      if (!isKakaoLoginCancelled(err)) {
+        alert('카카오 로그인 중 오류가 발생했습니다: ' + (err?.message || '알 수 없는 오류'));
+      }
       setIsLoading(false);
     }
   };
