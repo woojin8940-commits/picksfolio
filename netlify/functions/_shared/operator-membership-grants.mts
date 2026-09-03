@@ -111,5 +111,9 @@ export function applyOperatorMembershipGrant<T extends Record<string, any> | nul
     membership_plan: grant.plan,
     membership_started_at: grant.granted_at,
     membership_source: 'operator',
+    // 운영자 지급 멤버십은 결제가 없으니 해지 예약(= 다음 결제 중단)도 의미가 없다.
+    // 예전 결제 구독의 해지 예약이 남아 있어도 화면에 종료 예정으로 보이지 않게 지운다.
+    membership_cancel_at_period_end: false,
+    membership_ends_at: null,
   } as any
 }

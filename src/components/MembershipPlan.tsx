@@ -50,6 +50,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // 해지 안내 모달 — 해지하면 언제까지 이용할 수 있는지 먼저 안내한 뒤 확정한다.
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
   // 결제 대상 플랜 — 멤버십 티어.
@@ -129,6 +131,23 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   };
 
   const membershipActive = !!verification?.membership_active;
+
+  // 해지 예약 상태. 해지는 즉시 차단이 아니라 결제한 이용 기간이 끝나는 날 종료되므로,
+  // 예약이 걸린 동안에도 멤버십은 계속 활성(= 기능 이용 가능)이다.
+  const cancelPending = membershipActive && !!verification?.membership_cancel_at_period_end;
+  const membershipEndsAt = verification?.membership_ends_at || verification?.next_billing_date || null;
+
+  const formatDate = (iso?: string | null) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(language === 'en' ? 'en-US' : 'ko-KR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  };
+  const endsAtLabel = formatDate(membershipEndsAt);
 
   const flashSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -301,8 +320,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
   };
 
-  const handleCancelSubscription = async () => {
-    if (!window.confirm('멤버십 구독을 해지하시겠어요? 해지 후에는 멤버십 전용 기능을 이용할 수 없습니다.')) return;
+  const handleCancelSubscription = () => {
+    setError(null);
+    setCancelOpen(true);
+  };
+
+  // 해지 확정 — 서버가 "결제한 이용 기간이 끝나는 날 종료"로 예약을 걸고,
+  // 그 날짜까지는 membership_active 를 그대로 유지한다(남은 기간 이용).
+  const confirmCancelSubscription = async () => {
     setSaving(true);
     const res = await apiService.saveSellerVerification(normalizedUserName, { membership_active: false });
     setSaving(false);
@@ -310,7 +335,32 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       setError(res.error || '해지 처리 중 오류가 발생했습니다.');
       return;
     }
+    setCancelOpen(false);
     if (res.data) setVerification(res.data);
+    const endsAt = res.data?.membership_ends_at || res.data?.next_billing_date;
+    if (res.data?.membership_active && endsAt) {
+      flashSuccess(
+        `해지가 예약되었습니다. ${formatDate(endsAt)}까지 그대로 이용할 수 있고, 다음 결제는 진행되지 않습니다.`,
+      );
+    } else {
+      flashSuccess('멤버십이 해지되었습니다.');
+    }
+  };
+
+  // 해지 예약 취소(= 구독 계속하기). 아직 이용 기간이 남아 있을 때만 노출된다.
+  const resumeSubscription = async () => {
+    setError(null);
+    setSaving(true);
+    const res = await apiService.saveSellerVerification(normalizedUserName, {
+      membership_cancel_at_period_end: false,
+    });
+    setSaving(false);
+    if (!res.success) {
+      setError(res.error || '해지 취소 처리 중 오류가 발생했습니다.');
+      return;
+    }
+    if (res.data) setVerification(res.data);
+    flashSuccess('해지 예약이 취소되었습니다. 멤버십이 계속 유지됩니다.');
   };
 
   // Legacy installs may carry membership_plan === 'live' from the previous single-tier
@@ -322,6 +372,55 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   // 포함하고 있으면(= 더 높은 등급) 카드에 "○○에 포함되어 있습니다"를 띄운다.
   const includedInCurrentPlan = (tier: MembershipTier) =>
     membershipActive && !!currentPlan && TIER_RANK[currentPlan] > TIER_RANK[tier];
+
+  // 구독 중인 플랜 카드의 상태 + 해지 버튼. 해지 예약이 걸린 동안에는 남은 이용
+  // 기간과 "해지 취소"를 대신 보여준다(세 플랜 카드가 같은 UI 를 쓴다).
+  const subscribedActions = (subscribedLabel: string) => (
+    <div className="space-y-2">
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div
+          className={`flex-1 py-3 px-4 rounded-xl font-bold text-center border text-sm ${
+            cancelPending
+              ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-green-50 text-green-700 border-green-200'
+          }`}
+        >
+          {cancelPending
+            ? `⏳ ${language === 'en' ? 'Cancellation scheduled' : '해지 예약됨'}`
+            : `✓ ${subscribedLabel}`}
+        </div>
+        <button
+          type="button"
+          onClick={cancelPending ? resumeSubscription : handleCancelSubscription}
+          disabled={saving}
+          className={`px-4 py-3 rounded-xl font-bold text-sm border transition-all disabled:opacity-50 ${
+            cancelPending
+              ? 'text-blue-600 border-blue-200 hover:bg-blue-50'
+              : 'text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          {cancelPending
+            ? language === 'en'
+              ? 'Keep subscription'
+              : '해지 취소'
+            : language === 'en'
+              ? 'Cancel'
+              : '해지하기'}
+        </button>
+      </div>
+      {cancelPending && (
+        <p className="text-[11px] font-bold text-amber-700 leading-relaxed">
+          {endsAtLabel
+            ? language === 'en'
+              ? `Available until ${endsAtLabel}. No further payments will be charged.`
+              : `${endsAtLabel}까지 그대로 이용할 수 있고, 다음 결제는 진행되지 않습니다.`
+            : language === 'en'
+              ? 'Your membership ends when the paid period is over.'
+              : '결제한 이용 기간이 끝나면 자동으로 해지됩니다.'}
+        </p>
+      )}
+    </div>
+  );
 
   // Inside the native app, membership and Claude-plan purchases are not offered
   // — digital goods are sold on the website only. Show a neutral notice instead
@@ -358,6 +457,82 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </div>
       )}
 
+      {error && !confirmOpen && !cancelOpen && (
+        <div className="mb-6 max-w-2xl bg-red-50 border border-red-200 text-red-700 text-sm font-bold rounded-xl px-4 py-3">
+          {error}
+        </div>
+      )}
+
+      {/* 현재 구독 상태 — 다음 결제일, 그리고 해지를 예약했다면 언제까지 쓸 수 있는지.
+          플랜 카드가 없는 예전 커머스 멤버십도 여기서 해지할 수 있다. */}
+      {!loading && membershipActive && currentPlan && (
+        <section className="mb-10 max-w-3xl">
+          <div
+            className={`rounded-2xl border p-5 md:p-6 ${
+              cancelPending ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'
+            }`}
+          >
+            <div className="sm:flex sm:items-center sm:justify-between gap-4">
+              <div>
+                <p
+                  className={`text-[11px] font-black uppercase tracking-widest ${
+                    cancelPending ? 'text-amber-600' : 'text-blue-500'
+                  }`}
+                >
+                  {cancelPending
+                    ? language === 'en'
+                      ? 'Cancellation scheduled'
+                      : '해지 예약'
+                    : language === 'en'
+                      ? 'Current subscription'
+                      : '현재 구독'}
+                </p>
+                <h3 className="text-base md:text-lg font-black text-slate-900 mt-0.5">
+                  {TIER_LABEL[currentPlan]}
+                </h3>
+                <p className="text-xs md:text-sm text-slate-600 font-medium mt-1 leading-relaxed">
+                  {cancelPending
+                    ? endsAtLabel
+                      ? language === 'en'
+                        ? `You keep full access until ${endsAtLabel}. After that the membership ends and no further payment is charged.`
+                        : `이미 결제한 이용 기간인 ${endsAtLabel}까지는 모든 기능을 그대로 이용할 수 있습니다. 그 이후에는 자동으로 해지되며, 다음 달부터 결제되지 않습니다.`
+                      : language === 'en'
+                        ? 'Your membership ends when the paid period is over.'
+                        : '결제한 이용 기간이 끝나면 자동으로 해지됩니다.'
+                    : endsAtLabel
+                      ? language === 'en'
+                        ? `Next payment on ${endsAtLabel} · billed monthly on your signup date.`
+                        : `다음 결제일은 ${endsAtLabel}이며, 가입일 기준 매월 자동결제됩니다.`
+                      : language === 'en'
+                        ? 'Billed monthly on your signup date.'
+                        : '가입일 기준 매월 자동결제됩니다.'}
+                </p>
+              </div>
+              <div className="shrink-0 mt-4 sm:mt-0">
+                <button
+                  type="button"
+                  onClick={cancelPending ? resumeSubscription : handleCancelSubscription}
+                  disabled={saving}
+                  className={`w-full sm:w-auto px-5 py-3 rounded-xl font-bold text-sm border transition-all disabled:opacity-50 ${
+                    cancelPending
+                      ? 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {cancelPending
+                    ? language === 'en'
+                      ? 'Keep subscription'
+                      : '해지 취소하고 계속 이용'
+                    : language === 'en'
+                      ? 'Cancel membership'
+                      : '멤버십 해지하기'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Plan grid */}
       <section className="mb-12">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 max-w-7xl">
@@ -382,19 +557,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             {loading ? (
               <div className="text-slate-400 text-sm font-bold">{t('common.loading', '상태 확인 중...', 'Checking status...')}</div>
             ) : membershipActive && currentPlan === 'standard' ? (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                  ✓ {language === 'en' ? 'Subscribed to Standard' : '스탠다드 멤버십 구독 중'}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCancelSubscription}
-                  disabled={saving}
-                  className="px-4 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  {language === 'en' ? 'Cancel' : '해지하기'}
-                </button>
-              </div>
+              subscribedActions(language === 'en' ? 'Subscribed to Standard' : '스탠다드 멤버십 구독 중')
             ) : includedInCurrentPlan('standard') ? (
               <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
                 {language === 'en' ? `Included in ${TIER_LABEL[currentPlan!]}` : `${TIER_LABEL[currentPlan!]}에 포함되어 있습니다`}
@@ -433,19 +596,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             {loading ? (
               <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
             ) : membershipActive && currentPlan === 'standard_ai' ? (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                  ✓ AI 협업 멤버십 구독 중
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCancelSubscription}
-                  disabled={saving}
-                  className="px-4 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  해지하기
-                </button>
-              </div>
+              subscribedActions('AI 협업 멤버십 구독 중')
             ) : includedInCurrentPlan('standard_ai') ? (
               <div className="py-3 px-4 rounded-xl font-bold text-center bg-slate-50 text-slate-500 border border-slate-200 text-sm">
                 {TIER_LABEL[currentPlan!]}에 포함되어 있습니다
@@ -491,19 +642,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             {loading ? (
               <div className="text-slate-400 text-sm font-bold">상태 확인 중...</div>
             ) : membershipActive && currentPlan === 'pro' ? (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 py-3 px-4 rounded-xl font-bold text-center bg-green-50 text-green-700 border border-green-200 text-sm">
-                  ✓ 프로 플랜 구독 중
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCancelSubscription}
-                  disabled={saving}
-                  className="px-4 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  해지하기
-                </button>
-              </div>
+              subscribedActions('프로 플랜 구독 중')
             ) : (
               <button
                 type="button"
@@ -597,6 +736,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           </h4>
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-500 marker:text-slate-400">
             <li>스탠다드 멤버십은 월 {STANDARD_PRICE.toLocaleString()}원, AI 협업 멤버십은 월 {STANDARD_AI_PRICE.toLocaleString()}원, 프로 플랜은 월 {PRO_PRICE.toLocaleString()}원이며, 언제든 해지할 수 있습니다.</li>
+            <li><strong>해지하면 이미 결제한 이용 기간까지는 그대로 이용</strong>할 수 있고, 그 다음 달부터 자동결제가 중단되면서 멤버십이 해지됩니다. 이미 결제한 이용료는 환불되지 않고 남은 기간 이용으로 대체됩니다. 종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.</li>
             <li><strong>표시된 모든 금액은 부가세(VAT 10%)가 포함된 금액</strong>입니다. 결제 시 추가로 청구되는 금액은 없습니다.</li>
             <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
             <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 AI 협업 멤버십({STANDARD_AI_PRICE.toLocaleString()}원) 이상에 포함됩니다. 스탠다드 멤버십({STANDARD_PRICE.toLocaleString()}원)에는 포함되지 않습니다.</li>
@@ -606,6 +746,116 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
           </ul>
         </div>
       </section>
+
+      {/* 해지 안내 모달 — 해지해도 결제한 이용 기간은 남는다는 점을 먼저 알린다. */}
+      {cancelOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <p className="text-xs font-black text-amber-500 uppercase tracking-widest">
+                  {currentPlan ? TIER_LABEL[currentPlan] : '멤버십'}
+                </p>
+                <h3 className="text-lg font-black text-slate-900">
+                  {language === 'en' ? 'Cancel membership' : '멤버십 해지 안내'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setCancelOpen(false); setError(null); }}
+                className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
+                  {error}
+                </div>
+              )}
+
+              {endsAtLabel ? (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <p className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-1">
+                      {language === 'en' ? 'Available until' : '이용 가능 기간'}
+                    </p>
+                    <p className="text-2xl font-black text-amber-700">{endsAtLabel}</p>
+                    <p className="text-xs font-bold text-amber-600 mt-2">
+                      {language === 'en'
+                        ? 'Access continues to the end of the period you already paid for.'
+                        : '이미 결제한 이용 기간까지는 그대로 이용할 수 있습니다.'}
+                    </p>
+                  </div>
+                  <ul className="space-y-2 text-xs md:text-sm text-slate-600 font-medium">
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-bold shrink-0">•</span>
+                      {language === 'en'
+                        ? `You keep every membership feature until ${endsAtLabel} — this month's payment is not wasted.`
+                        : <span><strong>{endsAtLabel}까지</strong> 멤버십 전용 기능을 모두 그대로 이용할 수 있습니다. 이번 달 결제분은 남은 기간 동안 사용됩니다.</span>}
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-bold shrink-0">•</span>
+                      {language === 'en'
+                        ? 'From next month there is no automatic payment — the membership ends by itself.'
+                        : <span><strong>다음 달부터 결제되지 않습니다.</strong> 종료일이 지나면 자동결제 없이 멤버십이 해지됩니다.</span>}
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-bold shrink-0">•</span>
+                      {language === 'en'
+                        ? 'Already-paid months are not refunded; you use the remaining period instead.'
+                        : '이미 결제한 이용료는 환불되지 않고, 남은 기간 이용으로 대체됩니다.'}
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-bold shrink-0">•</span>
+                      {language === 'en'
+                        ? 'You can undo this any time before the end date with "Keep subscription".'
+                        : '종료일 전까지는 “해지 취소”로 구독을 계속할 수 있습니다.'}
+                    </li>
+                  </ul>
+                </>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs md:text-sm text-slate-600 font-medium leading-relaxed">
+                  {language === 'en'
+                    ? 'This membership has no remaining paid period, so it ends as soon as you cancel and membership-only features become unavailable.'
+                    : '남은 결제 기간이 없는 멤버십이라 해지하면 바로 종료되며, 멤버십 전용 기능을 이용할 수 없습니다.'}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setCancelOpen(false); setError(null); }}
+                  disabled={saving}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  {language === 'en' ? 'Keep my membership' : '멤버십 유지하기'}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmCancelSubscription}
+                  disabled={saving}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm text-white bg-slate-800 hover:bg-slate-900 transition-all shadow-md disabled:opacity-50"
+                >
+                  {saving
+                    ? language === 'en'
+                      ? 'Processing...'
+                      : '처리 중...'
+                    : endsAtLabel
+                      ? language === 'en'
+                        ? 'Cancel at period end'
+                        : '남은 기간 후 해지하기'
+                      : language === 'en'
+                        ? 'Cancel now'
+                        : '해지하기'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">

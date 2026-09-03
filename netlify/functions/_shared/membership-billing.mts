@@ -308,3 +308,43 @@ export interface MembershipBillingEntry {
   paymentId?: string
   error?: string
 }
+
+// ── 해지(구독 종료) ──────────────────────────────────────────────────────────
+/**
+ * 해지는 즉시 차단이 아니라 "이미 결제한 이용 기간이 끝나는 날 종료"다.
+ * 한 달치를 미리 받아 두었으므로 남은 기간은 그대로 쓸 수 있어야 하고, 막아야
+ * 하는 것은 다음 달 결제다. 그래서 해지 요청은 아래 세 값만 남기고
+ * `membership_active` 는 종료일까지 그대로 켜 둔다 — 기능 접근 판정
+ * (membershipCovers · tierAtLeast 등)은 손대지 않아도 남은 기간 동안 그대로 통과한다.
+ *
+ *   membership_cancel_at_period_end  해지 예약됨(= 다음 결제 없음)
+ *   membership_canceled_at           해지를 요청한 시각
+ *   membership_ends_at               이용이 끝나는 날(= 원래 다음 결제일)
+ *
+ * 종료일이 되면 정기결제 스케줄러(`scheduled-membership-billing`)가 청구 대신
+ * `membership_active` 를 끈다(그때 `membership_ended_at` 을 남긴다).
+ */
+export interface MembershipCancellationFields {
+  membership_cancel_at_period_end?: boolean
+  membership_canceled_at?: string | null
+  membership_ends_at?: string | null
+  membership_ended_at?: string | null
+}
+
+/**
+ * 해지 요청을 "기간 만료 해지"로 받을 수 있는지 판단한다.
+ * 남은 결제 기간이 있으면(다음 결제일이 미래) 그 날짜까지 유지하고, 남은 기간이
+ * 없으면(무료·증정 멤버십처럼 결제일이 없거나 이미 지난 경우) 즉시 해지한다.
+ */
+export const resolveCancellation = (
+  record:
+    | { membership_active?: boolean; next_billing_date?: string | null }
+    | null
+    | undefined,
+  now: Date,
+): { mode: 'scheduled'; endsAt: string } | { mode: 'immediate' } => {
+  if (!record?.membership_active || !record.next_billing_date) return { mode: 'immediate' }
+  const endsAt = new Date(record.next_billing_date).getTime()
+  if (!Number.isFinite(endsAt) || endsAt <= now.getTime()) return { mode: 'immediate' }
+  return { mode: 'scheduled', endsAt: new Date(endsAt).toISOString() }
+}
