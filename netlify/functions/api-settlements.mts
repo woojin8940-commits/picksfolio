@@ -328,7 +328,7 @@ export default async (req: Request) => {
         if (dbInstance) {
           try {
             receipts = (await dbInstance.sql`
-              SELECT campaign_id, invoice_amount, received_amount, received_date, received_at, memo
+              SELECT campaign_id, invoice_amount, received_amount, received_at, memo
               FROM campaign_brand_settlements
               WHERE LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
             `) as any[];
@@ -346,7 +346,6 @@ export default async (req: Request) => {
               campaign_id: hit ? String(hit.campaign_id) : "",
               /** 담당자가 입금을 확인했는가. 브랜드 화면의 '정산완료'가 이 값이다. */
               received: Boolean(hit?.received_at),
-              received_date: hit?.received_date ? String(hit.received_date).split("T")[0] : "",
               received_amount: Number(hit?.received_amount || 0),
               invoice_amount: Number(hit?.invoice_amount || 0),
               memo: String(hit?.memo || ""),

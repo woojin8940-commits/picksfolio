@@ -57,8 +57,6 @@ type Round = {
   pendingCount: number;
   /** 이 회차의 브랜드 입금이 전부 접수됐는가. */
   paid: boolean;
-  /** 담당자가 입금을 확인한 날짜. 회차 안에서 가장 늦은 날을 남긴다. */
-  receivedDate: string;
 };
 
 /** 회차 라벨 — "2026년 3월 31일". 날짜가 없으면 아직 잡히지 않은 회차다. */
@@ -112,7 +110,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
     return () => { alive = false; };
   }, [businessUsername, campaignId]);
 
-  const { rounds, total, scheduledSum, completedSum, pendingCount, headcount, allReceived, lastReceivedDate } =
+  const { rounds, total, scheduledSum, completedSum, pendingCount, headcount, allReceived } =
     useMemo(() => {
       const byDate = new Map<string, Round>();
       const people = new Set<string>();
@@ -121,7 +119,6 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
       let completedSum = 0;
       let pendingCount = 0;
       let receivedRows = 0;
-      let lastReceivedDate = '';
 
       for (const s of rows) {
         const date = String(s.scheduled_date || '').slice(0, 10);
@@ -129,27 +126,22 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
         // '완료'의 기준은 브랜드 입금 수납이다(isBrandPaid 참고).
         const paid = isBrandPaid(s);
         const pending = isAmountPending(s);
-        const receivedDate = String(s.brand_settlement?.received_date || '');
 
         total += amount;
         if (paid) completedSum += amount;
         else scheduledSum += amount;
         if (pending) pendingCount += 1;
-        if (paid) {
-          receivedRows += 1;
-          if (receivedDate > lastReceivedDate) lastReceivedDate = receivedDate;
-        }
+        if (paid) receivedRows += 1;
         people.add(String(s.influencer_username || '').toLowerCase());
 
         const round =
           byDate.get(date) ||
-          { date, headcount: 0, amount: 0, pendingCount: 0, paid: true, receivedDate: '' };
+          { date, headcount: 0, amount: 0, pendingCount: 0, paid: true };
         round.headcount += 1;
         round.amount += amount;
         if (pending) round.pendingCount += 1;
         // 한 건이라도 입금 전이면 회차는 아직 입금 전이다.
         if (!paid) round.paid = false;
-        if (receivedDate > round.receivedDate) round.receivedDate = receivedDate;
         byDate.set(date, round);
       }
 
@@ -164,7 +156,6 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
         headcount: people.size,
         /** 이 화면에 있는 정산이 전부 접수됐는가. 맨 위 칸의 배지가 이 값이다. */
         allReceived: rows.length > 0 && receivedRows === rows.length,
-        lastReceivedDate,
       };
     }, [rows]);
 
@@ -199,8 +190,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
         </div>
         {allReceived && (
           <p className="text-[11px] text-emerald-600 font-bold mt-1">
-            {lastReceivedDate ? `${lastReceivedDate} 입금 확인 완료` : '입금 확인 완료'} · 인플루언서 지급은
-            픽스폴리오가 진행합니다.
+            입금 확인 완료 · 인플루언서 지급은 픽스폴리오가 진행합니다.
           </p>
         )}
         {pendingCount > 0 && (
@@ -253,7 +243,6 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
                 <p className="text-[11px] text-slate-400 font-bold mt-0.5">
                   인플루언서 {round.headcount}명
                   {round.pendingCount > 0 && ` · 금액 조율 중 ${round.pendingCount}명`}
-                  {round.paid && round.receivedDate && ` · ${round.receivedDate} 입금 확인`}
                 </p>
               </div>
               <p className="text-sm font-black text-slate-900 flex-shrink-0">

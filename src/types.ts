@@ -229,7 +229,6 @@ export interface Settlement {
   brand_settlement?: {
     campaign_id: string;
     received: boolean;
-    received_date: string;
     received_amount: number;
     invoice_amount: number;
     memo: string;

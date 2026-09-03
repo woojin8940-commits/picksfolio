@@ -873,7 +873,7 @@ export default async (req: Request, context: Context) => {
         // 서버가 막는 규칙(complete_settlement)을 화면이 미리 알고 있어야, 담당자가
         // 눌러 보고 나서 거절 메시지로 배우지 않는다.
         db.sql`
-          SELECT received_at, received_date, received_amount, invoice_amount, memo
+          SELECT received_at, received_amount, invoice_amount, memo
           FROM campaign_brand_settlements WHERE campaign_id = ${collab.campaign_id}
         ` as Promise<any[]>,
         // 얼굴과 인스타 아이디. 목록과 같은 곳에서 읽어야 목록에서 누른 사람과 열린
@@ -975,9 +975,6 @@ export default async (req: Request, context: Context) => {
           role === "manager"
             ? {
                 received: Boolean((brandSettlementRows as any[])?.[0]?.received_at),
-                receivedDate: (brandSettlementRows as any[])?.[0]?.received_date
-                  ? String((brandSettlementRows as any[])[0].received_date).split("T")[0]
-                  : "",
                 receivedAmount: Number((brandSettlementRows as any[])?.[0]?.received_amount || 0),
                 invoiceAmount: Number((brandSettlementRows as any[])?.[0]?.invoice_amount || 0),
                 memo: String((brandSettlementRows as any[])?.[0]?.memo || ""),
