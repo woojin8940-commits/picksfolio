@@ -13,6 +13,7 @@ export function redactSellerRecord<T extends Record<string, any> | null | undefi
   if (!record || typeof record !== "object") return record;
   const {
     billing_key,
+    // 레거시 필드 — 예전 결제 연동에서 저장된 값이 남아 있을 수 있어 공개 응답에서 계속 지운다.
     toss_customer_key,
     business,
     settlement,

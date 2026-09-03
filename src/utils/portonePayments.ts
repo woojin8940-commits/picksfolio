@@ -1,12 +1,11 @@
 /**
- * PortOne(포트원) V2 결제 — 카드(나이스정보통신) / 토스페이 / 카카오페이.
+ * PortOne(포트원) V2 결제 — 카드(나이스정보통신) / 카카오페이. 이 두 가지만 사용한다.
  *
  * 카드 결제는 PortOne V2 의 **나이스정보통신(신모듈)** 채널로 처리한다(payMethod: 'CARD').
- * 예전에는 토스페이먼츠와 직접 연동했으나, 카드 PG 를 나이스정보통신으로 전환하면서 토스페이·
- * 카카오페이 간편결제와 동일하게 PortOne V2 를 통해 결제·검증한다. (PortOne V2 NICE 연동 문서:
- * https://developers.portone.io/opi/ko/integration/pg/v2/nice-v2)
+ * 간편결제는 카카오페이만 쓰며, 카드와 동일하게 PortOne V2 를 통해 결제·검증한다.
+ * (PortOne V2 NICE 연동 문서: https://developers.portone.io/opi/ko/integration/pg/v2/nice-v2)
  *
- * 토스페이는 PortOne 에서 **리다이렉트 전용** PG 다. 결제창을 promise 로만 호출하면(=
+ * 간편결제는 PG 에 따라 **리다이렉트로만** 동작한다. 결제창을 promise 로만 호출하면(=
  * redirectUrl 없이) 모바일에서 결제창이 아예 뜨지 않거나, 떠도 결제 후 가맹점으로 돌아오지
  * 못해 "결제가 안 되는" 것처럼 보인다. 그래서 모든 PortOne 결제는 redirectUrl 을 넣어
  * 리다이렉트 방식으로 호출하고, 돌아온 `/portone/return` 페이지가 서버 검증·적립을 마무리한다.
@@ -25,7 +24,6 @@ import { toAsciiSafeId } from './formatters';
 
 // PortOne V2 공개 식별자 (브라우저 노출용). 라이브 충전 / 클로드 / 멤버십 결제가 공유한다.
 export const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5';
-export const PORTONE_TOSSPAY_CHANNEL_KEY = 'channel-key-c110d840-4ee3-417d-9731-6f358e38e5c2';
 export const PORTONE_KAKAOPAY_CHANNEL_KEY = 'channel-key-0abb70ff-069a-4a4f-9939-5e0c60298182';
 // 카드 단건결제용 나이스정보통신(신모듈) 일반결제 채널 키(MID IM0029308m). 브라우저에 공개되는
 // 식별자이며(시크릿 아님), 클로드·라이브 단건결제에서 쓴다. PortOne 실연동 승인으로 확정된
@@ -37,8 +35,8 @@ export const PORTONE_NICE_CHANNEL_KEY =
   (import.meta.env.VITE_PORTONE_NICE_CHANNEL_KEY_IM0029308m as string | undefined)?.trim() ||
   'channel-key-c8047336-ba81-47fd-b684-0c8d280ee30c';
 
-// CARD = 나이스정보통신(신모듈) 카드 결제, TOSSPAY/KAKAOPAY = 간편결제.
-export type PortOnePayMethod = 'CARD' | 'TOSSPAY' | 'KAKAOPAY';
+// CARD = 나이스정보통신(신모듈) 카드 결제, KAKAOPAY = 간편결제(카카오페이).
+export type PortOnePayMethod = 'CARD' | 'KAKAOPAY';
 
 const INTENT_KEY = 'portone_pending_intent';
 
@@ -57,10 +55,6 @@ export interface PortOneIntent {
   kind?: 'activation' | 'recharge';
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
-  // 멤버십 카드결제를 빌링키(정기) 대신 단건 결제로 처리할 때 true. 카드(나이스정보통신)
-  // 빌링키 발급은 본인인증(휴대폰 인증)을 강제하므로, 클로드 플랜과 동일하게 단건 결제로
-  // 첫 달을 즉시 결제해 본인인증 없이 카드만 입력하도록 한다.
-  oneTime?: boolean;
   // 라이브 커머스 시청자 주문 본문(paymentId 제외). 리다이렉트 전후로 주문 맥락(상품·배송지·
   // 시청자)을 보존해 돌아온 페이지가 그대로 서버에 전달한다.
   order?: Record<string, unknown>;
@@ -69,9 +63,7 @@ export interface PortOneIntent {
 export const channelKeyFor = (m: PortOnePayMethod) =>
   m === 'KAKAOPAY'
     ? PORTONE_KAKAOPAY_CHANNEL_KEY
-    : m === 'TOSSPAY'
-      ? PORTONE_TOSSPAY_CHANNEL_KEY
-      : PORTONE_NICE_CHANNEL_KEY; // CARD → 나이스정보통신(신모듈)
+    : PORTONE_NICE_CHANNEL_KEY; // CARD → 나이스정보통신(신모듈)
 
 // requestPayment 의 payMethod. 카드(나이스정보통신)는 'CARD', 간편결제는 'EASY_PAY'.
 export const portonePayMethod = (m: PortOnePayMethod): 'CARD' | 'EASY_PAY' =>
@@ -82,21 +74,16 @@ export const portoneBillingKeyMethod = (m: PortOnePayMethod): 'CARD' | 'EASY_PAY
   m === 'CARD' ? 'CARD' : 'EASY_PAY';
 
 // PortOne V2 간편결제(EASY_PAY)는 채널 키와 함께 호출할 간편결제 서비스를 easyPayProvider 로
-// 지정해야 한다. 토스페이(신모듈 tosspay_v2 포함)는 'TOSSPAY', 카카오페이는 'KAKAOPAY' 다.
-// (토스페이에서 easyPayProvider 를 비우면 채널만으로 PG 가 확정되지 않아 결제창이 뜨지 않거나
-//  결제가 시작되지 않는다 — PortOne V2 공식 문서 기준.)
+// 지정해야 한다. 카카오페이는 'KAKAOPAY' 다. (easyPayProvider 를 비우면 채널만으로 PG 가
+//  확정되지 않아 결제창이 뜨지 않거나 결제가 시작되지 않는다 — PortOne V2 공식 문서 기준.)
 // 카드(나이스정보통신, payMethod 'CARD')는 간편결제가 아니므로 easyPay 파라미터를 넣지 않는다.
 export const easyPayParam = (m: PortOnePayMethod) =>
-  m === 'CARD'
-    ? {}
-    : m === 'KAKAOPAY'
-      ? { easyPay: { easyPayProvider: 'KAKAOPAY' } }
-      : { easyPay: { easyPayProvider: 'TOSSPAY' } };
+  m === 'CARD' ? {} : { easyPay: { easyPayProvider: 'KAKAOPAY' } };
 
 // 나이스정보통신(신모듈) 카드 결제 파라미터. NICE V2 는 카드 결제 시 고정 할부 개월수를
 // 요구한다(미지정 시 결제창이 즉시 오류로 닫혀 "결제 처리 중 오류"로 보인다). 결제 금액이
 // 대부분 할부 가능 기준(보통 5만원) 미만이므로 일시불(fixedMonth: 0)로 호출한다.
-// 간편결제(토스페이/카카오페이)에는 카드 옵션을 넣지 않는다. — PortOne V2 NICE 문서 기준.
+// 간편결제(카카오페이)에는 카드 옵션을 넣지 않는다. — PortOne V2 NICE 문서 기준.
 export const cardParam = (m: PortOnePayMethod) =>
   m === 'CARD' ? { card: { installment: { monthOption: { fixedMonth: 0 } } } } : {};
 

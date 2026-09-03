@@ -32,9 +32,9 @@
   </div>
 
   <script>
-    // PortOne(포트원) 간편결제(토스페이 / 카카오페이) 리다이렉트 복귀 처리.
+    // PortOne(포트원) 결제(카드 = 나이스정보통신 / 카카오페이) 리다이렉트 복귀 처리.
     //
-    // 토스페이는 리다이렉트 전용 PG 라, 결제창에서 결제가 끝나면 PortOne 이 redirectUrl 로
+    // 결제창에서 결제가 끝나면 PortOne 이 redirectUrl 로
     // 결과 쿼리(paymentId / billingKey / code …)를 붙여 돌려보낸다. 결제 시작 직전에 저장해 둔
     // intent 와 합쳐 서버에서 검증·적립을 마무리한다. (시크릿 키는 서버 전용.)
     const params = new URLSearchParams(location.search);
@@ -73,10 +73,76 @@
 
     function enc(s) { return encodeURIComponent(String(s).toLowerCase()); }
 
+    // 결제 마무리 API(멤버십 · 클로드 · 라이브 충전)는 모두 "본인 계정인지" 확인한다
+    // (netlify/functions/_shared/user-auth.mts). 이 페이지는 SPA 밖의 정적 화면이라
+    // apiService 의 authHeaders 를 쓸 수 없으므로, 브라우저에 저장된 로그인 토큰을 직접 읽어
+    // Authorization 헤더로 붙인다. 토큰 없이 보내면 결제는 됐는데 적립·활성화만 401 로
+    // 실패한다. (저장 위치는 apiService 와 같다 — 일반/운영자 회원은 Supabase 세션,
+    // 비즈니스 계정은 picks_business_access_token.)
+    function readLocal(key) {
+      try { return localStorage.getItem(key) || ""; } catch (e) { return ""; }
+    }
+
+    function normalizeAccount(raw) {
+      return String(raw || "").replace(/^biz\//, "").trim().toLowerCase();
+    }
+
+    // 만료된 토큰은 보내지 않는다(서버가 401 로 돌려주고 다른 토큰을 시도할 기회를 잃는다).
+    function usableToken(token) {
+      if (!token) return "";
+      try {
+        const payload = token.split(".")[1];
+        if (!payload) return token;
+        const json = JSON.parse(
+          decodeURIComponent(
+            atob(payload.replace(/-/g, "+").replace(/_/g, "/"))
+              .split("")
+              .map(function (ch) { return "%" + ("00" + ch.charCodeAt(0).toString(16)).slice(-2); })
+              .join(""),
+          ),
+        );
+        if (typeof json.exp !== "number") return token;
+        return json.exp * 1000 - Date.now() > 30000 ? token : "";
+      } catch (e) {
+        return token;
+      }
+    }
+
+    // Supabase 세션 키는 `sb-<ref>-auth-token` 이고, 탭별 계정 슬롯(accountScope)이 붙으면
+    // 뒤에 `@@operator` 같은 접미사가 더해진다 — 형태로 훑어 찾는다.
+    function supabaseToken() {
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k || k.indexOf("sb-") !== 0 || k.indexOf("-auth-token") === -1) continue;
+          let stored = null;
+          try { stored = JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { continue; }
+          const session = stored && stored.currentSession ? stored.currentSession : stored;
+          const token = usableToken(session && session.access_token);
+          if (token) return token;
+        }
+      } catch (e) {}
+      return "";
+    }
+
+    function authToken(username) {
+      const businessToken = usableToken(readLocal("picks_business_access_token"));
+      const businessAccount = normalizeAccount(readLocal("picks_business_session"));
+      // 비즈니스 계정으로 결제한 건이면 비즈니스 토큰이 맞다. 한 브라우저에 두 세션이 함께
+      // 남아 있을 수 있어(로그아웃이 서로의 키를 지우지 않는다) 결제 주인으로 골라야 한다.
+      if (businessToken && businessAccount && businessAccount === normalizeAccount(username)) {
+        return businessToken;
+      }
+      return supabaseToken() || businessToken;
+    }
+
     async function send(method, url, body) {
+      const headers = { "Content-Type": "application/json" };
+      const token = authToken(intent && intent.username);
+      if (token) headers["Authorization"] = "Bearer " + token;
       const res = await fetch(url, {
         method: method,
-        headers: { "Content-Type": "application/json" },
+        headers: headers,
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(function () { return {}; });
@@ -95,24 +161,13 @@
         return;
       }
 
-      const payMethod = intent.payMethod || "TOSSPAY";
+      const payMethod = intent.payMethod || "CARD";
 
       // ── 멤버십 ──
       if (intent.type === "membership") {
-        // 카드(신용카드) 단건 결제는 paymentId 로, 토스페이·카카오페이 빌링키 등록은 billingKey 로 돌아온다.
-        if (intent.oneTime) {
-          if (!paymentId) { fail("결제 정보가 올바르지 않습니다."); return; }
-          const r = await send("POST", "/api/billing-issue", {
-            username: intent.username,
-            tier: intent.tier,
-            paymentId: paymentId,
-            payMethod: intent.payMethod || "CARD",
-          });
-          if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
-          sessionStorage.removeItem(INTENT_KEY);
-          done(intent.returnPath);
-          return;
-        }
+        // 멤버십은 매월 자동결제(정기결제)뿐이다. 간편결제(카카오페이) 빌링키 등록은
+        // billingKey 로 돌아온다. (카드 정기결제는 결제창을 쓰지 않고 서버 키인 발급이라
+        //  이 페이지를 거치지 않는다.)
         if (!billingKey) { fail("빌링키를 받지 못했습니다. 다시 시도해 주세요."); return; }
         const r = await send("POST", "/api/billing-issue", {
           username: intent.username,

@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
-  chargeMembershipMonthly,
+  chargeMembershipBillingKey,
   addOneMonth,
   normalizeTier,
   isDue,
@@ -179,13 +179,7 @@ export default async () => {
         const scheduledDate = claim.base;
 
         // ── 2) 청구 ──────────────────────────────────────────────────────
-        const charge = await chargeMembershipMonthly(
-          username,
-          billingKey,
-          sub.plan,
-          (record.billing_provider as string | undefined) ?? "portone",
-          (record.toss_customer_key as string | undefined) ?? null,
-        );
+        const charge = await chargeMembershipBillingKey(username, billingKey, sub.plan);
         const at = new Date().toISOString();
 
         // ── 3) 결과 기록 ─────────────────────────────────────────────────

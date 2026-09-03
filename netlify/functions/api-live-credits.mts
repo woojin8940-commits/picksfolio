@@ -10,7 +10,6 @@ import {
   INCLUDED_MINUTES_PER_MONTH,
 } from './_shared/live-pricing.mts'
 import type { Config, Context } from '@netlify/functions'
-import { confirmTossPayment } from './_shared/toss-payments.mts'
 import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
 import { requireAccountOwner } from './_shared/user-auth.mts'
 
@@ -19,13 +18,10 @@ import { requireAccountOwner } from './_shared/user-auth.mts'
 //   POST /api/live-credits/:username  { hours, paymentId,
 //                                       payMethod }            → charge N hours (시간당 8,900원)
 //
-// Charging is a ONE-TIME (non-recurring) payment. Two providers, by method:
-//   • 토스페이먼츠(카드) → 토스페이먼츠 직접 연동. The client redirects through the
-//     TossPayments SDK and posts { provider:'toss', paymentKey, orderId } here; this
-//     endpoint CONFIRMS the payment with TossPayments (실제 매입) and checks the amount.
-//   • 토스페이 / 카카오페이 → PortOne. The client runs PortOne.requestPayment and posts
-//     the resulting paymentId; this endpoint verifies it against the PortOne REST API
-//     (status PAID, KRW, amount == hours × rate).
+// Charging is a ONE-TIME (non-recurring) payment, always through PortOne — 카드는
+// 나이스정보통신, 간편결제는 카카오페이. The client runs PortOne.requestPayment and posts
+// the resulting paymentId; this endpoint verifies it against the PortOne REST API
+// (status PAID, KRW, amount == hours × rate).
 // Either way no time is added without a real, matching payment. Charged hours extend
 // the monthly broadcast allowance so a seller can keep streaming after the included
 // 3 hours are spent. Time is monthly-scoped and resets with the calendar month,
@@ -59,13 +55,9 @@ export default async (req: Request, context: Context) => {
       const body = await req.json().catch(() => ({}))
       const hours = Math.floor(Number((body as any)?.hours) || 0)
       const payMethod = String((body as any)?.payMethod || '').trim()
-      const provider = String((body as any)?.provider || '').trim().toLowerCase()
-      const isToss = provider === 'toss'
-      // PortOne identifies a payment by paymentId; TossPayments by paymentKey. We use
-      // whichever is present as the idempotency/record key for this charge.
-      const paymentKey = String((body as any)?.paymentKey || '').trim()
-      const orderId = String((body as any)?.orderId || '').trim()
-      const paymentId = isToss ? paymentKey : String((body as any)?.paymentId || '').trim()
+      // 결제는 모두 포트원(카드 = 나이스정보통신 / 카카오페이)으로 처리한다. paymentId 가
+      // 이 충전의 멱등 키이자 기록 키다.
+      const paymentId = String((body as any)?.paymentId || '').trim()
       if (!hours || hours < 1) {
         return Response.json({ error: '충전할 시간을 1시간 이상 선택해주세요.' }, { status: 400 })
       }
@@ -75,11 +67,8 @@ export default async (req: Request, context: Context) => {
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
       }
-      if (!isToss && !['CARD', 'TOSSPAY', 'KAKAOPAY'].includes(payMethod)) {
+      if (!['CARD', 'KAKAOPAY'].includes(payMethod)) {
         return Response.json({ error: '유효한 결제 수단이 필요합니다.' }, { status: 400 })
-      }
-      if (isToss && !orderId) {
-        return Response.json({ error: '결제 정보(orderId)가 필요합니다.' }, { status: 400 })
       }
 
       const credits = await readLiveCredits(username, now)
@@ -107,29 +96,15 @@ export default async (req: Request, context: Context) => {
       }
 
       // Verify the one-time payment server-side before crediting time.
-      if (isToss) {
-        // 토스페이먼츠(카드) — confirm the payment (실제 매입) and match the amount.
-        const confirm = await confirmTossPayment(paymentKey, orderId, amountKrw)
-        if (!confirm.ok) {
-          return Response.json({ error: confirm.error || '토스페이먼츠 결제 승인에 실패했습니다.' }, { status: 400 })
-        }
-        if ((confirm.amountKrw ?? 0) !== amountKrw) {
-          return Response.json(
-            { error: `결제 금액이 일치하지 않습니다. (기대: ${amountKrw}, 실제: ${confirm.amountKrw})` },
-            { status: 400 },
-          )
-        }
-      } else {
-        const verified = await verifyLivePortOnePayment({
-          paymentId,
-          expectedKrw: amountKrw,
-          payMethod,
-          // 남의 결제번호를 주워와 자기 시간으로 충전하는 것을 막는다.
-          expectedOwner: username,
-        })
-        if (!verified.ok) {
-          return Response.json({ error: verified.error }, { status: verified.status })
-        }
+      const verified = await verifyLivePortOnePayment({
+        paymentId,
+        expectedKrw: amountKrw,
+        payMethod,
+        // 남의 결제번호를 주워와 자기 시간으로 충전하는 것을 막는다.
+        expectedOwner: username,
+      })
+      if (!verified.ok) {
+        return Response.json({ error: verified.error }, { status: verified.status })
       }
 
       // Payment verified — credit the time. 적립은 최신 잔액에 대고 조건부로 쓴다.

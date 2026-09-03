@@ -168,6 +168,10 @@ export interface SellerVerification {
   membership_started_at?: string | null;
   billing_key?: string | null;
   billing_key_issued_at?: string | null;
+  // 빌링키를 발급한 PG. 지금은 모든 정기결제가 포트원('portone')을 거친다
+  // (카드 = 나이스정보통신 수기 빌링키, 간편결제 = 카카오페이 빌링키).
+  billing_provider?: string | null;
+  membership_payment_method?: string | null;
   // Recurring (anniversary) billing state for the paid memberships. The Claude
   // plan is billed separately and does not use these fields.
   membership_amount_krw?: number | null;

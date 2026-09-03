@@ -1,5 +1,4 @@
 import type { Config, Context } from '@netlify/functions'
-import { confirmTossPayment } from './_shared/toss-payments.mts'
 import { verifyLivePortOnePayment } from './_shared/portone-live-payment.mts'
 import {
   ACTIVATION_GRANT_CREDITS,
@@ -96,12 +95,8 @@ export default async (req: Request, context: Context) => {
         (body as any)?.kind === 'recharge' ? 'recharge' : 'activation'
       const payMethod = String((body as any)?.payMethod || '').trim()
       const requestedAmount = Math.floor(Number((body as any)?.amountKrw) || 0)
-      const provider = String((body as any)?.provider || '').trim().toLowerCase()
-      const isToss = provider === 'toss'
-      // PortOne identifies a one-time payment by paymentId; TossPayments by paymentKey.
-      const paymentKey = String((body as any)?.paymentKey || '').trim()
-      const orderId = String((body as any)?.orderId || '').trim()
-      const paymentId = isToss ? paymentKey : String((body as any)?.paymentId || '').trim()
+      // 결제는 모두 포트원(카드 = 나이스정보통신)으로 처리한다 — 결제건은 paymentId 로 식별한다.
+      const paymentId = String((body as any)?.paymentId || '').trim()
 
       if (payMethod !== 'CARD') {
         return Response.json(
@@ -112,11 +107,8 @@ export default async (req: Request, context: Context) => {
       if (!paymentId) {
         return Response.json({ error: '결제 정보(paymentId)가 필요합니다.' }, { status: 400 })
       }
-      if (!isToss && !['CARD', 'TOSSPAY', 'KAKAOPAY'].includes(payMethod)) {
+      if (!['CARD', 'KAKAOPAY'].includes(payMethod)) {
         return Response.json({ error: '유효한 결제 수단이 필요합니다.' }, { status: 400 })
-      }
-      if (isToss && !orderId) {
-        return Response.json({ error: '결제 정보(orderId)가 필요합니다.' }, { status: 400 })
       }
 
       // Activation is a fixed price; recharge must be one of the offered packs.
@@ -134,23 +126,9 @@ export default async (req: Request, context: Context) => {
         return respond(credits, { alreadyProcessed: true })
       }
 
-      if (isToss) {
-        // 토스페이먼츠(카드) — confirm (실제 매입) and match the amount.
-        const confirm = await confirmTossPayment(paymentKey, orderId, amountKrw)
-        if (!confirm.ok) {
-          return Response.json({ error: confirm.error || '토스페이먼츠 결제 승인에 실패했습니다.' }, { status: 400 })
-        }
-        if ((confirm.amountKrw ?? 0) !== amountKrw) {
-          return Response.json(
-            { error: `결제 금액이 일치하지 않습니다. (기대: ${amountKrw}, 실제: ${confirm.amountKrw})` },
-            { status: 400 },
-          )
-        }
-      } else {
-        const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod, username)
-        if (!verified.ok) {
-          return Response.json({ error: verified.error }, { status: 400 })
-        }
+      const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod, username)
+      if (!verified.ok) {
+        return Response.json({ error: verified.error }, { status: 400 })
       }
 
       // Payment verified — grant credits. Activation grants the fixed base; a
@@ -165,8 +143,8 @@ export default async (req: Request, context: Context) => {
         kind,
         paymentId,
         payMethod,
-        // 환불 조회를 어느 PG 에 해야 하는지 기록해 둔다(포트원 paymentId / 토스 paymentKey).
-        provider: isToss ? 'toss' : 'portone',
+        // 환불 조회용 — 결제는 모두 포트원(paymentId)으로 처리한다.
+        provider: 'portone',
       }
 
       // 지급은 최신 지갑에 대고 조건부로 쓴다. 그래야 (1) 결제 확인에 걸리는 시간 동안
