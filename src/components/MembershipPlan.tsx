@@ -33,8 +33,9 @@ interface MembershipPlanProps {
 
 // PortOne V2 — storeId and channelKey are public identifiers used by the
 // browser SDK. The V2 API secret lives server-side only (PORTONE_V2_API_SECRET).
-// 카드(나이스정보통신) / 토스페이 / 카카오페이 멤버십 빌링키 발급을 모두 PortOne V2
-// 리다이렉트 방식으로 처리한다.
+// 멤버십 실결제는 신용카드(나이스정보통신 = 나이스페이)와 카카오페이 두 가지로만 운영한다.
+// 카드는 서버에서 나이스정보통신 정기결제 채널로 빌링키를 발급하고(수기/키인), 카카오페이는
+// PortOne V2 브라우저 SDK 로 빌링키를 발급해 리다이렉트 방식으로 처리한다.
 
 // Claude plan (separate prepaid AI add-on) — activated by its own PortOne payment
 // window opened from this page. Keep these figures in sync with the server's
@@ -51,7 +52,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY' | 'TOSSPAY'>('CARD');
+  // 실제 운영 결제수단은 신용카드(나이스정보통신)와 카카오페이 두 가지다.
+  const [payMethod, setPayMethod] = useState<'CARD' | 'KAKAOPAY'>('CARD');
   // 결제 대상 플랜 — 멤버십 티어.
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
   // 카드(신용카드) 정기결제 등록용 카드 정보. NICE V2 는 카드 빌링키를 수기(키인) 방식으로만
@@ -152,7 +154,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     // NICE V2 는 브라우저 SDK(requestIssueBillingKey)로 카드 빌링키를 발급할 수 없어(간편결제만
     // 지원) 카드 정보를 서버로 보내 수기(키인) `POST /billing-keys` 로 빌링키를 발급받고, 첫 달을
     // 즉시 결제한 뒤 가입일 기준 매월 자동결제한다. 카드 정보는 저장하지 않고 PortOne 으로만
-    // 전달된다. 토스페이·카카오페이는 아래 SDK 빌링키 경로를 그대로 사용한다.
+    // 전달된다. 카카오페이는 아래 SDK 빌링키 경로를 사용한다.
     if (payMethod === 'CARD') {
       const number = cardForm.number.replace(/\D/g, '');
       const exp = cardForm.expiry.replace(/\D/g, ''); // MMYY
@@ -208,7 +210,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       return;
     }
 
-    // ── 간편결제(토스페이 / 카카오페이): PortOne 빌링키로 정기결제 등록 ──
+    // ── 간편결제(카카오페이): PortOne 빌링키로 정기결제 등록 ──
     // SDK 는 여기서 받는다. 모든 페이지가 미리 받으면 라이브도 결제도 열지 않는
     // 방문자까지 77KB 를 기다린다.
     try {
@@ -224,7 +226,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       const ppMethod = payMethod;
 
       const issueId = genPortOneId('billing', normalizedUserName);
-      // 토스페이·카카오페이는 PortOne V2 빌링키를 발급해 매월 자동결제(정기결제)로 동작한다.
+      // 카카오페이는 PortOne V2 빌링키를 발급해 매월 자동결제(정기결제)로 동작한다.
 
       // 모두 리다이렉트 방식으로 호출한다. redirectUrl 을 넣어 빌링 인증창으로 페이지를 넘기고,
       // 돌아온 /portone/return 페이지가 발급된 billingKey 로 첫 달 결제·멤버십 활성화를
@@ -285,7 +287,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
       if (verifyRes.data) setVerification(verifyRes.data);
       setConfirmOpen(false);
-      const methodLabel = payMethod === 'KAKAOPAY' ? '카카오페이로' : payMethod === 'TOSSPAY' ? '토스페이로' : '카드로';
+      const methodLabel = payMethod === 'KAKAOPAY' ? '카카오페이로' : '카드로';
       const nextDate = nextBillingOf(verifyRes.data)
         ? new Date(nextBillingOf(verifyRes.data) as string).toLocaleDateString('ko-KR')
         : null;
@@ -638,7 +640,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
 
               <div>
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">결제 수단</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setPayMethod('CARD')}
@@ -650,18 +652,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   >
                     <span>💳</span>
                     <span className="whitespace-nowrap">신용카드</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPayMethod('TOSSPAY')}
-                    className={`py-3 px-2 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      payMethod === 'TOSSPAY'
-                        ? 'border-blue-400 bg-blue-50 text-blue-800'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="font-black text-blue-600">toss</span>
-                    <span className="whitespace-nowrap">토스페이</span>
                   </button>
                   <button
                     type="button"
@@ -732,11 +722,6 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     카카오톡 앱에서 카카오페이로 간편하게 결제됩니다.
                   </p>
                 )}
-                {payMethod === 'TOSSPAY' && (
-                  <p className="text-[11px] text-slate-400 font-medium mt-2">
-                    토스 앱에서 토스페이로 간편하게 결제됩니다.
-                  </p>
-                )}
               </div>
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
@@ -765,9 +750,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 ${
                   payMethod === 'KAKAOPAY'
                     ? 'bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-500 hover:to-amber-500 text-yellow-900'
-                    : payMethod === 'TOSSPAY'
-                      ? 'bg-gradient-to-r from-blue-400 to-blue-500 hover:from-blue-500 hover:to-blue-600'
-                      : 'bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600'
+                    : 'bg-gradient-to-r from-blue-600 to-pink-500 hover:from-blue-700 hover:to-pink-600'
                 }`}
               >
                 {saving

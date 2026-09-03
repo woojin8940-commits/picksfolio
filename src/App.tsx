@@ -1019,7 +1019,7 @@ const App: React.FC = () => {
   // Persistent auto-logout after 2 hours of inactivity — desktop only, and only
   // when the user has not asked to stay signed in.
   // On mobile (native shell or mobile web), and on any device where the login
-  // screen's "로그인 정보 저장" is ticked, the login is meant to last: see
+  // screen's Kakao "간편로그인 저장" is ticked, the login is meant to last: see
   // isPersistentLoginEnv(). There the effect exits immediately and drops the
   // stored timestamp, so a session that predates this behaviour can't be
   // logged out by a stale value either.
@@ -1146,8 +1146,9 @@ const App: React.FC = () => {
   }, [isLoggedIn]);
 
   // Business account inactivity timer (separate from regular user timer).
-  // Same rule as above: desktop only, mobile logins stay signed in — plus the
-  // business login screen's own "로그인 정보 저장" opt-in.
+  // Same rule as above: desktop only, mobile logins stay signed in. The business
+  // login screen has no "stay signed in" opt-in — that option exists for Kakao
+  // 간편로그인 only — so desktop business sessions always expire when idle.
   useEffect(() => {
     if (!isBusinessLoggedIn) return;
     if (isPersistentLoginEnv('business')) {
@@ -1731,7 +1732,10 @@ const App: React.FC = () => {
     <LazyRoute>
       <UserPage
         username={targetUser}
-        onBackToDashboard={isLoggedIn && targetUser.toLowerCase() === userName.toLowerCase()
+        // '대시보드로 돌아가기' 버튼은 앱에서만 띄운다. 웹에서는 내 페이지가 새 창으로
+        // 열리므로(위 onViewMyPage) 돌아갈 곳이 없고, 방문자에게 보이는 페이지 위에
+        // 운영용 버튼이 얹히지 않아야 한다.
+        onBackToDashboard={isNativeApp() && isLoggedIn && targetUser.toLowerCase() === userName.toLowerCase()
           ? () => {
               setSubView('dashboard');
               navigate('admin');
@@ -1878,7 +1882,17 @@ const App: React.FC = () => {
         onLogout={handleLogout}
         currentSubView={subView}
         onNavigateDashboard={() => setSubView('dashboard')}
-        onViewMyPage={() => navigate('user-page', userName)}
+        onViewMyPage={() => {
+          // 웹에서는 내 페이지를 새 창(탭)으로 띄운다 — 대시보드는 그대로 남아 있고,
+          // 링크를 그대로 공유해 볼 수 있다. 앱(WebView)에서는 새 창을 열면 외부
+          // 브라우저로 튕겨 나가므로 앱 안에서 이동하고(아래 user-page 화면의
+          // '대시보드' 버튼으로 돌아온다) 새 창을 쓰지 않는다.
+          if (isNativeApp()) {
+            navigate('user-page', userName);
+            return;
+          }
+          window.open(`${window.location.origin}/${userName}`, '_blank', 'noopener,noreferrer');
+        }}
         onNavigateLinks={() => setSubView('links')}
         onNavigateDmAutomation={() => setSubView('dm-automation')}
         onNavigateInsights={() => setSubView('insights')}
