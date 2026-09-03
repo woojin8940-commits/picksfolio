@@ -1,6 +1,10 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { applyComplimentaryMembership } from "./_shared/complimentary-memberships.mts";
+import {
+  applyOperatorMembershipGrant,
+  getOperatorMembershipGrant,
+} from "./_shared/operator-membership-grants.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
@@ -23,7 +27,12 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const data = await store.get(key, { type: "json" });
-    const enriched = applyComplimentaryMembership(username, data as any);
+    const complimentary = applyComplimentaryMembership(username, data as any);
+    const grant = await getOperatorMembershipGrant({
+      authUserId: auth.isAdmin ? null : auth.userId,
+      username,
+    });
+    const enriched = applyOperatorMembershipGrant(complimentary, grant);
     if (!enriched) return Response.json(null, { status: 404 });
     return Response.json(redactSellerRecord(enriched));
   }
@@ -50,7 +59,12 @@ export default async (req: Request, context: Context) => {
       return next;
     })) as Record<string, any>;
 
-    const enriched = applyComplimentaryMembership(username, merged as any);
+    const complimentary = applyComplimentaryMembership(username, merged as any);
+    const grant = await getOperatorMembershipGrant({
+      authUserId: auth.isAdmin ? null : auth.userId,
+      username,
+    });
+    const enriched = applyOperatorMembershipGrant(complimentary, grant);
     return Response.json({ success: true, data: redactSellerRecord(enriched) });
   }
 

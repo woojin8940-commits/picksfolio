@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import type { ProposalCategory } from '../types';
 import { apiService } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
@@ -6,9 +7,10 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface BusinessProposalFormProps {
   username: string;
+  onBack: () => void;
 }
 
-const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username }) => {
+const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, onBack }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
 
@@ -207,16 +209,25 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+      <div className="relative min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-slate-600 transition-colors hover:bg-white hover:text-slate-900 md:left-8 md:top-8"
+          aria-label={isEn ? 'Back to profile' : '프로필로 돌아가기'}
+        >
+          <ArrowLeft size={20} strokeWidth={2.5} />
+          <span>{isEn ? 'Back to profile' : '프로필로 돌아가기'}</span>
+        </button>
         <div className="bg-white rounded-3xl p-8 md:p-12 max-w-lg w-full text-center border border-slate-100 shadow-xl animate-in fade-in zoom-in-95 duration-300">
-          <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-green-100">
-            ✓
-          </div>
+            <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-green-100">
+              ✓
+            </div>
           <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3">{isEn ? 'Proposal Sent' : '제안서 전송 완료'}</h2>
           <p className="text-slate-500 font-medium text-sm leading-relaxed mb-8">
             <span className="font-black text-slate-900">@{username}</span>{isEn ? ' has received your proposal. You will be notified when they review it.' : '님에게 제안서가 성공적으로 전달되었습니다.\n인플루언서가 제안을 검토한 후 답변을 보내드립니다.'}
           </p>
-          <div className="space-y-3">
+            <div className="space-y-3">
             <button
               onClick={() => window.location.href = '/business-dashboard'}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-blue-500/30 transition-all"
@@ -237,8 +248,8 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
               className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-2xl font-black text-sm transition-all"
             >
               {isEn ? 'Send Another Proposal' : '다른 제안서 작성하기'}
-            </button>
-          </div>
+              </button>
+            </div>
         </div>
       </div>
     );
@@ -248,6 +259,15 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username })
     <div className="min-h-screen bg-[#f8fafc]">
       <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white">
         <div className="max-w-3xl mx-auto px-4 py-8 md:py-12">
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-5 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-black text-white transition-colors hover:bg-white/20"
+            aria-label={isEn ? 'Back to profile' : '프로필로 돌아가기'}
+          >
+            <ArrowLeft size={20} strokeWidth={2.5} />
+            <span>{isEn ? 'Back to profile' : '프로필로 돌아가기'}</span>
+          </button>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">📨</div>
             <h1 className="text-2xl md:text-3xl font-black">{isEn ? 'Business Proposal' : '비즈니스 제안'}</h1>

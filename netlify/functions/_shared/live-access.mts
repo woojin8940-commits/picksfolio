@@ -19,6 +19,7 @@
 import { getStore } from '@netlify/blobs'
 import { getDatabase } from '@picks/netlify-database'
 import { applyComplimentaryMembership } from './complimentary-memberships.mts'
+import { applyOperatorMembershipGrant, getOperatorMembershipGrant } from './operator-membership-grants.mts'
 import { hasLiveCommerceAccess } from './membership-billing.mts'
 
 // 라이브 커머스 멤버십은 판매를 종료했다 — 새로 구독할 수 있는 경로가 없으므로
@@ -63,6 +64,7 @@ export interface LiveAccessResult {
  */
 export async function checkLiveBroadcastAccess(
   usernameRaw: string,
+  authUserId?: string | null,
 ): Promise<LiveAccessResult> {
   const username = cleanName(usernameRaw)
   if (!username) return { allowed: false, reason: 'membership', message: LIVE_MEMBERSHIP_REQUIRED_MESSAGE }
@@ -73,7 +75,9 @@ export async function checkLiveBroadcastAccess(
     const stored = (await store
       .get(`seller_${username}`, { type: 'json' })
       .catch(() => null)) as Record<string, any> | null
-    record = applyComplimentaryMembership(username, stored) as Record<string, any> | null
+    const complimentary = applyComplimentaryMembership(username, stored) as Record<string, any> | null
+    const grant = await getOperatorMembershipGrant({ authUserId, username })
+    record = applyOperatorMembershipGrant(complimentary, grant) as Record<string, any> | null
   } catch (e) {
     console.warn('[live-access] verification lookup failed:', (e as Error)?.message)
     record = null

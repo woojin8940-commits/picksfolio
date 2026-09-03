@@ -183,7 +183,7 @@ export default async (req: Request, context: Context) => {
   const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
 
   // 디엠 자동화(수동 발송 포함)는 프로 플랜 전용이다.
-  if (!(await dmAutomationAllowed(username))) {
+  if (!(await dmAutomationAllowed(username, auth.userId))) {
     await appendLog(username, {
       status: "skipped",
       reason: "plan_required",

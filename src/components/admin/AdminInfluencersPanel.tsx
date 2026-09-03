@@ -5,6 +5,7 @@ import { TIER_LABEL, normalizeTier, type MembershipTier } from '../../utils/memb
 import { formatPhone } from '../../utils/formatters';
 
 interface InfluencerRow {
+  id: string;
   username: string;
   has_profile?: boolean;
   full_name?: string;
@@ -25,6 +26,9 @@ interface InfluencerRow {
   membership_active?: boolean;
   membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null;
   membership_started_at?: string | null;
+  membership_source?: 'operator' | 'complimentary' | 'paid' | null;
+  paid_membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null;
+  operator_membership_plan?: 'standard' | 'standard_ai' | 'commerce' | 'pro' | null;
 }
 
 interface BusinessRow {
@@ -47,6 +51,7 @@ interface LiveCustomerRow {
 
 type Segment = 'users' | 'businesses' | 'liveCustomers';
 type SortKey = 'created_at' | 'last_login_at' | 'clicks' | 'views' | 'proposals_total' | 'acceptance_rate';
+type PlanFilter = 'all' | 'none' | MembershipTier;
 
 interface Props {
   token: string;
@@ -83,6 +88,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [planFilter, setPlanFilter] = useState<PlanFilter>('all');
   const [busy, setBusy] = useState<string | null>(null);
   // Hide seed/QA accounts (testuser, biz_tester123, picksfolio12 …) by default.
   const [showTestData, setShowTestData] = useState(false);
@@ -102,6 +108,10 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
     const q = search.trim().toLowerCase();
     let list = rows;
     if (!showTestData) list = list.filter(r => !isTestUsername(r.username));
+    if (planFilter === 'none') list = list.filter(r => !r.membership_active);
+    else if (planFilter !== 'all') {
+      list = list.filter(r => r.membership_active && normalizeTier(r.membership_plan) === planFilter);
+    }
     if (q) {
       list = list.filter(r =>
         r.username.toLowerCase().includes(q) ||
@@ -119,7 +129,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
       if (typeof av === 'string') return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
       return ((av as number) - (bv as number)) * dir;
     });
-  }, [rows, search, sortKey, sortDir, showTestData]);
+  }, [rows, search, sortKey, sortDir, showTestData, planFilter]);
 
   const filteredBusinesses = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -176,25 +186,20 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
     const currentPlan = r.membership_active ? r.membership_plan ?? null : null;
     if (currentPlan === plan) return;
 
-    if (plan !== null && r.has_profile === false) {
-      window.alert('이 계정에는 프로필이 없어 멤버십을 부여할 수 없어요. 사용자가 먼저 프로필을 생성하면 부여 후 사용자 계정에 즉시 반영됩니다.');
-      return;
-    }
-
-    const verb = plan === null ? '해지' : `${TIER_LABEL[plan]} 부여`;
+    const verb = plan === null ? '운영자 부여 해제' : `${TIER_LABEL[plan]} 부여`;
     if (!window.confirm(`@${r.username} 계정에 ${verb}하시겠어요?`)) return;
 
     setBusy(r.username);
-    const res = await apiService.updateAdminInfluencer(token, r.username, { membership_plan: plan });
+    const res = await apiService.updateAdminInfluencer(token, r.username, {
+      membership_plan: plan,
+      auth_user_id: r.id,
+    });
     setBusy(null);
-    if (res.ok) {
-      const now = new Date().toISOString();
+    if (res.ok && res.membership) {
       setRows(prev => prev.map(x => x.username === r.username
         ? {
             ...x,
-            membership_active: plan !== null,
-            membership_plan: plan,
-            membership_started_at: plan !== null ? (x.membership_started_at || now) : null,
+            ...res.membership,
           }
         : x));
     } else {
@@ -300,6 +305,28 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                     className="px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200"
                   >새로고침</button>
                 </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {([
+                    ['all', '전체'],
+                    ['none', '미가입'],
+                    ['standard', '스탠다드'],
+                    ['standard_ai', 'AI 협업'],
+                    ['commerce', '커머스'],
+                    ['pro', '프로'],
+                  ] as [PlanFilter, string][]).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setPlanFilter(value)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition-colors ${
+                        planFilter === value
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <div className="flex items-center gap-2 flex-wrap text-[10px] font-black text-slate-400 uppercase">
                   <span>정렬:</span>
                   {([
@@ -337,8 +364,15 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                   <div className="p-12 text-center text-slate-400 font-bold text-sm">조건에 맞는 유저가 없습니다.</div>
                 ) : filtered.map(r => {
                   const activePlan: MembershipTier | null = r.membership_active ? normalizeTier(r.membership_plan) : null;
+                  const sourceLabel = r.membership_source === 'operator'
+                    ? '운영 부여'
+                    : r.membership_source === 'paid'
+                      ? '유료 구독'
+                      : r.membership_source === 'complimentary'
+                        ? '제휴 제공'
+                        : '';
                   return (
-                    <div key={r.username} className="md:grid md:grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-slate-50/50 transition-all">
+                    <div key={r.id} className="md:grid md:grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-slate-50/50 transition-all">
                       <div className="md:col-span-3 flex items-center gap-2 min-w-0">
                         <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
                           <span className="text-xs font-black text-white">{r.username.slice(0, 2).toUpperCase()}</span>
@@ -353,9 +387,9 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         {r.has_profile === false && (
                           <span
                             className="px-1.5 py-0.5 bg-rose-100 text-rose-700 text-[9px] font-black rounded"
-                            title="이 계정은 auth에는 있지만 프로필이 없습니다. 프로필 생성 전에는 멤버십 부여가 사용자 계정에 반영되지 않습니다."
+                            title="프로필 생성 전에도 계정 ID 기준으로 플랜을 부여할 수 있으며, 생성 후 자동으로 승계됩니다."
                           >
-                            프로필 없음
+                            프로필 준비중
                           </span>
                         )}
                       </div>
@@ -374,32 +408,40 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                       <div className="md:col-span-2 mt-2 md:mt-0">
                         {activePlan === 'pro' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 text-[10px] font-black">
-                            🚀 프로
+                            프로
                             <span className="text-[9px] font-bold text-emerald-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : activePlan === 'commerce' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-pink-100 text-pink-700 text-[10px] font-black">
-                            🎥 커머스
+                            커머스
                             <span className="text-[9px] font-bold text-pink-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : activePlan === 'standard_ai' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-100 text-violet-700 text-[10px] font-black">
-                            ✨ AI 협업
+                            AI 협업
                             <span className="text-[9px] font-bold text-violet-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : activePlan === 'standard' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 text-blue-700 text-[10px] font-black">
-                            ★ 스탠다드
+                            스탠다드
                             <span className="text-[9px] font-bold text-blue-500">{formatDate(r.membership_started_at)}~</span>
                           </span>
                         ) : (
                           <span className="inline-flex px-2 py-1 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-black">미가입</span>
                         )}
+                        {sourceLabel && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[9px] font-bold text-slate-400">
+                            <span>{sourceLabel}</span>
+                            {r.membership_source === 'operator' && r.paid_membership_plan && (
+                              <span>· 기존 구독 {TIER_LABEL[r.paid_membership_plan]}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="md:col-span-3 mt-2 md:mt-0 flex justify-end gap-1.5 flex-wrap">
                         <button
                           onClick={() => toggleFeatured(r)}
-                          disabled={busy === r.username}
+                          disabled={busy === r.username || r.has_profile === false}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all ${
                             r.featured
                               ? 'bg-amber-500 text-white hover:bg-amber-600'
@@ -410,7 +452,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'standard')}
-                          disabled={busy === r.username || activePlan === 'standard'}
+                          disabled={busy === r.username || r.operator_membership_plan === 'standard'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'standard'
                               ? 'bg-blue-500 text-white'
@@ -421,7 +463,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'standard_ai')}
-                          disabled={busy === r.username || activePlan === 'standard_ai'}
+                          disabled={busy === r.username || r.operator_membership_plan === 'standard_ai'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'standard_ai'
                               ? 'bg-violet-500 text-white'
@@ -432,7 +474,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'commerce')}
-                          disabled={busy === r.username || activePlan === 'commerce'}
+                          disabled={busy === r.username || r.operator_membership_plan === 'commerce'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'commerce'
                               ? 'bg-gradient-to-r from-blue-600 to-pink-500 text-white'
@@ -443,7 +485,7 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         </button>
                         <button
                           onClick={() => setMembership(r, 'pro')}
-                          disabled={busy === r.username || activePlan === 'pro'}
+                          disabled={busy === r.username || r.operator_membership_plan === 'pro'}
                           className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40 ${
                             activePlan === 'pro'
                               ? 'bg-slate-900 text-white'
@@ -452,13 +494,13 @@ const AdminInfluencersPanel: React.FC<Props> = ({ token }) => {
                         >
                           프로
                         </button>
-                        {activePlan && (
+                        {r.operator_membership_plan && (
                           <button
                             onClick={() => setMembership(r, null)}
                             disabled={busy === r.username}
                             className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-white text-slate-500 hover:bg-slate-50 border border-slate-200 disabled:opacity-50"
                           >
-                            해지
+                            부여 해제
                           </button>
                         )}
                         {busy === r.username && (
