@@ -68,7 +68,17 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
   const [brandBusy, setBrandBusy] = useState(false);
   /** 입금 확인 칸을 펼쳤는지. 기본은 접어 둔다 — 대개 확인은 한 번뿐이다. */
   const [confirming, setConfirming] = useState(false);
-  const [form, setForm] = useState({ amount: '', date: todayInSeoul(), memo: '' });
+  /**
+   * 담당자가 적는 것은 통장에 찍힌 금액 하나뿐이다.
+   *
+   * 한동안 입금일과 메모 칸이 함께 있었다. 담당자는 통장을 열어 확인한 그 자리에서
+   * 버튼을 누르므로 입금일은 언제나 '누른 날'이었고, 그것을 '입금일'로 적어 두면 통장의
+   * 날짜와 다를 수 있는 값이 사실처럼 남는다. 그래서 날짜는 받지도 남기지도 않는다 —
+   * 이 화면이 남기는 사실은 "입금이 되었는가" 하나다. 확인이 한 번에 끝나야 입금 전
+   * 지급 같은 사고를 막는 잠금이 실제로 쓰인다 — 칸이 많으면 담당자는 칸을 채우기보다
+   * 확인을 미룬다.
+   */
+  const [amountInput, setAmountInput] = useState('');
 
   const loadBrand = useCallback(async () => {
     if (!campaignId) {
@@ -85,16 +95,14 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
     setBrand(res.settlement || null);
     setBilling(res.billing || null);
     // 금액 칸의 기본값은 청구액이다. 통장 금액이 다르면 담당자가 고쳐 적는다.
-    setForm(f => ({
-      ...f,
-      amount: String(
+    setAmountInput(
+      String(
         Number(res.settlement?.receivedAmount || 0) ||
           Number(res.settlement?.invoiceAmount || 0) ||
           Number(res.billing?.amount || 0) ||
           '',
       ),
-      memo: String(res.settlement?.memo || f.memo || ''),
-    }));
+    );
   }, [campaignId, onNotify]);
 
   useEffect(() => {
@@ -159,21 +167,21 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
   const invoiceAmount = Number(brand?.invoiceAmount || 0) || Number(billing?.amount || 0) || totals.total;
 
   const markReceived = async () => {
-    const amount = digitsOf(form.amount) || invoiceAmount;
+    const amount = digitsOf(amountInput) || invoiceAmount;
     if (
       !confirm(
-        `브랜드 입금을 확인 완료로 처리합니다.\n입금액 ${amount.toLocaleString('ko-KR')}원 · ${form.date}\n\n` +
+        `브랜드 입금을 확인 완료로 처리합니다.\n입금액 ${amount.toLocaleString('ko-KR')}원\n\n` +
           `확인하면 인플루언서 지급(정산완료)이 열리고, 브랜드 정산 화면에 '정산완료'로 표시됩니다.`,
       )
     ) {
       return;
     }
     setBrandBusy(true);
+    // 금액만 보낸다. 입금 날짜는 어디에도 남기지 않고, 메모도 보내지 않으므로 이미
+    // 적혀 있던 메모는 그대로 남는다.
     const res = await apiService.campaignBrandSettlementAction(campaignId, 'mark_received', {
       receivedAmount: amount,
       invoiceAmount,
-      receivedDate: form.date,
-      memo: form.memo,
     });
     setBrandBusy(false);
     if (res.error) {
@@ -246,11 +254,12 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
           </div>
           <p className="text-[11px] font-bold text-slate-500 mt-1 leading-relaxed">
             {brandReceived ? (
+              /* 확인이 끝난 뒤 담당자가 다시 볼 것은 얼마가 들어왔는지다. 날짜는 남기지
+                 않으므로, 금액과 확인한 사람만 적는다. */
               <>
-                {brand?.receivedDate || '-'} 입금 확인
-                {Number(brand?.receivedAmount || 0) > 0 && (
-                  <> · {formatKoreanWon(Number(brand.receivedAmount))} 수납</>
-                )}
+                {Number(brand?.receivedAmount || 0) > 0
+                  ? `${formatKoreanWon(Number(brand.receivedAmount))} 입금 확인`
+                  : '입금 확인 완료'}
                 {brand?.receivedBy && ` · 확인 ${brand.receivedBy}`}
               </>
             ) : (
@@ -278,38 +287,18 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
       {!brandLoading && !brandReceived && (
         confirming ? (
           <div className="mt-4 space-y-2.5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label className="block">
-                <span className="block text-[10px] font-black text-slate-400 mb-1">입금액</span>
-                <input
-                  value={form.amount}
-                  onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                  inputMode="numeric"
-                  placeholder={String(invoiceAmount || '')}
-                  className={inputCls}
-                />
-              </label>
-              <label className="block">
-                <span className="block text-[10px] font-black text-slate-400 mb-1">입금일</span>
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                  className={inputCls}
-                />
-              </label>
-              <label className="block">
-                <span className="block text-[10px] font-black text-slate-400 mb-1">메모 (선택)</span>
-                <input
-                  value={form.memo}
-                  onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
-                  placeholder="예: 1차분 · 세금계산서 발행"
-                  className={inputCls}
-                />
-              </label>
-            </div>
+            <label className="block sm:max-w-[220px]">
+              <span className="block text-[10px] font-black text-slate-400 mb-1">입금액</span>
+              <input
+                value={amountInput}
+                onChange={e => setAmountInput(e.target.value)}
+                inputMode="numeric"
+                placeholder={String(invoiceAmount || '')}
+                className={inputCls}
+              />
+            </label>
             <p className="text-[10px] font-bold text-slate-400 leading-relaxed">
-              통장에 찍힌 금액과 날짜를 그대로 적어 주세요. 입금일과 메모는 브랜드 정산 화면에도 보입니다.
+              통장에 찍힌 금액을 그대로 적어 주세요. 청구액과 같으면 비워 두어도 됩니다.
             </p>
             <div className="flex items-center gap-2">
               <button

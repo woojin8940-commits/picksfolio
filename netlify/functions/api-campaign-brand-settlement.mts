@@ -1,7 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
-import { todayInSeoul } from "./_shared/campaign-recruit.mts";
 
 /**
  * 브랜드 일괄 정산금 수납 — 담당자가 "브랜드 돈이 들어왔다"를 남기는 자리.
@@ -23,6 +22,12 @@ import { todayInSeoul } from "./_shared/campaign-recruit.mts";
  * 청구액은 확정된 보수의 합계를 기본값으로 계산해 함께 내려보낸다 — 담당자가 금액을
  * 다시 적지 않아도 "얼마가 들어와야 하는가"가 화면에 있어야 통장과 대조할 수 있다.
  *
+ * 담당자가 적는 것은 실제로 들어온 금액 하나뿐이고, 남는 사실은 "입금이 되었는가"
+ * 하나다. 입금 날짜는 받지도, 남기지도 않는다 — 담당자는 통장을 열어 확인한 그 자리에서
+ * 누르므로 날짜는 언제나 '누른 날'이었고, 그것을 '입금일'로 화면에 붙이면 통장과 다를
+ * 수 있는 값을 사실처럼 말하게 된다. 확인한 시각(received_at)이 지급을 여는 조건이고,
+ * 화면이 필요한 것은 그 참/거짓뿐이다. 메모는 넘어오지 않으면 그대로 둔다.
+ *
  *   GET   /api/campaign-brand-settlement?campaignId=...
  *   PATCH /api/campaign-brand-settlement  { campaignId, action, ... }
  *
@@ -43,17 +48,11 @@ const parseAmount = (value: unknown): number => {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 };
 
-const dayOnly = (value: unknown): string => {
-  const raw = String(value ?? "").trim().split("T")[0];
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
-};
-
 /** 응답 모양. 담당자 화면과 브랜드 화면이 같은 이름으로 읽는다. */
 const shapeBrandSettlement = (row: any) => ({
   campaignId: String(row?.campaign_id || ""),
   invoiceAmount: Number(row?.invoice_amount || 0),
   receivedAmount: Number(row?.received_amount || 0),
-  receivedDate: row?.received_date ? String(row.received_date).split("T")[0] : "",
   receivedAt: row?.received_at || null,
   receivedBy: String(row?.received_by || ""),
   memo: String(row?.memo || ""),
@@ -146,26 +145,26 @@ export default async (req: Request) => {
           // 부분 수납이면 담당자가 실제 입금액을 적는다.
           const invoiceAmount = parseAmount(body.invoiceAmount) || billing.amount;
           const receivedAmount = parseAmount(body.receivedAmount) || invoiceAmount;
-          const receivedDate = dayOnly(body.receivedDate) || todayInSeoul();
           const memo = String(body.memo || "").trim().slice(0, 500);
 
           await db.sql`
             INSERT INTO campaign_brand_settlements (
               campaign_id, business_username, invoice_amount, received_amount,
-              received_date, received_at, received_by, memo
+              received_at, received_by, memo
             ) VALUES (
               ${campaignId}, ${business}, ${invoiceAmount}, ${receivedAmount},
-              ${receivedDate}::date, NOW(), ${auth.managerUsername}, ${memo}
+              NOW(), ${auth.managerUsername}, ${memo}
             )
             ON CONFLICT (campaign_id) DO UPDATE SET
               business_username = EXCLUDED.business_username,
               invoice_amount = EXCLUDED.invoice_amount,
               received_amount = EXCLUDED.received_amount,
-              received_date = EXCLUDED.received_date,
               -- 이미 확인된 건을 다시 누르면(금액 정정) 처음 확인한 시각을 지킨다.
               received_at = COALESCE(campaign_brand_settlements.received_at, NOW()),
               received_by = EXCLUDED.received_by,
-              memo = EXCLUDED.memo,
+              -- 메모는 이 호출에 없으면 지우지 않는다. 담당자 화면에 메모 칸이 없으므로
+              -- 빈 값이 늘 넘어오는데, 그걸로 청구 때 적어 둔 메모를 덮으면 안 된다.
+              memo = COALESCE(NULLIF(EXCLUDED.memo, ''), campaign_brand_settlements.memo),
               updated_at = NOW()
           `;
           break;
