@@ -32,6 +32,9 @@ const COMPLIMENTARY: Record<string, ComplimentaryTier> = {
   tester123: 'pro',
   tester_508070: 'pro',
   tester_711872: 'pro',
+  // 파트너 / 무상 제공 계정 — 운영자가 모든 멤버십 기능을 열어 준 실사용 계정이다.
+  // 로그인 아이디는 profiles.username 기준으로 확인했다(인사말에 보이는 이름과 다르다).
+  chaevely: 'pro',
 }
 
 export function getComplimentaryMembership(username: string | null | undefined): ComplimentaryTier | null {
