@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getSavedLoginId, isKeepLoginEnabled, rememberLoginId, setKeepLogin } from '../utils/loginPersistence';
 
 interface BusinessLoginPageProps {
   onNavigateHome: () => void;
@@ -14,7 +15,17 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
 
   const [isLoading, setIsLoading] = useState(false);
   const [showFindAccount, setShowFindAccount] = useState(false);
-  const [formData, setFormData] = useState({ username: '', password: '' });
+  // 저장해 둔 아이디가 있으면 채워 둔다("로그인 정보 저장"). 비밀번호는 저장하지
+  // 않는다 — 그 역할은 브라우저 비밀번호 관리자가 한다.
+  const [formData, setFormData] = useState({ username: getSavedLoginId('business'), password: '' });
+  // 한 번 켜 두면 계속 켜져 있어야 하므로 저장된 값에서 되살린다.
+  const [keepLogin, setKeepLoginState] = useState(() => isKeepLoginEnabled('business'));
+
+  // 체크를 만지는 즉시 기록한다. 끄면 저장해 둔 아이디도 그 자리에서 지워진다.
+  const handleKeepLoginChange = (enabled: boolean) => {
+    setKeepLoginState(enabled);
+    setKeepLogin('business', enabled);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +48,8 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
       }
 
       if (result.success) {
+        // 로그인에 성공한 아이디만 저장한다(체크가 켜져 있을 때).
+        rememberLoginId('business', formData.username.trim().toLowerCase());
         localStorage.setItem('picks_business_session', result.username);
         localStorage.setItem('picks_business_company', result.company_name);
         if (result.access_token) {
@@ -84,6 +97,10 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
                 required value={formData.username} onChange={handleChange}
                 className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
                 disabled={isLoading}
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
           </div>
@@ -96,13 +113,31 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
                 required value={formData.password} onChange={handleChange}
                 className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
                 disabled={isLoading}
+                autoComplete="current-password"
               />
             </div>
-            <div className="text-right">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={keepLogin}
+                  onChange={(e) => handleKeepLoginChange(e.target.checked)}
+                  disabled={isLoading}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 accent-blue-600 cursor-pointer"
+                />
+                <span className="text-xs text-slate-500 font-bold">
+                  {isEn ? 'Save login info' : '로그인 정보 저장'}
+                </span>
+              </label>
               <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
                 {isEn ? 'Find ID / Password' : '아이디/비밀번호 찾기'}
               </button>
             </div>
+            <p className="text-[11px] text-slate-400 font-medium ml-1 leading-snug">
+              {isEn
+                ? 'Keeps your ID filled in and stays signed in until you log out.'
+                : '아이디가 저장되고, 직접 로그아웃할 때까지 로그인이 유지됩니다.'}
+            </p>
           </div>
 
           <button

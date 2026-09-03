@@ -18,6 +18,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserPageProps {
   username: string;
+  onBackToDashboard?: () => void;
 }
 
 interface AboutSection {
@@ -43,7 +44,7 @@ interface LinkData {
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 
-const UserPage: React.FC<UserPageProps> = ({ username }) => {
+const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   const { language } = useLanguage();
   const normalizedUsername = useMemo(() => (username || '').toLowerCase(), [username]);
 
@@ -870,6 +871,20 @@ const UserPage: React.FC<UserPageProps> = ({ username }) => {
 
   return (
     <div className={`min-h-screen ${getFontStyle()} ${textColor} userpage-root`} style={backgroundStyle}>
+      {onBackToDashboard && (
+        <button
+          type="button"
+          onClick={onBackToDashboard}
+          className="fixed left-3 z-[80] flex items-center gap-2 rounded-full border border-white/20 bg-slate-950/85 px-4 py-2.5 text-xs font-black text-white shadow-xl backdrop-blur-md transition active:scale-95 md:left-5 md:top-5"
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+          aria-label="홈 대시보드로 돌아가기"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          대시보드
+        </button>
+      )}
       {/* PC: Full-width vertical layout */}
       <div className="min-h-screen">
         <div className="max-w-md md:max-w-2xl mx-auto min-h-screen flex flex-col relative px-4 md:px-8" style={backgroundStyle}>

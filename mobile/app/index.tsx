@@ -19,10 +19,6 @@ import type {
   WebViewNavigation,
 } from 'react-native-webview';
 import { config } from '@/constants/config';
-import {
-  isKakaoNativeLoginAvailable,
-  signInWithKakaoTalk,
-} from '@/services/kakaoAuth';
 import { registerPushForUser } from '@/services/push';
 import { colors } from '@/theme';
 
@@ -37,6 +33,9 @@ const INTERNAL_SCHEME = /^(https?|about|data|blob|file):/i;
  * an external app launch.
  */
 const EXTERNAL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/** KakaoTalk universal links must be resolved by the OS, not rendered in WebView. */
+const KAKAO_TALK_UNIVERSAL_LINK = /^https:\/\/talk-apps\.kakao\.com\/scheme\//i;
 
 /** http(s) hosts that should always open in the system browser, not in-app. */
 function isInternalUrl(url: string): boolean {
@@ -114,41 +113,11 @@ function openNativeBroadcast(raw: Record<string, unknown>): void {
 }
 
 /**
- * Is the native Kakao SDK linked into this build? Development builds made
- * without `EXPO_PUBLIC_KAKAO_NATIVE_APP_KEY` and Expo Go do not have it, and
- * the answer never changes at runtime — so it is resolved once, here.
- */
-const KAKAO_NATIVE_READY = isKakaoNativeLoginAvailable();
-
-/**
- * `PicksFolioNative.kakaoLogin()` — only advertised when the native SDK is
- * actually present. Returns a promise the web app awaits: the shell logs in
- * through KakaoTalk app-to-app and injects the result back by request id.
- *
- * This exists because the web flow cannot finish inside an in-app WebView.
- * KakaoTalk returns the authorization code to the phone's DEFAULT browser, so
- * the hand-off leaves the app and the WebView never sees the answer. Going
- * through the native SDK keeps the whole round trip inside the app; the web app
- * receives the ID token and creates the very same Supabase session it would
- * have created on the web.
- */
-const KAKAO_BRIDGE_METHOD = KAKAO_NATIVE_READY
-  ? `
-      kakaoLogin: function () {
-        return new Promise(function (resolve, reject) {
-          var id = 'k' + Date.now() + '_' + Math.random().toString(36).slice(2);
-          kakaoWaiters[id] = { resolve: resolve, reject: reject };
-          post({ type: 'KAKAO_LOGIN', payload: { requestId: id } });
-        });
-      },`
-  : '';
-
-/**
  * Injected before the web app loads. Advertises the native shell + native push
  * support and exposes `PicksFolioNative.registerPush(username, userType)` so the
  * web app can hand the signed-in user to the shell, which registers the device's
- * push token for new-message alerts. When the native Kakao SDK is linked it also
- * exposes `PicksFolioNative.kakaoLogin()` for KakaoTalk 간편로그인.
+ * push token for new-message alerts. Kakao login stays on the web flow; the
+ * WebView only hands KakaoTalk URLs to the OS.
  *
  * Native broadcast handoff is intentionally NOT advertised
  * (`__PICKSFOLIO_NATIVE_BROADCAST__ = false`). Handing the broadcast off to the
@@ -165,31 +134,21 @@ const NATIVE_BRIDGE = `
     window.__PICKSFOLIO_NATIVE__ = true;
     window.__PICKSFOLIO_NATIVE_BROADCAST__ = false;
     window.__PICKSFOLIO_NATIVE_PUSH__ = true;
-    window.__PICKSFOLIO_NATIVE_KAKAO__ = ${KAKAO_NATIVE_READY};
+    window.__PICKSFOLIO_NATIVE_KAKAO__ = false;
     function post(payload) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
     }
-    // Promises waiting for a native reply, keyed by request id. The shell calls
-    // window.__picksFolioKakaoResult(id, payload) once KakaoTalk is done.
-    var kakaoWaiters = {};
-    window.__picksFolioKakaoResult = function (id, payload) {
-      var waiter = kakaoWaiters[id];
-      delete kakaoWaiters[id];
-      if (!waiter) return;
-      if (payload && payload.ok) waiter.resolve(payload.tokens || {});
-      else waiter.reject(new Error((payload && payload.error) || '카카오 로그인에 실패했습니다.'));
-    };
     window.PicksFolioNative = {
-      version: 3,
+      version: 4,
       broadcastSupported: false,
       pushSupported: true,
-      kakaoSupported: ${KAKAO_NATIVE_READY},
+      kakaoSupported: false,
       openBroadcast: function (opts) {
         post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
       },
       registerPush: function (username, userType) {
         post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType } });
-      },${KAKAO_BRIDGE_METHOD}
+      }
     };
   })();
   true;
@@ -324,6 +283,13 @@ export default function WebAppScreen() {
         openNativeBroadcast(parseQuery(url));
         return false;
       }
+      if (KAKAO_TALK_UNIVERSAL_LINK.test(url)) {
+        Linking.openURL(url).catch(() => {
+          // If KakaoTalk is unavailable, keep the current Kakao login page in
+          // place so its account-login fallback remains usable.
+        });
+        return false;
+      }
       if (isInternalUrl(url)) return true;
       // `intent://` needs unwrapping first — handing it to the OS as-is does
       // nothing, which is how the KakaoTalk/PG app buttons used to dead-end.
@@ -349,45 +315,8 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Resolve the promise the web app is holding for a `kakaoLogin()` call. U+2028
-  // / U+2029 are legal in JSON but not inside a JS string literal, so they are
-  // escaped before the payload is injected as code.
-  const settleKakaoLogin = useCallback(
-    (requestId: string, payload: Record<string, unknown>) => {
-      const encoded = JSON.stringify(payload)
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029');
-      webRef.current?.injectJavaScript(
-        `(function(){ try { window.__picksFolioKakaoResult(${JSON.stringify(
-          requestId,
-        )}, ${encoded}); } catch (e) {} })(); true;`,
-      );
-    },
-    [],
-  );
-
-  // KakaoTalk 간편로그인: log in through the native SDK and hand the tokens back
-  // to the web app, which turns them into a Supabase session.
-  const runKakaoLogin = useCallback(
-    async (requestId: string) => {
-      try {
-        const tokens = await signInWithKakaoTalk();
-        settleKakaoLogin(requestId, { ok: true, tokens });
-      } catch (err) {
-        // The web app decides what to show; a user-cancelled login is silent
-        // there and recognised from the message text.
-        settleKakaoLogin(requestId, {
-          ok: false,
-          error: (err as Error)?.message || '카카오 로그인에 실패했습니다.',
-        });
-      }
-    },
-    [settleKakaoLogin],
-  );
-
-  // Bridge: the web live console calls window.PicksFolioNative.openBroadcast()
-  // to hand the broadcast off to the native IVS screen, and the login screens
-  // call kakaoLogin() to reach the KakaoTalk app.
+  // Bridge: native broadcast and push registration only. Kakao app hand-off is
+  // handled by URL interception above, without a native Kakao SDK bridge.
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
       let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
@@ -404,14 +333,9 @@ export default function WebAppScreen() {
         if (typeof username === 'string' && username) {
           registerPushForUser(username, userType);
         }
-      } else if (msg?.type === 'KAKAO_LOGIN') {
-        const requestId = msg.payload?.requestId;
-        if (typeof requestId === 'string' && requestId) {
-          void runKakaoLogin(requestId);
-        }
       }
     },
-    [runKakaoLogin],
+    [],
   );
 
   return (
