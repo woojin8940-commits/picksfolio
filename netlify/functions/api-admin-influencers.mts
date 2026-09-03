@@ -3,6 +3,10 @@ import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import { applyComplimentaryMembership } from './_shared/complimentary-memberships.mts'
 import {
+  readSellerMembership,
+  type SellerMembershipRecord,
+} from './_shared/seller-membership-store.mts'
+import {
   applyOperatorMembershipGrant,
   listOperatorMembershipGrants,
   setOperatorMembershipGrant,
@@ -12,29 +16,7 @@ import type { Config, Context } from '@netlify/functions'
 
 type MembershipPlan = 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live'
 
-interface SellerVerificationBlob {
-  membership_active?: boolean
-  membership_plan?: MembershipPlan | null
-  membership_started_at?: string | null
-  updated_at?: string
-  [key: string]: any
-}
-
-async function readSellerMembership(
-  store: ReturnType<typeof getStore>,
-  username: string,
-): Promise<SellerVerificationBlob | null> {
-  const clean = username.toLowerCase()
-  const canonicalKey = `seller_${clean}`
-  const canonical = (await store.get(canonicalKey, { type: 'json' })) as SellerVerificationBlob | null
-  if (canonical) return canonical
-
-  const legacy = (await store.get(clean, { type: 'json' })) as SellerVerificationBlob | null
-  if (!legacy) return null
-  await store.setJSON(canonicalKey, legacy)
-  try { await store.delete(clean) } catch {}
-  return legacy
-}
+type SellerVerificationBlob = SellerMembershipRecord
 
 function membershipSource(
   stored: SellerVerificationBlob | null,

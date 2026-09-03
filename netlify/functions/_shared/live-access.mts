@@ -21,6 +21,7 @@ import { getDatabase } from '@picks/netlify-database'
 import { applyComplimentaryMembership } from './complimentary-memberships.mts'
 import { applyOperatorMembershipGrant, getOperatorMembershipGrant } from './operator-membership-grants.mts'
 import { hasLiveCommerceAccess } from './membership-billing.mts'
+import { readSellerMembership } from './seller-membership-store.mts'
 
 // 라이브 커머스 멤버십은 판매를 종료했다 — 새로 구독할 수 있는 경로가 없으므로
 // 가격을 안내하지 않고 이용할 수 없다는 사실만 알린다(기존 구독자는 계속 통과).
@@ -72,9 +73,7 @@ export async function checkLiveBroadcastAccess(
   let record: Record<string, any> | null = null
   try {
     const store = getStore('seller-verification')
-    const stored = (await store
-      .get(`seller_${username}`, { type: 'json' })
-      .catch(() => null)) as Record<string, any> | null
+    const stored = (await readSellerMembership(store, username).catch(() => null)) as Record<string, any> | null
     const complimentary = applyComplimentaryMembership(username, stored) as Record<string, any> | null
     const grant = await getOperatorMembershipGrant({ authUserId, username })
     record = applyOperatorMembershipGrant(complimentary, grant) as Record<string, any> | null
