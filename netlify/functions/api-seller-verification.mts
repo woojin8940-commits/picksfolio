@@ -8,6 +8,7 @@ import {
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { redactSellerRecord } from "./_shared/seller-record.mts";
+import { readSellerMembership } from "./_shared/seller-membership-store.mts";
 
 const STORE = "seller-verification";
 
@@ -26,7 +27,7 @@ export default async (req: Request, context: Context) => {
   const key = `seller_${username}`;
 
   if (req.method === "GET") {
-    const data = await store.get(key, { type: "json" });
+    const data = await readSellerMembership(store, username);
     const complimentary = applyComplimentaryMembership(username, data as any);
     const grant = await getOperatorMembershipGrant({
       authUserId: auth.isAdmin ? null : auth.userId,
@@ -39,6 +40,8 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = await req.json();
+
+    await readSellerMembership(store, username);
 
     // 같은 레코드를 정기결제 스케줄러도 고친다. 통째로 읽고 다시 쓰면 서로의
     // 변경(다음 결제일 갱신 등)을 지울 수 있어 조건부 쓰기로 반영한다.
