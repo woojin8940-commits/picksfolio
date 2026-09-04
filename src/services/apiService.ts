@@ -922,6 +922,26 @@ export interface DmScheduledJob {
   error?: string;
   errorKind?: string;
   contactLastAt?: string;
+  /**
+   * 이 예약을 누가 만들었는지.
+   *  `manual`(기본) — 예약 발송 화면에서 직접 만든 예약.
+   *  `comment`      — 게시물 자동화를 "예약 발송"으로 설정해 둔 덕에, 댓글이 달린
+   *                   순간 대기열에 들어온 예약.
+   */
+  source?: 'manual' | 'comment';
+  /** 발송 형식. 값이 없으면 텍스트(예전 예약 호환). */
+  messageType?: 'text' | 'carousel';
+  /** 캐러셀 카드(형식이 carousel 일 때). */
+  cards?: DmCarouselCard[];
+  /** 캐러셀과 함께 보낼 인사말. */
+  intro?: string;
+  /** 댓글에서 만들어진 예약이면 그 댓글 ID(비공개 답장으로 나간다). */
+  commentId?: string;
+  /** 댓글이 달린 시각. 비공개 답장은 이 시각부터 7일 안에만 보낼 수 있다. */
+  commentAt?: string;
+  /** 이 예약을 만든 자동화. */
+  ruleId?: string;
+  ruleName?: string;
 }
 
 /** 카드 이미지 한 장의 크기 상한. 인스타그램이 받아가지 못할 만큼 큰 파일을 미리 막는다. */
@@ -952,6 +972,14 @@ export interface DmAutomationItem {
   cardIntro?: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
+  /**
+   * 조건에 맞는 댓글을 받았을 때 DM 을 언제 보낼지.
+   *  `instant`(기본) — 곧바로 보낸다.
+   *  `scheduled`     — `scheduledAt` 까지 기다렸다가 보낸다.
+   */
+  sendMode?: 'instant' | 'scheduled';
+  /** 예약 발송 시각(ISO). 즉시 발송이면 빈 문자열. */
+  scheduledAt?: string;
   createdAt: string;
   /**
    * 이 자동화를 마지막으로 저장한 시각(서버가 찍는다). 조건이 겹치는 자동화가

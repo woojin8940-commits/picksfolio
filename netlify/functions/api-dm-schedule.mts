@@ -196,8 +196,15 @@ export default async (req: Request, context: Context) => {
     return Response.json({ error: "보낼 내용을 입력해 주세요." }, { status: 400 });
   }
 
+  /**
+   * 손으로 만든 예약만 센다.
+   *
+   * 게시물 자동화가 "예약 발송"으로 걸려 있으면 댓글이 몰리는 동안 대기 건이 수십
+   * 개씩 쌓인다. 그것까지 한도에 넣으면 사용자가 직접 예약을 하나 걸려고 할 때
+   * "한도 초과"만 보게 되는데, 정작 정리할 대상은 사용자가 만든 예약이 아니다.
+   */
   const existing = await listScheduledJobs(username);
-  if (existing.filter((j) => j.status === "pending").length >= PENDING_MAX) {
+  if (existing.filter((j) => j.status === "pending" && j.source !== "comment").length >= PENDING_MAX) {
     return Response.json(
       { error: `예약은 최대 ${PENDING_MAX}건까지 걸 수 있습니다. 지난 예약을 정리해 주세요.` },
       { status: 400 },
@@ -215,6 +222,8 @@ export default async (req: Request, context: Context) => {
     createdAt: new Date().toISOString(),
     status: "pending",
     contactLastAt: contact.lastAt,
+    // 화면에서 댓글 자동화가 만든 예약과 구분해 보여준다.
+    source: "manual",
   };
   await createScheduledJob(job);
 

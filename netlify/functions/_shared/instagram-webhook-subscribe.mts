@@ -74,6 +74,49 @@ async function subscribeFields(args: {
   }
 }
 
+/**
+ * 실제로 구독된 필드를 읽어 확인한다.
+ *
+ * POST 가 성공했다고 요청한 필드가 모두 붙는 것은 아니다 — 앱 권한·연동 방식에
+ * 따라 일부가 조용히 빠진다. 요청한 목록을 그대로 기록하면 설정 화면은 "버튼 클릭
+ * 구독 완료"로 보이는데 실제로는 postback 이 도착하지 않고, 목록이 최신으로
+ * 기록됐으니 다시 구독을 걸어볼 계기도 사라진다.
+ *
+ * 우리가 관심 있는 필드만 `WEBHOOK_FIELDS` 순서로 추려 돌려준다. 순서를 고정하는
+ * 이유는 호출부가 이 문자열을 `WEBHOOK_FIELDS` 와 비교해 재구독 여부를 정하기
+ * 때문이다(순서만 다른 같은 목록을 매번 재구독하면 저장마다 요청이 늘어난다).
+ * 읽기에 실패하면 null — 그때는 요청한 목록을 그대로 쓴다(읽기 권한만 없고 구독은
+ * 성공한 경우가 있다).
+ */
+async function readGrantedFields(args: {
+  host: string;
+  target: string;
+  accessToken: string;
+}): Promise<string | null> {
+  const { host, target, accessToken } = args;
+  try {
+    const res = await fetch(
+      `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(target)}/subscribed_apps`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok || data?.error) return null;
+
+    const granted = new Set<string>();
+    for (const app of Array.isArray(data?.data) ? data.data : []) {
+      for (const field of app?.subscribed_fields || []) {
+        // 항목이 문자열로 오는 계정과 `{ name }` 객체로 오는 계정이 모두 있다.
+        const name = typeof field === "string" ? field : String(field?.name || "");
+        if (name) granted.add(name);
+      }
+    }
+    const ours = WEBHOOK_FIELDS.split(",").filter((f) => granted.has(f));
+    return ours.length > 0 ? ours.join(",") : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function subscribeInstagramWebhooks(args: {
   accessToken: string;
   /** `instagram_login` 이면 graph.instagram.com, 그 외 구 페이지 토큰은 graph.facebook.com. */
@@ -87,15 +130,20 @@ export async function subscribeInstagramWebhooks(args: {
   const host = tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
   const target = tokenSource === "instagram_login" ? "me" : igId || "me";
 
+  const confirm = async (requested: string): Promise<SubscribeResult> => ({
+    ok: true,
+    fields: (await readGrantedFields({ host, target, accessToken })) || requested,
+  });
+
   const full = await subscribeFields({ host, target, accessToken, fields: WEBHOOK_FIELDS });
-  if (full.ok) return { ok: true, fields: WEBHOOK_FIELDS };
+  if (full.ok) return confirm(WEBHOOK_FIELDS);
 
   // 일부 필드가 거절된 경우. 댓글·메시지 구독만이라도 반드시 살려 둔다.
   console.warn("[ig-webhook-subscribe] full field list rejected, narrowing:", full.error);
   let lastError = full.error;
   for (const fields of FALLBACK_FIELDS) {
     const attempt = await subscribeFields({ host, target, accessToken, fields });
-    if (attempt.ok) return { ok: true, fields };
+    if (attempt.ok) return confirm(fields);
     lastError = attempt.error || lastError;
   }
   return { ok: false, error: lastError };
