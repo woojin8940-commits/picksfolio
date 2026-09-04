@@ -71,8 +71,8 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
    *
    * 이 화면의 일은 후보를 견주는 것이라, 카드 하나가 화면을 다 차지하면 두 번째
    * 후보를 보려고 스크롤한 순간 첫 번째 숫자가 기억에서 사라진다. 그래서 겉에는
-   * 고를 때 쓰는 것만(숫자 · 릴스 3편) 두고, 피드 · 동향 설명 · 추천 이유는 눌러서
-   * 펼치게 한다.
+   * 고를 때 쓰는 것만(릴스 3편 · 추천 이유 · 숫자) 두고, 최근 피드 9칸과 조회수 동향
+   * 설명은 눌러서 펼치게 한다.
    */
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
@@ -303,9 +303,97 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                     </button>
                   </div>
 
-                  {/* 계정명 바로 아래가 값 자리다. 팔로워·평균 조회수·광고비를 한 줄에
-                      나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세 숫자에서 멈추게 한다.
-                      이 셋이면 "예산 안에 들어오는 규모인가"가 카드를 펼치지 않고
+                  {/* 릴스 세 칸이 카드에서 가장 큰 자리를 차지한다.
+
+                      예전에는 이 세 칸이 팔로워·평균 조회수·광고비를 담은 3분할 칸
+                      안에 들어가 있었다. 그러면 세 칸 중 한 칸(카드 폭의 1/3)을 다시
+                      셋으로 쪼개게 되어 릴스 한 편이 카드 폭의 1/9로 줄었고, 무엇을
+                      찍는 계정인지 알아볼 수 없었다. 그림을 숫자 칸에서 꺼내 카드 폭을
+                      그대로 쓰게 한다.
+
+                      자리도 숫자보다 위로 올렸다. 브랜드가 사람을 고르는 마지막 판단은
+                      그림이 하고, 숫자는 그 뒤에 "예산 안에 들어오는가"를 확인하는
+                      값이다. 계정명이 카드 첫 줄에 있으므로 그림이 먼저 와도 후보를
+                      구별하는 데 어려움은 없다.
+
+                      칸 수는 항상 셋이다. 릴스가 한 편뿐인 계정에서 칸을 줄이면 그 한
+                      칸이 카드 폭 절반을 먹어 옆 카드와 높이가 달라져 후보를 나란히
+                      견줄 수 없다. 모자란 칸은 최근 피드로 채운다.
+
+                      비율은 릴스 원본과 같은 9:16 이다. 4:5 로 자르면 릴스가 위아래에
+                      얹은 자막이 잘려 나가는데, 이 영상이 무엇을 말하는 영상인지는 그
+                      자막이 알려 준다. 카드는 그만큼 길어지지만, 한 줄에 둘까지만 놓는
+                      화면에서 이 세 칸은 한 편당 200px 이 넘어 휴대폰으로 릴스를 보는
+                      크기에 가깝다. */}
+                  {media.length > 0 && (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <p className="text-[10px] text-slate-400 font-black">
+                          {reelSlots > 0 ? `최근 릴스 ${reelSlots}편` : '최근 게시물'}
+                        </p>
+                        {trend && trend.percent !== null && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
+                          >
+                            {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
+                            {trend.percent}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 md:gap-2">
+                        {media.map(slot => (
+                          <div
+                            key={slot.id}
+                            className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-100"
+                          >
+                            {slot.thumbnailUrl ? (
+                              <img
+                                src={slot.thumbnailUrl}
+                                alt=""
+                                loading="lazy"
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                            ) : (
+                              // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
+                              // "게시물이 없는 계정"과 구분된다.
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-[10px] text-slate-300 font-bold">
+                                  {slot.isVideo ? '영상' : '사진'}
+                                </span>
+                              </div>
+                            )}
+                            {/* 조회수는 그림 아래 줄이 아니라 그림 위에 얹는다. 아래로
+                                빼면 그만큼 그림이 작아진다. 이 줄은 릴스에만 붙는다 —
+                                피드 사진에는 조회수 지표가 아예 없어 같은 자리에
+                                '비공개'라 적으면 값을 숨긴 계정으로 잘못 읽힌다. */}
+                            {slot.isReel && (
+                              <span
+                                className="absolute bottom-1.5 left-1.5 right-1.5 px-1.5 py-1 rounded-lg bg-black/55 text-white text-[10px] md:text-[11px] font-black text-center truncate"
+                                title={slot.views ? `조회 ${formatNumberWithCommas(slot.views)}` : '조회수 비공개'}
+                              >
+                                {slot.views ? `조회 ${formatCountKo(slot.views)}` : '조회수 비공개'}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 담당자가 왜 이 사람을 골랐는지는 그림 바로 아래 겉에 둔다. 펼침
+                      안에 숨겨 두면 브랜드는 그 이유를 못 보고 숫자만으로 거른다. */}
+                  {c.managerNote && (
+                    <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                      <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
+                      <p className="text-[12px] text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
+                        {c.managerNote}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 그림과 추천 이유 다음이 값 자리다. 팔로워·평균 조회수·광고비를 한
+                      줄에 나란히 두고 값에 색을 줘, 카드를 훑는 눈이 세 숫자에서 멈추게
+                      한다. 이 셋이면 "예산 안에 들어오는 규모인가"가 카드를 펼치지 않고
                       끝난다. */}
                   <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg px-3 py-2 mt-3">
                     <div className="min-w-0">
@@ -343,81 +431,6 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                         </p>
                       )}
                     </div>
-
-                  {/* 숫자 아래에 그림을 둔다. 계정명 → 세 숫자 → 최근 릴스 순서는
-                      "누구인지 → 규모가 맞는지 → 톤이 맞는지"로 좁혀 가는 판단 순서와
-                      같다. 계정명이 카드 첫 줄에 나오기 전에는 숫자보다 그림이 먼저
-                      필요했는데(별표 이름으로는 후보를 구별할 수 없었으므로), 이제
-                      첫 줄이 계정을 특정해 주므로 값이 먼저 와도 길을 잃지 않는다.
-                      칸 수는 항상 셋이다. 릴스가 한 편뿐인 계정에서 칸을 줄이면 그
-                      한 칸이 카드 폭 절반을 먹어 카드만 커지고, 옆 카드와 높이가 달라져
-                      후보를 나란히 견줄 수 없다. 모자란 칸은 최근 피드로 채운다.
-                      세로 9:16 을 그대로 늘리면 카드 하나가 화면을 다 먹으므로 4:5 로
-                      자른다. */}
-                  {media.length > 0 && (
-                    <div className="mt-3">
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <p className="text-[10px] text-slate-400 font-black">
-                          {reelSlots > 0 ? `최근 릴스 ${reelSlots}편` : '최근 게시물'}
-                        </p>
-                        {trend && trend.percent !== null && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-black ${trendTone(trend.percent).cls}`}
-                          >
-                            {trendTone(trend.percent).label} {trend.percent > 0 ? '+' : ''}
-                            {trend.percent}%
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {media.map(slot => (
-                          <div key={slot.id}>
-                            {slot.thumbnailUrl ? (
-                              <img
-                                src={slot.thumbnailUrl}
-                                alt=""
-                                loading="lazy"
-                                className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
-                              />
-                            ) : (
-                              <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
-                                <span className="text-[10px] text-slate-300 font-bold">
-                                  {slot.isVideo ? '영상' : '사진'}
-                                </span>
-                              </div>
-                            )}
-                            {/* 조회수 줄은 릴스에만 붙는다. 피드 사진에는 조회수 지표가
-                                아예 없어 같은 자리에 '비공개'라 적으면 값을 숨긴
-                                계정으로 잘못 읽힌다. */}
-                            {slot.isReel ? (
-                              <p
-                                className="text-[10px] text-slate-500 font-bold mt-1 truncate text-center"
-                                title={slot.views ? `조회 ${formatNumberWithCommas(slot.views)}` : '조회수 비공개'}
-                              >
-                                {slot.views ? `조회 ${formatCountKo(slot.views)}` : '비공개'}
-                              </p>
-                            ) : (
-                              <p className="text-[10px] text-slate-300 font-bold mt-1 truncate text-center">
-                                게시물
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 담당자가 왜 이 사람을 골랐는지는 그림 바로 아래 겉에 둔다. 펼침
-                      안에 숨겨 두면 브랜드는 그 이유를 못 보고 숫자만으로 거른다. */}
-                  {c.managerNote && (
-                    <div className="mt-3 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
-                      <p className="text-[10px] text-slate-400 font-black mb-0.5">추천 이유</p>
-                      <p className="text-[12px] text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
-                        {c.managerNote}
-                      </p>
-                    </div>
-                  )}
-
                   </div>
 
 
