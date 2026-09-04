@@ -15,8 +15,8 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
   const [isLoading, setIsLoading] = useState(false);
   const [showFindAccount, setShowFindAccount] = useState(false);
   // 비즈니스 로그인은 아이디도, 로그인 유지도 저장하지 않는다 — 아이디를 채워 주는
-  // 일은 브라우저·OS 의 비밀번호 관리자(autoComplete)가 한다. 저장 옵션은 카카오
-  // 간편로그인에만 있다(utils/loginPersistence).
+  // 일은 브라우저·OS 의 비밀번호 관리자(autoComplete)가 한다. 이제 어느 로그인
+  // 화면에도 저장 옵션이 없다(utils/loginPersistence).
   const [formData, setFormData] = useState({ username: '', password: '' });
 
   const handleSubmit = async (e: React.FormEvent) => {

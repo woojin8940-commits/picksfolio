@@ -7,8 +7,6 @@
  * synchronously on first render.
  */
 
-import { isKakaoKeepLoginEnabled } from './loginPersistence';
-
 /**
  * True when the web app is running inside the native app's WebView.
  *
@@ -56,13 +54,12 @@ export function isMobileDevice(): boolean {
  * refresh the token, and the 2-hour idle logout only applies on desktop, where
  * a browser is much more likely to be shared or left unattended.
  *
- * On desktop the same holds once the user asks for it, and only for Kakao: ticking
- * "간편로그인 저장" next to the Kakao button is an explicit "this is my machine, keep
- * me signed in", so the idle timer is skipped and the session lasts until an
- * explicit logout. ID/password logins and business logins have no such opt-in —
- * on desktop they always fall back to the 2-hour idle logout.
+ * On desktop there is no opt-out: no login screen offers a "stay signed in"
+ * option, so every desktop session — Kakao, ID/password and business alike —
+ * expires after 2 hours of inactivity. Getting back in is one click of the
+ * Kakao button when Kakao's own "간편로그인 저장" is ticked on Kakao's screen;
+ * see utils/loginPersistence.
  */
-export function isPersistentLoginEnv(kind: 'user' | 'business' = 'user'): boolean {
-  if (isMobileDevice()) return true;
-  return kind === 'user' && isKakaoKeepLoginEnabled();
+export function isPersistentLoginEnv(): boolean {
+  return isMobileDevice();
 }

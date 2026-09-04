@@ -4,7 +4,7 @@ import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData, clearLinkCache } from '../services/prefetchService';
-import { apiService } from '../services/apiService';
+import { apiService, type SaveResult } from '../services/apiService';
 import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification } from '../types';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
@@ -802,6 +802,40 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     setTimeout(() => setShowToast(false), 3000);
   };
 
+  const showFailureFeedback = (message: string, type: 'warning' | 'error' = 'error') => {
+    setSaveMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 5000);
+  };
+
+  /**
+   * 저장이 실패한 이유를 화면에 띄울 한 줄로 바꾼다.
+   *
+   * 예전에는 어떤 실패든 "로컬에 저장됨 (클라우드 동기화 재시도 중...)" 하나만
+   * 띄웠다. 그래서 다시 로그인해야 하는 건지, 이미지가 너무 큰 건지, 잠깐 끊긴
+   * 건지 알 수 없었고 — 되지 않는 재시도만 반복됐다.
+   */
+  const saveFailureMessage = (result: { status: number; error: string }): string => {
+    if (result.status === 401) return '로컬에만 저장됨 — 로그인이 만료되었습니다. 다시 로그인해 주세요.';
+    if (result.status === 403) return '로컬에만 저장됨 — 이 계정을 수정할 권한이 없습니다.';
+    if (result.status === 413) return '로컬에만 저장됨 — 저장할 내용이 너무 큽니다. 이미지를 줄여 주세요.';
+    if (!result.error) return '로컬에만 저장됨 — 저장에 실패했습니다. 잠시 후 다시 시도해주세요.';
+    return `로컬에만 저장됨 — ${result.error}`;
+  };
+
+  /**
+   * 로컬 저장. 용량이 꽉 차면 예외가 나는데(base64 이미지가 섞인 문서가 특히 그렇다)
+   * 그대로 던지면 저장 핸들러가 중간에 끊겨 버튼이 "저장 중" 에서 멈춘다.
+   */
+  const writeLocal = (key: string, value: unknown): void => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+      console.warn('[Save] 로컬 저장 실패(저장 공간 부족일 수 있습니다):', err);
+    }
+  };
+
   const handleSaveDesign = async () => {
     setIsSaving(true);
     const designUpdate: Partial<DesignSettings> = {
@@ -833,32 +867,26 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
     // 즉시 로컬 저장
     fullDesignRef.current = designUpdate as Record<string, any>;
-    localStorage.setItem(`picks_profile_${userName.toLowerCase()}`, JSON.stringify(profile));
-    localStorage.setItem(`picks_design_${userName.toLowerCase()}`, JSON.stringify(designUpdate));
-    localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(cleanedSocials));
+    writeLocal(`picks_profile_${userName.toLowerCase()}`, profile);
+    writeLocal(`picks_design_${userName.toLowerCase()}`, designUpdate);
+    writeLocal(`picks_socials_${userName.toLowerCase()}`, cleanedSocials);
     setSocials(cleanedSocials);
 
     // 클라우드 동기화 완료 후 결과 표시
     try {
-      const apiOk = await apiService.saveSiteData(userName, { design: designUpdate as any, profile, socials: cleanedSocials });
-      if (apiOk) {
+      const result = await apiService.saveSiteDataResult(userName, { design: designUpdate as any, profile, socials: cleanedSocials });
+      if (result.ok) {
         clearLinkCache(userName);
         showSuccessFeedback('저장되었습니다!');
       } else {
-        setSaveMessage('로컬에 저장됨 (클라우드 동기화 실패)');
-        setToastType('warning');
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 3000);
+        showFailureFeedback(saveFailureMessage(result), 'warning');
       }
       // Supabase 동기화 (백그라운드)
       updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials })
         .catch(err => console.warn('[SaveDesign] Supabase 동기화 실패:', err));
     } catch (error) {
       console.error('[SaveDesign] 클라우드 동기화 실패:', error);
-      setSaveMessage('저장 실패 - 다시 시도해주세요');
-      setToastType('error');
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      showFailureFeedback('저장 실패 - 다시 시도해주세요');
     } finally {
       setIsSaving(false);
     }
@@ -866,21 +894,21 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  const saveBlocksToCloud = async (blocksToSave: Block[]): Promise<boolean> => {
+  const saveBlocksToCloud = async (blocksToSave: Block[]): Promise<SaveResult> => {
     try {
-      const apiOk = await apiService.saveSiteData(userName, { blocks: blocksToSave });
+      const result = await apiService.saveSiteDataResult(userName, { blocks: blocksToSave });
       // 저장이 성공하면 프리페치 캐시를 비워, 편집 화면을 다시 열어도
       // 방금 저장한 내용이 즉시 반영되도록 한다(오래된 캐시가 덮어쓰지 않게).
-      if (apiOk) clearLinkCache(userName);
+      if (result.ok) clearLinkCache(userName);
       // Supabase 동기화도 시도 (백그라운드)
       Promise.all([
         updateLinkGridItems(blocksToSave),
         updateSiteSettings(userName, { blocks: blocksToSave })
       ]).catch(err => console.warn('[SaveBlocks] Supabase 동기화 실패:', err));
-      return apiOk;
+      return result;
     } catch (error) {
       console.error('[SaveBlocks] 클라우드 동기화 실패:', error);
-      return false;
+      return { ok: false, status: 0, error: '저장에 실패했습니다. 잠시 후 다시 시도해주세요.', retryable: true };
     }
   };
 
@@ -896,21 +924,22 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
     // 즉시 로컬 저장 및 UI 반영
     setBlocks(sanitizedBlocks);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(sanitizedBlocks));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, sanitizedBlocks);
 
     // 클라우드 동기화 완료 후 결과 표시
-    const apiOk = await saveBlocksToCloud(sanitizedBlocks);
-    if (apiOk) {
+    const result = await saveBlocksToCloud(sanitizedBlocks);
+    if (result.ok) {
       showSuccessFeedback('저장 완료!');
+    } else if (!result.retryable) {
+      // 같은 요청을 다시 보내도 같은 응답이 온다. 무엇을 해야 하는지 바로 알린다.
+      showFailureFeedback(saveFailureMessage(result), 'warning');
     } else {
-      setSaveMessage('로컬에 저장됨 (클라우드 동기화 재시도 중...)');
-      setToastType('warning');
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
-      // 재시도
-      const retryOk = await saveBlocksToCloud(sanitizedBlocks);
-      if (retryOk) {
+      showFailureFeedback('로컬에 저장됨 (클라우드 동기화 재시도 중...)', 'warning');
+      const retry = await saveBlocksToCloud(sanitizedBlocks);
+      if (retry.ok) {
         showSuccessFeedback('클라우드 동기화 완료!');
+      } else {
+        showFailureFeedback(saveFailureMessage(retry), 'warning');
       }
     }
     setIsSaving(false);
@@ -937,7 +966,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     const updated = [...blocks];
     [updated[idxA], updated[idxB]] = [updated[idxB], updated[idxA]];
     setBlocks(updated);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updated));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updated);
     saveBlocksToCloud(updated).catch(() => {});
   };
 
@@ -964,7 +993,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     const [moved] = updated.splice(fromIdx, 1);
     updated.splice(toIdx, 0, moved);
     setBlocks(updated);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updated));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updated);
     saveBlocksToCloud(updated).catch(() => {});
     setDraggedBlockId(null);
   };
@@ -1106,7 +1135,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
     const updatedBlocks = blocks.map(b => b.category === oldName ? { ...b, category: trimmed } : b);
     setBlocks(updatedBlocks);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
     saveBlocksToCloud(updatedBlocks).catch(() => {});
     const updatedCats = linkGridCategories.map(c => c === oldName ? trimmed : c);
     setLinkGridCategories(updatedCats);
@@ -1123,7 +1152,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const executeDeleteCategory = (catName: string) => {
     const updatedBlocks = blocks.filter(b => b.category !== catName);
     setBlocks(updatedBlocks);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
     saveBlocksToCloud(updatedBlocks).catch(() => {});
     const updatedCats = linkGridCategories.filter(c => c !== catName);
     setLinkGridCategories(updatedCats);
@@ -1171,7 +1200,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       reordered.push(...blocks.filter(b => (b.category || '') === cat));
     }
     setBlocks(reordered);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(reordered));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, reordered);
     saveBlocksToCloud(reordered).catch(() => {});
   };
 
@@ -1195,17 +1224,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       updatedBlocks = blocks.map(b => b.id === isEditing ? sanitizedEditForm : b);
     }
     setBlocks(updatedBlocks);
-    localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
 
     // 클라우드 동기화 완료 후 결과 표시
-    const apiOk = await saveBlocksToCloud(updatedBlocks);
-    if (apiOk) {
+    const result = await saveBlocksToCloud(updatedBlocks);
+    if (result.ok) {
       showSuccessFeedback('포스트가 수정되었습니다!');
     } else {
-      setSaveMessage('로컬에 저장됨 (클라우드 동기화 실패)');
-      setToastType('warning');
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      showFailureFeedback(saveFailureMessage(result), 'warning');
     }
     setIsEditing(null);
     setIsSaving(false);
@@ -1218,7 +1244,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     if (confirmDelete.type === 'block') {
       const updatedBlocks = blocks.filter(b => b.id !== confirmDelete.id);
       setBlocks(updatedBlocks);
-      localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(updatedBlocks));
+      writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
       // 클라우드 동기화 (백그라운드)
       saveBlocksToCloud(updatedBlocks).catch(err => console.warn('[DeleteBlock] 클라우드 동기화 실패:', err));
       setIsEditing(null);
