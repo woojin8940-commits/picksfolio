@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Image as ImageIcon, CornerDownRight } from 'lucide-react';
-import { apiService, DmAutomationItem, DmMessageButton, InstagramMedia } from '../services/apiService';
+import {
+  Send, X, Loader2, AlertCircle, Check, Plus, Trash2, Image as ImageIcon, CornerDownRight,
+  GalleryHorizontalEnd, Pencil,
+} from 'lucide-react';
+import { apiService, DmAutomationItem, DmCarouselCard, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface ManualDmModalProps {
@@ -60,7 +63,19 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
   const [selectedRuleId, setSelectedRuleId] = useState<string>('custom');
   const [messageType, setMessageType] = useState<'text' | 'carousel'>('text');
+  /**
+   * 텍스트 형식에서는 DM 본문, 캐러셀 형식에서는 카드 앞에 먼저 보내는 인사말이다.
+   * (캐러셀에서는 비워 둘 수 있다 — 그때는 카드만 발송된다.)
+   */
   const [message, setMessage] = useState(defaultMessage);
+  /**
+   * 발송할 캐러셀 카드.
+   *
+   * 예전에는 이 화면이 카드를 아예 다루지 않았다. 캐러셀 자동화를 골라도 화면에는
+   * 텍스트 입력칸만 보였고, 본문이 비어 있으면 서버가 "보낼 내용이 없습니다"로
+   * 막았다 — 자동 발송은 카드가 나가는데 [보내기] 버튼만 아무 일도 하지 않았다.
+   */
+  const [cards, setCards] = useState<DmCarouselCard[]>([]);
   const [buttons, setButtons] = useState<DmMessageButton[]>([
     { id: genId('btn'), label: defaultButtonLabel, url: '' },
   ]);
@@ -85,24 +100,41 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     setResult(null);
     if (initialAutomation) {
       setSelectedRuleId(initialAutomation.id);
-      setMessage(initialAutomation.message || '');
-      setMessageType(initialAutomation.messageType || 'text');
-      setButtons(initialAutomation.buttons?.length ? [...initialAutomation.buttons] : []);
-      setReplies(repliesOf(initialAutomation));
+      loadFrom(initialAutomation);
     } else {
       setSelectedRuleId('custom');
       setMessage(defaultMessage);
       setMessageType('text');
       setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
+      setCards([]);
       setReplies([]);
     }
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [initialAutomation, isOpen]);
 
-  const handleMessageChange = (value: string) => {
-    setMessage(value);
-    setMessageType('text');
+  /**
+   * 자동화 한 건의 설정을 이 화면으로 옮긴다.
+   *
+   * 캐러셀 자동화는 본문 대신 카드가 내용이므로, 카드와 인사말을 함께 가져와야
+   * 편집 화면에서 만든 것과 같은 메시지가 나간다.
+   */
+  const loadFrom = (a: DmAutomationItem) => {
+    const carousel = a.messageType === 'carousel';
+    setMessageType(carousel ? 'carousel' : 'text');
+    setMessage(carousel ? a.cardIntro || '' : a.message || '');
+    setCards(carousel ? [...(a.cards || [])] : []);
+    setButtons(a.buttons?.length ? [...a.buttons] : []);
+    setReplies(repliesOf(a));
   };
+
+  /**
+   * 본문 입력.
+   *
+   * 예전에는 여기서 형식을 텍스트로 되돌렸다. 그래서 캐러셀 자동화를 고른 뒤 문구를
+   * 한 글자만 손대도 카드가 조용히 빠지고 텍스트만 나갔다. 지금은 캐러셀에서 이 칸이
+   * 인사말이므로 형식을 바꾸지 않는다(형식은 템플릿 선택으로만 정해진다).
+   */
+  const handleMessageChange = (value: string) => setMessage(value);
 
   const handleSelectRule = (ruleId: string) => {
     setSelectedRuleId(ruleId);
@@ -110,16 +142,12 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       setMessage(defaultMessage);
       setMessageType('text');
       setButtons([{ id: genId('btn'), label: defaultButtonLabel, url: '' }]);
+      setCards([]);
       setReplies([]);
       return;
     }
     const found = automations.find((a) => a.id === ruleId);
-    if (found) {
-      setMessage(found.message || '');
-      setMessageType(found.messageType || 'text');
-      setButtons(found.buttons ? [...found.buttons] : []);
-      setReplies(repliesOf(found));
-    }
+    if (found) loadFrom(found);
   };
 
   const handleAddButton = () => {
@@ -145,6 +173,21 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     setReplies(replies.filter((_, i) => i !== index));
   };
 
+  /**
+   * 발송기와 같은 기준으로 카드를 고른다(제목 또는 http/https 이미지 주소).
+   * 화면에서 세는 장수와 실제로 도착하는 장수가 어긋나지 않게 한다.
+   */
+  const isValidCardImage = (raw: string): boolean => {
+    try {
+      const u = new URL((raw || '').trim());
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+  const sendableCards = cards.filter((c) => c.title?.trim() || isValidCardImage(c.imageUrl));
+  const isCarousel = messageType === 'carousel' && sendableCards.length > 0;
+
   const selectedRule = automations.find((a) => a.id === selectedRuleId);
   const activeMediaScope = selectedRule ? selectedRule.mediaScope : initialAutomation?.mediaScope;
   const activeMediaIds = selectedRule ? selectedRule.mediaIds : initialAutomation?.mediaIds;
@@ -156,8 +199,9 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const handleSend = async () => {
     const validReplies = replies.map((r) => r.trim()).filter(Boolean);
 
-    // DM 본문 없이 댓글 답글만 보내는 것도 발송이다. 둘 다 비었을 때만 막는다.
-    if (!message.trim() && validReplies.length === 0) {
+    // 캐러셀은 본문 없이 카드만으로 보내는 것이 정상이다.
+    // 본문·카드·답글이 전부 비었을 때만 막는다.
+    if (!message.trim() && sendableCards.length === 0 && validReplies.length === 0) {
       setResult({
         tone: 'error',
         message: t(
@@ -180,10 +224,12 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
-        message: message.trim(),
+        // 캐러셀에서는 이 칸이 본문이 아니라 카드 앞 인사말이다.
+        message: isCarousel ? '' : message.trim(),
+        intro: isCarousel ? message.trim() : undefined,
         messageType,
-        buttons: validButtons,
-        cards: messageType === 'carousel' ? (selectedRule?.cards || initialAutomation?.cards) : undefined,
+        buttons: isCarousel ? undefined : validButtons,
+        cards: isCarousel ? sendableCards : undefined,
         replies: validReplies,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
@@ -358,18 +404,70 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
           )}
 
-          {/* DM 메시지 본문 */}
+          {/* 캐러셀 카드 — 무엇이 발송되는지 그대로 보여준다(내용 수정은 편집 화면에서) */}
+          {messageType === 'carousel' && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                  <GalleryHorizontalEnd size={13} className="text-pink-500" />
+                  발송할 캐러셀 카드 {sendableCards.length}장
+                </label>
+                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                  <Pencil size={10} /> 카드 수정은 자동화 편집에서
+                </span>
+              </div>
+              {sendableCards.length === 0 ? (
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-2 text-xs font-bold text-amber-700">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">
+                    이 자동화에는 발송할 카드가 없어요. 자동화 편집에서 카드에 이미지나 제목을 넣어 주세요.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {sendableCards.map((c) => (
+                    <div key={c.id} className="w-28 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="w-full aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+                        {c.imageUrl
+                          ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          : <ImageIcon size={18} className="text-slate-300" />}
+                      </div>
+                      <div className="p-2">
+                        <p data-user-content className="text-[11px] font-black text-slate-800 truncate">
+                          {c.title || '제목 없음'}
+                        </p>
+                        {c.buttonLabel && (
+                          <p data-user-content className="text-[10px] font-bold text-pink-600 truncate mt-0.5">{c.buttonLabel}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DM 메시지 본문 (캐러셀에서는 카드 앞 인사말) */}
           <div>
             <label className="block text-xs font-black text-slate-700 mb-1.5">
-              {t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
+              {messageType === 'carousel'
+                ? '카드 앞 인사말 (선택)'
+                : t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
             </label>
             <textarea
               value={message}
               onChange={(e) => handleMessageChange(e.target.value)}
               rows={3}
-              placeholder={t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
+              placeholder={messageType === 'carousel'
+                ? '비워 두면 카드만 발송됩니다.'
+                : t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
               className="w-full p-4 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 resize-none"
             />
+            {messageType === 'carousel' && (
+              <p className="text-[11px] text-slate-500 font-medium mt-1.5">
+                적어 두면 이 문구가 먼저 도착하고, 이어서 카드가 도착합니다.
+              </p>
+            )}
           </div>
 
           {/* 댓글 공개 답글 — 입력해 두면 DM 과 함께 나간다 */}
@@ -429,8 +527,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             )}
           </div>
 
-          {/* 링크 버튼 설정 */}
-          <div>
+          {/* 링크 버튼 설정 — 캐러셀은 카드마다 버튼이 따로 있어 여기서는 다루지 않는다. */}
+          <div className={messageType === 'carousel' ? 'hidden' : ''}>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-black text-slate-700">
                 {t('dm.buttons', '링크 버튼 설정', 'Link Buttons')}

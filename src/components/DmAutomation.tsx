@@ -3,9 +3,13 @@ import {
   Instagram, Check, Plus, Trash2, Send, Loader2, MessageSquare, MessageCircle,
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
-  LayoutGrid, AlignLeft, GalleryHorizontalEnd,
+  LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
+  ArrowUp, ArrowDown, Images,
 } from 'lucide-react';
-import { apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard, InstagramMedia } from '../services/apiService';
+import {
+  apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
+  InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+} from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
@@ -51,6 +55,7 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   mediaIds: [],
   messageType: 'text',
   message: defaultDmMessage(t),
+  cardIntro: '',
   buttons: [{ id: genId('btn'), label: defaultButtonLabel(t), url: '' }],
   cards: [],
   createdAt: new Date().toISOString(),
@@ -66,6 +71,7 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds : [],
   mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
   messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
+  cardIntro: typeof a.cardIntro === 'string' ? a.cardIntro : '',
 });
 
 const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
@@ -80,6 +86,9 @@ const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
  * (발송 로직: netlify/functions/_shared/instagram-dm.mts)
  */
 const CARD_TEXT_MAX = 80;
+
+/** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
+const CARD_MAX_COUNT = 10;
 
 /** Graph API 는 http/https 절대 URL 만 링크 버튼으로 받는다. */
 const isValidLinkUrl = (raw: string): boolean => {
@@ -109,6 +118,20 @@ const normalizeLinkUrl = (raw: string): string => {
 
 /** 입력값이 링크로 쓸 수 없는 상태인지(비어 있지 않은데 정규화도 안 되는 경우). */
 const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !normalizeLinkUrl(raw);
+
+/**
+ * 이 카드가 실제로 발송되는지.
+ *
+ * 발송기(_shared/instagram-dm.mts)는 제목이나 올바른 이미지 주소가 있는 카드만
+ * 제네릭 템플릿 요소로 만든다. 화면의 판단 기준을 같게 두지 않으면 "카드 3장"으로
+ * 보이는 설정이 실제로는 2장만 도착한다.
+ */
+const cardSendable = (c: DmCarouselCard): boolean =>
+  Boolean(c.title.trim()) || isValidLinkUrl(c.imageUrl);
+
+/** 인스타그램 피드 게시물에서 카드 이미지로 쓸 수 있는 사진 주소. (영상은 썸네일) */
+const feedImageOf = (m: InstagramMedia): string =>
+  (m.mediaType === 'VIDEO' ? m.thumbnailUrl || m.mediaUrl : m.mediaUrl || m.thumbnailUrl) || '';
 
 /* ─────────── 자동화 카드에 표시하는 대상 피드 썸네일 ─────────── */
 // 자동화 목록만 보고는 "어떤 게시물에 걸어둔 자동화인지" 알 수 없으므로, 카드마다 대상
@@ -204,11 +227,15 @@ const DmPreview: React.FC<{
   igUsername: string;
   messageType: DmAutomationItem['messageType'];
   message: string;
+  /** 캐러셀 앞에 먼저 도착하는 인사말(선택). */
+  intro?: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
-}> = ({ igUsername, messageType, message, buttons, cards }) => {
-  const validCards = cards.filter((c) => c.title || c.imageUrl || c.buttonUrl);
+}> = ({ igUsername, messageType, message, intro = '', buttons, cards }) => {
+  // 미리보기도 발송기와 같은 기준으로 카드를 고른다(제목 또는 올바른 이미지 주소).
+  const validCards = cards.filter(cardSendable);
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
+  const introText = intro.trim();
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
   // 본문이 카드 제목 한도를 넘으면 본문 텍스트와 버튼 카드가 두 개의 버블로 도착한다.
@@ -225,7 +252,16 @@ const DmPreview: React.FC<{
         </div>
         <div className="max-w-[85%] min-w-0">
           {isCarousel ? (
-            <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
+            <div className="space-y-1.5">
+              {/* 인사말을 적어 두면 텍스트 한 통이 먼저 도착하고, 이어서 카드가 도착한다. */}
+              {introText && (
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+                  <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                    {introText}
+                  </p>
+                </div>
+              )}
+              <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
               {validCards.map((c) => (
                 <div key={c.id} className="w-40 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                   <div className="w-full aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -246,6 +282,7 @@ const DmPreview: React.FC<{
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -299,6 +336,366 @@ const DmPreview: React.FC<{
           링크 버튼은 카드 형태로 전송됩니다. 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
         </p>
       )}
+      {isCarousel && (
+        <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
+          캐러셀 카드 {validCards.length}장이 발송됩니다{introText ? ' (인사말 텍스트가 먼저 도착합니다)' : ''}. 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+        </p>
+      )}
+    </div>
+  );
+};
+
+/* ────────────────────────── 캐러셀 카드 빌더 ────────────────────────── */
+/**
+ * 카드의 이미지·문구·버튼을 만드는 편집기.
+ *
+ * 이미지는 세 가지 방법으로 넣는다 — 파일 올리기, 인스타그램 피드에서 고르기, 주소
+ * 직접 붙여넣기. 어느 쪽이든 카드에 저장되는 값은 만료되지 않는 공개 절대주소다.
+ * 인스타그램은 발송할 때 이 주소로 이미지를 직접 받아가기 때문에, 화면에서만 열리는
+ * 값(미리보기용 `blob:` 주소, 서명이 붙은 피드 CDN 주소)을 저장하면 설정은 정상으로
+ * 보이는데 카드가 이미지 없이 도착한다. 그래서 피드 사진도 고른 순간 서버가 우리
+ * 저장소로 복사한다(api-dm-card-image).
+ *
+ * 순서도 여기서 바꾼다. 캐러셀은 왼쪽부터 순서대로 도착하므로, 순서를 못 바꾸면
+ * 카드를 지우고 다시 만드는 수밖에 없다.
+ */
+const CarouselBuilder: React.FC<{
+  userName: string;
+  cards: DmCarouselCard[];
+  media: InstagramMedia[];
+  mediaLoading: boolean;
+  onChange: (cards: DmCarouselCard[]) => void;
+}> = ({ userName, cards, media, mediaLoading, onChange }) => {
+  /** 카드별 이미지 작업 상태. 업로드는 몇 초 걸릴 수 있어 진행률을 그대로 보여준다. */
+  const [busy, setBusy] = useState<Record<string, { ratio: number; label: string }>>({});
+  const [imageError, setImageError] = useState<Record<string, string>>({});
+  /** 피드 사진 고르기를 펼쳐 둔 카드. */
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+
+  const feedPhotos = useMemo(() => media.filter((m) => feedImageOf(m)), [media]);
+
+  const setCard = (id: string, p: Partial<DmCarouselCard>) =>
+    onChange(cards.map((c) => (c.id === id ? { ...c, ...p } : c)));
+
+  const clearCardState = (id: string) => {
+    setBusy((b) => { const next = { ...b }; delete next[id]; return next; });
+    setImageError((e) => { const next = { ...e }; delete next[id]; return next; });
+  };
+
+  const move = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= cards.length) return;
+    const next = [...cards];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+
+  const duplicate = (index: number) => {
+    if (cards.length >= CARD_MAX_COUNT) return;
+    const next = [...cards];
+    next.splice(index + 1, 0, { ...cards[index], id: genId('card') });
+    onChange(next);
+  };
+
+  const remove = (id: string) => {
+    if (pickerFor === id) setPickerFor(null);
+    clearCardState(id);
+    onChange(cards.filter((c) => c.id !== id));
+  };
+
+  /** 이미지 작업을 감싸는 공통 흐름 — 진행 표시, 성공 시 주소 반영, 실패 시 사유 노출. */
+  const runImageTask = async (
+    cardId: string,
+    label: string,
+    task: (onProgress: (ratio: number) => void) => Promise<{ url?: string; error?: string }>,
+  ) => {
+    setImageError((e) => ({ ...e, [cardId]: '' }));
+    setBusy((b) => ({ ...b, [cardId]: { ratio: 0, label } }));
+    const result = await task((ratio) =>
+      setBusy((b) => (b[cardId] ? { ...b, [cardId]: { ratio, label } } : b)),
+    );
+    setBusy((b) => { const next = { ...b }; delete next[cardId]; return next; });
+    if (result.url) setCard(cardId, { imageUrl: result.url });
+    else setImageError((e) => ({ ...e, [cardId]: result.error || '이미지를 넣지 못했습니다. 다시 시도해 주세요.' }));
+  };
+
+  const uploadImage = (cardId: string, file: File) =>
+    runImageTask(cardId, '올리는 중', (onProgress) =>
+      apiService.uploadDmCardImage(userName, file, onProgress),
+    );
+
+  const pickFromFeed = (cardId: string, m: InstagramMedia) => {
+    const source = feedImageOf(m);
+    if (!source) {
+      setImageError((e) => ({ ...e, [cardId]: '이 게시물에서는 사진을 가져올 수 없어요. 파일로 올려 주세요.' }));
+      return;
+    }
+    setPickerFor(null);
+    return runImageTask(cardId, '피드에서 가져오는 중', () =>
+      apiService.copyDmCardImageFromFeed(userName, source),
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-slate-500 font-medium">
+        이미지 카드를 좌우로 넘겨보는 캐러셀 메시지예요. 카드는 최대 {CARD_MAX_COUNT}장까지 추가할 수 있고,
+        왼쪽 카드부터 순서대로 도착합니다. 이미지는 정사각형(1:1)을 권장하며 {DM_CARD_IMAGE_MAX_MB}MB 이하 JPG·PNG·WEBP 를 넣을 수 있어요.
+      </p>
+
+      {cards.length === 0 && (
+        <div className="text-center py-6 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
+          <LayoutGrid size={24} className="text-slate-300 mx-auto mb-2" />
+          <p className="text-xs font-bold text-slate-500">카드를 추가해 캐러셀을 만들어보세요</p>
+        </div>
+      )}
+
+      {cards.map((c, i) => {
+        // 카드 버튼도 링크가 잘못되면 발송 시 통째로 빠진다.
+        const cardUrlInvalid =
+          linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim());
+        const imageInvalid = linkUrlBroken(c.imageUrl);
+        const working = busy[c.id];
+        const error = imageError[c.id];
+        // 제목도 이미지도 없는 카드는 발송에서 빠진다. 저장 전에 알려 준다.
+        const empty = !cardSendable(c);
+        return (
+          <div key={c.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-slate-500">카드 {i + 1}</span>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  title="앞으로 옮기기"
+                  aria-label="앞으로 옮기기"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:bg-white hover:text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === cards.length - 1}
+                  title="뒤로 옮기기"
+                  aria-label="뒤로 옮기기"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:bg-white hover:text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowDown size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => duplicate(i)}
+                  disabled={cards.length >= CARD_MAX_COUNT}
+                  title="카드 복제"
+                  aria-label="카드 복제"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:bg-white hover:text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <Copy size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => remove(c.id)}
+                  title="카드 삭제"
+                  aria-label="카드 삭제"
+                  className="w-7 h-7 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+
+            {/* 이미지 — 올리기 / 피드에서 고르기 / 주소 붙여넣기 */}
+            <div className="flex gap-3">
+              <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
+                {c.imageUrl && !imageInvalid
+                  ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
+                  : <ImageIcon size={20} className="text-slate-300" />}
+                {working && (
+                  <div className="absolute inset-0 bg-white/85 flex flex-col items-center justify-center gap-1">
+                    <Loader2 size={16} className="animate-spin text-pink-500" />
+                    <span className="text-[10px] font-black text-slate-500">
+                      {working.ratio > 0 ? `${Math.round(working.ratio * 100)}%` : working.label}
+                    </span>
+                  </div>
+                )}
+                {c.imageUrl && !working && (
+                  <button
+                    type="button"
+                    onClick={() => { clearCardState(c.id); setCard(c.id, { imageUrl: '' }); }}
+                    title="이미지 지우기"
+                    aria-label="이미지 지우기"
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0 space-y-2">
+                <div className="flex gap-1.5">
+                  <label
+                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2 text-[11px] font-black text-slate-600 ${
+                      working ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-pink-400 hover:text-pink-600'
+                    }`}
+                  >
+                    <Upload size={12} /> 이미지 올리기
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      disabled={Boolean(working)}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        // 같은 파일을 다시 고를 수 있게 값을 비운다(안 비우면 onChange 가 안 뜬다).
+                        e.target.value = '';
+                        if (file) uploadImage(c.id, file);
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPickerFor(pickerFor === c.id ? null : c.id)}
+                    disabled={Boolean(working)}
+                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border py-2 text-[11px] font-black transition-colors disabled:opacity-50 ${
+                      pickerFor === c.id
+                        ? 'border-pink-500 bg-pink-50 text-pink-600'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-pink-400 hover:text-pink-600'
+                    }`}
+                  >
+                    <Images size={12} /> 내 피드에서 고르기
+                  </button>
+                </div>
+                <input
+                  value={c.imageUrl}
+                  onChange={(e) => setCard(c.id, { imageUrl: e.target.value })}
+                  placeholder="또는 이미지 주소 붙여넣기 (https://...)"
+                  className={`w-full bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                    imageInvalid ? 'border-red-300' : 'border-slate-200'
+                  }`}
+                />
+                {imageInvalid && (
+                  <p className="flex items-center gap-1 text-[10px] font-bold text-red-500">
+                    <AlertCircle size={11} />
+                    인스타그램이 이미지를 직접 받아가므로 https:// 로 시작하는 공개 주소여야 합니다.
+                  </p>
+                )}
+                {error && (
+                  <p className="flex items-start gap-1 text-[10px] font-bold text-red-500">
+                    <AlertCircle size={11} className="mt-0.5 shrink-0" />
+                    <span className="leading-relaxed">{error}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 피드 사진 고르기 */}
+            {pickerFor === c.id && (
+              <div className="border border-slate-200 bg-white rounded-xl p-2.5">
+                {mediaLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-6 text-slate-400">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span className="text-[11px] font-bold">게시물을 불러오는 중…</span>
+                  </div>
+                ) : feedPhotos.length === 0 ? (
+                  <div className="text-center py-6">
+                    <ImageIcon size={22} className="text-slate-300 mx-auto mb-1.5" />
+                    <p className="text-[11px] font-bold text-slate-500">가져올 피드 사진이 없어요</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">파일로 직접 올려도 됩니다.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[10px] font-bold text-slate-400 mb-2">
+                      고른 사진은 카드용으로 복사돼요. 원본 게시물을 지워도 카드 이미지는 남습니다.
+                    </p>
+                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                      {feedPhotos.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => pickFromFeed(c.id, m)}
+                          title={m.caption?.slice(0, 60) || '피드 사진'}
+                          className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-pink-500 transition-all"
+                        >
+                          <img src={feedImageOf(m)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* 문구 */}
+            <div className="space-y-2">
+              <div>
+                <input
+                  value={c.title}
+                  onChange={(e) => setCard(c.id, { title: e.target.value })}
+                  placeholder="제목 (예: 여름 신제품)"
+                  maxLength={CARD_TEXT_MAX}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+                />
+                <p className="text-right text-[10px] text-slate-400 font-bold mt-0.5">{c.title.length}/{CARD_TEXT_MAX}</p>
+              </div>
+              <div>
+                <input
+                  value={c.subtitle}
+                  onChange={(e) => setCard(c.id, { subtitle: e.target.value })}
+                  placeholder="설명 (선택)"
+                  maxLength={CARD_TEXT_MAX}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium focus:outline-none focus:border-pink-500"
+                />
+                <p className="text-right text-[10px] text-slate-400 font-bold mt-0.5">{c.subtitle.length}/{CARD_TEXT_MAX}</p>
+              </div>
+            </div>
+
+            {/* 카드 버튼 */}
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={c.buttonLabel}
+                onChange={(e) => setCard(c.id, { buttonLabel: e.target.value })}
+                placeholder="버튼 이름 (예: 보기)"
+                maxLength={20}
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
+              />
+              <input
+                value={c.buttonUrl}
+                onChange={(e) => setCard(c.id, { buttonUrl: e.target.value })}
+                placeholder="버튼 링크 (https://...)"
+                className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
+                  cardUrlInvalid ? 'border-red-300' : 'border-slate-200'
+                }`}
+              />
+            </div>
+            {cardUrlInvalid && (
+              <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-red-500">
+                <AlertCircle size={11} />
+                https:// 로 시작하는 주소를 입력해야 카드 버튼이 전송됩니다.
+              </p>
+            )}
+            {empty && !working && (
+              <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-amber-600">
+                <AlertCircle size={11} />
+                이미지나 제목 중 하나는 있어야 이 카드가 발송됩니다.
+              </p>
+            )}
+          </div>
+        );
+      })}
+
+      {cards.length < CARD_MAX_COUNT ? (
+        <button
+          type="button"
+          onClick={() => onChange([...cards, blankCard()])}
+          className="w-full flex items-center justify-center gap-1.5 border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500"
+        >
+          <ImagePlus size={14} /> 카드 추가 ({cards.length}/{CARD_MAX_COUNT})
+        </button>
+      ) : (
+        <p className="text-center text-[11px] font-bold text-slate-400">카드는 최대 {CARD_MAX_COUNT}장까지 넣을 수 있어요.</p>
+      )}
     </div>
   );
 };
@@ -306,12 +703,14 @@ const DmPreview: React.FC<{
 /* ────────────────────────── 자동화 생성/편집 모달 ────────────────────────── */
 const AutomationEditor: React.FC<{
   initial: DmAutomationItem;
+  /** 로그인 계정(업로드 저장 경로에 쓴다). 인스타그램 계정명과 다를 수 있다. */
+  userName: string;
   igUsername: string;
   media: InstagramMedia[];
   mediaLoading: boolean;
   onClose: () => void;
   onSave: (a: DmAutomationItem) => void;
-}> = ({ initial, igUsername, media, mediaLoading, onClose, onSave }) => {
+}> = ({ initial, userName, igUsername, media, mediaLoading, onClose, onSave }) => {
   const [draft, setDraft] = useState<DmAutomationItem>(initial);
   const [keywordInput, setKeywordInput] = useState('');
 
@@ -331,17 +730,13 @@ const AutomationEditor: React.FC<{
   const removeButton = (id: string) =>
     patch({ buttons: draft.buttons.filter((b) => b.id !== id) });
 
-  const updateCard = (id: string, p: Partial<DmCarouselCard>) =>
-    patch({ cards: draft.cards.map((c) => (c.id === id ? { ...c, ...p } : c)) });
-  const addCard = () => patch({ cards: [...draft.cards, blankCard()] });
-  const removeCard = (id: string) => patch({ cards: draft.cards.filter((c) => c.id !== id) });
-
   const toggleMedia = (id: string) => {
     const has = draft.mediaIds.includes(id);
     patch({ mediaIds: has ? draft.mediaIds.filter((m) => m !== id) : [...draft.mediaIds, id] });
   };
 
-  const validCards = draft.cards.filter((c) => c.title || c.imageUrl || c.buttonUrl);
+  // 실제로 발송되는 카드(제목 또는 올바른 이미지 주소)가 한 장이라도 있어야 저장한다.
+  const validCards = draft.cards.filter(cardSendable);
   const messageValid = draft.messageType === 'carousel'
     ? validCards.length > 0
     : draft.message.trim().length > 0;
@@ -351,12 +746,34 @@ const AutomationEditor: React.FC<{
   // "설정은 저장됐는데 버튼만 안 보이는" 상황을 없앤다.
   const brokenLinks =
     draft.buttons.some((b) => linkUrlBroken(b.url) || (Boolean(b.label.trim()) && !b.url.trim())) ||
-    draft.cards.some((c) => linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim()));
+    draft.cards.some(
+      (c) =>
+        linkUrlBroken(c.buttonUrl) ||
+        (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim()) ||
+        // 카드 이미지도 인스타그램이 직접 받아가는 주소다. 잘못돼 있으면 서버가 저장을 거절한다.
+        linkUrlBroken(c.imageUrl),
+    );
 
   const canSave = messageValid &&
     mediaValid &&
     !brokenLinks &&
     (draft.commentMatch === 'all' || draft.keywords.length > 0);
+
+  /**
+   * 저장 버튼이 잠긴 이유. 예전에는 버튼만 흐려져서, 카드를 여러 장 만들어 둔
+   * 사용자가 "왜 설정 완료가 안 눌리는지" 알 방법이 없었다.
+   */
+  const saveBlockedReason = canSave
+    ? ''
+    : !mediaValid
+      ? '적용할 게시물을 한 개 이상 선택해주세요.'
+      : draft.commentMatch === 'keyword' && draft.keywords.length === 0
+        ? '반응할 키워드를 한 개 이상 추가해주세요.'
+        : brokenLinks
+          ? '링크·이미지 주소를 https:// 로 시작하는 주소로 고쳐주세요.'
+          : draft.messageType === 'carousel'
+            ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
+            : '보낼 DM 메시지를 입력해주세요.';
 
   const handleSave = () => {
     if (!canSave) return;
@@ -365,7 +782,11 @@ const AutomationEditor: React.FC<{
       ...draft,
       name: draft.name.trim() || (draft.commentMatch === 'keyword' ? `키워드 DM` : '댓글 DM'),
       buttons: draft.buttons.map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
-      cards: draft.cards.map((c) => ({ ...c, buttonUrl: normalizeLinkUrl(c.buttonUrl) })),
+      cards: draft.cards.map((c) => ({
+        ...c,
+        buttonUrl: normalizeLinkUrl(c.buttonUrl),
+        imageUrl: normalizeLinkUrl(c.imageUrl),
+      })),
     });
   };
 
@@ -592,7 +1013,13 @@ const AutomationEditor: React.FC<{
                   <button
                     key={opt.t}
                     type="button"
-                    onClick={() => patch({ messageType: opt.t })}
+                    onClick={() => patch(
+                      // 캐러셀로 바꾸면 빈 카드 한 장을 미리 놓아 준다. 빈 화면에서
+                      // '카드 추가'를 먼저 찾아야 하면 무엇을 채워야 하는지 보이지 않는다.
+                      opt.t === 'carousel' && draft.cards.length === 0
+                        ? { messageType: opt.t, cards: [blankCard()] }
+                        : { messageType: opt.t },
+                    )}
                     className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${
                       draft.messageType === opt.t ? 'border-pink-500 bg-pink-50' : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
@@ -663,87 +1090,32 @@ const AutomationEditor: React.FC<{
                   </div>
                 </>
               ) : (
-                /* 캐러셀 카드 빌더 */
-                <div className="space-y-3">
-                  <p className="text-[11px] text-slate-500 font-medium">이미지 카드를 좌우로 넘겨보는 캐러셀 메시지예요. 카드는 최대 10장까지 추가할 수 있어요.</p>
-                  {draft.cards.length === 0 && (
-                    <div className="text-center py-6 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
-                      <LayoutGrid size={24} className="text-slate-300 mx-auto mb-2" />
-                      <p className="text-xs font-bold text-slate-500">카드를 추가해 캐러셀을 만들어보세요</p>
-                    </div>
-                  )}
-                  {draft.cards.map((c, i) => {
-                    // 카드 버튼도 링크가 잘못되면 발송 시 통째로 빠진다.
-                    const cardUrlInvalid =
-                      linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim());
-                    return (
-                    <div key={c.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black text-slate-500">카드 {i + 1}</span>
-                        <button type="button" onClick={() => removeCard(c.id)} className="w-7 h-7 rounded-lg text-red-400 hover:bg-red-50 flex items-center justify-center">
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
-                          {c.imageUrl
-                            ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" />
-                            : <ImageIcon size={18} className="text-slate-300" />}
-                        </div>
-                        <div className="flex-1 space-y-2">
-                          <input
-                            value={c.imageUrl}
-                            onChange={(e) => updateCard(c.id, { imageUrl: e.target.value })}
-                            placeholder="이미지 URL (https://...)"
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-                          />
-                          <input
-                            value={c.title}
-                            onChange={(e) => updateCard(c.id, { title: e.target.value })}
-                            placeholder="제목"
-                            maxLength={80}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-                          />
-                        </div>
-                      </div>
-                      <input
-                        value={c.subtitle}
-                        onChange={(e) => updateCard(c.id, { subtitle: e.target.value })}
-                        placeholder="설명 (선택)"
-                        maxLength={80}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium focus:outline-none focus:border-pink-500"
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          value={c.buttonLabel}
-                          onChange={(e) => updateCard(c.id, { buttonLabel: e.target.value })}
-                          placeholder="버튼 이름 (예: 보기)"
-                          maxLength={20}
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500"
-                        />
-                        <input
-                          value={c.buttonUrl}
-                          onChange={(e) => updateCard(c.id, { buttonUrl: e.target.value })}
-                          placeholder="버튼 링크 (https://...)"
-                          className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
-                            cardUrlInvalid ? 'border-red-300' : 'border-slate-200'
-                          }`}
-                        />
-                      </div>
-                      {cardUrlInvalid && (
-                        <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-red-500">
-                          <AlertCircle size={11} />
-                          https:// 로 시작하는 주소를 입력해야 카드 버튼이 전송됩니다.
-                        </p>
-                      )}
-                    </div>
-                    );
-                  })}
-                  {draft.cards.length < 10 && (
-                    <button type="button" onClick={addCard} className="w-full border border-dashed border-slate-300 rounded-xl py-2.5 text-xs font-black text-slate-500 hover:border-pink-400 hover:text-pink-500">
-                      + 카드 추가
-                    </button>
-                  )}
+                /* 캐러셀 카드 빌더 — 이미지·문구·버튼·순서를 여기서 만든다. */
+                <div className="space-y-4">
+                  <div>
+                    <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 mb-2">
+                      <AlignLeft size={13} /> 카드 앞 인사말 <span className="text-slate-300 font-bold">(선택)</span>
+                    </label>
+                    <textarea
+                      value={draft.cardIntro || ''}
+                      onChange={(e) => patch({ cardIntro: e.target.value })}
+                      rows={2}
+                      maxLength={1000}
+                      placeholder="예: 문의 주셔서 감사합니다! 아래에서 골라보세요 😊"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      적어 두면 이 문구가 텍스트로 먼저 도착하고, 이어서 카드가 도착합니다. 비워 두면 카드만 발송됩니다.
+                    </p>
+                  </div>
+
+                  <CarouselBuilder
+                    userName={userName}
+                    cards={draft.cards}
+                    media={media}
+                    mediaLoading={mediaLoading}
+                    onChange={(cards) => patch({ cards })}
+                  />
                 </div>
               )}
             </div>
@@ -752,26 +1124,33 @@ const AutomationEditor: React.FC<{
           {/* 우: 미리보기 (데스크톱 고정) */}
           <div className="hidden lg:block bg-slate-50/60 border-l border-slate-100 p-6">
             <div className="sticky top-0">
-              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} intro={draft.cardIntro} buttons={draft.buttons} cards={draft.cards} />
             </div>
           </div>
         </div>
 
         {/* 모바일 미리보기 */}
         <div className="lg:hidden px-5 pb-2">
-          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} intro={draft.cardIntro} buttons={draft.buttons} cards={draft.cards} />
         </div>
 
         {/* 푸터 */}
-        <div className="px-5 md:px-8 py-4 border-t border-slate-100 flex gap-2 shrink-0">
-          <button onClick={onClose} className="flex-1 md:flex-none md:px-8 py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-black hover:bg-slate-200">취소</button>
-          <button
-            onClick={handleSave}
-            disabled={!canSave}
-            className="flex-1 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-orange-500 text-white text-sm font-black shadow-lg shadow-pink-500/25 disabled:opacity-40 disabled:shadow-none hover:opacity-95"
-          >
-            설정 완료
-          </button>
+        <div className="px-5 md:px-8 py-4 border-t border-slate-100 shrink-0">
+          {saveBlockedReason && (
+            <p className="flex items-center gap-1.5 mb-2.5 text-[11px] font-bold text-amber-600">
+              <AlertCircle size={12} className="shrink-0" /> {saveBlockedReason}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 md:flex-none md:px-8 py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-black hover:bg-slate-200">취소</button>
+            <button
+              onClick={handleSave}
+              disabled={!canSave}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-orange-500 text-white text-sm font-black shadow-lg shadow-pink-500/25 disabled:opacity-40 disabled:shadow-none hover:opacity-95"
+            >
+              설정 완료
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1480,7 +1859,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   </span>
                   {a.messageType === 'carousel' && (
                     <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-600 rounded-lg px-2 py-1 text-[11px] font-bold">
-                      <GalleryHorizontalEnd size={11} /> 캐러셀 {a.cards?.filter((c) => c.title || c.imageUrl).length || 0}장
+                      <GalleryHorizontalEnd size={11} /> 캐러셀 {(a.cards || []).filter(cardSendable).length}장
                     </span>
                   )}
                   {a.replyEnabled && (
@@ -1495,19 +1874,37 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   )}
                 </div>
 
+                {/* 캐러셀 카드 이미지 — 목록에서 어떤 카드가 나가는지 바로 보인다. */}
+                {a.messageType === 'carousel' && (a.cards || []).some((c) => c.imageUrl) && (
+                  <div className="flex gap-1.5 mb-3 overflow-hidden">
+                    {(a.cards || []).filter(cardSendable).slice(0, 5).map((c) => (
+                      <div key={c.id} className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center">
+                        {c.imageUrl
+                          ? <img src={c.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          : <ImageIcon size={14} className="text-slate-300" />}
+                      </div>
+                    ))}
+                    {(a.cards || []).filter(cardSendable).length > 5 && (
+                      <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-[11px] font-black text-slate-500">
+                        +{(a.cards || []).filter(cardSendable).length - 5}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-start gap-1.5 text-[12px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2.5 mb-3">
                   <CornerDownRight size={13} className="mt-0.5 shrink-0 text-slate-400" />
-                  {a.messageType === 'carousel' && !a.cards?.find((c) => c.title) ? (
-                    <span className="line-clamp-2">이미지 카드 캐러셀 메시지</span>
-                  ) : (
+                  {(() => {
+                    // 목록에는 실제로 먼저 도착하는 문구를 보여준다 — 인사말이 있으면
+                    // 그것이 첫 메시지이고, 없으면 첫 카드의 제목이 카드에 적힌다.
+                    const line = a.messageType === 'carousel'
+                      ? (a.cardIntro || '').trim() || (a.cards || []).find((c) => c.title.trim())?.title || ''
+                      : a.message;
+                    if (!line) return <span className="line-clamp-2">이미지 카드 캐러셀 메시지</span>;
                     // 저장된 발송 문구는 사용자가 쓴 내용이다. 화면 번역이 손대면 목록에
                     // 보이는 문구와 실제로 나가는 문구가 갈라진다.
-                    <span data-user-content className="line-clamp-2">
-                      {a.messageType === 'carousel'
-                        ? a.cards?.find((c) => c.title)?.title
-                        : a.message}
-                    </span>
-                  )}
+                    return <span data-user-content className="line-clamp-2">{line}</span>;
+                  })()}
                 </div>
 
                 <div className="flex gap-2">
@@ -1554,6 +1951,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       {editing && (
         <AutomationEditor
           initial={editing}
+          userName={userName}
           igUsername={igUsername}
           media={media}
           mediaLoading={mediaLoading}

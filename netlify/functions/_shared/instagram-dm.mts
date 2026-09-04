@@ -34,6 +34,12 @@ export interface DmContent {
   message?: string;
   buttons?: DmButton[];
   cards?: DmCard[];
+  /**
+   * 캐러셀 앞에 먼저 보낼 인사말(선택). 텍스트 형식의 `message` 와 따로 둔다 —
+   * 형식만 캐러셀로 바꿨다고 텍스트용 본문이 함께 나가면, 사용자가 편집 화면에서
+   * 본 적 없는 문구가 발송된다.
+   */
+  intro?: string;
 }
 
 /** 제네릭 템플릿 카드 제목/부제목 길이 제한. */
@@ -89,16 +95,23 @@ function toWebUrlButtons(buttons?: DmButton[]) {
     }));
 }
 
+/**
+ * 카드 목록을 제네릭 템플릿 요소로 바꾼다.
+ *
+ * 이미지 주소는 인스타그램이 발송 시점에 직접 받아가므로 http/https 절대주소만
+ * 싣는다. 그 밖의 값(상대 경로 · `blob:` · 오타)을 그대로 실으면 카드 하나가 아니라
+ * 메시지 전체가 거부돼, 제목·버튼까지 통째로 도착하지 않는다.
+ */
 function toCardElements(cards?: DmCard[]) {
   return (Array.isArray(cards) ? cards : [])
-    .filter((c) => c && (c.title?.trim() || c.imageUrl?.trim()))
+    .filter((c) => c && (c.title?.trim() || isValidLinkUrl(c.imageUrl)))
     .slice(0, CARD_MAX)
     .map((c) => {
       const el: Record<string, unknown> = {
         title: (c.title?.trim() || " ").slice(0, CARD_TEXT_MAX),
       };
       if (c.subtitle?.trim()) el.subtitle = c.subtitle.trim().slice(0, CARD_TEXT_MAX);
-      if (c.imageUrl?.trim()) el.image_url = c.imageUrl.trim();
+      if (isValidLinkUrl(c.imageUrl)) el.image_url = c.imageUrl.trim();
       if (c.buttonLabel?.trim() && isValidLinkUrl(c.buttonUrl)) {
         const url = c.buttonUrl.trim();
         el.default_action = { type: "web_url", url };
@@ -124,12 +137,21 @@ function genericTemplate(elements: unknown[]) {
  * 반환된 순서대로 발송해야 한다(본문 → 버튼 카드).
  */
 export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
-  const message = (content.message || "").trim();
+  let message = (content.message || "").trim();
+  const intro = (content.intro || "").trim();
 
   if (content.messageType === "carousel") {
     const elements = toCardElements(content.cards);
-    if (elements.length > 0) return [genericTemplate(elements)];
-    // 카드가 비어 있으면 아래 텍스트 처리로 폴백한다.
+    if (elements.length > 0) {
+      // 인사말을 적어 두면 텍스트 한 통이 먼저 도착하고, 이어서 카드가 도착한다.
+      return intro
+        ? [{ text: intro.slice(0, TEXT_MAX) }, genericTemplate(elements)]
+        : [genericTemplate(elements)];
+    }
+    // 보낼 카드가 하나도 없으면 아래 텍스트 처리로 폴백한다. 이때 인사말은 본문
+    // 자리를 대신한다 — 카드가 전부 비어 있다고 인사말까지 버리면, 문구를 적어 둔
+    // 사용자에게 아무것도 도착하지 않는다.
+    if (!message) message = intro;
   }
 
   const buttons = toWebUrlButtons(content.buttons);

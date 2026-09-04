@@ -88,6 +88,8 @@ interface SendBody {
   buttons?: DmButton[];
   messageType?: "text" | "carousel";
   cards?: DmCard[];
+  /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
+  intro?: string;
   /**
    * 댓글에 남길 공개 답글 문구. 여러 개면 대상마다 하나를 무작위로 고른다
    * (자동 발송과 같은 방식). 비어 있으면 답글을 달지 않는다.
@@ -161,16 +163,26 @@ export default async (req: Request, context: Context) => {
   const username = (body.username || "").toLowerCase();
   const recipientId = (body.recipientId || "").trim();
   const message = (body.message || "").trim();
+  const intro = (body.intro || "").trim();
+  /**
+   * 캐러셀은 본문 텍스트 없이 카드만으로 보내는 것이 정상이다.
+   *
+   * 예전에는 본문(`message`)이 비어 있으면 카드가 몇 장이든 "보낼 내용이 없습니다"로
+   * 막았다. 그래서 편집 화면에서 캐러셀을 다 만들어 둔 사용자가 [보내기]를 눌러도
+   * 아무것도 나가지 않았다 — 자동 발송은 되는데 수동 발송만 안 되는 상태였다.
+   */
+  const cards = Array.isArray(body.cards) ? body.cards : [];
+  const hasCards = body.messageType === "carousel" && cards.length > 0;
   // 답글 문구는 사용자가 비워 둘 수 있다. 빈 줄을 그대로 보내면 인스타그램이
   // 거절하므로 여기서 걸러 둔다.
   const replies = (Array.isArray(body.replies) ? body.replies : [])
     .map((r) => (typeof r === "string" ? r.trim() : ""))
     .filter(Boolean);
 
-  // DM 본문 없이 답글만 보내는 것도 발송이다. 둘 다 비었을 때만 거절한다.
-  if (!username || (!message && replies.length === 0)) {
+  // DM 본문 없이 답글만 보내는 것도, 카드만 보내는 것도 발송이다. 전부 비었을 때만 거절한다.
+  if (!username || (!message && !intro && !hasCards && replies.length === 0)) {
     return Response.json(
-      { error: "username 과 보낼 내용(DM 본문 또는 댓글 답글)은 필수입니다." },
+      { error: "username 과 보낼 내용(DM 본문 · 캐러셀 카드 · 댓글 답글)은 필수입니다." },
       { status: 400 },
     );
   }
@@ -231,14 +243,19 @@ export default async (req: Request, context: Context) => {
       : "graph.facebook.com";
 
   // 메시지 구조화 (텍스트 / 링크버튼 카드 / 캐러셀)
-  const messages = message
-    ? buildDmMessages({
-        messageType: body.messageType,
-        message,
-        buttons: body.buttons,
-        cards: body.cards,
-      })
-    : [];
+  //
+  // 보낼 것이 없으면 빌더가 빈 배열을 돌려준다. 본문이 비었다고 빌더를 건너뛰면
+  // 카드만 있는 캐러셀이 통째로 사라지므로, 판단은 빌더에 맡긴다.
+  const messages =
+    message || intro || hasCards
+      ? buildDmMessages({
+          messageType: body.messageType,
+          message,
+          buttons: body.buttons,
+          cards: body.cards,
+          intro,
+        })
+      : [];
 
   if (messages.length === 0 && replies.length === 0) {
     return Response.json(

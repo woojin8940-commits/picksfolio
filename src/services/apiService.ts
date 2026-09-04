@@ -798,7 +798,14 @@ export interface DmMessageButton {
   url: string;
 }
 
-// 캐러셀(제네릭 템플릿) 카드 — 이미지 + 제목/설명 + 버튼.
+/**
+ * 캐러셀(제네릭 템플릿) 카드 — 이미지 + 제목/설명 + 버튼.
+ *
+ * `imageUrl` 은 인스타그램이 발송 시점에 서버에서 직접 받아가는 주소다. 그래서
+ * 상대 경로(`/api/images/...`)나 브라우저 안에서만 유효한 값(`blob:`, `data:`)은
+ * 쓸 수 없고, 공개된 http/https 절대주소여야 한다. 업로드/피드 복사 경로가 모두
+ * 공개 저장소의 절대주소를 돌려주는 이유다.
+ */
 export interface DmCarouselCard {
   id: string;
   title: string;
@@ -807,6 +814,10 @@ export interface DmCarouselCard {
   buttonLabel: string;
   buttonUrl: string;
 }
+
+/** 카드 이미지 한 장의 크기 상한. 인스타그램이 받아가지 못할 만큼 큰 파일을 미리 막는다. */
+export const DM_CARD_IMAGE_MAX_MB = 8;
+export const DM_CARD_IMAGE_MAX_BYTES = DM_CARD_IMAGE_MAX_MB * 1024 * 1024;
 
 export interface DmAutomationItem {
   id: string;
@@ -823,6 +834,13 @@ export interface DmAutomationItem {
   // 메시지 형식 — 'text'(텍스트+버튼) 또는 'carousel'(캐러셀 카드).
   messageType: 'text' | 'carousel';
   message: string;
+  /**
+   * 캐러셀 앞에 먼저 보낼 인사말(선택).
+   *
+   * `message` 를 재사용하지 않는다 — 텍스트 형식으로 써 둔 본문이 형식만 캐러셀로
+   * 바꿨다고 갑자기 함께 발송되면, 사용자가 화면에서 본 적 없는 문구가 나간다.
+   */
+  cardIntro?: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   createdAt: string;
@@ -1177,8 +1195,13 @@ export const apiService = {
     username: string,
     file: File,
     onProgress?: (ratio: number) => void,
+    /**
+     * 저장 폴더 앞에 붙는 이름. 기본값은 제안서 첨부다. 다른 용도(디엠 카드 이미지 등)는
+     * 자기 이름을 넘겨, 나중에 경로만 보고 무엇에 쓰인 파일인지 구분할 수 있게 한다.
+     */
+    ownerPrefix: string = 'proposals',
   ): Promise<{ url?: string; error?: string }> {
-    const owner = `proposals-${username.toLowerCase()}`;
+    const owner = `${ownerPrefix}-${username.toLowerCase()}`;
 
     // 서버 응답에서 사람에게 보여줄 사유를 꺼낸다. JSON 이 아닐 수도 있다 — 그때는
     // 상태 코드로 말을 만든다.
@@ -1263,6 +1286,59 @@ export const apiService = {
     const res = await apiService.uploadAttachment(username, file);
     if (res.error) console.error('[API] Failed to upload proposal attachment:', res.error);
     return res.url || null;
+  },
+
+  /**
+   * 캐러셀 카드에 넣을 이미지를 올린다.
+   *
+   * 첨부 업로드와 같은 경로(브라우저 → 스토리지)를 쓰되 폴더만 따로 둔다. 중요한 건
+   * 돌려주는 값이 공개 절대주소라는 점이다 — 인스타그램은 발송할 때 이 주소로 직접
+   * 이미지를 받아가므로, 우리 화면에서만 열리는 주소를 저장하면 카드가 이미지 없이
+   * 도착한다.
+   */
+  async uploadDmCardImage(
+    username: string,
+    file: File,
+    onProgress?: (ratio: number) => void,
+  ): Promise<{ url?: string; error?: string }> {
+    if (file.type && !file.type.startsWith('image/')) {
+      return { error: '이미지 파일만 카드에 넣을 수 있습니다. (JPG · PNG · WEBP)' };
+    }
+    if (file.size > DM_CARD_IMAGE_MAX_BYTES) {
+      return {
+        error: `이미지가 큽니다. ${DM_CARD_IMAGE_MAX_MB}MB 이하로 올려 주세요. (현재 ${(file.size / (1024 * 1024)).toFixed(1)}MB)`,
+      };
+    }
+    return apiService.uploadAttachment(username, file, onProgress, 'dm-cards');
+  },
+
+  /**
+   * 인스타그램 피드 사진을 카드 이미지로 복사한다.
+   *
+   * 피드 이미지 주소를 그대로 카드에 저장하면 안 된다. 인스타그램 CDN 주소는 서명이
+   * 붙어 있어 며칠 뒤 만료되고, 그때부터 카드는 이미지 없이 도착한다(설정은 그대로인데
+   * 어느 날부터 사진만 사라지는, 원인 찾기 어려운 고장이다). 그래서 서버가 사진을
+   * 우리 저장소로 옮기고, 만료되지 않는 주소를 돌려준다.
+   */
+  async copyDmCardImageFromFeed(
+    username: string,
+    sourceUrl: string,
+  ): Promise<{ url?: string; error?: string }> {
+    try {
+      const res = await fetch(`/api/dm-card-image/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+        body: JSON.stringify({ sourceUrl }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.url) {
+        return { error: String(data?.error || `이미지를 가져오지 못했습니다. (HTTP ${res.status})`) };
+      }
+      return { url: String(data.url) };
+    } catch (e) {
+      console.error('[API] Failed to copy feed image:', e);
+      return { error: '네트워크 오류로 이미지를 가져오지 못했습니다.' };
+    }
   },
 
   // AWS IVS Stream Key API
@@ -3846,6 +3922,8 @@ export const apiService = {
     messageType?: 'text' | 'carousel';
     buttons?: DmMessageButton[];
     cards?: DmCarouselCard[];
+    /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
+    intro?: string;
     /** 댓글에 함께 남길 공개 답글 문구. 비어 있으면 답글은 달지 않는다. */
     replies?: string[];
     ruleId?: string;
