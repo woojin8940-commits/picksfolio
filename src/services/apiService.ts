@@ -755,6 +755,22 @@ export interface DmRule {
   enabled: boolean;
 }
 
+/** 자동 발송 활동 기록 한 건(진단 패널에 그대로 보여준다). */
+export interface DmLogEntry {
+  at: string;
+  /** 'dm' | 'reply' — 자동 DM 인지 공개 답글인지. */
+  kind?: string | null;
+  /** 'sent' | 'failed' | 'skipped' | 'external' */
+  status?: string | null;
+  /** 건너뛴 이유 코드('switch_off' | 'not_connected' | 'plan_required'). */
+  reason?: string | null;
+  ruleName?: string | null;
+  error?: string | null;
+  errorKind?: string | null;
+  /** 인사말 같은 부가 메시지가 빠진 경우의 사유(실패가 아니다). */
+  followUpSkipped?: string | null;
+}
+
 export interface DmAutomationSettings {
   enabled: boolean;
   connected: boolean;
@@ -784,6 +800,22 @@ export interface DmAutomationSettings {
    * 나간 자동 DM 을 감지할 수 없다.
    */
   echoSubscribed?: boolean;
+  /** 계정별 웹훅 구독(`subscribed_apps`)을 마친 시각. 비어 있으면 구독 자체가 없다. */
+  webhookSubscribedAt?: string;
+  /** 실제로 구독에 성공한 웹훅 필드 목록. */
+  webhookFields?: string;
+  /**
+   * 자동 발송 진단 정보.
+   *
+   * 자동 발송이 안 될 때, 인스타그램이 이벤트를 보내지 않는 것인지(웹훅 구독 문제)
+   * 받고도 건너뛴 것인지(플랜·스위치·중복)를 화면에서 구분하기 위한 값이다.
+   */
+  diagnostics?: {
+    /** 이 계정으로 웹훅 이벤트가 마지막으로 도착한 시각. */
+    lastWebhookAt?: string | null;
+    /** 최근 발송·건너뜀 기록(최신 순). */
+    recentLog?: DmLogEntry[];
+  };
   /**
    * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면
    * 나머지 필드는 "모른다"는 뜻이므로, 화면은 설정이 아니라 재시도 안내를 보여준다.
@@ -3840,6 +3872,40 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to save DM automation:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  /**
+   * 계정별 웹훅 구독을 다시 건다.
+   *
+   * 댓글 이벤트는 계정별 `subscribed_apps` 구독이 있어야 도착한다. 이 구독은
+   * 토큰 재발급·권한 변경으로 조용히 풀릴 수 있고, 그러면 화면상 자동 발송은
+   * 켜져 있는데 댓글에 아무 일도 일어나지 않는다. 사용자가 직접 다시 걸 수 있게 한다.
+   */
+  async resubscribeDmWebhook(
+    username: string,
+  ): Promise<{ ok: boolean; error?: string; webhookSubscribedAt?: string; webhookFields?: string }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'resubscribeWebhook' }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `웹훅 구독에 실패했습니다. (HTTP ${res.status})` };
+      }
+      return {
+        ok: true,
+        webhookSubscribedAt: data?.webhookSubscribedAt,
+        webhookFields: data?.webhookFields,
+      };
+    } catch (e) {
+      console.error('[API] Failed to resubscribe DM webhook:', e);
+      return { ok: false, error: '네트워크 오류로 웹훅 구독을 다시 걸지 못했습니다.' };
     }
   },
 

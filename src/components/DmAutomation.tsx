@@ -4,11 +4,11 @@ import {
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
-  ArrowUp, ArrowDown, Images,
+  ArrowUp, ArrowDown, Images, Activity, RefreshCw,
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
-  InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+  DmLogEntry, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -90,11 +90,19 @@ const CARD_TEXT_MAX = 80;
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
 
-/** Graph API 는 http/https 절대 URL 만 링크 버튼으로 받는다. */
+/**
+ * Graph API 는 http/https 절대 URL 만 링크 버튼·카드 이미지로 받는다.
+ *
+ * 호스트 형태까지 본다. `/api/images/x` 처럼 상대 경로에 스킴만 붙이면
+ * `https://api/images/x` 로 파싱돼 형식 검사만으로는 통과하는데, 인스타그램은 그
+ * 주소를 찾아갈 수 없어 카드 한 장이 아니라 메시지 전체가 거부된다.
+ * 서버 `_shared/instagram-dm.mts` 의 isValidLinkUrl 과 규칙을 맞춰 둔다.
+ */
 const isValidLinkUrl = (raw: string): boolean => {
   try {
     const u = new URL((raw || '').trim());
-    return u.protocol === 'http:' || u.protocol === 'https:';
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname);
   } catch {
     return false;
   }
@@ -122,12 +130,45 @@ const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !
 /**
  * 이 카드가 실제로 발송되는지.
  *
- * 발송기(_shared/instagram-dm.mts)는 제목이나 올바른 이미지 주소가 있는 카드만
- * 제네릭 템플릿 요소로 만든다. 화면의 판단 기준을 같게 두지 않으면 "카드 3장"으로
- * 보이는 설정이 실제로는 2장만 도착한다.
+ * 인스타그램의 제네릭 템플릿은 제목 말고도 속성이 최소 하나 있어야 한다
+ * ("At least one property must be set in addition to title"). 제목만 적힌 카드는
+ * 요소로 만들 수 없고, 그런 카드가 섞이면 캐러셀 전체가 거부돼 아무것도 도착하지
+ * 않는다. 그래서 발송기(_shared/instagram-dm.mts)는 이미지·설명·버튼이 하나도
+ * 없는 카드를 빼며, 화면도 같은 기준으로 판단해야 "카드 3장"으로 보이는 설정이
+ * 실제로는 2장만 도착하는 일이 없다.
  */
 const cardSendable = (c: DmCarouselCard): boolean =>
-  Boolean(c.title.trim()) || isValidLinkUrl(c.imageUrl);
+  isValidLinkUrl(c.imageUrl) || Boolean(c.subtitle.trim()) ||
+  Boolean(c.buttonLabel.trim() && isValidLinkUrl(c.buttonUrl));
+
+/** 자동 발송을 건너뛴 이유 코드 → 화면 문구. */
+const SKIP_REASONS: Record<string, string> = {
+  switch_off: '자동 발송 스위치가 꺼져 있어 보내지 않았어요.',
+  not_connected: '인스타그램 연동이 끊겨 보내지 않았어요.',
+  plan_required: '프로 플랜이 아니어서 보내지 않았어요.',
+};
+
+/**
+ * 활동 기록 한 건을 화면 문구로 바꾼다.
+ *
+ * "댓글을 달아도 DM 이 안 온다"의 원인은 대부분 이 기록에 남아 있다. 코드가 아는
+ * 사실(스위치가 꺼져 있었다 / 플랜이 없었다 / 인스타그램이 거부했다 / 이미 보낸
+ * 댓글이었다)을 사용자가 읽을 수 있게 옮겨 준다.
+ */
+const describeLogEntry = (e: DmLogEntry): { tone: 'ok' | 'warn' | 'err'; text: string } => {
+  const what = e.kind === 'reply' ? '댓글 답글' : '자동 DM';
+  if (e.status === 'sent') {
+    const extra = e.followUpSkipped ? ' (인사말 텍스트는 함께 보내지 못했어요)' : '';
+    return { tone: 'ok', text: `${what} 발송${e.ruleName ? ` · ${e.ruleName}` : ''}${extra}` };
+  }
+  if (e.status === 'skipped') {
+    return { tone: 'warn', text: SKIP_REASONS[e.reason || ''] || `${what}을 건너뛰었어요.${e.reason ? ` (${e.reason})` : ''}` };
+  }
+  if (e.status === 'external') {
+    return { tone: 'warn', text: '이 앱이 보내지 않은 자동 DM 이 감지됐어요.' };
+  }
+  return { tone: 'err', text: `${what} 실패${e.error ? ` · ${e.error}` : ''}` };
+};
 
 /** 인스타그램 피드 게시물에서 카드 이미지로 쓸 수 있는 사진 주소. (영상은 썸네일) */
 const feedImageOf = (m: InstagramMedia): string =>
@@ -253,14 +294,6 @@ const DmPreview: React.FC<{
         <div className="max-w-[85%] min-w-0">
           {isCarousel ? (
             <div className="space-y-1.5">
-              {/* 인사말을 적어 두면 텍스트 한 통이 먼저 도착하고, 이어서 카드가 도착한다. */}
-              {introText && (
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                  <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                    {introText}
-                  </p>
-                </div>
-              )}
               <div className="flex gap-2 overflow-x-auto pb-1 -mr-2">
               {validCards.map((c) => (
                 <div key={c.id} className="w-40 shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -283,6 +316,18 @@ const DmPreview: React.FC<{
                 </div>
               ))}
               </div>
+              {/*
+                인사말은 카드 뒤에 온다. 댓글로 트리거된 DM 은 비공개 답장 1통이
+                전부여서, 그 한 통에는 카드가 들어가고 인사말은 대화가 이미 열려
+                있는 상대에게만 이어서 도착한다(그래서 흐리게 표시한다).
+              */}
+              {introText && (
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm opacity-70">
+                  <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                    {introText}
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -338,7 +383,10 @@ const DmPreview: React.FC<{
       )}
       {isCarousel && (
         <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
-          캐러셀 카드 {validCards.length}장이 발송됩니다{introText ? ' (인사말 텍스트가 먼저 도착합니다)' : ''}. 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+          캐러셀 카드 {validCards.length}장이 발송됩니다. 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
+          {introText
+            ? ' 인사말 텍스트는 카드에 이어 보내지만, 인스타그램은 댓글 1건당 DM을 1통만 허용해 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.'
+            : ''}
         </p>
       )}
     </div>
@@ -506,7 +554,7 @@ const CarouselBuilder: React.FC<{
               </div>
             </div>
 
-            {/* 이미지 — 올리기 / 피드에서 고르기 / 주소 붙여넣기 */}
+            {/* 이미지 — 올리기 / 피드에서 고르기 */}
             <div className="flex gap-3">
               <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
                 {c.imageUrl && !imageInvalid
@@ -567,18 +615,16 @@ const CarouselBuilder: React.FC<{
                     <Images size={12} /> 내 피드에서 고르기
                   </button>
                 </div>
-                <input
-                  value={c.imageUrl}
-                  onChange={(e) => setCard(c.id, { imageUrl: e.target.value })}
-                  placeholder="또는 이미지 주소 붙여넣기 (https://...)"
-                  className={`w-full bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
-                    imageInvalid ? 'border-red-300' : 'border-slate-200'
-                  }`}
-                />
+                {/*
+                  이미지 주소를 손으로 붙여넣는 칸은 두지 않는다. 올리기·피드에서
+                  고르기 두 경로가 모두 인스타그램이 받아갈 수 있는 공개 주소를
+                  돌려주므로, 주소 입력은 잘못된 값(상대 경로·만료되는 링크)이
+                  들어올 통로만 됐다.
+                */}
                 {imageInvalid && (
                   <p className="flex items-center gap-1 text-[10px] font-bold text-red-500">
                     <AlertCircle size={11} />
-                    인스타그램이 이미지를 직접 받아가므로 https:// 로 시작하는 공개 주소여야 합니다.
+                    이 카드의 이미지 주소를 인스타그램이 받아갈 수 없습니다. 이미지를 다시 올려 주세요.
                   </p>
                 )}
                 {error && (
@@ -678,7 +724,7 @@ const CarouselBuilder: React.FC<{
             {empty && !working && (
               <p className="flex items-center gap-1 px-1 text-[10px] font-bold text-amber-600">
                 <AlertCircle size={11} />
-                이미지나 제목 중 하나는 있어야 이 카드가 발송됩니다.
+                이미지를 올려야 이 카드가 발송됩니다. (설명이나 버튼만 채워도 됩니다 — 제목만 있는 카드는 인스타그램이 거부합니다.)
               </p>
             )}
           </div>
@@ -735,7 +781,7 @@ const AutomationEditor: React.FC<{
     patch({ mediaIds: has ? draft.mediaIds.filter((m) => m !== id) : [...draft.mediaIds, id] });
   };
 
-  // 실제로 발송되는 카드(제목 또는 올바른 이미지 주소)가 한 장이라도 있어야 저장한다.
+  // 실제로 발송되는 카드(이미지·설명·버튼 중 하나가 있는 카드)가 한 장이라도 있어야 저장한다.
   const validCards = draft.cards.filter(cardSendable);
   const messageValid = draft.messageType === 'carousel'
     ? validCards.length > 0
@@ -1094,7 +1140,7 @@ const AutomationEditor: React.FC<{
                 <div className="space-y-4">
                   <div>
                     <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 mb-2">
-                      <AlignLeft size={13} /> 카드 앞 인사말 <span className="text-slate-300 font-bold">(선택)</span>
+                      <AlignLeft size={13} /> 인사말 <span className="text-slate-300 font-bold">(선택)</span>
                     </label>
                     <textarea
                       value={draft.cardIntro || ''}
@@ -1104,8 +1150,10 @@ const AutomationEditor: React.FC<{
                       placeholder="예: 문의 주셔서 감사합니다! 아래에서 골라보세요 😊"
                       className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
                     />
-                    <p className="text-[10px] text-slate-400 font-bold mt-1">
-                      적어 두면 이 문구가 텍스트로 먼저 도착하고, 이어서 카드가 도착합니다. 비워 두면 카드만 발송됩니다.
+                    <p className="text-[10px] text-slate-400 font-bold mt-1 leading-relaxed">
+                      카드가 먼저 도착하고 인사말은 그 뒤에 보냅니다. 인스타그램은 댓글 1건당 DM을 1통만
+                      허용하기 때문에, 인사말은 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.
+                      꼭 전하고 싶은 문구라면 카드의 제목·설명에 적어 주세요.
                     </p>
                   </div>
 
@@ -1221,6 +1269,16 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
   /** 발신 에코 구독 여부. 꺼져 있으면 외부 자동 DM 을 감지할 수 없다. */
   const [echoSubscribed, setEchoSubscribed] = useState(true);
+  /**
+   * 자동 발송 진단 정보(웹훅 수신 흔적 · 최근 활동 기록).
+   *
+   * 자동 발송이 안 될 때 사용자가 볼 수 있는 유일한 단서다. 이벤트가 아예 도착한
+   * 적이 없으면 인스타그램 쪽 구독 문제고, 도착했는데 건너뛴 기록이 남아 있으면
+   * 스위치·플랜·중복 때문이다. 둘은 해결 방법이 완전히 다르다.
+   */
+  const [diagnostics, setDiagnostics] = useState<DmAutomationSettings['diagnostics']>(undefined);
+  const [webhookSubscribedAt, setWebhookSubscribedAt] = useState<string | undefined>(undefined);
+  const [resubscribing, setResubscribing] = useState(false);
 
   const loadMedia = () => {
     setMediaLoading(true);
@@ -1247,6 +1305,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
         setEchoSubscribed(s.echoSubscribed !== false);
+        setDiagnostics(s.diagnostics);
+        setWebhookSubscribedAt(s.webhookSubscribedAt);
         setLoaded(true);
         if (s.connected) loadMedia();
       })
@@ -1336,6 +1396,30 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     setEnabled(v);
     const { ok } = await persist({ enabled: v });
     if (!ok) setEnabled(prev);
+  };
+
+  /**
+   * 계정별 웹훅 구독을 다시 건다.
+   *
+   * 댓글 이벤트는 이 구독이 있어야 도착한다. 토큰 재발급·권한 변경으로 조용히
+   * 풀릴 수 있어서, 화면상 자동 발송은 켜져 있는데 댓글에 아무 일도 일어나지 않는
+   * 상태가 생긴다. 그때 사용자가 직접 다시 걸 수 있어야 한다.
+   */
+  const resubscribeWebhook = async () => {
+    setResubscribing(true);
+    const result = await apiService.resubscribeDmWebhook(userName);
+    setResubscribing(false);
+    if (result.ok) {
+      setWebhookSubscribedAt(result.webhookSubscribedAt);
+      if (result.webhookFields) setEchoSubscribed(result.webhookFields.includes('message_echoes'));
+      setBanner({
+        type: 'ok',
+        text: '웹훅을 다시 연결했어요. 게시물에 댓글을 하나 달아 자동 발송을 확인해 보세요.',
+      });
+      load();
+    } else {
+      setBanner({ type: 'err', text: result.error || '웹훅을 다시 연결하지 못했습니다.' });
+    }
   };
 
   /**
@@ -1713,9 +1797,96 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6">
           <p className="text-[12px] md:text-sm font-bold text-amber-800">
             인스타그램 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을 거치지
-            않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 자동화를 한 번 저장하면 다시 연결을
-            시도합니다.
+            않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 아래 자동 발송 진단의
+            <span className="font-black"> 웹훅 다시 연결</span> 을 누르면 다시 시도합니다.
           </p>
+        </section>
+      )}
+
+      {/*
+        자동 발송 진단.
+
+        "자동 발송을 켜뒀는데 댓글에 반응이 없다"는 상황에서 사용자가 원인을 좁힐 수
+        있는 유일한 화면이다. 웹훅 이벤트가 도착한 적이 있는지(= 인스타그램이 알려주고
+        있는지)와, 도착한 뒤 무슨 일이 있었는지(발송·건너뜀·실패)를 함께 보여준다.
+      */}
+      {connected && (
+        <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
+              <Activity size={17} className="text-slate-400" /> 자동 발송 진단
+            </h3>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={load}
+                disabled={reloading}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-[11px] font-black text-slate-600 hover:border-slate-300 disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={reloading ? 'animate-spin' : ''} /> 새로고침
+              </button>
+              <button
+                type="button"
+                onClick={resubscribeWebhook}
+                disabled={resubscribing}
+                className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {resubscribing ? <Loader2 size={11} className="animate-spin" /> : <Link2 size={11} />}
+                웹훅 다시 연결
+              </button>
+            </div>
+          </div>
+
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <dt className="text-[10px] font-black text-slate-400">마지막 댓글·메시지 알림 수신</dt>
+              <dd className="text-[12px] font-bold text-slate-800 mt-0.5">
+                {diagnostics?.lastWebhookAt
+                  ? new Date(diagnostics.lastWebhookAt).toLocaleString('ko-KR')
+                  : '아직 없음'}
+              </dd>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <dt className="text-[10px] font-black text-slate-400">계정 웹훅 구독</dt>
+              <dd className="text-[12px] font-bold text-slate-800 mt-0.5">
+                {webhookSubscribedAt
+                  ? new Date(webhookSubscribedAt).toLocaleString('ko-KR')
+                  : '구독 기록 없음'}
+              </dd>
+            </div>
+          </dl>
+
+          {/* 이벤트가 한 번도 도착하지 않았다면 원인은 우리 쪽 설정이 아니라 구독이다. */}
+          {!diagnostics?.lastWebhookAt && (
+            <p className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 text-[11px] md:text-xs font-bold text-amber-800 leading-relaxed mb-3">
+              인스타그램에서 댓글 알림이 도착한 적이 없어요. 자동 발송은 인스타그램이 댓글 알림을
+              보내줘야 시작되므로, 이 상태에서는 수동 발송만 동작합니다.
+              <span className="font-black"> 웹훅 다시 연결</span> 을 누른 뒤 게시물에 댓글을 하나 달아
+              보세요. 그래도 비어 있으면 계정을 다시 연동해 주세요.
+            </p>
+          )}
+
+          <p className="text-[10px] font-black text-slate-400 mb-1.5">최근 활동</p>
+          {(diagnostics?.recentLog || []).length === 0 ? (
+            <p className="text-[11px] font-bold text-slate-400">아직 기록이 없어요.</p>
+          ) : (
+            <ul className="space-y-1">
+              {(diagnostics?.recentLog || []).slice(0, 8).map((e, i) => {
+                const d = describeLogEntry(e);
+                const tone = d.tone === 'ok'
+                  ? 'text-slate-600'
+                  : d.tone === 'warn' ? 'text-amber-700' : 'text-red-600';
+                return (
+                  <li key={`${e.at}_${i}`} className="flex items-start gap-2 text-[11px] font-bold">
+                    <span className="text-slate-400 shrink-0">
+                      {e.at ? new Date(e.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                    </span>
+                    <span className={`${tone} min-w-0 break-words`}>{d.text}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       )}
 

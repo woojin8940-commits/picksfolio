@@ -1,6 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
+import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
 import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 
@@ -181,12 +182,11 @@ export default async (req: Request, _context: Context) => {
     // 웹훅 구독과 역추적 인덱스는 디엠 자동화(댓글·메시지 이벤트)를 위한 것이다.
     // 캠페인 연동은 지표를 읽기만 하므로 계정에 아무 것도 걸지 않는다.
     if (!isCollab) {
-      // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스.
+      // 웹훅에서 IG 계정 → 우리 사용자명을 역추적하기 위한 인덱스. 저장된 ID 를 모두
+      // 넣어 둔다 — 웹훅 payload 의 entry.id 가 어느 필드와 같을지 연동 방식에 따라
+      // 다르고, 하나만 넣어 두면 이벤트가 도착해도 주인을 못 찾아 버려진다.
       try {
-        if (igUserId) {
-          const index = getStore({ name: "dm-automation-index", consistency: "strong" });
-          await index.set(`ig_${igUserId}`, username);
-        }
+        await indexDmAccount(username, [igUserId, next.igAccountId]);
       } catch (e) {
         console.warn("[ig-oauth] index write failed:", e);
       }
