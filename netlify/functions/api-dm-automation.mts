@@ -84,6 +84,14 @@ interface DmAutomationItem {
   cardIntro: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
+  /**
+   * 조건에 맞았을 때 DM 을 언제 보낼지.
+   *  `instant`(기본) — 댓글을 받은 즉시 보낸다.
+   *  `scheduled`     — `scheduledAt` 까지 기다렸다가 보낸다(예약 대기열로 들어간다).
+   */
+  sendMode: "instant" | "scheduled";
+  /** 예약 발송 시각(ISO). 즉시 발송이면 빈 문자열. */
+  scheduledAt: string;
   createdAt: string;
   /**
    * 이 자동화의 내용이 마지막으로 바뀐 시각.
@@ -287,6 +295,18 @@ function sanitizeAutomation(a: any): DmAutomationItem {
   const mediaScope = a?.mediaScope === "selected" && mediaIds.length > 0 ? "selected" : "all";
   const messageType = a?.messageType === "carousel" ? "carousel" : "text";
 
+  /**
+   * 예약 발송 시각.
+   *
+   * 해석할 수 없는 값이면 예약이 아니라 즉시 발송으로 되돌린다 — 시각을 못 읽는
+   * 예약을 그대로 두면 "예약으로 설정했는데 아무것도 나가지 않는다"가 된다.
+   * 지난 시각은 지우지 않는다. 발송기와 웹훅이 "이미 지난 예약은 즉시 발송"으로
+   * 다루므로 동작에는 문제가 없고, 사용자가 화면에서 자기가 넣은 값을 그대로
+   * 다시 볼 수 있어야 한다.
+   */
+  const scheduledMs = Date.parse(String(a?.scheduledAt || ""));
+  const scheduled = a?.sendMode === "scheduled" && !Number.isNaN(scheduledMs);
+
   return {
     id: String(a?.id || genId("auto")),
     name,
@@ -306,6 +326,8 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     cardIntro: String(a?.cardIntro || "").slice(0, 1000),
     buttons,
     cards,
+    sendMode: scheduled ? "scheduled" : "instant",
+    scheduledAt: scheduled ? new Date(scheduledMs).toISOString() : "",
     createdAt: String(a?.createdAt || new Date().toISOString()),
     updatedAt: a?.updatedAt ? String(a.updatedAt) : undefined,
   };
@@ -604,8 +626,18 @@ export default async (req: Request, context: Context) => {
         });
       }
 
-      const active = faq.enabled ? faq.items : [];
-      const sync = faq.enabled && active.length > 0
+      /**
+       * 전체 자동 발송 스위치가 꺼져 있으면 인스타그램에 올리지 않는다(올라가 있던
+       * 것은 내린다).
+       *
+       * 웹훅은 버튼 클릭(postback)을 처리하기 전에 이 스위치를 먼저 보므로, 스위치가
+       * 꺼진 채 버튼만 등록해 두면 눌러도 아무 답변이 나가지 않는 버튼이 DM 창에
+       * 남는다. 화면 안내도 "스위치를 끄면 질문 버튼도 함께 내려간다"고 약속하고
+       * 있다.
+       */
+      const switchOff = !current.enabled;
+      const active = current.enabled && faq.enabled ? faq.items : [];
+      const sync = active.length > 0
         ? await syncIceBreakers({
             accessToken: current.accessToken,
             tokenSource: current.tokenSource,
@@ -618,7 +650,8 @@ export default async (req: Request, context: Context) => {
             igId: current.igUserId || current.igAccountId,
           });
 
-      const syncedAt = sync.ok ? new Date().toISOString() : undefined;
+      // 아무것도 등록하지 않았다면 "등록했다"고 표시하지 않는다.
+      const syncedAt = sync.ok && active.length > 0 ? new Date().toISOString() : undefined;
       const syncError = sync.ok ? undefined : sync.error || "인스타그램에 등록하지 못했습니다.";
       await mutateBlobJSON<DmSettings>(STORE_NAME, key, (doc) =>
         doc ? { ...doc, faq: { ...faq, syncedAt, syncError } } : null,
@@ -629,6 +662,7 @@ export default async (req: Request, context: Context) => {
        * `messaging_postbacks` 가 들어 있어야 한다. 예전에 연동한 계정은 이 필드가
        * 없어서, 버튼은 보이는데 눌러도 답변이 나가지 않는다. 여기서 한 번 더 건다.
        */
+      let webhookWarning = "";
       if (!String(current.webhookFields || "").includes("messaging_postbacks")) {
         const sub = await subscribeInstagramWebhooks({
           accessToken: current.accessToken,
@@ -642,13 +676,36 @@ export default async (req: Request, context: Context) => {
               ? { ...doc, webhookSubscribedAt: new Date().toISOString(), webhookFields: achieved }
               : null,
           ).catch(() => undefined);
+          /**
+           * 구독은 성공했지만 postback 필드가 빠진 경우(계정 연동 방식·앱 권한에
+           * 따라 거절된다). 조용히 넘기면 "버튼은 등록됐는데 눌러도 답이 없다"의
+           * 원인을 화면에서 알 수 없다.
+           */
+          if (!achieved.includes("messaging_postbacks")) {
+            webhookWarning =
+              "질문 버튼 클릭을 받을 웹훅(messaging_postbacks)을 인스타그램이 허용하지 않았습니다. " +
+              "버튼은 보이지만 눌렀을 때 답변이 나가지 않을 수 있어요. 계정을 다시 연동해 주세요.";
+          }
+        } else {
+          webhookWarning = `질문 버튼 클릭을 받을 웹훅을 연결하지 못했습니다: ${sub.error || "알 수 없는 오류"}`;
         }
       }
+
+      const warning =
+        [
+          switchOff && faq.enabled && faq.items.length > 0
+            ? "자동 발송 스위치가 꺼져 있어 질문 버튼을 DM 창에 올리지 않았습니다. 스위치를 켜면 함께 올라갑니다."
+            : "",
+          webhookWarning,
+        ]
+          .filter(Boolean)
+          .join(" ") || undefined;
 
       return Response.json({
         success: sync.ok,
         faq: { ...faq, syncedAt, syncError },
         error: syncError,
+        warning,
       });
     }
 

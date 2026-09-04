@@ -25,6 +25,7 @@ import {
   wasSentByUs,
 } from "./_shared/dm-send-registry.mts";
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
+import { createScheduledJob } from "./_shared/dm-schedule-store.mts";
 import { fetchContactProfile, noteDmContact } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
 
@@ -77,6 +78,14 @@ interface DmAutomationItem {
   cardIntro?: string;
   buttons: DmButton[];
   cards?: DmCard[];
+  /**
+   * 이 자동화가 조건에 맞았을 때 DM 을 언제 보낼지.
+   *  `instant`(기본) — 댓글을 받은 즉시 보낸다.
+   *  `scheduled`     — `scheduledAt` 까지 기다렸다가 보낸다(예약 대기열에 넣는다).
+   */
+  sendMode?: "instant" | "scheduled";
+  /** 예약 발송 시각(ISO). `sendMode === "scheduled"` 일 때만 의미가 있다. */
+  scheduledAt?: string;
   createdAt?: string;
   /** 설정 화면에서 이 자동화를 마지막으로 고친 시각(api-dm-automation 이 찍는다). */
   updatedAt?: string;
@@ -161,6 +170,23 @@ function buildDirectPlan(a: DmAutomationItem): DmPlan {
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "ig-webhook");
+}
+
+/** 예약으로 넘길지 판단할 때 필요한 최소 여유. 이보다 가까우면 그냥 지금 보낸다. */
+const SCHEDULE_MIN_LEAD_MS = 30_000;
+
+/**
+ * 이 자동화가 "예약 발송"이면 보낼 시각(ms)을, 즉시 발송이면 null 을 돌려준다.
+ *
+ * 예약 시각이 이미 지났거나 눈앞이면 즉시 발송으로 본다. 지난 시각을 대기열에
+ * 넣어도 결국 다음 주기에 나가지만, 그 사이 발송기가 한 번 더 조건을 검사하는
+ * 동안 댓글 비공개 답장 기회를 미룰 이유가 없다.
+ */
+function scheduledSendAt(a: DmAutomationItem): number | null {
+  if (a.sendMode !== "scheduled") return null;
+  const at = Date.parse(a.scheduledAt || "");
+  if (Number.isNaN(at)) return null;
+  return at - Date.now() > SCHEDULE_MIN_LEAD_MS ? at : null;
 }
 
 /**
@@ -387,7 +413,24 @@ async function sendTriggerDm(
     message: args.message,
     buttons: args.buttons,
   });
-  if (plan.messages.length === 0) return;
+  /**
+   * 보낼 내용이 없는 경우(문구를 비워 둔 인사말·답변, 라벨만 있는 버튼).
+   *
+   * 예전에는 조용히 끝나서, 사용자는 "버튼을 눌렀는데 아무 답이 없다"의 이유를
+   * 활동 기록에서도 찾을 수 없었다.
+   */
+  if (plan.messages.length === 0) {
+    await appendLog(username, {
+      kind: "dm",
+      status: "skipped",
+      trigger,
+      reason: "보낼 문구가 비어 있습니다.",
+      recipientId,
+      ruleId,
+      ruleName,
+    });
+    return;
+  }
 
   if (!(await claimIfNew(username, claimKey))) {
     console.warn("[ig-webhook] duplicate messaging event — trigger DM skipped", claimKey);
@@ -469,7 +512,23 @@ async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<voi
   if (!faqId) return;
 
   const faq = ctx.settings.faq;
-  const item = (faq?.items || []).find((f) => f.id === faqId);
+  const clicked = (faq?.items || []).find((f) => f.id === faqId);
+
+  /**
+   * 버튼 클릭도 상대가 우리에게 말을 건 것이다 — 24시간 창이 열리고, 예약 발송
+   * 대상 명단에도 올라야 한다. 예전에는 postback 을 명단에 남기지 않아서, DM 창을
+   * 열어 버튼만 누른 사람에게는 예약을 걸 방법이 없었다.
+   *
+   * "처음 대화"로는 세지 않는다(`kind: "postback"`). 이 사람이 나중에 직접 첫
+   * 메시지를 보낼 때 인사말이 나가야 한다.
+   */
+  await noteDmContact({
+    username: ctx.username,
+    igsid: senderId,
+    text: clicked?.question,
+    kind: "postback",
+  }).catch(() => undefined);
+  const item = clicked;
   if (!item) {
     // 질문을 지운 뒤에도 상대 화면에는 버튼이 남아 있을 수 있다. 답할 내용이 없으니
     // 아무것도 보내지 않지만, 왜 조용했는지는 기록에 남긴다.
@@ -542,6 +601,7 @@ async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<
     text,
     name: profile.name,
     igHandle: profile.username,
+    kind: "message",
   });
 
   const greeting = settings.direct?.greeting;
@@ -905,6 +965,80 @@ export default async (req: Request, _context: Context) => {
               "보낼 수 있는 카드가 없습니다. 카드마다 이미지를 올리거나 설명·버튼을 채워 주세요(제목만 있는 카드는 인스타그램이 거부합니다).",
             errorKind: "other",
           });
+          continue;
+        }
+
+        /**
+         * "예약 발송"으로 설정된 자동화 — 지금 보내지 않고 대기열에 넣는다.
+         *
+         * 발송은 1분마다 도는 scheduled-dm-sender 가 맡는다. 댓글에서 만든 예약은
+         * `comment_id` 비공개 답장으로 나가므로 상대가 우리에게 DM 을 보낸 적이
+         * 없어도 되지만, 그 기회는 **댓글 작성 후 7일**까지다. 그래서 댓글 시각을
+         * 함께 넣어 발송기가 창을 판정할 수 있게 한다.
+         *
+         * 여기서 내용을 그대로 복사해 두는 이유: 예약이 나가는 시점에 설정이 바뀌어
+         * 있을 수 있는데, 사용자가 예약을 걸 때 화면에서 본 문구가 나가야 한다.
+         */
+        const scheduledMs = scheduledSendAt(automation);
+        if (scheduledMs !== null) {
+          /**
+           * 댓글 단위 선점을 예약을 넣기 전에 해 둔다. Meta 가 같은 댓글 이벤트를
+           * 다시 보내도 같은 댓글에 예약이 두 건 쌓이지 않는다.
+           */
+          if (!(await claimIfNew(username, commentDmKey(commentId)))) {
+            console.warn("[ig-webhook] comment already handled — scheduling skipped", commentId);
+            continue;
+          }
+          // 웹훅 entry.time 은 초 단위다. 없으면 지금(이벤트를 받은 시각)으로 본다.
+          const entryMs = Number(entry?.time) > 0 ? Number(entry.time) * 1000 : Date.now();
+          const sendAt = new Date(scheduledMs).toISOString();
+          const carousel = automation.messageType === "carousel";
+          try {
+            await createScheduledJob({
+              id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+              username,
+              recipientId: fromId,
+              recipientName: String(value?.from?.username || "") || undefined,
+              sendAt,
+              message: carousel ? "" : automation.message || "",
+              buttons: automation.buttons || [],
+              messageType: carousel ? "carousel" : "text",
+              cards: carousel ? automation.cards : undefined,
+              intro: automation.cardIntro,
+              commentId,
+              commentAt: new Date(entryMs).toISOString(),
+              source: "comment",
+              ruleId: automation.id,
+              ruleName: automation.name,
+              createdAt: new Date().toISOString(),
+              status: "pending",
+            });
+            await appendLog(username, {
+              kind: "dm",
+              status: "scheduled",
+              recipientId: fromId,
+              commentId,
+              ruleId: automation.id,
+              ruleName: automation.name,
+              sendAt,
+            });
+            console.log(`[ig-webhook] comment DM scheduled for ${sendAt}`);
+          } catch (e: any) {
+            // 대기열에 넣지 못했다면 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
+            // 그때 한 번 더 시도할 수 있어야 한다.
+            await release(username, commentDmKey(commentId));
+            console.error("[ig-webhook] scheduling failed:", e?.message);
+            await appendLog(username, {
+              kind: "dm",
+              status: "failed",
+              recipientId: fromId,
+              commentId,
+              ruleId: automation.id,
+              ruleName: automation.name,
+              error: "예약 대기열에 넣지 못했습니다. 잠시 후 다시 시도해 주세요.",
+              errorKind: "other",
+            });
+          }
           continue;
         }
 

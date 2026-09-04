@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, CalendarClock, Check, Clock, HelpCircle, Loader2, MessageSquareReply,
-  Plus, Send, Trash2, Users, X,
+  AlertCircle, CalendarClock, Check, Clock, HelpCircle, Loader2, MessageCircle,
+  MessageSquareReply, Plus, Send, Trash2, Users, X,
 } from 'lucide-react';
 import {
   apiService, DmContact, DmDirectSettings, DmFaqItem, DmFaqSettings, DmKeywordReply,
@@ -23,6 +23,9 @@ import Toggle from './DmToggle';
  *  · 질문 버튼은 **인스타그램 앱**의 DM 화면에서만 보인다(웹은 지원하지 않는다).
  *  · 예약 발송은 상대가 마지막으로 메시지를 보낸 뒤 **24시간 안에만** 가능하다.
  *    먼저 말을 거는 발송은 정책 위반이라 대상은 "DM 을 보내온 사람" 명단에서만 고른다.
+ *  · 게시물 자동화를 "예약 발송"으로 설정해 두면 댓글이 달린 순간 이 대기열에
+ *    예약이 들어온다. 그 예약은 댓글 비공개 답장이라 24시간이 아니라 **댓글 작성 후
+ *    7일** 창을 쓴다(목록에서 "댓글 자동화"로 표시된다).
  *
  * 파일을 나눠 둔 이유: DmAutomation.tsx 는 이미 2천 줄이 넘고, 이 세 기능은 저장
  * 경로(액션)도 서로 다르다. 한 파일에 더 밀어 넣으면 어느 상태가 어느 저장에
@@ -82,7 +85,7 @@ const SaveButton: React.FC<{ saving: boolean; disabled?: boolean; onClick: () =>
   </button>
 );
 
-const fmtDateTime = (iso?: string): string => {
+export const fmtDateTime = (iso?: string): string => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -92,7 +95,7 @@ const fmtDateTime = (iso?: string): string => {
 };
 
 /** `datetime-local` 입력에 넣을 수 있는 형식(현지 시간, 초 없음). */
-const toLocalInput = (d: Date): string => {
+export const toLocalInput = (d: Date): string => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
@@ -522,6 +525,28 @@ const STATUS_LABEL: Record<DmScheduledJob['status'], { text: string; className: 
   canceled: { text: '취소됨', className: 'bg-slate-100 text-slate-500' },
 };
 
+/**
+ * 목록에 보여줄 한 줄 요약.
+ *
+ * 댓글 자동화에서 들어온 캐러셀 예약은 본문(`message`)이 비어 있다. 그대로 두면
+ * 목록에 빈 줄만 남아 무엇이 나갈 예약인지 알 수 없다.
+ */
+const jobSummary = (j: DmScheduledJob): string => {
+  const text = (j.message || '').trim() || (j.intro || '').trim();
+  if (text) return text;
+  if (j.messageType === 'carousel') return `카드 ${j.cards?.length || 0}장`;
+  return '';
+};
+
+/** 댓글 자동화에서 들어온 예약임을 알리는 표시. */
+const JobSourceChip: React.FC<{ job: DmScheduledJob }> = ({ job }) =>
+  job.source === 'comment' ? (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 text-indigo-600 px-2 py-0.5 text-[10px] font-black max-w-[55%] truncate">
+      <MessageCircle size={10} className="shrink-0" />
+      <span className="truncate">댓글 자동화{job.ruleName ? ` · ${job.ruleName}` : ''}</span>
+    </span>
+  ) : null;
+
 export const DmScheduleSection: React.FC<ScheduleProps> = ({ userName, connected, entitled, onNotice }) => {
   const [loading, setLoading] = useState(true);
   const [jobs, setJobs] = useState<DmScheduledJob[]>([]);
@@ -680,12 +705,13 @@ export const DmScheduleSection: React.FC<ScheduleProps> = ({ userName, connected
                           {STATUS_LABEL[j.status].text}
                         </span>
                         <span className="text-xs font-black text-slate-900">{fmtDateTime(j.sendAt)}</span>
+                        <JobSourceChip job={j} />
                       </div>
                       <p className="text-[11px] font-bold text-slate-500 truncate">
                         <Users size={11} className="inline mr-1 -mt-0.5" />
                         {j.recipientName ? `@${j.recipientName}` : j.recipientId}
                       </p>
-                      <p data-user-content className="text-xs text-slate-600 font-medium mt-1 line-clamp-2">{j.message}</p>
+                      <p data-user-content className="text-xs text-slate-600 font-medium mt-1 line-clamp-2">{jobSummary(j)}</p>
                     </div>
                     <button
                       type="button"
@@ -713,8 +739,9 @@ export const DmScheduleSection: React.FC<ScheduleProps> = ({ userName, connected
                         {STATUS_LABEL[j.status].text}
                       </span>
                       <span className="text-xs font-black text-slate-700">{fmtDateTime(j.sentAt || j.sendAt)}</span>
+                      <JobSourceChip job={j} />
                     </div>
-                    <p data-user-content className="text-xs text-slate-600 font-medium line-clamp-2">{j.message}</p>
+                    <p data-user-content className="text-xs text-slate-600 font-medium line-clamp-2">{jobSummary(j)}</p>
                     {j.error && (
                       <p className="text-[11px] font-bold text-red-600 mt-1 leading-relaxed">{j.error}</p>
                     )}
@@ -729,6 +756,12 @@ export const DmScheduleSection: React.FC<ScheduleProps> = ({ userName, connected
             허용합니다. 그래서 예약 발송은 DM 을 보내온 사람에게만 걸 수 있고, 발송 시각에 그
             시간이 지났다면 실패로 기록됩니다(상대가 그 사이 다시 메시지를 보내면 정상 발송돼요).
             먼저 말을 거는 홍보 DM 은 정책상 보낼 수 없습니다.
+          </HintBox>
+          <HintBox>
+            <b>댓글 자동화</b> 표시가 붙은 예약은 게시물 설정에서 "예약 발송"을 고른 자동화가
+            만든 것입니다. 이 예약은 댓글에 대한 비공개 답장이라 상대가 DM 을 보내온 적이 없어도
+            발송되고, 대신 <b>댓글이 달린 뒤 7일</b>이 지나면 보낼 수 없습니다. 여기서 취소하면
+            그 댓글에는 DM 이 나가지 않아요.
           </HintBox>
         </>
       )}

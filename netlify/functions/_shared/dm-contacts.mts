@@ -35,6 +35,15 @@ export interface DmContact {
   /** 마지막으로 받은 메시지 일부(대상을 알아보기 쉽게 화면에 보여준다). */
   lastText?: string;
   count: number;
+  /**
+   * 아직 이 상대에게서 "메시지"를 받은 적은 없다는 표시.
+   *
+   * 질문 버튼 클릭(postback)만으로 만들어진 기록에 붙는다. 버튼 클릭도 24시간 창을
+   * 열어주므로 명단에는 있어야 하지만, 그것을 "처음 대화"로 소진해 버리면 이 사람이
+   * 실제로 첫 메시지를 보낼 때 인사말이 나가지 않는다. 그래서 첫 메시지가 도착하면
+   * 그때를 처음으로 보고 이 표시를 지운다.
+   */
+  awaitingFirstMessage?: boolean;
 }
 
 const prefixFor = (username: string) => `contact_${username.toLowerCase()}/`;
@@ -68,11 +77,19 @@ export async function noteDmContact(args: {
   text?: string;
   name?: string;
   igHandle?: string;
+  /**
+   * 무엇을 받았는지.
+   *  `message`(기본) — 실제로 도착한 DM.
+   *  `postback`      — 질문 버튼 클릭. 24시간 창은 열리지만 "처음 대화"로는 세지
+   *                    않는다(위 `awaitingFirstMessage` 참고).
+   */
+  kind?: "message" | "postback";
 }): Promise<NoteContactResult> {
   const { username, igsid } = args;
   if (!username || !igsid) return { first: false, contact: null };
   const now = new Date().toISOString();
   const text = (args.text || "").slice(0, 120);
+  const fromPostback = args.kind === "postback";
 
   const fresh: DmContact = {
     igsid,
@@ -82,15 +99,18 @@ export async function noteDmContact(args: {
     lastAt: now,
     lastText: text || undefined,
     count: 1,
+    awaitingFirstMessage: fromPostback || undefined,
   };
 
   try {
     const s = store();
     const key = keyFor(username, igsid);
     const created = await s.set(key, JSON.stringify(fresh), { onlyIfNew: true });
-    if (created?.modified !== false) return { first: true, contact: fresh };
+    if (created?.modified !== false) return { first: !fromPostback, contact: fresh };
 
     const prev = ((await s.get(key, { type: "json" })) as DmContact | null) || null;
+    // 버튼 클릭만 있던 상대가 드디어 메시지를 보냈다 — 이번이 "처음 대화"다.
+    const firstMessage = !fromPostback && prev?.awaitingFirstMessage === true;
     const merged: DmContact = {
       ...(prev || fresh),
       igsid,
@@ -100,9 +120,10 @@ export async function noteDmContact(args: {
       lastAt: now,
       lastText: text || prev?.lastText,
       count: (prev?.count || 0) + 1,
+      awaitingFirstMessage: fromPostback ? prev?.awaitingFirstMessage : undefined,
     };
     await s.setJSON(key, merged);
-    return { first: false, prevLastAt: prev?.lastAt, contact: merged };
+    return { first: firstMessage, prevLastAt: prev?.lastAt, contact: merged };
   } catch (e) {
     // 기록에 실패했다면 "처음"이라고 단정하지 않는다 — 인사말 중복 발송이
     // 아무 인사말도 안 보내는 것보다 나쁘다.

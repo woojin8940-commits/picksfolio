@@ -4,7 +4,7 @@ import {
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
-  ArrowUp, ArrowDown, Images,
+  ArrowUp, ArrowDown, Images, Clock, CalendarClock,
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
@@ -14,7 +14,7 @@ import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
-import { DmFaqSection, DmScheduleSection, DmTriggerSection } from './DmAutomationExtras';
+import { DmFaqSection, DmScheduleSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -60,8 +60,13 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   cardIntro: '',
   buttons: [{ id: genId('btn'), label: defaultButtonLabel(t), url: '' }],
   cards: [],
+  sendMode: 'instant',
+  scheduledAt: '',
   createdAt: new Date().toISOString(),
 });
+
+/** "예약 발송"을 처음 고를 때 채워 넣는 기본 시각 — 한 시간 뒤. */
+const defaultScheduleAt = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 // 이전에 저장된(신규 필드가 없는) 자동화도 안전하게 다룰 수 있도록 기본값을 채운다.
 const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
@@ -74,6 +79,9 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
   messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
   cardIntro: typeof a.cardIntro === 'string' ? a.cardIntro : '',
+  // 예약 시각이 없는 예약은 성립하지 않는다(발송 시점을 알 수 없다) → 즉시 발송으로 본다.
+  sendMode: a.sendMode === 'scheduled' && a.scheduledAt ? 'scheduled' : 'instant',
+  scheduledAt: typeof a.scheduledAt === 'string' ? a.scheduledAt : '',
 });
 
 const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
@@ -773,9 +781,20 @@ const AutomationEditor: React.FC<{
         linkUrlBroken(c.imageUrl),
     );
 
+  /**
+   * 예약 발송은 시각이 있어야 성립한다. 시각 없이 저장하면 발송기가 언제 보낼지
+   * 알 수 없어 그 자동화는 아무 일도 하지 않는다.
+   */
+  const scheduleMs = draft.scheduledAt ? Date.parse(draft.scheduledAt) : NaN;
+  const scheduleValid = draft.sendMode !== 'scheduled' || !Number.isNaN(scheduleMs);
+  /** 정해 둔 예약 시각이 이미 지났는지. 저장은 막지 않고 안내만 한다. */
+  const scheduleStale =
+    draft.sendMode === 'scheduled' && !Number.isNaN(scheduleMs) && scheduleMs <= Date.now();
+
   const canSave = messageValid &&
     mediaValid &&
     !brokenLinks &&
+    scheduleValid &&
     (draft.commentMatch === 'all' || draft.keywords.length > 0);
 
   /**
@@ -788,11 +807,13 @@ const AutomationEditor: React.FC<{
       ? '적용할 게시물을 한 개 이상 선택해주세요.'
       : draft.commentMatch === 'keyword' && draft.keywords.length === 0
         ? '반응할 키워드를 한 개 이상 추가해주세요.'
-        : brokenLinks
-          ? '링크·이미지 주소를 https:// 로 시작하는 주소로 고쳐주세요.'
-          : draft.messageType === 'carousel'
-            ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
-            : '보낼 DM 메시지를 입력해주세요.';
+        : !scheduleValid
+          ? '예약 발송할 날짜·시간을 정해주세요.'
+          : brokenLinks
+            ? '링크·이미지 주소를 https:// 로 시작하는 주소로 고쳐주세요.'
+            : draft.messageType === 'carousel'
+              ? '이미지나 제목이 있는 카드를 한 장 이상 만들어주세요.'
+              : '보낼 DM 메시지를 입력해주세요.';
 
   const handleSave = () => {
     if (!canSave) return;
@@ -800,6 +821,8 @@ const AutomationEditor: React.FC<{
     onSave({
       ...draft,
       name: draft.name.trim() || (draft.commentMatch === 'keyword' ? `키워드 DM` : '댓글 DM'),
+      // 즉시 발송으로 되돌렸다면 예약 시각은 남겨두지 않는다.
+      scheduledAt: draft.sendMode === 'scheduled' ? draft.scheduledAt : '',
       buttons: draft.buttons.map((b) => ({ ...b, url: normalizeLinkUrl(b.url) })),
       cards: draft.cards.map((c) => ({
         ...c,
@@ -984,11 +1007,69 @@ const AutomationEditor: React.FC<{
               </div>
             </div>
 
-            {/* 4. 댓글 답글 */}
+            {/* 4. 발송 시점 — 즉시 / 예약 */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">4</span>
+                <h4 className="text-sm md:text-base font-black text-slate-900">언제 보낼까요?</h4>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { m: 'instant' as const, icon: <Zap size={15} />, label: '즉시 발송', desc: '댓글이 달리면 바로' },
+                  { m: 'scheduled' as const, icon: <Clock size={15} />, label: '예약 발송', desc: '정해 둔 시각에' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.m}
+                    type="button"
+                    onClick={() => patch({
+                      sendMode: opt.m,
+                      // 예약을 처음 고른 경우에만 기본 시각(한 시간 뒤)을 채운다.
+                      scheduledAt: opt.m === 'scheduled' && !draft.scheduledAt ? defaultScheduleAt() : draft.scheduledAt,
+                    })}
+                    className={`rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
+                      (draft.sendMode || 'instant') === opt.m ? 'border-pink-500 bg-pink-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <span className={`flex items-center gap-1.5 text-sm font-black ${
+                      (draft.sendMode || 'instant') === opt.m ? 'text-pink-700' : 'text-slate-700'
+                    }`}>
+                      {opt.icon} {opt.label}
+                    </span>
+                    <span className="block text-[11px] font-medium text-slate-500 mt-0.5">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+
+              {draft.sendMode === 'scheduled' && (
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="datetime-local"
+                    value={draft.scheduledAt && !Number.isNaN(scheduleMs) ? toLocalInput(new Date(scheduleMs)) : ''}
+                    onChange={(e) => patch({
+                      scheduledAt: e.target.value ? new Date(e.target.value).toISOString() : '',
+                    })}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-pink-500"
+                  />
+                  <p className="text-[11px] font-medium text-slate-500 leading-relaxed">
+                    조건에 맞는 댓글이 달리면 바로 보내지 않고 <b>{draft.scheduledAt && !Number.isNaN(scheduleMs) ? fmtDateTime(draft.scheduledAt) : '정한 시각'}</b>에 보냅니다.
+                    대기 중인 DM 은 아래 <b>예약 발송</b> 목록에서 확인·취소할 수 있어요.
+                    인스타그램은 댓글이 달린 뒤 <b>7일</b> 안의 DM(비공개 답장)만 허용하니, 그 안쪽 시각으로 정해주세요.
+                  </p>
+                  {scheduleStale && (
+                    <p className="text-[11px] font-bold text-amber-600 leading-relaxed">
+                      <AlertCircle size={12} className="inline mr-1 -mt-0.5" />
+                      정해 둔 시각이 이미 지났어요. 지금 저장하면 앞으로 달리는 댓글에는 즉시 DM 이 나갑니다.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 5. 댓글 답글 */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">4</span>
+                  <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">5</span>
                   <h4 className="text-sm md:text-base font-black text-slate-900">댓글에 답글도 남길까요?</h4>
                 </div>
                 <Toggle on={draft.replyEnabled} onClick={() => patch({ replyEnabled: !draft.replyEnabled })} />
@@ -1016,10 +1097,10 @@ const AutomationEditor: React.FC<{
               )}
             </div>
 
-            {/* 5. 메시지 */}
+            {/* 6. 메시지 */}
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">5</span>
+                <span className="w-6 h-6 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center text-[11px] font-black">6</span>
                 <h4 className="text-sm md:text-base font-black text-slate-900">보낼 DM 메시지</h4>
               </div>
 
@@ -1386,7 +1467,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const result = await apiService.resubscribeDmWebhook(userName);
     setResubscribing(false);
     if (result.ok) {
-      if (result.webhookFields) setEchoSubscribed(result.webhookFields.includes('message_echoes'));
+      if (result.webhookFields) {
+        setEchoSubscribed(result.webhookFields.includes('message_echoes'));
+        // 질문 버튼 클릭(postback) 구독 여부도 같이 맞춘다 — 이 값이 곧 "자주 묻는 질문"
+        // 카드의 경고 문구를 띄울지 결정한다.
+        setPostbackSubscribed(result.webhookFields.includes('messaging_postbacks'));
+      }
       setBanner({
         type: 'ok',
         text: '웹훅을 다시 연결했어요. 게시물에 댓글을 하나 달아 자동 발송을 확인해 보세요.',
@@ -1925,6 +2011,13 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                   <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                     <Users size={11} /> {FOLLOW_LABEL[a.followFilter]}
                   </span>
+                  {/* 즉시 발송은 기본값이라 굳이 표시하지 않고, 예약만 눈에 띄게 알린다. */}
+                  {a.sendMode === 'scheduled' && (
+                    <span className="inline-flex items-center gap-1 bg-indigo-100 text-indigo-600 rounded-lg px-2 py-1 text-[11px] font-bold">
+                      <CalendarClock size={11} />
+                      {fmtDateTime(a.scheduledAt) || '예약'} 예약
+                    </span>
+                  )}
                   {a.messageType === 'carousel' && (
                     <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <GalleryHorizontalEnd size={11} /> 캐러셀 {(a.cards || []).filter(cardSendable).length}장

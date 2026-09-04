@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import type { DmButton } from "./instagram-dm.mts";
+import type { DmButton, DmCard } from "./instagram-dm.mts";
 
 /**
  * 예약 DM 대기열.
@@ -23,6 +23,14 @@ import type { DmButton } from "./instagram-dm.mts";
 const STORE = "dm-scheduled";
 /** 사용자당 보관할 완료 기록 수. */
 const HISTORY_KEEP = 50;
+/**
+ * 이 시간이 지난 선점은 죽은 실행이 남긴 것으로 본다.
+ *
+ * 발송기는 1분마다 돌고 한 건 처리에 몇 초가 걸린다. 10분은 정상 실행이 선점을
+ * 붙잡고 있을 수 있는 시간보다 훨씬 길어, 정상 실행과 겹칠 걱정 없이 끊긴 실행만
+ * 골라낼 수 있는 간격이다.
+ */
+const STALE_CLAIM_MS = 10 * 60 * 1000;
 
 export interface DmScheduledJob {
   id: string;
@@ -43,6 +51,36 @@ export interface DmScheduledJob {
   errorKind?: string;
   /** 예약을 만든 시점에 알고 있던 "상대의 마지막 메시지 시각". 창 안내에 쓴다. */
   contactLastAt?: string;
+  /**
+   * 이 예약을 누가 만들었는지.
+   *
+   *  `manual`  — 예약 발송 화면에서 사람이 직접 만든 예약(기본값).
+   *  `comment` — 게시물 자동화가 "예약 발송"으로 설정돼 있어, 댓글이 달린 순간
+   *              대기열에 들어온 예약. 발송 방식이 다르다(아래 commentId 참고).
+   */
+  source?: "manual" | "comment";
+  /**
+   * 발송 형식. 캐러셀로 설정한 게시물 자동화도 예약할 수 있어야 하므로, 텍스트
+   * 한 가지로 고정하지 않는다. 값이 없으면 텍스트로 본다(예전 예약 호환).
+   */
+  messageType?: "text" | "carousel";
+  cards?: DmCard[];
+  /** 캐러셀과 함께 보낼 인사말(선택). */
+  intro?: string;
+  /**
+   * 댓글에서 만들어진 예약이면 그 댓글 ID.
+   *
+   * 이 예약은 `recipient: { comment_id }` 비공개 답장으로 나간다. 댓글 작성자는
+   * 우리에게 DM 을 보낸 적이 없을 수 있는데(대부분 그렇다), 비공개 답장은 그
+   * 경우에도 **댓글 작성 후 7일 안에** 한 통 보낼 수 있다. 그래서 24시간 창 판정을
+   * 그대로 적용하면 정상 발송할 수 있는 예약을 전부 실패로 만든다.
+   */
+  commentId?: string;
+  /** 댓글이 달린 시각(ISO). 7일 창 판정에 쓴다. */
+  commentAt?: string;
+  /** 이 예약을 만든 자동화(기록·화면 표시용). */
+  ruleId?: string;
+  ruleName?: string;
 }
 
 const pendingPrefix = (username: string) => `job/${username.toLowerCase()}/`;
@@ -101,6 +139,8 @@ export async function cancelScheduledJob(username: string, id: string): Promise<
   const target = blobs.find((b) => parseKey(b.key)?.id === id);
   if (!target) return false;
   await s.delete(target.key);
+  // 선점 표시도 같이 지운다. 남겨 두면 취소된 예약의 흔적이 계속 쌓인다.
+  await s.delete(`claim/${target.key}`).catch(() => {});
   return true;
 }
 
@@ -170,14 +210,38 @@ export async function finishJob(key: string, job: DmScheduledJob): Promise<void>
  * 한다(블롭 삭제는 이미 지워진 키에도 오류를 내지 않으므로, 삭제 전에 값이 남아
  * 있었는지 조건부 쓰기로 확인한다).
  */
-export async function claimJob(key: string): Promise<boolean> {
+export async function claimJob(key: string, staleAfterMs = STALE_CLAIM_MS): Promise<boolean> {
   const s = store();
+  const claimKey = `claim/${key}`;
   try {
     // 같은 키에 "선점됨" 표시를 조건부로 남길 수는 없으므로(값이 이미 있다),
     // 별도의 선점 키를 하나 만든다. 이 키는 발송이 끝나면 남겨 두더라도
     // `job/` 목록을 훑는 데 영향이 없다.
-    const claim = await s.set(`claim/${key}`, "1", { onlyIfNew: true });
-    return claim?.modified !== false;
+    const now = Date.now();
+    const claim = await s.set(claimKey, "1", { onlyIfNew: true, metadata: { at: now } });
+    if (claim?.modified !== false) return true;
+
+    /**
+     * 이미 선점된 예약.
+     *
+     * 보통은 같은 예약을 두 실행이 동시에 집으려 한 경우라 여기서 물러나는 것이
+     * 맞다. 그런데 발송 도중 함수가 시간 초과로 끊기면(대기 건이 몰릴 때 생긴다)
+     * 선점 표시만 남고 대기 블롭은 그대로라, 그 예약은 매분 "보낼 시간"으로 잡히면서
+     * 영영 아무도 집지 못한다 — 화면에는 계속 "대기 중"으로 남는다. 그래서 충분히
+     * 오래된 선점은 죽은 실행이 남긴 것으로 보고 다시 집는다.
+     *
+     * 다시 집을 때도 조건부 쓰기(`onlyIfMatch`)를 쓴다. 그러지 않으면 오래된 선점을
+     * 본 두 실행이 함께 발송해 같은 DM 이 두 번 도착한다.
+     */
+    const meta = await s.getMetadata(claimKey);
+    const at = Number((meta?.metadata as { at?: unknown } | undefined)?.at || 0);
+    // 시각을 남기지 않은 예전 선점은 나이를 알 수 없으므로 건드리지 않는다.
+    if (!at || !meta?.etag || now - at < staleAfterMs) return false;
+
+    const retaken = await s.set(claimKey, "1", { onlyIfMatch: meta.etag, metadata: { at: now } });
+    if (retaken?.modified === false) return false;
+    console.warn(`[dm-schedule] stale claim re-taken: ${key}`);
+    return true;
   } catch (e) {
     // 선점 기록에 실패했다면 발송을 막지 않는다 — 예약이 아예 안 나가는 쪽이 더 나쁘다.
     console.warn("[dm-schedule] claim failed:", (e as Error)?.message);
