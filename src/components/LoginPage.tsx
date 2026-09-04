@@ -7,7 +7,6 @@ import { login as netlifyLogin } from '@netlify/identity';
 import FindAccount from './FindAccount';
 import { useLanguage } from '../contexts/LanguageContext';
 import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
-import { isKakaoKeepLoginEnabled, setKakaoKeepLogin } from '../utils/loginPersistence';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
 const ADMIN_USERNAMES = ['picksfolio'];
@@ -26,16 +25,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
   // 아이디/비밀번호 로그인은 아무것도 저장하지 않는다 — 아이디를 채워 주는 일은
   // 브라우저·OS 의 비밀번호 관리자(autoComplete)가 한다.
   const [formData, setFormData] = useState({ id: '', password: '' });
-  // 카카오 간편로그인만 "간편로그인 저장"을 갖는다. 체크 상태는 저장된 값에서
-  // 되살린다 — 한 번 켜 두면 계속 켜져 있어야 한다.
-  const [keepKakaoLogin, setKeepKakaoLoginState] = useState(() => isKakaoKeepLoginEnabled());
-
-  // 체크를 만지는 즉시 기록한다. 카카오 간편로그인은 이 화면을 떠나 카카오로 갔다
-  // 오기 때문에, 로그인이 끝난 뒤에 기록하려 하면 기록할 순간이 없다.
-  const handleKeepKakaoLoginChange = (enabled: boolean) => {
-    setKeepKakaoLoginState(enabled);
-    setKakaoKeepLogin(enabled);
-  };
 
   // 카카오 간편로그인이 콜백에서 끝내 실패하면 main.tsx 가 `?kakao_login=fail` 을
   // 남기고 이 화면으로 돌려보낸다. 조용히 로그인 폼만 보여 주면 사용자는 왜
@@ -60,9 +49,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
       return;
     }
     setIsLoading(true);
-    // 카카오로 넘어가면 이 화면은 사라진다. 체크 상태는 이미 저장돼 있지만(위
-    // handleKeepKakaoLoginChange) 한 번도 만지지 않았을 수도 있으니 여기서 못 박는다.
-    setKakaoKeepLogin(keepKakaoLogin);
     try {
       // 카카오 JS SDK 또는 서버가 만든 인가 주소로 이동한다. 앱 WebView 에서는
       // 셸이 카카오 스킴/인텐트만 가로채 카카오톡을 외부 앱으로 연다.
@@ -315,25 +301,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
           {language === 'en' ? 'Start with Kakao in 1 sec' : '카카오로 1초 만에 시작하기'}
         </button>
 
-        {/* 저장 옵션은 카카오 간편로그인에만 있다. 아이디/비밀번호 로그인과 비즈니스
-            로그인은 아무것도 저장하지 않는다. */}
-        <label className="flex items-center gap-2 cursor-pointer select-none mt-2.5 ml-1">
-          <input
-            type="checkbox"
-            checked={keepKakaoLogin}
-            onChange={(e) => handleKeepKakaoLoginChange(e.target.checked)}
-            disabled={isLoading}
-            className="w-4 h-4 rounded border-slate-300 text-blue-600 accent-blue-600 cursor-pointer"
-          />
-          <span className="text-xs text-slate-500 font-bold">
-            {language === 'en' ? 'Save Kakao login' : '간편로그인 저장'}
-          </span>
-        </label>
-        <p className="text-[11px] text-slate-400 font-medium ml-1 mt-1 leading-snug">
-          {language === 'en'
-            ? 'Kakao login stays signed in until you log out.'
-            : '카카오 간편로그인이 직접 로그아웃할 때까지 유지됩니다.'}
-        </p>
+        {/* 로그인 유지("간편로그인 저장") 체크는 두지 않는다 — 카카오 로그인 화면이
+            이미 자기 "간편로그인 저장"을 제공한다. 우리 화면에 같은 이름을 하나 더
+            두면 무엇을 저장하는 건지 알 수 없다. utils/loginPersistence 참고. */}
 
         <div className="text-center mt-4 text-slate-400 text-sm font-bold">
           {language === 'en' ? "Don't have an account?" : '계정이 없으신가요?'}{' '}

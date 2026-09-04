@@ -461,6 +461,28 @@ async function authHeadersWithTimeout(
   }
 }
 
+/**
+ * 저장 요청의 결과. 실패한 이유와 "다시 보내면 될 수 있는 실패인지"를 함께 담는다.
+ *
+ * `retryable` 이 false 면 같은 요청을 다시 보내도 같은 응답이 온다 — 로그인 만료,
+ * 권한 없음, 용량 초과 같은 경우다. 그럴 때 "재시도 중..." 을 띄우면 사용자는
+ * 기다리기만 하고 실제로 해야 할 일(다시 로그인 · 이미지 줄이기)을 알 수 없다.
+ */
+export interface SaveResult {
+  ok: boolean;
+  /** HTTP 상태. 네트워크 단계에서 끊겼으면 0. */
+  status: number;
+  /** 서버가 준 사람이 읽을 수 있는 이유. 성공이면 빈 문자열. */
+  error: string;
+  retryable: boolean;
+}
+
+/** 다시 보내면 결과가 달라질 수 있는 상태 코드만 재시도 대상으로 본다. */
+function isRetryableStatus(status: number): boolean {
+  if (status === 408 || status === 429) return true;
+  return status >= 500;
+}
+
 export interface SiteData {
   blocks?: Block[];
   design?: DesignSettings;
@@ -951,7 +973,15 @@ export const apiService = {
     return request;
   },
 
-  async saveSiteData(username: string, data: Partial<SiteData>): Promise<boolean> {
+  /**
+   * 저장 결과를 이유까지 붙여 돌려준다.
+   *
+   * 예전에는 `res.ok` 만 돌려줬다. 그래서 화면은 실패를 알아도 왜 실패했는지 알 수
+   * 없었고, 로그인 만료(401)나 용량 초과(413)처럼 다시 보내도 결과가 같은 실패에도
+   * "재시도 중..." 을 띄우고 같은 요청을 한 번 더 보냈다. 사용자에게는 원인을 알
+   * 수 없는 경고만 남았다.
+   */
+  async saveSiteDataResult(username: string, data: Partial<SiteData>): Promise<SaveResult> {
     try {
       const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
@@ -966,12 +996,22 @@ export const apiService = {
         const cached = siteDataCache[key];
         const base = (cached?.data || {}) as SiteData;
         siteDataCache[key] = { data: { ...base, ...data }, ts: Date.now() };
+        return { ok: true, status: res.status, error: '', retryable: false };
       }
-      return res.ok;
+
+      const body = await res.json().catch(() => null);
+      const error = String(body?.error || '') || `HTTP ${res.status}`;
+      console.error('[API] Failed to save site data:', res.status, error);
+      return { ok: false, status: res.status, error, retryable: isRetryableStatus(res.status) };
     } catch (e) {
+      // 네트워크가 끊겼거나 함수가 응답 없이 끝난 경우. 이건 다시 보내면 될 수 있다.
       console.error('[API] Failed to save site data:', e);
-      return false;
+      return { ok: false, status: 0, error: '네트워크 연결을 확인해 주세요.', retryable: true };
     }
+  },
+
+  async saveSiteData(username: string, data: Partial<SiteData>): Promise<boolean> {
+    return (await apiService.saveSiteDataResult(username, data)).ok;
   },
 
   async uploadImage(username: string, blob: Blob, filename: string): Promise<string | null> {

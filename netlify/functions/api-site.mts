@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";
 import { createUniqueProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { offloadEmbeddedMedia } from "./_shared/embedded-media.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -217,7 +218,23 @@ export default async (req: Request, context: Context) => {
         SELECT data, profile_code FROM site_data WHERE username = ${username}
       `;
 
-      const existingData = existing.length > 0 ? (existing[0].data as Record<string, any> || {}) : {};
+      const storedData = existing.length > 0 ? (existing[0].data as Record<string, any> || {}) : {};
+
+      // 문서에 박힌 base64 `data:` URL 은 블롭으로 옮기고 주소만 남긴다. 들어오는
+      // 요청과 이미 저장된 문서 양쪽에 적용한다 — 한 번 박히면 그 뒤의 모든 저장이
+      // 그 덩치를 읽고·스냅샷 뜨고·다시 쓰고·블롭까지 복사하느라 실패했다.
+      // (자세한 배경은 _shared/embedded-media.mts)
+      const offloaded = await offloadEmbeddedMedia({ stored: storedData, incoming: body }, username);
+      const existingData = offloaded.value.stored;
+      body = offloaded.value.incoming;
+      if (offloaded.report.moved || offloaded.report.skipped) {
+        console.log(
+          `[api-site] embedded media offload ${username}:`,
+          `moved=${offloaded.report.moved}`,
+          `bytes=${offloaded.report.bytes}`,
+          `skipped=${offloaded.report.skipped}`,
+        );
+      }
 
       if (existing.length > 0 && hasConnectedSiteContent(existingData) && isDestructiveUpdate(existingData, body)) {
         return Response.json({

@@ -6,6 +6,11 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { completeKakaoSdkLogin, isKakaoSdkCallback } from './utils/kakaoLogin';
+import { purgeRemovedLoginSaveKeys } from './utils/loginPersistence';
+
+// 없어진 "로그인 저장" 옵션들이 브라우저에 남겨 둔 값을 지운다. 기능이 없는데 값이
+// 남아 있으면 안 된다.
+purgeRemovedLoginSaveKeys();
 
 // Mobile debug console — activated by `?debug=1` query param so field users
 // (especially in-app WebViews like KakaoTalk, where external devtools cannot

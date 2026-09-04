@@ -153,6 +153,10 @@ export const platformTextPatterns = [
     "replacement": "Save failed. (HTTP $1)"
   },
   {
+    "source": "^로컬에만 저장됨 — (.+)$",
+    "replacement": "Saved locally only — $1"
+  },
+  {
     "source": "^인스타그램 연동이 (.+?)일 뒤 만료됩니다\\.$",
     "replacement": "Instagram integration expires in $1 days."
   },
