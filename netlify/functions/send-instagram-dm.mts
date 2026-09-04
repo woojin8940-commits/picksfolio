@@ -1,12 +1,13 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import {
-  buildDmMessages,
+  buildCommentDmPlan,
+  buildDirectDmPlan,
   describeDmError,
   postCommentReply,
   sendDmMessages,
 } from "./_shared/instagram-dm.mts";
-import type { DmButton, DmCard, DmErrorKind } from "./_shared/instagram-dm.mts";
+import type { DmButton, DmCard, DmErrorKind, DmPlan } from "./_shared/instagram-dm.mts";
 import {
   DM_AUTOMATION_REQUIRED_MESSAGE,
   dmAutomationAllowed,
@@ -122,7 +123,7 @@ function parseCommentTime(raw: unknown): number | null {
 
 /** 대상 한 명에 대한 DM 처리 결과. */
 type Outcome =
-  | { kind: "sent"; partial: boolean }
+  | { kind: "sent"; partial: boolean; followUpSkipped?: boolean }
   | { kind: "already"; reason: string }
   | { kind: "failed"; error: string; errorKind: DmErrorKind };
 
@@ -242,20 +243,32 @@ export default async (req: Request, context: Context) => {
       ? "graph.instagram.com"
       : "graph.facebook.com";
 
-  // 메시지 구조화 (텍스트 / 링크버튼 카드 / 캐러셀)
-  //
-  // 보낼 것이 없으면 빌더가 빈 배열을 돌려준다. 본문이 비었다고 빌더를 건너뛰면
-  // 카드만 있는 캐러셀이 통째로 사라지므로, 판단은 빌더에 맡긴다.
-  const messages =
-    message || intro || hasCards
-      ? buildDmMessages({
-          messageType: body.messageType,
-          message,
-          buttons: body.buttons,
-          cards: body.cards,
-          intro,
-        })
-      : [];
+  /**
+   * 메시지 구조화 (텍스트 / 링크버튼 카드 / 캐러셀).
+   *
+   * 수신자 종류에 따라 보낼 수 있는 통 수가 달라서 계획을 두 벌 만든다.
+   * - 댓글 작성자(비공개 답장): 댓글 1건당 1통. 캐러셀이 첫 통에 들어가야 한다.
+   *   예전에는 인사말 텍스트를 먼저 보내 그 한 통을 써버려서, 받는 사람에게는
+   *   텍스트만 도착하고 카드가 오지 않았다.
+   * - 수신자 ID 직접 지정(대화창이 열린 상대): 설정한 순서 그대로 여러 통.
+   *
+   * 보낼 것이 없으면 빌더가 빈 배열을 돌려준다. 본문이 비었다고 빌더를 건너뛰면
+   * 카드만 있는 캐러셀이 통째로 사라지므로, 판단은 빌더에 맡긴다.
+   */
+  const dmContent = {
+    messageType: body.messageType,
+    message,
+    buttons: body.buttons,
+    cards: body.cards,
+    intro,
+  };
+  const emptyPlan: DmPlan = { messages: [], bestEffortFrom: 0 };
+  const hasAnyContent = Boolean(message || intro || hasCards);
+  const commentPlan: DmPlan = hasAnyContent ? buildCommentDmPlan(dmContent) : emptyPlan;
+  const directPlan: DmPlan = hasAnyContent ? buildDirectDmPlan(dmContent) : emptyPlan;
+  // 내용 지문·에코 표시·"보낼 내용 없음" 판단은 댓글 작성자 경로(주 사용 경로)를 기준으로 한다.
+  // 자동 발송(instagram-webhook)도 같은 계획을 해싱하므로 중복 방지 키가 서로 맞는다.
+  const messages = commentPlan.messages;
 
   if (messages.length === 0 && replies.length === 0) {
     return Response.json(
@@ -295,7 +308,8 @@ export default async (req: Request, context: Context) => {
         igId,
         accessToken,
         recipient: { id: recipientId },
-        messages,
+        messages: directPlan.messages,
+        bestEffortFrom: directPlan.bestEffortFrom,
       });
 
       if (!result.ok && !result.partial) {
@@ -330,7 +344,7 @@ export default async (req: Request, context: Context) => {
         messageId: result.messageId,
         partial: result.partial,
         message: result.partial
-          ? `DM 본문은 발송됐지만 링크 버튼 카드가 전송되지 않았습니다. (${result.error})`
+          ? `첫 메시지는 도착했지만 이어지는 메시지가 전송되지 않았습니다. (${result.error})`
           : undefined,
       });
     } catch (e: any) {
@@ -543,16 +557,23 @@ export default async (req: Request, context: Context) => {
           igId: senderIgId,
           accessToken,
           recipient: { comment_id: c.commentId },
-          // 메시지가 2건(본문 + 버튼 카드)인 설정은 두 번째부터 IGSID 로 보낸다.
-          // 비공개 답장은 댓글당 1통만 허용되기 때문이다.
+          // 비공개 답장은 댓글당 1통만 허용되고 댓글은 대화창을 열어주지 않는다.
+          // 두 번째 통은 상대가 먼저 DM 을 보낸 적이 있을 때만 IGSID 로 도착하므로,
+          // 계획상 "부가 메시지"로 두고 실패해도 발송 성공으로 본다.
           followUpRecipient: c.fromId ? { id: c.fromId } : undefined,
           messages,
+          bestEffortFrom: commentPlan.bestEffortFrom,
+          fallback: commentPlan.fallback,
         });
 
         if (result.ok || result.partial) {
           // partial 은 본문이 이미 도착한 상태다. 실패로 다루면 재시도로 같은
           // 본문이 두 번 도착한다.
-          return { kind: "sent", partial: result.partial };
+          return {
+            kind: "sent",
+            partial: result.partial,
+            followUpSkipped: Boolean(result.followUpError),
+          };
         }
 
         lastError = result.error || "";
@@ -570,7 +591,10 @@ export default async (req: Request, context: Context) => {
           igId: senderIgId,
           accessToken,
           recipient: { id: c.fromId },
-          messages,
+          // 이 경로는 대화창이 열려 있어야 성공한다. 열려 있다면 여러 통을 보낼 수
+          // 있으므로 설정한 순서(인사말 → 카드)를 그대로 살린다.
+          messages: directPlan.messages.length > 0 ? directPlan.messages : messages,
+          bestEffortFrom: directPlan.bestEffortFrom,
         });
         if (direct.ok || direct.partial) {
           return { kind: "sent", partial: direct.partial };
@@ -637,6 +661,13 @@ export default async (req: Request, context: Context) => {
 
   const successCount = outcomes.filter((o) => o.kind === "sent").length;
   const partialCount = outcomes.filter((o) => o.kind === "sent" && o.partial).length;
+  /**
+   * 본 메시지는 도착했지만 인사말 같은 부가 메시지가 빠진 대상 수.
+   * 실패가 아니다 — 인스타그램의 "댓글 1건당 DM 1통" 제한 때문이다.
+   */
+  const followUpSkippedCount = outcomes.filter(
+    (o) => o.kind === "sent" && o.followUpSkipped,
+  ).length;
   const alreadyCount = outcomes.filter((o) => o.kind === "already").length;
   const failures = outcomes.filter((o) => o.kind === "failed") as Extract<Outcome, { kind: "failed" }>[];
   const failCount = failures.length;
@@ -662,6 +693,7 @@ export default async (req: Request, context: Context) => {
     targetMediaIds,
     sentCount: successCount,
     partialCount,
+    followUpSkippedCount,
     alreadyCount,
     failCount,
     replyCount,
@@ -689,7 +721,13 @@ export default async (req: Request, context: Context) => {
     parts.push(`이미 답글이 달린 댓글 ${replyAlreadyCount}개는 중복을 막기 위해 건너뛰었습니다.`);
   }
   if (partialCount > 0) {
-    parts.push(`${partialCount}명은 본문만 도착하고 링크 버튼 카드는 전송되지 않았습니다.`);
+    parts.push(`${partialCount}명은 첫 메시지만 도착하고 이어지는 메시지는 전송되지 않았습니다.`);
+  }
+  if (followUpSkippedCount > 0) {
+    parts.push(
+      `${followUpSkippedCount}명에게는 설정한 메시지만 도착했습니다. ` +
+        `인스타그램은 댓글 1건당 DM을 1통만 허용해, 인사말 텍스트는 상대가 먼저 DM을 보낸 적이 있을 때만 함께 도착합니다.`,
+    );
   }
   if (alreadyCount > 0) {
     parts.push(`이미 같은 DM을 받은 ${alreadyCount}명은 중복 발송을 막기 위해 건너뛰었습니다.`);

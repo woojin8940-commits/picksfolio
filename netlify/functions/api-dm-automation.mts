@@ -9,6 +9,8 @@ import {
 import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
+import { indexDmAccount, readWebhookReceipt } from "./_shared/dm-webhook-index.mts";
+import { readDmLog } from "./_shared/dm-automation-log.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -94,6 +96,14 @@ interface DmSettings {
   webhookSubscribedAt?: string;
   /** 마지막으로 구독을 건 필드 목록. 목록이 바뀌면 한 번 더 구독한다. */
   webhookFields?: string;
+  /**
+   * 이 설정을 저장한 로그인 사용자 ID.
+   *
+   * 플랜 판정을 설정 화면과 발송기(웹훅)가 같은 기준으로 하도록 남긴다. 웹훅에는
+   * 로그인 세션이 없어 사용자명으로만 조회했는데, 운영자 지급 멤버십이 다른
+   * 사용자명으로 기록돼 있으면 "설정은 저장되는데 자동 발송만 막히는" 상태가 됐다.
+   */
+  ownerAuthUserId?: string;
 }
 
 const DEFAULT_SETTINGS: DmSettings = {
@@ -308,9 +318,7 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const data = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
-    const { accessToken, ...safe } = data;
-    // 발송 로그(dm-automation-log)는 화면에서 보여주지 않으므로 응답에 싣지 않는다.
-    // 장애 조사용으로 블롭에는 계속 최근 50건이 쌓인다.
+    const { accessToken, ownerAuthUserId, ...safe } = data;
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
@@ -328,6 +336,35 @@ export default async (req: Request, context: Context) => {
       // 디엠 자동화는 프로 플랜 전용이다. 화면에서 업그레이드 안내를 띄울 수 있게 함께 내려준다.
       entitled: await dmAutomationAllowed(username, auth.userId),
       requiredTier: DM_AUTOMATION_TIER,
+      /**
+       * 자동 발송 진단 정보.
+       *
+       * "자동 발송을 켜뒀는데 댓글에 반응이 없다"는 문제는 코드만 봐서는 원인을 좁힐
+       * 수 없다. 이벤트가 아예 안 오는 것(Meta 앱 웹훅 등록·계정 구독 문제)과, 받고도
+       * 건너뛴 것(플랜·스위치·중복)이 화면에서 구분돼야 사용자가 다음 행동을 안다.
+       */
+      diagnostics: {
+        /** 이 계정으로 웹훅 이벤트가 마지막으로 도착한 시각. */
+        lastWebhookAt: await readWebhookReceipt({
+          username,
+          igIds: [data.igUserId, data.igAccountId],
+        }).catch(() => null),
+        /** 최근 발송·건너뜀 기록(최신 순). 실패 이유를 화면에서 바로 읽을 수 있게 한다. */
+        recentLog: await readDmLog(username, 12)
+          .then((entries) =>
+            entries.map((e) => ({
+              at: e.at,
+              kind: e.kind ?? null,
+              status: e.status ?? null,
+              reason: e.reason ?? null,
+              ruleName: e.ruleName ?? null,
+              error: e.error ?? null,
+              errorKind: e.errorKind ?? null,
+              followUpSkipped: e.followUpSkipped ?? null,
+            })),
+          )
+          .catch(() => []),
+      },
     });
   }
 
@@ -337,10 +374,12 @@ export default async (req: Request, context: Context) => {
 
     // 연동 해제
     if (body?.action === "disconnect") {
-      let staleIgId = "";
+      let staleIgIds: string[] = [];
       await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
         const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
-        staleIgId = existing.igUserId || existing.igAccountId || "";
+        staleIgIds = Array.from(
+          new Set([existing.igUserId, existing.igAccountId].filter(Boolean) as string[]),
+        );
         return {
           ...existing,
           enabled: false,
@@ -360,9 +399,10 @@ export default async (req: Request, context: Context) => {
       });
       // 웹훅 역인덱스(ig_<계정ID> → 사용자명)도 함께 비운다. 남겨두면 연동을 끊은 뒤에도
       // 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다.
-      if (staleIgId) {
+      if (staleIgIds.length > 0) {
         try {
-          await getStore({ name: "dm-automation-index", consistency: "strong" }).delete(`ig_${staleIgId}`);
+          const index = getStore({ name: "dm-automation-index", consistency: "strong" });
+          await Promise.all(staleIgIds.map((id) => index.delete(`ig_${id}`)));
         } catch (e) {
           console.warn("[dm-automation] index cleanup failed:", (e as Error)?.message);
         }
@@ -388,6 +428,59 @@ export default async (req: Request, context: Context) => {
         },
         { status: 403 },
       );
+    }
+
+    /**
+     * 계정별 웹훅 구독을 다시 건다(자동 발송이 안 될 때의 자기 수리 버튼).
+     *
+     * 댓글 이벤트는 Meta 앱의 웹훅 등록과 **계정별 `subscribed_apps` 구독**이 둘 다
+     * 있어야 도착한다. 계정 구독은 토큰 재발급·권한 변경 등으로 조용히 풀릴 수 있고,
+     * 그러면 화면상 자동 발송은 켜져 있는데 댓글에 아무 일도 일어나지 않는다. 그때
+     * 사용자가 직접 다시 걸 수 있어야 한다(예전에는 자동화를 저장할 때 한 번만
+     * 시도하고, 성공 기록이 남아 있으면 다시 시도하지 않았다).
+     */
+    if (body?.action === "resubscribeWebhook") {
+      const current = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
+      if (!current.accessToken) {
+        return Response.json(
+          { success: false, error: "인스타그램 계정을 먼저 연동해 주세요.", code: "NOT_CONNECTED" },
+          { status: 200 },
+        );
+      }
+
+      const sub = await subscribeInstagramWebhooks({
+        accessToken: current.accessToken,
+        tokenSource: current.tokenSource,
+        igId: current.igUserId || current.igAccountId,
+      });
+
+      if (!sub.ok) {
+        return Response.json(
+          {
+            success: false,
+            error:
+              `웹훅 구독에 실패했습니다. (${sub.error || "알 수 없는 오류"}) ` +
+              `계정을 다시 연동하면 해결되는 경우가 많습니다.`,
+            code: "WEBHOOK_SUBSCRIBE_FAILED",
+          },
+          { status: 200 },
+        );
+      }
+
+      const subscribedAt = new Date().toISOString();
+      const achieved = sub.fields || WEBHOOK_FIELDS;
+      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (stored) =>
+        stored ? { ...stored, webhookSubscribedAt: subscribedAt, webhookFields: achieved } : null,
+      ).catch((e) => console.warn("[dm-automation] webhook flag save failed:", (e as Error)?.message));
+      // 역인덱스도 함께 채운다 — 이벤트가 도착해도 주인을 못 찾으면 그대로 버려진다.
+      await indexDmAccount(username, [current.igUserId, current.igAccountId]);
+
+      return Response.json({
+        success: true,
+        webhookSubscribedAt: subscribedAt,
+        webhookFields: achieved,
+        echoSubscribed: achieved.includes("message_echoes"),
+      });
     }
 
     /**
@@ -481,6 +574,12 @@ export default async (req: Request, context: Context) => {
           ...existing,
           enabled,
           automations,
+          /**
+           * 소유자 ID 는 본인이 저장할 때만 채운다. 관리자가 대신 저장한 경우
+           * 관리자 ID 가 들어가면 발송기의 플랜 판정이 엉뚱한 사람을 조회한다.
+           */
+          ownerAuthUserId:
+            !auth.isAdmin && auth.userId ? auth.userId : existing.ownerAuthUserId,
           // 구버전 rules 는 전달되면 갱신, 아니면 유지
           rules: Array.isArray(body.rules) ? body.rules : existing.rules || [],
           updatedAt: now,
@@ -514,6 +613,19 @@ export default async (req: Request, context: Context) => {
           automations: Array.isArray(next.automations) ? next.automations : [],
         },
         { status: 409 },
+      );
+    }
+
+    /**
+     * 웹훅 역인덱스(ig_<계정ID> → 사용자명)를 저장할 때마다 채워 둔다.
+     *
+     * 예전에는 OAuth 콜백에서 한 번만 기록했다. 그 코드가 없던 시절에 연동한 계정은
+     * 인덱스가 비어 있어, 댓글 이벤트가 도착해도 주인을 찾지 못해 조용히 버려졌다
+     * (자동 발송만 안 되고 수동 발송은 되는 상태의 원인 중 하나다).
+     */
+    if (next.igUserId || next.igAccountId) {
+      await indexDmAccount(username, [next.igUserId, next.igAccountId]).catch((e) =>
+        console.warn("[dm-automation] index refresh failed:", (e as Error)?.message),
       );
     }
 

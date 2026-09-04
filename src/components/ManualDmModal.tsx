@@ -174,18 +174,28 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   };
 
   /**
-   * 발송기와 같은 기준으로 카드를 고른다(제목 또는 http/https 이미지 주소).
-   * 화면에서 세는 장수와 실제로 도착하는 장수가 어긋나지 않게 한다.
+   * 발송기와 같은 기준으로 카드를 고른다. 화면에서 세는 장수와 실제로 도착하는
+   * 장수가 어긋나지 않아야 한다.
+   *
+   * 인스타그램의 제네릭 템플릿은 제목 말고도 속성이 최소 하나 있어야 하므로
+   * (이미지·설명·버튼), 제목만 적힌 카드는 발송에서 빠진다. 이미지 주소는
+   * 인스타그램이 직접 받아가기 때문에 공개 호스트여야 한다.
    */
   const isValidCardImage = (raw: string): boolean => {
     try {
       const u = new URL((raw || '').trim());
-      return u.protocol === 'http:' || u.protocol === 'https:';
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+      return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname);
     } catch {
       return false;
     }
   };
-  const sendableCards = cards.filter((c) => c.title?.trim() || isValidCardImage(c.imageUrl));
+  const sendableCards = cards.filter(
+    (c) =>
+      isValidCardImage(c.imageUrl) ||
+      Boolean(c.subtitle?.trim()) ||
+      Boolean(c.buttonLabel?.trim() && isValidCardImage(c.buttonUrl)),
+  );
   const isCarousel = messageType === 'carousel' && sendableCards.length > 0;
 
   const selectedRule = automations.find((a) => a.id === selectedRuleId);
@@ -224,7 +234,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
-        // 캐러셀에서는 이 칸이 본문이 아니라 카드 앞 인사말이다.
+        // 캐러셀에서는 이 칸이 본문이 아니라 카드에 이어 보내는 인사말이다.
         message: isCarousel ? '' : message.trim(),
         intro: isCarousel ? message.trim() : undefined,
         messageType,
@@ -420,7 +430,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-2 text-xs font-bold text-amber-700">
                   <AlertCircle size={14} className="shrink-0 mt-0.5" />
                   <span className="leading-relaxed">
-                    이 자동화에는 발송할 카드가 없어요. 자동화 편집에서 카드에 이미지나 제목을 넣어 주세요.
+                    이 자동화에는 발송할 카드가 없어요. 자동화 편집에서 카드에 이미지를 넣어 주세요. (제목만 있는 카드는 인스타그램이 거부합니다.)
                   </span>
                 </div>
               ) : (
@@ -447,11 +457,11 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
           )}
 
-          {/* DM 메시지 본문 (캐러셀에서는 카드 앞 인사말) */}
+          {/* DM 메시지 본문 (캐러셀에서는 카드에 이어 보내는 인사말) */}
           <div>
             <label className="block text-xs font-black text-slate-700 mb-1.5">
               {messageType === 'carousel'
-                ? '카드 앞 인사말 (선택)'
+                ? '인사말 (선택)'
                 : t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
             </label>
             <textarea
@@ -465,7 +475,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             />
             {messageType === 'carousel' && (
               <p className="text-[11px] text-slate-500 font-medium mt-1.5">
-                적어 두면 이 문구가 먼저 도착하고, 이어서 카드가 도착합니다.
+                카드가 먼저 도착하고 인사말은 그 뒤에 보냅니다. 인스타그램은 댓글 1건당 DM을 1통만 허용해,
+                인사말은 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.
               </p>
             )}
           </div>

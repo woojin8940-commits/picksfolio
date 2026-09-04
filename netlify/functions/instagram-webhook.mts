@@ -2,12 +2,14 @@ import { getStore } from "@netlify/blobs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config, Context } from "@netlify/functions";
 import {
-  buildDmMessages,
+  buildCommentDmPlan,
+  buildDirectDmPlan,
   describeDmError,
   postCommentReply,
   sendDmMessages,
 } from "./_shared/instagram-dm.mts";
-import type { DmButton, DmCard } from "./_shared/instagram-dm.mts";
+import type { DmButton, DmCard, DmPlan } from "./_shared/instagram-dm.mts";
+import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
@@ -74,22 +76,45 @@ interface DmSettings {
   accessToken?: string;
   tokenSource?: string;
   automations?: DmAutomationItem[];
+  /**
+   * 이 설정을 저장한 로그인 사용자 ID.
+   *
+   * 플랜 판정(dmAutomationAllowed)은 설정 화면에서는 로그인 사용자 ID 로, 웹훅에서는
+   * 사용자명으로 조회했다. 운영자 지급 멤버십 행이 다른 사용자명으로 남아 있으면
+   * 두 판정이 갈려 "설정은 저장되는데(=플랜 통과) 자동 발송만 막히는" 상태가 된다.
+   * 저장 시점에 기록해 두고 웹훅도 같은 기준으로 조회한다.
+   */
+  ownerAuthUserId?: string;
 }
 
 function graphHost(settings: DmSettings) {
   return settings.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
 }
 
-function buildMessagePayload(a: DmAutomationItem) {
-  // 인스타그램은 버튼 템플릿을 지원하지 않으므로 링크 버튼도 제네릭 템플릿
-  // 카드로 감싸 보낸다. 자세한 내용은 _shared/instagram-dm.mts 참고.
-  return buildDmMessages({
+function dmContentOf(a: DmAutomationItem) {
+  return {
     messageType: a.messageType,
     message: a.message,
     buttons: a.buttons,
     cards: a.cards,
     intro: a.cardIntro,
-  });
+  };
+}
+
+/**
+ * 댓글 비공개 답장용 계획. 캐러셀이 첫 통에 들어간다.
+ *
+ * 인스타그램은 버튼 템플릿을 지원하지 않으므로 링크 버튼도 제네릭 템플릿 카드로
+ * 감싸 보낸다. 댓글 1건당 1통 제한 때문에 순서가 중요하다 —
+ * 자세한 내용은 _shared/instagram-dm.mts 참고.
+ */
+function buildCommentPlan(a: DmAutomationItem): DmPlan {
+  return buildCommentDmPlan(dmContentOf(a));
+}
+
+/** 대화창이 열린 상대에게 IGSID 로 직접 보낼 때 쓰는 계획(설정한 순서 그대로). */
+function buildDirectPlan(a: DmAutomationItem): DmPlan {
+  return buildDirectDmPlan(dmContentOf(a));
 }
 
 async function appendLog(username: string, entry: Record<string, unknown>) {
@@ -134,7 +159,9 @@ async function inspectEcho(username: string, event: any): Promise<void> {
 
 function hasContent(a: DmAutomationItem): boolean {
   if (a.messageType === "carousel") {
-    return (a.cards || []).some((c) => c && (c.title?.trim() || c.imageUrl?.trim()));
+    return (a.cards || []).some(
+      (c) => c && (c.title?.trim() || c.imageUrl?.trim() || c.buttonUrl?.trim()),
+    );
   }
   return Boolean(a.message?.trim());
 }
@@ -290,15 +317,24 @@ export default async (req: Request, _context: Context) => {
     // 설정 저장 직후 들어온 댓글에도 방금 편집한 메시지를 사용해야 한다. 기본 eventual
     // consistency 는 이전 설정을 최대 60초간 반환할 수 있어 자동 DM 내용이 어긋난다.
     const store = getStore({ name: "dm-automation", consistency: "strong" });
-    const index = getStore({ name: "dm-automation-index", consistency: "strong" });
 
     for (const entry of payload?.entry || []) {
       const igAccountId = String(entry?.id || "");
       if (!igAccountId) continue;
 
-      // 이 IG 계정이 어느 사용자 소유인지 조회
-      const username = await index.get(`ig_${igAccountId}`, { type: "text" });
-      if (!username) continue;
+      /**
+       * 이 IG 계정이 어느 사용자 소유인지 조회.
+       *
+       * 조회 결과와 무관하게 "이벤트가 도착했다"는 흔적을 먼저 남긴다. 자동 발송이
+       * 안 될 때 Meta 가 이벤트를 안 보내는 것인지, 받고도 주인을 못 찾은 것인지
+       * 설정 화면에서 구분할 수 있어야 한다.
+       */
+      const username = await resolveDmAccountByIgId(igAccountId);
+      await noteWebhookReceived(igAccountId, username);
+      if (!username) {
+        console.warn("[ig-webhook] no account for IG id", igAccountId);
+        continue;
+      }
 
       const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
       if (!settings) continue;
@@ -350,7 +386,9 @@ export default async (req: Request, _context: Context) => {
       const sendBlockedReason = async (): Promise<SendBlock | null> => {
         if (!settings.enabled) return "switch_off";
         if (!accessToken) return "not_connected";
-        if (planAllowed === null) planAllowed = await dmAutomationAllowed(username);
+        if (planAllowed === null) {
+          planAllowed = await dmAutomationAllowed(username, settings.ownerAuthUserId);
+        }
         return planAllowed ? null : "plan_required";
       };
 
@@ -467,7 +505,30 @@ export default async (req: Request, _context: Context) => {
         //    보낼 DM 본문이 없으므로 발송을 건너뛴다(실패로 기록하지 않는다).
         if (!hasContent(automation)) continue;
 
-        const messages = buildMessagePayload(automation);
+        const plan = buildCommentPlan(automation);
+        /**
+         * 설정에는 내용이 있는데 실제로 보낼 수 있는 메시지가 없는 경우.
+         *
+         * 대표적으로 카드에 제목만 적고 이미지·설명·버튼을 비워 둔 캐러셀이다.
+         * 제네릭 템플릿은 제목 외 속성이 최소 하나 있어야 해서 그 카드는 뺄 수밖에
+         * 없고, 전부 그런 카드면 남는 메시지가 없다. 조용히 넘기면 사용자는 이유를
+         * 알 수 없으니 활동 기록에 남긴다.
+         */
+        if (plan.messages.length === 0) {
+          await appendLog(username, {
+            kind: "dm",
+            status: "failed",
+            recipientId: fromId,
+            ruleId: automation.id,
+            ruleName: automation.name,
+            error:
+              "보낼 수 있는 카드가 없습니다. 카드마다 이미지를 올리거나 설명·버튼을 채워 주세요(제목만 있는 카드는 인스타그램이 거부합니다).",
+            errorKind: "other",
+          });
+          continue;
+        }
+
+        const messages = plan.messages;
         // 우리가 보낸 문구로 남긴다. 발송 직후 인스타그램이 돌려주는 발신 에코를
         // "외부 서비스가 보낸 DM"으로 잘못 표시하지 않으려면 발송 전에 남겨야 한다
         // (에코가 발송 응답보다 먼저 도착할 수 있다).
@@ -514,6 +575,8 @@ export default async (req: Request, _context: Context) => {
                 recipient: { comment_id: commentId },
                 followUpRecipient: fromId ? { id: fromId } : undefined,
                 messages,
+                bestEffortFrom: plan.bestEffortFrom,
+                fallback: plan.fallback,
               })
             : null;
 
@@ -538,13 +601,17 @@ export default async (req: Request, _context: Context) => {
             (!result || (!result.ok && !result.partial && result.errorKind === "already_sent"));
 
           if (retryViaIgsid) {
+            // 이 경로는 대화창이 열려 있어야 성공한다. 열려 있다면 여러 통을 보낼 수
+            // 있으므로, 설정한 순서(인사말 → 카드)를 그대로 살린다.
+            const direct = buildDirectPlan(automation);
             result = await sendDmMessages({
               graphHost: graphHost(settings),
               graphVersion: GRAPH_VERSION,
               igId,
               accessToken,
               recipient: { id: fromId },
-              messages,
+              messages: direct.messages.length > 0 ? direct.messages : messages,
+              bestEffortFrom: direct.bestEffortFrom,
             });
           }
 
@@ -562,6 +629,12 @@ export default async (req: Request, _context: Context) => {
               contentHash,
               messageId: result.messageId,
               error: result.partial ? result.error : undefined,
+              /**
+               * 인사말처럼 "도착하면 좋은" 부가 메시지가 빠진 경우. 댓글 비공개
+               * 답장은 한 통이 전부라 정상적인 결과이므로 실패로 남기지 않는다.
+               */
+              followUpSkipped: result.followUpError || undefined,
+              usedFallback: result.usedFallback || undefined,
             });
           } else {
             // 못 보냈으니 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.
