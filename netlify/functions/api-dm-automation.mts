@@ -45,6 +45,7 @@ interface DmCarouselCard {
   id: string;
   title: string;
   subtitle: string;
+  /** 인스타그램이 발송 시점에 직접 받아가는 주소. http/https 절대주소만 저장한다. */
   imageUrl: string;
   buttonLabel: string;
   buttonUrl: string;
@@ -63,6 +64,8 @@ interface DmAutomationItem {
   mediaIds: string[];
   messageType: "text" | "carousel";
   message: string;
+  /** 캐러셀 앞에 먼저 보낼 인사말(선택). 텍스트 형식의 message 와 따로 둔다. */
+  cardIntro: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   createdAt: string;
@@ -109,7 +112,11 @@ const STORE_NAME = "dm-automation";
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 /** 저장을 거절해야 하는 잘못된 링크를 모아 두는 예외. */
-class InvalidLinkError extends Error {}
+class InvalidLinkError extends Error {
+  constructor(message: string, readonly code: string = "INVALID_BUTTON_URL") {
+    super(message);
+  }
+}
 
 /** 링크를 정규화하고, 못 살리면 저장 자체를 실패시킨다. */
 function requireLink(raw: string, where: string): string {
@@ -119,6 +126,27 @@ function requireLink(raw: string, where: string): string {
   if (!normalized) {
     throw new InvalidLinkError(
       `${where}의 링크 주소가 올바르지 않습니다: "${value.slice(0, 80)}" — https:// 로 시작하는 주소를 입력해 주세요.`,
+    );
+  }
+  return normalized.slice(0, 1000);
+}
+
+/**
+ * 카드 이미지 주소를 확인한다.
+ *
+ * 이 주소는 우리 화면이 아니라 인스타그램이 발송 시점에 직접 받아간다. 그래서
+ * 화면에서만 열리는 값(상대 경로 · `blob:` · `data:`)이 저장되면, 설정은 정상으로
+ * 보이는데 카드가 이미지 없이 도착하거나 메시지 전체가 거부된다. 저장 단계에서
+ * 막아 두면 사용자가 원인을 화면에서 바로 안다.
+ */
+function requireImage(raw: string, where: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const normalized = normalizeLinkUrl(value);
+  if (!normalized) {
+    throw new InvalidLinkError(
+      `${where}의 이미지 주소가 올바르지 않습니다: "${value.slice(0, 80)}" — 이미지를 올리거나 https:// 로 시작하는 주소를 입력해 주세요.`,
+      "INVALID_CARD_IMAGE",
     );
   }
   return normalized.slice(0, 1000);
@@ -157,7 +185,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
           id: String(c?.id || genId("card")),
           title: String(c?.title || "").slice(0, 80),
           subtitle: String(c?.subtitle || "").slice(0, 80),
-          imageUrl: String(c?.imageUrl || "").slice(0, 1000),
+          imageUrl: requireImage(c?.imageUrl, `'${name}' 카드`),
           buttonLabel: String(c?.buttonLabel || "").slice(0, 20),
           buttonUrl: requireLink(c?.buttonUrl, `'${name}' 카드 버튼`),
         }))
@@ -183,6 +211,7 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     mediaIds,
     messageType,
     message: String(a?.message || "").slice(0, 1000),
+    cardIntro: String(a?.cardIntro || "").slice(0, 1000),
     buttons,
     cards,
     createdAt: String(a?.createdAt || new Date().toISOString()),
@@ -397,11 +426,8 @@ export default async (req: Request, context: Context) => {
       }
     } catch (e) {
       if (e instanceof InvalidLinkError) {
-        // 잘못된 링크는 발송 때 조용히 빠지므로, 저장 단계에서 되돌려준다.
-        return Response.json(
-          { error: e.message, code: "INVALID_BUTTON_URL" },
-          { status: 400 },
-        );
+        // 잘못된 링크·이미지는 발송 때 조용히 빠지므로, 저장 단계에서 되돌려준다.
+        return Response.json({ error: e.message, code: e.code }, { status: 400 });
       }
       throw e;
     }

@@ -59,6 +59,8 @@ interface DmAutomationItem {
   mediaIds?: string[];
   messageType?: "text" | "carousel";
   message: string;
+  /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
+  cardIntro?: string;
   buttons: DmButton[];
   cards?: DmCard[];
   createdAt?: string;
@@ -86,6 +88,7 @@ function buildMessagePayload(a: DmAutomationItem) {
     message: a.message,
     buttons: a.buttons,
     cards: a.cards,
+    intro: a.cardIntro,
   });
 }
 
