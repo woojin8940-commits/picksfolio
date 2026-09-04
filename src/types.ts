@@ -230,6 +230,19 @@ export interface Settlement {
   completed_at?: string;
   memo?: string;
   /**
+   * 이 정산이 어디서 온 협업인가.
+   *
+   *   campaign — 픽스폴리오 담당자가 관리하는 캠페인. 금액과 지급 완료를 담당자가
+   *              잡으므로 인플루언서·브랜드 화면에서는 읽기만 한다.
+   *   proposal — 브랜드가 직접 보낸 비즈니스 제안. 브랜드가 인플루언서에게 직접
+   *              지급하므로 양쪽 중 누가 완료를 누르든 완료다.
+   */
+  source?: 'campaign' | 'proposal';
+  /** 협업의 보수 방식. 공동구매 정산을 금액 대신 수수료율로 보여줄 때 쓴다. */
+  reward_mode?: 'paid' | 'barter' | 'groupbuy';
+  /** 공동구매 판매 수수료(%). 공동구매가 아니면 0. */
+  groupbuy_rate?: number;
+  /**
    * 브랜드가 픽스폴리오에 보내는 일괄 정산금의 수납 상태. 브랜드 화면(role=business)
    * 응답에만 실리고, 캠페인 협업에서 온 정산에만 붙는다.
    *

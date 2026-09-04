@@ -30,6 +30,14 @@ import type { Settlement } from '../../types';
  * 기준을 브랜드 입금 수납(brand_settlement)으로 바꿨다 — 담당자가 통장을 확인하고
  * '입금 확인 완료'를 누르면 이 화면의 회차가 '정산완료'가 된다. 인플루언서 개별
  * 지급은 그 뒤에 픽스폴리오가 처리한다.
+ *
+ * ── 비즈니스 제안으로 직접 한 협업 ──
+ * 위 설명은 담당자가 관리하는 캠페인 이야기다. 브랜드가 인플루언서에게 직접 제안해
+ * 성사된 협업은 돈도 브랜드가 직접 보낸다 — 픽스폴리오를 거치지 않으니 회차로 묶을
+ * 일괄 정산도, 담당자가 확인해 줄 수납도 없다. 그런데도 같은 목록에 섞여 있어서
+ * 브랜드가 이미 보낸 돈이 '입금 확인 대기'로 남아 있었다.
+ * 그래서 그 건들은 아래에 따로 세우고, 브랜드가 직접 '정산완료'를 누를 수 있게 한다.
+ * 인플루언서 쪽에서 눌러도 마찬가지로 완료다 — 둘 중 한쪽이 확인하면 그걸로 끝이다.
  */
 
 interface BrandSettlementSummaryProps {
@@ -75,6 +83,15 @@ const roundLabel = (date: string) => {
 const isAmountPending = (s: Settlement) => Boolean(s.amount_pending) && !Number(s.amount || 0);
 
 /**
+ * 담당자가 관리하는 캠페인에서 온 정산인가.
+ *
+ * 서버가 `source` 를 내려주지만, 캐시된 예전 응답에는 없을 수 있어 식별자 규칙으로
+ * 한 번 더 판단한다(`campaign_<캠페인>_<아이디>`).
+ */
+const isCampaignSettlement = (s: Settlement) =>
+  s.source ? s.source === 'campaign' : String(s.proposal_id || '').startsWith('campaign_');
+
+/**
  * 이 정산의 브랜드 입금이 접수됐는가.
  *
  * 캠페인 협업에는 수납 기록이 붙어 온다(brand_settlement) — 담당자가 통장을 확인한
@@ -91,6 +108,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
 }) => {
   const [rows, setRows] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [completingId, setCompletingId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -110,6 +128,45 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
     return () => { alive = false; };
   }, [businessUsername, campaignId]);
 
+  /** 담당자가 관리하는 캠페인 — 회차로 묶어 픽스폴리오에 한 번 보내는 건들. */
+  const campaignRows = useMemo(() => rows.filter(isCampaignSettlement), [rows]);
+  /** 브랜드가 인플루언서에게 직접 보내는 건들. 가까운 지급일이 위로. */
+  const directRows = useMemo(
+    () =>
+      rows
+        .filter(s => !isCampaignSettlement(s))
+        .sort((a, b) =>
+          String(a.scheduled_date || '9999').localeCompare(String(b.scheduled_date || '9999')),
+        ),
+    [rows],
+  );
+
+  /**
+   * 브랜드가 직접 지급한 건을 완료로 닫는다.
+   *
+   * 이 돈은 브랜드 통장에서 인플루언서 통장으로 바로 간다 — 픽스폴리오는 보냈는지
+   * 알 수 없다. 그래서 보낸 사람이 직접 표시하고, 그 값이 인플루언서 화면에도 같이
+   * 반영된다.
+   */
+  const handleComplete = async (s: Settlement) => {
+    if (!confirm('정산금을 지급하셨습니까? 인플루언서 화면에도 정산완료로 표시됩니다.')) return;
+    const clean = String(businessUsername || '').replace(/^biz\//, '');
+    setCompletingId(s.id);
+    const res = await apiService.completeSettlement(clean, s.id, 'business');
+    setCompletingId(null);
+    if (!res.ok) {
+      alert(res.error || '정산 완료 처리에 실패했습니다.');
+      return;
+    }
+    setRows(prev =>
+      prev.map(r =>
+        r.id === s.id
+          ? res.settlement || { ...r, status: 'completed', completed_at: new Date().toISOString() }
+          : r,
+      ),
+    );
+  };
+
   const { rounds, total, scheduledSum, completedSum, pendingCount, headcount, allReceived } =
     useMemo(() => {
       const byDate = new Map<string, Round>();
@@ -120,7 +177,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
       let pendingCount = 0;
       let receivedRows = 0;
 
-      for (const s of rows) {
+      for (const s of campaignRows) {
         const date = String(s.scheduled_date || '').slice(0, 10);
         const amount = Number(s.amount || 0);
         // '완료'의 기준은 브랜드 입금 수납이다(isBrandPaid 참고).
@@ -155,9 +212,9 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
         pendingCount,
         headcount: people.size,
         /** 이 화면에 있는 정산이 전부 접수됐는가. 맨 위 칸의 배지가 이 값이다. */
-        allReceived: rows.length > 0 && receivedRows === rows.length,
+        allReceived: campaignRows.length > 0 && receivedRows === campaignRows.length,
       };
-    }, [rows]);
+    }, [campaignRows]);
 
   if (loading) {
     return (
@@ -168,101 +225,171 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
     );
   }
 
+  /**
+   * 일괄 정산 묶음을 그릴지. 직접 지급 건만 있는 브랜드에게 0원짜리 '일괄 정산 총액'과
+   * '아직 정산 예정 내역이 없습니다'를 같이 보여 주면, 있는 정산이 없는 것처럼 읽힌다.
+   * 아무 정산도 없을 때는 이 묶음의 빈 안내가 그 역할을 한다.
+   */
+  const showBatch = campaignRows.length > 0 || directRows.length === 0;
+
   return (
     <div className="space-y-4">
-      {/* 맨 위 한 칸. 브랜드가 이 화면에서 확인하는 것은 "얼마를 어디로 보내는가"와
-          "보낸 것이 접수됐는가" 둘이다. */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <p className="text-[10px] font-black text-slate-400">일괄 정산 총액</p>
-            <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(total)}</p>
+      {/* 담당자가 관리하는 캠페인 — 회차로 묶어 픽스폴리오로 한 번 보내는 정산. 직접
+          지급하는 건만 있으면 이 묶음은 그릴 것이 없다. */}
+      {showBatch && (
+        <>
+        {/* 맨 위 한 칸. 브랜드가 이 화면에서 확인하는 것은 "얼마를 어디로 보내는가"와
+            "보낸 것이 접수됐는가" 둘이다. */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-slate-400">일괄 정산 총액</p>
+              <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(total)}</p>
+            </div>
+            {rows.length > 0 && (
+              <span
+                className={`px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0 ${
+                  allReceived ? 'bg-emerald-600 text-white' : 'bg-blue-50 text-blue-600'
+                }`}
+              >
+                {allReceived ? '정산완료' : '입금 확인 대기'}
+              </span>
+            )}
           </div>
-          {rows.length > 0 && (
-            <span
-              className={`px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0 ${
-                allReceived ? 'bg-emerald-600 text-white' : 'bg-blue-50 text-blue-600'
-              }`}
-            >
-              {allReceived ? '정산완료' : '입금 확인 대기'}
-            </span>
+          {allReceived && (
+            <p className="text-[11px] text-emerald-600 font-bold mt-1">
+              입금 확인 완료 · 인플루언서 지급은 픽스폴리오가 진행합니다.
+            </p>
+          )}
+          {pendingCount > 0 && (
+            <p className="text-[11px] text-amber-600 font-bold mt-1">
+              금액 조율 중 {pendingCount}건이 총액에 아직 포함되지 않았습니다.
+            </p>
           )}
         </div>
-        {allReceived && (
-          <p className="text-[11px] text-emerald-600 font-bold mt-1">
-            입금 확인 완료 · 인플루언서 지급은 픽스폴리오가 진행합니다.
-          </p>
-        )}
-        {pendingCount > 0 && (
-          <p className="text-[11px] text-amber-600 font-bold mt-1">
-            금액 조율 중 {pendingCount}건이 총액에 아직 포함되지 않았습니다.
-          </p>
-        )}
-      </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <p className="text-[10px] font-black text-slate-400">입금 예정</p>
-          <p className="text-lg font-black text-blue-600 mt-1">{formatKRW(scheduledSum)}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-[10px] font-black text-slate-400">입금 예정</p>
+            <p className="text-lg font-black text-blue-600 mt-1">{formatKRW(scheduledSum)}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-[10px] font-black text-slate-400">입금 완료</p>
+            <p className="text-lg font-black text-emerald-600 mt-1">{formatKRW(completedSum)}</p>
+          </div>
         </div>
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <p className="text-[10px] font-black text-slate-400">입금 완료</p>
-          <p className="text-lg font-black text-emerald-600 mt-1">{formatKRW(completedSum)}</p>
-        </div>
-      </div>
 
-      {rounds.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-10 text-center">
-          <p className="text-sm text-slate-500 font-bold">아직 정산 예정 내역이 없습니다</p>
-          <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
-            정산은 담당자가 업로드를 확인한 뒤 예약됩니다.<br />
-            지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100">
-          <div className="px-4 py-3">
-            <p className="text-[11px] font-black text-slate-900">정산 회차 {rounds.length}건</p>
-            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-              같은 지급일의 협업이 한 회차로 묶입니다. '정산완료'는 픽스폴리오가 입금을 확인한 회차입니다.
+        {rounds.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-10 text-center">
+            <p className="text-sm text-slate-500 font-bold">아직 정산 예정 내역이 없습니다</p>
+            <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+              정산은 담당자가 업로드를 확인한 뒤 예약됩니다.<br />
+              지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
             </p>
           </div>
-          {rounds.map(round => (
-            <div key={round.date || 'undated'} className="p-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-black text-slate-900 truncate">{roundLabel(round.date)}</span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-black flex-shrink-0 ${
-                      round.paid ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
-                    }`}
-                  >
-                    {round.paid ? '정산완료' : '입금 예정'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-                  인플루언서 {round.headcount}명
-                  {round.pendingCount > 0 && ` · 금액 조율 중 ${round.pendingCount}명`}
-                </p>
-              </div>
-              <p className="text-sm font-black text-slate-900 flex-shrink-0">
-                {round.amount > 0 ? (
-                  formatKRW(round.amount)
-                ) : (
-                  /* 회차 전체가 아직 조율 중. 0원으로 그리면 보낼 것이 없는 회차로 읽힌다. */
-                  <span className="text-amber-600">금액 조율 중</span>
-                )}
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100">
+            <div className="px-4 py-3">
+              <p className="text-[11px] font-black text-slate-900">정산 회차 {rounds.length}건</p>
+              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                같은 지급일의 협업이 한 회차로 묶입니다. '정산완료'는 픽스폴리오가 입금을 확인한 회차입니다.
               </p>
             </div>
-          ))}
-        </div>
+            {rounds.map(round => (
+              <div key={round.date || 'undated'} className="p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black text-slate-900 truncate">{roundLabel(round.date)}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black flex-shrink-0 ${
+                        round.paid ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
+                      }`}
+                    >
+                      {round.paid ? '정산완료' : '입금 예정'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-bold mt-0.5">
+                    인플루언서 {round.headcount}명
+                    {round.pendingCount > 0 && ` · 금액 조율 중 ${round.pendingCount}명`}
+                  </p>
+                </div>
+                <p className="text-sm font-black text-slate-900 flex-shrink-0">
+                  {round.amount > 0 ? (
+                    formatKRW(round.amount)
+                  ) : (
+                    /* 회차 전체가 아직 조율 중. 0원으로 그리면 보낼 것이 없는 회차로 읽힌다. */
+                    <span className="text-amber-600">금액 조율 중</span>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+          표시된 금액은 픽스폴리오로 입금하는 금액입니다{headcount > 0 && ` (인플루언서 ${headcount}명)`}. 입금이
+          확인되면 회차가 '정산완료'로 바뀌고, 인플루언서 개별 지급과 원천징수(3.3%)는 그 뒤에 픽스폴리오가
+          처리합니다. 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
+        </p>
+        </>
       )}
 
-      <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-        표시된 금액은 픽스폴리오로 입금하는 금액입니다{headcount > 0 && ` (인플루언서 ${headcount}명)`}. 입금이
-        확인되면 회차가 '정산완료'로 바뀌고, 인플루언서 개별 지급과 원천징수(3.3%)는 그 뒤에 픽스폴리오가
-        처리합니다. 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
-      </p>
+      {/* 브랜드가 직접 지급하는 건. 회차로 묶지 않고 한 건씩 세운다 — 보낸 사람이
+          직접 완료를 눌러야 하므로 어느 협업인지 그대로 보여야 한다. */}
+      {directRows.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100">
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-black text-slate-900">비즈니스 제안 직접 협업 {directRows.length}건</p>
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5 leading-relaxed">
+              내가 직접 제안해 성사된 협업입니다. 정산금은 픽스폴리오를 거치지 않고 인플루언서에게 바로
+              지급하며, 지급 후 '정산완료'를 눌러 주세요. 인플루언서가 먼저 확인해도 완료로 바뀝니다.
+            </p>
+          </div>
+          {directRows.map(s => {
+            const done = s.status === 'completed';
+            return (
+              <div key={s.id} className="p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black text-slate-900 truncate">
+                      {s.influencer_username ? `@${s.influencer_username}` : s.title || '협업 정산'}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black flex-shrink-0 ${
+                        done ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
+                      }`}
+                    >
+                      {done ? '정산완료' : '지급 예정'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-bold mt-0.5 truncate">
+                    {s.title || '협업 정산'} · {roundLabel(String(s.scheduled_date || '').slice(0, 10))}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <p className="text-sm font-black text-slate-900">
+                    {isAmountPending(s) ? (
+                      <span className="text-amber-600">금액 조율 중</span>
+                    ) : (
+                      formatKRW(Number(s.amount || 0))
+                    )}
+                  </p>
+                  {!done && !isAmountPending(s) && (
+                    <button
+                      type="button"
+                      onClick={() => handleComplete(s)}
+                      disabled={completingId === s.id}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {completingId === s.id ? '처리 중...' : '정산완료'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

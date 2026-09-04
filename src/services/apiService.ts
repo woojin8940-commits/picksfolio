@@ -755,22 +755,6 @@ export interface DmRule {
   enabled: boolean;
 }
 
-/** 자동 발송 활동 기록 한 건(진단 패널에 그대로 보여준다). */
-export interface DmLogEntry {
-  at: string;
-  /** 'dm' | 'reply' — 자동 DM 인지 공개 답글인지. */
-  kind?: string | null;
-  /** 'sent' | 'failed' | 'skipped' | 'external' */
-  status?: string | null;
-  /** 건너뛴 이유 코드('switch_off' | 'not_connected' | 'plan_required'). */
-  reason?: string | null;
-  ruleName?: string | null;
-  error?: string | null;
-  errorKind?: string | null;
-  /** 인사말 같은 부가 메시지가 빠진 경우의 사유(실패가 아니다). */
-  followUpSkipped?: string | null;
-}
-
 export interface DmAutomationSettings {
   enabled: boolean;
   connected: boolean;
@@ -779,6 +763,17 @@ export interface DmAutomationSettings {
   igUsername: string;
   hasAccessToken: boolean;
   automations: DmAutomationItem[];
+  /** DM 창 첫 화면의 "자주 묻는 질문"(인스타그램 아이스브레이커). */
+  faq?: DmFaqSettings;
+  /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
+  direct?: DmDirectSettings;
+  /**
+   * 질문 버튼 클릭(postback) 웹훅 구독 여부. false 면 버튼은 보이는데 눌러도
+   * 답변이 나가지 않는다 — 화면에서 재연결을 안내한다.
+   */
+  postbackSubscribed?: boolean;
+  /** 받은 메시지(`messages`) 웹훅 구독 여부. DM 트리거 자동화가 여기에 걸린다. */
+  messagesSubscribed?: boolean;
   rules?: DmRule[];
   /** 인스타그램 장기 토큰 만료 시각(ISO). 만료되면 재연동이 필요하다. */
   tokenExpiresAt?: string;
@@ -804,18 +799,6 @@ export interface DmAutomationSettings {
   webhookSubscribedAt?: string;
   /** 실제로 구독에 성공한 웹훅 필드 목록. */
   webhookFields?: string;
-  /**
-   * 자동 발송 진단 정보.
-   *
-   * 자동 발송이 안 될 때, 인스타그램이 이벤트를 보내지 않는 것인지(웹훅 구독 문제)
-   * 받고도 건너뛴 것인지(플랜·스위치·중복)를 화면에서 구분하기 위한 값이다.
-   */
-  diagnostics?: {
-    /** 이 계정으로 웹훅 이벤트가 마지막으로 도착한 시각. */
-    lastWebhookAt?: string | null;
-    /** 최근 발송·건너뜀 기록(최신 순). */
-    recentLog?: DmLogEntry[];
-  };
   /**
    * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면
    * 나머지 필드는 "모른다"는 뜻이므로, 화면은 설정이 아니라 재시도 안내를 보여준다.
@@ -845,6 +828,100 @@ export interface DmCarouselCard {
   imageUrl: string;
   buttonLabel: string;
   buttonUrl: string;
+}
+
+/**
+ * DM 창 첫 화면에 보이는 "자주 묻는 질문" 한 건.
+ *
+ * 인스타그램 아이스브레이커로 등록된다. 등록되는 것은 `question`(버튼 문구)이고,
+ * 사람이 버튼을 누르면 `answer` 가 자동으로 발송된다.
+ */
+export interface DmFaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  buttons: DmMessageButton[];
+}
+
+export interface DmFaqSettings {
+  enabled: boolean;
+  items: DmFaqItem[];
+  /**
+   * 인스타그램에 등록을 마친 시각. 비어 있으면 저장은 됐지만 DM 창에는 아직
+   * 보이지 않는 상태다(대개 연동이 끊겼거나 권한이 부족한 경우).
+   */
+  syncedAt?: string;
+  /** 등록 실패 이유. */
+  syncError?: string;
+}
+
+/** 처음 DM 을 받았을 때 자동으로 보낼 인사말. */
+export interface DmGreetingSettings {
+  enabled: boolean;
+  message: string;
+  buttons: DmMessageButton[];
+  /** 처음 대화하는 사람에게만 보낼지. 끄면 24시간 넘게 끊겼던 대화가 다시 시작될 때도 보낸다. */
+  onlyFirstContact: boolean;
+}
+
+/** 받은 DM 에 특정 단어가 있을 때 보낼 자동 답장. */
+export interface DmKeywordReply {
+  id: string;
+  name: string;
+  enabled: boolean;
+  keywords: string[];
+  message: string;
+  buttons: DmMessageButton[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface DmDirectSettings {
+  greeting: DmGreetingSettings;
+  replies: DmKeywordReply[];
+}
+
+/** 인스타그램이 허용하는 "자주 묻는 질문" 최대 개수. 우리가 늘릴 수 없는 값이다. */
+export const DM_FAQ_MAX = 4;
+/** 질문 버튼 문구 길이 제한. */
+export const DM_FAQ_QUESTION_MAX = 80;
+
+/**
+ * 예약 발송 대상 — 이 계정에 DM 을 보낸 적이 있는 사람.
+ *
+ * 인스타그램은 상대가 마지막으로 메시지를 보낸 뒤 24시간 안에만 자유 형식 DM 을
+ * 허용하므로, 예약 발송 대상은 이 명단에서만 고를 수 있다(임의의 계정에 먼저 말을
+ * 거는 발송은 정책 위반이다).
+ */
+export interface DmContact {
+  igsid: string;
+  name?: string;
+  username?: string;
+  firstAt: string;
+  lastAt: string;
+  lastText?: string;
+  count: number;
+  /** 지금 자유 형식 DM 을 보낼 수 있는지. */
+  open: boolean;
+  /** 이 시각까지만 보낼 수 있다(상대의 마지막 메시지 + 24시간). */
+  openUntil: string;
+}
+
+/** 예약 DM 한 건. */
+export interface DmScheduledJob {
+  id: string;
+  username: string;
+  recipientId: string;
+  recipientName?: string;
+  sendAt: string;
+  message: string;
+  buttons: { label: string; url: string }[];
+  createdAt: string;
+  status: 'pending' | 'sent' | 'failed' | 'canceled';
+  sentAt?: string;
+  error?: string;
+  errorKind?: string;
+  contactLastAt?: string;
 }
 
 /** 카드 이미지 한 장의 크기 상한. 인스타그램이 받아가지 못할 만큼 큰 파일을 미리 막는다. */
@@ -1530,6 +1607,40 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to get settlements:', e);
       return [];
+    }
+  },
+
+  /**
+   * 정산 한 건을 완료로 닫는다.
+   *
+   * 비즈니스 제안으로 성사된 협업은 브랜드가 인플루언서에게 직접 지급하므로, 입금
+   * 사실을 아는 사람이 그 두 사람뿐이다. 어느 한쪽이 완료를 누르면 완료이고, 서버가
+   * 상대방 목록에도 같은 값을 미러링한다.
+   *
+   * 담당자가 관리하는 캠페인 정산은 서버가 거절한다(403) — 그 건의 지급은 담당자가
+   * 브랜드 입금을 확인한 뒤 처리한다. 오류 문구를 그대로 돌려주므로 화면이 이유를
+   * 보여 줄 수 있다.
+   */
+  async completeSettlement(
+    username: string,
+    settlementId: string,
+    role: 'influencer' | 'business' = 'business',
+  ): Promise<{ ok: boolean; settlement?: Settlement; error?: string }> {
+    try {
+      const res = await fetch(
+        `/api/settlements/${encodeURIComponent(username.toLowerCase())}/${encodeURIComponent(settlementId)}?role=${role}`,
+        {
+          method: 'PATCH',
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ status: 'completed' }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data?.error || '정산 완료 처리에 실패했습니다.' };
+      return { ok: true, settlement: data.settlement };
+    } catch (e) {
+      console.error('[API] Failed to complete settlement:', e);
+      return { ok: false, error: '정산 완료 처리에 실패했습니다.' };
     }
   },
 
@@ -3840,7 +3951,10 @@ export const apiService = {
       automation?: DmAutomationItem;
       id?: string;
     },
-  ): Promise<{ ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean }> {
+  ): Promise<{
+    ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean;
+    faq?: DmFaqSettings; direct?: DmDirectSettings;
+  }> {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
@@ -3858,6 +3972,11 @@ export const apiService = {
           // 서버가 확정한 전체 스위치 상태. 화면이 이 값을 따라가야 "켜져 있다고
           // 보이는데 발송은 안 되는" 상태가 생기지 않는다.
           enabled: typeof data?.enabled === 'boolean' ? data.enabled : undefined,
+          // 전체 스위치를 끄면 서버가 인스타그램에 올려둔 질문 버튼도 함께 내린다
+          // (버튼은 남아 있는데 답변이 안 나가면 받는 사람만 헛걸음한다). 등록 시각·
+          // 실패 이유가 그 응답에 실려 오므로 화면이 그대로 따라가야 한다.
+          faq: data?.faq && typeof data.faq === 'object' ? data.faq : undefined,
+          direct: data?.direct && typeof data.direct === 'object' ? data.direct : undefined,
         };
       }
       // 잘못된 버튼 링크처럼 사용자가 고칠 수 있는 오류는 서버 메시지를 그대로 보여준다.
@@ -3906,6 +4025,152 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to resubscribe DM webhook:', e);
       return { ok: false, error: '네트워크 오류로 웹훅 구독을 다시 걸지 못했습니다.' };
+    }
+  },
+
+  /**
+   * "자주 묻는 질문"(아이스브레이커) 저장.
+   *
+   * 이 설정은 우리 서버가 아니라 **인스타그램 프로필**에 등록돼야 DM 창에 보인다.
+   * 서버가 저장과 등록을 함께 처리하고 그 결과(`faq.syncedAt` / `faq.syncError`)를
+   * 돌려주므로, 화면은 그 값으로 "실제로 보이는 상태"를 표시한다.
+   */
+  async saveDmFaq(
+    username: string,
+    faq: DmFaqSettings,
+  ): Promise<{ ok: boolean; error?: string; warning?: string; faq?: DmFaqSettings }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'saveFaq', faq }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
+      }
+      // 저장은 됐지만 인스타그램 등록이 실패한 경우도 있다(success: false). 그때도
+      // 입력한 내용은 보관되므로 faq 를 함께 돌려준다.
+      return {
+        ok: data?.success === true,
+        error: data?.error,
+        warning: data?.warning,
+        faq: data?.faq,
+      };
+    } catch (e) {
+      console.error('[API] Failed to save DM FAQ:', e);
+      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  /** DM 트리거 자동화(첫 인사말 · 키워드 자동 답장) 저장. */
+  async saveDmTriggers(
+    username: string,
+    direct: DmDirectSettings,
+  ): Promise<{ ok: boolean; error?: string; direct?: DmDirectSettings }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'saveDmTriggers', direct }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
+      }
+      return { ok: true, direct: data?.direct };
+    } catch (e) {
+      console.error('[API] Failed to save DM triggers:', e);
+      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  /** 예약 DM 목록과 보낼 수 있는 대상 명단. */
+  async getDmSchedule(username: string): Promise<{
+    jobs: DmScheduledJob[];
+    contacts: DmContact[];
+    connected: boolean;
+    masterEnabled: boolean;
+    loadError?: boolean;
+  }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-schedule/${encodeURIComponent(username.toLowerCase())}`, {
+        cache: 'no-store',
+        headers: await authHeadersWithTimeout({}, { account: username }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return {
+        jobs: Array.isArray(data?.jobs) ? data.jobs : [],
+        contacts: Array.isArray(data?.contacts) ? data.contacts : [],
+        connected: Boolean(data?.connected),
+        masterEnabled: Boolean(data?.masterEnabled),
+      };
+    } catch (e) {
+      console.error('[API] Failed to load DM schedule:', e);
+      return { jobs: [], contacts: [], connected: false, masterEnabled: false, loadError: true };
+    }
+  },
+
+  /**
+   * 예약 DM 을 만든다.
+   *
+   * `sendAt` 은 ISO 문자열이다. 서버는 상대가 명단에 있는지(= 먼저 DM 을 보낸 적이
+   * 있는지)와 시각의 범위만 확인하고, 24시간 창을 넘긴 예약은 막지 않고 `warning`
+   * 으로 알려준다 — 그 사이 상대가 다시 메시지를 보내면 정상 발송되기 때문이다.
+   */
+  async createDmSchedule(
+    username: string,
+    job: { recipientId: string; sendAt: string; message: string; buttons?: { label: string; url: string }[] },
+  ): Promise<{ ok: boolean; error?: string; warning?: string; jobs?: DmScheduledJob[] }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-schedule/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'create', ...job }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `예약에 실패했습니다. (HTTP ${res.status})` };
+      }
+      return { ok: true, warning: data?.warning, jobs: data?.jobs };
+    } catch (e) {
+      console.error('[API] Failed to create DM schedule:', e);
+      return { ok: false, error: '네트워크 오류로 예약에 실패했습니다.' };
+    }
+  },
+
+  /** 아직 나가지 않은 예약을 취소한다. */
+  async cancelDmSchedule(
+    username: string,
+    id: string,
+  ): Promise<{ ok: boolean; error?: string; jobs?: DmScheduledJob[] }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-schedule/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ action: 'cancel', id }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.success !== true) {
+        return { ok: false, error: data?.error || `취소에 실패했습니다. (HTTP ${res.status})`, jobs: data?.jobs };
+      }
+      return { ok: true, jobs: data?.jobs };
+    } catch (e) {
+      console.error('[API] Failed to cancel DM schedule:', e);
+      return { ok: false, error: '네트워크 오류로 취소에 실패했습니다.' };
     }
   },
 

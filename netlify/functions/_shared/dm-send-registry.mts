@@ -62,6 +62,17 @@ export const dmContentKey = (commentId: string, contentHash: string) =>
  */
 export const commentDmKey = (commentId: string) => `cdm_${commentId}`;
 
+/**
+ * 받은 DM · 질문 버튼 이벤트에 이미 응답했는지 표시하는 키.
+ *
+ * Meta 는 메시지 이벤트도 재전송한다. 이벤트 ID(`message.mid`)를 그대로 쓰면 같은
+ * 메시지에 인사말이나 자동 답장이 두 번 나가는 일을 막을 수 있다. 종류를 함께
+ * 넣는 이유는 한 메시지가 인사말과 키워드 답장을 모두 만들어 낼 수 있어서다 —
+ * 처음 보낸 메시지에 문의 키워드가 들어 있으면 둘 다 나가는 것이 정상이다.
+ */
+export const inboundDmKey = (kind: "greet" | "kw" | "faq", eventId: string) =>
+  `in${kind}_${eventId}`;
+
 /** 보낼 메시지 페이로드로부터 내용 해시를 만든다. */
 export function contentHashOf(messages: unknown): string {
   return createHash("sha256").update(JSON.stringify(messages ?? null)).digest("hex").slice(0, 12);
