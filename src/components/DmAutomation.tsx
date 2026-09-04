@@ -4,15 +4,17 @@ import {
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
-  ArrowUp, ArrowDown, Images, Activity, RefreshCw,
+  ArrowUp, ArrowDown, Images,
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
-  DmLogEntry, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+  DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
+import Toggle from './DmToggle';
+import { DmFaqSection, DmScheduleSection, DmTriggerSection } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -140,35 +142,6 @@ const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !
 const cardSendable = (c: DmCarouselCard): boolean =>
   isValidLinkUrl(c.imageUrl) || Boolean(c.subtitle.trim()) ||
   Boolean(c.buttonLabel.trim() && isValidLinkUrl(c.buttonUrl));
-
-/** 자동 발송을 건너뛴 이유 코드 → 화면 문구. */
-const SKIP_REASONS: Record<string, string> = {
-  switch_off: '자동 발송 스위치가 꺼져 있어 보내지 않았어요.',
-  not_connected: '인스타그램 연동이 끊겨 보내지 않았어요.',
-  plan_required: '프로 플랜이 아니어서 보내지 않았어요.',
-};
-
-/**
- * 활동 기록 한 건을 화면 문구로 바꾼다.
- *
- * "댓글을 달아도 DM 이 안 온다"의 원인은 대부분 이 기록에 남아 있다. 코드가 아는
- * 사실(스위치가 꺼져 있었다 / 플랜이 없었다 / 인스타그램이 거부했다 / 이미 보낸
- * 댓글이었다)을 사용자가 읽을 수 있게 옮겨 준다.
- */
-const describeLogEntry = (e: DmLogEntry): { tone: 'ok' | 'warn' | 'err'; text: string } => {
-  const what = e.kind === 'reply' ? '댓글 답글' : '자동 DM';
-  if (e.status === 'sent') {
-    const extra = e.followUpSkipped ? ' (인사말 텍스트는 함께 보내지 못했어요)' : '';
-    return { tone: 'ok', text: `${what} 발송${e.ruleName ? ` · ${e.ruleName}` : ''}${extra}` };
-  }
-  if (e.status === 'skipped') {
-    return { tone: 'warn', text: SKIP_REASONS[e.reason || ''] || `${what}을 건너뛰었어요.${e.reason ? ` (${e.reason})` : ''}` };
-  }
-  if (e.status === 'external') {
-    return { tone: 'warn', text: '이 앱이 보내지 않은 자동 DM 이 감지됐어요.' };
-  }
-  return { tone: 'err', text: `${what} 실패${e.error ? ` · ${e.error}` : ''}` };
-};
 
 /** 인스타그램 피드 게시물에서 카드 이미지로 쓸 수 있는 사진 주소. (영상은 썸네일) */
 const feedImageOf = (m: InstagramMedia): string =>
@@ -1206,23 +1179,6 @@ const AutomationEditor: React.FC<{
 };
 
 /* ────────────────────────── 토글 ────────────────────────── */
-const Toggle: React.FC<{ on: boolean; onClick: () => void; size?: 'sm' | 'md'; disabled?: boolean }> = ({ on, onClick, size = 'md', disabled = false }) => {
-  const s = size === 'sm' ? { w: 'w-10', h: 'h-6', k: 'w-4 h-4', on: 'left-5', off: 'left-1' } : { w: 'w-12', h: 'h-7', k: 'w-5 h-5', on: 'left-6', off: 'left-1' };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      role="switch"
-      aria-checked={on}
-      className={`relative ${s.w} ${s.h} rounded-full transition-all shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${on ? 'bg-pink-500' : 'bg-slate-300'}`}
-      aria-label="켜기/끄기"
-    >
-      <span className={`absolute top-1 ${s.k} bg-white rounded-full shadow transition-all ${on ? s.on : s.off}`} />
-    </button>
-  );
-};
-
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const { t } = useLanguage();
@@ -1269,16 +1225,31 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
   /** 발신 에코 구독 여부. 꺼져 있으면 외부 자동 DM 을 감지할 수 없다. */
   const [echoSubscribed, setEchoSubscribed] = useState(true);
-  /**
-   * 자동 발송 진단 정보(웹훅 수신 흔적 · 최근 활동 기록).
-   *
-   * 자동 발송이 안 될 때 사용자가 볼 수 있는 유일한 단서다. 이벤트가 아예 도착한
-   * 적이 없으면 인스타그램 쪽 구독 문제고, 도착했는데 건너뛴 기록이 남아 있으면
-   * 스위치·플랜·중복 때문이다. 둘은 해결 방법이 완전히 다르다.
-   */
-  const [diagnostics, setDiagnostics] = useState<DmAutomationSettings['diagnostics']>(undefined);
-  const [webhookSubscribedAt, setWebhookSubscribedAt] = useState<string | undefined>(undefined);
   const [resubscribing, setResubscribing] = useState(false);
+
+  /**
+   * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
+   *
+   *  faq     DM 창 첫 화면의 추천 질문 버튼(아이스브레이커).
+   *  direct  DM 수신 자체를 트리거로 쓰는 인사말·키워드 답장.
+   *
+   * 저장 경로(액션)가 각각 다르고 인스타그램 쪽 등록 결과까지 함께 돌아오므로,
+   * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
+   */
+  const [faq, setFaq] = useState<DmFaqSettings>({ enabled: false, items: [] });
+  const [direct, setDirect] = useState<DmDirectSettings>({
+    greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
+    replies: [],
+  });
+  /** 버튼 클릭(postback)·수신 메시지 웹훅 구독 여부. 없으면 트리거가 오지 않는다. */
+  const [postbackSubscribed, setPostbackSubscribed] = useState(true);
+  const [messagesSubscribed, setMessagesSubscribed] = useState(true);
+
+  /** 추가 기능 섹션들이 쓰는 알림. 상단 배너를 그대로 재사용한다. */
+  const notify = (type: 'ok' | 'err', text: string) => {
+    setBanner({ type, text });
+    window.setTimeout(() => setBanner((cur) => (cur && cur.text === text ? null : cur)), 6000);
+  };
 
   const loadMedia = () => {
     setMediaLoading(true);
@@ -1305,8 +1276,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
         setEchoSubscribed(s.echoSubscribed !== false);
-        setDiagnostics(s.diagnostics);
-        setWebhookSubscribedAt(s.webhookSubscribedAt);
+        if (s.faq) setFaq(s.faq);
+        if (s.direct) setDirect(s.direct);
+        setPostbackSubscribed(s.postbackSubscribed !== false);
+        setMessagesSubscribed(s.messagesSubscribed !== false);
         setLoaded(true);
         if (s.connected) loadMedia();
       })
@@ -1394,8 +1367,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const prev = enabled;
     const v = !enabled;
     setEnabled(v);
-    const { ok } = await persist({ enabled: v });
+    const { ok, faq: nextFaq } = await persist({ enabled: v });
     if (!ok) setEnabled(prev);
+    // 스위치를 끄면 인스타그램에 올려둔 질문 버튼도 함께 내려간다. 서버가 그 결과를
+    // 돌려주므로 등록 상태 표시가 실제와 어긋나지 않게 반영한다.
+    else if (nextFaq) setFaq(nextFaq);
   };
 
   /**
@@ -1410,7 +1386,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const result = await apiService.resubscribeDmWebhook(userName);
     setResubscribing(false);
     if (result.ok) {
-      setWebhookSubscribedAt(result.webhookSubscribedAt);
       if (result.webhookFields) setEchoSubscribed(result.webhookFields.includes('message_echoes'));
       setBanner({
         type: 'ok',
@@ -1792,101 +1767,23 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       {/* 발신 에코 구독이 아직 연결되지 않은 상태 안내.
           이 구독이 없으면 이 앱을 거치지 않고 나간 자동 DM(인스타그램 자체 자동 메시지,
           예전에 연결해 둔 다른 자동화 서비스)을 감지할 수 없어, 위의 "외부 자동 DM"
-          안내가 영영 뜨지 않는다. 감지가 꺼져 있다는 사실 자체를 알려줘야 한다. */}
+          안내가 영영 뜨지 않는다. 감지가 꺼져 있다는 사실 자체를 알려주고, 바로 다시
+          연결할 수 있게 버튼을 함께 둔다. */}
       {connected && !echoSubscribed && (
         <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6">
           <p className="text-[12px] md:text-sm font-bold text-amber-800">
             인스타그램 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을 거치지
-            않고 나간 자동 DM 은 자동으로 감지하지 못합니다. 아래 자동 발송 진단의
-            <span className="font-black"> 웹훅 다시 연결</span> 을 누르면 다시 시도합니다.
+            않고 나간 자동 DM 은 자동으로 감지하지 못합니다.
           </p>
-        </section>
-      )}
-
-      {/*
-        자동 발송 진단.
-
-        "자동 발송을 켜뒀는데 댓글에 반응이 없다"는 상황에서 사용자가 원인을 좁힐 수
-        있는 유일한 화면이다. 웹훅 이벤트가 도착한 적이 있는지(= 인스타그램이 알려주고
-        있는지)와, 도착한 뒤 무슨 일이 있었는지(발송·건너뜀·실패)를 함께 보여준다.
-      */}
-      {connected && (
-        <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
-              <Activity size={17} className="text-slate-400" /> 자동 발송 진단
-            </h3>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={load}
-                disabled={reloading}
-                className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-[11px] font-black text-slate-600 hover:border-slate-300 disabled:opacity-50"
-              >
-                <RefreshCw size={11} className={reloading ? 'animate-spin' : ''} /> 새로고침
-              </button>
-              <button
-                type="button"
-                onClick={resubscribeWebhook}
-                disabled={resubscribing}
-                className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                {resubscribing ? <Loader2 size={11} className="animate-spin" /> : <Link2 size={11} />}
-                웹훅 다시 연결
-              </button>
-            </div>
-          </div>
-
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-            <div className="rounded-2xl bg-slate-50 px-4 py-3">
-              <dt className="text-[10px] font-black text-slate-400">마지막 댓글·메시지 알림 수신</dt>
-              <dd className="text-[12px] font-bold text-slate-800 mt-0.5">
-                {diagnostics?.lastWebhookAt
-                  ? new Date(diagnostics.lastWebhookAt).toLocaleString('ko-KR')
-                  : '아직 없음'}
-              </dd>
-            </div>
-            <div className="rounded-2xl bg-slate-50 px-4 py-3">
-              <dt className="text-[10px] font-black text-slate-400">계정 웹훅 구독</dt>
-              <dd className="text-[12px] font-bold text-slate-800 mt-0.5">
-                {webhookSubscribedAt
-                  ? new Date(webhookSubscribedAt).toLocaleString('ko-KR')
-                  : '구독 기록 없음'}
-              </dd>
-            </div>
-          </dl>
-
-          {/* 이벤트가 한 번도 도착하지 않았다면 원인은 우리 쪽 설정이 아니라 구독이다. */}
-          {!diagnostics?.lastWebhookAt && (
-            <p className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 text-[11px] md:text-xs font-bold text-amber-800 leading-relaxed mb-3">
-              인스타그램에서 댓글 알림이 도착한 적이 없어요. 자동 발송은 인스타그램이 댓글 알림을
-              보내줘야 시작되므로, 이 상태에서는 수동 발송만 동작합니다.
-              <span className="font-black"> 웹훅 다시 연결</span> 을 누른 뒤 게시물에 댓글을 하나 달아
-              보세요. 그래도 비어 있으면 계정을 다시 연동해 주세요.
-            </p>
-          )}
-
-          <p className="text-[10px] font-black text-slate-400 mb-1.5">최근 활동</p>
-          {(diagnostics?.recentLog || []).length === 0 ? (
-            <p className="text-[11px] font-bold text-slate-400">아직 기록이 없어요.</p>
-          ) : (
-            <ul className="space-y-1">
-              {(diagnostics?.recentLog || []).slice(0, 8).map((e, i) => {
-                const d = describeLogEntry(e);
-                const tone = d.tone === 'ok'
-                  ? 'text-slate-600'
-                  : d.tone === 'warn' ? 'text-amber-700' : 'text-red-600';
-                return (
-                  <li key={`${e.at}_${i}`} className="flex items-start gap-2 text-[11px] font-bold">
-                    <span className="text-slate-400 shrink-0">
-                      {e.at ? new Date(e.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
-                    </span>
-                    <span className={`${tone} min-w-0 break-words`}>{d.text}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <button
+            type="button"
+            onClick={resubscribeWebhook}
+            disabled={resubscribing}
+            className="mt-3 flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {resubscribing ? <Loader2 size={11} className="animate-spin" /> : <Link2 size={11} />}
+            웹훅 다시 연결
+          </button>
         </section>
       )}
 
@@ -2101,6 +1998,36 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           </div>
         )}
       </section>
+
+      {/* 추가 기능 — 저장 경로가 달라 별도 컴포넌트로 뺐다. */}
+      <div className="mt-6">
+        <DmFaqSection
+          userName={userName}
+          connected={connected}
+          entitled={entitled}
+          masterEnabled={enabled}
+          postbackSubscribed={postbackSubscribed}
+          value={faq}
+          onChange={setFaq}
+          onNotice={notify}
+        />
+        <DmTriggerSection
+          userName={userName}
+          connected={connected}
+          entitled={entitled}
+          masterEnabled={enabled}
+          messagesSubscribed={messagesSubscribed}
+          value={direct}
+          onChange={setDirect}
+          onNotice={notify}
+        />
+        <DmScheduleSection
+          userName={userName}
+          connected={connected}
+          entitled={entitled}
+          onNotice={notify}
+        />
+      </div>
 
       {/* 성과 요약 (연결 시) */}
       {connected && automations.length > 0 && (

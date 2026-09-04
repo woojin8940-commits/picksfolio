@@ -1425,6 +1425,14 @@ export default async (req: Request, context: Context) => {
           WHERE collab_id = ${collabId}
         `;
 
+        /*
+         * 정산 항목이 아직 없을 수도 있다 — 지급일을 따로 잡지 않고(set_payout_date)
+         * 서류 확인 후 바로 지급을 닫는 경우다. 그때 상태만 넣어 만들면 금액도 업체명도
+         * 없는 '0원 완료' 항목이 인플루언서 정산금 화면에 남는다. 캠페인 정산은 화면에서
+         * 고칠 수 없으니(담당자가 관리하는 값이다) 만들 때 조건표 금액을 함께 채운다.
+         */
+        const feeRows = (await db.sql`SELECT fee FROM collab_terms WHERE collab_id = ${collabId}`) as any[];
+        const paidFee = Number(feeRows?.[0]?.fee || 0);
         try {
           await upsertSettlementForProposal(
             settlementProposalId(collab),
@@ -1434,6 +1442,13 @@ export default async (req: Request, context: Context) => {
               status: "completed",
               completed_at: new Date().toISOString(),
               scheduled_date: info.payout_date ? String(info.payout_date).split("T")[0] : paidDate,
+              ...(paidFee > 0 ? { amount: paidFee } : {}),
+            },
+            {
+              company_name: collab.company_name || "",
+              title: collab.campaign_title || "",
+              amount: paidFee,
+              amount_pending: paidFee <= 0,
             },
           );
         } catch (stlErr: any) {

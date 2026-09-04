@@ -17,6 +17,7 @@ import {
   commentDmKey,
   contentHashOf,
   dmContentKey,
+  inboundDmKey,
   noteSentText,
   privateReplyKey,
   publicReplyKey,
@@ -24,12 +25,23 @@ import {
   wasSentByUs,
 } from "./_shared/dm-send-registry.mts";
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
+import { fetchContactProfile, noteDmContact } from "./_shared/dm-contacts.mts";
+import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
  * - GET  : Meta 웹훅 검증 챌린지 응답(hub.challenge).
- * - POST : 게시물 "댓글" 이벤트를 받아 해당 사용자의 DM 자동화 규칙과 매칭하고,
- *          조건에 맞으면 댓글 작성자에게 자동 DM(및 선택 시 공개 답글)을 보낸다.
+ * - POST : 세 가지 이벤트를 처리한다.
+ *   · 게시물 "댓글" — 사용자의 DM 자동화 규칙과 매칭해 댓글 작성자에게 자동
+ *     DM(및 선택 시 공개 답글)을 보낸다.
+ *   · 받은 "메시지" — DM 자체를 트리거로 쓰는 자동화. 처음 대화하는 사람에게는
+ *     인사말을, 메시지에 등록해 둔 단어가 있으면 그에 맞는 답장을 보낸다.
+ *   · "postback" — DM 창 첫 화면의 "자주 묻는 질문"(아이스브레이커) 버튼을 누른
+ *     이벤트. payload 로 어떤 질문인지 알아내 미리 정해 둔 답변을 보낸다.
+ *
+ * 받은 메시지·postback 에 답장하는 것은 인스타그램 24시간 창 안쪽이라 정책상
+ * 안전하다(상대가 방금 우리에게 말을 걸었다). 승인된 권한
+ * (`instagram_business_manage_messages`)만으로 동작하고 추가 심사는 필요하지 않다.
  *
  * 실제 트리거를 받으려면 Meta 앱 대시보드에서 이 URL(/api/instagram/webhook)을
  * 웹훅 콜백으로 등록하고 comments 필드를 구독해야 한다. 앱 수준 등록만으로는
@@ -69,6 +81,34 @@ interface DmAutomationItem {
   /** 설정 화면에서 이 자동화를 마지막으로 고친 시각(api-dm-automation 이 찍는다). */
   updatedAt?: string;
 }
+/** DM 창 첫 화면의 "자주 묻는 질문" 한 건. */
+interface DmFaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  buttons?: DmButton[];
+}
+
+/** 처음 DM 을 받았을 때 보낼 인사말. */
+interface DmGreetingSettings {
+  enabled: boolean;
+  message: string;
+  buttons?: DmButton[];
+  onlyFirstContact: boolean;
+}
+
+/** 받은 DM 에 특정 단어가 있을 때 보낼 자동 답장. */
+interface DmKeywordReply {
+  id: string;
+  name: string;
+  enabled: boolean;
+  keywords: string[];
+  message: string;
+  buttons?: DmButton[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 interface DmSettings {
   enabled: boolean;
   igUserId?: string;
@@ -76,6 +116,8 @@ interface DmSettings {
   accessToken?: string;
   tokenSource?: string;
   automations?: DmAutomationItem[];
+  faq?: { enabled?: boolean; items?: DmFaqItem[] };
+  direct?: { greeting?: DmGreetingSettings; replies?: DmKeywordReply[] };
   /**
    * 이 설정을 저장한 로그인 사용자 ID.
    *
@@ -199,7 +241,7 @@ function specificityOf(a: DmAutomationItem): number {
   return score;
 }
 
-function configuredAt(a: DmAutomationItem): number {
+function configuredAt(a: { updatedAt?: string; createdAt?: string }): number {
   const ms = Date.parse(a.updatedAt || a.createdAt || "");
   return Number.isNaN(ms) ? 0 : ms;
 }
@@ -254,6 +296,313 @@ function passesFollowFilter(a: DmAutomationItem, follows: boolean | null): boole
   if (a.followFilter !== "followers" && a.followFilter !== "non_followers") return true;
   if (follows === null) return true;
   return a.followFilter === "followers" ? follows : !follows;
+}
+
+/** 자동 발송을 막고 있는 이유. 화면의 활동 기록에 그대로 남긴다. */
+type SendBlock = "switch_off" | "not_connected" | "plan_required";
+
+/**
+ * DM 트리거 자동화(인사말 · 키워드 답장 · 질문 버튼 답변)를 실행하는 데 필요한 것들.
+ *
+ * 댓글 자동화와 같은 발송 함수를 쓰지만 수신자가 다르다. 여기서는 상대가 방금
+ * 우리에게 메시지를 보냈으므로 IGSID(`{ id }`)로 곧장 보낼 수 있고, 24시간 창이
+ * 열려 있어 여러 통을 순서대로 보낼 수 있다(댓글 비공개 답장은 한 통이 전부다).
+ */
+interface DmTriggerContext {
+  username: string;
+  settings: DmSettings;
+  igId: string;
+  accessToken: string;
+  /** 계정 자신의 ID 모음 — 우리가 보낸 메시지를 트리거로 삼지 않기 위해 쓴다. */
+  ownIds: Set<string>;
+  blocked: () => Promise<SendBlock | null>;
+}
+
+/** 보낼 내용이 하나라도 있는지(본문이 비었어도 링크 버튼만으로 보낼 수 있다). */
+function hasTriggerContent(content: { message?: string; buttons?: DmButton[] }): boolean {
+  if (content.message?.trim()) return true;
+  return (content.buttons || []).some((b) => b?.url?.trim());
+}
+
+/**
+ * 받은 메시지에 이 키워드 답장이 걸리는지.
+ *
+ * 부분 일치로 본다("가격" 이 "가격 얼마예요?" 에 걸린다). 사람이 보내는 문장에서
+ * 정확히 일치하는 경우는 거의 없어, 완전 일치로 만들면 사실상 아무도 못 맞춘다.
+ */
+function matchKeywordReply(r: DmKeywordReply, text: string): boolean {
+  if (r.enabled === false) return false;
+  if (!hasTriggerContent(r)) return false;
+  const lower = text.toLowerCase();
+  return (r.keywords || []).some((k) => k && lower.includes(k.toLowerCase()));
+}
+
+/**
+ * 조건이 겹치는 키워드 답장 중 무엇을 쓸지 고른다.
+ *
+ * 댓글 자동화와 같은 기준이다 — 키워드를 좁게 적어 둔 것을 먼저 보고, 범위가 같으면
+ * 가장 최근에 설정한 것을 쓴다. 사용자가 마지막에 입력한 문구가 나가야 한다.
+ */
+function pickKeywordReply(replies: DmKeywordReply[], text: string): DmKeywordReply | undefined {
+  return replies
+    .filter((r) => matchKeywordReply(r, text))
+    .map((r, index) => ({ r, index }))
+    .sort((x, y) => {
+      const specific = (y.r.keywords || []).length - (x.r.keywords || []).length;
+      // 키워드를 하나만 적어 둔 답장이 더 "좁게 지정한" 것이다.
+      if (specific !== 0) return -specific;
+      const recency = configuredAt(y.r) - configuredAt(x.r);
+      if (recency !== 0) return recency;
+      return x.index - y.index;
+    })
+    .map((entry) => entry.r)[0];
+}
+
+/**
+ * DM 한 통을 보내고 결과를 활동 기록에 남긴다.
+ *
+ * 같은 이벤트가 재전송돼도 한 번만 보내도록 발송 대장에 먼저 선점 기록을 남긴다.
+ * 못 보냈으면 선점을 되돌려, Meta 가 이벤트를 다시 보낼 때 한 번 더 시도할 수 있게
+ * 한다.
+ */
+async function sendTriggerDm(
+  ctx: DmTriggerContext,
+  args: {
+    recipientId: string;
+    message?: string;
+    buttons?: DmButton[];
+    claimKey: string;
+    /** 활동 기록에 남길 트리거 종류. */
+    trigger: "greeting" | "keyword" | "faq";
+    ruleId?: string;
+    ruleName?: string;
+  },
+): Promise<void> {
+  const { username, settings, igId, accessToken } = ctx;
+  const { recipientId, claimKey, trigger, ruleId, ruleName } = args;
+  if (!recipientId) return;
+
+  const plan = buildDirectDmPlan({
+    messageType: "text",
+    message: args.message,
+    buttons: args.buttons,
+  });
+  if (plan.messages.length === 0) return;
+
+  if (!(await claimIfNew(username, claimKey))) {
+    console.warn("[ig-webhook] duplicate messaging event — trigger DM skipped", claimKey);
+    return;
+  }
+
+  // 우리가 보낸 문구로 먼저 남긴다. 발신 에코가 발송 응답보다 먼저 도착해도
+  // "외부 서비스가 보낸 DM"으로 잘못 표시되지 않는다.
+  for (const payload of plan.messages) {
+    const body = typeof (payload as any)?.text === "string" ? (payload as any).text : "";
+    if (body) await noteSentText(username, body);
+  }
+
+  try {
+    const result = await sendDmMessages({
+      graphHost: graphHost(settings),
+      graphVersion: GRAPH_VERSION,
+      igId,
+      accessToken,
+      recipient: { id: recipientId },
+      messages: plan.messages,
+      bestEffortFrom: plan.bestEffortFrom,
+    });
+
+    if (result.ok || result.partial) {
+      await appendLog(username, {
+        kind: "dm",
+        status: "sent",
+        trigger,
+        partial: result.partial,
+        recipientId,
+        ruleId,
+        ruleName,
+        messageId: result.messageId,
+        error: result.partial ? result.error : undefined,
+      });
+      return;
+    }
+
+    await release(username, claimKey);
+    const kind = result.errorKind || "other";
+    await appendLog(username, {
+      kind: "dm",
+      status: "failed",
+      trigger,
+      recipientId,
+      ruleId,
+      ruleName,
+      error: describeDmError(kind, result.error),
+      errorKind: kind,
+    });
+  } catch (e: any) {
+    await release(username, claimKey);
+    await appendLog(username, {
+      kind: "dm",
+      status: "failed",
+      trigger,
+      recipientId,
+      ruleId,
+      ruleName,
+      error: e?.message || "send error",
+    });
+  }
+}
+
+/**
+ * "자주 묻는 질문" 버튼을 누른 이벤트(postback) 처리.
+ *
+ * payload 에는 질문 문구가 아니라 항목 ID 가 실려 있다(`faq_<id>`). 문구를 고친
+ * 뒤에도 상대 DM 창에 떠 있던 예전 버튼이 올바른 답변을 찾아가야 하기 때문이다.
+ */
+async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<void> {
+  const postback = event?.postback;
+  if (!postback) return;
+  const senderId = String(event?.sender?.id || "");
+  if (!senderId || ctx.ownIds.has(senderId)) return;
+
+  const faqId = faqIdFromPayload(String(postback?.payload || ""));
+  if (!faqId) return;
+
+  const faq = ctx.settings.faq;
+  const item = (faq?.items || []).find((f) => f.id === faqId);
+  if (!item) {
+    // 질문을 지운 뒤에도 상대 화면에는 버튼이 남아 있을 수 있다. 답할 내용이 없으니
+    // 아무것도 보내지 않지만, 왜 조용했는지는 기록에 남긴다.
+    await appendLog(ctx.username, {
+      kind: "dm",
+      status: "skipped",
+      trigger: "faq",
+      reason: "삭제된 질문 버튼입니다.",
+      recipientId: senderId,
+    });
+    return;
+  }
+
+  const blocked = await ctx.blocked();
+  if (blocked) {
+    await appendLog(ctx.username, {
+      kind: "dm",
+      status: "skipped",
+      trigger: "faq",
+      reason: blocked,
+      recipientId: senderId,
+      ruleId: item.id,
+    });
+    return;
+  }
+
+  const eventId = String(postback?.mid || event?.message?.mid || `${senderId}_${event?.timestamp || ""}`);
+  await sendTriggerDm(ctx, {
+    recipientId: senderId,
+    message: item.answer,
+    buttons: item.buttons,
+    claimKey: inboundDmKey("faq", eventId),
+    trigger: "faq",
+    ruleId: item.id,
+    ruleName: item.question,
+  });
+}
+
+/**
+ * 받은 DM 처리 — 첫 인사말과 키워드 자동 답장.
+ *
+ * 명단 기록(`noteDmContact`)은 발송이 막혀 있어도 먼저 남긴다. 이 명단이 예약
+ * 발송의 대상 목록이자 "처음 대화하는 사람인지"의 근거라, 자동 발송 스위치가 꺼져
+ * 있는 동안 온 메시지를 빠뜨리면 나중에 예약을 걸 상대를 고를 수 없다.
+ */
+async function handleInboundMessage(ctx: DmTriggerContext, event: any): Promise<void> {
+  const message = event?.message;
+  // 에코(우리가 보낸 메시지)는 여기서 다루지 않는다 — inspectEcho 가 따로 본다.
+  if (!message || message.is_echo === true) return;
+  const senderId = String(event?.sender?.id || "");
+  if (!senderId || ctx.ownIds.has(senderId)) return;
+
+  const text = String(message?.text || "").trim();
+  const { username, settings } = ctx;
+
+  // 상대 이름은 있으면 화면(예약 발송 대상 목록)에서 알아보기 쉬워지는 부가 정보다.
+  // 조회에 실패해도 발송에는 아무 지장이 없다.
+  const profile = ctx.accessToken
+    ? await fetchContactProfile({
+        host: graphHost(settings),
+        graphVersion: GRAPH_VERSION,
+        igsid: senderId,
+        accessToken: ctx.accessToken,
+      })
+    : {};
+
+  const noted = await noteDmContact({
+    username,
+    igsid: senderId,
+    text,
+    name: profile.name,
+    igHandle: profile.username,
+  });
+
+  const greeting = settings.direct?.greeting;
+  const replies = settings.direct?.replies || [];
+  const greetingWanted =
+    Boolean(greeting?.enabled) &&
+    hasTriggerContent(greeting!) &&
+    // 처음 대화하는 사람에게만 보내는 게 기본값이다. 껐다면 24시간 넘게 조용했던
+    // 대화가 다시 시작될 때도 한 번 더 보낸다(대화 중에는 다시 보내지 않는다).
+    (noted.first ||
+      (greeting!.onlyFirstContact === false && conversationWentQuiet(noted.prevLastAt)));
+  const matched = text ? pickKeywordReply(replies, text) : undefined;
+
+  if (!greetingWanted && !matched) return;
+
+  const blocked = await ctx.blocked();
+  if (blocked) {
+    await appendLog(username, {
+      kind: "dm",
+      status: "skipped",
+      trigger: matched ? "keyword" : "greeting",
+      reason: blocked,
+      recipientId: senderId,
+      ruleId: matched?.id,
+    });
+    return;
+  }
+
+  const eventId = String(message?.mid || `${senderId}_${event?.timestamp || ""}`);
+
+  // 인사말을 먼저 보낸다. 처음 보낸 메시지에 문의 키워드가 들어 있으면 인사말에
+  // 이어 답장이 도착하는 것이 자연스럽다.
+  if (greetingWanted) {
+    await sendTriggerDm(ctx, {
+      recipientId: senderId,
+      message: greeting!.message,
+      buttons: greeting!.buttons,
+      claimKey: inboundDmKey("greet", eventId),
+      trigger: "greeting",
+      ruleName: "첫 인사말",
+    });
+  }
+
+  if (matched) {
+    await sendTriggerDm(ctx, {
+      recipientId: senderId,
+      message: matched.message,
+      buttons: matched.buttons,
+      claimKey: inboundDmKey("kw", `${matched.id}_${eventId}`),
+      trigger: "keyword",
+      ruleId: matched.id,
+      ruleName: matched.name,
+    });
+  }
+}
+
+/** 마지막으로 받은 메시지가 24시간보다 오래됐는지(대화가 끊겼다고 볼 기준). */
+function conversationWentQuiet(prevLastAt?: string): boolean {
+  const last = Date.parse(prevLastAt || "");
+  if (Number.isNaN(last)) return true;
+  return Date.now() - last > 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -362,15 +711,23 @@ export default async (req: Request, _context: Context) => {
 
       /**
        * 메시지 이벤트는 연동 방식에 따라 `entry.messaging` 또는 `entry.changes`
-       * (field: messages / message_echoes)로 온다. 양쪽 다 받는다.
+       * (field: messages / message_echoes / messaging_postbacks)로 온다. 양쪽 다 받는다.
+       *
+       * 한 배열에 받은 메시지 · 우리가 보낸 에코 · 질문 버튼 클릭이 섞여 오므로,
+       * 아래에서 각 처리기가 자기 것만 골라낸다.
        */
-      const echoEvents = [
+      const messagingEvents = [
         ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
         ...(entry?.changes || [])
-          .filter((c: any) => c?.field === "messages" || c?.field === "message_echoes")
+          .filter(
+            (c: any) =>
+              c?.field === "messages" ||
+              c?.field === "message_echoes" ||
+              c?.field === "messaging_postbacks",
+          )
           .map((c: any) => c?.value),
       ];
-      for (const event of echoEvents) {
+      for (const event of messagingEvents) {
         await inspectEcho(username, event).catch((e) =>
           console.warn("[ig-webhook] echo check failed:", (e as Error)?.message),
         );
@@ -382,7 +739,6 @@ export default async (req: Request, _context: Context) => {
        * 블롭 읽기라 매 이벤트마다 하지 않는다.
        */
       let planAllowed: boolean | null = null;
-      type SendBlock = "switch_off" | "not_connected" | "plan_required";
       const sendBlockedReason = async (): Promise<SendBlock | null> => {
         if (!settings.enabled) return "switch_off";
         if (!accessToken) return "not_connected";
@@ -391,6 +747,30 @@ export default async (req: Request, _context: Context) => {
         }
         return planAllowed ? null : "plan_required";
       };
+
+      /**
+       * DM 자체를 트리거로 쓰는 자동화 — 받은 메시지(인사말 · 키워드 답장)와
+       * 질문 버튼 클릭(postback).
+       *
+       * 댓글 자동화와 달리 상대가 방금 우리에게 말을 걸었으므로 24시간 창이 열려
+       * 있고, IGSID 로 곧장 보낼 수 있다.
+       */
+      const triggerCtx: DmTriggerContext = {
+        username,
+        settings,
+        igId,
+        accessToken,
+        ownIds,
+        blocked: sendBlockedReason,
+      };
+      for (const event of messagingEvents) {
+        await handleFaqPostback(triggerCtx, event).catch((e) =>
+          console.warn("[ig-webhook] faq postback failed:", (e as Error)?.message),
+        );
+        await handleInboundMessage(triggerCtx, event).catch((e) =>
+          console.warn("[ig-webhook] inbound DM trigger failed:", (e as Error)?.message),
+        );
+      }
 
       for (const change of entry?.changes || []) {
         if (change?.field !== "comments") continue;

@@ -94,6 +94,193 @@ function proposalSettlementDate(row: any, today: string): { date: string; estima
   });
 }
 
+/**
+ * 정산 항목의 출처. 화면이 정산금을 두 갈래로 나눠 보여주는 기준이다.
+ *
+ *   campaign — 픽스폴리오 담당자가 관리하는 캠페인 협업. 조건·지급일·지급 완료를
+ *              모두 담당자가 잡는다(브랜드 → 픽스폴리오 → 인플루언서).
+ *   proposal — 브랜드가 직접 보낸 비즈니스 제안. 브랜드가 인플루언서에게 직접
+ *              지급하므로 양쪽 중 누가 확인해도 완료다.
+ *
+ * 캠페인 협업의 정산 식별자는 `campaign_<캠페인>_<아이디>` 다 — 파생 행과 담당자가
+ * 만드는 명시 행(api-collab-workflow · settlementProposalId)이 같은 규칙을 쓴다.
+ * 제안에서 온 정산과 브랜드가 손으로 등록한 항목에는 그 접두사가 없다.
+ */
+export type SettlementSource = "campaign" | "proposal";
+
+const CAMPAIGN_PROPOSAL_PREFIX = "campaign_";
+const DERIVED_ID_PREFIX = "stl_derived_";
+
+/** 정산 항목(또는 그 식별자)이 담당자 관리 캠페인에서 온 것인가. */
+function sourceOfProposalId(proposalId: unknown): SettlementSource {
+  return String(proposalId || "").startsWith(CAMPAIGN_PROPOSAL_PREFIX) ? "campaign" : "proposal";
+}
+
+/**
+ * 파생 정산과, 그 정산이 어떤 진행 방식에서 나왔는지를 함께 읽는다.
+ *
+ * 진행 방식을 따로 돌려주는 이유는 공동구매다. 공동구매의 보수는 금액이 아니라 판매
+ * 수수료율로 약속되므로, 금액이 확정되기 전에는 화면에 0원이 아니라 비율이 보여야
+ * 한다. 담당자가 업로드를 확인해 명시 항목이 생긴 뒤에는 파생 행이 만들어지지 않지만
+ * (같은 협업이 두 줄로 보이면 안 된다) 비율은 계속 필요하므로, 파생 여부와 무관하게
+ * 협업별 방식·비율을 지도로 함께 돌려준다.
+ */
+async function loadDerivedSettlements(
+  db: any,
+  username: string,
+  role: string,
+  today: string,
+): Promise<{ derived: any[]; rewardByProposalId: Map<string, { mode: string; rate: number }> }> {
+  const rewardByProposalId = new Map<string, { mode: string; rate: number }>();
+  if (!db) return { derived: [], rewardByProposalId };
+
+  const isBiz = role === "business";
+  const [proposalRows, campaignRows] = await Promise.all([
+    (isBiz
+      ? db.sql`
+          SELECT id, influencer_username, company_name, title, fee, start_date, end_date, status, created_at
+          FROM proposals
+          WHERE LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
+            AND status IN ('accepted', 'completed')
+        `
+      : db.sql`
+          SELECT id, business_username, company_name, title, fee, start_date, end_date, status, created_at
+          FROM proposals
+          WHERE LOWER(influencer_username) = ${username}
+            AND status IN ('accepted', 'completed')
+        `
+    ).catch(() => []),
+    (isBiz
+      ? db.sql`
+          SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
+                 c.business_username as biz_user, c.brand_name, c.title as campaign_title,
+                 c.reward_amount, c.reward_mode, c.groupbuy_commission_rate,
+                 c.start_date, c.end_date, ca.created_at,
+                 ct.fee as manager_fee,
+                 -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
+                 -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
+                 ct.upload_due, cc.upload_confirmed_at,
+                 (SELECT MIN(cd.created_at) FROM collab_deliverables cd
+                   WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
+          FROM campaign_applications ca
+          JOIN campaigns c ON c.id = ca.campaign_id
+          LEFT JOIN campaign_collabs cc
+            ON cc.campaign_id = ca.campaign_id
+           AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+          LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+          WHERE ca.status = 'accepted'
+            AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+            AND LOWER(REGEXP_REPLACE(COALESCE(c.business_username, ''), '^biz/', '')) = ${username}
+        `
+      : db.sql`
+          SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
+                 c.business_username as biz_user, c.brand_name, c.title as campaign_title,
+                 c.reward_amount, c.reward_mode, c.groupbuy_commission_rate,
+                 c.start_date, c.end_date, ca.created_at,
+                 ct.fee as manager_fee,
+                 ct.upload_due, cc.upload_confirmed_at,
+                 (SELECT MIN(cd.created_at) FROM collab_deliverables cd
+                   WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
+          FROM campaign_applications ca
+          JOIN campaigns c ON c.id = ca.campaign_id
+          LEFT JOIN campaign_collabs cc
+            ON cc.campaign_id = ca.campaign_id
+           AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
+          LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+          WHERE ca.status = 'accepted'
+            AND COALESCE(c.reward_mode, 'paid') <> 'barter'
+            AND LOWER(ca.applicant_username) = ${username}
+        `
+    ).catch(() => []),
+  ]);
+
+  const derived: any[] = [];
+
+  for (const row of (proposalRows as any[]) || []) {
+    const propId = row.id || `prop_${Date.now()}`;
+    const payout = proposalSettlementDate(row, today);
+    derived.push({
+      id: `${DERIVED_ID_PREFIX}${propId}`,
+      proposal_id: propId,
+      influencer_username: isBiz ? String(row.influencer_username || "").toLowerCase() : username,
+      business_username: isBiz
+        ? username
+        : String(row.business_username || "").toLowerCase().replace(/^biz\//, ""),
+      company_name: row.company_name || "비즈니스 제안",
+      title: row.title || "비즈니스 제안 협업",
+      amount: parseAmount(row.fee || 0),
+      scheduled_date: payout.date,
+      status: row.status === "completed" ? "completed" : "scheduled",
+      memo: `비즈니스 제안 협업${payout.estimated ? " · 업로드 예정일 기준" : ""}`,
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.created_at || new Date().toISOString(),
+    });
+  }
+
+  for (const row of (campaignRows as any[]) || []) {
+    const infUser = isBiz ? String(row.applicant_username || "").toLowerCase() : username;
+    const propId = `${CAMPAIGN_PROPOSAL_PREFIX}${row.campaign_id}_${infUser}`;
+    const mode = normalizeRewardMode(row.reward_mode);
+    const rate = Number(row.groupbuy_commission_rate || 0);
+    rewardByProposalId.set(propId, { mode, rate });
+
+    const isListup = row.source === "listup";
+    const { amount, pending } = derivedAmount(row);
+    const payout = derivedSettlementDate(row);
+    derived.push({
+      id: `${DERIVED_ID_PREFIX}${propId}`,
+      proposal_id: propId,
+      influencer_username: infUser,
+      business_username: String(row.biz_user || "").toLowerCase().replace(/^biz\//, ""),
+      company_name: row.brand_name || "브랜드 협업",
+      title: row.campaign_title || "캠페인 협업",
+      amount,
+      amount_pending: pending,
+      scheduled_date: payout.date,
+      status: "scheduled",
+      memo: `${isListup ? "담당자 리스트업" : "캠페인 협업"}${
+        payout.estimated ? " · 업로드 예정일 기준" : " · 업로드한 달의 익월 말일 지급"
+      }`,
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.created_at || new Date().toISOString(),
+    });
+  }
+
+  return { derived, rewardByProposalId };
+}
+
+/** 데이터베이스 연결. 없으면(로컬·장애) 파생 정산 없이 명시 항목만 돌려준다. */
+async function openDatabase(): Promise<any> {
+  try {
+    const { getDatabase } = await import("@picks/netlify-database");
+    return getDatabase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 화면이 그대로 읽는 모양으로 마무리한다.
+ *
+ * `source` 는 정산금 화면이 "담당자 관리 캠페인"과 "직접 받은 제안"을 갈라 놓는
+ * 기준이고, `groupbuy_rate` 는 공동구매 줄에 금액 대신 보여줄 판매 수수료율이다.
+ * 명시 항목에는 진행 방식이 저장되지 않으므로 협업별 지도에서 채운다.
+ */
+function shapeSettlement(
+  row: any,
+  rewardByProposalId: Map<string, { mode: string; rate: number }>,
+): any {
+  const reward = rewardByProposalId.get(String(row?.proposal_id || "")) || null;
+  const mode = normalizeRewardMode(reward?.mode);
+  return {
+    ...row,
+    source: sourceOfProposalId(row?.proposal_id),
+    reward_mode: mode,
+    /** 공동구매 판매 수수료(%). 공동구매가 아니면 0. */
+    groupbuy_rate: mode === "groupbuy" ? Number(reward?.rate || 0) : 0,
+  };
+}
+
 export default async (req: Request) => {
   const url = new URL(req.url);
   const role = url.searchParams.get("role") || "influencer";
@@ -124,188 +311,27 @@ export default async (req: Request) => {
         if (s.id) seenProposalIds.add(s.id);
       }
 
-      const autoDerivedSettlements: any[] = [];
-      let dbInstance: any = null;
-      try {
-        const { getDatabase } = await import("@picks/netlify-database");
-        dbInstance = getDatabase();
-      } catch {}
-
-      if (role === "influencer") {
-        const [sqlProposals, campaignRows] = await Promise.all([
-          dbInstance ? (async () => {
-            try {
-              return await dbInstance.sql`
-                SELECT id, business_username, company_name, title, fee, start_date, end_date, status, created_at
-                FROM proposals
-                WHERE LOWER(influencer_username) = ${username}
-                  AND status IN ('accepted', 'completed')
-              ` as any[];
-            } catch { return []; }
-          })() : Promise.resolve([]),
-          dbInstance ? (async () => {
-            try {
-              return await dbInstance.sql`
-                SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
-                       c.business_username as biz_user, c.brand_name, c.title as campaign_title,
-                       c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
-                       ct.fee as manager_fee,
-                       -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
-                       -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
-                       ct.upload_due, cc.upload_confirmed_at,
-                       (SELECT MIN(cd.created_at) FROM collab_deliverables cd
-                         WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
-                FROM campaign_applications ca
-                JOIN campaigns c ON c.id = ca.campaign_id
-                LEFT JOIN campaign_collabs cc
-                  ON cc.campaign_id = ca.campaign_id
-                 AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
-                LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
-                WHERE ca.status = 'accepted'
-                  AND COALESCE(c.reward_mode, 'paid') <> 'barter'
-                  AND LOWER(ca.applicant_username) = ${username}
-              ` as any[];
-            } catch { return []; }
-          })() : Promise.resolve([]),
-        ]);
-
-        for (const row of sqlProposals || []) {
-          const propId = row.id || `prop_${Date.now()}`;
-          if (seenProposalIds.has(propId)) continue;
-          seenProposalIds.add(propId);
-          const payout = proposalSettlementDate(row, today);
-          autoDerivedSettlements.push({
-            id: `stl_derived_${propId}`,
-            proposal_id: propId,
-            influencer_username: username,
-            business_username: (row.business_username || '').toLowerCase().replace(/^biz\//, ''),
-            company_name: row.company_name || '비즈니스 제안',
-            title: row.title || '비즈니스 제안 협업',
-            amount: parseAmount(row.fee || 0),
-            scheduled_date: payout.date,
-            status: row.status === 'completed' ? 'completed' : 'scheduled',
-            memo: `비즈니스 제안 협업${payout.estimated ? ' · 업로드 예정일 기준' : ''}`,
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.created_at || new Date().toISOString(),
-          });
-        }
-
-        for (const row of campaignRows || []) {
-          const propId = `campaign_${row.campaign_id}_${username}`;
-          if (seenProposalIds.has(propId)) continue;
-          seenProposalIds.add(propId);
-          const isListup = row.source === 'listup';
-          const { amount, pending } = derivedAmount(row);
-          const payout = derivedSettlementDate(row);
-          autoDerivedSettlements.push({
-            id: `stl_derived_${propId}`,
-            proposal_id: propId,
-            influencer_username: username,
-            business_username: (row.biz_user || '').toLowerCase().replace(/^biz\//, ''),
-            company_name: row.brand_name || '브랜드 협업',
-            title: row.campaign_title || '캠페인 협업',
-            amount,
-            amount_pending: pending,
-            scheduled_date: payout.date,
-            status: 'scheduled',
-            memo: `${isListup ? '담당자 리스트업' : '캠페인 협업'}${payout.estimated ? ' · 업로드 예정일 기준' : ' · 업로드한 달의 익월 말일 지급'}`,
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.created_at || new Date().toISOString(),
-          });
-        }
-      } else {
-        // role === "business"
-        const [sqlProposals, campaignRows] = await Promise.all([
-          dbInstance ? (async () => {
-            try {
-              return await dbInstance.sql`
-                SELECT id, influencer_username, company_name, title, fee, start_date, end_date, status, created_at
-                FROM proposals
-                WHERE LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
-                  AND status IN ('accepted', 'completed')
-              ` as any[];
-            } catch { return []; }
-          })() : Promise.resolve([]),
-          dbInstance ? (async () => {
-            try {
-              return await dbInstance.sql`
-                SELECT ca.id as app_id, ca.campaign_id, ca.applicant_username, ca.source,
-                       c.business_username as biz_user, c.brand_name, c.title as campaign_title,
-                       c.reward_amount, c.reward_mode, c.start_date, c.end_date, ca.created_at,
-                       ct.fee as manager_fee,
-                       -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
-                       -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
-                       ct.upload_due, cc.upload_confirmed_at,
-                       (SELECT MIN(cd.created_at) FROM collab_deliverables cd
-                         WHERE cd.collab_id = cc.id AND cd.kind = 'upload') AS uploaded_at
-                FROM campaign_applications ca
-                JOIN campaigns c ON c.id = ca.campaign_id
-                LEFT JOIN campaign_collabs cc
-                  ON cc.campaign_id = ca.campaign_id
-                 AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
-                LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
-                WHERE ca.status = 'accepted'
-                  AND COALESCE(c.reward_mode, 'paid') <> 'barter'
-                  AND LOWER(REGEXP_REPLACE(COALESCE(c.business_username, ''), '^biz/', '')) = ${username}
-              ` as any[];
-            } catch { return []; }
-          })() : Promise.resolve([]),
-        ]);
-
-        for (const row of sqlProposals || []) {
-          const propId = row.id || `prop_${Date.now()}`;
-          if (seenProposalIds.has(propId)) continue;
-          seenProposalIds.add(propId);
-          autoDerivedSettlements.push({
-            id: `stl_derived_${propId}`,
-            proposal_id: propId,
-            influencer_username: (row.influencer_username || '').toLowerCase(),
-            business_username: username,
-            company_name: row.company_name || '비즈니스 제안',
-            title: row.title || '비즈니스 제안 협업',
-            amount: parseAmount(row.fee || 0),
-            scheduled_date: proposalSettlementDate(row, today).date,
-            status: row.status === 'completed' ? 'completed' : 'scheduled',
-            memo: '비즈니스 제안 협업',
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.created_at || new Date().toISOString(),
-          });
-        }
-
-        for (const row of campaignRows || []) {
-          const infUser = (row.applicant_username || '').toLowerCase();
-          const propId = `campaign_${row.campaign_id}_${infUser}`;
-          if (seenProposalIds.has(propId)) continue;
-          seenProposalIds.add(propId);
-          const isListup = row.source === 'listup';
-          const { amount, pending } = derivedAmount(row);
-          const payout = derivedSettlementDate(row);
-          autoDerivedSettlements.push({
-            id: `stl_derived_${propId}`,
-            proposal_id: propId,
-            influencer_username: infUser,
-            business_username: username,
-            company_name: row.brand_name || '브랜드 협업',
-            title: row.campaign_title || '캠페인 협업',
-            amount,
-            amount_pending: pending,
-            scheduled_date: payout.date,
-            status: 'scheduled',
-            memo: `${isListup ? '담당자 리스트업' : '캠페인 협업'}${payout.estimated ? ' · 업로드 예정일 기준' : ' · 업로드한 달의 익월 말일 지급'}`,
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.created_at || new Date().toISOString(),
-          });
-        }
-      }
+      const dbInstance = await openDatabase();
+      const { derived, rewardByProposalId } = await loadDerivedSettlements(
+        dbInstance,
+        username,
+        role,
+        today,
+      );
+      // 같은 협업에 명시 항목이 있으면 파생 행은 내보내지 않는다 — 두 줄로 보이면
+      // 담당자가 정한 지급일과 자동 계산된 예정일이 나란히 뜬다.
+      const autoDerivedSettlements = derived.filter(
+        (s: any) => !seenProposalIds.has(s.proposal_id) && !seenProposalIds.has(s.id),
+      );
 
       // 수신함·제안 현황에서 지운 제안에서 파생된 정산은 내보내지 않는다. 삭제 때
       // 명시 항목은 지우지만, 여기서 SQL 로 다시 만드는 파생 행은 SQL 삭제가
       // 실패했을 때 되살아난다 — 그러면 지운 협업이 정산금과 협업 현황 캘린더에만
       // 남아 "지웠는데 아직 있다"가 된다.
       const deletedIds = await loadDeletedProposalIds();
-      const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements].filter((s: any) =>
-        isProposalAlive(deletedIds, s?.proposal_id),
-      );
+      const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements]
+        .filter((s: any) => isProposalAlive(deletedIds, s?.proposal_id))
+        .map((s: any) => shapeSettlement(s, rewardByProposalId));
 
       /**
        * 브랜드에게는 "내가 보낸 일괄 정산금이 접수됐는가"를 함께 내려보낸다.
@@ -389,15 +415,59 @@ export default async (req: Request) => {
       return Response.json({ success: true, settlement });
     }
 
-    // Both the business AND the influencer can update a settlement. The business
-    // may edit any field; the influencer may change the status (e.g. mark a
-    // settlement as completed once they've confirmed payment) and the settlement
-    // amount (so they can correct the figure proposed by the business when the
-    // agreed payout differs). Whichever side makes the change is mirrored to the
-    // counterpart's record so both dashboards stay in sync.
+    /**
+     * 정산 한 건 수정.
+     *
+     * 누가 무엇을 닫을 수 있는지는 정산의 출처에서 갈린다.
+     *
+     *   · 비즈니스 제안(proposal) — 브랜드가 인플루언서에게 직접 지급한다. 입금
+     *     사실은 두 사람만 알고 서로 확인해 주면 되므로, 어느 한쪽이 정산 완료를
+     *     누르면 완료다. 반대쪽 목록에도 같은 값이 그대로 미러링된다.
+     *   · 담당자 관리 캠페인(campaign) — 돈이 브랜드 → 픽스폴리오 → 인플루언서로
+     *     흐른다. 브랜드 입금을 확인하고 원천징수를 떼고 실제로 이체하는 사람이
+     *     담당자이므로, 지급 완료도 담당자만 닫는다(api-collab-workflow 의
+     *     complete_settlement). 금액도 담당자가 확정한 조건표에서 온다.
+     *     여기서 인플루언서나 브랜드가 상태·금액을 고치면 담당자가 모르는 값이
+     *     명시 항목으로 굳어, 이후 조건표 변경이 화면에 반영되지 않는다.
+     */
     if (req.method === "PATCH" && settlementId && (role === "business" || role === "influencer")) {
       const body = await req.json();
       const now = new Date().toISOString();
+
+      const primaryKey = role === "business" ? bizKey : infKey;
+      const existingRecords = (await readRecords(SETTLEMENTS_STORE, primaryKey)) || [];
+      const existing = existingRecords.find((s: any) => s.id === settlementId) || null;
+
+      /**
+       * 대상의 출처. 명시 항목은 저장된 식별자로, 아직 저장되지 않은 파생 항목은
+       * 자기 id 로 판단한다(`stl_derived_campaign_...`).
+       */
+      const targetProposalId =
+        existing?.proposal_id ||
+        (settlementId.startsWith(DERIVED_ID_PREFIX)
+          ? settlementId.slice(DERIVED_ID_PREFIX.length)
+          : body.proposal_id || "");
+      if (sourceOfProposalId(targetProposalId) === "campaign") {
+        if (body.status !== undefined) {
+          return Response.json(
+            {
+              error:
+                "픽스폴리오 담당자가 관리하는 캠페인 정산입니다. 지급 완료는 담당자가 입금을 마친 뒤 처리합니다.",
+              code: "MANAGER_MANAGED_SETTLEMENT",
+            },
+            { status: 403 },
+          );
+        }
+        if (body.amount !== undefined) {
+          return Response.json(
+            {
+              error: "캠페인 정산 금액은 담당자가 확정한 협업 조건에서 옵니다. 담당자에게 문의해 주세요.",
+              code: "MANAGER_MANAGED_SETTLEMENT",
+            },
+            { status: 403 },
+          );
+        }
+      }
 
       // Influencers are limited to the status and amount fields — they cannot
       // rewrite the schedule or other business-owned fields.
@@ -413,7 +483,25 @@ export default async (req: Request) => {
         }
       }
 
-      const primaryKey = role === "business" ? bizKey : infKey;
+      /**
+       * 아직 저장되지 않은 파생 정산을 고치는 경우의 바탕값.
+       *
+       * 예전에는 요청 본문만 보고 새 줄을 만들었다. 그런데 화면은 상태 하나만 보내므로
+       * (`{status:'completed'}`) 금액 0원 · 업체명 없음 · 제목 '협업 정산' 인 줄이
+       * 생기고, 그 줄이 파생 행을 덮어써서 정산 완료를 누른 순간 금액이 사라졌다.
+       * 파생 목록을 다시 만들어 같은 id 를 찾아 바탕으로 쓴다.
+       */
+      let derivedBase: any = null;
+      if (!existing) {
+        const { derived } = await loadDerivedSettlements(
+          await openDatabase(),
+          username,
+          role,
+          todayInSeoul(),
+        );
+        derivedBase = derived.find((d: any) => d.id === settlementId) || null;
+      }
+
       let updated: any = null;
       let notFound = false;
 
@@ -431,9 +519,9 @@ export default async (req: Request) => {
         } else {
           // Derived settlement being patched for the first time
           notFound = false;
-          updated = {
+          const base = derivedBase || {
             id: settlementId,
-            proposal_id: body.proposal_id || (settlementId.startsWith("stl_derived_") ? settlementId.replace("stl_derived_", "") : ""),
+            proposal_id: targetProposalId,
             influencer_username: (body.influencer_username || (role === "influencer" ? username : "")).toLowerCase(),
             business_username: (body.business_username || (role === "business" ? username : "")).toLowerCase(),
             company_name: body.company_name || "",
@@ -442,7 +530,11 @@ export default async (req: Request) => {
             scheduled_date: body.scheduled_date || now.split("T")[0],
             status: body.status || "scheduled",
             memo: body.memo || "",
-            created_at: now,
+          };
+          updated = {
+            ...base,
+            id: settlementId,
+            created_at: base.created_at || now,
             updated_at: now,
             ...patch,
           };

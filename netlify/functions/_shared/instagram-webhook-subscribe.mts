@@ -15,19 +15,28 @@ const GRAPH_VERSION = "v21.0";
 /**
  * 구독할 웹훅 필드.
  *
- * - `comments`       : 댓글 → 자동 답글·자동 DM 트리거.
- * - `messages`       : 받은 메시지.
- * - `message_echoes` : **계정이 보낸** 메시지 알림. 이게 없으면 이 앱을 거치지 않고
+ * - `comments`            : 댓글 → 자동 답글·자동 DM 트리거.
+ * - `messages`            : 받은 메시지. DM 자체를 트리거로 쓰는 자동화(첫 인사말,
+ *   키워드 자동 답장)가 이 필드로 동작한다.
+ * - `messaging_postbacks` : "자주 묻는 질문"(아이스브레이커) 버튼을 눌렀을 때 오는
+ *   이벤트. 누른 질문은 일반 메시지가 아니라 postback 으로 도착하므로, 이 필드가
+ *   없으면 버튼은 보이는데 눌러도 답변이 나가지 않는다.
+ * - `message_echoes`      : **계정이 보낸** 메시지 알림. 이게 없으면 이 앱을 거치지 않고
  *   나간 자동 DM(인스타그램 자체 자동 메시지, 예전에 연결해 둔 다른 자동화 서비스)을
  *   감지할 수 없다. 감지하지 못하면 "자동 발송을 껐는데도 예전 문구가 도착한다"의
  *   진짜 발신원을 화면에서 알려줄 방법이 없어, 사용자는 이 앱을 의심하게 된다.
  *
- * 에코 필드는 계정 연동 방식·앱 권한에 따라 거절될 수 있다. 그때 요청 전체가
- * 실패하면 댓글 구독까지 함께 날아가 자동화가 아예 트리거되지 않으므로, 거절되면
- * 기본 필드만으로 한 번 더 구독한다.
+ * 뒤쪽 두 필드는 계정 연동 방식·앱 권한에 따라 거절될 수 있다. 그때 요청 전체가
+ * 실패하면 댓글 구독까지 함께 날아가 자동화가 아예 트리거되지 않는다. 그래서 넓은
+ * 목록부터 차례로 좁혀가며 시도하고, 마지막에는 최소한 댓글·메시지 구독을 살린다.
  */
-export const WEBHOOK_FIELDS = "comments,messages,message_echoes";
-const FALLBACK_FIELDS = "comments,messages";
+export const WEBHOOK_FIELDS = "comments,messages,messaging_postbacks,message_echoes";
+/** 넓은 목록이 거절될 때 차례로 시도할 대체 목록. 마지막이 최소 구성이다. */
+const FALLBACK_FIELDS = [
+  "comments,messages,messaging_postbacks",
+  "comments,messages,message_echoes",
+  "comments,messages",
+];
 
 export interface SubscribeResult {
   ok: boolean;
@@ -81,9 +90,13 @@ export async function subscribeInstagramWebhooks(args: {
   const full = await subscribeFields({ host, target, accessToken, fields: WEBHOOK_FIELDS });
   if (full.ok) return { ok: true, fields: WEBHOOK_FIELDS };
 
-  // 에코 필드가 거절된 경우. 댓글 구독만이라도 반드시 살려 둔다.
-  console.warn("[ig-webhook-subscribe] echo field rejected, retrying without it:", full.error);
-  const base = await subscribeFields({ host, target, accessToken, fields: FALLBACK_FIELDS });
-  if (base.ok) return { ok: true, fields: FALLBACK_FIELDS };
-  return { ok: false, error: base.error || full.error };
+  // 일부 필드가 거절된 경우. 댓글·메시지 구독만이라도 반드시 살려 둔다.
+  console.warn("[ig-webhook-subscribe] full field list rejected, narrowing:", full.error);
+  let lastError = full.error;
+  for (const fields of FALLBACK_FIELDS) {
+    const attempt = await subscribeFields({ host, target, accessToken, fields });
+    if (attempt.ok) return { ok: true, fields };
+    lastError = attempt.error || lastError;
+  }
+  return { ok: false, error: lastError };
 }

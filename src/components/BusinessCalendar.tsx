@@ -1253,7 +1253,15 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         <p className="font-black text-slate-900 text-sm truncate">{ev.title || ev.company_name || '협업 정산'}</p>
                         <p className="text-xs font-bold text-slate-400">
                           {ev.company_name ? `${ev.company_name} · ` : ''}
-                          {ev.amount_pending && !Number(ev.amount || 0) ? '금액 협의중' : formatFee(ev.amount)}
+                          {/* 공동구매는 보수가 금액이 아니라 판매 수수료율로 약속된다. 금액이
+                              확정되기 전에 0원으로 그리면 무보수 협업으로 읽힌다. */}
+                          {ev.reward_mode === 'groupbuy'
+                            ? `공동구매 수수료 ${Number(ev.groupbuy_rate || 0) > 0 ? `${ev.groupbuy_rate}%` : '협의중'}${
+                                Number(ev.amount || 0) > 0 ? ` · ${formatFee(ev.amount)}` : ''
+                              }`
+                            : ev.amount_pending && !Number(ev.amount || 0)
+                              ? '금액 협의중'
+                              : formatFee(ev.amount)}
                         </p>
                         {ev.memo && <p className="text-xs text-slate-400 mt-1 truncate">{ev.memo}</p>}
                       </div>
