@@ -5,7 +5,13 @@ import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import { getDmContact, withinDmWindow } from "./_shared/dm-contacts.mts";
 import { claimJob, finishJob, listDueJobs, releaseJobClaim } from "./_shared/dm-schedule-store.mts";
 import type { DmScheduledJob } from "./_shared/dm-schedule-store.mts";
-import { buildDirectDmPlan, describeDmError, sendDmMessages } from "./_shared/instagram-dm.mts";
+import {
+  buildCommentDmPlan,
+  buildDirectDmPlan,
+  describeDmError,
+  sendDmMessages,
+} from "./_shared/instagram-dm.mts";
+import type { DmContent } from "./_shared/instagram-dm.mts";
 import { noteSentText } from "./_shared/dm-send-registry.mts";
 
 /**
@@ -25,6 +31,16 @@ import { noteSentText } from "./_shared/dm-send-registry.mts";
  */
 
 const GRAPH_VERSION = "v21.0";
+
+/**
+ * 댓글 비공개 답장이 허용되는 기간.
+ *
+ * 댓글에서 걸린 예약(게시물별 설정에서 "예약 발송"을 고른 경우)은 대화창이 열려
+ * 있지 않아도 `recipient: { comment_id }` 로 나갈 수 있고, 이 창은 24시간이 아니라
+ * **댓글이 달린 뒤 7일**이다. 그래서 이 예약에는 24시간 검사를 적용하면 안 된다 —
+ * 적용하면 처음 말을 건 사람에게 걸린 예약이 전부 실패로 끝난다.
+ */
+const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface DmSettings {
   enabled?: boolean;
@@ -55,6 +71,17 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
   }
   if (!(await dmAutomationAllowed(job.username, settings.ownerAuthUserId))) {
     return "디엠 자동화 플랜이 활성 상태가 아니라 발송하지 못했습니다.";
+  }
+  if (job.commentId) {
+    // 비공개 답장 — 24시간 창이 아니라 댓글 기준 7일 창을 본다.
+    const commentMs = Date.parse(job.commentAt || "");
+    if (!Number.isNaN(commentMs) && Date.now() - commentMs > PRIVATE_REPLY_WINDOW_MS) {
+      return (
+        "댓글이 달린 뒤 7일이 지나 발송하지 못했습니다. " +
+        "인스타그램은 그 이후의 댓글 비공개 답장을 허용하지 않습니다."
+      );
+    }
+    return null;
   }
   const contact = await getDmContact(job.username, job.recipientId);
   if (!withinDmWindow(contact)) {
@@ -94,8 +121,8 @@ export default async () => {
             status: "failed",
             trigger: "scheduled",
             recipientId: job.recipientId,
-            ruleId: job.id,
-            ruleName: "예약 발송",
+            ruleId: job.ruleId || job.id,
+            ruleName: job.ruleName ? `${job.ruleName} (예약)` : "예약 발송",
             error: blocked,
           },
           "scheduled-dm",
@@ -103,11 +130,19 @@ export default async () => {
         continue;
       }
 
-      const plan = buildDirectDmPlan({
-        messageType: "text",
+      /**
+       * 댓글에서 걸린 예약은 비공개 답장이라 "가장 중요한 내용이 첫 통"이어야
+       * 한다(댓글 1건당 1통). 그래서 계획 자체를 댓글용으로 만든다.
+       */
+      const isPrivateReply = Boolean(job.commentId);
+      const content: DmContent = {
+        messageType: job.messageType === "carousel" ? "carousel" : "text",
         message: job.message,
         buttons: job.buttons,
-      });
+        cards: job.cards,
+        intro: job.intro,
+      };
+      const plan = isPrivateReply ? buildCommentDmPlan(content) : buildDirectDmPlan(content);
       if (plan.messages.length === 0) {
         await finishJob(key, {
           ...job,
@@ -125,17 +160,50 @@ export default async () => {
         if (text) await noteSentText(job.username, text);
       }
 
-      const result = await sendDmMessages({
+      const sendArgs = {
         graphHost: settings!.tokenSource === "instagram_login"
           ? "graph.instagram.com"
           : "graph.facebook.com",
         graphVersion: GRAPH_VERSION,
         igId: settings!.igUserId || settings!.igAccountId || "",
         accessToken: settings!.accessToken!,
-        recipient: { id: job.recipientId },
+      };
+
+      let result = await sendDmMessages({
+        ...sendArgs,
+        recipient: isPrivateReply ? { comment_id: job.commentId! } : { id: job.recipientId },
+        // 비공개 답장은 첫 통만 허용된다. 이어지는 통은 열린 대화창(IGSID)으로.
+        followUpRecipient: isPrivateReply && job.recipientId ? { id: job.recipientId } : undefined,
         messages: plan.messages,
         bestEffortFrom: plan.bestEffortFrom,
+        fallback: plan.fallback,
       });
+
+      /**
+       * 비공개 답장 기회가 이미 소진된 경우(인스타그램 자체 자동 메시지가 먼저
+       * 나갔거나, 같은 댓글에 다른 규칙이 즉시 발송을 했다) 아무것도 도착하지 않은
+       * 채로 실패로 끝난다. 상대가 24시간 안에 말을 건 적이 있다면 대화창이 열려
+       * 있으니 IGSID 로 한 번 더 시도해 예약 내용을 살린다.
+       */
+      if (
+        !result.ok &&
+        !result.partial &&
+        isPrivateReply &&
+        job.recipientId &&
+        result.errorKind === "already_sent" &&
+        withinDmWindow(await getDmContact(job.username, job.recipientId))
+      ) {
+        const direct = buildDirectDmPlan(content);
+        if (direct.messages.length > 0) {
+          result = await sendDmMessages({
+            ...sendArgs,
+            recipient: { id: job.recipientId },
+            messages: direct.messages,
+            bestEffortFrom: direct.bestEffortFrom,
+            fallback: direct.fallback,
+          });
+        }
+      }
 
       const sentAt = new Date().toISOString();
       if (result.ok || result.partial) {
@@ -148,8 +216,8 @@ export default async () => {
             trigger: "scheduled",
             partial: result.partial,
             recipientId: job.recipientId,
-            ruleId: job.id,
-            ruleName: "예약 발송",
+            ruleId: job.ruleId || job.id,
+            ruleName: job.ruleName ? `${job.ruleName} (예약)` : "예약 발송",
             messageId: result.messageId,
           },
           "scheduled-dm",
@@ -165,8 +233,8 @@ export default async () => {
             status: "failed",
             trigger: "scheduled",
             recipientId: job.recipientId,
-            ruleId: job.id,
-            ruleName: "예약 발송",
+            ruleId: job.ruleId || job.id,
+            ruleName: job.ruleName ? `${job.ruleName} (예약)` : "예약 발송",
             error,
             errorKind: kind,
           },
