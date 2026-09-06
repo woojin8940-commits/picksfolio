@@ -8,7 +8,7 @@ import {
   templateForCampaignType,
 } from "./collab-workflow.mts";
 import { todayInSeoul } from "./campaign-recruit.mts";
-import { refreshStaleProfileImages } from "./instagram-metrics.mts";
+import { refreshStaleChannelImages } from "./instagram-metrics.mts";
 
 /**
  * 리스트업(후보 제안) 공용 로직.
@@ -384,10 +384,11 @@ export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[
   );
   if (!names.length) return list;
 
-  // 얼굴은 연동된 인스타 계정의 지금 사진이어야 한다. 사진만 따로, 오래된 계정만
-  // 다시 받아 온다(자세한 규칙은 refreshStaleProfileImages 주석). 실패는 삼킨다 —
+  // 얼굴과 릴스 그림은 연동된 인스타 계정의 지금 것이어야 한다. 그림만 따로, 오래된
+  // 계정만 다시 받아 온다(자세한 규칙은 refreshStaleChannelImages 주석). 만료된 메타
+  // 주소가 굳어 있던 계정은 이 길에서 우리 저장소 주소로 옮겨진다. 실패는 삼킨다 —
   // 명단은 사진 한 장 없이도 그려져야 한다.
-  await refreshStaleProfileImages(db, names).catch(() => 0);
+  await refreshStaleChannelImages(db, names).catch(() => 0);
 
   let channelRows: any[] = [];
   try {
@@ -673,8 +674,19 @@ export function shapeListup(row: any, viewer: "manager" | "brand" | "influencer"
  * 단가·일정·가이드 합의다.
  *
  * 실명은 계속 가린다. 계정명과 달리 실명은 고르는 데 쓰이지 않고, 계약·정산
- * 단계에서야 필요한 정보다. 릴스 permalink 도 계속 막는다. 캡션에는 협업 문의
- * 연락처가 적혀 있는 경우가 많아, 링크 하나가 곧 담당자를 건너뛰는 경로가 된다.
+ * 단계에서야 필요한 정보다.
+ *
+ * 릴스·피드의 permalink 는 내보낸다 — 계정명을 내보내기로 한 결정의 연장이다.
+ * 예전에는 막았다(캡션의 협업 문의 연락처가 담당자를 건너뛰는 경로가 된다는
+ * 이유였다). 그런데 계정명이 이미 나가는 지금, 브랜드가 그 계정을 찾아가는 데
+ * 링크가 필요하지는 않다. 막아서 실제로 남은 결과는 하나뿐이었다 — 브랜드가
+ * 릴스를 정지된 표지 한 장으로만 보고 사람을 골랐다. 숏폼에서 판단할 것은 표지가
+ * 아니라 편집·말투·호흡이므로, 그것을 못 보게 하는 것은 가리개가 아니라 정보를
+ * 뺀 것이다. 담당자를 건너뛰는 것을 막는 실질적 장치는 이 가리개가 아니라
+ * 담당자가 쥐고 있는 단가·일정·가이드 합의다.
+ *
+ * 캡션은 계속 내보내지 않는다. 링크를 눌러 인스타에서 보는 것과, 협업 문의
+ * 연락처가 우리 응답에 실려 나가는 것은 다른 일이다.
  *
  * 프로필 사진도 가리지 않는다. 릴스 썸네일과 같은 성질의 판단 재료다.
  */
@@ -694,14 +706,14 @@ function maskSnapshot(snapshot: any, outreachStatus: string) {
       id: r?.id || "",
       thumbnailUrl: r?.thumbnailUrl || "",
       views: Number(r?.views || 0),
+      // 그림을 누르면 그 게시물이 열린다. 캡션·좋아요는 여기 싣지 않는다.
+      permalink: r?.permalink || "",
     })),
-    // 피드 9칸도 썸네일만 남긴다. permalink 하나면 계정을 찾아갈 수 있고, 캡션에는
-    // 계정 아이디나 협업 문의 연락처가 적혀 있는 경우가 많다. 분위기를 보는 데
-    // 필요한 것은 그림이지 링크가 아니다.
     recentFeed: feed.map((f: any) => ({
       id: f?.id || "",
       thumbnailUrl: f?.thumbnailUrl || "",
       mediaType: f?.mediaType || "",
+      permalink: f?.permalink || "",
     })),
   };
 }

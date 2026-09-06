@@ -595,14 +595,50 @@ async function loadChannel(db: any, username: string) {
   return (rows as any[])?.[0] || null;
 }
 
-/** 프로필 사진으로 받아 둘 형식. 목록에 없는 형식은 저장하지 않는다. */
-const AVATAR_TYPES: Record<string, string> = {
+/**
+ * 우리 저장소로 복사해 둘 이미지 형식. 목록에 없는 형식은 저장하지 않는다.
+ * 프로필 사진과 릴스·피드 썸네일이 같은 규칙을 쓴다 — 둘 다 메타가 주는 임시 주소다.
+ */
+const MIRROR_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
 };
 /** 프로필 사진 한 장의 상한. 인스타가 주는 원본은 보통 100KB 안쪽이다. */
 const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+/** 썸네일 한 장의 상한. 릴스 표지는 세로 원본이라 프로필 사진보다 크게 온다. */
+const MEDIA_MAX_BYTES = 5 * 1024 * 1024;
+/** 썸네일 사본이 쌓이는 자리. 계정 폴더 아래, 게시물 하나에 한 장. */
+const MEDIA_PREFIX = "creator-media";
+
+/** 우리 저장소 주소인지. 이 주소는 만료되지 않는다. */
+const isMirroredUrl = (url: unknown) => String(url || "").startsWith("/api/images/");
+
+/** `/api/images/<key>` → `<key>`. 지난 사본을 지울 때 쓴다. */
+const keyOfMirroredUrl = (url: unknown) =>
+  isMirroredUrl(url) ? String(url).slice("/api/images/".length) : "";
+
+/**
+ * 메타가 준 이미지를 받아 온다. 형식·크기가 규칙에 맞지 않으면 null.
+ * 프로필 사진과 썸네일이 같은 검사를 거치도록 한 군데 둔다.
+ */
+async function downloadImage(
+  sourceUrl: string,
+  maxBytes: number,
+): Promise<{ buffer: ArrayBuffer; ext: string; contentType: string } | null> {
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return null;
+  const res = await fetch(sourceUrl);
+  if (!res.ok) return null;
+  const contentType = String(res.headers.get("content-type") || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  const ext = MIRROR_TYPES[contentType];
+  if (!ext) return null;
+  const buffer = await res.arrayBuffer();
+  if (!buffer.byteLength || buffer.byteLength > maxBytes) return null;
+  return { buffer, ext, contentType };
+}
 
 /**
  * 인스타 프로필 사진을 우리 저장소에 한 장 복사해 두고, 그 주소를 대신 굳힌다.
@@ -617,26 +653,18 @@ const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
  * 사진 한 장 때문에 동기화 전체를 실패시키지 않는다.
  */
 async function mirrorProfileImage(username: string, sourceUrl: string, priorUrl: string): Promise<string> {
-  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return "";
   try {
-    const res = await fetch(sourceUrl);
-    if (!res.ok) return "";
-    const contentType = String(res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-    const ext = AVATAR_TYPES[contentType];
-    if (!ext) return "";
-    const buffer = await res.arrayBuffer();
-    if (!buffer.byteLength || buffer.byteLength > AVATAR_MAX_BYTES) return "";
+    const file = await downloadImage(sourceUrl, AVATAR_MAX_BYTES);
+    if (!file) return "";
 
     const store = getStore("images");
     // 주소에 시각을 넣는다. 이미지 응답이 immutable 로 캐시되므로, 같은 키에 덮어쓰면
     // 계정 사진을 바꿔도 브라우저에는 옛 얼굴이 남는다.
-    const key = `creator-avatar/${safeKeyPrefix(username)}/${Date.now()}.${ext}`;
-    await store.set(key, buffer, { metadata: { contentType } });
+    const key = `creator-avatar/${safeKeyPrefix(username)}/${Date.now()}.${file.ext}`;
+    await store.set(key, file.buffer, { metadata: { contentType: file.contentType } });
 
     // 지난 사진은 지운다. 동기화를 누를 때마다 한 장씩 쌓이게 두지 않는다.
-    const priorKey = String(priorUrl || "").startsWith("/api/images/")
-      ? priorUrl.slice("/api/images/".length)
-      : "";
+    const priorKey = keyOfMirroredUrl(priorUrl);
     if (priorKey && priorKey.startsWith("creator-avatar/") && priorKey !== key) {
       await store.delete(priorKey).catch(() => {});
     }
@@ -648,7 +676,80 @@ async function mirrorProfileImage(username: string, sourceUrl: string, priorUrl:
 }
 
 /**
- * 프로필 사진만 다시 받아 오는 간격. 이 시간이 지난 계정만 메타에 다시 묻는다.
+ * 릴스·피드 썸네일도 우리 저장소로 한 장씩 복사하고, 그 주소로 바꿔 돌려준다.
+ *
+ * 프로필 사진과 같은 문제였는데 이 자리만 빠져 있었다. 메타의 썸네일 주소에는
+ * 서명과 만료 시각이 박혀 있어서, 굳혀 둔 주소는 며칠 뒤 404 로 죽는다. 그래서
+ * "릴스는 분명히 있는데 화면에는 안 나온다" — 명단의 그림 칸이 하나씩 깨진 자리로
+ * 바뀌는 것이 그것이다. 숫자(조회수·평균)는 우리가 굳혀 둔 값이라 멀쩡한데 그림만
+ * 사라지므로, 보는 사람에게는 원인을 짐작할 단서조차 없다.
+ *
+ * 게시물 아이디를 키로 쓴다. 같은 게시물의 표지는 바뀌지 않으므로, 이미 복사해 둔
+ * 게시물은 다시 받지 않는다 — 동기화를 누를 때마다 열다섯 장을 다시 내려받는 일을
+ * 막는 것도 이 규칙이다.
+ *
+ * 한 장이라도 실패하면 그 칸만 원본 주소로 남긴다. 당장은 보이고, 다음 동기화가
+ * 다시 시도한다 — 썸네일 한 장 때문에 지표 저장 전체를 실패시킬 이유가 없다.
+ */
+async function mirrorMediaThumbs<T extends { id: string; thumbnailUrl: string }>(
+  username: string,
+  items: T[],
+  priorItems: any[],
+): Promise<T[]> {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return list;
+
+  const mirrored = new Map<string, string>();
+  for (const prior of Array.isArray(priorItems) ? priorItems : []) {
+    const id = String(prior?.id || "");
+    if (id && isMirroredUrl(prior?.thumbnailUrl)) mirrored.set(id, String(prior.thumbnailUrl));
+  }
+
+  const store = getStore("images");
+  return await Promise.all(
+    list.map(async (item) => {
+      const id = String(item?.id || "");
+      const source = String(item?.thumbnailUrl || "");
+      const reused = id ? mirrored.get(id) : "";
+      if (reused) return { ...item, thumbnailUrl: reused };
+      if (!id || !source || isMirroredUrl(source)) return item;
+      try {
+        const file = await downloadImage(source, MEDIA_MAX_BYTES);
+        if (!file) return item;
+        const key = `${MEDIA_PREFIX}/${safeKeyPrefix(username)}/${safeKeyPrefix(id)}.${file.ext}`;
+        await store.set(key, file.buffer, { metadata: { contentType: file.contentType } });
+        return { ...item, thumbnailUrl: `/api/images/${key}` };
+      } catch (e) {
+        console.warn("[ig-metrics] 썸네일 저장 실패:", (e as Error)?.message);
+        return item;
+      }
+    }),
+  );
+}
+
+/**
+ * 명단에서 밀려난 게시물의 사본을 지운다.
+ *
+ * 최근 릴스 6편·피드 9칸만 화면에 쓰므로, 계정이 새 게시물을 올릴 때마다 뒤로 밀린
+ * 사본이 저장소에 남는다. 지우지 않으면 한 계정이 몇 년 뒤 수백 장이 된다.
+ */
+async function pruneMediaThumbs(priorLists: any[][], kept: Set<string>): Promise<void> {
+  const stale = new Set<string>();
+  for (const list of priorLists) {
+    for (const item of Array.isArray(list) ? list : []) {
+      const url = String(item?.thumbnailUrl || "");
+      if (!isMirroredUrl(url) || kept.has(url)) continue;
+      const key = keyOfMirroredUrl(url);
+      if (key.startsWith(`${MEDIA_PREFIX}/`)) stale.add(key);
+    }
+  }
+  if (!stale.size) return;
+  const store = getStore("images");
+  await Promise.all([...stale].map((key) => store.delete(key).catch(() => {})));
+}
+
+/**
+ * 프로필 사진·썸네일을 다시 받아 오는 간격. 이 시간이 지난 계정만 메타에 다시 묻는다.
  *
  * 사람이 프로필 사진을 바꾸는 빈도는 하루에 몇 번이 아니라 몇 달에 한 번이다.
  * 그래서 짧게 잡을 이유가 없고, 짧게 잡으면 명단을 열 때마다 메타를 부르는 값을
@@ -657,6 +758,15 @@ async function mirrorProfileImage(username: string, sourceUrl: string, priorUrl:
 const PROFILE_IMAGE_TTL_HOURS = 6;
 /** 한 번의 요청에서 사진을 다시 받아 올 계정 수 상한. 명단이 서른 줄이어도 화면은 기다리지 않는다. */
 const PROFILE_IMAGE_BATCH = 6;
+/**
+ * 그중 썸네일까지 옮겨 올 계정 수 상한.
+ *
+ * 사진 한 장(프로필)과 열다섯 장(릴스 6 + 피드 9)은 같은 무게가 아니다. 명단을 여는
+ * 사람이 그 값을 로딩으로 내지 않도록 훨씬 좁게 잡는다. 한 번 옮겨 놓은 계정은 다시
+ * 대상이 되지 않으므로(사본 주소는 만료되지 않는다), 몇 번의 페이지 열기 안에 밀린
+ * 계정들이 차례로 정리된다.
+ */
+const MEDIA_MIRROR_BATCH = 2;
 
 /** "물어본 시각"만 찍는다. 실패한 호출을 페이지를 열 때마다 되풀이하지 않기 위한 도장이다. */
 async function stampProfileImageCheck(db: any, username: string): Promise<void> {
@@ -670,13 +780,89 @@ async function stampProfileImageCheck(db: any, username: string): Promise<void> 
 }
 
 /**
- * 한 계정의 프로필 사진을 연동된 인스타에서 다시 받아 온다.
+ * 이 계정의 릴스·피드 썸네일이 아직 메타 주소로 남아 있는지.
+ *
+ * 우리 저장소로 옮긴 주소는 만료되지 않으므로, 한 번 옮긴 계정에는 다시 물어볼 일이
+ * 없다. 이 검사가 곧 "이 무거운 일이 언제 멈추는가"의 답이다 — 배포 전에 굳어 있던
+ * 행들만 한 번씩 지나가고, 그 뒤로는 아무 요청도 늘어나지 않는다.
+ */
+const channelNeedsMediaMirror = (row: any): boolean => {
+  for (const list of [row?.recent_reels, row?.recent_feed]) {
+    for (const item of Array.isArray(list) ? list : []) {
+      const url = String(item?.thumbnailUrl || "");
+      if (url && !isMirroredUrl(url)) return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * 굳어 있는 릴스·피드의 썸네일 주소만 지금 것으로 바꿔 온다.
+ *
+ * 지표를 통째로 다시 받는 것(syncChannelFromMeta)과 일부러 나눈다 — 그쪽은 릴스
+ * 열두 편의 인사이트까지 부르고 평균값을 다시 굳힌다. 여기서 바꾸는 것은 그림 주소
+ * 하나뿐이고, 조회수·평균·게시 시각은 굳어 있던 값을 그대로 둔다. 브랜드가 무엇을
+ * 보고 골랐는지의 기록을 그림이 깨졌다는 이유로 고쳐 쓸 수는 없다.
+ */
+async function remirrorChannelMedia(
+  host: string,
+  token: string,
+  username: string,
+  row: any,
+): Promise<{ reels: any[]; feed: any[] } | null> {
+  try {
+    const fields = "id,media_type,media_url,thumbnail_url,permalink";
+    const res = await fetch(
+      `https://${host}/me/media?fields=${encodeURIComponent(fields)}` +
+        `&limit=${SAMPLE_SIZE * 2}&access_token=${encodeURIComponent(token)}`,
+    );
+    const payload = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) return null;
+
+    const fresh = new Map<string, any>();
+    for (const m of Array.isArray(payload?.data) ? payload.data : []) {
+      const id = String(m?.id || "");
+      if (id) fresh.set(id, m);
+    }
+    if (!fresh.size) return null;
+
+    // 굳어 있는 목록의 순서와 숫자는 그대로 두고, 같은 아이디의 지금 주소만 갈아 끼운다.
+    // 목록에서 사라진 게시물(삭제됐거나 너무 오래된 것)은 손대지 않는다.
+    const freshen = (list: any[]) =>
+      (Array.isArray(list) ? list : []).map((item) => {
+        const m = fresh.get(String(item?.id || ""));
+        if (!m) return item;
+        const isVideo = String(m?.media_type || "").toUpperCase() === "VIDEO";
+        const thumb = isVideo
+          ? String(m?.thumbnail_url || m?.media_url || "")
+          : String(m?.media_url || m?.thumbnail_url || "");
+        return {
+          ...item,
+          thumbnailUrl: thumb || String(item?.thumbnailUrl || ""),
+          permalink: String(m?.permalink || item?.permalink || ""),
+        };
+      });
+
+    const priorReels = Array.isArray(row?.recent_reels) ? row.recent_reels : [];
+    const priorFeed = Array.isArray(row?.recent_feed) ? row.recent_feed : [];
+    const reels = await mirrorMediaThumbs(username, freshen(priorReels) as any[], priorReels);
+    const feed = await mirrorMediaThumbs(username, freshen(priorFeed) as any[], priorFeed);
+    return { reels, feed };
+  } catch (e) {
+    console.warn("[ig-metrics] 썸네일 갱신 실패:", (e as Error)?.message);
+    return null;
+  }
+}
+
+/**
+ * 한 계정의 프로필 사진(과 필요하면 썸네일)을 연동된 인스타에서 다시 받아 온다.
  *
  * 지표 전체를 다시 받는 것(syncChannelFromMeta)과 일부러 나눠 둔다 — 그쪽은 릴스
  * 열두 편의 인사이트까지 부르므로 브랜드가 명단을 여는 길에 끼워 넣을 무게가 아니다.
- * 여기서 부르는 것은 프로필 필드 하나뿐이다.
+ * 여기서 부르는 것은 프로필 필드 하나, 그리고 썸네일이 밀린 계정에만 미디어 목록
+ * 하나다.
  */
-async function refreshOneProfileImage(db: any, row: any): Promise<boolean> {
+async function refreshOneChannelImages(db: any, row: any, withMedia: boolean): Promise<boolean> {
   const username = String(row?.username || "");
   if (!username) return false;
 
@@ -711,21 +897,36 @@ async function refreshOneProfileImage(db: any, row: any): Promise<boolean> {
       await stampProfileImageCheck(db, username);
       return false;
     }
-    const source = String(payload?.profile_picture_url || "");
-    if (!source) {
-      await stampProfileImageCheck(db, username);
-      return false;
-    }
 
     // 메타가 주는 주소는 서명과 만료가 박힌 임시 주소다. 지표 동기화와 같은 방식으로
-    // 우리 저장소에 한 장 복사하고 그 주소를 굳힌다.
+    // 우리 저장소에 한 장 복사하고 그 주소를 굳힌다. 못 받았으면 지난 사진을 남긴다.
     const prior = String(row?.profile_image || "");
-    const next = (await mirrorProfileImage(username, source, prior)) || source;
-    await db.sql`
-      UPDATE creator_channels
-      SET profile_image = ${next}, profile_image_checked_at = NOW(), updated_at = NOW()
-      WHERE username = ${username}
-    `;
+    const source = String(payload?.profile_picture_url || "");
+    const nextImage = source ? (await mirrorProfileImage(username, source, prior)) || source : prior;
+
+    // 썸네일은 아직 메타 주소로 남은 계정에만, 그것도 요청당 몇 계정까지만 옮긴다.
+    const media =
+      withMedia && channelNeedsMediaMirror(row)
+        ? await remirrorChannelMedia(host, token, username, row)
+        : null;
+
+    if (media) {
+      await db.sql`
+        UPDATE creator_channels
+        SET profile_image = ${nextImage},
+            recent_reels = ${JSON.stringify(media.reels)},
+            recent_feed = ${JSON.stringify(media.feed)},
+            profile_image_checked_at = NOW(),
+            updated_at = NOW()
+        WHERE username = ${username}
+      `;
+    } else {
+      await db.sql`
+        UPDATE creator_channels
+        SET profile_image = ${nextImage}, profile_image_checked_at = NOW(), updated_at = NOW()
+        WHERE username = ${username}
+      `;
+    }
     return true;
   } catch (e) {
     console.warn("[ig-metrics] 프로필 사진 갱신 실패:", (e as Error)?.message);
@@ -735,20 +936,21 @@ async function refreshOneProfileImage(db: any, row: any): Promise<boolean> {
 }
 
 /**
- * 명단에 뜰 얼굴을 연동된 인스타 계정의 지금 사진으로 맞춘다.
+ * 명단에 뜰 얼굴과 그림을 연동된 인스타 계정의 지금 것으로 맞춘다.
  *
- * 지금까지 creator_channels.profile_image 는 연동하는 순간과 인플루언서가 '갱신'을
+ * 지금까지 creator_channels 의 사진·썸네일은 연동하는 순간과 인플루언서가 '갱신'을
  * 누르는 순간에만 채워졌다. 둘 다 인플루언서의 손이 필요한 일이라, 연동해 둔 사람이
- * 인스타에서 사진을 바꿔도 브랜드 화면에는 연동한 날의 얼굴이 남았다 — 브랜드는
- * 진행사항 카드에서 지금 인스타에 없는 사진을 보고 같은 사람인지 의심하게 된다.
+ * 인스타에서 사진을 바꿔도 브랜드 화면에는 연동한 날의 얼굴이 남았고, 만료된 릴스
+ * 썸네일은 깨진 자리로 남았다 — 브랜드는 진행사항 카드에서 지금 인스타에 없는
+ * 사진을 보고 같은 사람인지 의심하게 된다.
  *
- * 그래서 브랜드·담당자가 명단을 여는 길에 사진만 따로 확인한다. 계정마다 마지막으로
+ * 그래서 브랜드·담당자가 명단을 여는 길에 그림만 따로 확인한다. 계정마다 마지막으로
  * 물어본 시각을 남겨 두고 그 뒤로 몇 시간이 지난 계정만, 그것도 한 번에 몇 개까지만
  * 다시 묻는다. 대부분의 페이지 열기에서는 한 건도 부르지 않는다.
  *
  * 실패는 조용히 삼킨다 — 사진 한 장 때문에 협업 명단이 안 열리면 안 된다.
  */
-export async function refreshStaleProfileImages(db: any, usernames: string[]): Promise<number> {
+export async function refreshStaleChannelImages(db: any, usernames: string[]): Promise<number> {
   const names = [
     ...new Set(
       (usernames || []).map((n) => String(n || "").trim().toLowerCase()).filter(Boolean),
@@ -764,7 +966,7 @@ export async function refreshStaleProfileImages(db: any, usernames: string[]): P
   let stale: any[] = [];
   try {
     stale = (await db.sql`
-      SELECT username, instagram_handle, profile_image
+      SELECT username, instagram_handle, profile_image, recent_reels, recent_feed
       FROM creator_channels
       WHERE username = ANY(${names})
         AND connected = TRUE
@@ -778,7 +980,9 @@ export async function refreshStaleProfileImages(db: any, usernames: string[]): P
   }
   if (stale.length === 0) return 0;
 
-  const results = await Promise.all(stale.map((row) => refreshOneProfileImage(db, row)));
+  const results = await Promise.all(
+    stale.map((row, i) => refreshOneChannelImages(db, row, i < MEDIA_MIRROR_BATCH)),
+  );
   return results.filter(Boolean).length;
 }
 
@@ -825,6 +1029,21 @@ export async function persistMetrics(
       ? prior.recent_feed
       : [];
 
+  // 릴스·피드 썸네일은 우리 저장소로 복사한 주소로 바꿔 굳힌다. 메타 주소를 그대로
+  // 굳히면 며칠 뒤 그림만 조용히 사라진다(자세한 이유는 mirrorMediaThumbs 주석).
+  const priorReelList = Array.isArray(existing?.recent_reels) ? existing.recent_reels : [];
+  const priorFeedList = Array.isArray(existing?.recent_feed) ? existing.recent_feed : [];
+  const mirroredReels = await mirrorMediaThumbs(username, recentReels as any[], priorReelList);
+  const mirroredFeed = await mirrorMediaThumbs(username, recentFeed as any[], priorFeedList);
+  // 화면에 남지 않는 사본은 지운다. 실패해도 지표 저장은 계속한다 — 남은 파일 한 장은
+  // 다음 동기화가 다시 걸러 낸다.
+  await pruneMediaThumbs(
+    [priorReelList, priorFeedList],
+    new Set(
+      [...mirroredReels, ...mirroredFeed].map((item) => String((item as any)?.thumbnailUrl || "")),
+    ),
+  ).catch(() => {});
+
   const handle = metrics.igUsername || String(existing?.instagram_handle || "");
   // 프로필 사진도 같은 규칙이다. 이번 응답에 없으면(권한·필드 미지원) 지난번 주소를
   // 남긴다. 단 계정이 바뀌었으면 물려받지 않는다 — 남의 얼굴이 걸린다.
@@ -850,7 +1069,7 @@ export async function persistMetrics(
     ) VALUES (
       ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
       ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
-      ${JSON.stringify(recentReels)}, ${JSON.stringify(recentFeed)}, NOW(),
+      ${JSON.stringify(mirroredReels)}, ${JSON.stringify(mirroredFeed)}, NOW(),
       ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}, NOW()
     )
     ON CONFLICT (username) DO UPDATE SET

@@ -178,6 +178,14 @@ interface DmSettings {
   /** 마지막으로 구독을 건 필드 목록. 목록이 바뀌면 한 번 더 구독한다. */
   webhookFields?: string;
   /**
+   * 화면을 열 때 서버가 마지막으로 구독을 손본 시각.
+   *
+   * `webhookSubscribedAt` 은 성공한 시각이고 이 값은 시도한 시각이다. 둘을 나누는
+   * 이유는 실패다 — 메타가 특정 필드를 거절하는 계정에서 성공 시각만 보고 있으면
+   * 설정 화면을 열 때마다 같은 실패를 되풀이해 부른다.
+   */
+  webhookHealedAt?: string;
+  /**
    * 이 설정을 저장한 로그인 사용자 ID.
    *
    * 플랜 판정을 설정 화면과 발송기(웹훅)가 같은 기준으로 하도록 남긴다. 웹훅에는
@@ -461,6 +469,69 @@ function replaceAll(
   });
 }
 
+/**
+ * 같은 실패를 되풀이해 부르지 않기 위한 간격. 화면을 열 때 손보는 일이라 짧을수록
+ * 사람이 그 시간을 로딩으로 낸다.
+ */
+const WEBHOOK_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
+
+/**
+ * 웹훅 구독은 화면이 알릴 일이 아니라 서버가 끝낼 일이다.
+ *
+ * 예전에는 구독이 빠진 계정에 안내(발신 에코가 연결되지 않았습니다 · 버튼 클릭을 받을
+ * 웹훅이 없습니다)를 띄우고 "웹훅 다시 연결" 버튼을 눌러 달라고 했다. 그런데 그 버튼이
+ * 하는 일은 이 함수가 하는 일과 똑같다 — 토큰으로 `subscribed_apps` 를 다시 거는 것
+ * 하나뿐이고, 사람이 판단할 것이 하나도 없다. 판단할 것이 없는 일을 화면에 물어보면,
+ * 남는 것은 "뭔가 잘못됐다는 경고를 매번 보지만 내가 할 수 있는 건 버튼 하나"라는
+ * 상태뿐이다. 그래서 설정 화면을 여는 길에 서버가 조용히 다시 건다.
+ *
+ * 이미 최신 목록으로 구독된 계정은 아무 호출도 하지 않는다. 못 걸린 계정만, 그것도
+ * 10분에 한 번만 시도한다 — 메타가 계정 사정으로 특정 필드를 거절하는 경우가 있고
+ * (앱 심사 범위·권한), 그때 화면을 열 때마다 실패를 되부르면 그 대기가 곧 로딩이다.
+ *
+ * 실패는 로그로만 남긴다. 자동 DM 이 안 나가는 것은 이 화면이 아니라 발송 기록에서
+ * 드러나야 하고, 사람에게 보여 줄 수 있는 다음 행동이 없는 경고는 알림이 아니다.
+ */
+async function healWebhookSubscription(
+  username: string,
+  key: string,
+  data: DmSettings,
+): Promise<DmSettings> {
+  if (!data.accessToken) return data;
+  if (String(data.webhookFields || "") === WEBHOOK_FIELDS) return data;
+
+  const lastTry = Date.parse(String(data.webhookHealedAt || "")) || 0;
+  if (Date.now() - lastTry < WEBHOOK_HEAL_COOLDOWN_MS) return data;
+
+  const healedAt = new Date().toISOString();
+  const sub = await subscribeInstagramWebhooks({
+    accessToken: data.accessToken,
+    tokenSource: data.tokenSource,
+    igId: data.igUserId || data.igAccountId,
+  }).catch((e) => ({ ok: false as const, error: (e as Error)?.message, fields: "" }));
+
+  const patch: Partial<DmSettings> = { webhookHealedAt: healedAt };
+  if (sub.ok) {
+    patch.webhookSubscribedAt = healedAt;
+    // 시도한 목록이 아니라 실제로 걸린 목록을 남긴다. 거절된 필드까지 성공으로 찍으면
+    // 이 계정은 다시 손볼 대상에서 영영 빠진다.
+    patch.webhookFields = sub.fields || WEBHOOK_FIELDS;
+  } else {
+    console.warn("[dm-automation] webhook self-heal failed:", sub.error);
+  }
+
+  // 역인덱스도 함께 채운다 — 이벤트가 도착해도 주인을 못 찾으면 그대로 버려진다.
+  if (data.igUserId || data.igAccountId) {
+    await indexDmAccount(username, [data.igUserId, data.igAccountId]).catch(() => {});
+  }
+
+  await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) =>
+    current ? { ...current, ...patch } : null,
+  ).catch((e) => console.warn("[dm-automation] webhook flag save failed:", (e as Error)?.message));
+
+  return { ...data, ...patch };
+}
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -476,7 +547,9 @@ export default async (req: Request, context: Context) => {
   const key = `dm_${username}`;
 
   if (req.method === "GET") {
-    const data = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
+    const stored = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
+    // 구독이 빠져 있으면 여기서 다시 건다. 화면에 경고를 띄우는 대신이다.
+    const data = await healWebhookSubscription(username, key, stored);
     const { accessToken, ownerAuthUserId, ...safe } = data;
     return Response.json({
       ...DEFAULT_SETTINGS,
@@ -489,16 +562,14 @@ export default async (req: Request, context: Context) => {
         greeting: { ...DEFAULT_SETTINGS.direct!.greeting, ...(data.direct?.greeting || {}) },
         replies: Array.isArray(data.direct?.replies) ? data.direct!.replies : [],
       },
-      /** 아이스브레이커·DM 트리거를 받을 수 있는 웹훅 필드가 구독돼 있는지. */
-      postbackSubscribed: String(data.webhookFields || "").includes("messaging_postbacks"),
-      messagesSubscribed: String(data.webhookFields || "").includes("messages"),
       connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
       hasAccessToken: Boolean(accessToken),
       /**
-       * 발신 에코(`message_echoes`) 구독 여부. 구독돼 있지 않으면 이 앱을 거치지
-       * 않고 나간 자동 DM 을 감지할 수 없으므로, 화면에서 그 한계를 알려준다.
+       * 어떤 웹훅 필드가 걸려 있는지. 화면은 이 값으로 경고를 띄우지 않는다 —
+       * 구독은 위 healWebhookSubscription 이 책임진다. 진단이 필요할 때 응답만 보고
+       * 판단할 수 있도록 목록 자체는 남겨 둔다.
        */
-      echoSubscribed: String(data.webhookFields || "").includes("message_echoes"),
+      webhookFields: String(data.webhookFields || ""),
       // 이 앱이 보내지 않은 자동 DM(인스타그램 자체 자동 메시지·다른 자동화 서비스)이
       // 감지됐다면 함께 내려준다. 화면에서 "왜 설정과 다른 문구가 오는지" 안내한다.
       externalDm: await readForeignDm(username),

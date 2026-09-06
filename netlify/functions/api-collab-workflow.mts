@@ -7,7 +7,7 @@ import {
   upsertSettlementForProposal,
 } from "./_shared/collab-records.mts";
 import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
-import { refreshStaleProfileImages } from "./_shared/instagram-metrics.mts";
+import { refreshStaleChannelImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 import {
   canTransitionStage,
@@ -632,7 +632,7 @@ export default async (req: Request, context: Context) => {
        * 한다 — 인플루언서는 자기 화면에서 언제든 직접 갱신할 수 있다.
        */
       if (role === "brand" || role === "manager") {
-        await refreshStaleProfileImages(db, creatorNames);
+        await refreshStaleChannelImages(db, creatorNames);
       }
       const [channelRows, siteRows] = await Promise.all([
         creatorNames.length
@@ -857,7 +857,7 @@ export default async (req: Request, context: Context) => {
       // 목록과 같은 규칙으로 얼굴을 맞춘다. 목록에서 누른 사람과 열린 화면의 사람이
       // 다른 사진으로 보이면 브랜드는 잘못 눌렀다고 읽는다.
       if (role === "brand" || role === "manager") {
-        await refreshStaleProfileImages(db, [norm(collab.creator_username)]);
+        await refreshStaleChannelImages(db, [norm(collab.creator_username)]);
       }
       const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, brandSettlementRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
