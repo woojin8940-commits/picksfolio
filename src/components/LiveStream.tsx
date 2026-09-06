@@ -9,6 +9,7 @@ import { loadPortOne, loadVideoJs } from '../utils/externalScripts';
 import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
+import { openExternalUrl } from '../utils/externalLink';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
 import { apiService, type ShippingProfile } from '../services/apiService';
 import { PartnerFeed } from './PartnerFeed';
@@ -2440,12 +2441,10 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
     // the seller's external link if one was provided. Live products may now be
     // saved with no link at all, in which case the bail is silent.
     if (price <= 0 && !hasPricedOption) {
-      const link = currentProduct.link?.startsWith('http')
-        ? currentProduct.link
-        : currentProduct.link ? `https://${currentProduct.link}` : '';
-      if (link) {
-        window.open(link, '_blank', 'noopener,noreferrer');
-      }
+      // 카카오톡 인앱 브라우저(개인페이지가 대부분 여기로 열린다)와 모바일
+      // 사파리는 스크립트가 여는 새 탭을 팝업으로 보고 조용히 막는다. 그러면
+      // 눌러도 아무 일이 없었다 — openExternalUrl 은 막히면 현재 창에서 연다.
+      openExternalUrl(currentProduct.link);
       return;
     }
 

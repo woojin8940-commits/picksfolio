@@ -34,21 +34,36 @@ export const DEFAULT_BUTTONS: DefaultButtonDef[] = [
 ];
 
 /**
+ * 주소 없이 아이디만 적었을 때 채워 줄 채널 홈.
+ *
+ * 안내 문구에 도메인을 적어 두어도 "@내채널" 처럼 아이디만 넣는 사람이 많다.
+ * 예전에는 카카오톡만 이걸 받아 주고 나머지는 https:// 만 붙였는데, 그러면
+ * "@me" 가 "https://@me" 가 된다 — 주소 꼴은 맞아서 저장은 되지만 어디에도
+ * 닿지 않으니, 버튼을 눌러도 아무 일이 없는 것처럼 보였다.
+ */
+const HANDLE_HOME: Record<DefaultButtonKey, (handle: string) => string> = {
+  kakao: handle => `https://pf.kakao.com/${handle}`,
+  youtube: handle => `https://www.youtube.com/@${handle}`,
+  tiktok: handle => `https://www.tiktok.com/@${handle}`,
+  naver: handle => `https://blog.naver.com/${handle}`,
+};
+
+/**
  * 입력값을 열 수 있는 주소로 만든다.
  *
  * 인플루언서는 주소를 복사해 오기도 하고("https://youtube.com/@me") 아이디만
  * 적기도 한다("@me"). https:// 를 안 붙이면 브라우저가 상대 경로로 읽어
  * /picks/youtube.com 같은 곳으로 가 버린다.
  *
- * 카카오톡만 예외를 둔다 — 채널 ID(_abcdef)만 적는 경우가 많은데, 그대로는
- * 주소가 되지 않아 채널 홈 주소로 만들어 준다.
+ * 점도 슬래시도 없는 값은 도메인이 아니라 아이디로 본다 — 그때는 위의 채널 홈
+ * 주소로 만들어 준다.
  */
 export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string => {
   const value = (raw || '').trim();
   if (!value) return '';
   if (/^https?:\/\//i.test(value)) return value;
-  if (key === 'kakao' && !value.includes('.') && !value.includes('/')) {
-    return `https://pf.kakao.com/${value.replace(/^@/, '')}`;
+  if (!value.includes('.') && !value.includes('/')) {
+    return HANDLE_HOME[key](value.replace(/^@/, ''));
   }
   return `https://${value.replace(/^\/+/, '')}`;
 };
