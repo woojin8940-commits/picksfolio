@@ -79,19 +79,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error('Error loading dashboard data from localStorage:', e);
     }
 
-    apiService.getSiteData(u).then(apiData => {
-      if (!apiData) return;
-      if (Array.isArray(apiData.blocks)) {
-        setPreviewBlocks(apiData.blocks);
-        localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
-      }
-      if (apiData.openSchedule) {
-        setPreviewSchedule(apiData.openSchedule);
-        localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
-      }
-    }).catch(e => {
-      console.warn('Error loading dashboard data from API:', e);
-    });
+    window.setTimeout(() => {
+      apiService.getSiteData(u).then(apiData => {
+        if (!apiData) return;
+        if (Array.isArray(apiData.blocks)) {
+          setPreviewBlocks(apiData.blocks);
+          localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
+        }
+        if (apiData.openSchedule) {
+          setPreviewSchedule(apiData.openSchedule);
+          localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
+        }
+      }).catch(e => {
+        console.warn('Error loading dashboard data from API:', e);
+      });
+    }, 900);
   }, [userName]);
 
   useEffect(() => {
@@ -121,44 +123,61 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
       } catch {}
     };
-    fetchUnread();
+    const firstTimer = setTimeout(fetchUnread, 4000);
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') fetchUnread();
     }, 120000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(firstTimer);
+      clearInterval(interval);
+    };
   }, [userName]);
 
   const fetchStats = async () => {
     if (!userName) return;
     try {
       console.log('Fetching stats for:', userName, startDate, endDate);
-      const data = await getStatsForRange(userName, startDate, endDate);
-      setStats(data || { views: 0, clicks: 0, ctr: 0 });
+      const [statsResult, settingsResult, topItemsResult] = await Promise.allSettled([
+        getStatsForRange(userName, startDate, endDate),
+        getSiteSettings(userName),
+        getTopClickedItemsForRange(userName, startDate, endDate),
+      ]);
+
+      if (statsResult.status === 'fulfilled') {
+        setStats(statsResult.value || { views: 0, clicks: 0, ctr: 0 });
+      }
 
       // Fetch blocks from site settings (API -> Supabase -> localStorage cascade)
-      const settings = await getSiteSettings(userName);
-      if (settings && settings.blocks && settings.blocks.length > 0) {
-        setBlocks(Array.isArray(settings.blocks) ? settings.blocks : []);
+      if (settingsResult.status === 'fulfilled' && settingsResult.value?.blocks && settingsResult.value.blocks.length > 0) {
+        setBlocks(Array.isArray(settingsResult.value.blocks) ? settingsResult.value.blocks : []);
       } else {
         setBlocks([]);
       }
 
       // Fetch real top clicked items for the selected range
-      const topItems = await getTopClickedItemsForRange(userName, startDate, endDate);
-      setTopItemsData(Array.isArray(topItems) ? topItems : []);
+      setTopItemsData(
+        topItemsResult.status === 'fulfilled' && Array.isArray(topItemsResult.value)
+          ? topItemsResult.value
+          : [],
+      );
     } catch (e) {
       console.error('Error fetching stats:', e);
     }
   };
 
   useEffect(() => {
-    fetchStats();
-    // Only auto-refresh if the end date is today
-    const today = todayInSeoul();
-    if (endDate === today) {
-      const interval = setInterval(fetchStats, 3600000); // Update every hour
-      return () => clearInterval(interval);
-    }
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const timer = setTimeout(() => {
+      fetchStats();
+      const today = todayInSeoul();
+      if (endDate === today) {
+        interval = setInterval(fetchStats, 3600000);
+      }
+    }, 1200);
+    return () => {
+      clearTimeout(timer);
+      if (interval) clearInterval(interval);
+    };
   }, [userName, startDate, endDate]);
 
   // Map real click counts to blocks for the TOP 3 section

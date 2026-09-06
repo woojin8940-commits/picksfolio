@@ -142,9 +142,12 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
   useEffect(() => {
     if (currentSubView === 'dashboard') {
-      fetchTopTrend();
-      fetchProposalStats();
-      fetchMonthlySettlement();
+      const timer = setTimeout(() => {
+        fetchTopTrend();
+        fetchProposalStats();
+        fetchMonthlySettlement();
+      }, 1200);
+      return () => clearTimeout(timer);
     }
   }, [currentSubView]);
 
@@ -167,11 +170,14 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         }
       } catch {}
     };
-    fetchUnread();
+    const firstTimer = setTimeout(fetchUnread, 4000);
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') fetchUnread();
     }, 120000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(firstTimer);
+      clearInterval(interval);
+    };
   }, [cleanUsername]);
 
   useEffect(() => {
