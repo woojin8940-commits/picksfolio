@@ -829,11 +829,9 @@ const App: React.FC = () => {
         // the login page, not the homepage.
         launchedIntoDashboardRef.current = false;
 
-        // 담당자 배정 여부. 관리자는 운영 콘솔로 가므로 물을 필요가 없다.
-        // 실패하면 담당자가 아닌 것으로 본다 — 여는 쪽으로 실패하면 안 되는 값이다.
-        let managerAssigned = false;
-        if (userRole !== 'admin') {
-          managerAssigned = await refreshManagerStatus();
+        const managerAssigned = userRole !== 'admin' && managerCheckedRef.current && isPlatformManagerRef.current;
+        if (userRole !== 'admin' && !managerCheckedRef.current) {
+          refreshManagerStatus().catch((e) => console.error('[Auth] 담당자 확인 실패:', e));
         }
 
         const currentView = viewRef.current;
@@ -873,23 +871,18 @@ const App: React.FC = () => {
             // 여기서 따지지 않는다 — 담당자에게 필요한 첫 화면은 캠페인이다.
             navigate('manager');
           } else {
-            // Check if user has site data (link blocks) before deciding destination
             try {
-              const service = await getApiService();
-              const siteData = await service.getSiteData(existingUsername);
-              const hasLinks = siteData && siteData.blocks && Array.isArray(siteData.blocks) && siteData.blocks.length > 0;
-              if (hasLinks) {
-                console.log(`[Auth] User has link data, redirecting to dashboard`);
-                navigate('admin');
-              } else {
-                console.log(`[Auth] User has no link data, redirecting to link management`);
+              const rawBlocks = localStorage.getItem(`picks_blocks_${existingUsername.toLowerCase()}`);
+              const cachedBlocks = rawBlocks ? JSON.parse(rawBlocks) : null;
+              if (Array.isArray(cachedBlocks) && cachedBlocks.length === 0) {
                 setSubView('links');
-                navigate('admin');
+              } else {
+                setSubView('dashboard');
               }
             } catch (e) {
-              console.error('[Auth] Error checking site data:', e);
-              navigate('admin');
+              setSubView('dashboard');
             }
+            navigate('admin');
           }
           setOauthProcessing(false);
         } else if (currentView === 'setup-link') {
@@ -1353,7 +1346,10 @@ const App: React.FC = () => {
     if (isLoggedIn && userName) {
       wasLoggedInRef.current = true;
       sessionSet('picks_user_session', userName);
-      import('./components/BusinessTimeline').catch(() => {});
+      const timer = window.setTimeout(() => {
+        import('./components/BusinessTimeline').catch(() => {});
+      }, 2500);
+      return () => window.clearTimeout(timer);
     } else if (!isLoggedIn && wasLoggedInRef.current) {
       sessionRemove('picks_user_session');
       sessionRemove('picks_last_activity');

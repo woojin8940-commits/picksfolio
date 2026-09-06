@@ -89,8 +89,11 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
         if (!controller.signal.aborted) setLoading(false);
       }
     };
-    fetchData();
-    return () => controller.abort();
+    const timer = setTimeout(fetchData, embedded ? 1800 : 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [language]);
 
   return (
