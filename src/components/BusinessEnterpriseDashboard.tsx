@@ -152,19 +152,25 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business`, {
+        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business&unread=1`, {
           headers: await authHeaders(),
         });
         const data = await res.json();
-        if (data.timelines) {
-          const total = (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+        if (typeof data.unreadTotal === 'number' || data.timelines) {
+          const total = typeof data.unreadTotal === 'number'
+            ? data.unreadTotal
+            : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
           setTimelineUnread(total);
-          try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
+          if (data.timelines) {
+            try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
+          }
         }
       } catch {}
     };
     fetchUnread();
-    const interval = setInterval(fetchUnread, 60000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchUnread();
+    }, 120000);
     return () => clearInterval(interval);
   }, [cleanUsername]);
 

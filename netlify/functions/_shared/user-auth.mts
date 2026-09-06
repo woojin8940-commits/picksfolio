@@ -22,6 +22,30 @@ const FALLBACK_SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
 let _client: SupabaseClient | null = null;
 
+type PositiveAuthResult = { ok: true; username: string; userId: string; isAdmin: boolean };
+
+const AUTH_CACHE_TTL_MS = 60_000;
+const AUTH_CACHE_MAX = 200;
+const authCache = new Map<string, { expiresAt: number; result: PositiveAuthResult }>();
+
+function cachedAuth(token: string): PositiveAuthResult | null {
+  const hit = authCache.get(token);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    authCache.delete(token);
+    return null;
+  }
+  return hit.result;
+}
+
+function rememberAuth(token: string, result: PositiveAuthResult): void {
+  if (authCache.size >= AUTH_CACHE_MAX) {
+    const firstKey = authCache.keys().next().value;
+    if (typeof firstKey === "string") authCache.delete(firstKey);
+  }
+  authCache.set(token, { expiresAt: Date.now() + AUTH_CACHE_TTL_MS, result });
+}
+
 function getAuthClient(): SupabaseClient | null {
   if (_client) return _client;
   const url = process.env.VITE_SUPABASE_URL || FALLBACK_SUPABASE_URL;
@@ -75,6 +99,9 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
     };
   }
 
+  const cached = cachedAuth(token);
+  if (cached) return cached;
+
   const { data, error } = await client.auth.getUser(token);
   const user = data?.user;
   if (error || !user) {
@@ -93,12 +120,14 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
     .eq("id", user.id)
     .maybeSingle();
 
-  return {
+  const result: PositiveAuthResult = {
     ok: true,
     username: normalizeName(String(profile?.username || "")),
     userId: user.id,
     isAdmin: (profile?.role || "").toLowerCase() === "admin",
   };
+  rememberAuth(token, result);
+  return result;
 }
 
 /**

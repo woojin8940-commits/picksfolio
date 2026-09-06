@@ -566,38 +566,42 @@ const App: React.FC = () => {
 
       if (isKakaoUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && needsKakaoProfileSetup) {
         const effectiveProviderToken = session.provider_token || capturedProviderToken || sessionStorage.getItem('kakao_provider_token') || '';
-        // 클라이언트에서 캐시한 카카오 전화번호/이름 (handleOAuthCallback에서 직접 API 호출 결과)
         const clientKakaoPhone = sessionStorage.getItem('kakao_client_phone') || '';
         const clientKakaoName = sessionStorage.getItem('kakao_client_name') || '';
-        // Clean up sessionStorage after use (one-time token)
         if (effectiveProviderToken) {
           sessionStorage.removeItem('kakao_provider_token');
         }
         sessionStorage.removeItem('kakao_client_phone');
         sessionStorage.removeItem('kakao_client_name');
         console.log('[Debug] Kakao user detected, calling server-side profile setup...');
-        try {
+
+        const runKakaoProfileSetup = async () => {
           const setupController = new AbortController();
           const setupTimeout = setTimeout(() => setupController.abort(), 15000);
-          const setupResponse = await fetch('/.netlify/functions/kakao-profile-setup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: uid,
-              user_metadata: session.user.user_metadata || {},
-              identities: session.user.identities || [],
-              email: session.user.email || '',
-              provider_token: effectiveProviderToken,
-              client_kakao_phone: clientKakaoPhone,
-              client_kakao_name: clientKakaoName,
-            }),
-            signal: setupController.signal,
-          });
-          clearTimeout(setupTimeout);
-          const setupResult = await setupResponse.json();
+          try {
+            const setupResponse = await fetch('/.netlify/functions/kakao-profile-setup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: uid,
+                user_metadata: session.user.user_metadata || {},
+                identities: session.user.identities || [],
+                email: session.user.email || '',
+                provider_token: effectiveProviderToken,
+                client_kakao_phone: clientKakaoPhone,
+                client_kakao_name: clientKakaoName,
+              }),
+              signal: setupController.signal,
+            });
+            return await setupResponse.json();
+          } finally {
+            clearTimeout(setupTimeout);
+          }
+        };
 
+        const applyKakaoProfile = (setupResult: any) => {
           if (setupResult.success && setupResult.profile) {
-            profileData = {
+            const nextProfile = {
               username: setupResult.profile.username || '',
               role: setupResult.profile.role || 'user',
               phone: setupResult.profile.phone || '',
@@ -606,41 +610,45 @@ const App: React.FC = () => {
               email: setupResult.profile.email || '',
               avatar_url: setupResult.profile.avatar_url || '',
             };
-            // Persist username to localStorage immediately so it survives page reloads
+            profileData = nextProfile;
             if (setupResult.profile.username) {
               sessionSet('picks_user_session', setupResult.profile.username);
               console.log('[Auth] Kakao profile username persisted to localStorage:', setupResult.profile.username);
             }
-          } else {
-            console.error('[Debug] Server-side profile setup failed:', setupResult.error);
-            // Use localStorage username as fallback when server call fails
-            const savedUsername = sessionGet('picks_user_session') || '';
-            if (savedUsername) {
-              profileData = { username: savedUsername, role: 'user' };
-              console.log('[Auth] Using saved username from localStorage as fallback:', savedUsername);
-            }
-            console.log('[Auth] 서버 함수 실패 응답 — 5초 후 세션 강제 갱신 예약됨');
-            setTimeout(async () => {
-              try {
-                console.log('[Auth] 5초 타임아웃: 서버 실패 후 세션 강제 갱신 시작...');
-                const { data: refreshData } = await supabase!.auth.refreshSession();
-                if (refreshData?.session) {
-                  setAuthUserId(refreshData.session.user.id);
-                  setIsLoggedIn(true);
-                  setProfileChecked(true);
-                  setOauthProcessing(false);
-                  console.log('[Auth] 세션 강제 갱신 완료 — 로그인 상태 복원됨');
-                }
-              } catch (refreshErr) {
-                console.error('[Auth] 세션 강제 갱신 실패:', refreshErr);
-                setOauthProcessing(false);
-                setProfileChecked(true);
-              }
-            }, 5000);
+            return nextProfile;
           }
-        } catch (serverErr) {
+          return null;
+        };
+
+        const handleKakaoSetupFailure = (setupResult: any) => {
+          console.error('[Debug] Server-side profile setup failed:', setupResult?.error);
+          const savedUsername = sessionGet('picks_user_session') || '';
+          if (savedUsername) {
+            profileData = { username: savedUsername, role: 'user' };
+            console.log('[Auth] Using saved username from localStorage as fallback:', savedUsername);
+          }
+          console.log('[Auth] 서버 함수 실패 응답 — 5초 후 세션 강제 갱신 예약됨');
+          setTimeout(async () => {
+            try {
+              console.log('[Auth] 5초 타임아웃: 서버 실패 후 세션 강제 갱신 시작...');
+              const { data: refreshData } = await supabase!.auth.refreshSession();
+              if (refreshData?.session) {
+                setAuthUserId(refreshData.session.user.id);
+                setIsLoggedIn(true);
+                setProfileChecked(true);
+                setOauthProcessing(false);
+                console.log('[Auth] 세션 강제 갱신 완료 — 로그인 상태 복원됨');
+              }
+            } catch (refreshErr) {
+              console.error('[Auth] 세션 강제 갱신 실패:', refreshErr);
+              setOauthProcessing(false);
+              setProfileChecked(true);
+            }
+          }, 5000);
+        };
+
+        const handleKakaoSetupError = async (serverErr: unknown) => {
           console.error('[Debug] Server-side profile setup call failed:', serverErr);
-          // Use localStorage username as fallback when server call throws
           const savedUsernameOnErr = sessionGet('picks_user_session') || '';
           if (savedUsernameOnErr && !profileData) {
             profileData = { username: savedUsernameOnErr, role: 'user' };
@@ -674,7 +682,6 @@ const App: React.FC = () => {
               setProfileChecked(true);
             }
           }, 5000);
-          // Fallback: try client-side profile creation if server call fails
           if (!profileData) {
             console.log('[Debug] Falling back to client-side profile creation...');
             const meta = session.user.user_metadata || {};
@@ -682,13 +689,11 @@ const App: React.FC = () => {
             const idData = kakaoIdentityForFallback?.identity_data || {};
             const kakaoId = meta.provider_id || meta.sub || idData.sub || '';
             const finalKakaoId = kakaoId || kakaoIdentityForFallback?.id || '';
-            // Extract phone: identity_data.kakao_account first, then meta paths
             const kakaoPhone = idData.kakao_account?.phone_number || idData.phone_number
               || meta.phone_number || meta.kakao_account?.phone_number || meta.phone || '';
             const normalizedPhone = kakaoPhone
               ? kakaoPhone.replace(/[^0-9+]/g, '').replace(/^\+82/, '0')
               : '';
-            // Extract name with sanitization: skip "." or empty
             const rawNameFb = idData.kakao_account?.name || idData.name || idData.full_name
               || meta.full_name || meta.name || '';
             const sanitizedNameFb = (rawNameFb && rawNameFb.trim() !== '.' && rawNameFb.trim() !== '') ? rawNameFb.trim() : '';
@@ -703,11 +708,11 @@ const App: React.FC = () => {
               role: 'user',
             };
             try {
-              const { error: insertError } = await supabase.from('profiles').insert(profilePayload);
+              const { error: insertError } = await supabase!.from('profiles').insert(profilePayload);
               if (!insertError) {
                 profileData = { username: '', role: 'user' };
               } else if (insertError.code === '23505') {
-                const { data: refetchedProfile } = await supabase
+                const { data: refetchedProfile } = await supabase!
                   .from('profiles')
                   .select('*')
                   .eq('id', uid)
@@ -717,6 +722,37 @@ const App: React.FC = () => {
             } catch (e) {
               console.error('[Debug] Client-side fallback also failed:', e);
             }
+          }
+        };
+
+        if (profileData?._fallback && (profileData.username || '').trim()) {
+          runKakaoProfileSetup()
+            .then((setupResult) => {
+              const nextProfile = applyKakaoProfile(setupResult);
+              if (nextProfile) {
+                const nextName = String(nextProfile.username || '').trim();
+                if (nextName) {
+                  setUserName(nextName);
+                  setIsLoggedIn(true);
+                }
+                if (nextProfile.role) {
+                  setProfileRole(nextProfile.role);
+                }
+              } else if (setupResult?.error) {
+                console.error('[Debug] Server-side profile setup failed:', setupResult.error);
+              }
+            })
+            .catch((serverErr) => {
+              console.error('[Debug] Server-side profile setup call failed:', serverErr);
+            });
+        } else {
+          try {
+            const setupResult = await runKakaoProfileSetup();
+            if (!applyKakaoProfile(setupResult)) {
+              handleKakaoSetupFailure(setupResult);
+            }
+          } catch (serverErr) {
+            await handleKakaoSetupError(serverErr);
           }
         }
       } else if (!profileData && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
