@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { externalLinkProps } from '../utils/externalLink';
 import { ExternalLink, ChevronRight, Briefcase } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
@@ -314,9 +315,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
               {(previewSelectedBlock.products || []).map((product: any) => (
                 <a
                   key={product.id}
-                  href={product.link?.startsWith('http') ? product.link : `https://${product.link}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  {...externalLinkProps(product.link)}
                   className={`flex items-center justify-between p-2.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
                 >
                   <span className="text-[8px] font-black">{product.name}</span>

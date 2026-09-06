@@ -6,6 +6,7 @@ import { supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
 import { enabledDefaultButtons } from '../utils/pageButtons';
+import { externalLinkProps, openExternalUrl } from '../utils/externalLink';
 import { normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
@@ -734,39 +735,13 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
   const selectedBlock = useMemo(() => blocks.find(b => b.id === selectedBlockId), [blocks, selectedBlockId]);
 
-  const ensureAbsoluteUrl = (url: string) => {
-    if (!url || url === '#' || url.trim() === '') return '#';
-    // Remove any stray # characters that might have been saved
-    const trimmed = url.trim().replace(/#/g, '');
-    if (trimmed === '') return '#';
-    
-    if (trimmed.startsWith('tel:') || trimmed.startsWith('mailto:')) return trimmed;
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-    if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return `${window.location.origin}${trimmed}`;
-    if (trimmed.startsWith('//')) return `https:${trimmed}`;
-
-    // Handle cases like naver.com or www.naver.com
-    return `https://${trimmed}`;
-  };
-
+  /**
+   * 카드 전체가 눌리는 자리(일정 블록처럼 `<a>` 로 감쌀 수 없는 곳)에서만 쓴다.
+   * 링크로 그릴 수 있는 버튼은 externalLinkProps 로 진짜 `<a>` 를 만든다 —
+   * 스크립트로 새 탭을 여는 건 팝업으로 취급돼 조용히 막히기 때문이다.
+   */
   const openLink = (url: string) => {
-    const absoluteUrl = ensureAbsoluteUrl(url);
-    if (absoluteUrl === '#') return;
-
-    console.info('Opening link in new tab:', absoluteUrl);
-
-    if (absoluteUrl.startsWith('tel:')) {
-      window.location.href = absoluteUrl;
-    } else {
-      // Use an anchor element to reliably open in a new tab without navigating the current page
-      const a = document.createElement('a');
-      a.href = absoluteUrl;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
+    openExternalUrl(url);
   };
 
 
@@ -822,9 +797,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
    * 하는 비즈니스 제안 버튼이 묻힌다.
    */
   const defaultButtonsBlock = enabledDefaultButtons(socials).map(btn => (
-    <button
+    <a
       key={btn.key}
-      onClick={() => openLink(btn.url)}
+      {...externalLinkProps(btn.url)}
       className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 ${
         isDark
           ? 'bg-white/10 border-white/15 text-white hover:bg-white/15'
@@ -832,7 +807,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       }`}
     >
       {btn.label}
-    </button>
+    </a>
   ));
 
   const visibleAboutSections = (profile?.aboutSections || []).filter(
@@ -973,17 +948,17 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               {/* Social & Contact Links */}
               <div className="flex gap-2.5 pt-4 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
+                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
-                  </button>
+                  </a>
                 )}
                 {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
+                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
-                  </button>
+                  </a>
                 ))}
               </div>
 
@@ -1208,9 +1183,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                         (block.products || []).map(p => (
                           <a
                             key={p.id}
-                            href={ensureAbsoluteUrl(p.link)}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            {...externalLinkProps(p.link)}
                             onClick={() => trackClick(username, block.id)}
                             className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
@@ -1309,17 +1282,17 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
               <div className="flex gap-2.5 overflow-x-auto scrollbar-hide justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <button onClick={() => openLink(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
+                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
-                  </button>
+                  </a>
                 )}
                 {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <button key={btn.id} onClick={() => openLink(btn.url.startsWith('http') ? btn.url : `https://${btn.url}`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
+                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
-                  </button>
+                  </a>
                 ))}
               </div>
 
@@ -1405,14 +1378,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   <div className={design.templateType === TemplateType.SHOPPABLE_GRID ? "grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6" : "flex flex-col gap-3 md:gap-4"}>
                     {links.map((link) => (
                       <a 
-                        href={ensureAbsoluteUrl(link.url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          trackClick(username, link.id);
-                          openLink(link.url);
-                        }}
+                        {...externalLinkProps(link.url)}
+                        onClick={() => trackClick(username, link.id)}
                         className={`group relative overflow-hidden transition-all hover:scale-[1.02] shadow-xl ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'} ${design.templateType === TemplateType.SHOPPABLE_GRID ? 'rounded-[2rem] aspect-square border' : 'rounded-2xl p-4 flex items-center gap-4 border'}`}
                       >
                         {design.templateType === TemplateType.SHOPPABLE_GRID ? (
@@ -1574,14 +1541,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                         (block.products || []).map(p => (
                           <a
                             key={p.id}
-                            href={ensureAbsoluteUrl(p.link)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              trackClick(username, block.id);
-                              openLink(p.link);
-                            }}
+                            {...externalLinkProps(p.link)}
+                            onClick={() => trackClick(username, block.id)}
                             className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
                           >
@@ -1684,9 +1645,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
                       <a
-                        href={ensureAbsoluteUrl(p.link)}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        {...externalLinkProps(p.link)}
                         onClick={() => {
                           trackClick(username, selectedBlockId || '');
                         }}
@@ -1699,9 +1658,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   </div>
                 </div>
                 <a 
-                  href={ensureAbsoluteUrl(p.link)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  {...externalLinkProps(p.link)}
                   onClick={() => {
                     trackClick(username, selectedBlockId || '');
                   }}

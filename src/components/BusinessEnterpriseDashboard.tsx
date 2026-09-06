@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { openExternalUrl } from '../utils/externalLink';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
 import { authHeaders, setActiveBusinessAccount } from '../services/apiService';
@@ -311,8 +312,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             onClick={() => {
-              const url = `${window.location.origin}/${businessUsername}`;
-              window.open(url, '_blank');
+              openExternalUrl(`/${businessUsername}`);
             }}
             className="bg-slate-900 text-white px-4 py-2 rounded-xl font-black text-[10px] md:text-sm hover:bg-slate-800 transition-all shadow-xl flex items-center gap-2 border border-white/10"
           >
