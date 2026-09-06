@@ -1,5 +1,4 @@
 import React from 'react';
-import { Globe } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface LanguageSwitcherProps {
@@ -23,7 +22,6 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         }`}
         title={language === 'ko' ? 'Switch to English' : '한국어로 변경'}
       >
-        <Globe size={13} className="shrink-0" />
         <span>{language === 'ko' ? 'EN' : '한국어'}</span>
       </button>
     );

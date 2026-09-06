@@ -2,8 +2,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
-import TemplateShowcase from './components/TemplateShowcase';
-import DataBoardSection from './components/DataBoardSection';
 import ErrorBoundary from './components/ErrorBoundary';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
@@ -27,6 +25,8 @@ import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
 import { isKakaoSdkSignedIn } from './utils/kakaoLogin';
 
 const UserPage = lazyWithRetry(() => import('./components/UserPage'));
+const TemplateShowcase = lazyWithRetry(() => import('./components/TemplateShowcase'));
+const DataBoardSection = lazyWithRetry(() => import('./components/DataBoardSection'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
 // they are code-split out of the initial bundle for a faster first paint.
 const SignupPage = lazyWithRetry(() => import('./components/SignupPage'));
@@ -490,8 +490,9 @@ const App: React.FC = () => {
       // Kakao API call that fetches phone_number. Previously we broke out of this
       // loop as soon as capturedProviderToken was set, but that was BEFORE the
       // Kakao API call completed, causing client_kakao_phone to always be empty.
-      const isKakaoProvider = session.user.app_metadata?.provider === 'kakao';
-      if (isKakaoProvider && !oauthCallbackComplete) {
+      const isKakaoUser = session.user.app_metadata?.provider === 'kakao'
+        || session.user.identities?.some((i: any) => i.provider === 'kakao');
+      if (isKakaoUser && !oauthCallbackComplete) {
         for (let i = 0; i < 25; i++) {
           await new Promise(r => setTimeout(r, 200));
           if (oauthCallbackComplete) break;
@@ -517,23 +518,31 @@ const App: React.FC = () => {
       // (localStorage username or 'Anonymous') so broadcasting/signaling is
       // never delayed. A background retry will update the profile later.
       const fallbackUsername = sessionGet('picks_user_session') || '';
-      let profileData: any = await safeFetchProfile(uid, {
-        timeoutMs: 5000,
-        defaultValue: null,
-        onSuccess: (latestProfile: any) => {
-          // Background retry succeeded — update UI state with fresh profile data
-          console.log('[Auth] Background profile retry succeeded:', latestProfile?.username);
-          if (latestProfile?.username) {
-            setUserName(latestProfile.username);
-            sessionSet('picks_user_session', latestProfile.username);
-          }
-          if (latestProfile?.role === 'admin') {
-            setProfileRole('admin');
-          }
-        },
-        maxRetries: 3,
-        retryDelayMs: 3000,
-      });
+      const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
+        || sessionStorage.getItem('kakao_provider_token')
+        || sessionStorage.getItem('kakao_client_phone')
+        || sessionStorage.getItem('kakao_client_name'));
+      const shouldUseKakaoSetupFirst = isKakaoUser && (event === 'SIGNED_IN' || hasKakaoHandoff || isOAuthCallbackRef.current);
+      let profileData: any = null;
+      if (!shouldUseKakaoSetupFirst) {
+        profileData = await safeFetchProfile(uid, {
+          timeoutMs: isKakaoUser ? 2000 : 5000,
+          defaultValue: null,
+          onSuccess: (latestProfile: any) => {
+            // Background retry succeeded — update UI state with fresh profile data
+            console.log('[Auth] Background profile retry succeeded:', latestProfile?.username);
+            if (latestProfile?.username) {
+              setUserName(latestProfile.username);
+              sessionSet('picks_user_session', latestProfile.username);
+            }
+            if (latestProfile?.role === 'admin') {
+              setProfileRole('admin');
+            }
+          },
+          maxRetries: 3,
+          retryDelayMs: 3000,
+        });
+      }
 
       // If initial fetch returned null, use fallback immediately without blocking
       if (!profileData && fallbackUsername) {
@@ -546,18 +555,11 @@ const App: React.FC = () => {
       // Use server-side function to create/update Kakao profile.
       // OIDC 방식: id_token에서 추출된 클레임이 user_metadata에 포함되어 있으므로
       // 서버에서는 metadata + 클라이언트 캐시(sessionStorage)에서 정보를 추출함.
-      const isKakaoUser = session.user.app_metadata?.provider === 'kakao'
-        || session.user.identities?.some((i: any) => i.provider === 'kakao');
-
       // 카카오 프로필 보정은 "아직 프로필이 채워지지 않은 경우"에만 필요하다.
       // 이미 username 이 있는 계정이 단순 새로고침한 것이라면, 이 호출은 새로
       // 가져올 정보가 없는데도(provider_token 은 OAuth 콜백에서만 생긴다)
       // 최대 15초까지 기다리게 만들어 대시보드 진입을 늦춘다. 그래서 새 정보가
       // 실제로 있을 때(로그인 직후 또는 프로필 미완성)만 호출한다.
-      const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
-        || sessionStorage.getItem('kakao_provider_token')
-        || sessionStorage.getItem('kakao_client_phone')
-        || sessionStorage.getItem('kakao_client_name'));
       const needsKakaoProfileSetup = !(profileData?.username || '').trim()
         || event === 'SIGNED_IN'
         || hasKakaoHandoff;
@@ -1944,8 +1946,12 @@ const App: React.FC = () => {
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
-            <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
-            <DataBoardSection />
+            <LazyRoute fallback={null}>
+              <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
+            </LazyRoute>
+            <LazyRoute fallback={null}>
+              <DataBoardSection />
+            </LazyRoute>
           </>
         ) : view === 'signup' ? (
           <LazyRoute>

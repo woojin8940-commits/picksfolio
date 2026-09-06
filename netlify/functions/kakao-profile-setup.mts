@@ -60,6 +60,10 @@ async function fetchKakaoProfile(providerToken: string) {
   }
 }
 
+function isRealUsername(username: string | null | undefined): boolean {
+  return !!username && !username.startsWith("_kakao_") && !username.startsWith("_kk_");
+}
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -111,6 +115,42 @@ export default async (req: Request) => {
       ""
     );
 
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user_id)
+      .maybeSingle();
+
+    if (existing && isRealUsername(existing.username)) {
+      const updates: Record<string, any> = {};
+      if (phone && existing.phone !== phone) updates.phone = phone;
+      if (fullName && existing.full_name !== fullName) updates.full_name = fullName;
+      if (avatarUrl && existing.avatar_url !== avatarUrl) updates.avatar_url = avatarUrl;
+      if (kakaoId && existing.kakao_id !== kakaoId) updates.kakao_id = kakaoId;
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString();
+        const { error: updateError } = await supabase
+          .from("profiles")
+          .update(updates)
+          .eq("id", user_id);
+
+        if (updateError) {
+          console.error("Failed to update existing profile:", updateError.message);
+        }
+      }
+
+      const merged = { ...existing, ...updates };
+      return Response.json({
+        success: true,
+        profile: {
+          ...merged,
+          username: merged.username || "",
+        },
+        isNewUser: false,
+      });
+    }
+
     if (provider_token && (!kakaoId || !phone || !fullName)) {
       const kakaoProfile = await fetchKakaoProfile(provider_token);
       if (kakaoProfile) {
@@ -137,43 +177,6 @@ export default async (req: Request) => {
       }
     }
 
-    const { data: existing } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user_id)
-      .maybeSingle();
-
-    const hasRealUsername = existing?.username &&
-      !existing.username.startsWith("_kakao_") &&
-      !existing.username.startsWith("_kk_");
-
-    if (existing && hasRealUsername) {
-      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (phone) updates.phone = phone;
-      if (fullName) updates.full_name = fullName;
-      if (avatarUrl) updates.avatar_url = avatarUrl;
-      if (kakaoId) updates.kakao_id = kakaoId;
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update(updates)
-        .eq("id", user_id);
-
-      if (updateError) {
-        console.error("Failed to update existing profile:", updateError.message);
-      }
-
-      const merged = { ...existing, ...updates };
-      return Response.json({
-        success: true,
-        profile: {
-          ...merged,
-          username: merged.username || "",
-        },
-        isNewUser: false,
-      });
-    }
-
     // Try to recover via kakao_id — works whether or not a profile row exists yet
     const recoveryKakaoId = existing?.kakao_id || kakaoId;
     if (recoveryKakaoId) {
@@ -186,7 +189,7 @@ export default async (req: Request) => {
         .limit(10);
       if (recoveredProfile && recoveredProfile.length > 0) {
         const rp = recoveredProfile.find(
-          (p: any) => p.username && !p.username.startsWith("_kakao_") && !p.username.startsWith("_kk_")
+          (p: any) => isRealUsername(p.username)
         );
         if (rp) {
           if (existing) {
@@ -230,6 +233,7 @@ export default async (req: Request) => {
     }
 
     let linkedProfile: Record<string, any> | null = null;
+    const allowDeepAuthScan = Netlify.env.get("KAKAO_PROFILE_DEEP_SCAN") === "1";
 
     // 1) Match by kakao_id (strongest signal)
     if (!linkedProfile && kakaoId) {
@@ -271,7 +275,7 @@ export default async (req: Request) => {
 
     // 2.5) Match by email across auth users — find if any other auth user
     // shares this email in their profile or identity data
-    if (!linkedProfile && email) {
+    if (allowDeepAuthScan && !linkedProfile && email) {
       try {
         let page = 1;
         while (!linkedProfile && page <= 3) {
@@ -298,9 +302,7 @@ export default async (req: Request) => {
                 .maybeSingle();
               if (
                 profileById &&
-                profileById.username &&
-                !profileById.username.startsWith("_kakao_") &&
-                !profileById.username.startsWith("_kk_") &&
+                isRealUsername(profileById.username) &&
                 (!profileById.kakao_id || profileById.kakao_id === kakaoId)
               ) {
                 linkedProfile = profileById;
@@ -340,9 +342,7 @@ export default async (req: Request) => {
           );
           const withRealName = eligible.find(
             (p: any) =>
-              p.username &&
-              !p.username.startsWith("_kakao_") &&
-              !p.username.startsWith("_kk_")
+              isRealUsername(p.username)
           );
           linkedProfile = withRealName || eligible[0] || null;
         }
@@ -350,7 +350,7 @@ export default async (req: Request) => {
     }
 
     // 5) Match by scanning auth users' phone metadata
-    if (!linkedProfile && phone) {
+    if (allowDeepAuthScan && !linkedProfile && phone) {
       try {
         const phoneDigits = phone.replace(/\D/g, "");
         const last10 = phoneDigits.slice(-10);
@@ -374,7 +374,7 @@ export default async (req: Request) => {
                   .maybeSingle();
                 if (
                   profileById &&
-                  profileById.username &&
+                  isRealUsername(profileById.username) &&
                   (!profileById.kakao_id || profileById.kakao_id === kakaoId)
                 ) {
                   linkedProfile = profileById;

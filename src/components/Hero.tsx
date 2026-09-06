@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface HeroProps {
@@ -16,12 +15,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
       {/* Background Glows */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[300px] md:w-[600px] h-[300px] md:h-[600px] bg-blue-primary/10 blur-[80px] md:blur-[120px] rounded-full -z-10 animate-pulse"></div>
 
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="max-w-5xl mx-auto"
-      >
+      <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl md:text-[4.5rem] font-black leading-[1.15] md:leading-[1.05] mb-4 md:mb-8 tracking-tighter text-white font-display">
           {language === 'en' ? 'Curate Your Daily Life.' : '일상을 큐레이션하다.'}<br />
           <span className="text-gradient">{language === 'en' ? 'One Single Link, PICKS' : '단 하나의 링크, PICKS'}</span>
@@ -49,7 +43,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             {language === 'en' ? 'Create Now' : '바로 만들기'}
           </button>
         </div>
-      </motion.div>
+      </div>
     </section>
   );
 };
