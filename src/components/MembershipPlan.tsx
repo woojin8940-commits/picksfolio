@@ -50,8 +50,9 @@ const ACTIVATION_GRANT_CREDITS = 3000;
 const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const { language, t } = useLanguage();
   const normalizedUserName = userName.replace(/^biz\//, '');
-  const [verification, setVerification] = useState<SellerVerification | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedVerification = apiService.getCachedSellerVerification(normalizedUserName);
+  const [verification, setVerification] = useState<SellerVerification | null>(() => cachedVerification);
+  const [loading, setLoading] = useState(() => !cachedVerification);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -79,7 +80,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   const [claudeSyncing, setClaudeSyncing] = useState(false);
 
   const loadVerification = useCallback(async () => {
-    setLoading(true);
+    const cached = apiService.getCachedSellerVerification(normalizedUserName);
+    if (cached) {
+      setVerification(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     const data = await apiService.getSellerVerification(normalizedUserName);
     setVerification(data);
     setLoading(false);

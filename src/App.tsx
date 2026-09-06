@@ -1346,15 +1346,69 @@ const App: React.FC = () => {
     if (isLoggedIn && userName) {
       wasLoggedInRef.current = true;
       sessionSet('picks_user_session', userName);
-      const timer = window.setTimeout(() => {
-        import('./components/BusinessTimeline').catch(() => {});
-      }, 2500);
-      return () => window.clearTimeout(timer);
     } else if (!isLoggedIn && wasLoggedInRef.current) {
       sessionRemove('picks_user_session');
       sessionRemove('picks_last_activity');
     }
   }, [isLoggedIn, userName]);
+
+  useEffect(() => {
+    if (!isLoggedIn || view !== 'admin' || !userName) return;
+    const timers: number[] = [];
+    const later = (ms: number, fn: () => void) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+
+    later(600, () => {
+      import('./components/DmAutomation').catch(() => {});
+      import('./components/CreatorInsights').catch(() => {});
+      import('./components/BusinessCalendar').catch(() => {});
+    });
+    later(1100, () => {
+      getApiService()
+        .then((api) => {
+          api.getDmAutomation(userName)
+            .then((settings) => {
+              if (settings.connected) api.getInstagramMedia(userName).catch(() => undefined);
+            })
+            .catch(() => undefined);
+        })
+        .catch(() => undefined);
+    });
+    later(1800, () => {
+      import('./components/BusinessDashboard').catch(() => {});
+      import('./components/BusinessTimeline').catch(() => {});
+      import('./components/UserCampaignBrowse').catch(() => {});
+      import('./components/CreatorCampaignCollabs').catch(() => {});
+      import('./components/UserSettlement').catch(() => {});
+    });
+    later(2400, () => {
+      getApiService()
+        .then((api) => {
+          api.getProposals(userName).catch(() => undefined);
+          api.getCollabRecords(userName).catch(() => undefined);
+          api.getSettlements(userName).catch(() => undefined);
+          api.getCollabs('influencer').catch(() => undefined);
+          api.getCreatorInsights(userName).catch(() => undefined);
+          api.getCreatorFollowerSeries(userName, 7).catch(() => undefined);
+        })
+        .catch(() => undefined);
+    });
+    later(3200, () => {
+      import('./components/MembershipPlan').catch(() => {});
+      import('./components/OpenScheduleManagement').catch(() => {});
+      getApiService()
+        .then((api) => {
+          api.getSellerVerification(userName).catch(() => undefined);
+          api.getClaudeCredits(userName).catch(() => undefined);
+        })
+        .catch(() => undefined);
+    });
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [isLoggedIn, userName, view]);
 
   // Route invite tokens to operator-login
   useEffect(() => {

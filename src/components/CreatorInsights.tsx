@@ -61,6 +61,37 @@ type RangeDays = 7 | 30 | 90;
 
 const RANGES: RangeDays[] = [7, 30, 90];
 
+type CreatorInsightsCache = {
+  data?: CreatorInsightsResponse | null;
+  series?: Record<string, FollowerSeriesResponse>;
+  demo?: FollowerDemographicsResponse | null;
+  benchmark?: BenchmarkResponse | null;
+  savedAt?: number;
+};
+
+const creatorInsightsCacheKey = (username: string) => `picks_creator_insights_${username.toLowerCase()}`;
+
+const readCreatorInsightsCache = (username: string): CreatorInsightsCache | null => {
+  if (!username) return null;
+  try {
+    const raw = localStorage.getItem(creatorInsightsCacheKey(username));
+    return raw ? JSON.parse(raw) as CreatorInsightsCache : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCreatorInsightsCache = (username: string, patch: CreatorInsightsCache): void => {
+  if (!username) return;
+  try {
+    const prev = readCreatorInsightsCache(username) || {};
+    localStorage.setItem(
+      creatorInsightsCacheKey(username),
+      JSON.stringify({ ...prev, ...patch, savedAt: Date.now() }),
+    );
+  } catch {}
+};
+
 /**
  * 그래프 탭. 콘텐츠 성과가 기본이다(파일 위 주석 참고).
  *
@@ -265,12 +296,13 @@ const sortReels = (reels: InsightReel[], key: SortKey): InsightReel[] => {
 const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
+  const initialCache = useMemo(() => readCreatorInsightsCache(userName), [userName]);
 
-  const [data, setData] = useState<CreatorInsightsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<CreatorInsightsResponse | null>(() => initialCache?.data || null);
+  const [loading, setLoading] = useState(() => !initialCache?.data);
   const [refreshing, setRefreshing] = useState(false);
-  const [series, setSeries] = useState<FollowerSeriesResponse | null>(null);
-  const [seriesLoading, setSeriesLoading] = useState(true);
+  const [series, setSeries] = useState<FollowerSeriesResponse | null>(() => initialCache?.series?.['7'] || null);
+  const [seriesLoading, setSeriesLoading] = useState(() => !initialCache?.series?.['7']);
   /**
    * 팔로워 구성(성별·연령대·국가).
    *
@@ -278,10 +310,10 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
    * 않았고(서버 주석 참고), 화면을 여는 사람 대부분은 콘텐츠 성과만 보고 나가므로
    * 열지도 않은 탭의 값을 미리 받아 두려고 메타를 부를 이유가 없다.
    */
-  const [demo, setDemo] = useState<FollowerDemographicsResponse | null>(null);
+  const [demo, setDemo] = useState<FollowerDemographicsResponse | null>(() => initialCache?.demo || null);
   const [demoLoading, setDemoLoading] = useState(false);
   /** 벤치마킹(같은 규모 평균). 이 탭을 처음 열 때 한 번. 우리 DB 만 읽는 조회다. */
-  const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(null);
+  const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(() => initialCache?.benchmark || null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [range, setRange] = useState<RangeDays>(7);
   const [sort, setSort] = useState<SortKey>('saved');
@@ -305,18 +337,28 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
    * 도착하는데, 오늘자 팔로워 점을 남기는 것은 인사이트 쪽 요청이다 — 순서가 뒤집히면
    * 처음 화면을 연 사람은 점이 하나도 없는 "수집 중" 화면을 보게 된다.
    */
-  const [loadedAt, setLoadedAt] = useState(0);
+  const [loadedAt, setLoadedAt] = useState(() => initialCache?.data ? Date.now() : 0);
 
   const load = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!userName) return;
+      const cached = readCreatorInsightsCache(userName);
+      if (!opts.refresh && cached?.data) {
+        setData(cached.data);
+        setLoading(false);
+        setLoadedAt(Date.now());
+      }
       if (opts.refresh) setRefreshing(true);
-      else setLoading(true);
-      const res = await apiService.getCreatorInsights(userName, { refresh: opts.refresh });
-      setData(res);
-      setLoading(false);
-      setRefreshing(false);
-      setLoadedAt(Date.now());
+      else if (!cached?.data) setLoading(true);
+      try {
+        const res = await apiService.getCreatorInsights(userName, { refresh: opts.refresh });
+        setData(res);
+        writeCreatorInsightsCache(userName, { data: res });
+        setLoadedAt(Date.now());
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
     },
     [userName],
   );
@@ -324,10 +366,22 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const loadSeries = useCallback(
     async (days: RangeDays) => {
       if (!userName) return;
-      setSeriesLoading(true);
-      const res = await apiService.getCreatorFollowerSeries(userName, days);
-      setSeries(res);
-      setSeriesLoading(false);
+      const cacheKey = String(days);
+      const cached = readCreatorInsightsCache(userName)?.series?.[cacheKey];
+      if (cached) {
+        setSeries(cached);
+        setSeriesLoading(false);
+      } else {
+        setSeriesLoading(true);
+      }
+      try {
+        const res = await apiService.getCreatorFollowerSeries(userName, days);
+        setSeries(res);
+        const prev = readCreatorInsightsCache(userName)?.series || {};
+        writeCreatorInsightsCache(userName, { series: { ...prev, [cacheKey]: res } });
+      } finally {
+        setSeriesLoading(false);
+      }
     },
     [userName],
   );
@@ -335,20 +389,40 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const loadDemographics = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!userName) return;
-      setDemoLoading(true);
-      const res = await apiService.getCreatorFollowerDemographics(userName, opts);
-      setDemo(res);
-      setDemoLoading(false);
+      const cached = readCreatorInsightsCache(userName)?.demo;
+      if (!opts.refresh && cached) {
+        setDemo(cached);
+        setDemoLoading(false);
+      } else {
+        setDemoLoading(true);
+      }
+      try {
+        const res = await apiService.getCreatorFollowerDemographics(userName, opts);
+        setDemo(res);
+        writeCreatorInsightsCache(userName, { demo: res });
+      } finally {
+        setDemoLoading(false);
+      }
     },
     [userName],
   );
 
   const loadBenchmark = useCallback(async () => {
     if (!userName) return;
-    setBenchmarkLoading(true);
-    const res = await apiService.getCreatorBenchmark(userName);
-    setBenchmark(res);
-    setBenchmarkLoading(false);
+    const cached = readCreatorInsightsCache(userName)?.benchmark;
+    if (cached) {
+      setBenchmark(cached);
+      setBenchmarkLoading(false);
+    } else {
+      setBenchmarkLoading(true);
+    }
+    try {
+      const res = await apiService.getCreatorBenchmark(userName);
+      setBenchmark(res);
+      writeCreatorInsightsCache(userName, { benchmark: res });
+    } finally {
+      setBenchmarkLoading(false);
+    }
   }, [userName]);
 
   useEffect(() => { load(); }, [load]);

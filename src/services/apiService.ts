@@ -20,6 +20,14 @@ const readLocal = (key: string): string => {
   }
 };
 
+const readSession = (key: string): string => {
+  try {
+    return sessionStorage.getItem(scopedKey(key)) || '';
+  } catch {
+    return '';
+  }
+};
+
 /** 브라우저에 저장된 일반 회원 Supabase 세션 뭉치. 없으면 null. */
 function readStoredSupabaseSession(): Record<string, any> | null {
   try {
@@ -1089,6 +1097,35 @@ const writeVerificationCache = (username: string, data: SellerVerification | nul
 /** 협업 API 를 어느 화면에서 부르는지. 서버가 역할을 고를 때 쓴다. */
 export type CollabViewerRole = 'brand' | 'influencer' | 'manager';
 
+type MemoryEntry<T> = { value?: T; inFlight?: Promise<T>; expiresAt: number };
+const requestMemory = new Map<string, MemoryEntry<unknown>>();
+
+function readMemory<T>(key: string, ttlMs: number, loader: () => Promise<T>, refresh = false): Promise<T> {
+  const now = Date.now();
+  const hit = requestMemory.get(key) as MemoryEntry<T> | undefined;
+  if (!refresh && hit?.value !== undefined && hit.expiresAt > now) {
+    return Promise.resolve(hit.value);
+  }
+  if (!refresh && hit?.inFlight) return hit.inFlight;
+  const inFlight = loader()
+    .then((value) => {
+      requestMemory.set(key, { value, expiresAt: Date.now() + ttlMs });
+      return value;
+    })
+    .catch((error) => {
+      requestMemory.delete(key);
+      throw error;
+    });
+  requestMemory.set(key, { inFlight, expiresAt: now + ttlMs });
+  return inFlight;
+}
+
+function clearMemory(prefix: string): void {
+  for (const key of requestMemory.keys()) {
+    if (key.startsWith(prefix)) requestMemory.delete(key);
+  }
+}
+
 export const apiService = {
   async getSiteData(username: string, opts?: { force?: boolean }): Promise<SiteData | null> {
     const key = username.toLowerCase();
@@ -1229,17 +1266,20 @@ export const apiService = {
   },
 
   async getProposals(username: string): Promise<BusinessProposal[]> {
-    try {
-      const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.proposals || [];
-    } catch (e) {
-      console.error('[API] Failed to get proposals:', e);
-      return [];
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`proposals:${key}`, 30_000, async () => {
+      try {
+        const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.proposals || [];
+      } catch (e) {
+        console.error('[API] Failed to get proposals:', e);
+        return [];
+      }
+    });
   },
 
   async updateProposalStatus(username: string, proposalId: string, status: 'accepted' | 'rejected' | 'completed', rejectionReason?: string): Promise<boolean> {
@@ -1253,6 +1293,10 @@ export const apiService = {
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
       });
+      if (res.ok) {
+        clearMemory(`proposals:${normalizeAccount(username)}`);
+        clearMemory(`settlements:${normalizeAccount(username)}:`);
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to update proposal status:', e);
@@ -1266,6 +1310,7 @@ export const apiService = {
         method: 'DELETE',
         headers: await authHeaders(),
       });
+      if (res.ok) clearMemory(`proposals:${normalizeAccount(username)}`);
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to delete proposal:', e);
@@ -1599,17 +1644,20 @@ export const apiService = {
 
   // Collaboration Records API
   async getCollabRecords(username: string): Promise<CollabRecord[]> {
-    try {
-      const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.records || [];
-    } catch (e) {
-      console.error('[API] Failed to get collab records:', e);
-      return [];
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`collabRecords:${key}`, 30_000, async () => {
+      try {
+        const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.records || [];
+      } catch (e) {
+        console.error('[API] Failed to get collab records:', e);
+        return [];
+      }
+    });
   },
 
   // Settlements created from accepted proposals. The influencer view of the
@@ -1617,17 +1665,20 @@ export const apiService = {
   // 브랜드 쪽(role='business')은 같은 정산을 지급하는 입장에서 읽는다 — 캠페인
   // 상세의 정산 탭이 이 값을 캠페인별로 걸러 보여 준다.
   async getSettlements(username: string, role: 'influencer' | 'business' = 'influencer'): Promise<Settlement[]> {
-    try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.settlements || [];
-    } catch (e) {
-      console.error('[API] Failed to get settlements:', e);
-      return [];
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`settlements:${key}:${role}`, 30_000, async () => {
+      try {
+        const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.settlements || [];
+      } catch (e) {
+        console.error('[API] Failed to get settlements:', e);
+        return [];
+      }
+    });
   },
 
   /**
@@ -1657,6 +1708,7 @@ export const apiService = {
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data?.error || '정산 완료 처리에 실패했습니다.' };
+      clearMemory(`settlements:${normalizeAccount(username)}:`);
       return { ok: true, settlement: data.settlement };
     } catch (e) {
       console.error('[API] Failed to complete settlement:', e);
@@ -1673,6 +1725,7 @@ export const apiService = {
       });
       if (!res.ok) return null;
       const data = await res.json();
+      clearMemory(`collabRecords:${normalizeAccount(username)}`);
       return data.record;
     } catch (e) {
       console.error('[API] Failed to create collab record:', e);
@@ -1687,6 +1740,7 @@ export const apiService = {
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updates)
       });
+      if (res.ok) clearMemory(`collabRecords:${normalizeAccount(username)}`);
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to update collab record:', e);
@@ -1700,6 +1754,7 @@ export const apiService = {
         method: 'DELETE',
         headers: await authHeaders(),
       });
+      if (res.ok) clearMemory(`collabRecords:${normalizeAccount(username)}`);
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to delete collab record:', e);
@@ -2012,18 +2067,21 @@ export const apiService = {
   },
 
   async getSellerVerification(username: string): Promise<SellerVerification | null> {
-    try {
-      const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`, {
-        headers: await authHeaders(),
-      });
-      if (!res.ok) return null;
-      const data = (await res.json()) as SellerVerification;
-      writeVerificationCache(username, data);
-      return data;
-    } catch (e) {
-      console.error('[API] Failed to get seller verification:', e);
-      return null;
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`sellerVerification:${key}`, 60_000, async () => {
+      try {
+        const res = await fetch(`/api/seller-verification/${encodeURIComponent(username.toLowerCase())}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as SellerVerification;
+        writeVerificationCache(username, data);
+        return data;
+      } catch (e) {
+        console.error('[API] Failed to get seller verification:', e);
+        return null;
+      }
+    });
   },
 
   async saveSellerVerification(username: string, data: Partial<SellerVerification>): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
@@ -2036,6 +2094,7 @@ export const apiService = {
       const json = await res.json();
       if (!res.ok) return { success: false, error: json?.error || '저장 실패' };
       if (json.data) writeVerificationCache(username, json.data);
+      clearMemory(`sellerVerification:${normalizeAccount(username)}`);
       return { success: true, data: json.data };
     } catch (e) {
       console.error('[API] Failed to save seller verification:', e);
@@ -2136,19 +2195,22 @@ export const apiService = {
     username: string,
     options: { refresh?: boolean } = {},
   ): Promise<ClaudeCreditsResponse | null> {
-    try {
-      // refresh=1 은 조회 간격을 무시하고 결제 취소(환불) 여부를 즉시 PG 에 확인한다.
-      const query = options.refresh ? '?refresh=1' : '';
-      const res = await fetch(
-        `/api/claude-credits/${encodeURIComponent(username.toLowerCase())}${query}`,
-        { headers: await authHeaders() },
-      );
-      if (!res.ok) return null;
-      return (await res.json()) as ClaudeCreditsResponse;
-    } catch (e) {
-      console.error('[API] Failed to get Claude credits:', e);
-      return null;
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`claudeCredits:${key}:${options.refresh ? 'refresh' : 'normal'}`, 60_000, async () => {
+      try {
+        // refresh=1 은 조회 간격을 무시하고 결제 취소(환불) 여부를 즉시 PG 에 확인한다.
+        const query = options.refresh ? '?refresh=1' : '';
+        const res = await fetch(
+          `/api/claude-credits/${encodeURIComponent(username.toLowerCase())}${query}`,
+          { headers: await authHeaders() },
+        );
+        if (!res.ok) return null;
+        return (await res.json()) as ClaudeCreditsResponse;
+      } catch (e) {
+        console.error('[API] Failed to get Claude credits:', e);
+        return null;
+      }
+    }, options.refresh);
   },
 
   async payClaudeCredits(
@@ -2663,23 +2725,29 @@ export const apiService = {
     role: 'brand' | 'influencer' | 'manager',
     opts: { token?: string; mine?: boolean; status?: string } = {},
   ): Promise<{ collabs: any[]; role?: string; error?: string }> {
-    try {
-      const params = new URLSearchParams({ role });
-      if (opts.mine) params.set('mine', '1');
-      if (opts.status) params.set('status', opts.status);
-      const res = opts.token
-        ? await fetch(`/api/collab-workflow?${params.toString()}`, {
-            credentials: 'same-origin',
-            headers: await collabHeaders(opts.token),
-          })
-        : await authedGet(`/api/collab-workflow?${params.toString()}`, () => collabHeaders());
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { collabs: [], error: json?.error || '협업 목록을 불러오지 못했습니다.' };
-      return json;
-    } catch (e) {
-      console.error('[API] Failed to get collabs:', e);
-      return { collabs: [], error: '네트워크 오류' };
-    }
+    const account = activeBusinessAccount || normalizeAccount(readLocal(BIZ_SESSION_KEY)) || normalizeAccount(readSession('picks_user_session')) || 'current';
+    const key = `collabs:${account}:${role}:${opts.mine ? 'mine' : 'all'}:${opts.status || 'any'}`;
+    const loader = async () => {
+      try {
+        const params = new URLSearchParams({ role });
+        if (opts.mine) params.set('mine', '1');
+        if (opts.status) params.set('status', opts.status);
+        const res = opts.token
+          ? await fetch(`/api/collab-workflow?${params.toString()}`, {
+              credentials: 'same-origin',
+              headers: await collabHeaders(opts.token),
+            })
+          : await authedGet(`/api/collab-workflow?${params.toString()}`, () => collabHeaders());
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return { collabs: [], error: json?.error || '협업 목록을 불러오지 못했습니다.' };
+        return json;
+      } catch (e) {
+        console.error('[API] Failed to get collabs:', e);
+        return { collabs: [], error: '네트워크 오류' };
+      }
+    };
+    if (opts.token) return loader();
+    return readMemory(key, 25_000, loader);
   },
 
   /**
@@ -2723,6 +2791,7 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '요청을 처리하지 못했습니다.', code: json?.code };
+      clearMemory('collabs:');
       return json;
     } catch (e) {
       console.error(`[API] Collab action failed (${action}):`, e);
@@ -3598,22 +3667,25 @@ export const apiService = {
     username: string,
     opts: { refresh?: boolean } = {},
   ): Promise<CreatorInsightsResponse> {
-    try {
-      const params = new URLSearchParams({ username: username.toLowerCase() });
-      if (opts.refresh) params.set('refresh', '1');
-      const res = await fetch(`/api/creator-insights?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders({}, { account: username }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return { reels: [], error: json?.error || '인사이트를 불러오지 못했습니다.', code: json?.code };
+    const key = normalizeAccount(username);
+    return readMemory(`creatorInsights:${key}`, 60_000, async () => {
+      try {
+        const params = new URLSearchParams({ username: username.toLowerCase() });
+        if (opts.refresh) params.set('refresh', '1');
+        const res = await fetch(`/api/creator-insights?${params.toString()}`, {
+          credentials: 'same-origin',
+          headers: await authHeaders({}, { account: username }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { reels: [], error: json?.error || '인사이트를 불러오지 못했습니다.', code: json?.code };
+        }
+        return json as CreatorInsightsResponse;
+      } catch (e) {
+        console.error('[API] Failed to get creator insights:', e);
+        return { reels: [], error: '네트워크 오류로 인사이트를 불러오지 못했습니다.' };
       }
-      return json as CreatorInsightsResponse;
-    } catch (e) {
-      console.error('[API] Failed to get creator insights:', e);
-      return { reels: [], error: '네트워크 오류로 인사이트를 불러오지 못했습니다.' };
-    }
+    }, opts.refresh);
   },
 
   /** 팔로워 증감 추이(일별 스냅샷). 배치를 켠 날부터만 값이 있다. */
@@ -3621,21 +3693,24 @@ export const apiService = {
     username: string,
     days: 7 | 30 | 90,
   ): Promise<FollowerSeriesResponse> {
-    try {
-      const params = new URLSearchParams({ username: username.toLowerCase(), days: String(days) });
-      const res = await fetch(`/api/creator-insights/followers?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders({}, { account: username }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return { days, points: [], collecting: true, error: json?.error || '추이를 불러오지 못했습니다.' };
+    const key = normalizeAccount(username);
+    return readMemory(`creatorFollowers:${key}:${days}`, 60_000, async () => {
+      try {
+        const params = new URLSearchParams({ username: username.toLowerCase(), days: String(days) });
+        const res = await fetch(`/api/creator-insights/followers?${params.toString()}`, {
+          credentials: 'same-origin',
+          headers: await authHeaders({}, { account: username }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { days, points: [], collecting: true, error: json?.error || '추이를 불러오지 못했습니다.' };
+        }
+        return json as FollowerSeriesResponse;
+      } catch (e) {
+        console.error('[API] Failed to get follower series:', e);
+        return { days, points: [], collecting: true, error: '네트워크 오류로 추이를 불러오지 못했습니다.' };
       }
-      return json as FollowerSeriesResponse;
-    } catch (e) {
-      console.error('[API] Failed to get follower series:', e);
-      return { days, points: [], collecting: true, error: '네트워크 오류로 추이를 불러오지 못했습니다.' };
-    }
+    });
   },
 
   /**
@@ -3655,20 +3730,23 @@ export const apiService = {
       reason: 'error',
       error,
     });
-    try {
-      const params = new URLSearchParams({ username: username.toLowerCase() });
-      if (opts.refresh) params.set('refresh', '1');
-      const res = await fetch(`/api/creator-insights/demographics?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders({}, { account: username }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return blank(json?.error || '팔로워 분포를 불러오지 못했습니다.');
-      return json as FollowerDemographicsResponse;
-    } catch (e) {
-      console.error('[API] Failed to get follower demographics:', e);
-      return blank('네트워크 오류로 팔로워 분포를 불러오지 못했습니다.');
-    }
+    const key = normalizeAccount(username);
+    return readMemory(`creatorDemographics:${key}`, 120_000, async () => {
+      try {
+        const params = new URLSearchParams({ username: username.toLowerCase() });
+        if (opts.refresh) params.set('refresh', '1');
+        const res = await fetch(`/api/creator-insights/demographics?${params.toString()}`, {
+          credentials: 'same-origin',
+          headers: await authHeaders({}, { account: username }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return blank(json?.error || '팔로워 분포를 불러오지 못했습니다.');
+        return json as FollowerDemographicsResponse;
+      } catch (e) {
+        console.error('[API] Failed to get follower demographics:', e);
+        return blank('네트워크 오류로 팔로워 분포를 불러오지 못했습니다.');
+      }
+    }, opts.refresh);
   },
 
   /**
@@ -3678,21 +3756,24 @@ export const apiService = {
    * `collecting: true` 로 오고, 그때 화면은 평균을 그리지 않는다.
    */
   async getCreatorBenchmark(username: string): Promise<BenchmarkResponse> {
-    try {
-      const params = new URLSearchParams({ username: username.toLowerCase() });
-      const res = await fetch(`/api/creator-insights/benchmark?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders({}, { account: username }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return { ok: false, reason: 'error', error: json?.error || '비교 데이터를 불러오지 못했습니다.' };
+    const key = normalizeAccount(username);
+    return readMemory(`creatorBenchmark:${key}`, 120_000, async () => {
+      try {
+        const params = new URLSearchParams({ username: username.toLowerCase() });
+        const res = await fetch(`/api/creator-insights/benchmark?${params.toString()}`, {
+          credentials: 'same-origin',
+          headers: await authHeaders({}, { account: username }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { ok: false, reason: 'error', error: json?.error || '비교 데이터를 불러오지 못했습니다.' };
+        }
+        return json as BenchmarkResponse;
+      } catch (e) {
+        console.error('[API] Failed to get creator benchmark:', e);
+        return { ok: false, reason: 'error', error: '네트워크 오류로 비교 데이터를 불러오지 못했습니다.' };
       }
-      return json as BenchmarkResponse;
-    } catch (e) {
-      console.error('[API] Failed to get creator benchmark:', e);
-      return { ok: false, reason: 'error', error: '네트워크 오류로 비교 데이터를 불러오지 못했습니다.' };
-    }
+    });
   },
 
   // ─── 태그된 콘텐츠 (브랜드 계정 화면) ─────────────────────────────────────
@@ -3706,26 +3787,29 @@ export const apiService = {
     username: string,
     opts: { refresh?: boolean } = {},
   ): Promise<TaggedMediaResponse> {
-    try {
-      const params = new URLSearchParams({ username: username.toLowerCase() });
-      if (opts.refresh) params.set('refresh', '1');
-      const res = await fetch(`/api/business-tagged-media?${params.toString()}`, {
-        credentials: 'same-origin',
-        headers: await authHeaders({}, { account: username }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return {
-          items: [],
-          error: json?.error || '태그된 콘텐츠를 불러오지 못했습니다.',
-          code: json?.code,
-        };
+    const key = normalizeAccount(username);
+    return readMemory(`businessTagged:${key}`, 60_000, async () => {
+      try {
+        const params = new URLSearchParams({ username: username.toLowerCase() });
+        if (opts.refresh) params.set('refresh', '1');
+        const res = await fetch(`/api/business-tagged-media?${params.toString()}`, {
+          credentials: 'same-origin',
+          headers: await authHeaders({}, { account: username }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return {
+            items: [],
+            error: json?.error || '태그된 콘텐츠를 불러오지 못했습니다.',
+            code: json?.code,
+          };
+        }
+        return json as TaggedMediaResponse;
+      } catch (e) {
+        console.error('[API] Failed to get tagged media:', e);
+        return { items: [], error: '네트워크 오류로 태그된 콘텐츠를 불러오지 못했습니다.' };
       }
-      return json as TaggedMediaResponse;
-    } catch (e) {
-      console.error('[API] Failed to get tagged media:', e);
-      return { items: [], error: '네트워크 오류로 태그된 콘텐츠를 불러오지 못했습니다.' };
-    }
+    }, opts.refresh);
   },
 
   // ─── 함께 방송하기 (co-broadcast) — friends ────────────────────────────────
@@ -3898,61 +3982,70 @@ export const apiService = {
   // 사용자가 네트워크가 한 번 흔들린 것만으로 "프로 전용 기능입니다" 안내를 보게 된다.
   // 실패는 loadError 로 분명히 알리고, 자격 여부는 모른다는 뜻으로 그대로 둔다.
   async getDmAutomation(username: string): Promise<DmAutomationSettings> {
+    const key = normalizeAccount(username);
+    const fallback = (): DmAutomationSettings => ({
+      enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '',
+      hasAccessToken: false, automations: [], requiredTier: 'pro', loadError: true,
+    });
     try {
-      const account = { account: username };
-      let lastError: unknown = new Error('DM automation request failed');
+      return await readMemory(`dmAutomation:${key}`, 30_000, async () => {
+        const account = { account: username };
+        let lastError: unknown = new Error('DM automation request failed');
 
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
-            cache: 'no-store',
-            headers: await authHeadersWithTimeout({}, account),
-          });
-          if (res.ok) return await res.json();
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
+              cache: 'no-store',
+              headers: await authHeadersWithTimeout({}, account),
+            });
+            if (res.ok) return await res.json();
 
-          lastError = new Error(`HTTP ${res.status}`);
-          const transient = res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500;
-          const refreshableAuth = res.status === 401 && !isBusinessRequest(account);
-          if (attempt > 0 || (!transient && !refreshableAuth)) throw lastError;
+            lastError = new Error(`HTTP ${res.status}`);
+            const transient = res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500;
+            const refreshableAuth = res.status === 401 && !isBusinessRequest(account);
+            if (attempt > 0 || (!transient && !refreshableAuth)) throw lastError;
 
-          if (refreshableAuth) {
-            // supabase 클라이언트에 세션이 아예 없으면 refreshSession() 은 손쓸 게
-            // 없다. 저장된 리프레시 토큰으로 직접 되살린다.
-            await refreshSupabaseSession();
+            if (refreshableAuth) {
+              // supabase 클라이언트에 세션이 아예 없으면 refreshSession() 은 손쓸 게
+              // 없다. 저장된 리프레시 토큰으로 직접 되살린다.
+              await refreshSupabaseSession();
+            }
+          } catch (error) {
+            lastError = error;
+            if (error instanceof Error && /^HTTP \d+$/.test(error.message)) throw error;
+            if (attempt > 0) throw error;
           }
-        } catch (error) {
-          lastError = error;
-          if (error instanceof Error && /^HTTP \d+$/.test(error.message)) throw error;
-          if (attempt > 0) throw error;
+
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      throw lastError;
+        throw lastError;
+      });
     } catch (e) {
       console.error('[API] Failed to get DM automation:', e);
-      return {
-        enabled: false, connected: false, igUserId: '', igAccountId: '', igUsername: '',
-        hasAccessToken: false, automations: [], requiredTier: 'pro', loadError: true,
-      };
+      clearMemory(`dmAutomation:${key}`);
+      return fallback();
     }
   },
 
   // 연동된 인스타그램 계정의 피드 게시물 목록.
   // 그래프 API 를 여러 페이지 훑기 때문에 다른 호출보다 여유를 둔다.
   async getInstagramMedia(username: string): Promise<InstagramMedia[]> {
+    const key = normalizeAccount(username);
     try {
-      const res = await fetchWithTimeout(
-        `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`,
-        { cache: 'no-store', headers: await authHeadersWithTimeout({}, { account: username }) },
-        25_000,
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return Array.isArray(data?.media) ? data.media : [];
+      return await readMemory(`instagramMedia:${key}`, 120_000, async () => {
+        const res = await fetchWithTimeout(
+          `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`,
+          { cache: 'no-store', headers: await authHeadersWithTimeout({}, { account: username }) },
+          25_000,
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return Array.isArray(data?.media) ? data.media : [];
+      });
     } catch (e) {
       console.error('[API] Failed to get Instagram media:', e);
+      clearMemory(`instagramMedia:${key}`);
       return [];
     }
   },
@@ -3986,6 +4079,7 @@ export const apiService = {
       });
       if (res.ok) {
         const data = await res.json().catch(() => ({} as any));
+        clearMemory(`dmAutomation:${normalizeAccount(username)}`);
         return {
           ok: true,
           automations: Array.isArray(data?.automations) ? data.automations : undefined,
@@ -4037,6 +4131,7 @@ export const apiService = {
       if (!res.ok || data?.success !== true) {
         return { ok: false, error: data?.error || `웹훅 구독에 실패했습니다. (HTTP ${res.status})` };
       }
+      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
       return {
         ok: true,
         webhookSubscribedAt: data?.webhookSubscribedAt,
@@ -4072,6 +4167,7 @@ export const apiService = {
       if (!res.ok) {
         return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
       }
+      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
       // 저장은 됐지만 인스타그램 등록이 실패한 경우도 있다(success: false). 그때도
       // 입력한 내용은 보관되므로 faq 를 함께 돌려준다.
       return {
@@ -4104,6 +4200,7 @@ export const apiService = {
       if (!res.ok || data?.success !== true) {
         return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
       }
+      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
       return { ok: true, direct: data?.direct };
     } catch (e) {
       console.error('[API] Failed to save DM triggers:', e);
@@ -4205,6 +4302,7 @@ export const apiService = {
         ),
         body: JSON.stringify({ action: 'dismissExternalDm' }),
       });
+      if (res.ok) clearMemory(`dmAutomation:${normalizeAccount(username)}`);
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to dismiss external DM notice:', e);
@@ -4249,6 +4347,11 @@ export const apiService = {
         headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({ action: 'disconnect' }),
       });
+      if (res.ok) {
+        clearMemory(`dmAutomation:${normalizeAccount(username)}`);
+        clearMemory(`instagramMedia:${normalizeAccount(username)}`);
+        clearMemory(`businessTagged:${normalizeAccount(username)}`);
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to disconnect Instagram:', e);

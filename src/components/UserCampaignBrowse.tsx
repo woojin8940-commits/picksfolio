@@ -53,6 +53,47 @@ const CATEGORIES_EN: Record<string, string> = {
 
 const PAGE_SIZE = 12;
 
+type CampaignBrowseListCache = {
+  campaigns: Campaign[];
+  total: number;
+  savedAt: number;
+};
+
+type CampaignBrowseStatusCache = {
+  appliedIds: string[];
+  acceptedCampaigns: string[];
+  collabByCampaign: Record<string, string>;
+  savedAt: number;
+};
+
+const campaignCacheUser = (username: string) => (username || '').toLowerCase();
+const campaignListCacheKey = (username: string, type: string, category: string, search: string, page: number) =>
+  `picks_campaign_browse_${campaignCacheUser(username)}_${type || 'all'}_${category || 'all'}_${encodeURIComponent(search.trim().toLowerCase()) || 'all'}_${page}`;
+const campaignStatusCacheKey = (username: string) => `picks_campaign_browse_status_${campaignCacheUser(username)}`;
+
+const readJson = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) as T : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeJson = <T,>(key: string, value: T): void => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
+
+const writeCampaignStatusCache = (username: string, patch: Partial<CampaignBrowseStatusCache>) => {
+  const prev = readJson<CampaignBrowseStatusCache>(campaignStatusCacheKey(username));
+  writeJson<CampaignBrowseStatusCache>(campaignStatusCacheKey(username), {
+    appliedIds: patch.appliedIds ?? prev?.appliedIds ?? [],
+    acceptedCampaigns: patch.acceptedCampaigns ?? prev?.acceptedCampaigns ?? [],
+    collabByCampaign: patch.collabByCampaign ?? prev?.collabByCampaign ?? {},
+    savedAt: Date.now(),
+  });
+};
+
 const TYPE_LABELS_KO: Record<string, string> = {
   ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
   collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트',
@@ -135,6 +176,8 @@ const formatDate = (dateStr: string) => {
 const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBack }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
+  const initialListCache = readJson<CampaignBrowseListCache>(campaignListCacheKey(userName, '', '', '', 1));
+  const initialStatusCache = readJson<CampaignBrowseStatusCache>(campaignStatusCacheKey(userName));
 
   const categoriesMap = isEn ? CATEGORIES_EN : CATEGORIES_KO;
   const rewardFilters = [
@@ -143,18 +186,18 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     { value: 'group_buy', label: isEn ? 'Group Buy' : '공동구매' },
   ];
 
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [total, setTotal] = useState(0);
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => initialListCache?.campaigns || []);
+  const [total, setTotal] = useState(() => initialListCache?.total || 0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialListCache);
 
   const [activeFilter, setActiveFilter] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
-  const [acceptedCampaigns, setAcceptedCampaigns] = useState<Set<string>>(new Set());
-  const [collabByCampaign, setCollabByCampaign] = useState<Record<string, string>>({});
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(() => new Set(initialStatusCache?.appliedIds || []));
+  const [acceptedCampaigns, setAcceptedCampaigns] = useState<Set<string>>(() => new Set(initialStatusCache?.acceptedCampaigns || []));
+  const [collabByCampaign, setCollabByCampaign] = useState<Record<string, string>>(() => initialStatusCache?.collabByCampaign || {});
 
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -170,7 +213,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       // 서버가 400 을 돌려줬고, 이미 지원한 캠페인에도 "지원하기"가 그대로 떴다.
       const res = await fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`).then(r => r.json());
       if (res.applications) {
-        setAppliedIds(new Set(res.applications.map((a: any) => a.campaign_id)));
+        const next = new Set<string>(res.applications.map((a: any) => a.campaign_id));
+        setAppliedIds(next);
+        writeCampaignStatusCache(userName, { appliedIds: Array.from(next) });
       }
     } catch (e) {
       console.error(e);
@@ -193,10 +238,22 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     });
     setAcceptedCampaigns(acceptedSet);
     setCollabByCampaign(map);
+    writeCampaignStatusCache(userName, {
+      acceptedCampaigns: Array.from(acceptedSet),
+      collabByCampaign: map,
+    });
   }, [userName]);
 
   const fetchCampaignsList = useCallback(async () => {
-    setLoading(true);
+    const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchQuery, page);
+    const cached = readJson<CampaignBrowseListCache>(key);
+    if (cached) {
+      setCampaigns(cached.campaigns || []);
+      setTotal(cached.total || 0);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       if (activeFilter) params.append('type', activeFilter);
@@ -206,14 +263,17 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       params.append('limit', String(PAGE_SIZE));
 
       const res = await fetch(`/.netlify/functions/api-campaigns?${params.toString()}`).then(r => r.json());
-      setCampaigns(res.campaigns || []);
-      setTotal(res.total || 0);
+      const next = Array.isArray(res.campaigns) ? res.campaigns : [];
+      const nextTotal = Number(res.total || 0);
+      setCampaigns(next);
+      setTotal(nextTotal);
+      writeJson<CampaignBrowseListCache>(key, { campaigns: next, total: nextTotal, savedAt: Date.now() });
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, activeCategory, searchQuery, page]);
+  }, [activeFilter, activeCategory, searchQuery, page, userName]);
 
   useEffect(() => {
     fetchCampaignsList();
@@ -271,7 +331,21 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         setToast({ message: res.error, type: 'error' });
       } else {
         setToast({ message: isEn ? 'Application submitted successfully!' : '캠페인 지원이 완료되었습니다!', type: 'success' });
-        setAppliedIds(prev => new Set([...prev, selectedCampaign.id]));
+        setAppliedIds(prev => {
+          const next = new Set([...prev, selectedCampaign.id]);
+          writeCampaignStatusCache(userName, { appliedIds: Array.from(next) });
+          return next;
+        });
+        setCampaigns(prev => {
+          const next = prev.map(c =>
+            c.id === selectedCampaign.id ? { ...c, application_count: c.application_count + 1 } : c
+          );
+          writeJson<CampaignBrowseListCache>(
+            campaignListCacheKey(userName, activeFilter, activeCategory, searchQuery, page),
+            { campaigns: next, total, savedAt: Date.now() },
+          );
+          return next;
+        });
         setShowApplyForm(false);
         setSelectedCampaign(prev => prev ? { ...prev, application_count: prev.application_count + 1 } : null);
       }

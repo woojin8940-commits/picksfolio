@@ -68,6 +68,29 @@ const APPLY_STATUS: Record<string, { label: string; cls: string; note: string }>
   },
 };
 
+type CreatorCollabCache = {
+  collabs: any[];
+  applications: any[];
+  savedAt: number;
+};
+
+const creatorCollabCacheKey = (username: string) => `picks_creator_campaign_collabs_${(username || '').toLowerCase()}`;
+
+const readCreatorCollabCache = (username: string): CreatorCollabCache | null => {
+  if (!username) return null;
+  try {
+    const raw = localStorage.getItem(creatorCollabCacheKey(username));
+    return raw ? JSON.parse(raw) as CreatorCollabCache : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCreatorCollabCache = (username: string, data: CreatorCollabCache): void => {
+  if (!username) return;
+  try { localStorage.setItem(creatorCollabCacheKey(username), JSON.stringify(data)); } catch {}
+};
+
 const dueText = (dueDate: string, daysLeft: number | null, isEn: boolean) => {
   if (!dueDate) return isEn ? 'No deadline' : '마감일 미정';
   if (daysLeft === null || daysLeft === undefined) return dueDate;
@@ -109,10 +132,11 @@ const collabBadge = (c: any): { label: string; cls: string } => {
 const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName, initialCollabId }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
+  const initialCache = readCreatorCollabCache(userName);
 
-  const [collabs, setCollabs] = useState<any[]>([]);
-  const [applications, setApplications] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [collabs, setCollabs] = useState<any[]>(() => initialCache?.collabs || []);
+  const [applications, setApplications] = useState<any[]>(() => initialCache?.applications || []);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [loadError, setLoadError] = useState('');
 
   const [selectedId, setSelectedId] = useState('');
@@ -124,20 +148,39 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
   const load = useCallback(async () => {
-    setLoading(true);
-    const [collabRes, applyRes] = await Promise.all([
-      apiService.getCollabs('influencer'),
-      fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`)
-        .then(r => r.json())
-        .catch(() => ({ applications: [] })),
-    ]);
-    // 실패를 "진행 중인 협업이 없음"으로 그리지 않는다. 예전에는 오류를 버려서,
-    // 진행이 확정된 협업이 조회에 실패하면 이 화면이 빈 목록으로 보였다 — 인플루언서
-    // 입장에서는 확정된 협업이 사라진 것처럼 보이고, 원인을 알 단서가 없었다.
-    setLoadError(collabRes.error || '');
-    setCollabs(collabRes.collabs || []);
-    setApplications(Array.isArray(applyRes?.applications) ? applyRes.applications : []);
-    setLoading(false);
+    const cached = readCreatorCollabCache(userName);
+    if (cached) {
+      setCollabs(cached.collabs || []);
+      setApplications(cached.applications || []);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const [collabRes, applyRes] = await Promise.all([
+        apiService.getCollabs('influencer'),
+        fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`)
+          .then(r => r.json())
+          .catch(() => ({ applications: [] })),
+      ]);
+      const nextCollabs = collabRes.error && cached ? cached.collabs : collabRes.collabs || [];
+      const nextApplications = Array.isArray(applyRes?.applications) ? applyRes.applications : cached?.applications || [];
+      // 실패를 "진행 중인 협업이 없음"으로 그리지 않는다. 예전에는 오류를 버려서,
+      // 진행이 확정된 협업이 조회에 실패하면 이 화면이 빈 목록으로 보였다 — 인플루언서
+      // 입장에서는 확정된 협업이 사라진 것처럼 보이고, 원인을 알 단서가 없었다.
+      setLoadError(collabRes.error || '');
+      setCollabs(nextCollabs);
+      setApplications(nextApplications);
+      if (!collabRes.error) {
+        writeCreatorCollabCache(userName, {
+          collabs: nextCollabs,
+          applications: nextApplications,
+          savedAt: Date.now(),
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [userName]);
 
   useEffect(() => {
