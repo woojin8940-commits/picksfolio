@@ -340,17 +340,16 @@ export async function authHeaders(
   let token = useBusinessToken ? await businessAccessToken() : '';
 
   if (!useBusinessToken) {
-    try {
-      const { data } = (await supabase?.auth.getSession()) || { data: null };
-      token = data?.session?.access_token || '';
-    } catch {
-      token = '';
-    }
-    // 세션을 못 읽었다고 바로 포기하면 인증 헤더 없는 요청이 나가고, 화면은
-    // 로그인해 있는데도 "로그인이 필요합니다" 를 본다. 저장소 → 직전 토큰 →
-    // 리프레시 순으로 되살릴 수 있는 데까지 되살린다.
-    if (!token) token = persistedSupabaseToken();
+    token = persistedSupabaseToken();
     if (!token) token = usableToken(lastKnownSupabaseToken);
+    if (!token) {
+      try {
+        const { data } = (await supabase?.auth.getSession()) || { data: null };
+        token = data?.session?.access_token || '';
+      } catch {
+        token = '';
+      }
+    }
     if (!token) token = await refreshSupabaseSession();
     // 네트워크가 잠깐 끊긴 것뿐이라면 다음 요청에서 다시 살아난다. 서버가 세션을
     // 확실히 거절했을 때만 재로그인을 안내한다.

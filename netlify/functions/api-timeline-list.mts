@@ -59,6 +59,24 @@ export default async (req: Request, context: Context) => {
     const existing = (Array.isArray(data) ? data : []).filter(
       (t: any) => !(userType === "business" && t?.kind === "brand_support"),
     );
+
+    if (url.searchParams.get("unread") === "1") {
+      const unreadRows = await Promise.all(
+        existing.map(async (t: any) => {
+          try {
+            const detail = (await store.get(`detail_${t.proposalId}`, { type: "json" })) as any;
+            const comments = Array.isArray(detail?.comments) ? detail.comments : [];
+            const unreadCount = comments.filter((c: any) => !c.readBy?.includes(username)).length;
+            return { proposalId: t.proposalId, unreadCount };
+          } catch {
+            return { proposalId: t.proposalId, unreadCount: 0 };
+          }
+        }),
+      );
+      const unreadTotal = unreadRows.reduce((sum, t) => sum + t.unreadCount, 0);
+      return Response.json({ unreadTotal });
+    }
+
     const seenProposalIds = new Set<string>(existing.map((t: any) => t.proposalId));
     let added = 0;
 

@@ -45,6 +45,7 @@ interface LinkData {
 }
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
+const ENABLE_SUPABASE_REALTIME = import.meta.env.VITE_ENABLE_SUPABASE_REALTIME === '1';
 
 const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   const { language } = useLanguage();
@@ -374,7 +375,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         loadDataTimer = setTimeout(() => { loadData(); }, 500);
       };
 
-      if (supabase) {
+      if (supabase && ENABLE_SUPABASE_REALTIME) {
         // Listen to link grid items changes (filtered to this user only)
         gridChannel = supabase
           .channel('public:link_grid_items')
