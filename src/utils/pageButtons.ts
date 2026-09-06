@@ -7,22 +7,30 @@
  * 사람마다 "유튜브" / "YouTube" / "유튜브 채널" 로 갈리고, 색도 제각각이 되어
  * 페이지마다 버튼 줄이 다르게 생긴다.
  *
- * 그래서 이 네 개는 주소만 넣으면 나오는 기본 버튼으로 둔다. 이름·아이콘은 여기서
- * 정하고, 인플루언서는 주소만 넣는다. 여전히 특별한 버튼이 필요하면 커스텀 버튼을
- * 쓴다(두 방식은 함께 쓸 수 있다).
+ * 그래서 이 네 개는 주소만 넣으면 나오는 기본 버튼으로 둔다. 로고와 주소 형식은
+ * 여기서 정하고, 인플루언서는 주소만 넣는다. 여전히 특별한 버튼이 필요하면 커스텀
+ * 버튼을 쓴다(두 방식은 함께 쓸 수 있다).
+ *
+ * 이름은 플랫폼이 정해 두지 않는다. 로고는 어느 플랫폼인지 알려 주지만 "카카오톡"
+ * 이라고만 적혀 있으면 그 안의 어떤 채널인지 — 공지 채널인지, 공동구매 오픈챗인지,
+ * 상담 창구인지 — 누르기 전에 알 수 없었다. 그래서 이름은 인플루언서가 바꿀 수 있게
+ * 두고, 여기 적은 값은 아무것도 적지 않았을 때 쓰는 기본값이다.
  *
  * 저장 위치는 새로 만들지 않았다. socials 에 이미 kakao / youtube / tiktok / naver
  * 칸이 있었고(연동용으로 만들어 두고 화면에서 쓰지 않던 값이다), 값이 비어 있으면
  * 버튼을 그리지 않는다 — 별도의 on/off 플래그를 두면 "주소는 있는데 꺼져 있음"
- * 같은 상태가 생겨 왜 안 나오는지 알 수 없게 된다.
+ * 같은 상태가 생겨 왜 안 나오는지 알 수 없게 된다. 이름도 같은 자리에 kakaoLabel
+ * 처럼 나란히 둔다(socials 는 자유 형식 JSON 이라 칸을 늘려도 마이그레이션이
+ * 필요하지 않다).
  */
 
 export type DefaultButtonKey = 'kakao' | 'youtube' | 'tiktok' | 'naver';
 
 export type DefaultButtonDef = {
   key: DefaultButtonKey;
+  /** 이름을 적지 않았을 때 쓰는 기본 이름. */
   label: string;
-  /** 편집 화면의 입력칸 안내 문구. */
+  /** 편집 화면의 주소 입력칸 안내 문구. */
   placeholder: string;
 };
 
@@ -32,6 +40,24 @@ export const DEFAULT_BUTTONS: DefaultButtonDef[] = [
   { key: 'tiktok', label: '틱톡', placeholder: 'tiktok.com/@아이디' },
   { key: 'naver', label: '네이버', placeholder: 'blog.naver.com/아이디 또는 스마트스토어 주소' },
 ];
+
+/** 이름이 저장되는 socials 칸. 주소 칸(`kakao`) 옆의 `kakaoLabel`. */
+export const buttonLabelKey = (key: DefaultButtonKey): string => `${key}Label`;
+
+/**
+ * 화면에 그릴 버튼 이름.
+ *
+ * 인플루언서가 적은 이름이 있으면 그것을, 비웠으면 플랫폼 기본 이름을 쓴다 — 이름을
+ * 지웠다고 이름 없는 버튼(로고만 있는 칸)이 되면 무슨 버튼인지 더 알 수 없어진다.
+ */
+export const resolveButtonLabel = (
+  socials: Record<string, any> | null | undefined,
+  key: DefaultButtonKey,
+): string => {
+  const custom = String(socials?.[buttonLabelKey(key)] ?? '').trim();
+  if (custom) return custom;
+  return DEFAULT_BUTTONS.find(def => def.key === key)?.label ?? key;
+};
 
 /**
  * 주소 없이 아이디만 적었을 때 채워 줄 채널 홈.
@@ -68,10 +94,14 @@ export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string =
   return `https://${value.replace(/^\/+/, '')}`;
 };
 
-/** 값이 들어 있는 기본 버튼만, 정해진 순서대로. */
+/** 값이 들어 있는 기본 버튼만, 정해진 순서대로. 이름은 인플루언서가 적은 것으로. */
 export const enabledDefaultButtons = (
   socials: Record<string, any> | null | undefined,
 ): Array<DefaultButtonDef & { url: string }> =>
   DEFAULT_BUTTONS
-    .map(def => ({ ...def, url: normalizeButtonUrl(def.key, String(socials?.[def.key] ?? '')) }))
+    .map(def => ({
+      ...def,
+      label: resolveButtonLabel(socials, def.key),
+      url: normalizeButtonUrl(def.key, String(socials?.[def.key] ?? '')),
+    }))
     .filter(b => !!b.url);

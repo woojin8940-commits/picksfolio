@@ -10,7 +10,7 @@ import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
-import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
+import { DEFAULT_BUTTONS, buttonLabelKey, type DefaultButtonKey } from '../utils/pageButtons';
 import PlatformLogo from './PlatformLogo';
 import { sanitizeLinkValue } from '../utils/externalLink';
 import {
@@ -259,9 +259,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   /**
    * 편집 화면에서 펼쳐 둔 기본 버튼 칸.
    *
-   * 저장되는 값은 주소(socials.kakao 등)뿐이다. 이 목록은 "주소를 아직 안 넣었지만
-   * 입력칸은 열어 둔" 상태만 담는다 — 저장하지 않는 이유는, 주소가 비어 있는 버튼은
-   * 공개 페이지에 나오지 않으므로 저장할 내용이 없기 때문이다.
+   * 저장되는 값은 주소(socials.kakao 등)와 이름(socials.kakaoLabel)뿐이다. 이 목록은
+   * "주소를 아직 안 넣었지만 입력칸은 열어 둔" 상태만 담는다 — 저장하지 않는 이유는,
+   * 주소가 비어 있는 버튼은 공개 페이지에 나오지 않으므로 저장할 내용이 없기 때문이다.
    */
   const [openDefaultButtons, setOpenDefaultButtons] = useState<DefaultButtonKey[]>([]);
 
@@ -870,10 +870,20 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     };
 
     // 버튼(비즈니스 제안 · 기본 버튼 · 커스텀 버튼)은 모두 socials 에 저장된다. 빈 버튼은 제외.
-    const cleanedSocials = {
+    //
+    // 기본 버튼의 이름은 주소가 있을 때만 남긴다. 주소를 지운(= 페이지에서 사라진)
+    // 버튼의 이름이 남아 있으면, 나중에 그 버튼을 다시 넣었을 때 예전에 쓰던 이름이
+    // 저절로 붙어 나온다.
+    const cleanedSocials: Record<string, any> = {
       ...socials,
       customButtons: (socials.customButtons || []).filter((b: any) => (b.label || '').trim() && (b.url || '').trim()),
     };
+    DEFAULT_BUTTONS.forEach(def => {
+      const labelKey = buttonLabelKey(def.key);
+      const label = String(cleanedSocials[labelKey] ?? '').trim();
+      if (!label || !String(cleanedSocials[def.key] ?? '').trim()) delete cleanedSocials[labelKey];
+      else cleanedSocials[labelKey] = label;
+    });
 
     // 즉시 로컬 저장
     fullDesignRef.current = designUpdate as Record<string, any>;
@@ -1664,8 +1674,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
               {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 기본 버튼 / 커스텀 버튼.
                   기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버)은 주소만 넣으면 나온다.
-                  이름·로고·디자인은 플랫폼이 정해 두었다 — utils/pageButtons.ts 와
-                  components/PlatformLogo.tsx 주석 참고. */}
+                  로고·디자인은 플랫폼이 정해 두고, 이름은 바꿀 수 있다 —
+                  utils/pageButtons.ts 와 components/PlatformLogo.tsx 주석 참고. */}
               <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">버튼</h3>
@@ -1683,16 +1693,27 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 {/* 기본 버튼. 주소가 들어 있으면(= 공개 페이지에 나오면) 늘 펼쳐 두고,
                     비어 있는 것은 아래 추가 버튼을 눌렀을 때만 입력칸을 낸다 — 네 개를
                     항상 펼쳐 두면 쓰지 않는 칸이 편집 화면을 채운다.
+                    이름은 고쳐 쓸 수 있다. 로고가 플랫폼을 알려 주더라도 "카카오톡" 만
+                    적혀 있으면 그 안의 어떤 채널인지 알 수 없어서, "공동구매 오픈챗"
+                    처럼 적을 수 있게 두었다. 비워 두면 안내 문구로 보이는 기본 이름이
+                    그대로 나간다(로고만 남은 버튼은 만들지 않는다).
                     지우기는 값을 비우는 것이다. 값이 없으면 버튼도 사라지므로 별도의
                     on/off 상태를 두지 않는다. */}
                 {DEFAULT_BUTTONS.filter(def => (socials[def.key] || '').trim() || openDefaultButtons.includes(def.key)).map(def => (
                   <div key={def.key} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2">
                     <div className="flex items-center gap-2">
                       <PlatformLogo platform={def.key} size={18} />
-                      <span className="flex-1 font-bold text-sm text-slate-700">{def.label}</span>
+                      <input
+                        type="text"
+                        value={socials[buttonLabelKey(def.key)] || ''}
+                        onChange={(e) => setSocials({ ...socials, [buttonLabelKey(def.key)]: e.target.value })}
+                        className="flex-1 min-w-0 bg-transparent border border-transparent rounded-md px-1.5 py-0.5 font-bold text-sm text-slate-700 hover:border-slate-200 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-none transition-colors"
+                        placeholder={def.label}
+                        aria-label={`${def.label} 버튼 이름`}
+                      />
                       <button
                         onClick={() => {
-                          setSocials({ ...socials, [def.key]: '' });
+                          setSocials({ ...socials, [def.key]: '', [buttonLabelKey(def.key)]: '' });
                           setOpenDefaultButtons(openDefaultButtons.filter(k => k !== def.key));
                         }}
                         className="p-1 text-slate-300 hover:text-red-500 transition-colors"
@@ -1707,6 +1728,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                       placeholder={def.placeholder}
                     />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      위쪽 이름을 눌러 고칠 수 있어요 — 예: {def.key === 'kakao' ? '공동구매 오픈챗' : `${def.label} 채널`}
+                    </p>
                   </div>
                 ))}
 
