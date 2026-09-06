@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { formatCountKo, formatNumberWithCommas, parseWonText } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
+import { MediaLink, MediaThumb } from './MediaThumb';
 
 /**
  * 인플루언서 후보 카드.
@@ -45,9 +46,10 @@ import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
  * 이 영역이 아예 나오지 않는다 — 빈 칸을 그려 두면 "활동을 안 하는 사람"으로 잘못
  * 읽히므로, 데이터가 없으면 자리를 접는다.
  *
- * 명단에 올리기 전(제안 수락 전)에는 서버가 permalink 와 캡션을 지우고 썸네일만
- * 내려보낸다(campaign-listup.mts 의 maskSnapshot). 그래서 썸네일에 링크가 없는
- * 경우가 정상이고, 카드는 링크 없이도 그림이 보이게 그린다.
+ * 그림을 누르면 인스타에서 그 게시물이 열린다. 수락 전 브랜드 화면에서도 열린다 —
+ * 서버가 지우는 것은 실명·픽스폴리오 아이디·캡션이고, 게시물 주소는 내보낸다
+ * (campaign-listup.mts 의 maskSnapshot). 단 링크가 비어 오는 경우(수기 입력 계정,
+ * 오래 전에 굳은 스냅샷)도 있으므로, 카드는 링크 없이도 그림이 보이게 그린다.
  */
 
 export type CandidateMetrics = {
@@ -535,20 +537,13 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
     const inner = (
       <>
         <div className="relative">
-          {slot.thumbnailUrl ? (
-            <img
-              src={slot.thumbnailUrl}
-              alt=""
-              loading="lazy"
-              className="w-full aspect-[4/5] object-cover rounded-lg bg-slate-100"
-            />
-          ) : (
-            // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면 "게시물이 없는
-            // 계정"과 구분된다.
-            <div className="w-full aspect-[4/5] rounded-lg bg-slate-100 flex items-center justify-center">
-              <span className="text-[10px] text-slate-300 font-bold">{slot.isVideo ? '영상' : '사진'}</span>
-            </div>
-          )}
+          {/* 메타 주소는 만료된다. 죽은 주소는 회색 자리로 남겨 "게시물이 없는
+              계정"과 구분한다(MediaThumb 주석). */}
+          <MediaThumb
+            src={slot.thumbnailUrl}
+            label={slot.isVideo ? '영상' : '사진'}
+            className="w-full aspect-[4/5] rounded-lg"
+          />
         </div>
         {slot.isReel ? (
           <p
@@ -562,18 +557,10 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
         )}
       </>
     );
-    return slot.permalink ? (
-      <a
-        key={slot.id}
-        href={slot.permalink}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block hover:opacity-80"
-      >
+    return (
+      <MediaLink key={slot.id} permalink={slot.permalink} className="block">
         {inner}
-      </a>
-    ) : (
-      <div key={slot.id}>{inner}</div>
+      </MediaLink>
     );
   };
 
@@ -764,35 +751,16 @@ const InfluencerCandidateCard: React.FC<InfluencerCandidateCardProps> = ({
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {feed.map((f: any, i: number) => {
                   const isVideo = String(f?.mediaType || '').toUpperCase() === 'VIDEO';
-                  const inner = f?.thumbnailUrl ? (
-                    <div className="relative">
-                      <img
-                        src={f.thumbnailUrl}
-                        alt=""
-                        loading="lazy"
-                        className="w-full aspect-square object-cover rounded-lg bg-slate-100"
+                  return (
+                    <MediaLink key={f?.id || i} permalink={f?.permalink} className="relative block">
+                      <MediaThumb
+                        src={f?.thumbnailUrl}
+                        className="w-full aspect-square rounded-lg"
                       />
                       {isVideo && (
                         <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-white/80" />
                       )}
-                    </div>
-                  ) : (
-                    // 메타의 미디어 URL 은 만료된다. 지난번에 받아 둔 주소가 죽었을 뿐이니
-                    // 빈 칸을 회색 자리로 그려 "게시물이 없는 계정"과 구분한다.
-                    <div className="w-full aspect-square rounded-lg bg-slate-100" />
-                  );
-                  return f?.permalink ? (
-                    <a
-                      key={f.id || i}
-                      href={f.permalink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block hover:opacity-80"
-                    >
-                      {inner}
-                    </a>
-                  ) : (
-                    <div key={f?.id || i}>{inner}</div>
+                    </MediaLink>
                   );
                 })}
               </div>

@@ -14,7 +14,7 @@ import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
-import { DmFaqSection, DmScheduleSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DmFaqSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -1052,7 +1052,6 @@ const AutomationEditor: React.FC<{
                   />
                   <p className="text-[11px] font-medium text-slate-500 leading-relaxed">
                     조건에 맞는 댓글이 달리면 바로 보내지 않고 <b>{draft.scheduledAt && !Number.isNaN(scheduleMs) ? fmtDateTime(draft.scheduledAt) : '정한 시각'}</b>에 보냅니다.
-                    대기 중인 DM 은 아래 <b>예약 발송</b> 목록에서 확인·취소할 수 있어요.
                     인스타그램은 댓글이 달린 뒤 <b>7일</b> 안의 DM(비공개 답장)만 허용하니, 그 안쪽 시각으로 정해주세요.
                   </p>
                   {scheduleStale && (
@@ -1304,9 +1303,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 도착하거나 자동 발송을 꺼도 DM 이 간다. 감지되면 끄는 방법을 안내한다.
    */
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
-  /** 발신 에코 구독 여부. 꺼져 있으면 외부 자동 DM 을 감지할 수 없다. */
-  const [echoSubscribed, setEchoSubscribed] = useState(true);
-  const [resubscribing, setResubscribing] = useState(false);
 
   /**
    * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
@@ -1322,9 +1318,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
     replies: [],
   });
-  /** 버튼 클릭(postback)·수신 메시지 웹훅 구독 여부. 없으면 트리거가 오지 않는다. */
-  const [postbackSubscribed, setPostbackSubscribed] = useState(true);
-  const [messagesSubscribed, setMessagesSubscribed] = useState(true);
 
   /** 추가 기능 섹션들이 쓰는 알림. 상단 배너를 그대로 재사용한다. */
   const notify = (type: 'ok' | 'err', text: string) => {
@@ -1356,11 +1349,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
-        setEchoSubscribed(s.echoSubscribed !== false);
         if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
-        setPostbackSubscribed(s.postbackSubscribed !== false);
-        setMessagesSubscribed(s.messagesSubscribed !== false);
         setLoaded(true);
         if (s.connected) loadMedia();
       })
@@ -1453,34 +1443,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     // 스위치를 끄면 인스타그램에 올려둔 질문 버튼도 함께 내려간다. 서버가 그 결과를
     // 돌려주므로 등록 상태 표시가 실제와 어긋나지 않게 반영한다.
     else if (nextFaq) setFaq(nextFaq);
-  };
-
-  /**
-   * 계정별 웹훅 구독을 다시 건다.
-   *
-   * 댓글 이벤트는 이 구독이 있어야 도착한다. 토큰 재발급·권한 변경으로 조용히
-   * 풀릴 수 있어서, 화면상 자동 발송은 켜져 있는데 댓글에 아무 일도 일어나지 않는
-   * 상태가 생긴다. 그때 사용자가 직접 다시 걸 수 있어야 한다.
-   */
-  const resubscribeWebhook = async () => {
-    setResubscribing(true);
-    const result = await apiService.resubscribeDmWebhook(userName);
-    setResubscribing(false);
-    if (result.ok) {
-      if (result.webhookFields) {
-        setEchoSubscribed(result.webhookFields.includes('message_echoes'));
-        // 질문 버튼 클릭(postback) 구독 여부도 같이 맞춘다 — 이 값이 곧 "자주 묻는 질문"
-        // 카드의 경고 문구를 띄울지 결정한다.
-        setPostbackSubscribed(result.webhookFields.includes('messaging_postbacks'));
-      }
-      setBanner({
-        type: 'ok',
-        text: '웹훅을 다시 연결했어요. 게시물에 댓글을 하나 달아 자동 발송을 확인해 보세요.',
-      });
-      load();
-    } else {
-      setBanner({ type: 'err', text: result.error || '웹훅을 다시 연결하지 못했습니다.' });
-    }
   };
 
   /**
@@ -1850,29 +1812,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         </section>
       )}
 
-      {/* 발신 에코 구독이 아직 연결되지 않은 상태 안내.
-          이 구독이 없으면 이 앱을 거치지 않고 나간 자동 DM(인스타그램 자체 자동 메시지,
-          예전에 연결해 둔 다른 자동화 서비스)을 감지할 수 없어, 위의 "외부 자동 DM"
-          안내가 영영 뜨지 않는다. 감지가 꺼져 있다는 사실 자체를 알려주고, 바로 다시
-          연결할 수 있게 버튼을 함께 둔다. */}
-      {connected && !echoSubscribed && (
-        <section className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 md:px-6">
-          <p className="text-[12px] md:text-sm font-bold text-amber-800">
-            인스타그램 발신 메시지 알림(에코) 구독이 아직 연결되지 않았습니다. 그래서 이 앱을 거치지
-            않고 나간 자동 DM 은 자동으로 감지하지 못합니다.
-          </p>
-          <button
-            type="button"
-            onClick={resubscribeWebhook}
-            disabled={resubscribing}
-            className="mt-3 flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {resubscribing ? <Loader2 size={11} className="animate-spin" /> : <Link2 size={11} />}
-            웹훅 다시 연결
-          </button>
-        </section>
-      )}
-
       {/* 연동 계정 피드 게시물 */}
       {connected && (
         <section className="bg-white p-5 md:p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
@@ -2099,7 +2038,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           connected={connected}
           entitled={entitled}
           masterEnabled={enabled}
-          postbackSubscribed={postbackSubscribed}
           value={faq}
           onChange={setFaq}
           onNotice={notify}
@@ -2109,15 +2047,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           connected={connected}
           entitled={entitled}
           masterEnabled={enabled}
-          messagesSubscribed={messagesSubscribed}
           value={direct}
           onChange={setDirect}
-          onNotice={notify}
-        />
-        <DmScheduleSection
-          userName={userName}
-          connected={connected}
-          entitled={entitled}
           onNotice={notify}
         />
       </div>

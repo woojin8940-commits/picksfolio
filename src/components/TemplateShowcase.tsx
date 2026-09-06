@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Grid, List, Briefcase, ExternalLink } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import PlatformLogo from './PlatformLogo';
 
 interface TemplateShowcaseProps {
   onSignup?: () => void;
@@ -125,13 +126,20 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                     <Briefcase size={9} strokeWidth={2.5} />
                     {language === 'en' ? 'Business Inquiry' : '비즈니스 제안'}
                   </span>
-                  {/* 기본 버튼 — 주소를 넣은 것만 나오지만, 소개용 목업이라 네 개를 모두 보여준다. */}
-                  {(language === 'en' ? ['KakaoTalk', 'YouTube', 'TikTok', 'Naver'] : ['카카오톡', '유튜브', '틱톡', '네이버']).map((label) => (
+                  {/* 기본 버튼 — 주소를 넣은 것만 나오지만, 소개용 목업이라 네 개를 모두 보여준다.
+                      로고는 실제 페이지와 같은 조각(PlatformLogo)을 쓴다. */}
+                  {([
+                    { key: 'kakao' as const, label: language === 'en' ? 'KakaoTalk' : '카카오톡' },
+                    { key: 'youtube' as const, label: language === 'en' ? 'YouTube' : '유튜브' },
+                    { key: 'tiktok' as const, label: language === 'en' ? 'TikTok' : '틱톡' },
+                    { key: 'naver' as const, label: language === 'en' ? 'Naver' : '네이버' },
+                  ]).map((btn) => (
                     <span
-                      key={label}
-                      className="flex items-center px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-white/10 border border-white/15"
+                      key={btn.key}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[8px] md:text-[9px] font-bold text-white whitespace-nowrap bg-white/10 border border-white/15"
                     >
-                      {label}
+                      <PlatformLogo platform={btn.key} size={11} />
+                      {btn.label}
                     </span>
                   ))}
                 </div>

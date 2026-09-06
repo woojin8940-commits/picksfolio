@@ -11,6 +11,7 @@ import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
 import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
+import PlatformLogo from './PlatformLogo';
 import {
   type ThemePreset,
   THEME_BG_PRESETS,
@@ -228,13 +229,21 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
     return 'medium';
   });
+  /**
+   * 소개(bio)는 빈 값으로 시작한다.
+   *
+   * 예전에는 '패션과 뷰티를 사랑하는 크리에이터입니다.' 를 미리 넣어 두었다. 예시를
+   * 보여 주려던 값인데, 저장을 한 번 누르면 그 문장이 그대로 자기 페이지 소개로
+   * 올라갔다 — 적은 적이 없는 문장이 남의 페이지에 붙는 셈이다. 예시는 입력칸
+   * placeholder 로 보여 주면 되고, 값은 사람이 적은 것만 담는다.
+   */
   const [profile, setProfile] = useState(() => {
     try {
       const saved = localStorage.getItem(`picks_profile_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : { name: userName, bio: '패션과 뷰티를 사랑하는 크리에이터입니다.', avatar_url: '' };
+      return saved ? JSON.parse(saved) : { name: userName, bio: '', avatar_url: '' };
     } catch (e) {
       console.error('Error parsing profile:', e);
-      return { name: userName, bio: '패션과 뷰티를 사랑하는 크리에이터입니다.', avatar_url: '' };
+      return { name: userName, bio: '', avatar_url: '' };
     }
   });
 
@@ -1585,7 +1594,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     value={profile.bio || ''}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
-                    placeholder="한 줄 소개를 입력하세요"
+                    placeholder="예) 패션·뷰티 크리에이터 — 비워 두면 이름만 나와요"
                     rows={2}
                   />
                 </div>
@@ -1647,7 +1656,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
               {/* 버튼 — 개인페이지 상단에 노출되는 비즈니스 제안 / 기본 버튼 / 커스텀 버튼.
                   기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버)은 주소만 넣으면 나온다.
-                  이름과 디자인은 플랫폼이 정해 두었다 — utils/pageButtons.ts 주석 참고. */}
+                  이름·로고·디자인은 플랫폼이 정해 두었다 — utils/pageButtons.ts 와
+                  components/PlatformLogo.tsx 주석 참고. */}
               <section className="space-y-3 bg-white rounded-2xl border border-[#E2E8F0] p-5 md:p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[1.1rem] font-black text-[#1E1E2E] tracking-tight">버튼</h3>
@@ -1670,7 +1680,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 {DEFAULT_BUTTONS.filter(def => (socials[def.key] || '').trim() || openDefaultButtons.includes(def.key)).map(def => (
                   <div key={def.key} className="bg-slate-50 rounded-xl px-4 py-3 space-y-2">
                     <div className="flex items-center gap-2">
-                      <Globe size={14} className="text-slate-400 shrink-0" />
+                      <PlatformLogo platform={def.key} size={18} />
                       <span className="flex-1 font-bold text-sm text-slate-700">{def.label}</span>
                       <button
                         onClick={() => {
@@ -1756,7 +1766,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       onClick={() => setOpenDefaultButtons([...openDefaultButtons, def.key])}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-dashed border-slate-300 text-slate-500 text-[11px] font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
                     >
-                      <Plus size={12} /> {def.label}
+                      <Plus size={12} /> <PlatformLogo platform={def.key} size={14} /> {def.label}
                     </button>
                   ))}
                   <button

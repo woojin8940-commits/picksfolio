@@ -3,6 +3,7 @@ import { apiService } from '../../services/apiService';
 import { formatCountKo, formatKoreanWon, formatNumberWithCommas } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 import { buildMediaStrip } from './InfluencerCandidateCard';
+import { MediaLink, MediaThumb } from './MediaThumb';
 
 /**
  * 브랜드가 보는 리스트업 — 담당자가 올린 추천 조합.
@@ -221,8 +222,8 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
               const snap = c.snapshot || {};
               const allReels = Array.isArray(snap.recentReels) ? snap.recentReels : [];
               const trend = reelTrendOf(allReels);
-              // 피드 9칸은 톤을 보는 자리다. 수락 전에는 서버가 permalink 를 지우므로
-              // 그림만 오고, 그래도 판단에 필요한 것은 다 온다.
+              // 피드 9칸은 톤을 보는 자리다. 캡션은 수락 전까지 서버가 지우고 그림과
+              // 게시물 주소만 오므로, 눌러서 인스타에서 볼 수는 있다.
               const feed = (Array.isArray(snap.recentFeed) ? snap.recentFeed : []).slice(0, 9);
               // 릴스로 시작해 피드로 잇는 그림 세 칸. 지원자 카드와 같은 규칙을 쓴다.
               const media = buildMediaStrip(allReels, feed);
@@ -342,26 +343,20 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                       </div>
                       <div className="grid grid-cols-3 gap-1.5 md:gap-2">
                         {media.map(slot => (
-                          <div
+                          // 그림을 누르면 인스타에서 그 게시물이 열린다. 브랜드가 마지막에
+                          // 보는 것은 표지가 아니라 영상이다.
+                          <MediaLink
                             key={slot.id}
-                            className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-100"
+                            permalink={slot.permalink}
+                            className="relative block aspect-[9/16] rounded-xl overflow-hidden bg-slate-100"
                           >
-                            {slot.thumbnailUrl ? (
-                              <img
-                                src={slot.thumbnailUrl}
-                                alt=""
-                                loading="lazy"
-                                className="absolute inset-0 w-full h-full object-cover"
-                              />
-                            ) : (
-                              // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
-                              // "게시물이 없는 계정"과 구분된다.
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-[10px] text-slate-300 font-bold">
-                                  {slot.isVideo ? '영상' : '사진'}
-                                </span>
-                              </div>
-                            )}
+                            {/* 메타 주소는 만료된다. 죽은 주소는 회색 자리로 남겨
+                                "게시물이 없는 계정"과 구분한다(MediaThumb 주석). */}
+                            <MediaThumb
+                              src={slot.thumbnailUrl}
+                              label={slot.isVideo ? '영상' : '사진'}
+                              className="absolute inset-0 w-full h-full"
+                            />
                             {/* 조회수는 그림 아래 줄이 아니라 그림 위에 얹는다. 아래로
                                 빼면 그만큼 그림이 작아진다. 이 줄은 릴스에만 붙는다 —
                                 피드 사진에는 조회수 지표가 아예 없어 같은 자리에
@@ -374,7 +369,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                                 {slot.views ? `조회 ${formatCountKo(slot.views)}` : '조회수 비공개'}
                               </span>
                             )}
-                          </div>
+                          </MediaLink>
                         ))}
                       </div>
                     </div>
@@ -482,23 +477,19 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
                               세 줄로 나눠 그림을 알아볼 수 있는 크기로 키운다. */}
                           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                             {feed.map((f: any, i: number) => (
-                              <div key={f?.id || i} className="relative">
-                                {f?.thumbnailUrl ? (
-                                  <img
-                                    src={f.thumbnailUrl}
-                                    alt=""
-                                    loading="lazy"
-                                    className="w-full aspect-square object-cover rounded-lg bg-slate-100"
-                                  />
-                                ) : (
-                                  // 메타의 미디어 주소는 만료된다. 회색 자리로 남겨 두면
-                                  // "게시물이 없는 계정"과 구분된다.
-                                  <div className="w-full aspect-square rounded-lg bg-slate-100" />
-                                )}
+                              <MediaLink
+                                key={f?.id || i}
+                                permalink={f?.permalink}
+                                className="relative block"
+                              >
+                                <MediaThumb
+                                  src={f?.thumbnailUrl}
+                                  className="w-full aspect-square rounded-lg"
+                                />
                                 {String(f?.mediaType || '').toUpperCase() === 'VIDEO' && (
                                   <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-white/80" />
                                 )}
-                              </div>
+                              </MediaLink>
                             ))}
                           </div>
                         </div>

@@ -4,6 +4,7 @@ import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
 import { enabledDefaultButtons } from '../utils/pageButtons';
+import PlatformLogo from './PlatformLogo';
 import {
   type ThemePreset,
   PRESET_BACKGROUND,
@@ -95,11 +96,14 @@ const PagePreview: React.FC<PagePreviewProps> = ({
         />
         <div className="absolute bottom-2 left-3 right-3">
           <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>
-          <p className={`font-black uppercase tracking-[0.2em] ${
-            portfolioFontSize === 'small' ? 'text-[5px]' :
-            portfolioFontSize === 'large' ? 'text-[8px]' :
-            'text-[6px]'
-          }`} style={{ color: accentColor }}>{profile.bio || 'Visual Storyteller'}</p>
+          {/* 소개를 적지 않았으면 이 줄은 없다 — 실제 페이지도 대신 넣는 문구가 없다. */}
+          {(profile.bio || '').trim() && (
+            <p className={`font-black uppercase tracking-[0.2em] ${
+              portfolioFontSize === 'small' ? 'text-[5px]' :
+              portfolioFontSize === 'large' ? 'text-[8px]' :
+              'text-[6px]'
+            }`} style={{ color: accentColor }}>{profile.bio}</p>
+          )}
         </div>
       </div>
 
@@ -133,6 +137,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                     : 'bg-white/10 border-white/15 text-white'
                 }`}
               >
+                <PlatformLogo platform={btn.key} size={7} className="mr-0.5" />
                 {btn.label}
               </span>
             ))}

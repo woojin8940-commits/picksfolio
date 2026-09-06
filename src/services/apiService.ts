@@ -767,13 +767,6 @@ export interface DmAutomationSettings {
   faq?: DmFaqSettings;
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
-  /**
-   * 질문 버튼 클릭(postback) 웹훅 구독 여부. false 면 버튼은 보이는데 눌러도
-   * 답변이 나가지 않는다 — 화면에서 재연결을 안내한다.
-   */
-  postbackSubscribed?: boolean;
-  /** 받은 메시지(`messages`) 웹훅 구독 여부. DM 트리거 자동화가 여기에 걸린다. */
-  messagesSubscribed?: boolean;
   rules?: DmRule[];
   /** 인스타그램 장기 토큰 만료 시각(ISO). 만료되면 재연동이 필요하다. */
   tokenExpiresAt?: string;
@@ -790,14 +783,14 @@ export interface DmAutomationSettings {
    * 계속 도착한다. 감지되면 화면에서 그 사실과 끄는 방법을 안내한다.
    */
   externalDm?: { text: string; at: string; count: number } | null;
-  /**
-   * 발신 에코(`message_echoes`) 웹훅 구독 여부. false 면 이 앱을 거치지 않고
-   * 나간 자동 DM 을 감지할 수 없다.
-   */
-  echoSubscribed?: boolean;
   /** 계정별 웹훅 구독(`subscribed_apps`)을 마친 시각. 비어 있으면 구독 자체가 없다. */
   webhookSubscribedAt?: string;
-  /** 실제로 구독에 성공한 웹훅 필드 목록. */
+  /**
+   * 실제로 구독에 성공한 웹훅 필드 목록.
+   *
+   * 화면은 이 값으로 경고를 띄우지 않는다 — 구독은 설정을 불러올 때 서버가 스스로
+   * 다시 건다(api-dm-automation 의 healWebhookSubscription). 진단용으로만 읽는다.
+   */
   webhookFields?: string;
   /**
    * 서버 응답을 받지 못했다는 표시(네트워크·타임아웃·인증 실패). 이 값이 true 면

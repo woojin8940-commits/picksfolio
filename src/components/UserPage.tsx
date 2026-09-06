@@ -6,6 +6,7 @@ import { supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
 import { enabledDefaultButtons } from '../utils/pageButtons';
+import PlatformLogo from './PlatformLogo';
 import { normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
 import { ViewerSignaling } from '../services/webrtcSignaling';
@@ -816,10 +817,15 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
    * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다 — 예전에 버튼 줄을 두 곳에
    * 따로 적어 두었더니 한쪽만 고쳐져서 레이아웃을 바꾸면 버튼이 달라지는 일이 있었다.
    *
-   * 디자인은 일부러 심심하게 둔다. 강조색(accentColor)은 비즈니스 제안 버튼 하나만
-   * 쓰고, 기본 버튼은 테마에 맞춘 흰/투명 배경 + 얇은 선으로만 구분한다. 브랜드
-   * 색(카카오 노랑 · 유튜브 빨강)을 그대로 쓰면 버튼 줄이 알록달록해져서 정작 눌러야
-   * 하는 비즈니스 제안 버튼이 묻힌다.
+   * 버튼 바탕은 일부러 심심하게 둔다. 강조색(accentColor)은 비즈니스 제안 버튼 하나만
+   * 쓰고, 기본 버튼은 테마에 맞춘 흰/투명 배경 + 얇은 선으로만 구분한다. 버튼 전체를
+   * 브랜드 색(카카오 노랑 · 유튜브 빨강)으로 칠하면 버튼 줄이 알록달록해져서 정작
+   * 눌러야 하는 비즈니스 제안 버튼이 묻힌다.
+   *
+   * 대신 이름 앞에 플랫폼 로고를 붙인다 — 이름만 글자로 있으면 커스텀 버튼과
+   * 구별되지 않아 어디로 가는 버튼인지 읽어야 알 수 있었다. 로고는 브랜드색 타일
+   * 안에 들어 있어(components/PlatformLogo) 버튼 바탕은 그대로 두고 마크만 색을
+   * 가진다.
    */
   const defaultButtonsBlock = enabledDefaultButtons(socials).map(btn => (
     <button
@@ -831,9 +837,28 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
       }`}
     >
+      <PlatformLogo platform={btn.key} size={16} className="mr-2" />
       {btn.label}
     </button>
   ));
+
+  /**
+   * 커버 사진 위, 이름 아래의 한 줄 소개.
+   *
+   * 비어 있으면 아무것도 그리지 않는다. 예전에는 'Visual Storyteller' 를 대신
+   * 넣었는데, 소개를 적지 않은 사람의 페이지에도 영어 문구가 떠서 자기가 쓴 줄인지
+   * 시스템 문구인지 알 수 없었다 — 지우려고 소개칸을 비우면 오히려 그 문구가 다시
+   * 나왔다. 안 적었으면 이름만 나오는 것이 맞다.
+   *
+   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다.
+   */
+  const bioLine = (profile?.bio || '').trim() ? (
+    <p className={`font-black uppercase tracking-[0.3em] ${
+      design.portfolioFontSize === 'small' ? 'text-[8px]' :
+      design.portfolioFontSize === 'large' ? 'text-sm' :
+      'text-[10px]'
+    }`} style={{ color: design.accentColor }}>{profile?.bio}</p>
+  ) : null;
 
   const visibleAboutSections = (profile?.aboutSections || []).filter(
     s => (s.title || '').trim() || (s.content || '').trim()
@@ -961,11 +986,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
               <div className="absolute bottom-6 left-6 right-6">
                  <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
-                 <p className={`font-black uppercase tracking-[0.3em] ${
-                   design.portfolioFontSize === 'small' ? 'text-[8px]' :
-                   design.portfolioFontSize === 'large' ? 'text-sm' :
-                   'text-[10px]'
-                 }`} style={{ color: design.accentColor }}>{profile?.bio || 'Visual Storyteller'}</p>
+                 {bioLine}
               </div>
             </div>
 
@@ -1297,11 +1318,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
               <div className="absolute bottom-6 left-6 right-6">
                  <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
-                 <p className={`font-black uppercase tracking-[0.3em] ${
-                   design.portfolioFontSize === 'small' ? 'text-[8px]' :
-                   design.portfolioFontSize === 'large' ? 'text-sm' :
-                   'text-[10px]'
-                 }`} style={{ color: design.accentColor }}>{profile?.bio || 'Visual Storyteller'}</p>
+                 {bioLine}
               </div>
             </div>
 
