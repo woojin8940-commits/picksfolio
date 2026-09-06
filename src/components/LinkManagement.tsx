@@ -11,6 +11,7 @@ import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
 import { DEFAULT_BUTTONS, type DefaultButtonKey } from '../utils/pageButtons';
+import { sanitizeLinkValue } from '../utils/externalLink';
 import {
   type ThemePreset,
   THEME_BG_PRESETS,
@@ -918,7 +919,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       ...block,
       products: (block.products || []).map(p => ({
         ...p,
-        link: (p.link || '').replace(/#/g, '')
+        link: sanitizeLinkValue(p.link)
       }))
     }));
 
@@ -1212,7 +1213,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       ...editForm,
       products: (editForm.products || []).map(p => ({
         ...p,
-        link: p.link.replace(/#/g, '')
+        link: sanitizeLinkValue(p.link)
       }))
     } as Block;
 
@@ -1263,10 +1264,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     setEditForm({ ...editForm, products: [...(editForm.products || []), newProduct] } as Block);
   };
 
+  /**
+   * 입력값은 적은 그대로 담는다.
+   *
+   * 예전에는 링크칸에서 글자를 칠 때마다 `#` 을 지웠다. 저장된 자리표시용 "#" 을
+   * 걷어내려던 것인데, 그 때문에 조각이 있는 주소(…/page#section)를 아예 적을 수
+   * 없었다 — `#` 을 누르는 순간 사라지니 그 뒤를 이어 칠 수가 없다. 다듬는 일은
+   * 저장할 때 sanitizeLinkValue 가 한 번만 한다.
+   */
   const handleUpdateProduct = (pId: string, field: keyof Product, value: string) => {
     if (!isEditing) return;
-    const sanitizedValue = field === 'link' ? value.replace(/#/g, '') : value;
-    const updatedProducts = (editForm.products || []).map(p => p.id === pId ? { ...p, [field]: sanitizedValue } : p);
+    const updatedProducts = (editForm.products || []).map(p => p.id === pId ? { ...p, [field]: value } : p);
     setEditForm({ ...editForm, products: updatedProducts } as Block);
   };
 

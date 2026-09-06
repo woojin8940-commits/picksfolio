@@ -56,6 +56,7 @@ const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeli
 const ManagerDashboard = lazyWithRetry(() => import('./components/manager/ManagerDashboard'));
 import { apiService } from './services/apiService';
 import { clearAllLinkCache } from './services/prefetchService';
+import { openExternalUrl } from './utils/externalLink';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
@@ -1888,7 +1889,7 @@ const App: React.FC = () => {
             navigate('user-page', userName);
             return;
           }
-          window.open(`${window.location.origin}/${userName}`, '_blank', 'noopener,noreferrer');
+          openExternalUrl(`/${userName}`);
         }}
         onNavigateLinks={() => setSubView('links')}
         onNavigateDmAutomation={() => setSubView('dm-automation')}
