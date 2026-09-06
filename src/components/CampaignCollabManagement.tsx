@@ -162,6 +162,29 @@ const categoryLabel = (val: string) => CATEGORIES.find(c => c.value === val)?.la
 // mirroring how the backend matches business_username.
 const normalizeUser = (u: string) => (u || '').replace(/^biz\//, '').toLowerCase();
 
+type ApplicantCache = {
+  applicants: Applicant[];
+  managerUsername: string;
+  selectionBy: 'brand' | 'manager';
+  savedAt: number;
+};
+
+const applicantCacheKey = (businessUsername: string, campaignId: string) =>
+  `picks_campaign_applicants_${normalizeUser(businessUsername)}_${campaignId}`;
+
+const readApplicantCache = (businessUsername: string, campaignId: string): ApplicantCache | null => {
+  try {
+    const raw = localStorage.getItem(applicantCacheKey(businessUsername, campaignId));
+    return raw ? JSON.parse(raw) as ApplicantCache : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeApplicantCache = (businessUsername: string, campaignId: string, data: ApplicantCache): void => {
+  try { localStorage.setItem(applicantCacheKey(businessUsername, campaignId), JSON.stringify(data)); } catch {}
+};
+
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName, initialCampaignId }) => {
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
@@ -328,13 +351,29 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   }, [campaigns]);
 
   const fetchApplicants = async (campaignId: string) => {
-    setApplicantsLoading(true);
+    const cached = readApplicantCache(businessUsername, campaignId);
+    if (cached) {
+      setApplicants(cached.applicants || []);
+      setCampaignManager(cached.managerUsername || '');
+      setSelectionBy(cached.selectionBy === 'brand' ? 'brand' : 'manager');
+      setApplicantsLoading(false);
+    } else {
+      setApplicantsLoading(true);
+    }
     try {
       // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자(또는 담당자)인지 확인한다.
       const data = await apiService.getCampaignApplicants(campaignId);
-      setApplicants(data.applicants || []);
+      const nextApplicants = Array.isArray(data.applicants) ? data.applicants : [];
+      const nextSelectionBy = data.selectionBy === 'brand' ? 'brand' : 'manager';
+      setApplicants(nextApplicants);
       setCampaignManager(data.managerUsername || '');
-      setSelectionBy(data.selectionBy === 'brand' ? 'brand' : 'manager');
+      setSelectionBy(nextSelectionBy);
+      writeApplicantCache(businessUsername, campaignId, {
+        applicants: nextApplicants,
+        managerUsername: data.managerUsername || '',
+        selectionBy: nextSelectionBy,
+        savedAt: Date.now(),
+      });
     } catch {
       console.error('Failed to fetch applicants');
     } finally {
@@ -352,7 +391,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     setApplicantView('');
     setApplicantSort('recent');
     if (normalizeUser(campaign.business_username) === normalizeUser(businessUsername)) {
-      setApplicants([]);
+      const cached = readApplicantCache(businessUsername, campaign.id);
+      setApplicants(cached?.applicants || []);
+      if (cached?.managerUsername) setCampaignManager(cached.managerUsername);
+      if (cached?.selectionBy) setSelectionBy(cached.selectionBy);
       fetchApplicants(campaign.id);
       fetchCollabSummary(campaign.id);
     } else {
@@ -479,7 +521,18 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         notify(res.error, 'error');
         return;
       }
-      setApplicants(prev => prev.map(a => (a.id === applicantId ? { ...a, brand_preference: preference } : a)));
+      setApplicants(prev => {
+        const next = prev.map(a => (a.id === applicantId ? { ...a, brand_preference: preference } : a));
+        if (selectedCampaign) {
+          writeApplicantCache(businessUsername, selectedCampaign.id, {
+            applicants: next,
+            managerUsername: campaignManager,
+            selectionBy,
+            savedAt: Date.now(),
+          });
+        }
+        return next;
+      });
       notify(
         preference === 'shortlist'
           ? '추천으로 표시했습니다. 담당자가 확인 후 선정을 진행합니다.'

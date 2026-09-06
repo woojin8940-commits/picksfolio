@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Settlement } from '../types';
 import { formatKRW, formatNumberWithCommas, stripCommas } from '../utils/formatters';
-import { authHeaders } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface UserSettlementProps {
@@ -84,10 +84,26 @@ function groupbuyRate(s: Settlement): number {
   return Number(s.groupbuy_rate || 0);
 }
 
+const settlementCacheKey = (username: string) => `picks_user_settlements_${(username || '').toLowerCase()}`;
+
+const readSettlementCache = (username: string): Settlement[] => {
+  try {
+    const raw = localStorage.getItem(settlementCacheKey(username));
+    return raw ? JSON.parse(raw) as Settlement[] : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeSettlementCache = (username: string, next: Settlement[]): void => {
+  try { localStorage.setItem(settlementCacheKey(username), JSON.stringify(next)); } catch {}
+};
+
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
   const { language, t } = useLanguage();
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedSettlements = readSettlementCache(userName);
+  const [settlements, setSettlements] = useState<Settlement[]>(() => cachedSettlements);
+  const [loading, setLoading] = useState(() => cachedSettlements.length === 0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
@@ -95,6 +111,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
 
   const commitSettlements = (next: Settlement[]) => {
     setSettlements(next);
+    writeSettlementCache(userName, next);
     onSettlementsChange?.(next);
   };
 
@@ -168,15 +185,10 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
   };
 
   const fetchSettlements = async () => {
-    setLoading(true);
+    if (settlements.length === 0) setLoading(true);
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(userName)}?role=influencer`, {
-        headers: await authHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        commitSettlements(data.settlements || []);
-      }
+      const data = await apiService.getSettlements(userName);
+      commitSettlements(data || []);
     } catch (e) {
       console.error('Failed to fetch settlements:', e);
     }

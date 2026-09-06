@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { openExternalUrl } from '../utils/externalLink';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
-import { authHeaders, setActiveBusinessAccount } from '../services/apiService';
+import { apiService, authHeaders, setActiveBusinessAccount } from '../services/apiService';
 // 청크를 못 받은 화면이 "로딩 중" 에서 멈추지 않도록, 크리에이터 대시보드와 같은
 // 래퍼(재시도 → 실패 시 오류 경계)를 쓴다.
 import { lazyWithRetry, LazyRoute } from '../utils/lazyRoute';
@@ -42,6 +42,20 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const trendCacheKey = `picks_biz_trend`;
   const settlementCacheKey = `picks_biz_settlement_${cleanUsername}`;
 
+  function rememberCalendarProposals(proposals: any[]) {
+    try {
+      const key = `picks_biz_calendar_${cleanUsername}`;
+      const raw = localStorage.getItem(key);
+      const existing = raw ? JSON.parse(raw) : {};
+      const accepted = proposals.filter((p: any) => p.status === 'accepted' || p.status === 'completed');
+      localStorage.setItem(key, JSON.stringify({
+        proposals: accepted,
+        collabs: Array.isArray(existing?.collabs) ? existing.collabs : [],
+        savedAt: Date.now(),
+      }));
+    } catch {}
+  }
+
   /**
    * 이 화면에 있는 동안의 요청은 비즈니스 계정 토큰으로 보낸다.
    *
@@ -55,6 +69,60 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   useEffect(() => {
     setActiveBusinessAccount(cleanUsername);
     return () => setActiveBusinessAccount('');
+  }, [cleanUsername]);
+
+  useEffect(() => {
+    if (!cleanUsername) return;
+    const timers: number[] = [];
+    const later = (ms: number, fn: () => void) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+
+    later(600, () => {
+      import('./BusinessInbox').catch(() => {});
+      import('./DmAutomation').catch(() => {});
+      import('./BusinessTaggedContent').catch(() => {});
+      import('./BusinessEntCalendar').catch(() => {});
+    });
+    later(1100, () => {
+      apiService.getDmAutomation(cleanUsername)
+        .then((settings) => {
+          if (settings.connected) apiService.getInstagramMedia(cleanUsername).catch(() => undefined);
+        })
+        .catch(() => undefined);
+    });
+    later(1700, () => {
+      import('./CampaignCollabManagement').catch(() => {});
+      import('./BusinessCampaignHistory').catch(() => {});
+      import('./BusinessTimeline').catch(() => {});
+      apiService.getCollabs('brand').catch(() => undefined);
+      apiService.getBusinessTaggedMedia(cleanUsername).catch(() => undefined);
+    });
+    later(2500, () => {
+      authHeaders({}, { account: cleanUsername })
+        .then((headers) => fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, { headers }))
+        .then((res) => res?.ok ? res.json() : null)
+        .then((data) => {
+          if (Array.isArray(data?.proposals)) {
+            rememberCalendarProposals(data.proposals);
+            try {
+              localStorage.setItem(`picks_biz_inbox_${cleanUsername.toLowerCase()}`, JSON.stringify(data.proposals));
+            } catch {}
+          }
+        })
+        .catch(() => undefined);
+      apiService.getSettlements(cleanUsername, 'business').catch(() => undefined);
+    });
+    later(3300, () => {
+      import('./MembershipPlan').catch(() => {});
+      import('./OpenScheduleManagement').catch(() => {});
+      apiService.getSellerVerification(cleanUsername).catch(() => undefined);
+      apiService.getClaudeCredits(cleanUsername).catch(() => undefined);
+    });
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [cleanUsername]);
 
   const cachedStats = (() => {
@@ -103,6 +171,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       if (res.ok) {
         const data = await res.json();
         const proposals = data.proposals || [];
+        rememberCalendarProposals(proposals);
         const stats = {
           total: proposals.length,
           accepted: proposals.filter((p: any) => p.status === 'accepted').length,

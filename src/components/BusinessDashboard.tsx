@@ -13,6 +13,21 @@ type SortMode = 'latest' | 'deadline' | 'fee';
 type TabCategory = '광고' | '커머스';
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected' | 'completed';
 
+const proposalCacheKey = (username: string) => `picks_business_dashboard_${(username || '').toLowerCase()}`;
+
+const readProposalCache = (username: string): BusinessProposal[] => {
+  try {
+    const raw = localStorage.getItem(proposalCacheKey(username));
+    return raw ? JSON.parse(raw) as BusinessProposal[] : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeProposalCache = (username: string, proposals: BusinessProposal[]): void => {
+  try { localStorage.setItem(proposalCacheKey(username), JSON.stringify(proposals)); } catch {}
+};
+
 const REJECTION_PRESETS_KO = [
   '제안 단가가 낮아요',
   '진행 일정이 맞지 않아요',
@@ -36,9 +51,10 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   const isEn = language === 'en';
 
   const rejectionPresets = isEn ? REJECTION_PRESETS_EN : REJECTION_PRESETS_KO;
+  const cachedProposals = readProposalCache(userName);
 
-  const [proposals, setProposals] = useState<BusinessProposal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [proposals, setProposals] = useState<BusinessProposal[]>(() => cachedProposals);
+  const [loading, setLoading] = useState(() => cachedProposals.length === 0);
   const [activeTab, setActiveTab] = useState<TabCategory>('광고');
   const [sortMode, setSortMode] = useState<SortMode>('latest');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -49,9 +65,10 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   const [rejectionReason, setRejectionReason] = useState('');
 
   const fetchProposals = async () => {
-    setLoading(true);
+    if (proposals.length === 0) setLoading(true);
     const data = await apiService.getProposals(userName);
     setProposals(data);
+    writeProposalCache(userName, data);
     setLoading(false);
   };
 
@@ -63,9 +80,11 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     setUpdatingId(proposalId);
     const success = await apiService.updateProposalStatus(userName, proposalId, status, rejectionReasonText);
     if (success) {
-      setProposals(prev =>
-        prev.map(p => p.id === proposalId ? { ...p, status, rejection_reason: rejectionReasonText, updated_at: new Date().toISOString() } : p)
-      );
+      setProposals(prev => {
+        const next = prev.map(p => p.id === proposalId ? { ...p, status, rejection_reason: rejectionReasonText, updated_at: new Date().toISOString() } : p);
+        writeProposalCache(userName, next);
+        return next;
+      });
       setRejectingId(null);
       setRejectionReason('');
     } else {
@@ -92,7 +111,11 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
     setDeletingId(proposalId);
     const success = await apiService.deleteProposal(userName, proposalId);
     if (success) {
-      setProposals(prev => prev.filter(p => p.id !== proposalId));
+      setProposals(prev => {
+        const next = prev.filter(p => p.id !== proposalId);
+        writeProposalCache(userName, next);
+        return next;
+      });
       if (expandedId === proposalId) setExpandedId(null);
     } else {
       alert(isEn ? 'Failed to delete.' : '삭제에 실패했습니다.');
