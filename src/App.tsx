@@ -54,10 +54,25 @@ const UserSettlement = lazyWithRetry(() => import('./components/UserSettlement')
 const BusinessTimeline = lazyWithRetry(() => import('./components/BusinessTimeline'));
 // 담당자 대시보드. 운영자가 배정한 일반 계정만 들어온다.
 const ManagerDashboard = lazyWithRetry(() => import('./components/manager/ManagerDashboard'));
-import { apiService } from './services/apiService';
-import { clearAllLinkCache } from './services/prefetchService';
 import { openExternalUrl } from './utils/externalLink';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
+
+type ApiService = typeof import('./services/apiService').apiService;
+
+let apiServicePromise: Promise<ApiService> | null = null;
+
+const getApiService = () => {
+  if (!apiServicePromise) {
+    apiServicePromise = import('./services/apiService').then(module => module.apiService);
+  }
+  return apiServicePromise;
+};
+
+const clearAllLinkCacheLazy = () => {
+  import('./services/prefetchService')
+    .then(module => module.clearAllLinkCache())
+    .catch(error => console.warn('[Prefetch] Failed to clear cache:', error));
+};
 
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
@@ -320,7 +335,8 @@ const App: React.FC = () => {
    * 치면 로그인 직후 운영 콘솔이 아니라 담당자 대시보드로 가게 된다.
    */
   const refreshManagerStatus = useCallback(async (): Promise<boolean> => {
-    const status = await apiService.getMyManagerStatus();
+    const service = await getApiService();
+    const status = await service.getMyManagerStatus();
     // 확인하지 못했으면 아무것도 바꾸지 않는다. 로그인 직후에는 세션이 막 심어지는
     // 중이라 토큰이 아직 안 붙는 순간이 있는데, 그때의 실패를 확정으로 받으면
     // 배정된 담당자가 일반 대시보드로 떨어진다("가끔" 그랬던 이유다).
@@ -821,7 +837,8 @@ const App: React.FC = () => {
           } else {
             // Check if user has site data (link blocks) before deciding destination
             try {
-              const siteData = await apiService.getSiteData(existingUsername);
+              const service = await getApiService();
+              const siteData = await service.getSiteData(existingUsername);
               const hasLinks = siteData && siteData.blocks && Array.isArray(siteData.blocks) && siteData.blocks.length > 0;
               if (hasLinks) {
                 console.log(`[Auth] User has link data, redirecting to dashboard`);
@@ -1060,7 +1077,7 @@ const App: React.FC = () => {
       ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
       ownSupabaseKeys().forEach(key => localStorage.removeItem(key));
       clearTabStateKeepScope();
-      clearAllLinkCache();
+      clearAllLinkCacheLazy();
       if (supabase) { try { await supabase.auth.signOut(); } catch {} }
     };
 
@@ -1511,7 +1528,7 @@ const App: React.FC = () => {
     setUserName('');
     ownPicksKeys(BUSINESS_SESSION_KEYS).forEach(key => localStorage.removeItem(key));
     clearTabStateKeepScope();
-    clearAllLinkCache();
+    clearAllLinkCacheLazy();
     console.log('User picks_ localStorage keys cleared (business keys preserved)');
 
     // 2. Await Supabase signout so its session tokens (sb-*-auth-token) are fully
