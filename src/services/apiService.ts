@@ -1066,6 +1066,18 @@ const SITE_DATA_TTL = 60 * 1000; // 1 minute
 const siteDataCache: Record<string, { data: SiteData; ts: number }> = {};
 const siteDataInflight: Record<string, Promise<SiteData | null>> = {};
 const siteDataVersions: Record<string, symbol> = {};
+const siteDataSaveQueues = new Map<string, Promise<unknown>>();
+
+function serializeSiteDataSave<T>(username: string, task: () => Promise<T>): Promise<T> {
+  const key = username.toLowerCase();
+  const previous = siteDataSaveQueues.get(key) || Promise.resolve();
+  const current = previous.then(task, task);
+  siteDataSaveQueues.set(key, current);
+  current.finally(() => {
+    if (siteDataSaveQueues.get(key) === current) siteDataSaveQueues.delete(key);
+  }).catch(() => {});
+  return current;
+}
 
 const VERIFICATION_TTL = 5 * 60 * 1000; // 5 minutes
 const verificationCache: Record<string, { data: SellerVerification | null; ts: number }> = {};
@@ -1170,46 +1182,48 @@ export const apiService = {
    * 수 없는 경고만 남았다.
    */
   async saveSiteDataResult(username: string, data: Partial<SiteData>): Promise<SaveResult> {
-    try {
-      const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`, {
-        method: 'POST',
-        headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(data)
-      });
-      if (res.ok) {
-        // Keep the cache in sync with what we just persisted so a subsequent
-        // navigation doesn't briefly render pre-save data. Create the entry even
-        // when nothing was cached yet, so the very next read is immediately fresh.
-        const key = username.toLowerCase();
-        delete siteDataVersions[key];
-        delete siteDataInflight[key];
-        const cached = siteDataCache[key];
-        const base = (cached?.data || {}) as SiteData;
-        if (cached) {
-          siteDataCache[key] = {
-            data: {
-              ...base, ...data,
-              ...(data.profile ? { profile: { ...base.profile, ...data.profile } } : {}),
-              ...(data.design ? { design: { ...base.design, ...data.design } } : {}),
-              ...(data.socials ? { socials: { ...base.socials, ...data.socials } } : {}),
-            },
-            ts: Date.now(),
-          };
-        } else {
-          delete siteDataCache[key];
+    return serializeSiteDataSave(username, async () => {
+      try {
+        const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`, {
+          method: 'POST',
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          // Keep the cache in sync with what we just persisted so a subsequent
+          // navigation doesn't briefly render pre-save data. Create the entry even
+          // when nothing was cached yet, so the very next read is immediately fresh.
+          const key = username.toLowerCase();
+          delete siteDataVersions[key];
+          delete siteDataInflight[key];
+          const cached = siteDataCache[key];
+          const base = (cached?.data || {}) as SiteData;
+          if (cached) {
+            siteDataCache[key] = {
+              data: {
+                ...base, ...data,
+                ...(data.profile ? { profile: { ...base.profile, ...data.profile } } : {}),
+                ...(data.design ? { design: { ...base.design, ...data.design } } : {}),
+                ...(data.socials ? { socials: { ...base.socials, ...data.socials } } : {}),
+              },
+              ts: Date.now(),
+            };
+          } else {
+            delete siteDataCache[key];
+          }
+          return { ok: true, status: res.status, error: '', retryable: false };
         }
-        return { ok: true, status: res.status, error: '', retryable: false };
-      }
 
-      const body = await res.json().catch(() => null);
-      const error = String(body?.error || '') || `HTTP ${res.status}`;
-      console.error('[API] Failed to save site data:', res.status, error);
-      return { ok: false, status: res.status, error, retryable: isRetryableStatus(res.status) };
-    } catch (e) {
-      // 네트워크가 끊겼거나 함수가 응답 없이 끝난 경우. 이건 다시 보내면 될 수 있다.
-      console.error('[API] Failed to save site data:', e);
-      return { ok: false, status: 0, error: '네트워크 연결을 확인해 주세요.', retryable: true };
-    }
+        const body = await res.json().catch(() => null);
+        const error = String(body?.error || '') || `HTTP ${res.status}`;
+        console.error('[API] Failed to save site data:', res.status, error);
+        return { ok: false, status: res.status, error, retryable: isRetryableStatus(res.status) };
+      } catch (e) {
+        // 네트워크가 끊겼거나 함수가 응답 없이 끝난 경우. 이건 다시 보내면 될 수 있다.
+        console.error('[API] Failed to save site data:', e);
+        return { ok: false, status: 0, error: '네트워크 연결을 확인해 주세요.', retryable: true };
+      }
+    });
   },
 
   async saveSiteData(username: string, data: Partial<SiteData>): Promise<boolean> {
