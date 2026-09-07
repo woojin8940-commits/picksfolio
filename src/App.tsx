@@ -488,22 +488,10 @@ const App: React.FC = () => {
       if (sessionProcessed) return;
       sessionProcessed = true;
 
-      // If OAuth callback hasn't completed yet (onAuthStateChange fired early),
-      // wait for the FULL OAuth callback to finish — including the client-side
-      // Kakao API call that fetches phone_number. Previously we broke out of this
-      // loop as soon as capturedProviderToken was set, but that was BEFORE the
-      // Kakao API call completed, causing client_kakao_phone to always be empty.
       const isKakaoUser = session.user.app_metadata?.provider === 'kakao'
         || session.user.identities?.some((i: any) => i.provider === 'kakao');
-      if (isKakaoUser && !oauthCallbackComplete) {
-        for (let i = 0; i < 25; i++) {
-          await new Promise(r => setTimeout(r, 200));
-          if (oauthCallbackComplete) break;
-        }
-        // Re-read from sessionStorage in case it was set during the wait
-        if (!capturedProviderToken) {
-          capturedProviderToken = sessionStorage.getItem('kakao_provider_token');
-        }
+      if (isKakaoUser && !capturedProviderToken) {
+        capturedProviderToken = sessionStorage.getItem('kakao_provider_token');
       }
 
       const uid = session.user.id;
@@ -1005,6 +993,9 @@ const App: React.FC = () => {
     // Step 3: Listen for ongoing auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
+        if (isOAuthCallbackRef.current && !oauthCallbackComplete) {
+          return;
+        }
         // If login flow already handled navigation (ID/password login),
         // just sync the auth state without any view changes
         if (loginNavigationHandledRef.current) {

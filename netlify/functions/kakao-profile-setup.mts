@@ -84,6 +84,17 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
+    if (isRealUsername(auth.username)) {
+      return Response.json({
+        success: true,
+        profile: {
+          username: auth.username,
+          role: auth.isAdmin ? "admin" : "user",
+        },
+        isNewUser: false,
+      });
+    }
+
     const supabase = getSupabaseAdmin();
     const { data: verifiedAuth, error: verifiedAuthError } = await supabase.auth.admin.getUserById(user_id);
     if (verifiedAuthError || !verifiedAuth?.user) {

@@ -215,7 +215,9 @@ export default async (req: Request, context: Context) => {
       }
 
       const existing = await db.sql`
-        SELECT data, profile_code, updated_at FROM site_data WHERE username = ${username}
+        SELECT data, profile_code, updated_at, xmin::text AS row_version
+        FROM site_data
+        WHERE username = ${username}
       `;
 
       const storedData = existing.length > 0 ? (existing[0].data as Record<string, any> || {}) : {};
@@ -274,7 +276,7 @@ export default async (req: Request, context: Context) => {
 
       if (existing.length > 0) {
         let currentData = existingData;
-        let expectedUpdatedAt = existing[0].updated_at;
+        let expectedRowVersion = String(existing[0].row_version || "");
         let saved = false;
 
         for (let attempt = 0; attempt < 5; attempt++) {
@@ -297,8 +299,8 @@ export default async (req: Request, context: Context) => {
                 updated_at = NOW(),
                 cover_updated_at = CASE WHEN ${coverChanged} THEN NOW() ELSE cover_updated_at END
             WHERE username = ${username}
-              AND updated_at IS NOT DISTINCT FROM ${expectedUpdatedAt}
-            RETURNING data, updated_at
+              AND xmin::text = ${expectedRowVersion}
+            RETURNING data, updated_at, xmin::text AS row_version
           `;
 
           if (updated.length > 0) {
@@ -307,11 +309,13 @@ export default async (req: Request, context: Context) => {
           }
 
           const latest = await db.sql`
-            SELECT data, updated_at FROM site_data WHERE username = ${username}
+            SELECT data, updated_at, xmin::text AS row_version
+            FROM site_data
+            WHERE username = ${username}
           `;
           if (latest.length === 0) break;
           currentData = (latest[0].data as Record<string, any>) || {};
-          expectedUpdatedAt = latest[0].updated_at;
+          expectedRowVersion = String(latest[0].row_version || "");
         }
 
         if (!saved) {
