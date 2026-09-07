@@ -81,7 +81,7 @@ export default async (req: Request) => {
           AND (${category} = '' OR categories ILIKE ${catLike})
         ORDER BY followers DESC
         LIMIT 400
-      ` as Promise<any[]>,
+      `,
 
       db.sql`
         SELECT id, applicant_username, name, instagram_url, category, note,
@@ -96,7 +96,7 @@ export default async (req: Request) => {
           AND (${category} = '' OR category ILIKE ${catLike})
         ORDER BY followers DESC NULLS LAST
         LIMIT 400
-      ` as Promise<any[]>,
+      `,
 
       // 지금 무엇을 진행 중인 사람인지. 새 캠페인에 넣기 전에 겹치는 일정이
       // 있는지부터 봐야 한다.
@@ -106,7 +106,7 @@ export default async (req: Request) => {
                COUNT(*) FILTER (WHERE status = 'completed')::int AS completed
         FROM campaign_collabs
         GROUP BY LOWER(creator_username)
-      ` as Promise<any[]>,
+      `,
     ]);
 
     const collabMap = new Map<string, any>();

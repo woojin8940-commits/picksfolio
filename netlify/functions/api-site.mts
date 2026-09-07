@@ -152,14 +152,14 @@ export default async (req: Request, context: Context) => {
             ? {
                 ...legacySiteData,
                 profile: legacySiteData.profile || {
-                  name: profile.nickname || profile.full_name || username,
+                  name: profile.full_name || username,
                   bio: profile.bio || "",
                   avatar_url: profile.avatar_url || "",
                 },
               }
             : {
                 profile: {
-                  name: profile.nickname || profile.full_name || username,
+                  name: profile.full_name || username,
                   bio: profile.bio || "",
                   avatar_url: profile.avatar_url || "",
                 },
@@ -215,7 +215,7 @@ export default async (req: Request, context: Context) => {
       }
 
       const existing = await db.sql`
-        SELECT data, profile_code FROM site_data WHERE username = ${username}
+        SELECT data, profile_code, updated_at FROM site_data WHERE username = ${username}
       `;
 
       const storedData = existing.length > 0 ? (existing[0].data as Record<string, any> || {}) : {};
@@ -236,7 +236,8 @@ export default async (req: Request, context: Context) => {
         );
       }
 
-      if (existing.length > 0 && hasConnectedSiteContent(existingData) && isDestructiveUpdate(existingData, body)) {
+      const forceUpdate = new URL(req.url).searchParams.get("force") === "true";
+      if (existing.length > 0 && hasConnectedSiteContent(existingData) && isDestructiveUpdate(existingData, body) && !forceUpdate) {
         return Response.json({
           error: "이 요청은 기존 콘텐츠를 모두 삭제합니다. force=true 파라미터를 포함하여 다시 시도해 주세요.",
           code: "DESTRUCTIVE_UPDATE",
@@ -264,30 +265,57 @@ export default async (req: Request, context: Context) => {
         }
       }
 
-      const oldCoverImage =
-        existingData?.design?.portfolioHeaderImage ||
-        existingData?.blocks?.[0]?.coverMedia ||
-        existingData?.profile?.avatar_url || null;
       const newCoverImage =
         body?.design?.portfolioHeaderImage ||
         body?.blocks?.[0]?.coverMedia ||
         body?.profile?.avatar_url || null;
-      const coverChanged = newCoverImage !== null && newCoverImage !== oldCoverImage;
 
       const bodyJson = JSON.stringify(body);
 
       if (existing.length > 0) {
-        const mergedData = stripNulls(deepMerge(existingData, body));
-        await db.sql`
-          UPDATE site_data
-          SET data = ${JSON.stringify(mergedData)}::jsonb,
-              updated_at = NOW()
-          WHERE username = ${username}
-        `;
-        if (coverChanged) {
-          await db.sql`
-            UPDATE site_data SET cover_updated_at = NOW() WHERE username = ${username}
+        let currentData = existingData;
+        let expectedUpdatedAt = existing[0].updated_at;
+        let saved = false;
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (hasConnectedSiteContent(currentData) && isDestructiveUpdate(currentData, body) && !forceUpdate) {
+            return Response.json({
+              error: "이 요청은 기존 콘텐츠를 모두 삭제합니다. force=true 파라미터를 포함하여 다시 시도해 주세요.",
+              code: "DESTRUCTIVE_UPDATE",
+            }, { status: 409 });
+          }
+
+          const oldCoverImage =
+            currentData?.design?.portfolioHeaderImage ||
+            currentData?.blocks?.[0]?.coverMedia ||
+            currentData?.profile?.avatar_url || null;
+          const coverChanged = newCoverImage !== null && newCoverImage !== oldCoverImage;
+          const mergedData = stripNulls(deepMerge(currentData, body));
+          const updated = await db.sql`
+            UPDATE site_data
+            SET data = ${JSON.stringify(mergedData)}::jsonb,
+                updated_at = NOW(),
+                cover_updated_at = CASE WHEN ${coverChanged} THEN NOW() ELSE cover_updated_at END
+            WHERE username = ${username}
+              AND updated_at IS NOT DISTINCT FROM ${expectedUpdatedAt}
+            RETURNING data, updated_at
           `;
+
+          if (updated.length > 0) {
+            saved = true;
+            break;
+          }
+
+          const latest = await db.sql`
+            SELECT data, updated_at FROM site_data WHERE username = ${username}
+          `;
+          if (latest.length === 0) break;
+          currentData = (latest[0].data as Record<string, any>) || {};
+          expectedUpdatedAt = latest[0].updated_at;
+        }
+
+        if (!saved) {
+          return Response.json({ error: "Concurrent update conflict" }, { status: 503 });
         }
       } else {
         const profileCode = await createUniqueProfileCode(db);

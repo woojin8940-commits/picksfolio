@@ -4,6 +4,7 @@ import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
+import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
 
 const STORE = "proposals";
 const BIZ_STORE = "business-proposals";
@@ -16,9 +17,6 @@ export default async (req: Request, context: Context) => {
 
   const store = getStore(STORE);
 
-  // 받은 제안함이다(업체 담당자 이름 · 이메일 · 연락처 · 제안 금액이 들어 있다).
-  // 읽기·상태 변경은 본인만. 단 POST(제안 접수)는 로그인 없이 제안서 폼을 채운
-  // 업체도 보내야 하므로 열어 둔다.
   if (req.method === "GET" || req.method === "PUT") {
     const auth = await requireAccountOwner(req, username);
     if (!auth.ok) return auth.response;
@@ -127,6 +125,13 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = await req.json();
+    const bizUsername = String(body.business_username || "").toLowerCase().replace(/^biz\//, "").trim();
+    if (!bizUsername) {
+      return Response.json({ error: "Business account required" }, { status: 400 });
+    }
+    const auth = await requireAccountOwner(req, bizUsername);
+    if (!auth.ok) return auth.response;
+
     const proposal = {
       ...body,
       // id·소유자·상태는 서버가 정한다(body 로 덮어쓰지 못하게 뒤에 둔다).
@@ -143,7 +148,6 @@ export default async (req: Request, context: Context) => {
       proposal,
     ]);
 
-    const bizUsername = (body.business_username || "").toLowerCase().replace(/^biz\//, "");
     if (bizUsername) {
       await mutateBlobJSON<any[]>(BIZ_STORE, `biz_proposals_${bizUsername}`, (current) => [
         ...(Array.isArray(current) ? current : []),
@@ -232,20 +236,16 @@ export default async (req: Request, context: Context) => {
       const proposalTitle = body.title || "협업 제안";
       const magicLink = `${siteOrigin}/admin?tab=proposals`;
 
-      await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          message: `[픽스폴리오] 새로운 협업 제안\n\n${companyName}에서 "${proposalTitle}" 협업을 제안했습니다.\n\n자세한 내용은 아래 링크에서 확인하세요.\n${magicLink}`,
-          templateId: "KA01TP260409050013707MDcnfpN4ApK",
-          variables: {
-            "#{고객명}": username,
-            "#{업체명}": companyName,
-            "#{프로젝트명}": proposalTitle,
-            "#{링크연결}": magicLink,
-          },
-        }),
+      await sendKakaoAlimtalk({
+        username,
+        message: `[픽스폴리오] 새로운 협업 제안\n\n${companyName}에서 "${proposalTitle}" 협업을 제안했습니다.\n\n자세한 내용은 아래 링크에서 확인하세요.\n${magicLink}`,
+        templateId: "KA01TP260409050013707MDcnfpN4ApK",
+        variables: {
+          "#{고객명}": username,
+          "#{업체명}": companyName,
+          "#{프로젝트명}": proposalTitle,
+          "#{링크연결}": magicLink,
+        },
       });
     } catch (notifErr) {
       console.error("[api-proposals] Failed to send proposal alimtalk:", notifErr);
@@ -296,4 +296,5 @@ export default async (req: Request, context: Context) => {
 export const config: Config = {
   path: "/api/proposals/:username",
   method: ["GET", "POST", "PUT", "OPTIONS"],
+  rateLimit: { windowSize: 60, windowLimit: 20, aggregateBy: "ip" },
 };

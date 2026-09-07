@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { supabase } from '../services/supabase';
+import { getPublicProfileByUsername, supabase } from '../services/supabase';
 import { sessionSet } from '../utils/accountScope';
 
 interface SetupLinkProps {
@@ -60,11 +60,7 @@ const SetupLink: React.FC<SetupLinkProps> = ({ userId, onSetupComplete }) => {
 
     try {
       // Check if username is already taken
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', username)
-        .maybeSingle();
+      const { data: existing } = await getPublicProfileByUsername(username, 'id');
 
       if (existing) {
         setError('이미 사용 중인 링크입니다. 다른 링크를 입력해 주세요.');
@@ -76,7 +72,6 @@ const SetupLink: React.FC<SetupLinkProps> = ({ userId, onSetupComplete }) => {
       const profilePayload: Record<string, any> = {
         id: userId,
         username: username,
-        role: 'user',
         updated_at: new Date().toISOString(),
       };
       let { error: updateError } = await supabase

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Hash } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
-import { supabase, withTimeout } from '../services/supabase';
+import { getPublicProfileByUsername, supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
 import { enabledDefaultButtons } from '../utils/pageButtons';
@@ -297,11 +297,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
               try {
                 const result = await withTimeout(
-                  supabase
-                    .from('profiles')
-                    .select('id, username, full_name, bio, avatar_url, phone')
-                    .eq('username', username)
-                    .maybeSingle(),
+                  getPublicProfileByUsername(username, 'id, username, full_name, bio, avatar_url'),
                   5000,
                   'UserPage 프로필 조회'
                 );
@@ -564,13 +560,17 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       // profile username) — not a separate per-stream nickname. Resolve it from
       // the server so returning members chat under the same handle every time.
       try {
+        const accessToken = session?.access_token || (await supabase!.auth.getSession()).data.session?.access_token || '';
         const providerToken =
           session?.provider_token ||
           sessionStorage.getItem('kakao_provider_token') ||
           '';
         const setupRes = await fetch('/.netlify/functions/kakao-profile-setup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
+          },
           body: JSON.stringify({
             user_id: user.id,
             user_metadata: user.user_metadata || {},
@@ -595,8 +595,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       localStorage.setItem('picks_kakao_user', JSON.stringify(kakaoUser));
       localStorage.removeItem('picks_live_kakao_redirect');
 
-      // Sign out from Supabase so the viewer session doesn't interfere with admin login
-      await supabase!.auth.signOut();
+      if (kakaoUser.username) {
+        await supabase!.auth.signOut();
+      }
 
       // Auto-open live stream modal
       setShowLiveModal(true);

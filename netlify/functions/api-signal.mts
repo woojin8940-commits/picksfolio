@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * WebRTC signaling relay over HTTP polling, backed by Netlify Blobs.
@@ -138,6 +139,8 @@ export default async (req: Request, context: Context) => {
     }
 
     if (req.method === "DELETE") {
+      const auth = await requireAccountOwner(req, room);
+      if (!auth.ok) return auth.response;
       const listed = await store.list({ prefix });
       const blobs = listed.blobs || [];
       await Promise.all(blobs.map((blob) => store.delete(blob.key).catch(() => {})));

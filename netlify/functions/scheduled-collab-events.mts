@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { sendPushToUser } from "./_shared/push.mts";
+import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
 
 /**
  * 협업 이벤트 → 알림 발송.
@@ -137,21 +138,17 @@ export default async () => {
 
       if (!siteOrigin) continue;
       try {
-        await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username,
-            message: `[픽스폴리오] ${title}\n\n${body}\n\n${link}`,
-            templateId: Netlify.env.get("SOLAPI_KAKAO_COLLAB_TEMPLATE_ID") || "",
-            variables: {
-              "#{고객명}": username,
-              "#{업체명}": event.company_name || "",
-              "#{프로젝트명}": event.campaign_title || "",
-              "#{메시지내용}": body,
-              "#{링크연결}": link,
-            },
-          }),
+        await sendKakaoAlimtalk({
+          username,
+          message: `[픽스폴리오] ${title}\n\n${body}\n\n${link}`,
+          templateId: Netlify.env.get("SOLAPI_KAKAO_COLLAB_TEMPLATE_ID") || "",
+          variables: {
+            "#{고객명}": username,
+            "#{업체명}": event.company_name || "",
+            "#{프로젝트명}": event.campaign_title || "",
+            "#{메시지내용}": body,
+            "#{링크연결}": link,
+          },
         });
       } catch (smsErr) {
         console.error(`[collab-events] 알림톡 실패 (${username}):`, smsErr);

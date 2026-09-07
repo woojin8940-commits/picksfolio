@@ -79,9 +79,10 @@ let lastRegistered = '';
 export async function registerPushForUser(
   username: string,
   userType: 'business' | 'influencer',
+  accessToken: string,
 ): Promise<void> {
   const uname = (username || '').trim();
-  if (!uname) return;
+  if (!uname || !accessToken) return;
 
   const key = `${userType}:${uname.toLowerCase()}`;
   if (key === lastRegistered) return;
@@ -92,7 +93,10 @@ export async function registerPushForUser(
 
     await fetch(`${config.webUrl}/api/push/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({ token, username: uname, userType, platform: Platform.OS }),
     });
     lastRegistered = key;

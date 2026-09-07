@@ -584,7 +584,10 @@ const App: React.FC = () => {
           try {
             const setupResponse = await fetch('/.netlify/functions/kakao-profile-setup', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+              },
               body: JSON.stringify({
                 user_id: uid,
                 user_metadata: session.user.user_metadata || {},
@@ -708,7 +711,6 @@ const App: React.FC = () => {
               avatar_url: meta.avatar_url || meta.picture || idData.avatar_url || '',
               kakao_id: finalKakaoId,
               phone: normalizedPhone || '',
-              role: 'user',
             };
             try {
               const { error: insertError } = await supabase!.from('profiles').insert(profilePayload);
@@ -779,7 +781,6 @@ const App: React.FC = () => {
               id: uid,
               username: '',
               email: session.user.email || '',
-              role: 'user',
             };
             const { error: insertError } = await supabase.from('profiles').insert(profilePayload);
             if (!insertError) {
@@ -1283,14 +1284,22 @@ const App: React.FC = () => {
   // (chat) messages even when the app is closed.
   useEffect(() => {
     const native = (window as unknown as {
-      PicksFolioNative?: { registerPush?: (username: string, userType: string) => void };
+      PicksFolioNative?: { registerPush?: (username: string, userType: string, accessToken: string) => void };
     }).PicksFolioNative;
     if (!native || typeof native.registerPush !== 'function') return;
-    if (isBusinessLoggedIn && businessUsername) {
-      native.registerPush(businessUsername.replace(/^biz\//, ''), 'business');
-    } else if (isLoggedIn && userName) {
-      native.registerPush(userName, 'influencer');
-    }
+    let cancelled = false;
+    void (async () => {
+      const account = isBusinessLoggedIn ? businessUsername : userName;
+      const userType = isBusinessLoggedIn ? 'business' : 'influencer';
+      if (!account || (!isBusinessLoggedIn && !isLoggedIn)) return;
+      const accessToken = isBusinessLoggedIn
+        ? localStorage.getItem('picks_business_access_token') || ''
+        : (await supabase?.auth.getSession())?.data.session?.access_token || '';
+      if (!cancelled && accessToken) {
+        native.registerPush!(account.replace(/^biz\//, ''), userType, accessToken);
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
   }, [isLoggedIn, userName, isBusinessLoggedIn, businessUsername]);
 
   /**

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getDatabase } from "@picks/netlify-database";
+import type { Config } from "@netlify/functions";
 
 const SUPABASE_URL =
   "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -143,4 +144,9 @@ export default async (req: Request) => {
       error: err?.message || "로그인 중 오류가 발생했습니다.",
     });
   }
+};
+
+export const config: Config = {
+  path: "/.netlify/functions/auth-login",
+  rateLimit: { windowSize: 60, windowLimit: 30, aggregateBy: "ip" },
 };

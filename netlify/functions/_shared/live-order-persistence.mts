@@ -104,18 +104,7 @@ export async function persistLiveOrderToDatabase(order: PersistedLiveOrder): Pro
       ${order.paidAt},
       now()
     )
-    ON CONFLICT (id) DO UPDATE SET
-      username = EXCLUDED.username,
-      viewer_id = EXCLUDED.viewer_id,
-      viewer_name = EXCLUDED.viewer_name,
-      viewer_phone = EXCLUDED.viewer_phone,
-      items = EXCLUDED.items,
-      total_amount = EXCLUDED.total_amount,
-      status = EXCLUDED.status,
-      payment_id = EXCLUDED.payment_id,
-      address = EXCLUDED.address,
-      memo = EXCLUDED.memo,
-      updated_at = now()
+    ON CONFLICT (id) DO NOTHING
   `
 }
 

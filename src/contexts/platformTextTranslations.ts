@@ -3203,7 +3203,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "Meta 확인": "Check Meta",
   "mp4 · mov 처럼 바로 재생되는 링크면 브랜드가 화면에서 시점을 짚어 의견을 남길 수 있습니다.": "Direct video links (mp4, mov) allow timestamped feedback on-screen.",
   "PDF·노션 등 자료가 있으면 링크를 넣어 주세요.": "If you have materials such as PDF or Notion, please include a link.",
-  "pf.kakao.com/_채널ID 또는 오픈채팅 주소": "pf.kakao.com/_Channel ID or open chat address",
+  "pf.kakao.com/@채널이름 또는 오픈채팅 주소": "pf.kakao.com/@channel name or open chat address",
   "PICKS 운영자 전용 로그인": "PICKS operator only login",
   "processUserSession auto-create 전 재확인": "Recheck processUserSession before auto-creating",
   "Safari/Chrome에서 열기": "Open in Safari/Chrome",

@@ -110,7 +110,7 @@ export default async (req: Request) => {
       if (!campaign) return jsonError("캠페인을 찾을 수 없습니다.", 404);
 
       const [rows, billing] = await Promise.all([
-        db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}` as Promise<any[]>,
+        db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}`,
         billingBasis(db, campaignId),
       ]);
 
@@ -207,7 +207,7 @@ export default async (req: Request) => {
       }
 
       const [rows, billing] = await Promise.all([
-        db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}` as Promise<any[]>,
+        db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}`,
         billingBasis(db, campaignId),
       ]);
       return Response.json({

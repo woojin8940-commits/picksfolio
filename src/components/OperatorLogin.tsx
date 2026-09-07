@@ -103,8 +103,6 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
 
     const usernameClean = input.toLowerCase();
     try {
-      await fetch('/.netlify/functions/admin-seed', { method: 'POST' }).catch(() => {});
-
       const response = await fetch('/.netlify/functions/auth-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

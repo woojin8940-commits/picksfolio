@@ -43,7 +43,7 @@ export default async (req: Request) => {
           WHERE status = 'active' AND COALESCE(manager_username, '') = ''
           ORDER BY created_at DESC
           LIMIT 50
-        ` as Promise<any[]>,
+        `,
 
         db.sql`
           SELECT ca.id, ca.campaign_id, ca.applicant_username, ca.message, ca.contact,
@@ -60,7 +60,7 @@ export default async (req: Request) => {
             CASE ca.brand_preference WHEN 'shortlist' THEN 0 WHEN '' THEN 1 ELSE 2 END,
             ca.created_at ASC
           LIMIT 100
-        ` as Promise<any[]>,
+        `,
 
         db.sql`
           SELECT s.id, s.collab_id, s.stage_key, s.title, s.due_date, s.submitted_at,
@@ -72,7 +72,7 @@ export default async (req: Request) => {
             AND (${mineOnly} = false OR COALESCE(c.manager_username, '') = ${me})
           ORDER BY s.submitted_at ASC NULLS LAST
           LIMIT 100
-        ` as Promise<any[]>,
+        `,
 
         db.sql`
           SELECT s.id, s.collab_id, s.stage_key, s.title, s.owner_role, s.status, s.due_date,
@@ -86,7 +86,7 @@ export default async (req: Request) => {
             AND (${mineOnly} = false OR COALESCE(c.manager_username, '') = ${me})
           ORDER BY s.due_date ASC
           LIMIT 100
-        ` as Promise<any[]>,
+        `,
 
         // 마지막 메시지를 담당자가 쓰지 않은 방 = 우리가 답을 미루고 있는 방.
         db.sql`
@@ -107,7 +107,7 @@ export default async (req: Request) => {
             AND (${mineOnly} = false OR COALESCE(t.manager_username, '') = ${me})
           ORDER BY m.created_at ASC
           LIMIT 100
-        ` as Promise<any[]>,
+        `,
 
         db.sql`
           SELECT
@@ -116,7 +116,7 @@ export default async (req: Request) => {
             (SELECT COUNT(*)::int FROM campaign_collabs WHERE status = 'completed') AS completed,
             (SELECT COUNT(*)::int FROM campaign_collabs WHERE status = 'cancelled') AS cancelled,
             (SELECT COUNT(*)::int FROM collab_feedbacks WHERE status = 'open' AND visible_to_influencer = FALSE) AS brand_feedback_open
-        ` as Promise<any[]>,
+        `,
       ]);
 
     return Response.json({

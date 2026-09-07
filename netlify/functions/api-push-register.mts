@@ -1,5 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * Register (or refresh) a native device's Expo push token against the
@@ -30,6 +31,8 @@ export default async (req: Request) => {
   if (!validToken || !username) {
     return Response.json({ error: "Missing or invalid token/username" }, { status: 400 });
   }
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   try {
     const db = getDatabase();
@@ -48,4 +51,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/api/push/register",
+  rateLimit: { windowSize: 60, windowLimit: 10, aggregateBy: "ip" },
 };

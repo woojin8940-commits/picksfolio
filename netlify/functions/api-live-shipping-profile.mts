@@ -108,4 +108,5 @@ export default async (req: Request, _context: Context) => {
 export const config: Config = {
   path: '/api/live-shipping-profile',
   method: ['GET', 'POST'],
+  rateLimit: { windowSize: 60, windowLimit: 120, aggregateBy: 'ip' },
 }

@@ -146,8 +146,8 @@ const NATIVE_BRIDGE = `
       openBroadcast: function (opts) {
         post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
       },
-      registerPush: function (username, userType) {
-        post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType } });
+      registerPush: function (username, userType, accessToken) {
+        post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType, accessToken: accessToken } });
       }
     };
   })();
@@ -329,9 +329,10 @@ export default function WebAppScreen() {
         openNativeBroadcast(msg.payload ?? {});
       } else if (msg?.type === 'REGISTER_PUSH') {
         const username = msg.payload?.username;
+        const accessToken = msg.payload?.accessToken;
         const userType = msg.payload?.userType === 'business' ? 'business' : 'influencer';
-        if (typeof username === 'string' && username) {
-          registerPushForUser(username, userType);
+        if (typeof username === 'string' && username && typeof accessToken === 'string' && accessToken) {
+          registerPushForUser(username, userType, accessToken);
         }
       }
     },

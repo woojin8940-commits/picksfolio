@@ -4,6 +4,7 @@ import { getSupabaseServer } from "./_shared/supabase.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
 import {
   isProposalAlive,
   loadDeletedProposalIds,
@@ -288,21 +289,17 @@ export default async (req: Request, context: Context) => {
           ? `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`
           : `${siteOrigin}/admin?tab=inbox`;
 
-        await fetch(`${siteOrigin}/api/send-kakao-alimtalk`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: bizUsername,
-            message: `[픽스폴리오] 협업 제안 ${statusText}\n\n@${username}님이 "${proposalTitle}" 협업 제안을 ${statusText}했습니다.\n\n아래 링크에서 확인하세요.\n${magicLink}`,
-            templateId,
-            variables: {
-              "#{고객명}": bizUsername,
-              "#{업체명}": updatedProposal.company_name || bizUsername,
-              "#{프로젝트명}": proposalTitle,
-              "#{메시지내용}": `@${username}님이 협업 제안을 ${statusText}했습니다.`,
-              "#{링크연결}": magicLink,
-            },
-          }),
+        await sendKakaoAlimtalk({
+          username: bizUsername,
+          message: `[픽스폴리오] 협업 제안 ${statusText}\n\n@${username}님이 "${proposalTitle}" 협업 제안을 ${statusText}했습니다.\n\n아래 링크에서 확인하세요.\n${magicLink}`,
+          templateId,
+          variables: {
+            "#{고객명}": bizUsername,
+            "#{업체명}": updatedProposal.company_name || bizUsername,
+            "#{프로젝트명}": proposalTitle,
+            "#{메시지내용}": `@${username}님이 협업 제안을 ${statusText}했습니다.`,
+            "#{링크연결}": magicLink,
+          },
         });
       } catch (notifErr) {
         console.error("[api-proposal-item] Failed to send status alimtalk to business:", notifErr);

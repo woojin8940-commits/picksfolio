@@ -184,8 +184,8 @@ export default async (req: Request, context: Context) => {
     }
 
     try {
-      const { KakaoTemplateService } = await import('solapi')
-      const templateService = new KakaoTemplateService(
+      const { SolapiMessageService } = await import('solapi')
+      const templateService = new SolapiMessageService(
         Netlify.env.get('SOLAPI_API_KEY') || '',
         Netlify.env.get('SOLAPI_API_SECRET') || '',
       )

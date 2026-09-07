@@ -2261,9 +2261,18 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
 
     try {
       if (kakaoUser?.userId) {
+        const { data: sessionData } = await supabase!.auth.getSession();
+        const accessToken = sessionData.session?.access_token || '';
+        if (!accessToken) {
+          setUsernameError('로그인이 만료되었습니다. 다시 로그인해주세요.');
+          return;
+        }
         const res = await fetch('/.netlify/functions/kakao-set-username', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
           body: JSON.stringify({ user_id: kakaoUser.userId, username: value }),
         });
         const data = await res.json();
@@ -2271,6 +2280,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
           setUsernameError(data.error || '저장 중 오류가 발생했습니다. 다시 시도해주세요.');
           return;
         }
+        await supabase!.auth.signOut();
       }
 
       setKakaoUser(prev => {

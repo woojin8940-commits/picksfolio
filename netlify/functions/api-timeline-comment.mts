@@ -24,13 +24,43 @@ export default async (req: Request, context: Context) => {
 
     const store = getStore({ name: STORE, consistency: "strong" });
     const key = `detail_${proposalId}`;
-    const stored = (await store.get(key, { type: "json" })) as any;
+    let stored = (await store.get(key, { type: "json" })) as any;
+    if (!stored) {
+      try {
+        const { getDatabase } = await import("@picks/netlify-database");
+        const db = getDatabase();
+        const rows = await db.sql`
+          SELECT proposal_id, kind, collab_id, influencer_username, business_username,
+                 manager_username, company_name, proposal_title, created_at
+          FROM timelines
+          WHERE proposal_id = ${proposalId}
+          LIMIT 1
+        `;
+        if (rows.length > 0) {
+          const row = rows[0] as any;
+          stored = {
+            proposalId: row.proposal_id,
+            kind: row.kind || "brand_influencer",
+            collabId: row.collab_id || "",
+            influencerUsername: row.influencer_username || "",
+            businessUsername: row.business_username || "",
+            managerUsername: row.manager_username || "",
+            companyName: row.company_name || "",
+            proposalTitle: row.proposal_title || "",
+            comments: [],
+            createdAt: row.created_at || new Date().toISOString(),
+          };
+        }
+      } catch {}
+    }
+    if (!stored) {
+      return Response.json({ error: "대화방을 찾을 수 없습니다." }, { status: 404 });
+    }
 
-    // 방이 아직 없으면(첫 메시지) body 가 알려준 당사자를 기준으로 판단한다.
-    const influencerUsername = stored?.influencerUsername || body.influencerUsername || "";
-    const businessUsername = stored?.businessUsername || body.businessUsername || "";
-    const managerUsername = stored?.managerUsername || "";
-    const threadKind = stored?.kind || "brand_influencer";
+    const influencerUsername = stored.influencerUsername || "";
+    const businessUsername = stored.businessUsername || "";
+    const managerUsername = stored.managerUsername || "";
+    const threadKind = stored.kind || "brand_influencer";
 
     const access = await resolveTimelineAccess(req, {
       influencer: influencerUsername,
@@ -44,52 +74,40 @@ export default async (req: Request, context: Context) => {
     // 나중에 "누가 그렇게 말했나"를 따질 때 이게 유일한 근거다.
     const authorUsername = access.username;
     const authorType = access.authorType;
-    const defaultAuthorName = authorType === "manager" ? "픽스폴리오 담당자" : authorUsername;
+    const defaultAuthorName = authorType === "manager"
+      ? "픽스폴리오 담당자"
+      : authorType === "business"
+        ? stored.companyName || authorUsername
+        : authorUsername;
+    const content = typeof body.content === "string" ? body.content.trim().slice(0, 5000) : "";
+    const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 10) : [];
+    if (!content && attachments.length === 0) {
+      return Response.json({ error: "메시지 내용을 입력해 주세요." }, { status: 400 });
+    }
 
     const comment = {
       id: `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       proposalId,
       authorType,
-      authorName: body.authorName || defaultAuthorName,
+      authorName: defaultAuthorName,
       authorUsername,
-      content: body.content || "",
+      content,
       createdAt: new Date().toISOString(),
       readBy: [authorUsername],
       ...(typeof body.clientId === "string" && /^pending_[a-zA-Z0-9_]{1,100}$/.test(body.clientId)
         ? { clientId: body.clientId } : {}),
-      ...(body.attachments ? { attachments: body.attachments } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     };
 
     // 양쪽이 동시에 답장하면 통째로 덮어쓰기가 상대 메시지를 지운다. 최신 대화를
     // 다시 읽어 이 메시지만 덧붙이는 조건부 쓰기로 저장한다.
     const existing = (await mutateBlobJSON<any>(STORE, key, (current) => {
-      const base = current ?? {
-        proposalId,
-        influencerUsername: body.influencerUsername || "",
-        businessUsername: body.businessUsername || "",
-        managerUsername: "",
-        kind: "brand_influencer",
-        companyName: body.companyName || "",
-        proposalTitle: body.proposalTitle || "",
-        comments: [],
-        createdAt: new Date().toISOString(),
-      };
+      const base = current ?? stored;
 
       const next: any = {
         ...base,
         comments: [...(Array.isArray(base.comments) ? base.comments : []), comment],
       };
-
-      // 당사자는 비어 있을 때만 채운다 — 이미 기록된 상대를 body 로 바꿔치기하면
-      // 남의 협업방을 가져올 수 있다.
-      if (!next.influencerUsername && body.influencerUsername) {
-        next.influencerUsername = body.influencerUsername;
-      }
-      if (!next.businessUsername && body.businessUsername) {
-        next.businessUsername = body.businessUsername;
-      }
-      if (body.companyName) next.companyName = body.companyName;
-      if (body.proposalTitle) next.proposalTitle = body.proposalTitle;
 
       return next;
     })) as any;
@@ -145,7 +163,7 @@ export default async (req: Request, context: Context) => {
             `,
             db.sql`
               INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, attachments, read_by, created_at)
-              VALUES (${comment.id}, ${proposalId}, ${comment.authorType}, ${comment.authorName}, ${comment.authorUsername}, ${comment.content}, ${body.attachments ? JSON.stringify(body.attachments) : null}, ${comment.readBy}, ${comment.createdAt})
+              VALUES (${comment.id}, ${proposalId}, ${comment.authorType}, ${comment.authorName}, ${comment.authorUsername}, ${comment.content}, ${attachments.length > 0 ? JSON.stringify(attachments) : null}, ${comment.readBy}, ${comment.createdAt})
               ON CONFLICT (id) DO NOTHING
             `,
           ]);
@@ -170,10 +188,9 @@ export default async (req: Request, context: Context) => {
 
           if (recipients.length === 0) return;
 
-          const notifQueue = getStore({ name: "notification-queue", consistency: "strong" });
           const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
           const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
-          const messagePreview = (body.content || "").slice(0, 50);
+          const messagePreview = content.slice(0, 50);
           const projectName = existing.proposalTitle || "협업 프로젝트";
           const senderName = comment.authorName
             || (comment.authorType === "manager" ? "픽스폴리오 담당자" : existing.companyName)
@@ -181,20 +198,22 @@ export default async (req: Request, context: Context) => {
 
           await Promise.all(recipients.map(async (recipientUsername) => {
             const queueKey = `pending:${proposalId}_${recipientUsername}`;
-            const existingNotif = await notifQueue.get(queueKey, { type: "json" }) as any;
             const recipientType = recipientUsername === managerUser
               ? "manager"
               : recipientUsername === businessUser
                 ? "business"
                 : "influencer";
 
-            if (existingNotif) {
-              existingNotif.messageCount = (existingNotif.messageCount || 1) + 1;
-              existingNotif.lastMessagePreview = messagePreview;
-              existingNotif.sendAfter = new Date(Date.now() + 30_000).toISOString();
-              await notifQueue.setJSON(queueKey, existingNotif);
-            } else {
-              await notifQueue.setJSON(queueKey, {
+            await mutateBlobJSON<any>("notification-queue", queueKey, (current) => {
+              if (current) {
+                return {
+                  ...current,
+                  messageCount: (current.messageCount || 1) + 1,
+                  lastMessagePreview: messagePreview,
+                  sendAfter: new Date(Date.now() + 30_000).toISOString(),
+                };
+              }
+              return {
                 recipientUsername,
                 recipientType,
                 proposalId,
@@ -207,14 +226,14 @@ export default async (req: Request, context: Context) => {
                 magicLink,
                 siteOrigin,
                 sendAfter: new Date(Date.now() + 30_000).toISOString(),
-              });
-            }
+              };
+            });
 
             // Native push is immediate — its whole value is reaching the
             // recipient the moment the message lands (the Kakao alimtalk above
             // is debounced 30s and acts as the fallback when the app is gone).
             const pushBody = messagePreview
-              || (body.attachments?.length ? "사진을 보냈어요." : "새 메시지가 도착했어요.");
+              || (attachments.length > 0 ? "사진을 보냈어요." : "새 메시지가 도착했어요.");
             await sendPushToUser(recipientUsername, {
               title: `${senderName} · ${projectName}`,
               body: pushBody,

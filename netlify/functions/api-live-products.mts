@@ -18,15 +18,27 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const data = await store.get(key, { type: "json" });
-    return Response.json({ products: data || [] });
+    return Response.json({ products: Array.isArray(data) ? data : [] });
   }
 
   if (req.method === "POST") {
     const auth = await requireAccountOwner(req, username);
     if (!auth.ok) return auth.response;
 
-    const body = await req.json();
-    await store.setJSON(key, body.products || []);
+    const bodyText = await req.text();
+    if (bodyText.length > 1024 * 1024) {
+      return Response.json({ error: "Payload too large" }, { status: 413 });
+    }
+    let body: any;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      return Response.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+    if (!Array.isArray(body.products) || body.products.length > 500) {
+      return Response.json({ error: "Invalid products" }, { status: 400 });
+    }
+    await store.setJSON(key, body.products);
     return Response.json({ success: true });
   }
 
@@ -35,4 +47,5 @@ export default async (req: Request, context: Context) => {
 
 export const config: Config = {
   path: "/api/live-products/:username",
+  rateLimit: { windowSize: 60, windowLimit: 120, aggregateBy: "ip" },
 };

@@ -1,3 +1,5 @@
+import { authHeaders } from './apiService';
+
 /**
  * WebRTC signaling via HTTP polling (Netlify Functions + Blobs).
  * No dependency on Supabase Realtime — works on any deployment.
@@ -626,6 +628,14 @@ async function postSignal(username: string, msg: SignalMessage) {
   }
 }
 
+async function clearSignalRoom(username: string) {
+  const headers = await authHeaders();
+  await fetch(`/api/signal/${encodeURIComponent(username.toLowerCase())}`, {
+    method: 'DELETE',
+    headers,
+  });
+}
+
 async function pollSignals(
   username: string,
   participantId: string,
@@ -712,7 +722,7 @@ export class BroadcasterSignaling {
     this.lastTimestamp = Date.now() - 5000;
 
     // Clear old signals from previous broadcast to avoid stale viewer-joins
-    fetch(`/api/signal/${encodeURIComponent(this.channelName)}`, { method: 'DELETE' }).catch(() => {});
+    clearSignalRoom(this.channelName).catch(() => {});
 
     // Start adaptive polling - fast initially, slower once stable
     this.schedulePoll();
@@ -1180,7 +1190,7 @@ export class BroadcasterSignaling {
     // receive it before the channel is wiped. The next broadcast's start() also
     // clears stale signals, so a missed delete here is harmless.
     setTimeout(() => {
-      fetch(`/api/signal/${encodeURIComponent(this.channelName)}`, { method: 'DELETE' }).catch(() => {});
+      clearSignalRoom(this.channelName).catch(() => {});
     }, 4000);
   }
 }

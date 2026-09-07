@@ -907,7 +907,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         showFailureFeedback(saveFailureMessage(result), 'warning');
       }
       // Supabase 동기화 (백그라운드)
-      updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials })
+      updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials }, false)
         .catch(err => console.warn('[SaveDesign] Supabase 동기화 실패:', err));
     } catch (error) {
       console.error('[SaveDesign] 클라우드 동기화 실패:', error);
@@ -928,7 +928,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       // Supabase 동기화도 시도 (백그라운드)
       Promise.all([
         updateLinkGridItems(blocksToSave),
-        updateSiteSettings(userName, { blocks: blocksToSave })
+        updateSiteSettings(userName, { blocks: blocksToSave }, false)
       ]).catch(err => console.warn('[SaveBlocks] Supabase 동기화 실패:', err));
       return result;
     } catch (error) {

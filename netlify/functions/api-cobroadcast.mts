@@ -267,11 +267,15 @@ export default async (req: Request) => {
         // friend list instead of retyping the username. Best-effort — a failure
         // here must not block the accept.
         if (partner) {
-          await db.sql`
-            INSERT INTO live_friends (owner_username, friend_username)
-            VALUES (${user}, ${partner}), (${partner}, ${user})
-            ON CONFLICT (owner_username, friend_username) DO NOTHING
-          `.catch((e: any) => console.error("[api-cobroadcast] reciprocal friend add failed:", e));
+          try {
+            await db.sql`
+              INSERT INTO live_friends (owner_username, friend_username)
+              VALUES (${user}, ${partner}), (${partner}, ${user})
+              ON CONFLICT (owner_username, friend_username) DO NOTHING
+            `;
+          } catch (e: any) {
+            console.error("[api-cobroadcast] reciprocal friend add failed:", e);
+          }
         }
 
         const info = await profilesFor(db, [user]);
@@ -309,11 +313,15 @@ export default async (req: Request) => {
         // keep each other in their saved-friends list and can re-invite straight
         // from it next time. Best-effort — never block going live on this.
         if (partner) {
-          await db.sql`
-            INSERT INTO live_friends (owner_username, friend_username)
-            VALUES (${user}, ${partner}), (${partner}, ${user})
-            ON CONFLICT (owner_username, friend_username) DO NOTHING
-          `.catch((e: any) => console.error("[api-cobroadcast] live friend add failed:", e));
+          try {
+            await db.sql`
+              INSERT INTO live_friends (owner_username, friend_username)
+              VALUES (${user}, ${partner}), (${partner}, ${user})
+              ON CONFLICT (owner_username, friend_username) DO NOTHING
+            `;
+          } catch (e: any) {
+            console.error("[api-cobroadcast] live friend add failed:", e);
+          }
         }
 
         return Response.json({ success: true, status: "live" });

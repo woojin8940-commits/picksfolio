@@ -140,20 +140,9 @@ export default async (req: Request, _context: Context) => {
   const username = (body.username || '').trim().toLowerCase()
   const expectedAmount = Number(body.expectedAmount)
   const items = Array.isArray(body.items) ? body.items : []
-  if (!paymentId || !username || !Number.isFinite(expectedAmount) || expectedAmount <= 0 || items.length === 0) {
+  if (!paymentId || !username || !Number.isFinite(expectedAmount) || expectedAmount <= 0 || items.length === 0 || items.length > 50) {
     return Response.json(
       { success: false, error: 'paymentId, username, expectedAmount, items가 모두 필요합니다.' },
-      { status: 400 },
-    )
-  }
-
-  const itemsSum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0)
-  if (itemsSum !== expectedAmount) {
-    return Response.json(
-      {
-        success: false,
-        error: `항목 금액 합계(${itemsSum})가 결제 금액(${expectedAmount})과 일치하지 않습니다.`,
-      },
       { status: 400 },
     )
   }
@@ -167,7 +156,28 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw: expectedAmount })
+  const itemsSum = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+  if (itemsSum !== expectedAmount) {
+    return Response.json(
+      {
+        success: false,
+        error: `항목 금액 합계(${itemsSum})가 결제 금액(${expectedAmount})과 일치하지 않습니다.`,
+      },
+      { status: 400 },
+    )
+  }
+
+  const expectedOrderName = (items.length === 1
+    ? String(items[0]?.productName || '')
+    : `${String(items[0]?.productName || '')} 외 ${items.length - 1}건`
+  ).slice(0, 100)
+  const verified = await verifyLivePortOnePayment({
+    paymentId,
+    expectedKrw: expectedAmount,
+    expectedPaymentIdPrefix: 'live-batch',
+    expectedPaymentIdOwner: username,
+    expectedOrderName,
+  })
   if (!verified.ok) {
     return Response.json(
       { success: false, error: verified.error },
@@ -178,10 +188,11 @@ export default async (req: Request, _context: Context) => {
 
   const now = new Date().toISOString()
 
-  const records: OrderRecord[] = items.map((it, idx) => {
-    const itemAmount = Number(it.amount)
+  const records: OrderRecord[] = items.map((item, idx) => {
+    const itemAmount = Number(item.amount)
     const split = splitLiveCommission(itemAmount)
-    return {      paymentId: `${paymentId}#${idx + 1}`,
+    return {
+      paymentId: `${paymentId}#${idx + 1}`,
       pgTxId: payment.pgTxId,
       amount: itemAmount,
       paidAt: payment.paidAt || now,
@@ -193,11 +204,11 @@ export default async (req: Request, _context: Context) => {
       commissionAmount: split.commissionAmount,
       sellerNetAmount: split.sellerNetAmount,
       product: {
-        id: it.productId!,
-        name: it.productName!,
-        link: it.productLink,
-        image: it.productImage,
-        selectedOptions: it.selectedOptions,
+        id: item.productId!,
+        name: item.productName!,
+        link: item.productLink,
+        image: item.productImage,
+        selectedOptions: item.selectedOptions,
       },
       viewer: {
         viewerId: body.viewer?.viewerId || 'anonymous',
@@ -208,33 +219,11 @@ export default async (req: Request, _context: Context) => {
     }
   })
 
-  // 동시 결제로 주문이 유실되지 않도록 조건부 쓰기로 반영한다. 중복(같은 paymentId)
-  // 검사도 최신 목록을 기준으로 해야 하므로 같은 블록 안에서 한다.
-  let alreadyRecorded = false
-  await mutateBlobJSON<LiveOrdersData>('live-orders', username, (current) => {
-    const orders = Array.isArray(current?.orders) ? current!.orders : []
-    if (orders.some((o) => o.paymentId === paymentId)) {
-      alreadyRecorded = true
-      return null
-    }
-    alreadyRecorded = false
-    // Anchor the batch under the original paymentId too so idempotency checks hit.
-    const anchor: OrderRecord = { ...records[0], paymentId }
-    return {
-      orders: [...[...records].reverse(), anchor, ...orders],
-      updatedAt: now,
-    }
-  })
-
-  if (alreadyRecorded) {
-    return Response.json({ success: true, alreadyProcessed: true })
-  }
-
   await persistLiveOrdersToDatabase(
     records.map((record) => ({
       id: record.paymentId,
       username,
-      paymentId: record.paymentId,
+      paymentId: record.batchPaymentId || record.paymentId,
       amount: record.amount,
       paidAt: record.paidAt,
       status: record.status,
@@ -249,6 +238,26 @@ export default async (req: Request, _context: Context) => {
       shipping: record.shipping,
     })),
   )
+
+  // 동시 결제로 주문이 유실되지 않도록 조건부 쓰기로 반영한다. 중복(같은 paymentId)
+  // 검사도 최신 목록을 기준으로 해야 하므로 같은 블록 안에서 한다.
+  let alreadyRecorded = false
+  await mutateBlobJSON<LiveOrdersData>('live-orders', username, (current) => {
+    const orders = Array.isArray(current?.orders) ? current!.orders : []
+    if (orders.some((o) => o.paymentId === paymentId || o.batchPaymentId === paymentId)) {
+      alreadyRecorded = true
+      return null
+    }
+    alreadyRecorded = false
+    return {
+      orders: [...[...records].reverse(), ...orders],
+      updatedAt: now,
+    }
+  })
+
+  if (alreadyRecorded) {
+    return Response.json({ success: true, alreadyProcessed: true })
+  }
 
   // Remove just the paid items from this viewer's cart so the seller's
   // live-cart view updates but any unpriceable leftover items remain visible.
@@ -281,4 +290,5 @@ export default async (req: Request, _context: Context) => {
 export const config: Config = {
   path: '/api/live-order-batch',
   method: ['POST'],
+  rateLimit: { windowSize: 60, windowLimit: 30, aggregateBy: 'ip' },
 }

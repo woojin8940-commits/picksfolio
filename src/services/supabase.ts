@@ -25,6 +25,35 @@ export const SUPABASE_ANON_KEY = supabaseAnonKey;
 
 let supabase: SupabaseClient | null = null;
 
+const publicProfilesViewMissing = (error: any) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === 'PGRST205' || code === '42P01' ||
+    (message.includes('public_profiles') && /schema cache|does not exist/i.test(message));
+};
+
+export const getPublicProfileByUsername = async (
+  username: string,
+  columns: string
+): Promise<{ data: any; error: any }> => {
+  if (!supabase) return { data: null, error: new Error('Supabase unavailable') };
+
+  const normalizedUsername = username.trim().toLowerCase();
+  const result: any = await supabase
+    .from('public_profiles')
+    .select(columns)
+    .eq('username', normalizedUsername)
+    .maybeSingle();
+
+  if (!result.error || !publicProfilesViewMissing(result.error)) return result;
+
+  return await supabase
+    .from('profiles')
+    .select(columns)
+    .eq('username', normalizedUsername)
+    .maybeSingle() as any;
+};
+
 // In-process fallback lock: serializes concurrent calls within this tab without
 // blocking on other tabs. Used when navigator.locks is unavailable or deadlocks.
 const inProcessLockQueues = new Map<string, Promise<unknown>>();

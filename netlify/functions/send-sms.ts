@@ -1,6 +1,9 @@
 import type { Config } from "@netlify/functions";
 import { SolapiMessageService } from "solapi";
 import { getDatabase } from "@picks/netlify-database";
+import { randomInt } from "node:crypto";
+
+const PURPOSES = new Set(["signup", "business_signup", "find-id", "reset-password"]);
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -16,14 +19,17 @@ export default async (req: Request) => {
 
     const apiKey = Netlify.env.get("SOLAPI_API_KEY");
     const apiSecret = Netlify.env.get("SOLAPI_API_SECRET");
-    const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER") || "01035638940";
+    const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER");
 
-    if (!apiKey || !apiSecret) {
+    if (!apiKey || !apiSecret || !fromNumber) {
       return Response.json({ error: "서버 설정 오류" }, { status: 500 });
     }
 
     const cleanPhone = receiver.replace(/\D/g, "");
     const smsPurpose = purpose || "general";
+    if (!/^01\d{8,9}$/.test(cleanPhone) || !PURPOSES.has(smsPurpose)) {
+      return Response.json({ error: "잘못된 인증 요청입니다." }, { status: 400 });
+    }
 
     const db = getDatabase();
 
@@ -39,7 +45,7 @@ export default async (req: Request) => {
       }, { status: 429 });
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomInt(100000, 1000000).toString();
 
     const messageService = new SolapiMessageService(apiKey, apiSecret);
 
@@ -85,4 +91,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/.netlify/functions/send-sms",
+  rateLimit: { windowSize: 60, windowLimit: 5, aggregateBy: "ip" },
 };
