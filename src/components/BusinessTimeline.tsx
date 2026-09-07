@@ -9,6 +9,8 @@ import {
 import { isNativeApp } from '../utils/appEnv';
 import { membershipCovers } from '../utils/membershipTiers';
 import { AiMarkdown } from './AiMarkdown';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
+import { mergeTimelineMessages } from '../utils/timelineMessages';
 
 interface AiMessage {
   role: 'user' | 'assistant';
@@ -39,6 +41,7 @@ interface TimelineAttachment {
 
 interface TimelineComment {
   id: string;
+  clientId?: string;
   proposalId: string;
   authorType: 'influencer' | 'business' | 'manager';
   authorName: string;
@@ -180,19 +183,20 @@ interface BusinessTimelineProps {
 const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType = 'influencer', initialProposalId }) => {
   const normalizedUserName = userName.replace(/^biz\//, '');
   const cacheKey = `picks_timelines_${userType}_${normalizedUserName.toLowerCase()}`;
-  const detailCacheKey = (proposalId: string) => `picks_timeline_detail_${proposalId}`;
+  const detailCacheKey = useCallback((proposalId: string) => `${cacheKey}_detail_${proposalId}`, [cacheKey]);
 
-  const initialTimelines = (() => {
+  const initialTimelines = React.useMemo(() => {
     if (typeof window === 'undefined') return [] as TimelineData[];
     try {
       const raw = localStorage.getItem(cacheKey);
-      return raw ? (JSON.parse(raw) as TimelineData[]) : [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed as TimelineData[] : [];
     } catch {
       return [] as TimelineData[];
     }
-  })();
+  }, [cacheKey]);
 
-  const initialDetail = (() => {
+  const initialDetail = React.useMemo(() => {
     if (typeof window === 'undefined' || !initialProposalId) return null;
     try {
       const raw = localStorage.getItem(detailCacheKey(initialProposalId));
@@ -200,7 +204,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     } catch {
       return null;
     }
-  })();
+  }, [initialProposalId, detailCacheKey]);
 
   const [timelines, setTimelines] = useState<TimelineData[]>(initialTimelines);
   const [selectedTimeline, setSelectedTimeline] = useState<TimelineData | null>(initialDetail);
@@ -217,12 +221,17 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   const locallyHiddenRef = useRef<Map<string, 'pending' | 'confirmed'>>(new Map());
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
-  const [windowFocused, setWindowFocused] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const lastMessageCountRef = useRef<number>(0);
+  const timelinesRef = useRef(timelines);
+  timelinesRef.current = timelines;
+  const selectedIdRef = useRef(selectedTimeline?.proposalId || '');
+  selectedIdRef.current = selectedTimeline?.proposalId || '';
+  const detailEtagsRef = useRef(new Map<string, string>());
+  const messageRevisionRef = useRef(0);
+  const readInFlightRef = useRef(new Set<string>());
 
   // Pinned AI assistant (top of the collaboration message list)
   const [aiActive, setAiActive] = useState(false);
@@ -461,24 +470,15 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     }
   };
 
-  useEffect(() => {
-    const onFocus = () => setWindowFocused(true);
-    const onBlur = () => setWindowFocused(false);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
-
-  const fetchTimelines = useCallback(async () => {
+  const fetchTimelines = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch(`/api/timeline/list/${normalizedUserName}?type=${userType}`, {
         headers: await authHeaders(),
+        signal,
+        cache: 'no-store',
       });
       const data = await res.json();
-      if (data.timelines) {
+      if (res.ok && !signal?.aborted && Array.isArray(data.timelines)) {
         // 방금 삭제한 대화는 서버 응답이 그 삭제를 반영할 때까지 걸러낸다. 걸러낸
         // 뒤에 '확인됨' 표시를 지우는 순서가 중요하다 — 서버가 걸러 주기 시작하면
         // 로컬 필터를 놓아 줘야 상대가 새 메시지를 보내 되살아난 대화가 다시 보인다.
@@ -491,7 +491,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         try { localStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
       }
     } catch (e) {
-      console.error('Failed to fetch timelines:', e);
+      if (!signal?.aborted) console.error('Failed to fetch timelines:', e);
     } finally {
       setLoading(false);
     }
@@ -572,10 +572,10 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     return () => clearTimeout(timer);
   }, [listNotice]);
 
-  const fetchTimelineDetail = useCallback(async (proposalId: string, showCachedImmediately = false) => {
+  const fetchTimelineDetail = useCallback(async (proposalId: string, showCachedImmediately = false, signal?: AbortSignal) => {
     // 목록에만 있는 값(경로·제안 상태)은 상세 응답에 없다. 상세로 갈아끼울 때
     // 이 두 칸을 챙겨 두지 않으면 방을 열자마자 배지가 사라진다.
-    const listEntry = timelines.find(t => t.proposalId === proposalId);
+    const listEntry = timelinesRef.current.find(t => t.proposalId === proposalId);
     const carryOver = {
       ...(listEntry?.source ? { source: listEntry.source } : {}),
       ...(listEntry?.proposalStatus !== undefined ? { proposalStatus: listEntry.proposalStatus } : {}),
@@ -587,54 +587,49 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           return raw ? JSON.parse(raw) as TimelineData : null;
         } catch { return null; }
       })();
-      const fromList = timelines.find(t => t.proposalId === proposalId);
-      if (cached) {
-        setSelectedTimeline({ ...cached, ...carryOver });
-        lastMessageCountRef.current = cached.comments?.length || 0;
-      } else if (fromList && fromList.comments) {
-        setSelectedTimeline(fromList);
-        lastMessageCountRef.current = fromList.comments?.length || 0;
-      }
+      selectedIdRef.current = proposalId;
+      detailEtagsRef.current.delete(proposalId);
+      setSelectedTimeline({
+        ...(cached || listEntry || {
+          proposalId, influencerUsername: '', businessUsername: '',
+          companyName: '', proposalTitle: '', comments: [], createdAt: '',
+        }),
+        ...carryOver,
+      });
+      return;
     }
     try {
-      const res = await fetch(`/api/timeline/detail/${proposalId}`, {
-        headers: await authHeaders(),
+      const revision = messageRevisionRef.current;
+      const data = await apiService.getTimelineThread(proposalId, undefined, {
+        signal,
+        etag: detailEtagsRef.current.get(proposalId),
       });
-      const data = await res.json();
+      if (signal?.aborted || selectedIdRef.current !== proposalId || revision !== messageRevisionRef.current) return;
+      if (data.notModified || data.aborted) return;
+      if (data.error) throw new Error(data.error);
       if (data.timeline) {
-        const serverCount = (data.timeline.comments || []).length;
+        const comments: TimelineComment[] = Array.isArray(data.timeline.comments) ? data.timeline.comments : [];
         setSelectedTimeline(prev => {
-          if (prev && prev.proposalId === proposalId) {
-            const pendingMsgs = (prev.comments || []).filter((c: TimelineComment) => c.id.startsWith('pending_'));
-            const serverIds = new Set((data.timeline.comments || []).map((c: TimelineComment) => c.id));
-            const stillPending = pendingMsgs.filter((c: TimelineComment) => !serverIds.has(c.id.replace('pending_', 'tc_')));
-            if (serverCount === lastMessageCountRef.current && stillPending.length === 0) {
-              return prev;
-            }
-            lastMessageCountRef.current = serverCount;
-            return { ...data.timeline, ...carryOver, comments: [...(data.timeline.comments || []), ...stillPending] };
-          }
-          lastMessageCountRef.current = serverCount;
-          return { ...data.timeline, ...carryOver };
+          if (!prev || prev.proposalId !== proposalId) return prev;
+          const next = { ...data.timeline, ...carryOver, comments: mergeTimelineMessages(comments, prev.comments || []) };
+          return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
         });
         try { localStorage.setItem(detailCacheKey(proposalId), JSON.stringify(data.timeline)); } catch {}
-        fetch(`/api/timeline/read/${proposalId}`, {
-          method: 'PATCH',
-          headers: await authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ username: normalizedUserName.toLowerCase() }),
-        }).catch(() => {});
+        const viewer = data.viewer?.username || normalizedUserName.toLowerCase();
+        const unread = comments.some(c => !c.readBy?.includes(viewer));
+        if (!unread && data.etag) detailEtagsRef.current.set(proposalId, data.etag);
+        else detailEtagsRef.current.delete(proposalId);
+        if (unread && !readInFlightRef.current.has(proposalId)) {
+          readInFlightRef.current.add(proposalId);
+          void apiService.markTimelineRead(proposalId).finally(() => readInFlightRef.current.delete(proposalId));
+        }
       }
     } catch (e) {
       console.error('Failed to fetch timeline detail:', e);
     }
-  }, [normalizedUserName, timelines]);
+  }, [normalizedUserName, detailCacheKey]);
 
-  useEffect(() => {
-    fetchTimelines();
-    const ms = windowFocused ? 30000 : 120000;
-    const interval = setInterval(fetchTimelines, ms);
-    return () => clearInterval(interval);
-  }, [fetchTimelines, windowFocused]);
+  useVisiblePolling(fetchTimelines, 15_000, true, cacheKey);
 
   useEffect(() => {
     if (initialProposalId) {
@@ -646,16 +641,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   useEffect(() => {
     const el = messagesContainerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [selectedTimeline?.comments]);
+  }, [selectedTimeline?.proposalId, selectedTimeline?.comments?.length]);
 
-  useEffect(() => {
-    if (!selectedTimeline) return;
-    const ms = windowFocused ? 10000 : 60000;
-    const interval = setInterval(() => {
-      fetchTimelineDetail(selectedTimeline.proposalId);
-    }, ms);
-    return () => clearInterval(interval);
-  }, [selectedTimeline?.proposalId, fetchTimelineDetail, windowFocused]);
+  useVisiblePolling(
+    signal => fetchTimelineDetail(selectedIdRef.current, false, signal),
+    2_000,
+    !!selectedTimeline && !aiActive && !showList,
+    selectedTimeline?.proposalId || '',
+  );
 
   const handleSendMessage = () => {
     if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedTimeline) return;
@@ -666,6 +659,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     const optimisticId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const optimisticComment: TimelineComment = {
       id: optimisticId,
+      clientId: optimisticId,
       proposalId: selectedTimeline.proposalId,
       authorType: userType,
       authorName: normalizedUserName,
@@ -702,6 +696,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           formData.append('username', normalizedUserName.toLowerCase());
           const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
           const uploadData = await uploadRes.json();
+          if (!uploadRes.ok || !uploadData.url) throw new Error('Upload failed');
           if (uploadData.url) {
             uploadedAttachments.push({
               url: uploadData.url,
@@ -714,7 +709,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
 
         if (uploadedAttachments.length > 0) {
           setSelectedTimeline(prev => {
-            if (!prev) return null;
+            if (!prev || prev.proposalId !== proposalId) return prev;
             return {
               ...prev,
               comments: (prev.comments || []).map(c =>
@@ -732,27 +727,31 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
             authorName: normalizedUserName,
             authorUsername: normalizedUserName.toLowerCase(),
             content: messageContent,
+            clientId: optimisticId,
             ...timelineInfo,
             ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
           }),
         });
 
         const data = await res.json();
+        if (!res.ok || !data.success || !data.comment) throw new Error(data.error || 'Message failed');
         if (data.success && data.comment) {
+          messageRevisionRef.current += 1;
+          detailEtagsRef.current.delete(proposalId);
           setSelectedTimeline(prev => {
-            if (!prev) return null;
+            if (!prev || prev.proposalId !== proposalId) return prev;
             return {
               ...prev,
-              comments: (prev.comments || []).map(c =>
-                c.id === optimisticId ? data.comment : c
-              ),
+              comments: [...(prev.comments || []).filter(c =>
+                c.id !== optimisticId && c.id !== data.comment.id && c.clientId !== optimisticId
+              ), data.comment].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
             };
           });
         }
       } catch (e) {
         console.error('Failed to send message:', e);
         setSelectedTimeline(prev => {
-          if (!prev) return null;
+          if (!prev || prev.proposalId !== proposalId) return prev;
           return {
             ...prev,
             comments: (prev.comments || []).map(c =>

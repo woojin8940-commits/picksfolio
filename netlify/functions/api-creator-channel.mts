@@ -65,12 +65,14 @@ export default async (req: Request) => {
         if (!auth.ok) return auth.response;
       }
 
-      const row = await loadChannel(db, username);
+      const [row, link] = await Promise.all([
+        loadChannel(db, username),
+        loadMetaLink(username, "collab"),
+      ]);
       // 캠페인 등록 화면에서 직접 로그인한 연동만 본다. 디엠 자동화에 붙여 둔 계정을
       // 여기서 같이 세면, 등록하는 사람은 고른 적 없는 계정으로 이미 연동된 화면을
       // 보게 된다. 두 기능은 같은 인스타그램 계정을 쓰더라도 별개의 연동이다.
       // 토큰 자체는 절대 내려보내지 않는다.
-      const link = await loadMetaLink(username, "collab");
       const metaLinked = linkIsUsable(link);
       // 토큰이 죽은 연동은 "연동 안 됨"이 아니라 "다시 동의해야 함"이다. 둘을 같은
       // 값으로 내리면 화면은 이미 받아 둔 팔로워 수를 지운 빈 카드를 보여 주게 된다.

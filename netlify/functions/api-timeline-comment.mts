@@ -22,7 +22,7 @@ export default async (req: Request, context: Context) => {
     // body 가 아니라 토큰에서 확인된 본인으로 기록한다.
     const body = await req.json();
 
-    const store = getStore(STORE);
+    const store = getStore({ name: STORE, consistency: "strong" });
     const key = `detail_${proposalId}`;
     const stored = (await store.get(key, { type: "json" })) as any;
 
@@ -55,6 +55,8 @@ export default async (req: Request, context: Context) => {
       content: body.content || "",
       createdAt: new Date().toISOString(),
       readBy: [authorUsername],
+      ...(typeof body.clientId === "string" && /^pending_[a-zA-Z0-9_]{1,100}$/.test(body.clientId)
+        ? { clientId: body.clientId } : {}),
       ...(body.attachments ? { attachments: body.attachments } : {}),
     };
 

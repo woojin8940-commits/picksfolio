@@ -79,16 +79,23 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
   const [now, setNow] = useState(() => Date.now());
   // 사용자가 화면에서 담고 있는 중이면 새로고침이 그 선택을 덮지 않게 한다.
   const touched = useRef(false);
+  const notifyRef = useRef(onNotify);
+  notifyRef.current = onNotify;
+  const requestRef = useRef(0);
+  const campaignIdRef = useRef(campaignId);
+  campaignIdRef.current = campaignId;
 
   const notify = useCallback(
     (message: string, type: 'success' | 'error' = 'success') => {
-      if (onNotify) onNotify(message, type);
+      notifyRef.current?.(message, type);
     },
-    [onNotify],
+    [],
   );
 
   const load = useCallback(async () => {
+    const request = ++requestRef.current;
     const res = await apiService.getCampaignListup(campaignId);
+    if (request !== requestRef.current || campaignIdRef.current !== campaignId) return;
     setLoading(false);
     if (res.error) {
       notify(res.error, 'error');
@@ -108,6 +115,7 @@ const CampaignListupBoard: React.FC<CampaignListupBoardProps> = ({ campaignId, o
     setLoading(true);
     touched.current = false;
     load();
+    return () => { requestRef.current += 1; };
   }, [load]);
 
   // 남은 시간 표시. 기한이 없는 캠페인에서는 타이머를 돌리지 않는다.

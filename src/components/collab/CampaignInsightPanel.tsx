@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
@@ -131,11 +131,15 @@ const CampaignInsightPanel: React.FC<CampaignInsightPanelProps> = ({
   const [loading, setLoading] = useState(!!campaignId);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const requestRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!campaignId) return;
+    const request = ++requestRef.current;
     setLoading(true);
+    setRefreshing(false);
     const res = await apiService.getCampaignMetrics(campaignId, { token });
+    if (request !== requestRef.current) return;
     if (res?.error) {
       setError(res.error);
       setData(null);
@@ -148,18 +152,22 @@ const CampaignInsightPanel: React.FC<CampaignInsightPanelProps> = ({
 
   useEffect(() => {
     void load();
+    return () => { requestRef.current++; };
   }, [load]);
 
   const refresh = async () => {
     if (!campaignId || refreshing) return;
+    const request = ++requestRef.current;
     setRefreshing(true);
     const res = await apiService.refreshCampaignMetrics(campaignId, { token });
+    if (request !== requestRef.current) return;
     if (res?.error) setError(res.error);
     else {
       setError('');
       setData(res as Metrics);
     }
     setRefreshing(false);
+    setLoading(false);
   };
 
   const totals = data?.totals;

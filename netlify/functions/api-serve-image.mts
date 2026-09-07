@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
+import { mapConcurrent } from "./_shared/concurrency.mts";
 import {
   ALLOWED_CONTENT_TYPES,
   PART_SIZE,
@@ -67,8 +68,13 @@ async function readParts(
 
   const out = new Uint8Array(end - start + 1);
   let written = 0;
+  const chunks = await mapConcurrent(
+    Array.from({ length: last - first + 1 }, (_, offset) => first + offset),
+    4,
+    i => store.get(partKey(key, i), { type: "arrayBuffer" }),
+  );
   for (let i = first; i <= last; i += 1) {
-    const raw = (await store.get(partKey(key, i), { type: "arrayBuffer" })) as ArrayBuffer | null;
+    const raw = chunks[i - first] as ArrayBuffer | null;
     // 조각 하나가 없으면 그 구간을 만들 수 없다. 0 으로 메우면 재생이 조용히
     // 깨지므로, 여기서 실패로 돌려 404 를 내보낸다.
     if (!raw) return null;

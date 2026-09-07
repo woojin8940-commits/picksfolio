@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Clock, BarChart3 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { readTrendCache, writeTrendCache } from '../utils/trendCache';
 
 interface RankingItem {
   rank: number;
@@ -43,14 +44,25 @@ const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
 
 const DataBoardSection: React.FC = () => {
   const { language } = useLanguage();
-  const [categories, setCategories] = useState<CategoryBlock[]>(FALLBACK_CATEGORIES);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedTrend = readTrendCache<CategoryBlock>(language);
+  const [categories, setCategories] = useState<CategoryBlock[]>(() => cachedTrend?.categories.slice(0, 6) || FALLBACK_CATEGORIES);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(() => cachedTrend?.updatedAt || null);
+  const [loading, setLoading] = useState(() => !cachedTrend?.categories.length);
 
   useEffect(() => {
     const controller = new AbortController();
-    const fetchData = async () => {
+    const cached = readTrendCache<CategoryBlock>(language);
+    const hasCached = Boolean(cached?.categories.length);
+    if (hasCached) {
+      setCategories(cached!.categories.slice(0, 6));
+      setUpdatedAt(cached!.updatedAt || null);
+      setLoading(false);
+    } else {
       setLoading(true);
+    }
+
+    const fetchData = async () => {
+      if (!hasCached) setLoading(true);
       try {
         const res = await fetch(`/.netlify/functions/api-naver-category-rankings?lang=${language}`, {
           signal: controller.signal,
@@ -62,6 +74,7 @@ const DataBoardSection: React.FC = () => {
           if (filtered.length > 0) {
             setCategories(filtered.slice(0, 6));
             if (data.updatedAt) setUpdatedAt(data.updatedAt);
+            writeTrendCache(language, filtered, data.updatedAt || null);
           }
         }
       } catch (err) {

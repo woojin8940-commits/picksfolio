@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs'
+import { mapConcurrent } from './_shared/concurrency.mts'
 import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import { applyComplimentaryMembership } from './_shared/complimentary-memberships.mts'
@@ -85,9 +86,18 @@ export default async (req: Request, context: Context) => {
       }
 
       // 2) Aggregate analytics (total clicks/views per username)
-      const { data: analyticsRows } = await supabase
-        .from('analytics')
-        .select('username, views, clicks')
+      let operatorGrantsError: string | null = null
+      const [{ data: analyticsRows }, { data: proposalRows }, operatorGrants] = await Promise.all([
+        supabase
+          .from('analytics')
+          .select('username, views, clicks'),
+        supabase.from('business_proposals').select('influencer_username, status'),
+        listOperatorMembershipGrants().catch((error) => {
+          console.warn('[admin-influencers] operator membership grants query failed:', error)
+          operatorGrantsError = error?.message || '운영자 부여 목록을 불러오지 못했습니다.'
+          return [] as OperatorMembershipGrant[]
+        }),
+      ])
 
       const analyticsMap: Record<string, { views: number; clicks: number }> = {}
       for (const r of analyticsRows || []) {
@@ -98,9 +108,6 @@ export default async (req: Request, context: Context) => {
       }
 
       // 3) Proposal counts per influencer
-      const { data: proposalRows } = await supabase
-        .from('business_proposals')
-        .select('influencer_username, status')
 
       const proposalMap: Record<string, { total: number; accepted: number; rejected: number; pending: number; completed: number }> = {}
       for (const p of proposalRows || []) {
@@ -114,12 +121,6 @@ export default async (req: Request, context: Context) => {
       // 운영자 부여 현황. 조회가 실패하면 부여한 계정이 하나도 없는 것처럼 보이는데,
       // 그러면 운영자는 "부여했는데 현황에 안 보인다"는 상태와 구분할 수 없다.
       // 실패 사실을 응답에 담아 화면이 "0명" 대신 오류를 말하게 한다.
-      let operatorGrantsError: string | null = null
-      const operatorGrants = await listOperatorMembershipGrants().catch((error) => {
-        console.warn('[admin-influencers] operator membership grants query failed:', error)
-        operatorGrantsError = error?.message || '운영자 부여 목록을 불러오지 못했습니다.'
-        return [] as OperatorMembershipGrant[]
-      })
       const grantByUserId = new Map(operatorGrants.map((grant) => [grant.auth_user_id, grant]))
       // 부여 한 건이 목록의 어느 줄에 붙었는지 기록한다. 끝까지 아무 줄에도 붙지
       // 않은 부여는 계정을 찾지 못한 것이므로 별도로 드러낸다.
@@ -131,8 +132,8 @@ export default async (req: Request, context: Context) => {
           .filter(Boolean),
       )
 
-      const influencers = await Promise.all(
-        (profiles || []).map(async (p: any) => {
+      const influencers = await mapConcurrent(profiles || [], 8,
+        async (p: any) => {
           const a = analyticsMap[p.username] || { views: 0, clicks: 0 }
           const pr = proposalMap[p.username] || { total: 0, accepted: 0, rejected: 0, pending: 0, completed: 0 }
           const acceptanceRate = pr.total > 0 ? Math.round((pr.accepted + pr.completed) / pr.total * 100) : 0
@@ -223,7 +224,7 @@ export default async (req: Request, context: Context) => {
               : null,
             operator_membership_plan: operatorGrant?.active ? operatorGrant.plan : null,
           }
-        }),
+        },
       )
 
       // 4) Business accounts. They live in the same `profiles` table with a
@@ -279,15 +280,25 @@ export default async (req: Request, context: Context) => {
           })
           if (authErr) throw authErr
           const users = authData?.users || []
-          for (const u of users) {
-            if (profileIds.has(u.id)) continue
+          const orphans = users.filter(u => !profileIds.has(u.id)).map(u => {
             const meta = (u.user_metadata || {}) as Record<string, any>
             const emailLocal = (u.email || '').split('@')[0] || ''
             let username = String(meta.username || emailLocal || u.id.slice(0, 8)).toLowerCase()
             if (seenUsernames.has(username)) username = `${username}-${u.id.slice(0, 4)}`
             seenUsernames.add(username)
-
-            const stored = await readSellerMembership(sellerStore, username)
+            return { u, meta, username }
+          })
+          const memberships = await mapConcurrent(orphans, 8, async ({ username }) => {
+            try {
+              return { ok: true as const, stored: await readSellerMembership(sellerStore, username) }
+            } catch (error) {
+              return { ok: false as const, error }
+            }
+          })
+          for (const [index, { u, meta, username }] of orphans.entries()) {
+            const membership = memberships[index]
+            if (!membership.ok) throw membership.error
+            const stored = membership.stored
             const complimentary = applyComplimentaryMembership(
               username,
               stored,

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getStatsForRange, getTopClickedItemsForRange } from '../services/analyticsService';
+import { getAnalyticsForRange } from '../services/analyticsService';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { getSiteSettings } from '../services/settingsService';
 import { prefetchLinkData } from '../services/prefetchService';
 import { apiService, authHeaders } from '../services/apiService';
@@ -79,72 +80,64 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error('Error loading dashboard data from localStorage:', e);
     }
 
-    window.setTimeout(() => {
-      apiService.getSiteData(u).then(apiData => {
-        if (!apiData) return;
-        if (Array.isArray(apiData.blocks)) {
-          setPreviewBlocks(apiData.blocks);
-          localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
-        }
-        if (apiData.openSchedule) {
-          setPreviewSchedule(apiData.openSchedule);
-          localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
-        }
-      }).catch(e => {
-        console.warn('Error loading dashboard data from API:', e);
-      });
-    }, 900);
+    let cancelled = false;
+    apiService.getSiteData(u).then(apiData => {
+      if (!apiData || cancelled) return;
+      if (Array.isArray(apiData.blocks)) {
+        setPreviewBlocks(apiData.blocks);
+        localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
+      }
+      if (apiData.openSchedule) {
+        setPreviewSchedule(apiData.openSchedule);
+        localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
+      }
+    }).catch(e => {
+      console.warn('Error loading dashboard data from API:', e);
+    });
+    return () => { cancelled = true; };
   }, [userName]);
 
   useEffect(() => {
     if (currentSubView === 'dashboard') {
-      loadDashboardCounts();
+      return loadDashboardCounts();
     }
   }, [currentSubView, loadDashboardCounts]);
 
-  useEffect(() => {
+  useVisiblePolling(async signal => {
     if (!userName) return;
     const normalizedName = userName.toLowerCase();
     const cacheKey = `picks_timelines_influencer_${normalizedName}`;
-    const fetchUnread = async () => {
-      try {
-        const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer&unread=1`, {
-          headers: await authHeaders(),
-        });
-        const data = await res.json();
-        if (typeof data.unreadTotal === 'number' || data.timelines) {
-          const total = typeof data.unreadTotal === 'number'
-            ? data.unreadTotal
-            : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
-          setTimelineUnread(total);
-          if (data.timelines) {
-            try { localStorage.setItem(cacheKey, JSON.stringify(data.timelines)); } catch {}
-          }
+    try {
+      const res = await fetch(`/api/timeline/list/${normalizedName}?type=influencer&unread=1`, {
+        headers: await authHeaders(),
+        signal,
+      });
+      const data = await res.json();
+      if (signal.aborted || !res.ok) return;
+      if (typeof data.unreadTotal === 'number' || data.timelines) {
+        const total = typeof data.unreadTotal === 'number'
+          ? data.unreadTotal
+          : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+        setTimelineUnread(total);
+        if (data.timelines) {
+          try { localStorage.setItem(cacheKey, JSON.stringify(data.timelines)); } catch {}
         }
-      } catch {}
-    };
-    const firstTimer = setTimeout(fetchUnread, 4000);
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchUnread();
-    }, 120000);
-    return () => {
-      clearTimeout(firstTimer);
-      clearInterval(interval);
-    };
-  }, [userName]);
+      }
+    } catch {}
+  }, 120000, !!userName && currentSubView !== 'timeline', userName, 4000);
 
-  const fetchStats = async () => {
+  const fetchStats = async (signal: AbortSignal) => {
     if (!userName) return;
     try {
       console.log('Fetching stats for:', userName, startDate, endDate);
-      const [statsResult, settingsResult, topItemsResult] = await Promise.allSettled([
-        getStatsForRange(userName, startDate, endDate),
+      const [statsResult, settingsResult] = await Promise.allSettled([
+        getAnalyticsForRange(userName, startDate, endDate, signal),
         getSiteSettings(userName),
-        getTopClickedItemsForRange(userName, startDate, endDate),
       ]);
+      if (signal.aborted) return;
 
       if (statsResult.status === 'fulfilled') {
-        setStats(statsResult.value || { views: 0, clicks: 0, ctr: 0 });
+        setStats(statsResult.value.stats);
       }
 
       // Fetch blocks from site settings (API -> Supabase -> localStorage cascade)
@@ -156,8 +149,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       // Fetch real top clicked items for the selected range
       setTopItemsData(
-        topItemsResult.status === 'fulfilled' && Array.isArray(topItemsResult.value)
-          ? topItemsResult.value
+        statsResult.status === 'fulfilled' && Array.isArray(statsResult.value.topItems)
+          ? statsResult.value.topItems
           : [],
       );
     } catch (e) {
@@ -165,20 +158,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const timer = setTimeout(() => {
-      fetchStats();
-      const today = todayInSeoul();
-      if (endDate === today) {
-        interval = setInterval(fetchStats, 3600000);
-      }
-    }, 1200);
-    return () => {
-      clearTimeout(timer);
-      if (interval) clearInterval(interval);
-    };
-  }, [userName, startDate, endDate]);
+  useVisiblePolling(fetchStats, 3600000, currentSubView === 'dashboard',
+    `${userName}:${startDate}:${endDate}`);
 
   // Map real click counts to blocks for the TOP 3 section
   const topItems = (Array.isArray(topItemsData) ? topItemsData.map((item, idx) => {

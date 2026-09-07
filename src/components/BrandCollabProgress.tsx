@@ -517,6 +517,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const [guideOpen, setGuideOpen] = useState(false);
   /** 진행사항 화면에서 바로 올리는 가이드 파일. */
   const [guideUploading, setGuideUploading] = useState(false);
+  const loadRequestRef = React.useRef(0);
+  const openIdRef = React.useRef(openId);
+  openIdRef.current = openId;
 
   const notify = useCallback(
     (message: string, type: 'success' | 'error' = 'success') => {
@@ -526,8 +529,13 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
-    const res = await apiService.getCollabs(viewer);
+    const request = ++loadRequestRef.current;
+    const [res, listup] = await Promise.all([
+      apiService.getCollabs(viewer),
+      campaignId ? apiService.getCampaignListup(campaignId) : Promise.resolve(null),
+    ]);
+    if (request !== loadRequestRef.current) return;
+    setLoading(false);
     setLoadError(res.error || '');
     const rows: CollabRow[] = res.collabs || [];
     const mine = campaignId ? rows.filter(c => c.campaignId === campaignId) : rows;
@@ -537,7 +545,6 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
     // 전체 협업 목록에서는 어느 캠페인의 선택인지 구분이 안 돼 줄만 늘어난다.
     if (campaignId) {
       const started = new Set(mine.map(c => String(c.creatorUsername || '').toLowerCase()));
-      const listup = await apiService.getCampaignListup(campaignId);
       const candidates = (listup?.candidates || []) as any[];
 
       // 연동 정보가 아직 없을 때 쓸 얼굴 · 계정명 · 팔로워. 협업 목록 API 가 연동
@@ -577,12 +584,17 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   }, [campaignId, viewer]);
 
   useEffect(() => {
+    setLoading(true);
+    setOpenId('');
+    setDetail(null);
     load();
+    return () => { loadRequestRef.current += 1; };
   }, [load]);
 
   const refreshDetail = useCallback(
     async (collabId: string) => {
       const res = await apiService.getCollabDetail(collabId, undefined, viewer);
+      if (openIdRef.current !== collabId) return null;
       if (res.error) {
         notify(res.error, 'error');
         return null;
@@ -602,15 +614,17 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
         return;
       }
       setOpenId('');
+      openIdRef.current = '';
       setDetail(null);
       return;
     }
     setOpenId(collabId);
+    openIdRef.current = collabId;
     setFocusStep(step);
     setDetail(null);
     setDetailLoading(true);
     await refreshDetail(collabId);
-    setDetailLoading(false);
+    if (openIdRef.current === collabId) setDetailLoading(false);
   };
 
   /** 주소 한 줄. 브랜드가 택배 송장에 그대로 옮겨 적는 형태로 만든다. */

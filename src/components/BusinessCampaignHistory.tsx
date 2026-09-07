@@ -134,12 +134,12 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const cacheKey = `picks_biz_campaign_history_${cleanUsername}`;
 
-  const cached = (() => {
+  const cached = useMemo(() => {
     try {
       const rawCache = localStorage.getItem(cacheKey);
       return rawCache ? JSON.parse(rawCache) : null;
     } catch { return null; }
-  })();
+  }, [cacheKey]);
 
   const [campaigns, setCampaigns] = useState<HistoryCampaign[]>(cached?.campaigns || []);
   const [totals, setTotals] = useState<HistoryTotals>(cached?.totals || EMPTY_TOTALS);

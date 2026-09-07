@@ -164,7 +164,13 @@ export default async (req: Request) => {
     }
 
     const force = url.searchParams.get("refresh") === "1";
-    const result = await getTaggedMedia(rawUsername, link!, getDatabase(), { force });
+    const [result, account] = await Promise.all([
+      getTaggedMedia(rawUsername, link!, getDatabase(), { force }),
+      loadBrandAccount(getDatabase(), rawUsername, link!).catch(e => {
+        console.warn("[business-tagged-media] 계정 추이 조회 실패:", (e as Error)?.message);
+        return null;
+      }),
+    ]);
     if (!result.ok) {
       return Response.json(
         { connected: true, needsReauth: false, error: result.error, code: result.code, items: [] },
@@ -178,12 +184,6 @@ export default async (req: Request) => {
      * 블록1 에 쓸 계정 숫자. 실패해도 목록은 그대로 내려간다 — 팔로워 카드 하나
      * 때문에 태그된 콘텐츠 화면 전체가 오류로 바뀌면 손해가 더 크다.
      */
-    let account: Awaited<ReturnType<typeof loadBrandAccount>> = null;
-    try {
-      account = await loadBrandAccount(getDatabase(), rawUsername, link!);
-    } catch (e) {
-      console.warn("[business-tagged-media] 계정 추이 조회 실패:", (e as Error)?.message);
-    }
     // 예전 판 캐시에는 없는 배열이다. 키에 판 번호가 붙어 있어 보통은 걸리지 않지만,
     // 없는 값을 그대로 내려보내면 화면이 undefined 를 세게 된다.
     const ownItems = Array.isArray(payload.ownItems) ? payload.ownItems : [];

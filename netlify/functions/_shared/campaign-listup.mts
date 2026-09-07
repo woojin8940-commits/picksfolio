@@ -375,7 +375,11 @@ export async function buildSnapshots(
  * 주소류(프로필 사진·릴스·피드)는 지금 값이 있으면 그쪽을 쓴다. 판단 근거는 그대로
  * 두면서 화면만 살아 있게 하는 절충이다.
  */
-export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[]> {
+export async function refreshListupSnapshots(
+  db: any,
+  rows: any[],
+  defer?: (task: Promise<unknown>) => void,
+): Promise<any[]> {
   const list = Array.isArray(rows) ? rows : [];
   if (!list.length) return list;
 
@@ -388,7 +392,9 @@ export async function refreshListupSnapshots(db: any, rows: any[]): Promise<any[
   // 계정만 다시 받아 온다(자세한 규칙은 refreshStaleChannelImages 주석). 만료된 메타
   // 주소가 굳어 있던 계정은 이 길에서 우리 저장소 주소로 옮겨진다. 실패는 삼킨다 —
   // 명단은 사진 한 장 없이도 그려져야 한다.
-  await refreshStaleChannelImages(db, names).catch(() => 0);
+  const refresh = refreshStaleChannelImages(db, names).catch(() => 0);
+  if (defer) defer(refresh);
+  else await refresh;
 
   let channelRows: any[] = [];
   try {

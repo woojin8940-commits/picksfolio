@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ComposedChart, Bar, Cell, ReferenceLine,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -163,9 +163,29 @@ const RANK_LIMIT = 10;
 const rankItems = (items: TaggedMediaItem[], key: RankKey): TaggedMediaItem[] =>
   sortItems(items.filter((m) => typeof m[key] === 'number'), key).slice(0, RANK_LIMIT);
 
+const taggedCacheKey = (username: string) => `picks_business_tagged_${username.toLowerCase().replace(/^biz\//, '')}`;
+
+function readTaggedCache(username: string): TaggedMediaResponse | null {
+  try {
+    const raw = localStorage.getItem(taggedCacheKey(username));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TaggedMediaResponse;
+    return parsed && Array.isArray(parsed.items) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeTaggedCache(username: string, data: TaggedMediaResponse): void {
+  try {
+    localStorage.setItem(taggedCacheKey(username), JSON.stringify(data));
+  } catch {}
+}
+
 const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ businessUsername }) => {
-  const [data, setData] = useState<TaggedMediaResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedTagged = useMemo(() => readTaggedCache(businessUsername), [businessUsername]);
+  const [data, setData] = useState<TaggedMediaResponse | null>(() => cachedTagged);
+  const [loading, setLoading] = useState(() => !cachedTagged);
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<SortKey>('recent');
   const [query, setQuery] = useState('');
@@ -180,14 +200,26 @@ const BusinessTaggedContent: React.FC<{ businessUsername: string }> = ({ busines
    * 목록이 사라져 있으면 이 화면에서 할 수 있는 일이 줄어든다.
    */
   const [expanded, setExpanded] = useState(false);
+  const requestRef = useRef(0);
+  useEffect(() => () => { requestRef.current++; }, [businessUsername]);
 
   const load = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!businessUsername) return;
-      if (opts.refresh) setRefreshing(true);
-      else setLoading(true);
+      const request = ++requestRef.current;
+      const cached = readTaggedCache(businessUsername);
+      if (opts.refresh) {
+        setRefreshing(true);
+      } else if (cached) {
+        setData(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       const res = await apiService.getBusinessTaggedMedia(businessUsername, { refresh: opts.refresh });
+      if (request !== requestRef.current) return;
       setData(res);
+      if (!res.error) writeTaggedCache(businessUsername, res);
       setLoading(false);
       setRefreshing(false);
     },

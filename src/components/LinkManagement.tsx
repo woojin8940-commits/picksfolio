@@ -576,6 +576,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       try {
         // API (Netlify Blobs) 먼저 시도
         const apiData = await apiService.getSiteData(userName);
+        if (disposed) return;
         if (apiData) {
           // API is the source of truth — always apply its data, even if empty
           if (Array.isArray(apiData.blocks)) {
@@ -603,6 +604,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               getSiteSettings(userName),
               getLinkGridItems(userName)
             ]);
+            if (disposed) return;
 
             if (gridItems && gridItems.length > 0) {
               setBlocks(gridItems);
@@ -625,6 +627,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
             getSiteSettings(userName),
             getLinkGridItems(userName)
           ]);
+          if (disposed) return;
 
           if (gridItems && gridItems.length > 0) {
             setBlocks(gridItems);
@@ -639,7 +642,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
-        setIsLoading(false);
+        if (!disposed) setIsLoading(false);
       }
     };
 
@@ -666,7 +669,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       }
     };
 
+    let disposed = false;
     loadData();
+    return () => { disposed = true; };
   }, [userName]);
 
   useEffect(() => {

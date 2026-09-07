@@ -20,14 +20,6 @@ const readLocal = (key: string): string => {
   }
 };
 
-const readSession = (key: string): string => {
-  try {
-    return sessionStorage.getItem(scopedKey(key)) || '';
-  } catch {
-    return '';
-  }
-};
-
 /** 브라우저에 저장된 일반 회원 Supabase 세션 뭉치. 없으면 null. */
 function readStoredSupabaseSession(): Record<string, any> | null {
   try {
@@ -439,11 +431,15 @@ export async function fetchWithTimeout(
   timeoutMs = 15_000,
 ): Promise<Response> {
   const controller = new AbortController();
+  const abort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) abort();
+  else init.signal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    init.signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -1078,6 +1074,7 @@ export interface LiveOrderInfo {
 const SITE_DATA_TTL = 60 * 1000; // 1 minute
 const siteDataCache: Record<string, { data: SiteData; ts: number }> = {};
 const siteDataInflight: Record<string, Promise<SiteData | null>> = {};
+const siteDataVersions: Record<string, symbol> = {};
 
 const VERIFICATION_TTL = 5 * 60 * 1000; // 5 minutes
 const verificationCache: Record<string, { data: SellerVerification | null; ts: number }> = {};
@@ -1109,13 +1106,26 @@ function readMemory<T>(key: string, ttlMs: number, loader: () => Promise<T>, ref
   if (!refresh && hit?.inFlight) return hit.inFlight;
   const inFlight = loader()
     .then((value) => {
-      requestMemory.set(key, { value, expiresAt: Date.now() + ttlMs });
+      if (requestMemory.get(key)?.inFlight === inFlight) {
+        if (value == null || (typeof value === 'object' && 'error' in value && value.error)) {
+          requestMemory.delete(key);
+        } else {
+          requestMemory.set(key, { value, expiresAt: Date.now() + ttlMs });
+        }
+      }
       return value;
     })
     .catch((error) => {
-      requestMemory.delete(key);
+      if (requestMemory.get(key)?.inFlight === inFlight) requestMemory.delete(key);
       throw error;
     });
+  for (const [entryKey, entry] of requestMemory) {
+    if (!entry.inFlight && entry.expiresAt <= now) requestMemory.delete(entryKey);
+  }
+  if (requestMemory.size >= 100) {
+    const oldest = requestMemory.keys().next().value;
+    if (oldest !== undefined) requestMemory.delete(oldest);
+  }
   requestMemory.set(key, { inFlight, expiresAt: now + ttlMs });
   return inFlight;
 }
@@ -1138,18 +1148,21 @@ export const apiService = {
       return siteDataInflight[key];
     }
 
+    const version = Symbol();
+    siteDataVersions[key] = version;
     const request = (async () => {
       try {
         const res = await fetch(`/api/site/${encodeURIComponent(key)}`);
         if (!res.ok) return null;
         const data = (await res.json()) as SiteData;
+        if (siteDataVersions[key] !== version) return siteDataCache[key]?.data || null;
         siteDataCache[key] = { data, ts: Date.now() };
         return data;
       } catch (e) {
         console.error('[API] Failed to get site data:', e);
         return null;
       } finally {
-        delete siteDataInflight[key];
+        if (siteDataVersions[key] === version) delete siteDataInflight[key];
       }
     })();
 
@@ -1177,9 +1190,23 @@ export const apiService = {
         // navigation doesn't briefly render pre-save data. Create the entry even
         // when nothing was cached yet, so the very next read is immediately fresh.
         const key = username.toLowerCase();
+        delete siteDataVersions[key];
+        delete siteDataInflight[key];
         const cached = siteDataCache[key];
         const base = (cached?.data || {}) as SiteData;
-        siteDataCache[key] = { data: { ...base, ...data }, ts: Date.now() };
+        if (cached) {
+          siteDataCache[key] = {
+            data: {
+              ...base, ...data,
+              ...(data.profile ? { profile: { ...base.profile, ...data.profile } } : {}),
+              ...(data.design ? { design: { ...base.design, ...data.design } } : {}),
+              ...(data.socials ? { socials: { ...base.socials, ...data.socials } } : {}),
+            },
+            ts: Date.now(),
+          };
+        } else {
+          delete siteDataCache[key];
+        }
         return { ok: true, status: res.status, error: '', retryable: false };
       }
 
@@ -1258,6 +1285,10 @@ export const apiService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(proposal)
       });
+      if (res.ok) {
+        clearMemory('proposals:');
+        clearMemory('businessProposals:');
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to submit proposal:', e);
@@ -1265,21 +1296,44 @@ export const apiService = {
     }
   },
 
+  async getBusinessProposals(username: string): Promise<{
+    proposals: BusinessProposal[];
+    hiddenIds: string[];
+    error?: string;
+  }> {
+    const account = normalizeAccount(username);
+    return readMemory(`businessProposals:${account}`, 20_000, async () => {
+      try {
+        const res = await fetchWithTimeout(`/api/business-proposals/${encodeURIComponent(account)}`, {
+          headers: await authHeaders({}, { account }),
+        }, 15_000);
+        const data = await res.json();
+        if (!res.ok) return { proposals: [], hiddenIds: [], error: data.error || '제안을 불러오지 못했습니다.' };
+        return {
+          proposals: Array.isArray(data.proposals) ? data.proposals : [],
+          hiddenIds: Array.isArray(data.hiddenIds) ? data.hiddenIds : [],
+        };
+      } catch {
+        return { proposals: [], hiddenIds: [], error: '네트워크 오류' };
+      }
+    });
+  },
+
   async getProposals(username: string): Promise<BusinessProposal[]> {
     const key = normalizeAccount(username);
-    return readMemory(`proposals:${key}`, 30_000, async () => {
+    return (await readMemory<BusinessProposal[] | null>(`proposals:${key}`, 30_000, async () => {
       try {
         const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
           headers: await authHeaders(),
         });
-        if (!res.ok) return [];
+        if (!res.ok) return null;
         const data = await res.json();
         return data.proposals || [];
       } catch (e) {
         console.error('[API] Failed to get proposals:', e);
-        return [];
+        return null;
       }
-    });
+    })) || [];
   },
 
   async updateProposalStatus(username: string, proposalId: string, status: 'accepted' | 'rejected' | 'completed', rejectionReason?: string): Promise<boolean> {
@@ -1296,6 +1350,9 @@ export const apiService = {
       if (res.ok) {
         clearMemory(`proposals:${normalizeAccount(username)}`);
         clearMemory(`settlements:${normalizeAccount(username)}:`);
+        clearMemory('businessProposals:');
+        clearMemory('collabRecords:');
+        clearMemory('collabs:');
       }
       return res.ok;
     } catch (e) {
@@ -1310,7 +1367,13 @@ export const apiService = {
         method: 'DELETE',
         headers: await authHeaders(),
       });
-      if (res.ok) clearMemory(`proposals:${normalizeAccount(username)}`);
+      if (res.ok) {
+        clearMemory('proposals:');
+        clearMemory('businessProposals:');
+        clearMemory('settlements:');
+        clearMemory('collabRecords:');
+        clearMemory('collabs:');
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to delete proposal:', e);
@@ -1337,6 +1400,15 @@ export const apiService = {
         `/api/business-proposals/${encodeURIComponent(clean)}/${encodeURIComponent(itemId)}${query}`,
         { method: 'DELETE', headers: await authHeaders() },
       );
+      if (res.ok) {
+        clearMemory('businessProposals:');
+        if (scope !== 'hide') {
+          clearMemory('proposals:');
+          clearMemory('settlements:');
+          clearMemory('collabRecords:');
+          clearMemory('collabs:');
+        }
+      }
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to delete business proposal:', e);
@@ -1645,19 +1717,19 @@ export const apiService = {
   // Collaboration Records API
   async getCollabRecords(username: string): Promise<CollabRecord[]> {
     const key = normalizeAccount(username);
-    return readMemory(`collabRecords:${key}`, 30_000, async () => {
+    return (await readMemory<CollabRecord[] | null>(`collabRecords:${key}`, 30_000, async () => {
       try {
         const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
           headers: await authHeaders(),
         });
-        if (!res.ok) return [];
+        if (!res.ok) return null;
         const data = await res.json();
         return data.records || [];
       } catch (e) {
         console.error('[API] Failed to get collab records:', e);
-        return [];
+        return null;
       }
-    });
+    })) || [];
   },
 
   // Settlements created from accepted proposals. The influencer view of the
@@ -1666,19 +1738,19 @@ export const apiService = {
   // 상세의 정산 탭이 이 값을 캠페인별로 걸러 보여 준다.
   async getSettlements(username: string, role: 'influencer' | 'business' = 'influencer'): Promise<Settlement[]> {
     const key = normalizeAccount(username);
-    return readMemory(`settlements:${key}:${role}`, 30_000, async () => {
+    return (await readMemory<Settlement[] | null>(`settlements:${key}:${role}`, 30_000, async () => {
       try {
         const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
           headers: await authHeaders(),
         });
-        if (!res.ok) return [];
+        if (!res.ok) return null;
         const data = await res.json();
         return data.settlements || [];
       } catch (e) {
         console.error('[API] Failed to get settlements:', e);
-        return [];
+        return null;
       }
-    });
+    })) || [];
   },
 
   /**
@@ -2493,20 +2565,23 @@ export const apiService = {
 
   // ───────────────────── Admin: Live commerce ─────────────────────
   async getAdminLiveOverview(token: string, opts?: { username?: string; limit?: number }): Promise<any> {
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const qs = new URLSearchParams();
-      if (opts?.username) qs.set('username', opts.username.trim().toLowerCase());
-      if (opts?.limit) qs.set('limit', String(opts.limit));
-      const url = qs.toString() ? `/api/admin/live-overview?${qs.toString()}` : '/api/admin/live-overview';
-      const res = await fetch(url, { credentials: 'same-origin', headers });
-      if (!res.ok) return { ongoing: [], history: [] };
-      return await res.json();
-    } catch (e) {
-      console.error('[API] Failed to get admin live overview:', e);
-      return { ongoing: [], history: [] };
-    }
+    const key = JSON.stringify([token, opts?.username?.trim().toLowerCase() || '', opts?.limit || 0]);
+    return readMemory(`adminLive:${key}`, 0, async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const qs = new URLSearchParams();
+        if (opts?.username) qs.set('username', opts.username.trim().toLowerCase());
+        if (opts?.limit) qs.set('limit', String(opts.limit));
+        const url = qs.toString() ? `/api/admin/live-overview?${qs.toString()}` : '/api/admin/live-overview';
+        const res = await fetch(url, { credentials: 'same-origin', headers });
+        if (!res.ok) return { ongoing: [], history: [] };
+        return await res.json();
+      } catch (e) {
+        console.error('[API] Failed to get admin live overview:', e);
+        return { ongoing: [], history: [] };
+      }
+    });
   },
 
   // Admin per-user live broadcast time + monthly/daily hard cap status
@@ -2723,9 +2798,9 @@ export const apiService = {
   // ───────────────────── 담당자 중개 협업 (collab workflow) ─────────────────────
   async getCollabs(
     role: 'brand' | 'influencer' | 'manager',
-    opts: { token?: string; mine?: boolean; status?: string } = {},
+    opts: { token?: string; mine?: boolean; status?: string; refresh?: boolean } = {},
   ): Promise<{ collabs: any[]; role?: string; error?: string }> {
-    const account = activeBusinessAccount || normalizeAccount(readLocal(BIZ_SESSION_KEY)) || normalizeAccount(readSession('picks_user_session')) || 'current';
+    const account = JSON.stringify(await collabHeaders(opts.token));
     const key = `collabs:${account}:${role}:${opts.mine ? 'mine' : 'all'}:${opts.status || 'any'}`;
     const loader = async () => {
       try {
@@ -2746,8 +2821,8 @@ export const apiService = {
         return { collabs: [], error: '네트워크 오류' };
       }
     };
-    if (opts.token) return loader();
-    return readMemory(key, 25_000, loader);
+    if (opts.token || role === 'manager') return loader();
+    return readMemory(key, 25_000, loader, opts.refresh);
   },
 
   /**
@@ -2792,6 +2867,8 @@ export const apiService = {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '요청을 처리하지 못했습니다.', code: json?.code };
       clearMemory('collabs:');
+      clearMemory('settlements:');
+      clearMemory('collabRecords:');
       return json;
     } catch (e) {
       console.error(`[API] Collab action failed (${action}):`, e);
@@ -2817,10 +2894,12 @@ export const apiService = {
 
   /** 지원자 목록. 브랜드(본인 캠페인)와 담당자 모두 같은 경로를 쓴다. */
   async getCampaignApplicants(campaignId: string, token?: string): Promise<any> {
+    const headers = await collabHeaders(token);
+    return readMemory(`campaignApplicants:${JSON.stringify(headers)}:${campaignId}`, token ? 0 : 10_000, async () => {
     try {
       const res = await fetch(`/api/campaign-applicants?campaign_id=${encodeURIComponent(campaignId)}`, {
         credentials: 'same-origin',
-        headers: await collabHeaders(token),
+        headers,
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { applicants: [], error: json?.error || '지원자를 불러오지 못했습니다.' };
@@ -2829,6 +2908,7 @@ export const apiService = {
       console.error('[API] Failed to get campaign applicants:', e);
       return { applicants: [], error: '네트워크 오류' };
     }
+    });
   },
 
   /** 브랜드 의견 표시(추천 · 보류). 선정 권한은 없다 — 담당자에게 전달되는 메모다. */
@@ -2846,6 +2926,7 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '의견을 저장하지 못했습니다.' };
+      clearMemory('campaignApplicants:');
       return json;
     } catch (e) {
       console.error('[API] Failed to set applicant preference:', e);
@@ -2874,6 +2955,7 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '추천 이유를 저장하지 못했습니다.' };
+      clearMemory('campaignApplicants:');
       return json;
     } catch (e) {
       console.error('[API] Failed to save applicant manager note:', e);
@@ -2912,6 +2994,9 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '처리에 실패했습니다.', code: json?.code };
+      clearMemory('campaignApplicants:');
+      clearMemory('campaignListup:');
+      clearMemory('collabs:');
       return json;
     } catch (e) {
       console.error('[API] Failed to decide applicant:', e);
@@ -2926,18 +3011,42 @@ export const apiService = {
    * 그대로 쓸 수 없다. 운영 콘솔 안에서 답장할 수 있도록 같은 대화 API 를 관리자
    * 토큰으로 호출한다.
    */
-  async getTimelineThread(proposalId: string, token?: string): Promise<any> {
+  async getTimelineThread(
+    proposalId: string,
+    token?: string,
+    options: { signal?: AbortSignal; etag?: string } = {},
+  ): Promise<any> {
     try {
+      const headers = new Headers(await collabHeaders(token));
+      if (options.etag) headers.set('If-None-Match', options.etag);
       const res = await fetch(`/api/timeline/detail/${encodeURIComponent(proposalId)}`, {
         credentials: 'same-origin',
-        headers: await collabHeaders(token),
+        cache: 'no-store',
+        signal: options.signal,
+        headers,
       });
+      if (res.status === 304) return { notModified: true };
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '대화를 불러오지 못했습니다.' };
-      return json;
+      return { ...json, etag: res.headers.get('etag') || '' };
     } catch (e) {
+      if (options.signal?.aborted) return { aborted: true };
       console.error('[API] Failed to get timeline thread:', e);
       return { error: '네트워크 오류' };
+    }
+  },
+
+  async markTimelineRead(proposalId: string, token?: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/timeline/read/${encodeURIComponent(proposalId)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: await collabHeaders(token),
+        body: '{}',
+      });
+      return res.ok;
+    } catch {
+      return false;
     }
   },
 
@@ -3011,13 +3120,16 @@ export const apiService = {
     campaignId: string,
     opts: { token?: string; pool?: boolean; q?: string } = {},
   ): Promise<any> {
+    const headers = await collabHeaders(opts.token);
+    const key = `campaignListup:${JSON.stringify(headers)}:${campaignId}:${opts.pool ? 'pool' : 'list'}:${opts.q || ''}`;
+    return readMemory(key, opts.token || opts.pool ? 0 : 10_000, async () => {
     try {
       const params = new URLSearchParams({ campaign_id: campaignId });
       if (opts.pool) params.set('pool', '1');
       if (opts.q) params.set('q', opts.q);
       const res = await fetch(`/api/campaign-listup?${params.toString()}`, {
         credentials: 'same-origin',
-        headers: await collabHeaders(opts.token),
+        headers,
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { candidates: [], error: json?.error || '리스트업을 불러오지 못했습니다.' };
@@ -3026,6 +3138,7 @@ export const apiService = {
       console.error('[API] Failed to get campaign listup:', e);
       return { candidates: [], error: '네트워크 오류' };
     }
+    });
   },
 
   /** 인플루언서가 받은 제안 목록. */
@@ -3078,6 +3191,7 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '명단에 올리지 못했습니다.' };
+      clearMemory('campaignListup:');
       return json;
     } catch (e) {
       console.error('[API] Failed to add listup candidates:', e);
@@ -3114,6 +3228,9 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '처리에 실패했습니다.', code: json?.code };
+      clearMemory('campaignListup:');
+      clearMemory('campaignApplicants:');
+      clearMemory('collabs:');
       return json;
     } catch (e) {
       console.error(`[API] Listup action failed (${action}):`, e);
@@ -3141,6 +3258,8 @@ export const apiService = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: json?.error || '확정에 실패했습니다.' };
+      clearMemory('campaignListup:');
+      clearMemory('collabs:');
       return json;
     } catch (e) {
       console.error('[API] Failed to confirm listup selection:', e);
@@ -3310,13 +3429,16 @@ export const apiService = {
     opts: { mine?: boolean; token?: string } = {},
   ): Promise<{ campaigns?: any[]; brandPicks?: any[]; managerUsername?: string; error?: string }> {
     try {
-      const res = await fetch(`/api/manager-campaigns${opts.mine ? '?mine=1' : ''}`, {
-        credentials: 'same-origin',
-        headers: await collabHeaders(opts.token),
+      const headers = await collabHeaders(opts.token);
+      return await readMemory(`managerCampaigns:${JSON.stringify(headers)}:${!!opts.mine}`, 0, async () => {
+        const res = await fetch(`/api/manager-campaigns${opts.mine ? '?mine=1' : ''}`, {
+          credentials: 'same-origin',
+          headers,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return { campaigns: [], brandPicks: [], error: json?.error || '캠페인을 불러오지 못했습니다.' };
+        return json;
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { campaigns: [], brandPicks: [], error: json?.error || '캠페인을 불러오지 못했습니다.' };
-      return json;
     } catch (e) {
       console.error('[API] Failed to get manager campaigns:', e);
       return { campaigns: [], brandPicks: [], error: '네트워크 오류' };
@@ -3335,13 +3457,16 @@ export const apiService = {
     opts: { token?: string } = {},
   ): Promise<any> {
     try {
-      const res = await authedGet(
-        `/api/campaign-metrics?campaignId=${encodeURIComponent(campaignId)}`,
-        () => collabHeaders(opts.token),
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json?.error || '캠페인 성과를 불러오지 못했습니다.' };
-      return json;
+      const headers = await collabHeaders(opts.token);
+      return await readMemory(`campaignMetrics:${JSON.stringify(headers)}:${campaignId}`, 0, async () => {
+        const res = await authedGet(
+          `/api/campaign-metrics?campaignId=${encodeURIComponent(campaignId)}`,
+          () => collabHeaders(opts.token),
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return { error: json?.error || '캠페인 성과를 불러오지 못했습니다.' };
+        return json;
+      });
     } catch (e) {
       console.error('[API] Failed to get campaign metrics:', e);
       return { error: '네트워크 오류' };
@@ -3444,19 +3569,20 @@ export const apiService = {
   async getTimelineList(
     username: string,
     type: 'influencer' | 'business' | 'manager' = 'influencer',
-    opts: { mine?: boolean; token?: string } = {},
+    opts: { mine?: boolean; token?: string; signal?: AbortSignal } = {},
   ): Promise<{ timelines?: any[]; error?: string }> {
     try {
       const params = new URLSearchParams({ type });
       if (opts.mine) params.set('mine', '1');
       const res = await fetch(
         `/api/timeline/list/${encodeURIComponent(username)}?${params.toString()}`,
-        { credentials: 'same-origin', headers: await collabHeaders(opts.token) },
+        { credentials: 'same-origin', cache: 'no-store', signal: opts.signal, headers: await collabHeaders(opts.token) },
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { timelines: [], error: json?.error || '대화 목록을 불러오지 못했습니다.' };
       return json;
     } catch (e) {
+      if (opts.signal?.aborted) return {};
       console.error('[API] Failed to get timeline list:', e);
       return { timelines: [], error: '네트워크 오류' };
     }

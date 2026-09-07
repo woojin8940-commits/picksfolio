@@ -398,6 +398,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
 
   // 릴스가 REELS_LIMIT 개 모일 때까지 커서를 따라간다. 사진만 올리는 계정에서
   // 무한히 넘기지 않도록 페이지 수에 상한을 둔다.
+  const profileTask = fetchProfileCounts(link);
   const raw: any[] = [];
   let page = first;
   for (let i = 0; i < MAX_PAGES; i++) {
@@ -405,7 +406,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
     for (const m of items) if (isReel(m)) raw.push(m);
     if (raw.length >= REELS_LIMIT) break;
     const next = items.length > 0 ? (page.data?.paging?.next as string) || null : null;
-    if (!next) break;
+    if (!next || i === MAX_PAGES - 1) break;
     const attempt = await askPage(fields, next);
     // 도중에 실패하면 모은 만큼으로 만든다. 뒤쪽 페이지는 더 오래된 릴스다.
     if (!attempt.ok) break;
@@ -451,7 +452,7 @@ async function fetchReelsFromMeta(link: MetaLink): Promise<InsightsResult> {
     };
   });
 
-  const profile = await fetchProfileCounts(link);
+  const profile = await profileTask;
 
   return {
     ok: true,

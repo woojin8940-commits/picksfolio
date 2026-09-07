@@ -132,7 +132,7 @@ const collabBadge = (c: any): { label: string; cls: string } => {
 const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName, initialCollabId }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const initialCache = readCreatorCollabCache(userName);
+  const initialCache = useMemo(() => readCreatorCollabCache(userName), [userName]);
 
   const [collabs, setCollabs] = useState<any[]>(() => initialCache?.collabs || []);
   const [applications, setApplications] = useState<any[]>(() => initialCache?.applications || []);
@@ -145,7 +145,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   const [detailTab, setDetailTab] = useState<DetailTab>('progress');
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
+  const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => setToast({ message, type }), []);
 
   const load = useCallback(async () => {
     const cached = readCreatorCollabCache(userName);

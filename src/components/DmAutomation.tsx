@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Instagram, Check, Plus, Trash2, Send, Loader2, MessageSquare, MessageCircle,
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
@@ -83,6 +83,24 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   sendMode: a.sendMode === 'scheduled' && a.scheduledAt ? 'scheduled' : 'instant',
   scheduledAt: typeof a.scheduledAt === 'string' ? a.scheduledAt : '',
 });
+
+const dmSettingsCacheKey = (username: string) => `picks_dm_automation_${username.toLowerCase()}`;
+const dmMediaCacheKey = (username: string) => `picks_dm_media_${username.toLowerCase()}`;
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) as T : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
 
 const FOLLOW_LABEL: Record<DmAutomationItem['followFilter'], string> = {
   all: '모든 사용자',
@@ -1262,10 +1280,13 @@ const AutomationEditor: React.FC<{
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
 const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const { t } = useLanguage();
+  const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
+  const cachedMedia = useMemo(() => readJson<InstagramMedia[]>(dmMediaCacheKey(userName)), [userName]);
+  const requests = useRef({ settings: 0, media: 0 });
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [manualModalRule, setManualModalRule] = useState<DmAutomationItem | null>(null);
 
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => Boolean(cachedSettings));
   // 설정을 받아오지 못한 상태. 예전에는 이 경우를 구분하지 않아서, 응답이 오지
   // 않으면 스피너가 그대로 남았고(화면이 "계속 로딩 중"), 응답 실패를 자격 없음으로
   // 삼키면 프로 플랜 사용자에게 결제 안내가 떴다. 실패는 실패로 보여 준다.
@@ -1276,24 +1297,26 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  const [enabled, setEnabled] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [igUsername, setIgUsername] = useState('');
+  const [enabled, setEnabled] = useState(() => Boolean(cachedSettings?.enabled));
+  const [connected, setConnected] = useState(() => Boolean(cachedSettings?.connected));
+  const [igUsername, setIgUsername] = useState(() => cachedSettings?.igUsername || '');
   // 인스타그램 장기 토큰은 60일이면 만료된다. 만료되면 "연결됨"으로 보이지만 발송은
   // 전부 실패하므로, 남은 기간을 화면에서 알려 재연동을 유도한다.
-  const [tokenExpiresAt, setTokenExpiresAt] = useState<string | undefined>(undefined);
-  const [automations, setAutomations] = useState<DmAutomationItem[]>([]);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<string | undefined>(() => cachedSettings?.tokenExpiresAt);
+  const [automations, setAutomations] = useState<DmAutomationItem[]>(() =>
+    Array.isArray(cachedSettings?.automations) ? cachedSettings!.automations.map(normalizeAutomation) : [],
+  );
 
   const [editing, setEditing] = useState<DmAutomationItem | null>(null);
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const [media, setMedia] = useState<InstagramMedia[]>([]);
-  const [mediaLoading, setMediaLoading] = useState(false);
+  const [media, setMedia] = useState<InstagramMedia[]>(() => Array.isArray(cachedMedia) ? cachedMedia : []);
+  const [mediaLoading, setMediaLoading] = useState(() => Boolean(cachedSettings?.connected && !cachedMedia?.length));
 
   // 디엠 자동화는 프로 플랜 전용 기능이다. 서버가 계정 자격(entitled)을 함께 내려주며,
   // 자격이 없으면 저장·발송이 403 으로 막히므로 화면에서도 업그레이드 안내를 보여준다.
-  const [entitled, setEntitled] = useState(true);
+  const [entitled, setEntitled] = useState(() => cachedSettings?.entitled !== false);
 
   /**
    * 이 앱이 보내지 않았는데 계정에서 나간 자동 DM.
@@ -1302,7 +1325,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 경우다. 여기 설정과 무관하게 나가기 때문에, 문구를 바꿔도 예전 문구가 함께
    * 도착하거나 자동 발송을 꺼도 DM 이 간다. 감지되면 끄는 방법을 안내한다.
    */
-  const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(null);
+  const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(() => cachedSettings?.externalDm || null);
 
   /**
    * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
@@ -1313,8 +1336,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
    * 저장 경로(액션)가 각각 다르고 인스타그램 쪽 등록 결과까지 함께 돌아오므로,
    * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
    */
-  const [faq, setFaq] = useState<DmFaqSettings>({ enabled: false, items: [] });
-  const [direct, setDirect] = useState<DmDirectSettings>({
+  const [faq, setFaq] = useState<DmFaqSettings>(() => cachedSettings?.faq || { enabled: false, items: [] });
+  const [direct, setDirect] = useState<DmDirectSettings>(() => cachedSettings?.direct || {
     greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
     replies: [],
   });
@@ -1325,18 +1348,41 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     window.setTimeout(() => setBanner((cur) => (cur && cur.text === text ? null : cur)), 6000);
   };
 
+  const writeSettingsCache = (overrides: Partial<DmAutomationSettings> = {}) => {
+    writeJson(dmSettingsCacheKey(userName), {
+      ...(cachedSettings || {}),
+      enabled,
+      connected,
+      igUsername,
+      tokenExpiresAt,
+      automations,
+      entitled,
+      externalDm,
+      faq,
+      direct,
+      ...overrides,
+    } as DmAutomationSettings);
+  };
+
   const loadMedia = () => {
+    const request = ++requests.current.media;
     setMediaLoading(true);
     apiService.getInstagramMedia(userName)
-      .then((m) => setMedia(m))
-      .catch(() => setMedia([]))
-      .finally(() => setMediaLoading(false));
+      .then((m) => {
+        if (request !== requests.current.media) return;
+        setMedia(m);
+        if (m.length > 0) writeJson(dmMediaCacheKey(userName), m);
+      })
+      .catch(() => { if (request === requests.current.media) setMedia([]); })
+      .finally(() => { if (request === requests.current.media) setMediaLoading(false); });
   };
 
   const load = () => {
+    const request = ++requests.current.settings;
     setReloading(true);
     apiService.getDmAutomation(userName)
       .then((s) => {
+        if (request !== requests.current.settings) return;
         if (s.loadError) {
           setLoadFailed(true);
           return;
@@ -1346,24 +1392,31 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setConnected(Boolean(s.connected));
         setIgUsername(s.igUsername || '');
         setTokenExpiresAt(s.tokenExpiresAt);
-        setAutomations(Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : []);
+        const nextAutomations = Array.isArray(s.automations) ? s.automations.map(normalizeAutomation) : [];
+        setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
         if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
+        writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
         if (s.connected) loadMedia();
       })
       // getDmAutomation 은 스스로 오류를 삼키지만, 앞으로 구현이 바뀌어도 스피너가
       // 남지 않도록 여기서도 반드시 끝을 만든다.
       .catch((e) => {
+        if (request !== requests.current.settings) return;
         console.error('[DmAutomation] 설정을 불러오지 못했습니다:', e);
         setLoadFailed(true);
       })
-      .finally(() => setReloading(false));
+      .finally(() => { if (request === requests.current.settings) setReloading(false); });
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [userName]);
+  useEffect(() => {
+    load();
+    return () => { requests.current.settings++; requests.current.media++; };
+    /* eslint-disable-next-line */
+  }, [userName]);
 
   // OAuth 연동 콜백 결과 처리 (?ig_connected / ?ig_error)
   useEffect(() => {
@@ -1402,6 +1455,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       return { ok: false as const };
     }
     setSaving(true);
+    requests.current.settings++;
+    setReloading(false);
     const result = await apiService.saveDmAutomation(userName, next);
     setSaving(false);
     if (result.ok) {
@@ -1428,7 +1483,22 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     setDisconnecting(true);
     const ok = await apiService.disconnectInstagram(userName);
     setDisconnecting(false);
-    if (ok) { setConnected(false); setEnabled(false); setIgUsername(''); setTokenExpiresAt(undefined); setMedia([]); setBanner({ type: 'ok', text: '연동이 해제되었습니다.' }); }
+    if (ok) {
+      requests.current.settings++;
+      requests.current.media++;
+      setReloading(false);
+      setMediaLoading(false);
+      setConnected(false);
+      setEnabled(false);
+      setIgUsername('');
+      setTokenExpiresAt(undefined);
+      setMedia([]);
+      try {
+        localStorage.removeItem(dmSettingsCacheKey(userName));
+        localStorage.removeItem(dmMediaCacheKey(userName));
+      } catch {}
+      setBanner({ type: 'ok', text: '연동이 해제되었습니다.' });
+    }
   };
 
   // 저장이 실패하면(플랜 없음 · 네트워크 오류) 화면만 바뀌고 서버는 그대로여서, 새로고침
@@ -1442,7 +1512,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     if (!ok) setEnabled(prev);
     // 스위치를 끄면 인스타그램에 올려둔 질문 버튼도 함께 내려간다. 서버가 그 결과를
     // 돌려주므로 등록 상태 표시가 실제와 어긋나지 않게 반영한다.
-    else if (nextFaq) setFaq(nextFaq);
+    else {
+      if (nextFaq) setFaq(nextFaq);
+      writeSettingsCache({ enabled: v, faq: nextFaq || faq });
+    }
   };
 
   /**
@@ -1468,7 +1541,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const commitAutomation = async (automation: DmAutomationItem) => {
     const prev = automations;
     const exists = prev.some((x) => x.id === automation.id);
-    setAutomations(exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation]);
+    const optimistic = exists ? prev.map((x) => (x.id === automation.id ? automation : x)) : [...prev, automation];
+    setAutomations(optimistic);
     const result = await persist({ action: 'upsertAutomation', automation });
     // 저장에 실패하면 서버가 최신 목록을 함께 준 경우(다른 곳에서 먼저 수정) 그 값을,
     // 아니면 직전 화면 값을 쓴다. 어느 쪽이든 화면은 실제 저장 상태를 따라간다.
@@ -1476,10 +1550,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
       return;
     }
-    if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
+    const savedAutomations = result.automations ? result.automations.map(normalizeAutomation) : optimistic;
+    if (result.automations) setAutomations(savedAutomations);
     // 서버가 확정한 전체 스위치 상태를 그대로 따른다(저장 요청은 이 값을 바꾸지 않는다).
     const masterOn = typeof result.enabled === 'boolean' ? result.enabled : enabled;
     if (typeof result.enabled === 'boolean') setEnabled(result.enabled);
+    writeSettingsCache({ automations: savedAutomations, enabled: masterOn });
     if (automation.enabled && !masterOn) {
       setBanner({
         type: 'ok',
@@ -1506,7 +1582,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setAutomations(result.automations ? result.automations.map(normalizeAutomation) : prev);
       return;
     }
-    if (result.automations) setAutomations(result.automations.map(normalizeAutomation));
+    const savedAutomations = result.automations ? result.automations.map(normalizeAutomation) : automations.filter((x) => x.id !== id);
+    if (result.automations) setAutomations(savedAutomations);
+    writeSettingsCache({ automations: savedAutomations });
   };
 
   const activeCount = useMemo(() => automations.filter((a) => a.enabled).length, [automations]);

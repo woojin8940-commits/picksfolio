@@ -169,12 +169,13 @@ if (typeof window !== 'undefined') {
 
 // 타임아웃 유틸리티: Promise 또는 thenable을 지정 시간(ms) 후 자동 reject
 export function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    Promise.resolve(promise),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`[Timeout] ${label}: ${ms}ms`)), ms)
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`[Timeout] ${label}: ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 /**

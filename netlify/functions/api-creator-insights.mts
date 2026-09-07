@@ -377,7 +377,10 @@ export default async (req: Request) => {
     }
 
     const force = url.searchParams.get("refresh") === "1";
-    const result = await getReelInsights(username, resolved.link, resolved.scope, { force });
+    const [result] = await Promise.all([
+      getReelInsights(username, resolved.link, resolved.scope, { force }),
+      backfillSnapshotFromChannel(db, username),
+    ]);
     if (!result.ok) {
       return Response.json(
         { connected: true, needsReauth: result.code === "META_TOKEN_INVALID", error: result.error, code: result.code, reels: [] },
@@ -395,7 +398,6 @@ export default async (req: Request) => {
 
     // 최근 7일 증감. 스냅샷이 두 개 이상 있어야 말할 수 있는 값이라, 없으면 null 로
     // 두고 화면이 이 항목 자체를 생략한다 — 0 으로 적으면 "일주일째 그대로"가 된다.
-    await backfillSnapshotFromChannel(db, username);
     const week = await loadFollowerSeries(db, username, 7);
     const followerDelta7d =
       week.length >= 2 ? week[week.length - 1].followers - week[0].followers : null;

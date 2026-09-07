@@ -51,7 +51,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   const isEn = language === 'en';
 
   const rejectionPresets = isEn ? REJECTION_PRESETS_EN : REJECTION_PRESETS_KO;
-  const cachedProposals = readProposalCache(userName);
+  const cachedProposals = useMemo(() => readProposalCache(userName), [userName]);
 
   const [proposals, setProposals] = useState<BusinessProposal[]>(() => cachedProposals);
   const [loading, setLoading] = useState(() => cachedProposals.length === 0);

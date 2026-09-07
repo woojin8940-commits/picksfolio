@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   LineChart, ComposedChart, Line, Bar, Cell, ReferenceLine, LabelList,
   PieChart, Pie, RadarChart, PolarGrid, PolarAngleAxis, Radar,
@@ -338,10 +338,18 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
    * 처음 화면을 연 사람은 점이 하나도 없는 "수집 중" 화면을 보게 된다.
    */
   const [loadedAt, setLoadedAt] = useState(() => initialCache?.data ? Date.now() : 0);
+  const requests = useRef({ main: 0, series: 0, demo: 0, benchmark: 0 });
+  useEffect(() => () => {
+    requests.current.main++;
+    requests.current.series++;
+    requests.current.demo++;
+    requests.current.benchmark++;
+  }, [userName]);
 
   const load = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!userName) return;
+      const request = ++requests.current.main;
       const cached = readCreatorInsightsCache(userName);
       if (!opts.refresh && cached?.data) {
         setData(cached.data);
@@ -352,12 +360,15 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
       else if (!cached?.data) setLoading(true);
       try {
         const res = await apiService.getCreatorInsights(userName, { refresh: opts.refresh });
+        if (request !== requests.current.main) return;
         setData(res);
-        writeCreatorInsightsCache(userName, { data: res });
+        if (!res.error) writeCreatorInsightsCache(userName, { data: res });
         setLoadedAt(Date.now());
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (request === requests.current.main) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [userName],
@@ -367,6 +378,7 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     async (days: RangeDays) => {
       if (!userName) return;
       const cacheKey = String(days);
+      const request = ++requests.current.series;
       const cached = readCreatorInsightsCache(userName)?.series?.[cacheKey];
       if (cached) {
         setSeries(cached);
@@ -376,11 +388,12 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
       }
       try {
         const res = await apiService.getCreatorFollowerSeries(userName, days);
+        if (request !== requests.current.series) return;
         setSeries(res);
         const prev = readCreatorInsightsCache(userName)?.series || {};
-        writeCreatorInsightsCache(userName, { series: { ...prev, [cacheKey]: res } });
+        if (!res.error) writeCreatorInsightsCache(userName, { series: { ...prev, [cacheKey]: res } });
       } finally {
-        setSeriesLoading(false);
+        if (request === requests.current.series) setSeriesLoading(false);
       }
     },
     [userName],
@@ -389,6 +402,7 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const loadDemographics = useCallback(
     async (opts: { refresh?: boolean } = {}) => {
       if (!userName) return;
+      const request = ++requests.current.demo;
       const cached = readCreatorInsightsCache(userName)?.demo;
       if (!opts.refresh && cached) {
         setDemo(cached);
@@ -398,10 +412,11 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
       }
       try {
         const res = await apiService.getCreatorFollowerDemographics(userName, opts);
+        if (request !== requests.current.demo) return;
         setDemo(res);
-        writeCreatorInsightsCache(userName, { demo: res });
+        if (!res.error) writeCreatorInsightsCache(userName, { demo: res });
       } finally {
-        setDemoLoading(false);
+        if (request === requests.current.demo) setDemoLoading(false);
       }
     },
     [userName],
@@ -409,6 +424,7 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
 
   const loadBenchmark = useCallback(async () => {
     if (!userName) return;
+    const request = ++requests.current.benchmark;
     const cached = readCreatorInsightsCache(userName)?.benchmark;
     if (cached) {
       setBenchmark(cached);
@@ -418,10 +434,11 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     }
     try {
       const res = await apiService.getCreatorBenchmark(userName);
+      if (request !== requests.current.benchmark) return;
       setBenchmark(res);
-      writeCreatorInsightsCache(userName, { benchmark: res });
+      if (!res.error) writeCreatorInsightsCache(userName, { benchmark: res });
     } finally {
-      setBenchmarkLoading(false);
+      if (request === requests.current.benchmark) setBenchmarkLoading(false);
     }
   }, [userName]);
 

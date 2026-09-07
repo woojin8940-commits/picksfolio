@@ -48,7 +48,7 @@ export default async (req: Request, context: Context) => {
     if (!auth.ok) return auth.response;
   }
 
-  const store = getStore("timelines");
+  const store = getStore({ name: "timelines", consistency: "strong" });
   const indexKey = `index_${userType}_${username}`;
 
   if (req.method === "GET") {
@@ -342,78 +342,84 @@ export default async (req: Request, context: Context) => {
     const businessProposalIds = existing
       .filter((t: any) => sourceOf(t) === "business_proposal")
       .map((t: any) => t.proposalId);
-    if (businessProposalIds.length > 0 && dbInstance) {
-      try {
-        const statusRows = (await dbInstance.sql`
-          SELECT id, status FROM proposals WHERE id = ANY(${businessProposalIds})
-        `) as any[];
-        for (const row of statusRows || []) {
-          if (row?.id) proposalStatusMap[row.id] = row.status || "";
-        }
-      } catch {
-        // 제안이 Blobs 에만 남아 있는 예전 건은 상태를 알 수 없다. 그 경우
-        // 화면은 상태 배지를 생략한다 — 대화 자체는 그대로 가능하다.
-      }
-    }
-
-    if (proposalIds.length > 0 && dbInstance) {
-      try {
-        const unreadRows = await dbInstance.sql`
-          SELECT proposal_id,
-                 COUNT(*) FILTER (WHERE NOT (${username} = ANY(read_by))) as unread_count,
-                 MAX(created_at) as last_message_at
-          FROM timeline_messages
-          WHERE proposal_id = ANY(${proposalIds})
-          GROUP BY proposal_id
-        ` as any[];
-        if (Array.isArray(unreadRows)) {
-          for (const row of unreadRows) {
-            unreadMap[row.proposal_id] = parseInt(row.unread_count) || 0;
-            latestMessageMap[row.proposal_id] = row.last_message_at;
+    const hiddenAtMap: Record<string, number> = {};
+    await Promise.all([
+      (async () => {
+        if (businessProposalIds.length > 0 && dbInstance) {
+          try {
+            const statusRows = (await dbInstance.sql`
+              SELECT id, status FROM proposals WHERE id = ANY(${businessProposalIds})
+            `) as any[];
+            for (const row of statusRows || []) {
+              if (row?.id) proposalStatusMap[row.id] = row.status || "";
+            }
+          } catch {
+            // 제안이 Blobs 에만 남아 있는 예전 건은 상태를 알 수 없다. 그 경우
+            // 화면은 상태 배지를 생략한다 — 대화 자체는 그대로 가능하다.
           }
         }
-      } catch {
-        const batchSize = 10;
-        const batched = existing.slice(0, batchSize);
-        const details = await Promise.all(
-          batched.map(async (t: any) => {
-            try {
-              const detail = (await store.get(`detail_${t.proposalId}`, { type: "json" })) as any;
-              const comments = detail?.comments || [];
-              const unreadCount = comments.filter((c: any) => !c.readBy?.includes(username)).length;
-              return { proposalId: t.proposalId, unreadCount };
-            } catch {
-              return { proposalId: t.proposalId, unreadCount: 0 };
+      })(),
+      (async () => {
+        if (proposalIds.length > 0 && dbInstance) {
+          try {
+            const unreadRows = await dbInstance.sql`
+              SELECT proposal_id,
+                     COUNT(*) FILTER (WHERE NOT (${username} = ANY(read_by))) as unread_count,
+                     MAX(created_at) as last_message_at
+              FROM timeline_messages
+              WHERE proposal_id = ANY(${proposalIds})
+              GROUP BY proposal_id
+            ` as any[];
+            if (Array.isArray(unreadRows)) {
+              for (const row of unreadRows) {
+                unreadMap[row.proposal_id] = parseInt(row.unread_count) || 0;
+                latestMessageMap[row.proposal_id] = row.last_message_at;
+              }
             }
-          })
-        );
-        for (const d of details) {
-          unreadMap[d.proposalId] = d.unreadCount;
+          } catch {
+            const batchSize = 10;
+            const batched = existing.slice(0, batchSize);
+            const details = await Promise.all(
+              batched.map(async (t: any) => {
+                try {
+                  const detail = (await store.get(`detail_${t.proposalId}`, { type: "json" })) as any;
+                  const comments = detail?.comments || [];
+                  const unreadCount = comments.filter((c: any) => !c.readBy?.includes(username)).length;
+                  return { proposalId: t.proposalId, unreadCount };
+                } catch {
+                  return { proposalId: t.proposalId, unreadCount: 0 };
+                }
+              })
+            );
+            for (const d of details) {
+              unreadMap[d.proposalId] = d.unreadCount;
+            }
+          }
         }
-      }
-    }
-
-    // 사용자가 목록에서 내린 대화(timeline_hidden). 방과 메시지는 그대로 두고
-    // 목록에서만 감춘다 — 방은 상대와 함께 쓰는 기록이라 지울 수 없다.
-    //
-    // 내린 뒤에 새 메시지가 도착한 방은 다시 보여 주고 기록을 지운다. 한 번 삭제한
-    // 업체의 연락을 영구히 놓치면 삭제 기능이 오히려 손해가 된다.
-    const hiddenAtMap: Record<string, number> = {};
-    if (proposalIds.length > 0 && dbInstance) {
-      try {
-        const hiddenRows = (await dbInstance.sql`
-          SELECT proposal_id, hidden_at FROM timeline_hidden
-          WHERE username = ${username} AND proposal_id = ANY(${proposalIds})
-        `) as any[];
-        for (const row of hiddenRows || []) {
-          const at = new Date(row?.hidden_at).getTime();
-          if (row?.proposal_id && !Number.isNaN(at)) hiddenAtMap[row.proposal_id] = at;
+      })(),
+      (async () => {
+        // 사용자가 목록에서 내린 대화(timeline_hidden). 방과 메시지는 그대로 두고
+        // 목록에서만 감춘다 — 방은 상대와 함께 쓰는 기록이라 지울 수 없다.
+        //
+        // 내린 뒤에 새 메시지가 도착한 방은 다시 보여 주고 기록을 지운다. 한 번 삭제한
+        // 업체의 연락을 영구히 놓치면 삭제 기능이 오히려 손해가 된다.
+        if (proposalIds.length > 0 && dbInstance) {
+          try {
+            const hiddenRows = (await dbInstance.sql`
+              SELECT proposal_id, hidden_at FROM timeline_hidden
+              WHERE username = ${username} AND proposal_id = ANY(${proposalIds})
+            `) as any[];
+            for (const row of hiddenRows || []) {
+              const at = new Date(row?.hidden_at).getTime();
+              if (row?.proposal_id && !Number.isNaN(at)) hiddenAtMap[row.proposal_id] = at;
+            }
+          } catch {
+            // 조회가 실패하면 아무것도 감추지 않는다 — 진행 중인 대화가 사라지는 것보다
+            // 지웠던 줄이 다시 보이는 편이 안전하다.
+          }
         }
-      } catch {
-        // 조회가 실패하면 아무것도 감추지 않는다 — 진행 중인 대화가 사라지는 것보다
-        // 지웠던 줄이 다시 보이는 편이 안전하다.
-      }
-    }
+      })(),
+    ]);
 
     const revived: string[] = [];
     const visible = existing.filter((t: any) => {
