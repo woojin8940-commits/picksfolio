@@ -35,7 +35,7 @@ export type DefaultButtonDef = {
 };
 
 export const DEFAULT_BUTTONS: DefaultButtonDef[] = [
-  { key: 'kakao', label: '카카오톡', placeholder: 'pf.kakao.com/_채널ID 또는 오픈채팅 주소' },
+  { key: 'kakao', label: '카카오톡', placeholder: 'pf.kakao.com/@채널이름 또는 오픈채팅 주소' },
   { key: 'youtube', label: '유튜브', placeholder: 'youtube.com/@채널' },
   { key: 'tiktok', label: '틱톡', placeholder: 'tiktok.com/@아이디' },
   { key: 'naver', label: '네이버', placeholder: 'blog.naver.com/아이디 또는 스마트스토어 주소' },
@@ -66,12 +66,41 @@ export const resolveButtonLabel = (
  * 예전에는 카카오톡만 이걸 받아 주고 나머지는 https:// 만 붙였는데, 그러면
  * "@me" 가 "https://@me" 가 된다 — 주소 꼴은 맞아서 저장은 되지만 어디에도
  * 닿지 않으니, 버튼을 눌러도 아무 일이 없는 것처럼 보였다.
+ *
+ * 넘겨받는 값은 사람이 적은 그대로다(`@` 를 떼지 않는다). 예전에는 여기 오기 전에
+ * `@` 를 먼저 떼어 냈는데, 유튜브·틱톡은 자기 주소를 만들 때 `@` 를 다시 붙이니
+ * 문제가 없었지만 카카오톡은 붙이지 않았다. 그래서 카카오톡만 결과가
+ * `https://pf.kakao.com/내채널` — 카카오가 알지 못하는 주소라 눌러도 채널로
+ * 가지 않았다. `@` 를 떼는 일은 각 플랫폼이 자기 주소 형식에 맞게 처리한다.
  */
 const HANDLE_HOME: Record<DefaultButtonKey, (handle: string) => string> = {
-  kakao: handle => `https://pf.kakao.com/${handle}`,
-  youtube: handle => `https://www.youtube.com/@${handle}`,
-  tiktok: handle => `https://www.tiktok.com/@${handle}`,
-  naver: handle => `https://blog.naver.com/${handle}`,
+  // 카카오톡 채널 홈은 두 가지 꼴만 받는다 — 채널 공개 ID(`_xXxXx`)와 검색용
+  // 이름(`@내채널`). `_` 로 시작하면 공개 ID 그대로, 아니면 `@` 를 붙인다.
+  kakao: handle => `https://pf.kakao.com/${handle.startsWith('_') ? handle : `@${handle.replace(/^@/, '')}`}`,
+  youtube: handle => `https://www.youtube.com/@${handle.replace(/^@/, '')}`,
+  tiktok: handle => `https://www.tiktok.com/@${handle.replace(/^@/, '')}`,
+  naver: handle => `https://blog.naver.com/${handle.replace(/^@/, '')}`,
+};
+
+/**
+ * 붙여 넣은 카카오톡 주소 다듬기.
+ *
+ * 카카오톡 채널 관리자에서 주소를 복사해 오면 대개 제대로 된 주소지만, 채널
+ * 이름만 손으로 이어 붙여 `pf.kakao.com/내채널` 로 저장해 둔 값도 있다. 그
+ * 주소는 카카오에 없어서 열리지 않으므로, 경로가 이름 한 칸뿐이고 `@` 도 `_` 도
+ * 없을 때만 `@` 를 붙여 준다(뒤에 /chat, /posts 같은 칸이 더 붙은 주소는
+ * 사람이 실제로 복사해 온 주소이므로 건드리지 않는다).
+ *
+ * http 로 저장된 카카오 주소는 https 로 올린다 — 카카오가 어차피 https 로
+ * 넘기고, 인앱 브라우저는 http 요청을 아예 막는 경우가 있다.
+ */
+const repairKakaoUrl = (url: string): string => {
+  let value = url.replace(/^http:\/\//i, 'https://');
+  const match = value.match(/^(https:\/\/pf\.kakao\.com\/)([^/?#]+)$/i);
+  if (match && !/^[@_]/.test(match[2])) {
+    value = `${match[1]}@${match[2]}`;
+  }
+  return value;
 };
 
 /**
@@ -87,11 +116,12 @@ const HANDLE_HOME: Record<DefaultButtonKey, (handle: string) => string> = {
 export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string => {
   const value = (raw || '').trim();
   if (!value) return '';
-  if (/^https?:\/\//i.test(value)) return value;
+  const finish = (url: string) => (key === 'kakao' ? repairKakaoUrl(url) : url);
+  if (/^https?:\/\//i.test(value)) return finish(value);
   if (!value.includes('.') && !value.includes('/')) {
-    return HANDLE_HOME[key](value.replace(/^@/, ''));
+    return HANDLE_HOME[key](value);
   }
-  return `https://${value.replace(/^\/+/, '')}`;
+  return finish(`https://${value.replace(/^\/+/, '')}`);
 };
 
 /** 값이 들어 있는 기본 버튼만, 정해진 순서대로. 이름은 인플루언서가 적은 것으로. */

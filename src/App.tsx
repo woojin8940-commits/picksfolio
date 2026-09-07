@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SiteHeader from './components/SiteHeader';
 import Hero from './components/Hero';
 import ErrorBoundary from './components/ErrorBoundary';
+import AuthLoadingScreen from './components/AuthLoadingScreen';
 import Footer from './components/Footer';
 import { supabase, withTimeout, safeFetchProfile } from './services/supabase';
 // 탭마다 계정 슬롯을 나눠, 일반 유저 · 비즈니스 · 운영자를 동시에 열어 두고 써도
@@ -1603,7 +1604,32 @@ const App: React.FC = () => {
     window.scrollTo(0, 0);
   };
 
+  /**
+   * 로그아웃이 진행 중인지.
+   *
+   * "로그아웃되었습니다" 가 두 번 뜨던 원인이 여기에 있었다. 로그아웃은 한 번
+   * 눌리면 되돌릴 수 없는 동작인데, 이 함수는 몇 번 불려도 그때마다 처음부터 다시
+   * 실행됐다. 안내창은 Supabase 세션 정리(최대 3초)를 기다린 뒤에 뜨기 때문에,
+   * 그 사이에 로그아웃이 한 번 더 들어오면(같은 버튼을 다시 누르거나, 세션이
+   * 끊겼다는 신호 · 자동 로그아웃 같은 다른 경로가 겹치거나) 같은 안내창이 두 장
+   * 쌓였다.
+   *
+   * 그래서 "이미 로그아웃하는 중"을 표시로 남기고 두 번째부터는 그냥 돌아간다.
+   * 어느 경로가 겹쳐도 정리는 한 번만, 안내창도 한 번만 뜬다. ref 로 두는 것은
+   * 상태 갱신이 반영되기를 기다리지 않고 같은 tick 안에서 곧바로 막아야 하기
+   * 때문이다(state 는 화면을 덮는 데만 쓴다). 표시를 되돌리지 않는 것도 의도다 —
+   * 이 함수는 항상 페이지 이동으로 끝난다.
+   */
+  const loggingOutRef = useRef(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
   const handleLogout = async () => {
+    if (loggingOutRef.current) {
+      console.log('Logout already in progress — ignoring duplicate request');
+      return;
+    }
+    loggingOutRef.current = true;
+    setLoggingOut(true);
     console.log('Logout process started...');
 
     // 1. Immediate local cleanup — clear this tab's own picks_ keys but PRESERVE
@@ -1657,6 +1683,13 @@ const App: React.FC = () => {
   };
 
   const handleBusinessLogout = () => {
+    // 크리에이터 로그아웃과 같은 이유로 한 번만 실행한다(위 loggingOutRef 설명).
+    if (loggingOutRef.current) {
+      console.log('Logout already in progress — ignoring duplicate request');
+      return;
+    }
+    loggingOutRef.current = true;
+    setLoggingOut(true);
     // 비즈니스 로그아웃은 비즈니스 키만 건드린다 — 다른 탭의 크리에이터 · 운영자
     // 로그인은 그대로 살아 있어야 한다.
     BUSINESS_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
@@ -1693,6 +1726,14 @@ const App: React.FC = () => {
     window.addEventListener('picks:auth-lost', onAuthLost);
     return () => window.removeEventListener('picks:auth-lost', onAuthLost);
   }, [isLoggedIn]);
+
+  // 로그아웃하는 동안에는 화면 전체를 로딩 화면으로 덮는다. 대시보드가 그대로
+  // 남아 있으면 로그아웃 버튼도 그대로 남아, 정리가 끝나기를 기다리는 사이에 한 번
+  // 더 눌릴 수 있다. 위의 ref 가 두 번째 실행을 막아 주지만, 아예 누를 것이 없는
+  // 편이 낫다 — 눌러도 아무 반응이 없는 버튼은 고장으로 보인다.
+  if (loggingOut) {
+    return <AuthLoadingScreen message="로그아웃 중입니다" />;
+  }
 
   // Business views
   if (view === 'business-signup') {
@@ -1776,14 +1817,7 @@ const App: React.FC = () => {
       return null;
     }
     if (!profileChecked && supabase) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-midnight">
-          <div className="text-center">
-            <div className="w-8 h-8 border-3 border-blue-400/30 border-t-blue-400 rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-slate-400 text-sm">권한 확인 중...</p>
-          </div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
     return <LazyRoute><OperatorDashboard onLogout={() => navigate('operator-login')} /></LazyRoute>;
   }
@@ -1800,14 +1834,7 @@ const App: React.FC = () => {
     // 크리에이터 대시보드로 튕겨 나간다 — 그래서 판정(managerChecked)이 끝날
     // 때까지는 스피너를 둔다.
     if ((!profileChecked || !managerChecked) && supabase) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="text-center">
-            <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-slate-400 text-sm font-bold">권한 확인 중...</p>
-          </div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
     if (!isPlatformManager) {
       setTimeout(() => navigate('admin'), 0);
@@ -1872,11 +1899,7 @@ const App: React.FC = () => {
     // show a loading spinner instead of the SetupLink form.
     // This prevents existing users from ever seeing the link creation screen.
     if (!profileChecked) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-midnight">
-          <div className="w-8 h-8 border-3 border-blue-400/30 border-t-blue-400 rounded-full animate-spin"></div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
     return (
       <LazyRoute>
@@ -1901,25 +1924,11 @@ const App: React.FC = () => {
       return null;
     }
     if (!profileChecked && supabase) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-[#f8fafc]">
-          <div className="text-center">
-            <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-slate-400 text-sm">프로필 확인 중...</p>
-          </div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
-    // Show smooth transition screen while login completes
+    // 로그인이 마무리되는 동안. 앞의 프로필 확인과 같은 화면이라 색도 글자도 바뀌지 않는다.
     if (loginTransitioning) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-[#f8fafc]">
-          <div className="text-center animate-in fade-in duration-300">
-            <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-slate-500 font-bold text-sm">대시보드를 불러오는 중...</p>
-          </div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
 
     let subComponent: React.ReactNode = null;
@@ -1986,7 +1995,10 @@ const App: React.FC = () => {
             담당자 대시보드
           </button>
         )}
-        <LazyRoute>
+        {/* 대시보드 화면 코드를 받아오는 동안에도 같은 로딩 화면을 유지한다. 기본
+            fallback(RouteFallback)은 배경이 없어서, 여기서만 body 색인 검정이 한 번
+            비쳤다 — 로그인 한 번에 화면이 검정·흰색으로 깜빡이던 마지막 단계다. */}
+        <LazyRoute fallback={<AuthLoadingScreen />}>
         <AdminDashboard
         userName={userName}
         onLogout={handleLogout}
@@ -2025,6 +2037,13 @@ const App: React.FC = () => {
     );
   }
 
+  // 로그인 처리 중에는 헤더도 그리지 않는다. 예전에는 로딩 표시가 SiteHeader 아래
+  // <main> 안에 들어가 있어서, 대시보드로 넘어가는 순간 헤더가 사라지며 화면이 한 번
+  // 더 바뀌었다. 위의 대시보드 게이트들과 같은 화면 하나로 끝낸다.
+  if (view !== 'home' && view !== 'signup' && (oauthProcessing || loginTransitioning)) {
+    return <AuthLoadingScreen />;
+  }
+
   return (
     <div className="min-h-screen bg-background selection:bg-blue-primary/30 flex flex-col">
       <SiteHeader
@@ -2056,14 +2075,6 @@ const App: React.FC = () => {
           />
           </LazyRoute>
         ) : (
-          (oauthProcessing || loginTransitioning) ? (
-            <div className="min-h-screen flex items-center justify-center bg-midnight">
-              <div className="text-center animate-in fade-in duration-300">
-                <div className="w-10 h-10 border-3 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-slate-300 font-bold text-sm">{loginTransitioning ? '대시보드를 불러오는 중...' : '카카오 로그인 처리 중...'}</p>
-              </div>
-            </div>
-          ) : (
           <LazyRoute>
           <LoginPage
             onNavigateHome={() => navigate('home')}
@@ -2120,7 +2131,6 @@ const App: React.FC = () => {
             }}
           />
           </LazyRoute>
-          )
         )}
       </main>
       {view === 'home' && (

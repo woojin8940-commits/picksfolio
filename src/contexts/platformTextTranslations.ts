@@ -1611,6 +1611,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "시청자는 방송 중 장바구니에 담은 상품을 회사가 제공하는 일괄 결제 시스템을 통해 결제하며, 결제는 등록된 결제대행사(PG)를 통해 처리됩니다.": "Viewers pay for the products they put in their shopping cart during the broadcast through the lump sum payment system provided by the company, and the payment is processed through a registered payment agency (PG).",
   "시청자는 별도의 유료 구독 없이 멤버십 회원(셀러)의 방송을 시청하고 상품을 구매할 수 있으며, 이때 발생하는 비용은 구매한 상품 대금에 한합니다.": "Viewers can watch broadcasts and purchase products from membership members (sellers) without a separate paid subscription, and the cost incurred at this time is limited to the price of the purchased product.",
   "시행일: 2026년 4월 1일": "Enforcement date: April 1, 2026",
+  "시행일: 2026년 9월 15일 (개정)": "Effective date: September 15, 2026 (amended)",
   "식품": "Food",
   "신규 (30일)": "New (30 days)",
   "신규 (7일)": "New (7 days)",

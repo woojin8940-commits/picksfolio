@@ -52,6 +52,50 @@
 </head>
 <body>
     <div id="root"></div>
+    <!--
+      로그인 콜백으로 들어온 방문에만, 리액트가 뜨기 전 자리를 지키는 로딩 화면.
+
+      카카오 간편로그인 콜백은 main.tsx 가 인가 코드를 세션으로 바꾼 다음에야 앱을
+      그린다(그 전에 그리면 App.tsx 의 OAuth 처리가 카카오가 준 코드를 자기 것으로
+      착각한다). 그 교환은 네트워크를 한 번 타므로 그동안 #root 는 비어 있었고,
+      화면에는 body 색인 검정만 남았다 — 로그인하는 사람에게는 "눌렀는데 검은
+      화면이 한참 있다가 무언가 뜨는" 첫 번째 깜빡임이었다.
+
+      그래서 그 구간에만 AuthLoadingScreen 과 똑같은 그림을 정적 마크업으로 미리
+      그려 둔다. 리액트가 뜨면 createRoot 가 #root 안을 비우고 같은 화면을 이어
+      그리므로, 넘어가는 순간이 보이지 않는다. 색·크기·문구는 반드시
+      src/components/AuthLoadingScreen.tsx 와 같이 유지해야 한다.
+
+      로그인 콜백이 아닌 보통의 방문(개인페이지 등)에는 아무것도 그리지 않는다.
+      모든 방문에 스피너를 깔면, 지금은 조용히 뜨던 개인페이지에 없던 스피너가
+      한 번 번쩍이게 된다.
+    -->
+    <script>
+      (function () {
+        try {
+          var loc = window.location;
+          var isAuthCallback =
+            loc.pathname === '/auth-callback' ||
+            /[?&](code|kakao_login)=/.test(loc.search) ||
+            /access_token=/.test(loc.hash);
+          if (!isAuthCallback) return;
+          var root = document.getElementById('root');
+          if (!root) return;
+          root.innerHTML =
+            '<div style="position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;' +
+            'align-items:center;justify-content:center;background:#050507" role="status" aria-live="polite">' +
+            '<div style="width:40px;height:40px;border:3px solid #60a5fa;border-top-color:transparent;' +
+            'border-radius:9999px;animation:picks-boot-spin 1s linear infinite"></div>' +
+            '<p style="margin:1rem 0 0;font-size:0.875rem;font-weight:700;color:#cbd5e1">로그인 중입니다</p>' +
+            '</div>';
+          var style = document.createElement('style');
+          style.textContent = '@keyframes picks-boot-spin{to{transform:rotate(360deg)}}';
+          document.head.appendChild(style);
+        } catch (e) {
+          // 로딩 표시는 곁가지다. 실패해도 앱이 뜨는 것을 막지 않는다.
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
     <!--
       video.js 와 포트원 결제 SDK 는 여기서 부르지 않는다.
