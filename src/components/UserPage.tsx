@@ -969,7 +969,13 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             <div className="px-4 pt-4 pb-8 space-y-12">
               {/* Social & Contact Links */}
-              <div className="flex gap-2.5 pt-4 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
+              {/* 버튼은 마우스를 올리면 2px 떠오르고 그림자가 생긴다. 예전에는 이 줄에
+                  overflow-x-auto 가 걸려 있어서(가로 스크롤을 켜면 세로도 함께 잘린다)
+                  떠오른 만큼 위가 잘리고 그림자는 아래가 잘렸다 — 버튼 줄 바로 위가
+                  상단 커버 사진이라, 위쪽이 사진에 걸려 잘린 것처럼 보였다. 버튼은
+                  flex-wrap 으로 이미 줄바꿈되니 가로 스크롤은 필요하지 않다. 대신
+                  위아래로 조금 여유를 둬서 떠오른 버튼과 그림자가 다 보이게 한다. */}
+              <div className="flex gap-2.5 pt-4 pb-2 justify-center flex-wrap">
                 {socials.businessProposal && (
                   <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
@@ -1041,8 +1047,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                </div>
 
                {/* Product Search Bar */}
+               {/* 좁은 화면에서는 검색줄을 한 단계 얇게 둔다(py-2.5). 글자와 아이콘
+                   크기는 그대로라 눌리는 영역은 충분하고, 모바일에서 유독 두꺼워
+                   보이던 느낌만 덜어 낸다. 넓은 화면은 예전 두께를 유지한다. */}
                <div className="px-4 mb-6">
-                 <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
+                 <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                    <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                    <input
                      type="text"
@@ -1299,7 +1308,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4 md:-mx-8">
 
-              <div className="flex gap-2.5 overflow-x-auto scrollbar-hide justify-center flex-wrap">
+              {/* 위 포트폴리오 레이아웃과 같은 이유로 가로 스크롤을 걷어 냈다. 이쪽은
+                  줄 자체에 위아래 여백이 없어서 떠오르는 모션과 그림자가 더 잘렸다. */}
+              <div className="flex gap-2.5 py-1.5 justify-center flex-wrap">
                 {socials.businessProposal && (
                   <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
                     <Briefcase size={14} strokeWidth={2.5} />
@@ -1371,8 +1382,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
             </div>
 
             {/* Product Search Bar */}
+            {/* 큐레이션 레이아웃의 검색줄도 같은 두께를 쓴다. */}
             <div className="px-6 mb-2">
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
+              <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                 <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                 <input
                   type="text"

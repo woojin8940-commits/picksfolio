@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { lazyWithRetry } from '../utils/lazyRoute';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
@@ -264,6 +265,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const selectedIdRef = React.useRef('');
   selectedIdRef.current = selectedCampaign?.id || '';
   const collabsRef = React.useRef<any[]>([]);
+  /**
+   * 캠페인별로 "인플루언서가 남긴, 내가 아직 안 본 진행 기록" 수.
+   *
+   * 예전에는 인플루언서가 기획안을 올려도 캠페인 목록에는 아무 표시가 없어서,
+   * 브랜드가 캠페인을 하나씩 열고 사람을 하나씩 눌러 봐야 알 수 있었다. 협업
+   * 타임라인 메뉴에 붙던 빨간 표시를 캠페인 카드에도 붙인다.
+   *
+   * 협업 목록(getCollabs)에서 세지 않고 합계만 묻는 조회를 따로 쓴다 — 이 값은
+   * 주기적으로 다시 세야 하는데, 협업 목록은 단계 · 제출물 · 배송까지 딸린 큰
+   * 응답이라 표시 하나를 위해 2분마다 받을 이유가 없다.
+   */
+  const [campaignUnread, setCampaignUnread] = useState<Record<string, number>>({});
+
+  const refreshUnread = useCallback(async (signal?: AbortSignal) => {
+    const { byCampaign } = await apiService.getCollabUnread('brand', { signal });
+    if (!signal?.aborted) setCampaignUnread(byCampaign);
+  }, []);
+
+  useVisiblePolling(signal => refreshUnread(signal), 120000, !!businessUsername, businessUsername, 2000);
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -840,7 +860,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
          가로로 밀어 봐야 한다 — 보드로 만든 이유가 "몰려 있는 칸이 한눈에 보이는 것"인데
          그 이유가 폭에서 사라진다. 다른 탭은 카드 열이 늘어나 빈자리를 채운다. */
       <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-[1560px] mx-auto pb-[calc(152px+env(safe-area-inset-bottom,0px))] md:pb-28">
-        <button onClick={() => setSelectedCampaign(null)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
+        {/* 목록으로 돌아갈 때 표시를 다시 센다. 방금 열어 본 사람들의 기록은 읽음이
+            되었으니, 2분 뒤의 다음 조회를 기다리면 카드에 표시가 남아 있다. */}
+        <button onClick={() => { setSelectedCampaign(null); void refreshUnread(); }} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-black text-sm mb-6 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           캠페인 목록
         </button>
@@ -1764,6 +1786,13 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       </span>
                     )}
                   </div>
+                  {/* 인플루언서가 진행사항에서 무엇을 했는가. 카드에 표시가 있으면
+                      브랜드는 캠페인을 하나씩 열어 보지 않아도 어디를 봐야 할지 안다. */}
+                  {(campaignUnread[campaign.id] || 0) > 0 && (
+                    <span className="absolute bottom-2.5 right-2.5 bg-red-500 text-white text-[11px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full shadow-md">
+                      {campaignUnread[campaign.id] > 99 ? '99+' : campaignUnread[campaign.id]}
+                    </span>
+                  )}
                   {/* 수정·삭제. 마감된 캠페인의 삭제 버튼은 계속 보이게 둔다 — 손댈 일이
                       끝난 캠페인을 정리하려면 커서를 올려야 나타나는 버튼을 먼저 찾아내야
                       하는데, 모바일에서는 hover 가 없어 아예 닿지 않는다. */}

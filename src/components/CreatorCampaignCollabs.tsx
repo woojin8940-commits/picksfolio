@@ -8,6 +8,7 @@ import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 
 /**
  * 캠페인 협업 — 인플루언서가 자기 캠페인을 진행하는 곳.
@@ -188,6 +189,26 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   }, [userName, load]);
 
   /**
+   * 카드의 빨간 배지만 따로 새로 받는다.
+   *
+   * 목록 전체(load)를 다시 끌어오면 카드 순서와 단계 문구까지 바뀌어, 보고 있던
+   * 카드가 눈앞에서 움직인다. 안 본 개수만 세어 오는 가벼운 조회가 따로 있으니
+   * 그것만 받아 배지 숫자에 덮어쓴다. 상세를 펼쳐 둔 동안은 쉰다 — 방금 읽은
+   * 것으로 지운 배지가 다시 켜지면 안 본 것이 남은 것처럼 보인다.
+   */
+  useVisiblePolling(
+    async signal => {
+      const { byCollab } = await apiService.getCollabUnread('influencer', { signal });
+      if (signal.aborted) return;
+      setCollabs(prev => prev.map(c => ({ ...c, unreadEvents: byCollab[c.id] || 0 })));
+    },
+    120000,
+    !!userName && !selectedId,
+    userName,
+    3000,
+  );
+
+  /**
    * 지목해 들어온 협업을 바로 펼친다. 목록이 온 뒤에 한 번만 — 그 뒤에 사람이 다른
    * 협업으로 옮겨 갔을 때 같은 id 로 다시 끌어오면 화면이 되돌아간다.
    */
@@ -217,6 +238,12 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     setDetailTab('progress');
     setDetailLoading(true);
     window.scrollTo({ top: 0 });
+    // 협업을 펼치면 그 안의 새 소식은 읽은 것으로 둔다. 서버 응답을 기다리지 않고
+    // 빨간 배지를 먼저 지우는데, 여기서 사람이 알고 싶은 것은 "안 본 게 남았나"
+    // 뿐이고 그 답은 이미 화면에 펼쳐졌기 때문이다. 기록이 실패해도 다음 조회에서
+    // 다시 뜰 뿐이라 잘못된 상태로 굳지 않는다.
+    setCollabs(prev => prev.map(c => (c.id === collabId ? { ...c, unreadEvents: 0 } : c)));
+    void apiService.markCollabEventsSeen(collabId, 'influencer');
     await refreshDetail(collabId);
     setDetailLoading(false);
   };
@@ -570,6 +597,14 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                           }`}
                         >
                           {dueText(c.dueDate, c.daysLeft, isEn)}
+                        </span>
+                      )}
+                      {/* 브랜드가 남긴 새 소식(피드백, 단계 처리) 개수. 협업 타임라인
+                          메뉴의 빨간 배지와 같은 모양으로, 어느 협업을 열어야 하는지
+                          목록에서 바로 보이게 한다. */}
+                      {(c.unreadEvents || 0) > 0 && (
+                        <span className="absolute bottom-2.5 right-2.5 bg-red-500 text-white text-[11px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full shadow-md">
+                          {c.unreadEvents > 99 ? '99+' : c.unreadEvents}
                         </span>
                       )}
                     </div>
