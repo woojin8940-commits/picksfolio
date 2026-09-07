@@ -16,14 +16,12 @@
         "npm:@netlify/identity@^1.2.0",
         "npm:@supabase/supabase-js@^2.97.0",
         "npm:@tailwindcss/postcss@^4.2.1",
-        "npm:@types/dompurify@^3.0.5",
         "npm:@types/express@^5.0.6",
         "npm:@types/node@^22.14.0",
         "npm:@types/react-dom@^19.2.3",
         "npm:@types/react@^19.2.14",
         "npm:@vitejs/plugin-react@5",
         "npm:autoprefixer@^10.4.27",
-        "npm:dompurify@^3.4.5",
         "npm:express@^5.2.1",
         "npm:framer-motion@^12.35.1",
         "npm:lucide-react@0.575",
@@ -33,7 +31,7 @@
         "npm:recharts@^3.7.0",
         "npm:solapi@^5.5.4",
         "npm:tailwindcss@^4.2.1",
-        "npm:tsx@^4.21.0",
+        "npm:tsx@^4.23.13",
         "npm:typescript@~5.8.2",
         "npm:vite@^6.2.0"
       ]

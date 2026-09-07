@@ -34,6 +34,19 @@ function parseKrwPrice(raw?: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function cleanText(value: unknown, max: number): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function cleanSelectedOptions(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .slice(0, 20)
+    .map(([key, selected]) => [cleanText(key, 80), cleanText(selected, 120)] as const)
+    .filter(([key, selected]) => key && selected);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function computeStats(data: CartData) {
   const allItems: { item: CartItem; viewerId: string }[] = [];
   for (const cart of data.carts) {
@@ -157,7 +170,7 @@ export default async (req: Request, context: Context) => {
   try {
     if (req.method === "GET") {
       const url = new URL(req.url);
-      const viewerId = url.searchParams.get("viewerId");
+      const viewerId = cleanText(url.searchParams.get("viewerId"), 64);
 
       if (viewerId) {
         const raw = await store.get(username, { type: "json" });
@@ -178,7 +191,19 @@ export default async (req: Request, context: Context) => {
 
     if (req.method === "POST") {
       const body = await req.json();
-      const viewerId = body.viewerId || "unknown";
+      const viewerId = cleanText(body.viewerId, 64) || "unknown";
+      const item: CartItem = {
+        productId: cleanText(body.productId, 120),
+        productName: cleanText(body.productName, 160),
+        productPrice: cleanText(body.productPrice, 40) || undefined,
+        productImage: cleanText(body.productImage, 2000) || undefined,
+        productLink: cleanText(body.productLink, 2000),
+        selectedOptions: cleanSelectedOptions(body.selectedOptions),
+        addedAt: new Date().toISOString(),
+      };
+      if (!item.productId || !item.productName) {
+        return Response.json({ error: "invalid cart item" }, { status: 400 });
+      }
 
       // 방송 중에는 여러 시청자가 동시에 담는다. 조건부 쓰기로 반영해야
       // 나중에 쓴 요청이 다른 시청자의 담기를 지우지 않는다.
@@ -188,23 +213,22 @@ export default async (req: Request, context: Context) => {
         if (!viewerCart) {
           viewerCart = {
             viewerId,
-            viewerNickname: body.viewerNickname || viewerId,
-            viewerProfileImage: body.viewerProfileImage,
+            viewerNickname: cleanText(body.viewerNickname, 80) || viewerId,
+            viewerProfileImage: cleanText(body.viewerProfileImage, 2000) || undefined,
             items: [],
             kakaoSent: false,
           };
           data.carts.push(viewerCart);
         }
 
-        viewerCart.items.push({
-          productId: body.productId,
-          productName: body.productName,
-          productPrice: body.productPrice,
-          productImage: body.productImage,
-          productLink: body.productLink || "",
-          selectedOptions: body.selectedOptions,
-          addedAt: new Date().toISOString(),
-        });
+        const optionKey = JSON.stringify(item.selectedOptions || {});
+        const duplicate = viewerCart.items.some((existing) =>
+          existing.productId === item.productId &&
+          JSON.stringify(existing.selectedOptions || {}) === optionKey,
+        );
+        if (!duplicate) viewerCart.items.push(item);
+        viewerCart.items = viewerCart.items.slice(-100);
+        data.carts = data.carts.slice(-5000);
         data.updatedAt = new Date().toISOString();
         return data;
       });
@@ -239,21 +263,27 @@ export default async (req: Request, context: Context) => {
       } catch {}
 
       if (body.viewerId && body.productId) {
+        const viewerId = cleanText(body.viewerId, 64);
+        const productId = cleanText(body.productId, 120);
+        const selectedOptions = cleanSelectedOptions(body.selectedOptions);
+        if (!viewerId || !productId) {
+          return Response.json({ error: "invalid cart item" }, { status: 400 });
+        }
         // 시청자가 자기 담은 항목을 빼는 경우.
         await mutateBlobJSON<CartData>(CART_STORE, username, (raw) => {
           const data = ensureCartData(raw);
-          const cart = data.carts.find((c) => c.viewerId === body.viewerId);
+          const cart = data.carts.find((c) => c.viewerId === viewerId);
           if (!cart) return null;
 
-          const optKey = body.selectedOptions ? JSON.stringify(body.selectedOptions) : null;
+          const optKey = selectedOptions ? JSON.stringify(selectedOptions) : null;
           const idx = cart.items.findIndex((i) => {
-            if (i.productId !== body.productId) return false;
+            if (i.productId !== productId) return false;
             if (optKey) return JSON.stringify(i.selectedOptions || {}) === optKey;
             return true;
           });
           if (idx !== -1) cart.items.splice(idx, 1);
           if (cart.items.length === 0) {
-            data.carts = data.carts.filter((c) => c.viewerId !== body.viewerId);
+            data.carts = data.carts.filter((c) => c.viewerId !== viewerId);
           }
           data.updatedAt = new Date().toISOString();
           return data;
@@ -278,4 +308,5 @@ export default async (req: Request, context: Context) => {
 
 export const config: Config = {
   path: "/api/live-cart/:username",
+  rateLimit: { windowSize: 60, windowLimit: 180, aggregateBy: "ip" },
 };

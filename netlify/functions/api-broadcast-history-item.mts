@@ -1,5 +1,5 @@
-import { getStore } from "@netlify/blobs";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import type { Config, Context } from "@netlify/functions";
 
 export default async (req: Request, context: Context) => {
@@ -13,13 +13,12 @@ export default async (req: Request, context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const store = getStore("broadcast-history");
   const key = `history_${username}`;
 
   if (req.method === "DELETE" && recordId) {
-    const existing = (await store.get(key, { type: "json" })) as any[] || [];
-    const filtered = existing.filter((r: any) => r.id !== recordId);
-    await store.setJSON(key, filtered);
+    await mutateBlobJSON<any[]>("broadcast-history", key, (current) =>
+      (Array.isArray(current) ? current : []).filter((record: any) => record.id !== recordId),
+    );
     return Response.json({ success: true });
   }
 

@@ -1,4 +1,6 @@
 
+import { authHeaders } from './apiService';
+
 const getDateKey = (date?: Date) => {
   const d = date || new Date();
   return d.toISOString().split('T')[0]; // YYYY-MM-DD
@@ -7,11 +9,14 @@ const getDateKey = (date?: Date) => {
 const analyticsApi = (username: string) =>
   `/api/analytics/${encodeURIComponent(username.toLowerCase())}`;
 
+const getAnalytics = async (url: string, signal?: AbortSignal) =>
+  fetch(url, { signal, credentials: 'same-origin', headers: await authHeaders() });
+
 export const getAnalyticsForRange = async (
   username: string, startDate: string, endDate: string, signal?: AbortSignal,
 ) => {
   const params = new URLSearchParams({ start: startDate, end: endDate, type: 'summary' });
-  const res = await fetch(`${analyticsApi(username)}?${params}`, { signal });
+  const res = await getAnalytics(`${analyticsApi(username)}?${params}`, signal);
   if (!res.ok) throw new Error(`Analytics HTTP ${res.status}`);
   const data = await res.json();
   return {
@@ -42,7 +47,7 @@ export const trackClick = (username: string, blockId: string) => {
 
 export const getStatsForDate = async (username: string, dateString: string) => {
   try {
-    const res = await fetch(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=stats`);
+    const res = await getAnalytics(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=stats`);
     if (!res.ok) return { views: 0, clicks: 0, ctr: 0 };
     return await res.json();
   } catch (e) {
@@ -57,7 +62,7 @@ export const getTodayStats = async (username: string) => {
 
 export const getTopClickedItemsForDate = async (username: string, dateString: string) => {
   try {
-    const res = await fetch(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=top-items`);
+    const res = await getAnalytics(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=top-items`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.topItems || []).map((item: any) => ({
@@ -72,7 +77,7 @@ export const getTopClickedItemsForDate = async (username: string, dateString: st
 
 export const getStatsForRange = async (username: string, startDate: string, endDate: string) => {
   try {
-    const res = await fetch(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=stats`);
+    const res = await getAnalytics(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=stats`);
     if (!res.ok) return { views: 0, clicks: 0, ctr: 0 };
     return await res.json();
   } catch (e) {
@@ -83,7 +88,7 @@ export const getStatsForRange = async (username: string, startDate: string, endD
 
 export const getTopClickedItemsForRange = async (username: string, startDate: string, endDate: string) => {
   try {
-    const res = await fetch(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=top-items`);
+    const res = await getAnalytics(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=top-items`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.topItems || []).map((item: any) => ({

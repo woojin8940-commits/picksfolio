@@ -1,4 +1,4 @@
-import { getStore } from "@netlify/blobs";
+import { mutateBlobJSON } from "./blob-write.mts";
 
 /**
  * 로그인을 요구할 수 없는 공개 엔드포인트용 호출 횟수 제한.
@@ -43,21 +43,27 @@ export async function checkRateLimit(opts: {
   const storeKey = `${bucket}/${safeKey}`;
 
   try {
-    const store = getStore("rate-limits");
     const now = Date.now();
-    const current = (await store.get(storeKey, { type: "json" })) as
-      | { count?: number; resetAt?: number }
-      | null;
+    let allowed = false;
+    let retryAfter = windowSeconds;
+    await mutateBlobJSON<{ count?: number; resetAt?: number }>("rate-limits", storeKey, (current) => {
+      if (!current || typeof current.resetAt !== "number" || current.resetAt <= now) {
+        allowed = true;
+        return { count: 1, resetAt: now + windowSeconds * 1000 };
+      }
 
-    // 창이 지났거나 기록이 없으면 새 창을 시작한다.
-    if (!current || typeof current.resetAt !== "number" || current.resetAt <= now) {
-      await store.setJSON(storeKey, { count: 1, resetAt: now + windowSeconds * 1000 });
-      return { ok: true };
-    }
+      const count = Number(current.count || 0);
+      if (count >= limit) {
+        allowed = false;
+        retryAfter = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+        return null;
+      }
 
-    const count = Number(current.count || 0);
-    if (count >= limit) {
-      const retryAfter = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      allowed = true;
+      return { count: count + 1, resetAt: current.resetAt };
+    });
+
+    if (!allowed) {
       return {
         ok: false,
         response: Response.json(
@@ -71,8 +77,6 @@ export async function checkRateLimit(opts: {
         ),
       };
     }
-
-    await store.setJSON(storeKey, { count: count + 1, resetAt: current.resetAt });
     return { ok: true };
   } catch (err) {
     console.error(`[rate-limit] ${storeKey} 확인 실패 — 통과시킨다`, err);

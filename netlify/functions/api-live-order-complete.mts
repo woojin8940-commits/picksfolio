@@ -130,7 +130,17 @@ export default async (req: Request, _context: Context) => {
     )
   }
 
-  const verified = await verifyLivePortOnePayment({ paymentId, expectedKrw: expectedAmount })
+  const optionSuffix = body.product.selectedOptions && Object.keys(body.product.selectedOptions).length > 0
+    ? ` (${Object.values(body.product.selectedOptions).join('/')})`
+    : ''
+  const expectedOrderName = `${body.product.name}${optionSuffix}`.slice(0, 100)
+  const verified = await verifyLivePortOnePayment({
+    paymentId,
+    expectedKrw: expectedAmount,
+    expectedPaymentIdPrefix: `live-${body.product.id}`,
+    expectedPaymentIdOwner: username,
+    expectedOrderName,
+  })
   if (!verified.ok) {
     return Response.json(
       { success: false, error: verified.error },
@@ -168,6 +178,22 @@ export default async (req: Request, _context: Context) => {
     shipping: normalizeShipping(body.shipping),
   }
 
+  await persistLiveOrderToDatabase({
+    id: paymentId,
+    username,
+    paymentId,
+    amount: paidAmount,
+    paidAt: order.paidAt,
+    status: order.status,
+    orderName: order.orderName,
+    commissionRate: order.commissionRate,
+    commissionAmount: order.commissionAmount,
+    sellerNetAmount: order.sellerNetAmount,
+    product: order.product,
+    viewer: order.viewer,
+    shipping: order.shipping,
+  })
+
   // 방송 중에는 결제가 동시에 여러 건 들어온다. 목록을 통째로 읽고 다시 쓰면
   // 나중에 쓴 요청이 그 사이 들어온 주문을 덮어써서 결제는 됐는데 주문이 사라진다.
   // 조건부 쓰기로 반영하고, 중복(같은 paymentId) 검사도 그 안에서 한다.
@@ -186,26 +212,11 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ success: true, alreadyProcessed: true })
   }
 
-  await persistLiveOrderToDatabase({
-    id: paymentId,
-    username,
-    paymentId,
-    amount: paidAmount,
-    paidAt: order.paidAt,
-    status: order.status,
-    orderName: order.orderName,
-    commissionRate: order.commissionRate,
-    commissionAmount: order.commissionAmount,
-    sellerNetAmount: order.sellerNetAmount,
-    product: order.product,
-    viewer: order.viewer,
-    shipping: order.shipping,
-  })
-
   return Response.json({ success: true, order })
 }
 
 export const config: Config = {
   path: '/api/live-order-complete',
   method: ['POST'],
+  rateLimit: { windowSize: 60, windowLimit: 30, aggregateBy: 'ip' },
 }

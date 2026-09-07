@@ -73,8 +73,9 @@ export default async (req: Request, context: Context) => {
         const { blobs } = await liveStore.list()
         const liveKeys: Array<string | undefined> = []
         await mapConcurrent(blobs || [], 8, async (b, index) => {
+          if (!b.key.startsWith('picks_live_')) return
           const data = (await liveStore.get(b.key, { type: 'json' })) as Record<string, any> | null
-          if (data?.isLive) liveKeys[index] = b.key.toLowerCase()
+          if (data?.isLive) liveKeys[index] = b.key.slice('picks_live_'.length).toLowerCase()
         }).catch(() => {})
         for (const key of liveKeys) if (key) liveSet.add(key)
       } catch {}
@@ -208,9 +209,11 @@ export default async (req: Request, context: Context) => {
 
       const liveStore = getStore({ name: 'live-state', consistency: 'strong' })
       const viewerStore = getStore({ name: 'live-viewers', consistency: 'strong' })
+      const liveKey = `picks_live_${username}`
+      const viewerKey = `viewers_${username}`
 
-      const prev = (await liveStore.get(username, { type: 'json' })) as Record<string, any> | null
-      await liveStore.setJSON(username, {
+      const prev = (await liveStore.get(liveKey, { type: 'json' })) as Record<string, any> | null
+      await liveStore.setJSON(liveKey, {
         ...(prev || {}),
         isLive: false,
         viewerCount: 0,
@@ -219,7 +222,7 @@ export default async (req: Request, context: Context) => {
         forceEndReason: reason,
         updatedAt: new Date().toISOString(),
       })
-      try { await viewerStore.setJSON(username, {}) } catch {}
+      try { await viewerStore.setJSON(viewerKey, {}) } catch {}
 
       // Tag the most recent broadcast_history entry within 24h with the reason
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -269,15 +272,17 @@ export default async (req: Request, context: Context) => {
       const HEARTBEAT_TIMEOUT = 30000
 
       const rooms = await mapConcurrent(blobs || [], 8, async b => {
+        if (!b.key.startsWith('picks_live_')) return null
         const data = (await liveStore.get(b.key, { type: 'json' })) as Record<string, any> | null
         if (!data?.isLive) return null
+        const roomUsername = b.key.slice('picks_live_'.length).toLowerCase()
         let activeViewers = 0
         try {
-          const vd = (await viewerStore.get(b.key, { type: 'json' })) as Record<string, number> | null
+          const vd = (await viewerStore.get(`viewers_${roomUsername}`, { type: 'json' })) as Record<string, number> | null
           if (vd) activeViewers = Object.values(vd).filter(ts => now - ts < HEARTBEAT_TIMEOUT).length
         } catch {}
         return {
-          username: b.key,
+          username: roomUsername,
           isLive: true,
           viewerCount: activeViewers,
           currentProduct: data.currentProduct || null,
@@ -293,12 +298,19 @@ export default async (req: Request, context: Context) => {
         const ordersStore = getStore({ name: 'live-orders', consistency: 'eventual' })
         await mapConcurrent(ongoing, 8, async room => {
           try {
-            const orders = (await ordersStore.get(room.username, { type: 'json' })) as any[] | null
-            if (Array.isArray(orders)) {
+            const stored = (await ordersStore.get(room.username, { type: 'json' })) as any
+            const rawOrders = Array.isArray(stored) ? stored : Array.isArray(stored?.orders) ? stored.orders : []
+            if (rawOrders.length > 0) {
+              const batchItemIds = new Set(
+                rawOrders
+                  .filter((order: any) => order.batchPaymentId && order.paymentId?.startsWith(`${order.batchPaymentId}#`))
+                  .map((order: any) => order.batchPaymentId),
+              )
               const sinceTs = new Date(room.updatedAt || Date.now() - 24 * 3600 * 1000).getTime() - 24 * 3600 * 1000
-              room.revenue = orders
-                .filter(o => new Date(o.completed_at || o.created_at || 0).getTime() >= sinceTs)
-                .reduce((s, o) => s + (Number(o.amount) || 0), 0)
+              room.revenue = rawOrders
+                .filter((o: any) => !(o.batchPaymentId && o.paymentId === o.batchPaymentId && batchItemIds.has(o.batchPaymentId)))
+                .filter((o: any) => new Date(o.paidAt || o.completed_at || o.created_at || 0).getTime() >= sinceTs)
+                .reduce((s: number, o: any) => s + (Number(o.amount) || 0), 0)
             } else {
               room.revenue = 0
             }

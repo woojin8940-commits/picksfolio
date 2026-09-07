@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { ProposalCategory } from '../types';
-import { apiService } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas } from '../utils/formatters';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -59,11 +59,12 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
 
   useEffect(() => {
     if (!initialSession) return;
-    fetch('/.netlify/functions/business-auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'profile', username: initialSession }),
-    })
+    authHeaders({ 'Content-Type': 'application/json' }, { account: initialSession })
+      .then(headers => fetch('/.netlify/functions/business-auth', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'profile', username: initialSession }),
+      }))
       .then(res => res.json())
       .then(data => {
         if (data.success && data.profile) {

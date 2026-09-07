@@ -1282,7 +1282,10 @@ export const apiService = {
     try {
       const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(
+          { 'Content-Type': 'application/json' },
+          { account: proposal.business_username },
+        ),
         body: JSON.stringify(proposal)
       });
       if (res.ok) {
@@ -2092,31 +2095,6 @@ export const apiService = {
       return res.ok;
     } catch (e) {
       console.error('[API] Failed to mark notifications read:', e);
-      return false;
-    }
-  },
-
-  async refreshKakaoCache(username: string): Promise<boolean> {
-    try {
-      const encodedName = encodeURIComponent(username.toLowerCase());
-      const customDomain = 'https://picks-folio.com';
-      const originUrl = `${window.location.origin}/${encodedName}`;
-      const customUrl = `${customDomain}/${encodedName}`;
-
-      // Flush both the current origin and the custom domain so Kakao picks up new OG data
-      const urls = new Set([originUrl, customUrl]);
-      const results = await Promise.all(
-        [...urls].map((url) =>
-          fetch('/api/kakao-cache-refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-          }).then((r) => r.ok).catch(() => false)
-        )
-      );
-      return results.some(Boolean);
-    } catch (e) {
-      console.error('[API] Failed to refresh Kakao cache:', e);
       return false;
     }
   },
@@ -3947,7 +3925,9 @@ export const apiService = {
     outgoing: { username: string; display_name: string; avatar_url: string }[];
   }> {
     try {
-      const res = await fetch(`/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}`);
+      const res = await fetch(`/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}`, {
+        headers: await authHeaders(),
+      });
       if (!res.ok) return { friends: [], incoming: [], outgoing: [] };
       const json = await res.json();
       return {
@@ -3970,7 +3950,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/live/friends', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ owner: owner.toLowerCase(), friendUsername: friendUsername.toLowerCase() }),
       });
       const json = await res.json().catch(() => ({}));
@@ -3987,7 +3967,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/live/friends', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ owner: me.toLowerCase(), friendUsername: requester.toLowerCase(), action: 'accept' }),
       });
       const json = await res.json().catch(() => ({}));
@@ -4004,7 +3984,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/live/friends', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ owner: me.toLowerCase(), friendUsername: requester.toLowerCase(), action: 'decline' }),
       });
       return res.ok;
@@ -4018,7 +3998,7 @@ export const apiService = {
     try {
       const res = await fetch(
         `/api/live/friends?owner=${encodeURIComponent(owner.toLowerCase())}&friend=${encodeURIComponent(friend.toLowerCase())}`,
-        { method: 'DELETE' }
+        { method: 'DELETE', headers: await authHeaders() }
       );
       return res.ok;
     } catch (e) {

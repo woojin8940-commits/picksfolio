@@ -1,6 +1,8 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 
+const PURPOSES = new Set(["signup", "business_signup", "find-id", "reset-password"]);
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -19,6 +21,10 @@ export default async (req: Request) => {
 
     const cleanPhone = phone.replace(/\D/g, "");
     const smsPurpose = purpose || "general";
+    const cleanCode = String(code).trim();
+    if (!/^01\d{8,9}$/.test(cleanPhone) || !/^\d{6}$/.test(cleanCode) || !PURPOSES.has(smsPurpose)) {
+      return Response.json({ success: false, error: "잘못된 인증 요청입니다." }, { status: 400 });
+    }
     const db = getDatabase();
 
     const records = await db.sql`
@@ -47,7 +53,7 @@ export default async (req: Request) => {
       });
     }
 
-    if (record.code !== code) {
+    if (String(record.code) !== cleanCode) {
       await db.sql`
         UPDATE sms_verifications SET attempts = attempts + 1 WHERE id = ${record.id}
       `;
@@ -71,4 +77,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/.netlify/functions/verify-sms",
+  rateLimit: { windowSize: 60, windowLimit: 30, aggregateBy: "ip" },
 };

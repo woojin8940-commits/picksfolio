@@ -1,5 +1,6 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * Co-broadcast friends ("함께 방송할 친구") — a per-creator list of saved partners
@@ -60,6 +61,8 @@ export default async (req: Request) => {
     if (req.method === "GET") {
       const owner = norm(url.searchParams.get("owner"));
       if (!owner) return Response.json({ error: "owner required" }, { status: 400 });
+      const auth = await requireAccountOwner(req, owner);
+      if (!auth.ok) return auth.response;
 
       // Accepted friendships are mutual: owner may be on either side of the edge.
       const acceptedRows = (await db.sql`
@@ -124,6 +127,8 @@ export default async (req: Request) => {
       if (!owner || !friend) {
         return Response.json({ error: "owner and friendUsername required" }, { status: 400 });
       }
+      const auth = await requireAccountOwner(req, owner);
+      if (!auth.ok) return auth.response;
       if (owner === friend) {
         return Response.json({ error: "자기 자신은 친구로 추가할 수 없습니다." }, { status: 400 });
       }
@@ -204,6 +209,8 @@ export default async (req: Request) => {
       if (!owner || !friend) {
         return Response.json({ error: "owner and friend required" }, { status: 400 });
       }
+      const auth = await requireAccountOwner(req, owner);
+      if (!auth.ok) return auth.response;
       // Remove the friendship (or a pending request) regardless of direction.
       await db.sql`
         DELETE FROM live_friends

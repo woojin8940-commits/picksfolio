@@ -1,6 +1,8 @@
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { mapConcurrent } from "./_shared/concurrency.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 interface DayData {
   views: number;
@@ -18,10 +20,15 @@ function dayKey(username: string, date: string): string {
   return `analytics_${username}_${date}`;
 }
 
-function dateRange(start: string, end: string): string[] {
+function dateRange(start: string, end: string): string[] | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) return null;
+  if (endMs - startMs > 366 * 24 * 60 * 60 * 1000) return null;
   const dates: string[] = [];
-  const cur = new Date(start + "T00:00:00Z");
-  const last = new Date(end + "T00:00:00Z");
+  const cur = new Date(startMs);
+  const last = new Date(endMs);
   while (cur <= last) {
     dates.push(cur.toISOString().split("T")[0]);
     cur.setUTCDate(cur.getUTCDate() + 1);
@@ -31,13 +38,15 @@ function dateRange(start: string, end: string): string[] {
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
-  if (!username) {
+  if (!username || !/^[a-z0-9_]{3,20}$/.test(username)) {
     return Response.json({ error: "Missing username" }, { status: 400 });
   }
 
   const store = getStore("analytics");
 
   if (req.method === "GET") {
+    const auth = await requireAccountOwner(req, username);
+    if (!auth.ok) return auth.response;
     const url = new URL(req.url);
     const type = url.searchParams.get("type");
     const start = url.searchParams.get("start");
@@ -45,6 +54,7 @@ export default async (req: Request, context: Context) => {
 
     if ((type === "stats" || type === "top-items" || type === "summary") && start && end) {
       const dates = dateRange(start, end);
+      if (!dates) return Response.json({ error: "Invalid date range" }, { status: 400 });
       let totalViews = 0;
       let totalClicks = 0;
       const merged: Record<string, number> = {};
@@ -81,27 +91,36 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
-    const body = await req.json();
-    const date = body.date || new Date().toISOString().split("T")[0];
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action || "");
+    if (action !== "track-view" && action !== "track-click") {
+      return Response.json({ error: "Invalid action" }, { status: 400 });
+    }
+    const blockId = String(body.blockId || "");
+    if (action === "track-click" && !/^[a-zA-Z0-9_-]{1,100}$/.test(blockId)) {
+      return Response.json({ error: "Invalid blockId" }, { status: 400 });
+    }
+    const visitorId = String(body.visitorId || "").slice(0, 100);
+    const date = new Date().toISOString().split("T")[0];
     const key = dayKey(username, date);
 
-    const existing = ((await store.get(key, { type: "json" })) as DayData | null) || emptyDay();
-
-    if (body.action === "track-click" && body.blockId) {
-      existing.clicks = (existing.clicks || 0) + 1;
-      existing.blockClicks = existing.blockClicks || {};
-      existing.blockClicks[body.blockId] = (existing.blockClicks[body.blockId] || 0) + 1;
-    } else {
-      existing.views = (existing.views || 0) + 1;
-      if (body.visitorId) {
-        existing.visitors = existing.visitors || [];
-        if (!existing.visitors.includes(body.visitorId)) {
-          existing.visitors.push(body.visitorId);
+    await mutateBlobJSON<DayData>("analytics", key, (current) => {
+      const existing = current || emptyDay();
+      if (action === "track-click") {
+        existing.clicks = (existing.clicks || 0) + 1;
+        existing.blockClicks = existing.blockClicks || {};
+        existing.blockClicks[blockId] = (existing.blockClicks[blockId] || 0) + 1;
+      } else {
+        existing.views = (existing.views || 0) + 1;
+        if (visitorId) {
+          existing.visitors = existing.visitors || [];
+          if (existing.visitors.length < 10000 && !existing.visitors.includes(visitorId)) {
+            existing.visitors.push(visitorId);
+          }
         }
       }
-    }
-
-    await store.setJSON(key, existing);
+      return existing;
+    });
     return Response.json({ success: true });
   }
 
@@ -110,4 +129,5 @@ export default async (req: Request, context: Context) => {
 
 export const config: Config = {
   path: "/api/analytics/:username",
+  rateLimit: { windowSize: 60, windowLimit: 300, aggregateBy: "ip" },
 };

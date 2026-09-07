@@ -189,4 +189,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/.netlify/functions/find-account",
+  rateLimit: { windowSize: 60, windowLimit: 15, aggregateBy: "ip" },
 };

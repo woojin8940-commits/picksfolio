@@ -31,6 +31,9 @@ type VerifyOptions = {
    * 결제자가 우리 회원이 아닌 경우(라이브 시청자 주문 등)에는 넘기지 않는다.
    */
   expectedOwner?: string
+  expectedPaymentIdPrefix?: string
+  expectedPaymentIdOwner?: string
+  expectedOrderName?: string
 }
 
 export type PortOneVerification =
@@ -87,10 +90,20 @@ export const verifyLivePortOnePayment = async ({
   expectedKrw,
   payMethod,
   expectedOwner,
+  expectedPaymentIdPrefix,
+  expectedPaymentIdOwner,
+  expectedOrderName,
 }: VerifyOptions): Promise<PortOneVerification> => {
   const apiSecret = process.env.PORTONE_V2_API_SECRET
   if (!apiSecret) {
     return { ok: false, error: '결제 검증 설정이 완료되지 않았습니다.', status: 503 }
+  }
+
+  if (expectedPaymentIdPrefix && expectedPaymentIdOwner) {
+    const expectedStem = `${expectedPaymentIdPrefix}-${ownerToken(expectedPaymentIdOwner)}-`.toLowerCase()
+    if (!paymentId.toLowerCase().startsWith(expectedStem)) {
+      return { ok: false, error: '결제 정보가 주문과 일치하지 않습니다.', status: 403 }
+    }
   }
 
   let response: Response
@@ -128,6 +141,10 @@ export const verifyLivePortOnePayment = async ({
 
   if (payment.currency && payment.currency !== 'KRW') {
     return { ok: false, error: '결제 통화가 올바르지 않습니다.', status: 400 }
+  }
+
+  if (expectedOrderName && String(payment.orderName || '').trim() !== expectedOrderName.trim()) {
+    return { ok: false, error: '결제 상품 정보가 일치하지 않습니다.', status: 400 }
   }
 
   const paidAmount = payment.amount?.total ?? payment.amount?.paid ?? 0

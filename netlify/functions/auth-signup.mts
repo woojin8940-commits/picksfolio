@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getDatabase } from "@picks/netlify-database";
+import type { Config } from "@netlify/functions";
 import {
   consumePhoneVerification,
   findVerifiedPhone,
@@ -60,6 +61,13 @@ export default async (req: Request) => {
     const cleanUsername = username.trim().toLowerCase();
     const email = cleanEmail;
     const cleanPhone = (phone || "").replace(/\D/g, "");
+
+    if (!/^[a-z0-9_]{3,20}$/.test(cleanUsername)) {
+      return Response.json({
+        success: false,
+        error: "아이디는 영문 소문자, 숫자, 밑줄로 3~20자까지 입력해 주세요.",
+      });
+    }
 
     // 휴대폰 인증은 서버에서 확인한다. 화면의 isVerified 만 믿으면 이 함수로 직접
     // 요청해 인증하지 않은 번호로 가입할 수 있고, 그러면 그 번호로 계정을 찾아 주는
@@ -154,7 +162,7 @@ export default async (req: Request) => {
     }
 
     if (authData?.user) {
-      await supabase.from("profiles").upsert(
+      const { error: profileError } = await supabase.from("profiles").upsert(
         {
           id: authData.user.id,
           username: cleanUsername,
@@ -165,6 +173,10 @@ export default async (req: Request) => {
         },
         { onConflict: "id" }
       );
+      if (profileError) {
+        await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+        return Response.json({ success: false, error: "회원정보를 저장하지 못했습니다. 다시 시도해 주세요." });
+      }
     }
 
     let profileCode = generateProfileCode();
@@ -209,4 +221,9 @@ export default async (req: Request) => {
       error: err?.message || "회원가입 중 오류가 발생했습니다.",
     });
   }
+};
+
+export const config: Config = {
+  path: "/.netlify/functions/auth-signup",
+  rateLimit: { windowSize: 60, windowLimit: 10, aggregateBy: "ip" },
 };

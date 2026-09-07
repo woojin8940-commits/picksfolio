@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import type { Config, Context } from "@netlify/functions";
 
 /**
@@ -27,14 +28,15 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "POST") {
     const body = await req.json();
-    const existing = (await store.get(key, { type: "json" })) as any[] || [];
     const record = {
       id: `broadcast_${Date.now()}`,
       ...body,
       createdAt: new Date().toISOString(),
     };
-    existing.unshift(record);
-    await store.setJSON(key, existing);
+    await mutateBlobJSON<any[]>("broadcast-history", key, (current) => [
+      record,
+      ...(Array.isArray(current) ? current : []),
+    ].slice(0, 500));
     return Response.json({ success: true });
   }
 

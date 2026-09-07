@@ -1,5 +1,5 @@
 import { Block, TemplateType, DesignSettings } from '../types';
-import { supabase } from './supabase';
+import { getPublicProfileByUsername, supabase } from './supabase';
 import { apiService } from './apiService';
 
 export interface SiteSettings {
@@ -36,11 +36,10 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
   // 2. Try Supabase as fallback (if available)
   try {
     if (supabase) {
-      const { data: profileData, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('username', normalizedUsername)
-        .maybeSingle();
+      const { data: profileData, error } = await getPublicProfileByUsername(
+        normalizedUsername,
+        'id, username, full_name, avatar_url, bio, site_data'
+      );
 
       if (!error && profileData) {
         const legacy = profileData.site_data;
@@ -57,7 +56,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
             design: legacy.design,
             socials: legacy.socials,
             profile: legacy.profile || {
-              name: profileData.nickname || profileData.full_name || '',
+              name: profileData.full_name || '',
               bio: profileData.bio || '',
               avatar_url: profileData.avatar_url || ''
             }
@@ -69,7 +68,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
           templateType: TemplateType.SHOPPABLE_GRID,
           blocks: [],
           profile: {
-            name: profileData.nickname || profileData.full_name || '',
+            name: profileData.full_name || '',
             bio: profileData.bio || '',
             avatar_url: profileData.avatar_url || ''
           }
@@ -118,11 +117,7 @@ export const getLinkGridItems = async (userName: string): Promise<Block[]> => {
     const normalizedUsername = userName.toLowerCase();
     
     // 1. Get user_id from profiles table using username
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('username', normalizedUsername)
-      .maybeSingle();
+    const { data: profile, error: profileError } = await getPublicProfileByUsername(normalizedUsername, 'id');
     
     if (profileError || !profile) return [];
 
@@ -211,7 +206,7 @@ export const updateLinkGridItems = async (blocks: Block[]) => {
   }
 };
 
-export const updateSiteSettings = async (userName: string, settings: Partial<SiteSettings>) => {
+export const updateSiteSettings = async (userName: string, settings: Partial<SiteSettings>, syncPrimary = true) => {
   const normalizedUsername = userName.toLowerCase();
 
   // 1. Update LocalStorage (Immediate)
@@ -232,26 +227,28 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
   }
 
   // 2. Sync to Netlify Database + Blobs API (Primary Cloud Storage)
-  try {
-    const apiPayload: Record<string, any> = {};
-    if (settings.blocks !== undefined) apiPayload.blocks = settings.blocks;
-    if (settings.design !== undefined) apiPayload.design = settings.design;
-    if (settings.portfolio !== undefined) apiPayload.portfolio = settings.portfolio;
-    if (settings.socials !== undefined) apiPayload.socials = settings.socials;
-    if (settings.profile !== undefined) apiPayload.profile = settings.profile;
+  if (syncPrimary) {
+    try {
+      const apiPayload: Record<string, any> = {};
+      if (settings.blocks !== undefined) apiPayload.blocks = settings.blocks;
+      if (settings.design !== undefined) apiPayload.design = settings.design;
+      if (settings.portfolio !== undefined) apiPayload.portfolio = settings.portfolio;
+      if (settings.socials !== undefined) apiPayload.socials = settings.socials;
+      if (settings.profile !== undefined) apiPayload.profile = settings.profile;
 
-    if (Object.keys(apiPayload).length > 0) {
-      let saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
-      if (!saved) {
-        await new Promise(r => setTimeout(r, 1000));
-        saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
+      if (Object.keys(apiPayload).length > 0) {
+        let saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
         if (!saved) {
-          console.error('[settingsService] Cloud save failed after retry');
+          await new Promise(r => setTimeout(r, 1000));
+          saved = await apiService.saveSiteData(normalizedUsername, apiPayload);
+          if (!saved) {
+            console.error('[settingsService] Cloud save failed after retry');
+          }
         }
       }
+    } catch (e) {
+      console.warn('Error syncing to Netlify Blobs API:', e);
     }
-  } catch (e) {
-    console.warn('Error syncing to Netlify Blobs API:', e);
   }
 
   // 3. Also sync to Supabase if available (secondary backup)
@@ -284,7 +281,7 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
 
       // Sync top-level fields
       if (settings.profile) {
-        if (settings.profile.name) updateData.nickname = settings.profile.name;
+        if (settings.profile.name) updateData.full_name = settings.profile.name;
         if (settings.profile.bio) updateData.bio = settings.profile.bio;
         if (settings.profile.avatar_url) updateData.avatar_url = settings.profile.avatar_url;
         if (settings.profile.links?.phone) updateData.phone = settings.profile.links.phone;

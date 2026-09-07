@@ -12,25 +12,6 @@ import { purgeRemovedLoginSaveKeys } from './utils/loginPersistence';
 // 남아 있으면 안 된다.
 purgeRemovedLoginSaveKeys();
 
-// Mobile debug console — activated by `?debug=1` query param so field users
-// (especially in-app WebViews like KakaoTalk, where external devtools cannot
-// attach) can surface console logs and WebRTC/HLS errors on-screen. Off by
-// default so it never ships to normal viewers.
-try {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has('debug')) {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/eruda';
-    s.onload = () => {
-      const w = window as unknown as { eruda?: { init: () => void } };
-      w.eruda?.init();
-    };
-    document.head.appendChild(s);
-  }
-} catch {
-  // Never block app mount on debug setup.
-}
-
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");

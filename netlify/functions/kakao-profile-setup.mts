@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Config } from "@netlify/functions";
+import { requireSignedInUser } from "./_shared/user-auth.mts";
 
 const SUPABASE_URL =
   "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -71,21 +72,29 @@ export default async (req: Request) => {
 
   try {
     const body = await req.json();
-    const {
-      user_id,
-      user_metadata = {},
-      identities = [],
-      email = "",
-      provider_token = "",
-      client_kakao_phone = "",
-      client_kakao_name = "",
-    } = body;
+    const { user_id, provider_token = "" } = body;
 
     if (!user_id) {
       return Response.json({ success: false, error: "Missing user_id" });
     }
 
+    const auth = await requireSignedInUser(req);
+    if (!auth.ok) return auth.response;
+    if (auth.userId !== user_id) {
+      return Response.json({ success: false, error: "Forbidden" }, { status: 403 });
+    }
+
     const supabase = getSupabaseAdmin();
+    const { data: verifiedAuth, error: verifiedAuthError } = await supabase.auth.admin.getUserById(user_id);
+    if (verifiedAuthError || !verifiedAuth?.user) {
+      return Response.json({ success: false, error: "User not found" }, { status: 401 });
+    }
+    const verifiedUser = verifiedAuth.user;
+    const user_metadata = verifiedUser.user_metadata || {};
+    const identities = verifiedUser.identities || [];
+    const email = verifiedUser.email || "";
+    const client_kakao_phone = "";
+    const client_kakao_name = "";
 
     const kakaoIdentity = identities.find(
       (i: any) => i.provider === "kakao"
@@ -154,6 +163,9 @@ export default async (req: Request) => {
     if (provider_token && (!kakaoId || !phone || !fullName)) {
       const kakaoProfile = await fetchKakaoProfile(provider_token);
       if (kakaoProfile) {
+        if (kakaoId && String(kakaoProfile.id || "") !== kakaoId) {
+          return Response.json({ success: false, error: "Kakao account mismatch" }, { status: 403 });
+        }
         if (!kakaoId && kakaoProfile.id) {
           kakaoId = String(kakaoProfile.id);
         }
@@ -504,4 +516,9 @@ export default async (req: Request) => {
       error: err?.message || "Internal error",
     });
   }
+};
+
+export const config: Config = {
+  path: "/.netlify/functions/kakao-profile-setup",
+  rateLimit: { windowSize: 60, windowLimit: 30, aggregateBy: "ip" },
 };

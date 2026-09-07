@@ -144,7 +144,7 @@ export default async (req: Request, _context: Context) => {
                COALESCE(SUM(COALESCE(NULLIF(instagram_followers, 0), follower_count)), 0)::bigint AS follower_sum
         FROM collab_directory_applications
         GROUP BY role, COALESCE(NULLIF(status, ''), 'pending')
-      ` as Promise<any[]>,
+      `,
 
       db.sql`
         SELECT id, role, applicant_username, name, category, status, created_at,
@@ -153,7 +153,7 @@ export default async (req: Request, _context: Context) => {
         WHERE role = 'influencer'
         ORDER BY created_at DESC
         LIMIT 6
-      ` as Promise<any[]>,
+      `,
 
       // 캠페인 예산. reward_amount 는 TEXT(1인 단가)라서 총 예산은 budget_krw 를 쓴다.
       db.sql`
@@ -163,7 +163,7 @@ export default async (req: Request, _context: Context) => {
                COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int AS recent30d
         FROM campaigns
         GROUP BY status
-      ` as Promise<any[]>,
+      `,
 
       // 리스트업 단계별 금액. 브랜드 제시가(quoted)와 인플루언서 지급가(offer)를
       // 나란히 합쳐 두면 차액이 곧 우리 수익이 된다.
@@ -201,13 +201,13 @@ export default async (req: Request, _context: Context) => {
                ), 0)::bigint AS margin_amount
         FROM priced
         GROUP BY outreach_status, brand_decision
-      ` as Promise<any[]>,
+      `,
 
       db.sql`
         SELECT status, COUNT(*)::int AS cnt
         FROM campaign_collabs
         GROUP BY status
-      ` as Promise<any[]>,
+      `,
 
       db.sql`
         SELECT COALESCE(NULLIF(source, ''), 'apply') AS source,
@@ -215,7 +215,7 @@ export default async (req: Request, _context: Context) => {
                COUNT(*)::int AS cnt
         FROM campaign_applications
         GROUP BY COALESCE(NULLIF(source, ''), 'apply'), status
-      ` as Promise<any[]>,
+      `,
     ])
 
     // ── 브랜드 매칭 지원자 ────────────────────────────────────────────────

@@ -1,4 +1,6 @@
 import { getSupabaseServer } from "./_shared/supabase.mts";
+import type { Config } from "@netlify/functions";
+import { requireSignedInUser } from "./_shared/user-auth.mts";
 
 // Sets a Kakao viewer's profile "link name" (the same username they would pick
 // at signup). Live-stream viewers sign in with Kakao and then have their
@@ -19,6 +21,11 @@ export default async (req: Request) => {
     if (!user_id) {
       return Response.json({ success: false, error: "Missing user_id" });
     }
+    const auth = await requireSignedInUser(req);
+    if (!auth.ok) return auth.response;
+    if (auth.userId !== user_id) {
+      return Response.json({ success: false, error: "Forbidden" }, { status: 403 });
+    }
 
     // Same rules as the signup link-name (SetupLink): lowercase letters,
     // numbers and underscore, 3–20 characters.
@@ -32,12 +39,10 @@ export default async (req: Request) => {
 
     const supabase = getSupabaseServer();
 
-    // Reject if the link name is already used by a different account.
-    const { data: existing } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("username", value)
-      .maybeSingle();
+    const [{ data: existing }, { data: current }] = await Promise.all([
+      supabase.from("profiles").select("id").eq("username", value).maybeSingle(),
+      supabase.from("profiles").select("id, username").eq("id", user_id).maybeSingle(),
+    ]);
 
     if (existing && existing.id !== user_id) {
       return Response.json({
@@ -45,18 +50,14 @@ export default async (req: Request) => {
         error: "이미 사용 중인 링크입니다. 다른 이름을 입력해주세요.",
       });
     }
+    if (current?.username && current.username !== value) {
+      return Response.json({ success: false, error: "이미 링크 이름이 설정되어 있습니다." }, { status: 409 });
+    }
 
-    const { error: upsertError } = await supabase
-      .from("profiles")
-      .upsert(
-        {
-          id: user_id,
-          username: value,
-          role: "user",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+    const payload = { username: value, updated_at: new Date().toISOString() };
+    const { error: upsertError } = current
+      ? await supabase.from("profiles").update(payload).eq("id", user_id)
+      : await supabase.from("profiles").insert({ id: user_id, ...payload, role: "user" });
 
     if (upsertError) {
       return Response.json({ success: false, error: upsertError.message });
@@ -69,4 +70,9 @@ export default async (req: Request) => {
       error: err?.message || "Internal error",
     });
   }
+};
+
+export const config: Config = {
+  path: "/.netlify/functions/kakao-set-username",
+  rateLimit: { windowSize: 60, windowLimit: 10, aggregateBy: "ip" },
 };

@@ -21,9 +21,9 @@ async function startServer() {
 
     const apiKey = process.env.SOLAPI_API_KEY;
     const apiSecret = process.env.SOLAPI_API_SECRET;
-    const fromNumber = process.env.SOLAPI_FROM_NUMBER || "01035638940";
+    const fromNumber = process.env.SOLAPI_FROM_NUMBER;
 
-    if (!apiKey || !apiSecret) {
+    if (!apiKey || !apiSecret || !fromNumber) {
       return res.status(500).json({ error: "서버 설정 오류", message: "API 키가 설정되지 않았습니다." });
     }
 

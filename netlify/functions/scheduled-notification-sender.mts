@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs'
 import type { Config } from '@netlify/functions'
+import { sendKakaoAlimtalk } from './_shared/kakao-message.mts'
 
 interface PendingNotification {
   recipientUsername: string
@@ -61,17 +62,12 @@ export default async () => {
         },
       }
 
-      const sendUrl = `${pending.siteOrigin}/api/send-kakao-alimtalk`
-      const resp = await fetch(sendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(notifBody),
-      })
+      const result = await sendKakaoAlimtalk(notifBody)
 
-      if (resp.ok) {
+      if (result.success) {
         console.log(`[scheduled-notif] Sent notification for ${pending.recipientUsername}:${pending.proposalId} (${pending.messageCount} messages)`)
       } else {
-        console.error(`[scheduled-notif] Failed to send: ${resp.status} ${await resp.text()}`)
+        console.error(`[scheduled-notif] Failed to send: ${result.error}`)
       }
 
       await notifQueue.delete(blob.key)

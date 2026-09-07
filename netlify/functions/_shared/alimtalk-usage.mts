@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs'
+import { mutateBlobJSON } from './blob-write.mts'
 
 export interface AlimtalkUsageStats {
   monthlySent: number
@@ -47,15 +48,28 @@ export async function readAlimtalkUsage(user: string): Promise<AlimtalkUsageStat
 export async function incrementAlimtalkUsage(user: string, delta = 1): Promise<AlimtalkUsageStats> {
   if (!user || delta <= 0) return DEFAULT_USAGE
   const key = user.toLowerCase()
-  const store = getStore({ name: 'alimtalk-usage', consistency: 'strong' })
-  const current = await readAlimtalkUsage(key)
-  const next: AlimtalkUsageStats & { month: string } = {
-    ...current,
-    month: currentMonthKey(),
-    monthlySent: current.monthlySent + delta,
-    totalSent: current.totalSent + delta,
-    resetAt: current.resetAt || nextMonthIso(),
-  }
-  await store.setJSON(key, next)
-  return next
+  const month = currentMonthKey()
+  const next = await mutateBlobJSON<AlimtalkUsageStats & { month?: string }>(
+    'alimtalk-usage',
+    key,
+    (stored) => {
+      const current = !stored || stored.month !== month
+        ? {
+            ...DEFAULT_USAGE,
+            totalSent: stored?.totalSent ?? 0,
+            monthlyQuota: stored?.monthlyQuota ?? DEFAULT_USAGE.monthlyQuota,
+            costPerMessage: stored?.costPerMessage ?? DEFAULT_USAGE.costPerMessage,
+            resetAt: nextMonthIso(),
+          }
+        : { ...DEFAULT_USAGE, ...stored }
+      return {
+        ...current,
+        month,
+        monthlySent: current.monthlySent + delta,
+        totalSent: current.totalSent + delta,
+        resetAt: current.resetAt || nextMonthIso(),
+      }
+    },
+  )
+  return { ...DEFAULT_USAGE, ...(next || {}) }
 }

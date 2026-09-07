@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import type { Config, Context } from "@netlify/functions";
 
 /**
@@ -84,14 +85,22 @@ export default async (req: Request, context: Context) => {
       const viewerId = String(body?.viewerId || "").slice(0, 64);
       if (!viewerId) return Response.json({ success: true, viewerCount: 0 });
 
-      const alive = await readViewers();
-      if (body.leave === true) delete alive[viewerId];
-      else alive[viewerId] = Date.now();
-
-      // 폭주 방지 — 비정상적으로 많은 항목은 최근 것만 남긴다.
-      const entries = Object.entries(alive).sort((a, b) => b[1] - a[1]).slice(0, 5000);
-      await viewerStore.setJSON(viewerKey, Object.fromEntries(entries));
-      return Response.json({ success: true, viewerCount: entries.length });
+      const next = await mutateBlobJSON<Record<string, number>>(
+        "live-viewers",
+        viewerKey,
+        (current) => {
+          const now = Date.now();
+          const alive: Record<string, number> = {};
+          for (const [id, seen] of Object.entries(current || {})) {
+            if (typeof seen === "number" && now - seen <= VIEWER_STALE_MS) alive[id] = seen;
+          }
+          if (body.leave === true) delete alive[viewerId];
+          else alive[viewerId] = now;
+          const entries = Object.entries(alive).sort((a, b) => b[1] - a[1]).slice(0, 5000);
+          return Object.fromEntries(entries);
+        },
+      );
+      return Response.json({ success: true, viewerCount: Object.keys(next || {}).length });
     }
 
     // ── 방송 상태 쓰기 ── 본인(또는 관리자)만.
