@@ -65,8 +65,6 @@ export interface DmScheduledJob {
    */
   messageType?: "text" | "carousel";
   cards?: DmCard[];
-  /** 캐러셀과 함께 보낼 인사말(선택). */
-  intro?: string;
   /**
    * 댓글에서 만들어진 예약이면 그 댓글 ID.
    *

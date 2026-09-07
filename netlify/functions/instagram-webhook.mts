@@ -74,8 +74,6 @@ interface DmAutomationItem {
   mediaIds?: string[];
   messageType?: "text" | "carousel";
   message: string;
-  /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
-  cardIntro?: string;
   buttons: DmButton[];
   cards?: DmCard[];
   /**
@@ -148,7 +146,6 @@ function dmContentOf(a: DmAutomationItem) {
     message: a.message,
     buttons: a.buttons,
     cards: a.cards,
-    intro: a.cardIntro,
   };
 }
 
@@ -1004,7 +1001,6 @@ export default async (req: Request, _context: Context) => {
               buttons: automation.buttons || [],
               messageType: carousel ? "carousel" : "text",
               cards: carousel ? automation.cards : undefined,
-              intro: automation.cardIntro,
               commentId,
               commentAt: new Date(entryMs).toISOString(),
               source: "comment",

@@ -1,7 +1,6 @@
 // Generated from static Korean platform copy. User-provided content is intentionally not included.
 export const platformTextTranslations: Readonly<Record<string, string>> = {
   "(선택)": "(optional)",
-  "(인사말 텍스트가 먼저 도착합니다)": "(the greeting text arrives first)",
   ". 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.": ". Cards are shown only in the Instagram mobile app and are not visible on the web (instagram.com) DM screen.",
   "MB 이하 JPG·PNG·WEBP 를 넣을 수 있어요.": "MB.",
   "가져올 피드 사진이 없어요": "No feed photos to bring in",
@@ -25,7 +24,6 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "버건디": "Burgundy",
   "보낼 DM 메시지를 입력해주세요.": "Enter the DM message to send.",
   "블러시": "Blush",
-  "비워 두면 카드만 발송됩니다.": "Leave it empty to send the cards only.",
   "샌드": "Sand",
   "선정한 인플루언서": "Selected influencer",
   "스노우": "Snow",
@@ -68,10 +66,10 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "카드 복제": "Duplicate card",
   "카드 삭제": "Delete card",
   "카드 수정은 자동화 편집에서": "Cards are edited in the automation editor",
-  "카드 앞 인사말": "Greeting before the cards",
-  "카드 앞 인사말 (선택)": "Greeting before the cards (optional)",
   "카드 추가 (": "Add card (",
   "카드는 최대": "Up to",
+  "캐러셀은 카드 한 통으로 발송됩니다. 인스타그램이 메시지 한 통에 텍스트와 카드를 함께 담지 못하기 때문에, 인사말처럼 전하고 싶은 문구는 카드의 제목·설명에 적어 주세요.": "A carousel is sent as a single message. Instagram cannot put text and cards in one message, so write anything you want to say — a greeting included — in the card title and description.",
+  "캐러셀은 카드 한 통으로 발송됩니다. 전하고 싶은 문구는 자동화 편집에서 카드의 제목·설명에 적어 주세요.": "A carousel is sent as a single message. Write anything you want to say in the card title and description from the automation editor.",
   "크림": "Cream",
   "파일로 직접 올려도 됩니다.": "You can also upload a file directly.",
   "팔레트에서 고르면 글자 색은 자동으로 맞춰집니다": "Pick from the palette and the text color adjusts automatically",

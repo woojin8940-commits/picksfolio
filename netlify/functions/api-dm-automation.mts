@@ -15,8 +15,12 @@ import {
   syncIceBreakers,
 } from "./_shared/instagram-ice-breakers.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
-import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
-import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
+import {
+  subscribeInstagramWebhooks,
+  webhookFieldsSufficient,
+  WEBHOOK_FIELDS,
+} from "./_shared/instagram-webhook-subscribe.mts";
+import { indexDmAccount, unindexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -80,8 +84,6 @@ interface DmAutomationItem {
   mediaIds: string[];
   messageType: "text" | "carousel";
   message: string;
-  /** 캐러셀 앞에 먼저 보낼 인사말(선택). 텍스트 형식의 message 와 따로 둔다. */
-  cardIntro: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   /**
@@ -331,7 +333,6 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     mediaIds,
     messageType,
     message: String(a?.message || "").slice(0, 1000),
-    cardIntro: String(a?.cardIntro || "").slice(0, 1000),
     buttons,
     cards,
     sendMode: scheduled ? "scheduled" : "instant",
@@ -476,6 +477,16 @@ function replaceAll(
 const WEBHOOK_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
 
 /**
+ * 필수 필드는 다 걸렸고 부가 필드(`message_echoes`)만 거절된 계정을 다시 시도하는 간격.
+ *
+ * 메타는 계정 사정에 따라 이 필드를 영구히 거절한다. 그런 계정에서 10분마다 다시
+ * 시도하면 설정 화면을 열 때마다 거절 5번을 기다리게 되고, 그때마다 역인덱스를 다시
+ * 써 같은 인스타그램 계정을 연동한 다른 앱 계정과 주인 자리를 주고받는다. 자동화는
+ * 필수 필드만으로 완전히 동작하므로, 여기서부터는 서두를 이유가 없다.
+ */
+const WEBHOOK_HEAL_SETTLED_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/**
  * 웹훅 구독은 화면이 알릴 일이 아니라 서버가 끝낼 일이다.
  *
  * 예전에는 구독이 빠진 계정에 안내(발신 에코가 연결되지 않았습니다 · 버튼 클릭을 받을
@@ -488,6 +499,9 @@ const WEBHOOK_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
  * 이미 최신 목록으로 구독된 계정은 아무 호출도 하지 않는다. 못 걸린 계정만, 그것도
  * 10분에 한 번만 시도한다 — 메타가 계정 사정으로 특정 필드를 거절하는 경우가 있고
  * (앱 심사 범위·권한), 그때 화면을 열 때마다 실패를 되부르면 그 대기가 곧 로딩이다.
+ * 필수 필드(`REQUIRED_WEBHOOK_FIELDS`)가 이미 다 걸린 계정은 자동화가 완전히 동작하는
+ * 상태이므로 간격을 하루로 늘린다. 남은 것은 진단용 부가 필드뿐이고, 그 하나를 위해
+ * 10분마다 거절을 되부를 이유가 없다.
  *
  * 실패는 로그로만 남긴다. 자동 DM 이 안 나가는 것은 이 화면이 아니라 발송 기록에서
  * 드러나야 하고, 사람에게 보여 줄 수 있는 다음 행동이 없는 경고는 알림이 아니다.
@@ -501,7 +515,10 @@ async function healWebhookSubscription(
   if (String(data.webhookFields || "") === WEBHOOK_FIELDS) return data;
 
   const lastTry = Date.parse(String(data.webhookHealedAt || "")) || 0;
-  if (Date.now() - lastTry < WEBHOOK_HEAL_COOLDOWN_MS) return data;
+  const cooldown = webhookFieldsSufficient(data.webhookFields)
+    ? WEBHOOK_HEAL_SETTLED_COOLDOWN_MS
+    : WEBHOOK_HEAL_COOLDOWN_MS;
+  if (Date.now() - lastTry < cooldown) return data;
 
   const healedAt = new Date().toISOString();
   const sub = await subscribeInstagramWebhooks({
@@ -608,15 +625,11 @@ export default async (req: Request, context: Context) => {
           updatedAt: now,
         };
       });
-      // 웹훅 역인덱스(ig_<계정ID> → 사용자명)도 함께 비운다. 남겨두면 연동을 끊은 뒤에도
-      // 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다.
+      // 웹훅 역인덱스(ig_<계정ID> → 사용자명)에서도 자기 이름을 뺀다. 남겨두면 연동을
+      // 끊은 뒤에도 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다. 키를 통째로
+      // 지우지는 않는다 — 같은 인스타그램 계정을 연동한 다른 사용자가 남아 있을 수 있다.
       if (staleIgIds.length > 0) {
-        try {
-          const index = getStore({ name: "dm-automation-index", consistency: "strong" });
-          await Promise.all(staleIgIds.map((id) => index.delete(`ig_${id}`)));
-        } catch (e) {
-          console.warn("[dm-automation] index cleanup failed:", (e as Error)?.message);
-        }
+        await unindexDmAccount(username, staleIgIds);
       }
       return Response.json({ success: true, connected: false });
     }
