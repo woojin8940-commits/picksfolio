@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiService } from '../../services/apiService';
+import { useVisiblePolling } from '../../hooks/useVisiblePolling';
 
 /**
  * 대화 — 담당자가 인플루언서와 주고받는 채널.
@@ -37,29 +38,57 @@ const ManagerChatPanel: React.FC<ManagerChatPanelProps> = ({ managerUsername, on
   const [openId, setOpenId] = useState('');
   const [thread, setThread] = useState<any>(null);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [detailRefresh, setDetailRefresh] = useState(0);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const openIdRef = useRef(openId);
+  openIdRef.current = openId;
+  const etagRef = useRef('');
+  const revisionRef = useRef(0);
+  const readInFlightRef = useRef(new Set<string>());
+  const notifyRef = useRef(onNotify);
+  notifyRef.current = onNotify;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await apiService.getTimelineList(managerUsername, 'manager', { mine: mineOnly });
+  const load = useCallback(async (quiet = false, signal?: AbortSignal) => {
+    if (!quiet) setLoading(true);
+    const res = await apiService.getTimelineList(managerUsername, 'manager', { mine: mineOnly, signal });
+    if (signal?.aborted) return;
     setLoading(false);
     if (res.error) {
-      onNotify(res.error, 'error');
+      if (!quiet) notifyRef.current(res.error, 'error');
       return;
     }
     setTimelines(res.timelines || []);
-  }, [managerUsername, mineOnly, onNotify]);
+  }, [managerUsername, mineOnly]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useVisiblePolling(signal => load(true, signal), 15_000, true, `${managerUsername}:${mineOnly}`);
+  useVisiblePolling(async signal => {
+    const proposalId = openIdRef.current;
+    const revision = revisionRef.current;
+    const res = await apiService.getTimelineThread(proposalId, undefined, { signal, etag: etagRef.current });
+    if (signal.aborted || openIdRef.current !== proposalId || revision !== revisionRef.current) return;
+    setThreadLoading(false);
+    if (res.notModified || res.aborted) return;
+    if (res.error) {
+      if (!thread) notifyRef.current(res.error, 'error');
+      return;
+    }
+    setThread((prev: any) => JSON.stringify(prev) === JSON.stringify(res.timeline) ? prev : res.timeline);
+    const viewer = res.viewer?.username || managerUsername;
+    const unread = (res.timeline?.comments || []).some((c: any) => !c.readBy?.includes(viewer));
+    etagRef.current = unread ? '' : res.etag || '';
+    if (unread && !readInFlightRef.current.has(proposalId)) {
+      readInFlightRef.current.add(proposalId);
+      void apiService.markTimelineRead(proposalId).finally(() => readInFlightRef.current.delete(proposalId));
+    }
+    setTimelines(prev => prev.map(t => t.proposalId === proposalId ? { ...t, unreadCount: 0 } : t));
+  }, 2_000, !!openId, `${openId}:${detailRefresh}`);
 
   // 방을 열거나 메시지를 보낸 뒤 맨 아래로. 가장 최근 말이 안 보이면 방을 연 의미가 없다.
   useEffect(() => {
     if (thread) bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [thread]);
+  }, [openId, thread?.comments?.length]);
 
   const rows = useMemo(
     () => timelines.filter((t) => channelOf(t) === channel),
@@ -78,26 +107,25 @@ const ManagerChatPanel: React.FC<ManagerChatPanelProps> = ({ managerUsername, on
     return { inf, biz, unread };
   }, [timelines]);
 
-  const openThread = async (proposalId: string) => {
+  const openThread = (proposalId: string) => {
+    if (openIdRef.current === proposalId) {
+      etagRef.current = '';
+      setDetailRefresh(value => value + 1);
+      return;
+    }
+    openIdRef.current = proposalId;
+    etagRef.current = '';
     setOpenId(proposalId);
     setThread(null);
     setDraft('');
     setThreadLoading(true);
-    const res = await apiService.getTimelineThread(proposalId);
-    setThreadLoading(false);
-    if (res.error) {
-      onNotify(res.error, 'error');
-      setOpenId('');
-      return;
-    }
-    setThread(res.timeline || null);
     // 읽은 표시는 목록의 안 읽음 숫자에 반영된다.
-    load();
   };
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !openId) return;
+    if (!text || !openId || sending) return;
+    const proposalId = openId;
     setSending(true);
     const res = await apiService.postTimelineComment(openId, text);
     setSending(false);
@@ -105,11 +133,15 @@ const ManagerChatPanel: React.FC<ManagerChatPanelProps> = ({ managerUsername, on
       onNotify(res.error, 'error');
       return;
     }
-    setDraft('');
-    setThread((prev: any) =>
-      prev ? { ...prev, comments: [...(prev.comments || []), res.comment] } : prev,
-    );
-    load();
+    revisionRef.current += 1;
+    if (openIdRef.current === proposalId) {
+      etagRef.current = '';
+      setDraft(prev => prev.trim() === text ? '' : prev);
+      setThread((prev: any) =>
+        prev ? { ...prev, comments: [...(prev.comments || []).filter((c: any) => c.id !== res.comment?.id), res.comment] } : prev,
+      );
+    }
+    void load(true);
   };
 
   const openRow = useMemo(() => timelines.find((t) => t.proposalId === openId), [timelines, openId]);

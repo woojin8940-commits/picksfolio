@@ -304,14 +304,17 @@ export default async (req: Request) => {
   try {
     if (req.method === "GET") {
       const today = todayInSeoul();
-      const explicitRecords = await readRecords(SETTLEMENTS_STORE, role === "business" ? bizKey : infKey);
+      const [explicitRecords, dbInstance, deletedIds] = await Promise.all([
+        readRecords(SETTLEMENTS_STORE, role === "business" ? bizKey : infKey),
+        openDatabase(),
+        loadDeletedProposalIds(),
+      ]);
       const seenProposalIds = new Set<string>();
       for (const s of explicitRecords || []) {
         if (s.proposal_id) seenProposalIds.add(s.proposal_id);
         if (s.id) seenProposalIds.add(s.id);
       }
 
-      const dbInstance = await openDatabase();
       const { derived, rewardByProposalId } = await loadDerivedSettlements(
         dbInstance,
         username,
@@ -328,7 +331,6 @@ export default async (req: Request) => {
       // 명시 항목은 지우지만, 여기서 SQL 로 다시 만드는 파생 행은 SQL 삭제가
       // 실패했을 때 되살아난다 — 그러면 지운 협업이 정산금과 협업 현황 캘린더에만
       // 남아 "지웠는데 아직 있다"가 된다.
-      const deletedIds = await loadDeletedProposalIds();
       const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements]
         .filter((s: any) => isProposalAlive(deletedIds, s?.proposal_id))
         .map((s: any) => shapeSettlement(s, rewardByProposalId));

@@ -3,6 +3,7 @@ import { openExternalUrl } from '../utils/externalLink';
 import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
 import { apiService, authHeaders, setActiveBusinessAccount } from '../services/apiService';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 // 청크를 못 받은 화면이 "로딩 중" 에서 멈추지 않도록, 크리에이터 대시보드와 같은
 // 래퍼(재시도 → 실패 시 오류 경계)를 쓴다.
 import { lazyWithRetry, LazyRoute } from '../utils/lazyRoute';
@@ -31,6 +32,8 @@ type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
+  const currentSubViewRef = React.useRef(currentSubView);
+  currentSubViewRef.current = currentSubView;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
@@ -75,7 +78,12 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     if (!cleanUsername) return;
     const timers: number[] = [];
     const later = (ms: number, fn: () => void) => {
-      timers.push(window.setTimeout(fn, ms));
+      timers.push(window.setTimeout(() => {
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+        if (document.visibilityState === 'hidden' || currentSubViewRef.current !== 'dashboard' ||
+          connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || '')) return;
+        fn();
+      }, ms));
     };
 
     later(600, () => {
@@ -99,11 +107,9 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       apiService.getBusinessTaggedMedia(cleanUsername).catch(() => undefined);
     });
     later(2500, () => {
-      authHeaders({}, { account: cleanUsername })
-        .then((headers) => fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, { headers }))
-        .then((res) => res?.ok ? res.json() : null)
+      apiService.getBusinessProposals(cleanUsername)
         .then((data) => {
-          if (Array.isArray(data?.proposals)) {
+          if (!data.error && Array.isArray(data?.proposals)) {
             rememberCalendarProposals(data.proposals);
             try {
               localStorage.setItem(`picks_biz_inbox_${cleanUsername.toLowerCase()}`, JSON.stringify(data.proposals));
@@ -125,22 +131,22 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     };
   }, [cleanUsername]);
 
-  const cachedStats = (() => {
+  const cachedStats = React.useMemo(() => {
     try {
       const raw = localStorage.getItem(statsCacheKey);
       return raw ? JSON.parse(raw) : { total: 0, accepted: 0, inProgress: 0 };
     } catch { return { total: 0, accepted: 0, inProgress: 0 }; }
-  })();
-  const cachedTrend = (() => {
+  }, [statsCacheKey]);
+  const cachedTrend = React.useMemo(() => {
     try { return localStorage.getItem(trendCacheKey) || '분석 중...'; }
     catch { return '분석 중...'; }
-  })();
-  const cachedSettlement = (() => {
+  }, [trendCacheKey]);
+  const cachedSettlement = React.useMemo(() => {
     try {
       const raw = localStorage.getItem(settlementCacheKey);
       return raw ? Number(raw) || 0 : 0;
     } catch { return 0; }
-  })();
+  }, [settlementCacheKey]);
 
   // Phone preview removed — the business home now matches the regular user
   // dashboard's single-column layout.
@@ -148,11 +154,12 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const [proposalStats, setProposalStats] = useState(cachedStats);
   const [monthlySettlement, setMonthlySettlement] = useState<number>(cachedSettlement);
 
-  const fetchTopTrend = async () => {
+  const fetchTopTrend = async (signal: AbortSignal) => {
     try {
-      const response = await fetch('/.netlify/functions/api-naver-datalab');
+      const response = await fetch('/.netlify/functions/api-naver-datalab', { signal });
       if (response.ok) {
         const data = await response.json();
+        if (signal.aborted) return;
         if (data.mainInsight && data.mainInsight.keyword) {
           setTopTrend(data.mainInsight.keyword);
           try { localStorage.setItem(trendCacheKey, data.mainInsight.keyword); } catch {}
@@ -163,13 +170,11 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     }
   };
 
-  const fetchProposalStats = async () => {
+  const fetchProposalStats = async (signal: AbortSignal) => {
     try {
-      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
-        headers: await authHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await apiService.getBusinessProposals(cleanUsername);
+      if (signal.aborted) return;
+      if (!data.error) {
         const proposals = data.proposals || [];
         rememberCalendarProposals(proposals);
         const stats = {
@@ -187,14 +192,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
   // Sum the current calendar month's settlements for this business so the
   // "이번 달 정산" KPI reflects real data instead of a hardcoded 0.
-  const fetchMonthlySettlement = async () => {
+  const fetchMonthlySettlement = async (signal: AbortSignal) => {
     try {
-      const res = await fetch(`/api/settlements/${encodeURIComponent(cleanUsername)}?role=business`, {
-        headers: await authHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const settlements = data.settlements || [];
+        const settlements = await apiService.getSettlements(cleanUsername, 'business');
+        if (signal.aborted) return;
         const now = new Date();
         const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         const sum = settlements.reduce((acc: number, s: any) => {
@@ -203,51 +204,35 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         }, 0);
         setMonthlySettlement(sum);
         try { localStorage.setItem(settlementCacheKey, String(sum)); } catch {}
-      }
     } catch (e) {
       console.error('Error fetching monthly settlement:', e);
     }
   };
 
-  useEffect(() => {
-    if (currentSubView === 'dashboard') {
-      const timer = setTimeout(() => {
-        fetchTopTrend();
-        fetchProposalStats();
-        fetchMonthlySettlement();
-      }, 1200);
-      return () => clearTimeout(timer);
-    }
-  }, [currentSubView]);
+  useVisiblePolling(signal => Promise.all([
+    fetchTopTrend(signal), fetchProposalStats(signal), fetchMonthlySettlement(signal),
+  ]), 3600000, currentSubView === 'dashboard', cleanUsername);
 
-  useEffect(() => {
+  useVisiblePolling(async signal => {
     const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
-    const fetchUnread = async () => {
-      try {
-        const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business&unread=1`, {
-          headers: await authHeaders(),
-        });
-        const data = await res.json();
-        if (typeof data.unreadTotal === 'number' || data.timelines) {
-          const total = typeof data.unreadTotal === 'number'
-            ? data.unreadTotal
-            : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
-          setTimelineUnread(total);
-          if (data.timelines) {
-            try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
-          }
+    try {
+      const res = await fetch(`/api/timeline/list/${cleanUsername}?type=business&unread=1`, {
+        headers: await authHeaders(),
+        signal,
+      });
+      const data = await res.json();
+      if (signal.aborted || !res.ok) return;
+      if (typeof data.unreadTotal === 'number' || data.timelines) {
+        const total = typeof data.unreadTotal === 'number'
+          ? data.unreadTotal
+          : (data.timelines as { unreadCount?: number }[]).reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+        setTimelineUnread(total);
+        if (data.timelines) {
+          try { localStorage.setItem(timelineCacheKey, JSON.stringify(data.timelines)); } catch {}
         }
-      } catch {}
-    };
-    const firstTimer = setTimeout(fetchUnread, 4000);
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchUnread();
-    }, 120000);
-    return () => {
-      clearTimeout(firstTimer);
-      clearInterval(interval);
-    };
-  }, [cleanUsername]);
+      }
+    } catch {}
+  }, 120000, !!cleanUsername && currentSubView !== 'timeline', cleanUsername, 4000);
 
   useEffect(() => {
     const handleNavigateTimeline = (e: Event) => {

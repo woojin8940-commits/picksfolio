@@ -15,7 +15,7 @@ export default async (req: Request, context: Context) => {
     // 읽음 표시는 "누가 읽었는지"를 남기는 기록이다. 예전에는 body 의 username 을
     // 그대로 믿어서 남의 대화를 대신 읽음 처리할 수 있었으므로, 토큰으로 확인한
     // 호출자 본인 이름만 쓴다. 담당자가 읽으면 담당자 이름으로 남는다.
-    const store = getStore(STORE);
+    const store = getStore({ name: STORE, consistency: "strong" });
     const key = `detail_${proposalId}`;
     const data = (await store.get(key, { type: "json" })) as any;
 
@@ -34,6 +34,9 @@ export default async (req: Request, context: Context) => {
       return Response.json({ error: "Missing username" }, { status: 400 });
     }
     if (!data || !data.comments) {
+      return Response.json({ success: true });
+    }
+    if (!data.comments.some((comment: any) => !Array.isArray(comment.readBy) || !comment.readBy.includes(username))) {
       return Response.json({ success: true });
     }
 
@@ -59,7 +62,7 @@ export default async (req: Request, context: Context) => {
 
     if (updated) {
       // Update SQL read_by as well
-      try {
+      context.waitUntil((async () => { try {
         const { getDatabase } = await import("@picks/netlify-database");
         const db = getDatabase();
         await db.sql`
@@ -70,7 +73,7 @@ export default async (req: Request, context: Context) => {
         `;
       } catch (dbErr) {
         console.error("[timeline-read] Failed to update SQL read_by:", dbErr);
-      }
+      } })());
     }
 
     return Response.json({ success: true });

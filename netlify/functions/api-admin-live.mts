@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs'
+import { mapConcurrent } from './_shared/concurrency.mts'
 import { getSupabaseServer } from './_shared/supabase.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import {
@@ -70,10 +71,12 @@ export default async (req: Request, context: Context) => {
       const liveSet = new Set<string>()
       try {
         const { blobs } = await liveStore.list()
-        for (const b of blobs || []) {
+        const liveKeys: Array<string | undefined> = []
+        await mapConcurrent(blobs || [], 8, async (b, index) => {
           const data = (await liveStore.get(b.key, { type: 'json' })) as Record<string, any> | null
-          if (data?.isLive) liveSet.add(b.key.toLowerCase())
-        }
+          if (data?.isLive) liveKeys[index] = b.key.toLowerCase()
+        }).catch(() => {})
+        for (const key of liveKeys) if (key) liveSet.add(key)
       } catch {}
 
       const usersInfo = Array.from(byUser.entries()).map(([u, agg]) => {
@@ -265,29 +268,30 @@ export default async (req: Request, context: Context) => {
       const now = Date.now()
       const HEARTBEAT_TIMEOUT = 30000
 
-      for (const b of blobs || []) {
+      const rooms = await mapConcurrent(blobs || [], 8, async b => {
         const data = (await liveStore.get(b.key, { type: 'json' })) as Record<string, any> | null
-        if (!data?.isLive) continue
+        if (!data?.isLive) return null
         let activeViewers = 0
         try {
           const vd = (await viewerStore.get(b.key, { type: 'json' })) as Record<string, number> | null
           if (vd) activeViewers = Object.values(vd).filter(ts => now - ts < HEARTBEAT_TIMEOUT).length
         } catch {}
-        ongoing.push({
+        return {
           username: b.key,
           isLive: true,
           viewerCount: activeViewers,
           currentProduct: data.currentProduct || null,
           activeMaterial: data.activeMaterial || null,
           updatedAt: data.updatedAt || null,
-        })
-      }
+        }
+      })
+      ongoing.push(...rooms.filter(Boolean))
 
       // Estimate revenue per live username from completed live orders (live-orders blob)
       // (Best-effort; if blob missing, revenue stays 0.)
       try {
         const ordersStore = getStore({ name: 'live-orders', consistency: 'eventual' })
-        for (const room of ongoing) {
+        await mapConcurrent(ongoing, 8, async room => {
           try {
             const orders = (await ordersStore.get(room.username, { type: 'json' })) as any[] | null
             if (Array.isArray(orders)) {
@@ -299,7 +303,7 @@ export default async (req: Request, context: Context) => {
               room.revenue = 0
             }
           } catch { room.revenue = 0 }
-        }
+        })
       } catch {}
 
       const { data: history } = await (() => {

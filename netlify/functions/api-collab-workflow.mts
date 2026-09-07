@@ -509,16 +509,62 @@ export default async (req: Request, context: Context) => {
       if (rows.length === 0) return Response.json({ collabs: [] });
 
       const ids = rows.map((r) => r.id);
-      const stages = (await db.sql`
-        SELECT collab_id, stage_key, title, status, due_date, owner_role, seq
-        FROM collab_stages WHERE collab_id = ANY(${ids}) ORDER BY seq ASC
-      `) as any[];
-      const openFeedback = (await db.sql`
-        SELECT collab_id, COUNT(*)::int AS open_count
-        FROM collab_feedbacks
-        WHERE collab_id = ANY(${ids}) AND status = 'open'
-        GROUP BY collab_id
-      `) as any[];
+      const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
+      const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
+      const [
+        stages, openFeedback, workRows, uploadedRows, shipRows, termRows,
+        settlementRows, channelRows, siteRows, campaignRows, guideAssetRows,
+      ]: any[][] = await Promise.all([
+        db.sql`
+          SELECT collab_id, stage_key, title, status, due_date, owner_role, seq
+          FROM collab_stages WHERE collab_id = ANY(${ids}) ORDER BY seq ASC
+        `,
+        db.sql`
+          SELECT collab_id, COUNT(*)::int AS open_count
+          FROM collab_feedbacks
+          WHERE collab_id = ANY(${ids}) AND status = 'open'
+          GROUP BY collab_id
+        `,
+        db.sql`
+          SELECT DISTINCT ON (collab_id, stage_key)
+                 collab_id, stage_key, kind, version, status, created_at
+          FROM collab_deliverables
+          WHERE collab_id = ANY(${ids})
+          ORDER BY collab_id, stage_key, version DESC
+        `,
+        db.sql`
+          SELECT collab_id, MIN(created_at) AS uploaded_at
+          FROM collab_deliverables
+          WHERE collab_id = ANY(${ids}) AND kind = 'upload'
+          GROUP BY collab_id
+        `,
+        db.sql`SELECT * FROM collab_shipping WHERE collab_id = ANY(${ids})`,
+        db.sql`
+          SELECT collab_id, fee, locked_at, upload_due, deliverable_spec
+          FROM collab_terms WHERE collab_id = ANY(${ids})
+        `,
+        role === "brand" ? Promise.resolve([]) : db.sql`
+          SELECT collab_id, submitted_at, reviewed_at, payout_date, paid_at
+          FROM collab_settlement_info WHERE collab_id = ANY(${ids})
+        `,
+        creatorNames.length ? db.sql`
+          SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
+          FROM creator_channels WHERE username = ANY(${creatorNames})
+        ` : Promise.resolve([]),
+        creatorNames.length
+          ? db.sql`SELECT username, data FROM site_data WHERE username = ANY(${creatorNames})`
+          : Promise.resolve([]),
+        campaignIds.length ? db.sql`
+          SELECT id, title, brand_name, thumbnail_url, category, type,
+                 reward_mode, reward_type, reward_amount, end_date, status,
+                 guideline_note, guideline_url, guideline_files
+          FROM campaigns WHERE id = ANY(${campaignIds})
+        ` : Promise.resolve([]),
+        db.sql`
+          SELECT DISTINCT collab_id FROM collab_assets
+          WHERE collab_id = ANY(${ids}) AND kind = 'guide' AND COALESCE(file_url, '') <> ''
+        `,
+      ]);
       const openMap = new Map(openFeedback.map((r) => [r.collab_id, r.open_count]));
 
       /**
@@ -529,13 +575,6 @@ export default async (req: Request, context: Context) => {
        * 일도 일어나지 않는다 — 현재 단계는 여전히 가이드에 걸려 있기 때문이다. 실제로
        * 무엇이 올라왔는지는 제출물 행이 알고 있으므로, 단계마다 최신 한 건씩만 싣는다.
        */
-      const workRows = (await db.sql`
-        SELECT DISTINCT ON (collab_id, stage_key)
-               collab_id, stage_key, kind, version, status, created_at
-        FROM collab_deliverables
-        WHERE collab_id = ANY(${ids})
-        ORDER BY collab_id, stage_key, version DESC
-      `) as any[];
 
       /**
        * 게시물이 처음 등록된 시각 = 콘텐츠가 올라간 날.
@@ -545,12 +584,6 @@ export default async (req: Request, context: Context) => {
        * 날은 첫 등록일이고 정산 회차도 그 날을 기준으로 잡힌다(업로드한 달의 익월
        * 말일). 달력이 업로드 점을 이 날에 찍어야 정산 점과 한 줄로 읽힌다.
        */
-      const uploadedRows = (await db.sql`
-        SELECT collab_id, MIN(created_at) AS uploaded_at
-        FROM collab_deliverables
-        WHERE collab_id = ANY(${ids}) AND kind = 'upload'
-        GROUP BY collab_id
-      `) as any[];
       const uploadedMap = new Map(uploadedRows.map((r) => [r.collab_id, r.uploaded_at]));
 
       /**
@@ -564,9 +597,6 @@ export default async (req: Request, context: Context) => {
        * 주소 원문은 브랜드·담당자에게만 싣는다. 인플루언서에게는 자기 주소지만,
        * 목록 화면에는 쓸 데가 없다.
        */
-      const shipRows = (await db.sql`
-        SELECT * FROM collab_shipping WHERE collab_id = ANY(${ids})
-      `) as any[];
       const shipMap = new Map(shipRows.map((r) => [r.collab_id, r]));
       const showAddress = role === "brand" || role === "manager";
 
@@ -579,10 +609,6 @@ export default async (req: Request, context: Context) => {
        * 확정된 사람들에게 나갈 돈이 얼마인가"다. 조건이 아직 잠기지 않은(담당자가
        * 정리 중인) 협업은 0원으로 들어오므로, 화면은 잠긴 건수를 함께 센다.
        */
-      const termRows = (await db.sql`
-        SELECT collab_id, fee, locked_at, upload_due, deliverable_spec
-        FROM collab_terms WHERE collab_id = ANY(${ids})
-      `) as any[];
       const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
 
       /**
@@ -595,10 +621,6 @@ export default async (req: Request, context: Context) => {
        * 지급일은 브랜드가 손댈 수 없는 담당자의 일이고, 브랜드는 회차로 묶인 일괄
        * 정산만 확인한다.
        */
-      const settlementRows = (await db.sql`
-        SELECT collab_id, submitted_at, reviewed_at, payout_date, paid_at
-        FROM collab_settlement_info WHERE collab_id = ANY(${ids})
-      `) as any[];
       const settlementMap = new Map(settlementRows.map((r) => [r.collab_id, r]));
       const showSettlement = role !== "brand";
 
@@ -618,7 +640,6 @@ export default async (req: Request, context: Context) => {
        * 보고 고른 그 계정과도 다른 사진·다른 이름이 뜬다. 연동 때 함께 받아 둔
        * creator_channels 의 사진·아이디를 그대로 싣는다.
        */
-      const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
       /**
        * 얼굴을 읽기 전에, 오래된 사진만 인스타에 다시 물어본다.
        *
@@ -632,32 +653,12 @@ export default async (req: Request, context: Context) => {
        * 한다 — 인플루언서는 자기 화면에서 언제든 직접 갱신할 수 있다.
        */
       if (role === "brand" || role === "manager") {
-        await refreshStaleChannelImages(db, creatorNames);
+        context.waitUntil(refreshStaleChannelImages(db, creatorNames).catch(() => 0));
       }
-      const [channelRows, siteRows] = await Promise.all([
-        creatorNames.length
-          ? (db.sql`
-              SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
-              FROM creator_channels WHERE username = ANY(${creatorNames})
-            ` as Promise<any[]>)
-          : Promise.resolve([] as any[]),
         // 채널에 사진이 없는 사람의 되돌아갈 자리. 리스트업이 쓰는 규칙과 같다.
-        creatorNames.length
-          ? (db.sql`SELECT username, data FROM site_data WHERE username = ANY(${creatorNames})` as Promise<any[]>)
-          : Promise.resolve([] as any[]),
-      ]);
       const channelMap = new Map(channelRows.map((c) => [norm(c.username), c]));
       const avatarMap = new Map(siteRows.map((s) => [norm(s.username), avatarFromSite(s)]));
 
-      const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
-      const campaignRows = campaignIds.length
-        ? ((await db.sql`
-            SELECT id, title, brand_name, thumbnail_url, category, type,
-                   reward_mode, reward_type, reward_amount, end_date, status,
-                   guideline_note, guideline_url, guideline_files
-            FROM campaigns WHERE id = ANY(${campaignIds})
-          `) as any[])
-        : [];
       const campaignMap = new Map(campaignRows.map((c) => [c.id, c]));
 
       /**
@@ -670,10 +671,6 @@ export default async (req: Request, context: Context) => {
        * 싣는다. 캠페인에 적어 둔 가이드(메모 · 링크 · 파일)와 협업 자료함에 올린 파일을
        * 상세 화면과 같은 규칙으로 본다.
        */
-      const guideAssetRows = (await db.sql`
-        SELECT DISTINCT collab_id FROM collab_assets
-        WHERE collab_id = ANY(${ids}) AND kind = 'guide' AND COALESCE(file_url, '') <> ''
-      `) as any[];
       const guideAssetSet = new Set(guideAssetRows.map((r) => r.collab_id));
       const campaignGuideReady = (campaign: any) =>
         Boolean(
@@ -710,9 +707,21 @@ export default async (req: Request, context: Context) => {
         return out;
       };
 
+      const stagesByCollab = new Map<string, any[]>();
+      const worksByCollab = new Map<string, any[]>();
+      for (const stage of stages) {
+        const group = stagesByCollab.get(stage.collab_id) || [];
+        group.push(stage);
+        stagesByCollab.set(stage.collab_id, group);
+      }
+      for (const work of workRows) {
+        const group = worksByCollab.get(work.collab_id) || [];
+        group.push(work);
+        worksByCollab.set(work.collab_id, group);
+      }
       const collabs = rows.map((row) => {
-        const own = stages.filter((s) => s.collab_id === row.id);
-        const works = workRows.filter((w) => w.collab_id === row.id);
+        const own = stagesByCollab.get(row.id) || [];
+        const works = worksByCollab.get(row.id) || [];
         const current = own.find((s) => s.stage_key === row.current_stage_key) || own.find((s) => s.status !== "done");
         const campaign = campaignMap.get(row.campaign_id) || null;
         const ship = shapeShipping(shipMap.get(row.id));
@@ -857,34 +866,34 @@ export default async (req: Request, context: Context) => {
       // 목록과 같은 규칙으로 얼굴을 맞춘다. 목록에서 누른 사람과 열린 화면의 사람이
       // 다른 사진으로 보이면 브랜드는 잘못 눌렀다고 읽는다.
       if (role === "brand" || role === "manager") {
-        await refreshStaleChannelImages(db, [norm(collab.creator_username)]);
+        context.waitUntil(refreshStaleChannelImages(db, [norm(collab.creator_username)]).catch(() => 0));
       }
       const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, brandSettlementRows, channelRows, siteRows] = await Promise.all([
         loadStages(db, collabId),
-        db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_events WHERE collab_id = ${collabId} ORDER BY created_at DESC LIMIT 50` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_terms WHERE collab_id = ${collabId}` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as Promise<any[]>,
-        db.sql`SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}` as Promise<any[]>,
+        db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_events WHERE collab_id = ${collabId} ORDER BY created_at DESC LIMIT 50` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_terms WHERE collab_id = ${collabId}` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_schedule_changes WHERE collab_id = ${collabId} ORDER BY created_at DESC` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_assets WHERE collab_id = ${collabId} ORDER BY created_at DESC` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_shipping WHERE collab_id = ${collabId}` as PromiseLike<any[]>,
+        db.sql`SELECT * FROM collab_settlement_info WHERE collab_id = ${collabId}` as PromiseLike<any[]>,
         // 브랜드 일괄 정산금이 들어왔는가. 지급 완료 버튼이 이 값으로 잠긴다 —
         // 서버가 막는 규칙(complete_settlement)을 화면이 미리 알고 있어야, 담당자가
         // 눌러 보고 나서 거절 메시지로 배우지 않는다.
         db.sql`
           SELECT received_at, received_amount, invoice_amount, memo
           FROM campaign_brand_settlements WHERE campaign_id = ${collab.campaign_id}
-        ` as Promise<any[]>,
+        ` as PromiseLike<any[]>,
         // 얼굴과 인스타 아이디. 목록과 같은 곳에서 읽어야 목록에서 누른 사람과 열린
         // 화면의 사람이 같아 보인다.
         db.sql`
           SELECT username, instagram_handle, instagram_url, profile_image, connected, followers
           FROM creator_channels WHERE username = ${norm(collab.creator_username)}
-        ` as Promise<any[]>,
+        ` as PromiseLike<any[]>,
         db.sql`
           SELECT username, data FROM site_data WHERE username = ${norm(collab.creator_username)}
-        ` as Promise<any[]>,
+        ` as PromiseLike<any[]>,
       ]);
 
       const template = templateByKey(collab.template_key);

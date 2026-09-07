@@ -12,6 +12,7 @@ import {
   type MetaLink,
 } from "./instagram-metrics.mts";
 import { todayInSeoul } from "./campaign-recruit.mts";
+import { mapConcurrent } from "./concurrency.mts";
 
 /**
  * 캠페인 성과 수집 — 업로드된 게시물의 조회수 · 좋아요 · 댓글.
@@ -437,20 +438,20 @@ export async function collectCampaignMetrics(
   }
 
   // 같은 인플루언서의 연동은 한 번만 읽는다. 협업이 여러 건이어도 블롭 조회는 사람 수만큼이다.
-  const linkCache = new Map<string, MetaLink | null>();
+  const linkCache = new Map<string, Promise<MetaLink | null>>();
   let collected = 0;
-  for (const row of targets) {
+  await mapConcurrent(targets, 4, async row => {
     const creator = norm(row.creator_username);
     if (!linkCache.has(creator)) {
-      linkCache.set(creator, await loadMetaLink(creator, "collab"));
+      linkCache.set(creator, loadMetaLink(creator, "collab"));
     }
     try {
-      const res = await collectCollabMetrics(db, row, { link: linkCache.get(creator) });
+      const res = await collectCollabMetrics(db, row, { link: await linkCache.get(creator) });
       if (res.ok) collected += 1;
     } catch (e) {
       console.warn(`[post-metrics] ${row.id} 수집 중 오류:`, (e as Error)?.message);
     }
-  }
+  });
 
   return { attempted: targets.length, collected, skipped: rows.length - targets.length };
 }
@@ -492,7 +493,9 @@ function buildSeries(snapshots: any[]) {
   const byDate = new Map<string, any[]>();
   snapshots.forEach((s) => {
     const day = String(s.captured_on).slice(0, 10);
-    byDate.set(day, [...(byDate.get(day) || []), s]);
+    const rows = byDate.get(day) || [];
+    rows.push(s);
+    byDate.set(day, rows);
   });
 
   return dates.map((date) => {

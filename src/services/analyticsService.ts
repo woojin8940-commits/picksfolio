@@ -7,6 +7,21 @@ const getDateKey = (date?: Date) => {
 const analyticsApi = (username: string) =>
   `/api/analytics/${encodeURIComponent(username.toLowerCase())}`;
 
+export const getAnalyticsForRange = async (
+  username: string, startDate: string, endDate: string, signal?: AbortSignal,
+) => {
+  const params = new URLSearchParams({ start: startDate, end: endDate, type: 'summary' });
+  const res = await fetch(`${analyticsApi(username)}?${params}`, { signal });
+  if (!res.ok) throw new Error(`Analytics HTTP ${res.status}`);
+  const data = await res.json();
+  return {
+    stats: { views: data.views || 0, clicks: data.clicks || 0, ctr: data.ctr || 0 },
+    topItems: (data.topItems || []).map((item: any) => ({
+      id: item.blockId || item.id, count: item.clicks || item.count || 0,
+    })),
+  };
+};
+
 export const trackView = (username: string) => {
   const dateKey = getDateKey();
   fetch(analyticsApi(username), {

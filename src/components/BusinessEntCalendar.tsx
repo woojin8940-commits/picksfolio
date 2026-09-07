@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
-import { authHeaders, apiService } from '../services/apiService';
+import { apiService } from '../services/apiService';
 import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import {
   CampaignCollabStatus,
@@ -65,6 +65,30 @@ type UploadChip = {
   row: CollabRow;
 };
 
+type BizCalendarCache = {
+  proposals: BusinessProposal[];
+  collabs: CampaignCollabStatus[];
+  savedAt: number;
+};
+
+function readBizCalendarCache(key: string): BizCalendarCache | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { proposals: parsed, collabs: [], savedAt: 0 };
+    return parsed && Array.isArray(parsed.proposals) && Array.isArray(parsed.collabs) ? parsed as BizCalendarCache : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBizCalendarCache(key: string, proposals: BusinessProposal[], collabs: CampaignCollabStatus[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ proposals, collabs, savedAt: Date.now() }));
+  } catch {}
+}
+
 const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsername }) => {
   const cleanUsername = businessUsername.replace(/^biz\//, '');
   const cacheKey = `picks_biz_calendar_${cleanUsername.toLowerCase()}`;
@@ -74,51 +98,66 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   // (정산금) summary, all in one place.
   const [topTab, setTopTab] = useState<'calendar' | 'collabs' | 'settlement'>('calendar');
 
-  const cachedProposals = (() => {
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  })();
+  const cachedCalendar = useMemo(() => readBizCalendarCache(cacheKey), [cacheKey]);
 
-  const [proposals, setProposals] = useState<BusinessProposal[]>(cachedProposals);
-  const [collabs, setCollabs] = useState<CampaignCollabStatus[]>([]);
-  const [loading, setLoading] = useState(cachedProposals.length === 0);
+  const [proposals, setProposals] = useState<BusinessProposal[]>(() => cachedCalendar?.proposals || []);
+  const [collabs, setCollabs] = useState<CampaignCollabStatus[]>(() => cachedCalendar?.collabs || []);
+  const [loading, setLoading] = useState(() => !cachedCalendar);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
+    let disposed = false;
+    const cached = readBizCalendarCache(cacheKey);
+    let nextProposals = cached?.proposals || [];
+    let nextCollabs = cached?.collabs || [];
+    if (cached) {
+      setProposals(nextProposals);
+      setCollabs(nextCollabs);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    const persist = () => writeBizCalendarCache(cacheKey, nextProposals, nextCollabs);
+    const ready = () => {
+      if (!disposed) setLoading(false);
+    };
+
     const fetchProposals = async () => {
       try {
-        const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
-          headers: await authHeaders(),
-        });
-        if (res.ok) {
-          const data = await res.json();
+        const data = await apiService.getBusinessProposals(cleanUsername);
+        if (!data.error && !disposed) {
           const fresh = (data.proposals || []).filter((p: BusinessProposal) => p.status === 'accepted' || p.status === 'completed');
-          setProposals(fresh);
-          try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
+          nextProposals = fresh;
+          if (!disposed) setProposals(fresh);
+          persist();
+          ready();
         }
       } catch (e) {
         console.error('Failed to fetch proposals:', e);
       }
-      setLoading(false);
+      ready();
     };
-    /**
-     * 캠페인 협업. 캐시에는 넣지 않는다 — 진행 단계가 자주 바뀌는 값이라, 지난번에
-     * 저장해 둔 상태가 잠깐 보이면 그동안 오간 승인·수정요청이 없던 일처럼 읽힌다.
-     */
     const fetchCollabs = async () => {
       try {
         const res = await apiService.getCollabs('brand');
-        setCollabs(toCampaignCollabStatuses(res.collabs || [], 'brand'));
+        if (res.error || disposed) return;
+        const fresh = toCampaignCollabStatuses(res.collabs || [], 'brand');
+        nextCollabs = fresh;
+        if (!disposed) setCollabs(fresh);
+        persist();
+        ready();
       } catch (e) {
         console.error('Failed to fetch campaign collabs:', e);
       }
+      ready();
     };
     fetchProposals();
     fetchCollabs();
-  }, [businessUsername]);
+    return () => {
+      disposed = true;
+    };
+  }, [businessUsername, cacheKey, cleanUsername]);
 
   /**
    * 제안 + 캠페인 협업. 아래 계산은 전부 이 배열만 본다.

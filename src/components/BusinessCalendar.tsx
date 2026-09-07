@@ -127,13 +127,40 @@ const windowsOverlap = (aStart?: string, aEnd?: string, bStart?: string, bEnd?: 
   return a1 <= b2 && b1 <= a2;
 };
 
+type CalendarCache = {
+  proposals: BusinessProposal[];
+  collabRecords: CollabRecord[];
+  campaignCollabs: CampaignCollabStatus[];
+  settlements: Settlement[];
+  savedAt: number;
+};
+
+const calendarCacheKey = (username: string) => `picks_calendar_${username.toLowerCase()}`;
+
+function readCalendarCache(username: string): CalendarCache | null {
+  try {
+    const raw = localStorage.getItem(calendarCacheKey(username));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CalendarCache;
+    return parsed && Array.isArray(parsed.proposals) && Array.isArray(parsed.collabRecords) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCalendarCache(username: string, cache: Omit<CalendarCache, 'savedAt'>): void {
+  try {
+    localStorage.setItem(calendarCacheKey(username), JSON.stringify({ ...cache, savedAt: Date.now() }));
+  } catch {}
+}
 
 const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
-  const [proposals, setProposals] = useState<BusinessProposal[]>([]);
-  const [collabRecords, setCollabRecords] = useState<CollabRecord[]>([]);
-  const [campaignCollabs, setCampaignCollabs] = useState<CampaignCollabStatus[]>([]);
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedCalendar = useMemo(() => readCalendarCache(userName), [userName]);
+  const [proposals, setProposals] = useState<BusinessProposal[]>(() => cachedCalendar?.proposals || []);
+  const [collabRecords, setCollabRecords] = useState<CollabRecord[]>(() => cachedCalendar?.collabRecords || []);
+  const [campaignCollabs, setCampaignCollabs] = useState<CampaignCollabStatus[]>(() => cachedCalendar?.campaignCollabs || []);
+  const [settlements, setSettlements] = useState<Settlement[]>(() => cachedCalendar?.settlements || []);
+  const [loading, setLoading] = useState(() => !cachedCalendar);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -166,32 +193,78 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   });
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      const [proposalData, collabData, settlementData, campaignRes] = await Promise.all([
-        apiService.getProposals(userName),
-        apiService.getCollabRecords(userName),
-        apiService.getSettlements(userName),
-        // 캠페인 협업. 실패하면 빈 배열로 두고 나머지는 그대로 그린다 — 이 요청 하나
-        // 때문에 제안·정산까지 못 보게 만들 이유가 없다.
-        apiService.getCollabs('influencer').catch(() => ({ collabs: [] as any[] })),
-      ]);
-      setProposals(proposalData);
-      setCollabRecords(collabData);
-      setSettlements(settlementData);
-      setCampaignCollabs(toCampaignCollabStatuses(campaignRes.collabs || [], 'influencer'));
+    let disposed = false;
+    const cached = readCalendarCache(userName);
+    let nextProposals = cached?.proposals || [];
+    let nextCollabRecords = cached?.collabRecords || [];
+    let nextCampaignCollabs = cached?.campaignCollabs || [];
+    let nextSettlements = cached?.settlements || [];
+
+    if (cached) {
+      setProposals(nextProposals);
+      setCollabRecords(nextCollabRecords);
+      setCampaignCollabs(nextCampaignCollabs);
+      setSettlements(nextSettlements);
       setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    const persist = () => {
+      if (disposed) return;
+      writeCalendarCache(userName, {
+        proposals: nextProposals,
+        collabRecords: nextCollabRecords,
+        campaignCollabs: nextCampaignCollabs,
+        settlements: nextSettlements,
+      });
     };
-    fetchData();
+    const ready = () => {
+      if (!disposed) setLoading(false);
+    };
+
+    const tasks = [
+      apiService.getProposals(userName).then((data) => {
+        nextProposals = data;
+        if (!disposed) setProposals(data);
+        persist();
+        ready();
+      }),
+      apiService.getCollabRecords(userName).then((data) => {
+        nextCollabRecords = data;
+        if (!disposed) setCollabRecords(data);
+        persist();
+        ready();
+      }),
+      apiService.getSettlements(userName).then((data) => {
+        nextSettlements = data;
+        if (!disposed) setSettlements(data);
+        persist();
+        ready();
+      }),
+      apiService.getCollabs('influencer').then((res) => {
+        if (disposed || res.error) return;
+        const data = toCampaignCollabStatuses(res.collabs || [], 'influencer');
+        nextCampaignCollabs = data;
+        if (!disposed) setCampaignCollabs(data);
+        persist();
+        ready();
+      }),
+    ];
+
+    Promise.allSettled(tasks).finally(ready);
+    return () => {
+      disposed = true;
+    };
   }, [userName]);
 
   const handleComplete = async (proposalId: string) => {
     setUpdatingId(proposalId);
     const success = await apiService.updateProposalStatus(userName, proposalId, 'completed');
     if (success) {
-      setProposals(prev =>
-        prev.map(p => p.id === proposalId ? { ...p, status: 'completed', updated_at: new Date().toISOString() } : p)
-      );
+      const next = proposals.map(p => p.id === proposalId ? { ...p, status: 'completed' as const, updated_at: new Date().toISOString() } : p);
+      setProposals(next);
+      writeCalendarCache(userName, { proposals: next, collabRecords, campaignCollabs, settlements });
     }
     setUpdatingId(null);
   };
@@ -238,14 +311,16 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     if (editingCollab) {
       const success = await apiService.updateCollabRecord(userName, editingCollab.id, formData);
       if (success) {
-        setCollabRecords(prev =>
-          prev.map(c => c.id === editingCollab.id ? { ...c, ...formData, updated_at: new Date().toISOString() } : c)
-        );
+        const next = collabRecords.map(c => c.id === editingCollab.id ? { ...c, ...formData, updated_at: new Date().toISOString() } : c);
+        setCollabRecords(next);
+        writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
       }
     } else {
       const record = await apiService.createCollabRecord(userName, formData);
       if (record) {
-        setCollabRecords(prev => [...prev, record]);
+        const next = [...collabRecords, record];
+        setCollabRecords(next);
+        writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
       }
     }
 
@@ -258,7 +333,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     if (!confirm('이 협업 기록을 삭제하시겠습니까?')) return;
     const success = await apiService.deleteCollabRecord(userName, collabId);
     if (success) {
-      setCollabRecords(prev => prev.filter(c => c.id !== collabId));
+      const next = collabRecords.filter(c => c.id !== collabId);
+      setCollabRecords(next);
+      writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
     }
   };
 
@@ -266,9 +343,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     setUpdatingId(collabId);
     const success = await apiService.updateCollabRecord(userName, collabId, { status });
     if (success) {
-      setCollabRecords(prev =>
-        prev.map(c => c.id === collabId ? { ...c, status, updated_at: new Date().toISOString() } : c)
-      );
+      const next = collabRecords.map(c => c.id === collabId ? { ...c, status, updated_at: new Date().toISOString() } : c);
+      setCollabRecords(next);
+      writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
     }
     setUpdatingId(null);
   };

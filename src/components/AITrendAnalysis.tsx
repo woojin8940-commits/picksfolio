@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, BarChart3, Clock } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { readTrendCache, writeTrendCache } from '../utils/trendCache';
 
 interface AITrendAnalysisProps {
   userName: string;
@@ -49,9 +50,10 @@ const DISPLAY_CIDS = ['50000000', '50000002', '50000003', '50000004', '50000006'
 
 const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) => {
   const { language } = useLanguage();
-  const [categories, setCategories] = useState<CategoryBlock[]>(FALLBACK_CATEGORIES);
-  const [categoriesUpdatedAt, setCategoriesUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedTrend = readTrendCache<CategoryBlock>(language);
+  const [categories, setCategories] = useState<CategoryBlock[]>(() => cachedTrend?.categories || FALLBACK_CATEGORIES);
+  const [categoriesUpdatedAt, setCategoriesUpdatedAt] = useState<string | null>(() => cachedTrend?.updatedAt || null);
+  const [loading, setLoading] = useState(() => !cachedTrend?.categories.length);
 
   const formatUpdatedAt = (isoString: string): string => {
     try {
@@ -68,8 +70,18 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
 
   useEffect(() => {
     const controller = new AbortController();
-    const fetchData = async () => {
+    const cached = readTrendCache<CategoryBlock>(language);
+    const hasCached = Boolean(cached?.categories.length);
+    if (hasCached) {
+      setCategories(cached!.categories);
+      setCategoriesUpdatedAt(cached!.updatedAt || null);
+      setLoading(false);
+    } else {
       setLoading(true);
+    }
+
+    const fetchData = async () => {
+      if (!hasCached) setLoading(true);
       try {
         const res = await fetch(`/.netlify/functions/api-naver-category-rankings?lang=${language}`, {
           signal: controller.signal,
@@ -80,6 +92,7 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
           const filtered = apiCategories.filter((c) => DISPLAY_CIDS.includes(c.cid));
           if (filtered.length > 0) {
             setCategories(filtered);
+            writeTrendCache(language, filtered, data.updatedAt || null);
           }
           if (data.updatedAt) setCategoriesUpdatedAt(data.updatedAt);
         }
@@ -89,12 +102,12 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
         if (!controller.signal.aborted) setLoading(false);
       }
     };
-    const timer = setTimeout(fetchData, embedded ? 1800 : 0);
+    const timer = setTimeout(fetchData, embedded && !hasCached ? 250 : 0);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [language]);
+  }, [language, embedded]);
 
   return (
     <div className={embedded ? 'animate-in fade-in duration-500' : 'p-4 md:p-14 max-w-6xl mx-auto animate-in fade-in duration-500'}>

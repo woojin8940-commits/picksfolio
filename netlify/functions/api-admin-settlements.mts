@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs'
+import { mapConcurrent } from './_shared/concurrency.mts'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import type { Config, Context } from '@netlify/functions'
 
@@ -36,19 +37,17 @@ export default async (req: Request, _context: Context) => {
     const store = getStore('settlements')
     const seen = new Set<string>()
     const settlements: any[] = []
-    for (const prefix of ['settlements_biz_', 'settlements_inf_']) {
-      const { blobs } = await store.list({ prefix })
-      const lists = await Promise.all(blobs.map((b) => getRecords(store, b.key)))
-      for (const recs of lists) {
-        for (const s of recs) {
-          const id = s?.id || `${s?.proposal_id || ''}_${s?.influencer_username || ''}`
-          if (!id || seen.has(id)) continue
-          seen.add(id)
-          settlements.push(s)
-        }
+    const indexes = await Promise.all(
+      ['settlements_biz_', 'settlements_inf_'].map(prefix => store.list({ prefix })))
+    const lists = await mapConcurrent(indexes.flatMap(index => index.blobs), 8, b => getRecords(store, b.key))
+    for (const recs of lists) {
+      for (const s of recs) {
+        const id = s?.id || `${s?.proposal_id || ''}_${s?.influencer_username || ''}`
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        settlements.push(s)
       }
     }
-
     // 2) Pull proposals from Postgres: the `proposals` table plus accepted
     // campaign applications (campaign acceptances are written to Blobs and are
     // derivable from the SQL join, mirroring api-business-proposals).

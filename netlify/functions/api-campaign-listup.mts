@@ -1,5 +1,5 @@
 import { getDatabase } from "@picks/netlify-database";
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import {
   forbiddenResponse,
   requireAccountOwner,
@@ -106,7 +106,7 @@ const shapeCampaign = (c: any) => ({
   listupPublishedAt: c.listup_published_at || null,
 });
 
-export default async (req: Request) => {
+export default async (req: Request, context: Context) => {
   const db = getDatabase();
   const url = new URL(req.url);
 
@@ -145,7 +145,10 @@ export default async (req: Request) => {
       if (!campaignId) {
         return Response.json({ error: "캠페인 ID가 필요합니다." }, { status: 400 });
       }
-      const campaign = await loadCampaign(db, campaignId);
+      const [campaign, identities] = await Promise.all([
+        loadCampaign(db, campaignId),
+        resolveIdentities(req),
+      ]);
       if (!campaign) {
         return Response.json({ error: "캠페인을 찾을 수 없습니다." }, { status: 404 });
       }
@@ -159,7 +162,7 @@ export default async (req: Request) => {
       // 담당자 도구로 들어올 때만(후보 풀 검색 · viewer=manager) 준다.
       const wantsManagerView =
         url.searchParams.get("pool") === "1" || url.searchParams.get("viewer") === "manager";
-      const { account, manager, accountError } = await resolveIdentities(req);
+      const { account, manager, accountError } = identities;
       const isOwner = !!account && account.username === norm(campaign.business_username || "");
       let viewerRole: "manager" | "brand";
       if (manager && (wantsManagerView || !isOwner)) {
@@ -179,7 +182,7 @@ export default async (req: Request) => {
       `;
       // 굳은 스냅샷 위에 지금 채널 값을 덧입힌다. 연동을 나중에 마친 후보의 카드가
       // 계속 '—' 로 남지 않게 하기 위한 것으로, 규칙은 refreshListupSnapshots 주석에 있다.
-      const freshRows = await refreshListupSnapshots(db, listRows as any[]);
+      const freshRows = await refreshListupSnapshots(db, listRows as any[], (task) => context.waitUntil(task));
       const candidates = freshRows.map((r) => shapeListup(r, viewerRole));
       const listed = new Set((listRows as any[]).map((r) => norm(r.influencer_username)));
 
@@ -214,7 +217,7 @@ export default async (req: Request) => {
               )
             ORDER BY followers DESC NULLS LAST
             LIMIT 60
-          ` as Promise<any[]>,
+          ` as PromiseLike<any[]>,
 
           db.sql`
             SELECT * FROM creator_channels
@@ -226,7 +229,7 @@ export default async (req: Request) => {
             )
             ORDER BY followers DESC
             LIMIT 60
-          ` as Promise<any[]>,
+          ` as PromiseLike<any[]>,
 
           db.sql`
             SELECT applicant_username, instagram_url, message, contact, status
@@ -235,7 +238,7 @@ export default async (req: Request) => {
               AND COALESCE(source, 'apply') = 'apply'
             ORDER BY created_at DESC
             LIMIT 100
-          ` as Promise<any[]>,
+          ` as PromiseLike<any[]>,
         ]);
 
         const pool = new Map<string, any>();
@@ -380,7 +383,7 @@ export default async (req: Request) => {
         : body.username
           ? [body.username]
           : [];
-      const usernames = Array.from(new Set(rawList.map((u: unknown) => norm(u)).filter(Boolean)));
+      const usernames = Array.from(new Set<string>(rawList.map((u: unknown) => norm(u)).filter(Boolean)));
       const note = String(body.note || "");
       // 제시 조건. 한 번에 여러 명을 올릴 때 같은 값을 적용하되, 사람마다 다르게
       // 매기고 싶으면 quotes 로 계정별 값을 덮어쓴다. 담당자가 명단을 만들 때

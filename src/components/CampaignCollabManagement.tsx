@@ -1,19 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { lazyWithRetry } from '../utils/lazyRoute';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
-import BrandCollabProgress from './BrandCollabProgress';
-import CampaignRegisterWizard from './collab/CampaignRegisterWizard';
 import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
-import CampaignInsightPanel from './collab/CampaignInsightPanel';
-import BrandSettlementSummary from './collab/BrandSettlementSummary';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
 import {
   rewardModeOf, PRODUCT_PROVIDE, AD_OBJECTIVES, stageMarksFor,
   parseTierCounts, chosenTiers, tierFeeLabel, allocatedFloor, contentFormatLabel,
 } from '../utils/campaignBrief';
 import Toast from './Toast';
+
+const BrandCollabProgress = lazyWithRetry(() => import('./BrandCollabProgress'));
+const CampaignRegisterWizard = lazyWithRetry(() => import('./collab/CampaignRegisterWizard'));
+const CampaignInsightPanel = lazyWithRetry(() => import('./collab/CampaignInsightPanel'));
+const BrandSettlementSummary = lazyWithRetry(() => import('./collab/BrandSettlementSummary'));
+const panelFallback = <div role="status" aria-label="로딩 중" className="py-8 flex justify-center"><div className="w-8 h-8 border-2 border-slate-200 border-t-blue-600 rounded-full animate-spin" /></div>;
 
 interface Campaign {
   id: string;
@@ -188,12 +191,12 @@ const writeApplicantCache = (businessUsername: string, campaignId: string, data:
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName, initialCampaignId }) => {
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
 
-  const cachedCampaigns = (() => {
+  const cachedCampaigns = React.useMemo(() => {
     try {
       const raw = localStorage.getItem(cacheKey);
       return raw ? JSON.parse(raw) : [];
     } catch { return []; }
-  })();
+  }, [cacheKey]);
 
   const [campaigns, setCampaigns] = useState<Campaign[]>(cachedCampaigns);
   const [loading, setLoading] = useState(cachedCampaigns.length === 0);
@@ -257,7 +260,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const [activeCategoryFilter, setActiveCategoryFilter] = useState('');
   const [activeStatusFilter, setActiveStatusFilter] = useState<'' | 'open' | 'closed'>('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const notify = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
+  const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => setToast({ message, type }), []);
+  const selectedIdRef = React.useRef('');
+  selectedIdRef.current = selectedCampaign?.id || '';
+  const collabsRef = React.useRef<any[]>([]);
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -267,6 +273,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         headers: await authHeaders({}, { account: businessUsername }),
       });
       const data = await res.json();
+      if (!res.ok || !Array.isArray(data.campaigns)) throw new Error('Campaign request failed');
       const fresh = data.campaigns || [];
       setCampaigns(fresh);
       try { localStorage.setItem(cacheKey, JSON.stringify(fresh)); } catch {}
@@ -299,7 +306,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fetchActualSpend = useCallback(async () => {
     try {
       const res = await apiService.getCollabs('brand');
+      if (res.error) return;
+      collabsRef.current = res.collabs || [];
       setActualSpend(collabSpendMap((res.collabs || []) as any[]));
+      if (selectedIdRef.current) {
+        setCollabSummary(collabsRef.current.filter(c => c.campaignId === selectedIdRef.current));
+      }
     } catch {
       // 실집행 합계는 곁들이는 숫자다. 못 읽으면 계획 금액만 보이면 된다.
     }
@@ -363,6 +375,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     try {
       // 지원자 연락처가 담긴 목록이라 서버가 캠페인 소유자(또는 담당자)인지 확인한다.
       const data = await apiService.getCampaignApplicants(campaignId);
+      if (data.error) throw new Error(data.error);
+      if (selectedIdRef.current !== campaignId) return;
       const nextApplicants = Array.isArray(data.applicants) ? data.applicants : [];
       const nextSelectionBy = data.selectionBy === 'brand' ? 'brand' : 'manager';
       setApplicants(nextApplicants);
@@ -377,15 +391,16 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     } catch {
       console.error('Failed to fetch applicants');
     } finally {
-      setApplicantsLoading(false);
+      if (selectedIdRef.current === campaignId) setApplicantsLoading(false);
     }
   };
 
   const handleSelectCampaign = (campaign: Campaign) => {
+    selectedIdRef.current = campaign.id;
     setSelectedCampaign(campaign);
     setDetailTab('influencer');
     setShowBrief(false);
-    setCollabSummary([]);
+    setCollabSummary(collabsRef.current.filter(c => c.campaignId === campaign.id));
     // 지원자 보기 방식은 캠페인마다 새로 시작한다. 앞 캠페인에서 "보류"만 보던
     // 상태가 그대로 넘어오면 지원자가 있는 캠페인이 빈 목록으로 열린다.
     setApplicantView('');
@@ -393,9 +408,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     if (normalizeUser(campaign.business_username) === normalizeUser(businessUsername)) {
       const cached = readApplicantCache(businessUsername, campaign.id);
       setApplicants(cached?.applicants || []);
-      if (cached?.managerUsername) setCampaignManager(cached.managerUsername);
-      if (cached?.selectionBy) setSelectionBy(cached.selectionBy);
-      fetchApplicants(campaign.id);
+      setCampaignManager(cached?.managerUsername || String((campaign as any).manager_username || ''));
+      setSelectionBy(cached?.selectionBy || (rewardModeOf(campaign.reward_mode).openApply ? 'brand' : 'manager'));
+      if (rewardModeOf(campaign.reward_mode).openApply) void fetchApplicants(campaign.id);
+      else setApplicantsLoading(false);
       fetchCollabSummary(campaign.id);
     } else {
       setApplicants([]);
@@ -410,6 +426,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const fetchCollabSummary = async (campaignId: string) => {
     try {
       const res = await apiService.getCollabs('brand');
+      if (res.error || selectedIdRef.current !== campaignId) return;
+      collabsRef.current = res.collabs || [];
       const rows = (res.collabs || []) as Array<{
         id: string; campaignId: string; uploadUrl: string; confirmedAt: string | null; fee: number; status: string;
       }>;
@@ -1141,6 +1159,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   "담당자가 아직 안 올려 줬나"로 읽혀 오지 않을 명단을 기다리게 된다. */}
               {mode.managerListup && (
                 <CampaignListupBoard
+                  key={selectedCampaign.id}
                   campaignId={selectedCampaign.id}
                   onNotify={notify}
                   onConfirmed={() => setDetailTab('progress')}
@@ -1445,7 +1464,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           isOwner ? (
             // 선정 이후의 진행 상황. 브랜드는 여기서 단계와 산출물을 보고 담당자에게
             // 의견을 남긴다 — 인플루언서에게 직접 전달되지 않고 담당자를 거친다.
-            <BrandCollabProgress
+            <Suspense fallback={panelFallback}><BrandCollabProgress
+              key={selectedCampaign.id}
               campaignId={selectedCampaign.id}
               guidelineFiles={parseGuidelineFiles(selectedCampaign.guideline_files)}
               guidelineNote={selectedCampaign.guideline_note || ''}
@@ -1461,7 +1481,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 );
               }}
               onNotify={notify}
-            />
+            /></Suspense>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 shadow-sm text-center">
               <p className="text-sm text-slate-500 font-bold">진행 상황은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
@@ -1471,12 +1491,12 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
         {/* ------------------------------------------------ 인사이트 */}
         {activeTab === 'insight' && (
-          <CampaignInsightPanel
+          <Suspense fallback={panelFallback}><CampaignInsightPanel
             campaignId={selectedCampaign.id}
             budgetKrw={budget}
             uploadedCount={uploadedCount}
             totalCollabs={collabSummary.length}
-          />
+          /></Suspense>
         )}
 
         {/* ------------------------------------------------ 정산
@@ -1487,10 +1507,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             아닌 일정을 인원수만큼 확인하게 된다. */}
         {activeTab === 'settlement' && (
           isOwner ? (
-            <BrandSettlementSummary
+            <Suspense fallback={panelFallback}><BrandSettlementSummary
               businessUsername={businessUsername}
               campaignId={selectedCampaign.id}
-            />
+            /></Suspense>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 shadow-sm text-center">
               <p className="text-sm text-slate-500 font-bold">정산 내역은 캠페인을 등록한 브랜드만 확인할 수 있습니다</p>
@@ -1556,7 +1576,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
           캠페인 목록
         </button>
 
-        <CampaignRegisterWizard
+        <Suspense fallback={panelFallback}><CampaignRegisterWizard
           businessUsername={businessUsername}
           companyName={companyName}
           editing={editingCampaign}
@@ -1568,7 +1588,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             fetchCampaigns();
           }}
           onNotify={notify}
-        />
+        /></Suspense>
         {toastEl}
       </main>
     );

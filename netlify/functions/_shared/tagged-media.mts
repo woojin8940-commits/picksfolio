@@ -11,6 +11,7 @@ import {
   type MetaLink,
 } from "./instagram-metrics.mts";
 import { readCachedInsights } from "./creator-insights.mts";
+import { mapConcurrent } from "./concurrency.mts";
 
 /**
  * 브랜드 계정이 태그·언급된 콘텐츠 목록.
@@ -493,7 +494,7 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<TaggedMediaPayloa
    * 방향은 아니고, 화면에는 언제 받은 값인지 함께 적힌다.
    */
   const cachedViews = new Map<string, Map<string, number>>();
-  for (const username of new Set(candidates.map((m) => m.authorUsername))) {
+  await mapConcurrent([...new Set(candidates.map((m) => m.authorUsername))], 8, async username => {
     const payload = await readCachedInsights(username);
     const byId = new Map<string, number>();
     for (const reel of payload?.reels || []) {
@@ -503,7 +504,7 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<TaggedMediaPayloa
       if (reel?.id && Number.isFinite(views) && views > 0) byId.set(String(reel.id), views);
     }
     cachedViews.set(username, byId);
-  }
+  });
   for (const m of candidates) {
     const value = cachedViews.get(m.authorUsername)?.get(String(m.id));
     if (value === undefined) continue;
@@ -528,9 +529,9 @@ async function fillMissingViews(items: TaggedMedia[]): Promise<TaggedMediaPayloa
   // 계정별 연동은 한 번만 읽는다. 한 인플루언서가 여러 편을 올렸을 때 같은 블롭을
   // 편 수만큼 다시 읽을 이유가 없다.
   const links = new Map<string, MetaLink | null>();
-  for (const username of new Set(targets.map((m) => m.authorUsername))) {
+  await mapConcurrent([...new Set(targets.map((m) => m.authorUsername))], 8, async username => {
     links.set(username, await usableCreatorLink(username));
-  }
+  });
   // 연동이 죽었거나 없는 계정의 게시물은 물어보지 못한 쪽으로 센다.
   for (const m of targets) {
     if (!links.get(m.authorUsername)) {

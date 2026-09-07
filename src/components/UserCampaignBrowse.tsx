@@ -176,8 +176,8 @@ const formatDate = (dateStr: string) => {
 const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBack }) => {
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const initialListCache = readJson<CampaignBrowseListCache>(campaignListCacheKey(userName, '', '', '', 1));
-  const initialStatusCache = readJson<CampaignBrowseStatusCache>(campaignStatusCacheKey(userName));
+  const initialListCache = React.useMemo(() => readJson<CampaignBrowseListCache>(campaignListCacheKey(userName, '', '', '', 1)), [userName]);
+  const initialStatusCache = React.useMemo(() => readJson<CampaignBrowseStatusCache>(campaignStatusCacheKey(userName)), [userName]);
 
   const categoriesMap = isEn ? CATEGORIES_EN : CATEGORIES_KO;
   const rewardFilters = [
@@ -194,6 +194,16 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [activeFilter, setActiveFilter] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    if (searchQuery.trim() === searchTerm) return;
+    const timer = window.setTimeout(() => {
+      setSearchTerm(searchQuery.trim());
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, searchTerm]);
 
   const [appliedIds, setAppliedIds] = useState<Set<string>>(() => new Set(initialStatusCache?.appliedIds || []));
   const [acceptedCampaigns, setAcceptedCampaigns] = useState<Set<string>>(() => new Set(initialStatusCache?.acceptedCampaigns || []));
@@ -225,6 +235,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const loadMyCollabs = useCallback(async () => {
     if (!userName) return;
     const res = await apiService.getCollabs('influencer');
+    if (res.error) return;
     const acceptedSet = new Set<string>();
     const map: Record<string, string> = {};
     (res.collabs || []).forEach((c: any) => {
@@ -244,8 +255,8 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     });
   }, [userName]);
 
-  const fetchCampaignsList = useCallback(async () => {
-    const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchQuery, page);
+  const fetchCampaignsList = useCallback(async (signal: AbortSignal) => {
+    const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchTerm, page);
     const cached = readJson<CampaignBrowseListCache>(key);
     if (cached) {
       setCampaigns(cached.campaigns || []);
@@ -258,25 +269,29 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       const params = new URLSearchParams();
       if (activeFilter) params.append('type', activeFilter);
       if (activeCategory) params.append('category', activeCategory);
-      if (searchQuery.trim()) params.append('search', searchQuery.trim());
+      if (searchTerm) params.append('search', searchTerm);
       params.append('page', String(page));
       params.append('limit', String(PAGE_SIZE));
 
-      const res = await fetch(`/.netlify/functions/api-campaigns?${params.toString()}`).then(r => r.json());
+      const response = await fetch(`/.netlify/functions/api-campaigns?${params.toString()}`, { signal });
+      const res = await response.json();
+      if (signal.aborted || !response.ok || res.error || !Array.isArray(res.campaigns)) return;
       const next = Array.isArray(res.campaigns) ? res.campaigns : [];
       const nextTotal = Number(res.total || 0);
       setCampaigns(next);
       setTotal(nextTotal);
       writeJson<CampaignBrowseListCache>(key, { campaigns: next, total: nextTotal, savedAt: Date.now() });
     } catch (e) {
-      console.error(e);
+      if (!signal.aborted) console.error(e);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [activeFilter, activeCategory, searchQuery, page, userName]);
+  }, [activeFilter, activeCategory, searchTerm, page, userName]);
 
   useEffect(() => {
-    fetchCampaignsList();
+    const controller = new AbortController();
+    void fetchCampaignsList(controller.signal);
+    return () => controller.abort();
   }, [fetchCampaignsList]);
 
   useEffect(() => {
@@ -304,6 +319,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setSearchTerm(searchQuery.trim());
     setPage(1);
   };
 

@@ -158,25 +158,31 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
       // when available, otherwise a sentinel so the truthy gate passes — the
       // sub-panels authenticate via the `nf_jwt` cookie either way.
       setAdminToken(token || 'cookie');
-
-      // Fetch notifications (server reads cookie when token is empty).
-      const notifData = await apiService.getAdminNotifications(token);
-      setNotifications(notifData.notifications || []);
-      setUnreadCount(notifData.unreadCount || 0);
-
-      // 전체 현황 집계(가입 계정·브랜드 매칭 지원·캠페인 예산/마진·AI 수익).
+      setLoading(false);
       setOverviewLoading(true);
-      const overviewData = await apiService.getAdminOperatorOverview(token);
-      setOverview(overviewData && !overviewData.error ? overviewData : null);
-      setOverviewLoading(false);
-
-      // 정산 요약은 순수익 카드의 거래 현황과 정산 탭이 함께 쓴다.
-      try {
-        const settlementData = await apiService.getAdminSettlementsOverview(token);
-        setSettlementSummary(settlementData.summary || null);
-      } catch {
-        setSettlementSummary(null);
-      }
+      await Promise.all([
+        (async () => {
+          // Fetch notifications (server reads cookie when token is empty).
+          const notifData = await apiService.getAdminNotifications(token);
+          setNotifications(notifData.notifications || []);
+          setUnreadCount(notifData.unreadCount || 0);
+        })(),
+        (async () => {
+          // 전체 현황 집계(가입 계정·브랜드 매칭 지원·캠페인 예산/마진·AI 수익).
+          const overviewData = await apiService.getAdminOperatorOverview(token);
+          setOverview(overviewData && !overviewData.error ? overviewData : null);
+          setOverviewLoading(false);
+        })(),
+        (async () => {
+          // 정산 요약은 순수익 카드의 거래 현황과 정산 탭이 함께 쓴다.
+          try {
+            const settlementData = await apiService.getAdminSettlementsOverview(token);
+            setSettlementSummary(settlementData.summary || null);
+          } catch {
+            setSettlementSummary(null);
+          }
+        })(),
+      ]);
     } catch {
       setError('네트워크 오류가 발생했습니다.');
     }

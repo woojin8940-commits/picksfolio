@@ -223,6 +223,8 @@ const App: React.FC = () => {
   const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
   const [view, setView] = useState<View>(() => launchViewRef.current ?? 'home');
   const [subView, setSubView] = useState<SubView>('dashboard');
+  const subViewRef = useRef(subView);
+  subViewRef.current = subView;
   /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState('');
@@ -1356,7 +1358,12 @@ const App: React.FC = () => {
     if (!isLoggedIn || view !== 'admin' || !userName) return;
     const timers: number[] = [];
     const later = (ms: number, fn: () => void) => {
-      timers.push(window.setTimeout(fn, ms));
+      timers.push(window.setTimeout(() => {
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+        if (document.visibilityState === 'hidden' || subViewRef.current !== 'dashboard' ||
+          connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || '')) return;
+        fn();
+      }, ms));
     };
 
     later(600, () => {

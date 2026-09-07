@@ -101,7 +101,7 @@ const writeSettlementCache = (username: string, next: Settlement[]): void => {
 
 const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = false, onSettlementsChange }) => {
   const { language, t } = useLanguage();
-  const cachedSettlements = readSettlementCache(userName);
+  const cachedSettlements = useMemo(() => readSettlementCache(userName), [userName]);
   const [settlements, setSettlements] = useState<Settlement[]>(() => cachedSettlements);
   const [loading, setLoading] = useState(() => cachedSettlements.length === 0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);

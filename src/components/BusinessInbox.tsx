@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { BusinessProposal } from '../types';
 import { formatKRW } from '../utils/formatters';
-import { authHeaders, apiService } from '../services/apiService';
+import { apiService } from '../services/apiService';
+import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import {
   CampaignCollabStatus,
   dropProposalsCoveredByCollabs,
@@ -35,12 +36,12 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
   const cleanUsername = businessUsername.replace(/^biz\//, '');
   const cacheKey = `picks_biz_inbox_${cleanUsername.toLowerCase()}`;
 
-  const cachedProposals = (() => {
+  const cachedProposals = useMemo(() => {
     try {
       const raw = localStorage.getItem(cacheKey);
       return raw ? JSON.parse(raw) : [];
     } catch { return []; }
-  })();
+  }, [cacheKey]);
 
   const [proposals, setProposals] = useState<(BusinessProposal & { _influencer?: string })[]>(cachedProposals);
   const [collabs, setCollabs] = useState<CampaignCollabStatus[]>([]);
@@ -54,13 +55,11 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [removingId, setRemovingId] = useState<string | null>(null);
 
-  const fetchProposals = async () => {
+  const fetchProposals = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`/api/business-proposals/${encodeURIComponent(cleanUsername)}`, {
-        headers: await authHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await apiService.getBusinessProposals(cleanUsername);
+      if (signal?.aborted) return;
+      if (!data.error) {
         const fresh = data.proposals || [];
         setProposals(fresh);
         setHiddenIds(new Set<string>(data.hiddenIds || []));
@@ -69,7 +68,7 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
     } catch (e) {
       console.error('Failed to fetch business proposals:', e);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
@@ -121,24 +120,22 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
    * 캠페인 협업은 실패해도 화면을 멈추지 않는다. 제안 목록은 이미 왔는데 협업 요청
    * 하나 때문에 전체가 로딩으로 남으면, 있던 정보까지 못 보게 된다.
    */
-  const fetchCollabs = async () => {
+  const fetchCollabs = async (signal?: AbortSignal) => {
     try {
       const res = await apiService.getCollabs('brand');
+      if (signal?.aborted || res.error) return;
       setCollabs(toCampaignCollabStatuses(res.collabs || [], 'brand'));
     } catch (e) {
       console.error('Failed to fetch campaign collabs:', e);
     }
   };
 
-  useEffect(() => {
-    fetchProposals();
-    fetchCollabs();
-    const interval = setInterval(() => {
-      fetchProposals();
-      fetchCollabs();
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [businessUsername]);
+  useVisiblePolling(
+    signal => Promise.all([fetchProposals(signal), fetchCollabs(signal)]),
+    30_000,
+    true,
+    cleanUsername,
+  );
 
   /**
    * 두 갈래를 한 목록으로. 최근에 움직인 것이 위로 온다.

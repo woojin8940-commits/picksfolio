@@ -16,11 +16,12 @@ export default async (req: Request, context: Context) => {
   // 담당자 채널은 참여자가 두 명(당사자 한 명 + 담당자)뿐이다. 방에 기록되지 않은
   // 쪽은 담당자여도 아니라 아예 열리지 않는다 — 브랜드 채널에는 인플루언서가,
   // 인플루언서 채널에는 브랜드가 들어올 수 없다.
-  const store = getStore("timelines");
+  const store = getStore({ name: "timelines", consistency: "strong" });
   const key = `detail_${proposalId}`;
 
   if (req.method === "GET") {
-    const data = await store.get(key, { type: "json" }) as any;
+    const snapshot = await store.getWithMetadata(key, { type: "json" });
+    const data = snapshot?.data as any;
     if (data) {
       const access = await resolveTimelineAccess(req, {
         influencer: data.influencerUsername,
@@ -28,10 +29,18 @@ export default async (req: Request, context: Context) => {
         manager: data.managerUsername,
       });
       if (!access.ok) return access.response;
+      const headers = new Headers({ "Cache-Control": "private, no-cache", Vary: "Authorization, Cookie" });
+      if (snapshot?.etag) {
+        const etag = '"' + snapshot.etag.replace(/^"|"$/g, "") + '"';
+        headers.set("ETag", etag);
+        if (req.headers.get("if-none-match") === etag) {
+          return new Response(null, { status: 304, headers });
+        }
+      }
       return Response.json({
         timeline: data,
         viewer: { username: access.username, authorType: access.authorType },
-      });
+      }, { headers });
     }
 
     try {
@@ -80,7 +89,7 @@ export default async (req: Request, context: Context) => {
           createdAt: row.created_at || new Date().toISOString(),
         };
 
-        context.waitUntil(store.setJSON(key, recovered).catch(() => {}));
+        context.waitUntil(store.set(key, JSON.stringify(recovered), { onlyIfNew: true }).catch(() => {}));
         return Response.json({
           timeline: recovered,
           viewer: { username: access.username, authorType: access.authorType },
