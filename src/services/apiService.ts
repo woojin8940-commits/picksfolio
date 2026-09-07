@@ -375,13 +375,15 @@ export async function authHeaders(
 async function authedGet(
   url: string,
   build: () => Promise<Record<string, string>>,
+  /** 화면을 벗어나면 취소할 수 있게 — 주기적으로 부르는 조회가 쓴다. */
+  opts: { signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const res = await fetch(url, { credentials: 'same-origin', headers: await build() });
+  const res = await fetch(url, { credentials: 'same-origin', headers: await build(), signal: opts.signal });
   if (res.status !== 401) return res;
 
   const refreshed = await refreshSupabaseSession();
   if (!refreshed) return res;
-  return await fetch(url, { credentials: 'same-origin', headers: await build() });
+  return await fetch(url, { credentials: 'same-origin', headers: await build(), signal: opts.signal });
 }
 
 /**
@@ -2806,6 +2808,53 @@ export const apiService = {
     };
     if (opts.token || role === 'manager') return loader();
     return readMemory(key, 25_000, loader, opts.refresh);
+  },
+
+  /**
+   * 진행사항의 안 읽은 수만 묻는다(메뉴 · 캠페인 카드의 빨간 표시).
+   *
+   * 협업 목록을 통째로 받아 세지 않는 이유는 하나다 — 이 값은 대시보드가 2분에
+   * 한 번씩 부르는데, 목록 응답에는 단계 · 제출물 · 배송 · 캠페인 표지가 다 들어
+   * 있어서 표시 하나를 위해 화면이 쓰지도 않는 값을 계속 받아야 한다. 협업
+   * 타임라인의 안 읽은 수와 같은 방식이다(합계만 돌려주는 조회).
+   *
+   * 캐시하지 않는다. 안 읽은 수는 "지금 상대가 움직였는가"라서, 25초 전 값을
+   * 되돌려 주면 표시가 늦게 뜨고 늦게 사라진다.
+   */
+  async getCollabUnread(
+    role: 'brand' | 'influencer' | 'manager',
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<{ unreadTotal: number; byCampaign: Record<string, number>; byCollab: Record<string, number> }> {
+    const empty = { unreadTotal: 0, byCampaign: {}, byCollab: {} };
+    try {
+      const res = await authedGet(
+        `/api/collab-workflow?role=${role}&unread=1`,
+        () => collabHeaders(),
+        { signal: opts.signal },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return empty;
+      return {
+        unreadTotal: Number(json?.unreadTotal || 0),
+        byCampaign: json?.byCampaign || {},
+        byCollab: json?.byCollab || {},
+      };
+    } catch {
+      return empty;
+    }
+  },
+
+  /**
+   * 진행사항을 열었다고 알린다 → 그 협업의 빨간 표시가 사라진다.
+   *
+   * 실패해도 화면은 그대로 진행한다. 표시가 한 번 더 남는 것은 다음 조회에서
+   * 정리되지만, 여기서 막히면 진행사항 자체가 열리지 않는다.
+   */
+  async markCollabEventsSeen(collabId: string, role: CollabViewerRole): Promise<void> {
+    if (!collabId) return;
+    try {
+      await this.collabAction(collabId, 'mark_events_seen', {}, undefined, role);
+    } catch {}
   },
 
   /**

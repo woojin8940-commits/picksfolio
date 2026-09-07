@@ -131,6 +131,8 @@ type CollabRow = {
   /** 칸마다의 단계 상태와 제출물 유무. 현재 단계만으로 추측하지 않기 위해 함께 받는다. */
   steps?: Record<string, StepProgress>;
   openFeedbackCount: number;
+  /** 인플루언서가 남긴, 내가 아직 안 본 진행 기록 수. 카드의 빨간 표시가 이 값이다. */
+  unreadEvents?: number;
   uploadUrl: string;
   /** 인플루언서가 업로드할 때 남긴 광고 파트너십 코드. 업로드 칸이 그대로 보여 준다. */
   adCode?: string;
@@ -623,6 +625,10 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
     setFocusStep(step);
     setDetail(null);
     setDetailLoading(true);
+    /* 진행사항을 열었다 = 이 사람의 기록은 다 봤다. 카드의 빨간 표시를 곧바로
+       지우고(응답을 기다리면 열어 놓고도 표시가 남아 있다) 서버에도 남긴다. */
+    setCollabs(prev => prev.map(r => (r.id === collabId ? { ...r, unreadEvents: 0 } : r)));
+    void apiService.markCollabEventsSeen(collabId, viewer);
     await refreshDetail(collabId);
     if (openIdRef.current === collabId) setDetailLoading(false);
   };
@@ -1231,6 +1237,11 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                                     <p className="text-[11px] text-slate-400 font-bold truncate">{who.sub}</p>
                                   )}
                                 </div>
+                                {(collab.unreadEvents || 0) > 0 && (
+                                  <span className="bg-red-500 text-white text-[10px] font-black min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full flex-shrink-0">
+                                    {(collab.unreadEvents || 0) > 99 ? '99+' : collab.unreadEvents}
+                                  </span>
+                                )}
                                 {collab.openFeedbackCount > 0 && cardState !== 'done' && (
                                   <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[10px] font-black flex-shrink-0">
                                     의견 {collab.openFeedbackCount}

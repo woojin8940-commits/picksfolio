@@ -4,6 +4,12 @@ import ErrorBoundary from './ErrorBoundary';
 import { isNativeApp } from '../utils/appEnv';
 import { apiService, authHeaders, setActiveBusinessAccount } from '../services/apiService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
+// 홈 상단 숫자는 크리에이터 대시보드와 같은 것을 본다 — 내 개인페이지 방문자 수와
+// 링크 클릭률. 그래서 데이터도 같은 곳에서(분석 API · 사이트 설정) 가져온다.
+import { getAnalyticsForRange } from '../services/analyticsService';
+import { getSiteSettings } from '../services/settingsService';
+import { todayInSeoul } from '../utils/formatters';
+import type { Block } from '../types';
 // 청크를 못 받은 화면이 "로딩 중" 에서 멈추지 않도록, 크리에이터 대시보드와 같은
 // 래퍼(재시도 → 실패 시 오류 경계)를 쓴다.
 import { lazyWithRetry, LazyRoute } from '../utils/lazyRoute';
@@ -39,11 +45,17 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   /** 현황 화면에서 "캠페인 진행사항 열기"로 지목한 캠페인. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabCampaignId, setCollabCampaignId] = useState<string | null>(null);
   const [timelineUnread, setTimelineUnread] = useState(0);
+  /**
+   * 캠페인 협업 진행사항의 안 읽은 수.
+   *
+   * 인플루언서가 기획안을 올리거나 배송지를 넣어도 브랜드 쪽에는 아무 표시가 없어서,
+   * 캠페인을 열고 사람을 하나씩 눌러 봐야 알 수 있었다. 안 읽은 표시가 있는 곳은
+   * 협업 타임라인(메시지)뿐이었다. 진행사항도 같은 방식으로 표시한다.
+   */
+  const [collabUnread, setCollabUnread] = useState(0);
 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
-  const statsCacheKey = `picks_biz_stats_${cleanUsername}`;
   const trendCacheKey = `picks_biz_trend`;
-  const settlementCacheKey = `picks_biz_settlement_${cleanUsername}`;
 
   function rememberCalendarProposals(proposals: any[]) {
     try {
@@ -131,28 +143,28 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     };
   }, [cleanUsername]);
 
-  const cachedStats = React.useMemo(() => {
-    try {
-      const raw = localStorage.getItem(statsCacheKey);
-      return raw ? JSON.parse(raw) : { total: 0, accepted: 0, inProgress: 0 };
-    } catch { return { total: 0, accepted: 0, inProgress: 0 }; }
-  }, [statsCacheKey]);
   const cachedTrend = React.useMemo(() => {
     try { return localStorage.getItem(trendCacheKey) || '분석 중...'; }
     catch { return '분석 중...'; }
   }, [trendCacheKey]);
-  const cachedSettlement = React.useMemo(() => {
-    try {
-      const raw = localStorage.getItem(settlementCacheKey);
-      return raw ? Number(raw) || 0 : 0;
-    } catch { return 0; }
-  }, [settlementCacheKey]);
 
   // Phone preview removed — the business home now matches the regular user
   // dashboard's single-column layout.
   const [topTrend, setTopTrend] = useState<string>(cachedTrend);
-  const [proposalStats, setProposalStats] = useState(cachedStats);
-  const [monthlySettlement, setMonthlySettlement] = useState<number>(cachedSettlement);
+  /**
+   * 홈 상단 숫자.
+   *
+   * 예전에는 여기에 보낸 제안 · 수락됨 · 진행중 협업 · 이번 달 정산을 세워 두었다.
+   * 그런데 그 넷은 모두 다른 메뉴(제안 현황 · 캠페인 협업 · 협업 현황)에 각자의
+   * 화면이 있고, 홈에서 다시 세어 주면 같은 숫자가 두 곳에서 갈렸다. 홈에서
+   * 알고 싶은 것은 크리에이터 계정과 마찬가지로 "내 개인페이지가 얼마나 열렸고
+   * 링크가 얼마나 눌렸나" 다. 그래서 일반 계정 대시보드와 똑같은 세 칸을 쓴다.
+   */
+  const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
+  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
+  const [startDate, setStartDate] = useState(() => todayInSeoul());
+  const [endDate, setEndDate] = useState(() => todayInSeoul());
 
   const fetchTopTrend = async (signal: AbortSignal) => {
     try {
@@ -170,48 +182,80 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     }
   };
 
+  /**
+   * 제안 목록은 홈에서 숫자로 세지 않지만, 협업 현황(캘린더)이 이 화면이 저장해 둔
+   * 목록을 먼저 읽고 그린다. 그래서 가져오는 일은 그대로 남겨 둔다 — 지우면
+   * 캘린더가 처음 열릴 때마다 빈 화면부터 시작한다.
+   */
   const fetchProposalStats = async (signal: AbortSignal) => {
     try {
       const data = await apiService.getBusinessProposals(cleanUsername);
       if (signal.aborted) return;
       if (!data.error) {
-        const proposals = data.proposals || [];
-        rememberCalendarProposals(proposals);
-        const stats = {
-          total: proposals.length,
-          accepted: proposals.filter((p: any) => p.status === 'accepted').length,
-          inProgress: proposals.filter((p: any) => p.status === 'accepted' || p.status === 'completed').length,
-        };
-        setProposalStats(stats);
-        try { localStorage.setItem(statsCacheKey, JSON.stringify(stats)); } catch {}
+        rememberCalendarProposals(data.proposals || []);
       }
     } catch (e) {
       console.error('Error fetching proposal stats:', e);
     }
   };
 
-  // Sum the current calendar month's settlements for this business so the
-  // "이번 달 정산" KPI reflects real data instead of a hardcoded 0.
-  const fetchMonthlySettlement = async (signal: AbortSignal) => {
+  /**
+   * 개인페이지 방문자 · 클릭률 · 클릭 TOP 3.
+   *
+   * 크리에이터 대시보드와 같은 두 곳을 함께 부른다 — 기간별 분석과 사이트 설정.
+   * 블록 제목은 설정에만 있고 클릭 수는 분석에만 있어서, 둘을 맞춰야 TOP 3 에
+   * 무엇이 눌렸는지 이름으로 적을 수 있다. 한쪽이 실패해도 나머지는 그린다.
+   */
+  const fetchPageStats = async (signal: AbortSignal) => {
+    if (!cleanUsername) return;
     try {
-        const settlements = await apiService.getSettlements(cleanUsername, 'business');
-        if (signal.aborted) return;
-        const now = new Date();
-        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const sum = settlements.reduce((acc: number, s: any) => {
-          const dateStr = String(s.scheduled_date || s.created_at || '');
-          return dateStr.slice(0, 7) === ym ? acc + (Number(s.amount) || 0) : acc;
-        }, 0);
-        setMonthlySettlement(sum);
-        try { localStorage.setItem(settlementCacheKey, String(sum)); } catch {}
+      const [statsResult, settingsResult] = await Promise.allSettled([
+        getAnalyticsForRange(cleanUsername, startDate, endDate, signal),
+        getSiteSettings(cleanUsername),
+      ]);
+      if (signal.aborted) return;
+
+      if (statsResult.status === 'fulfilled') {
+        setStats(statsResult.value.stats);
+      }
+      setBlocks(
+        settingsResult.status === 'fulfilled' && Array.isArray(settingsResult.value?.blocks)
+          ? settingsResult.value.blocks
+          : [],
+      );
+      setTopItemsData(
+        statsResult.status === 'fulfilled' && Array.isArray(statsResult.value.topItems)
+          ? statsResult.value.topItems
+          : [],
+      );
     } catch (e) {
-      console.error('Error fetching monthly settlement:', e);
+      console.error('Error fetching page stats:', e);
     }
   };
 
   useVisiblePolling(signal => Promise.all([
-    fetchTopTrend(signal), fetchProposalStats(signal), fetchMonthlySettlement(signal),
-  ]), 3600000, currentSubView === 'dashboard', cleanUsername);
+    fetchTopTrend(signal), fetchProposalStats(signal), fetchPageStats(signal),
+  ]), 3600000, currentSubView === 'dashboard', `${cleanUsername}:${startDate}:${endDate}`);
+
+  // 클릭 수를 블록 제목에 맞춰 TOP 3 을 만든다. 아직 눌린 것이 없으면 블록 세 개를
+  // 0 회로 보여 준다 — 칸이 비어 있으면 "집계가 고장 났나" 로 읽힌다.
+  const topItems = (Array.isArray(topItemsData) ? topItemsData.map((item, idx) => {
+    if (!item || !item.id) return null;
+    const block = Array.isArray(blocks) ? blocks.find(b => b && String(b.id) === String(item.id)) : null;
+    if (!block) return null;
+    return { rank: idx + 1, name: block.title || 'Untitled', clicks: item.count || 0 };
+  }).filter(Boolean) : []).slice(0, 3) as { rank: number; name: string; clicks: number }[];
+
+  /** 오늘 하루만 고른 상태면 숫자가 지금 쌓이는 중이라는 표시를 붙인다. */
+  const isRealtimeRange = startDate === endDate && startDate === todayInSeoul();
+
+  const displayTopItems = topItems.length > 0
+    ? topItems
+    : (Array.isArray(blocks) ? blocks.filter(Boolean).slice(0, 3).map((block, idx) => ({
+        rank: idx + 1,
+        name: block.title || 'Untitled',
+        clicks: 0,
+      })) : []);
 
   useVisiblePolling(async signal => {
     const timelineCacheKey = `picks_timelines_business_${cleanUsername}`;
@@ -233,6 +277,13 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       }
     } catch {}
   }, 120000, !!cleanUsername && currentSubView !== 'timeline', cleanUsername, 4000);
+
+  // 진행사항의 빨간 표시. 캠페인 협업 화면에 들어가 있는 동안에는 묻지 않는다 —
+  // 그 화면이 협업을 열 때마다 읽음을 남기므로, 나온 뒤에 다시 세는 것이 맞다.
+  useVisiblePolling(async signal => {
+    const { unreadTotal } = await apiService.getCollabUnread('brand', { signal });
+    if (!signal.aborted) setCollabUnread(unreadTotal);
+  }, 120000, !!cleanUsername && currentSubView !== 'campaign-collab', cleanUsername, 4000);
 
   useEffect(() => {
     const handleNavigateTimeline = (e: Event) => {
@@ -376,6 +427,24 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {/* 기간 선택도 일반 계정 대시보드와 같은 자리 · 같은 모양이다. 아래 숫자
+              세 칸이 모두 이 기간의 값이다. */}
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 md:px-4 md:py-2 rounded-xl border border-slate-100 shadow-sm">
+            <span className="hidden md:inline text-[10px] font-black text-slate-400 uppercase tracking-widest">기간</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="bg-transparent border-none font-bold text-[10px] md:text-sm focus:outline-none text-slate-700 w-[100px] md:w-auto"
+            />
+            <span className="text-slate-300 font-bold text-xs">~</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="bg-transparent border-none font-bold text-[10px] md:text-sm focus:outline-none text-slate-700 w-[100px] md:w-auto"
+            />
+          </div>
           <button
             onClick={() => {
               openExternalUrl(`/${businessUsername}`);
@@ -390,23 +459,37 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       </header>
 
       <div>
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6">
-            <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">보낸 제안</p>
-              <p className="text-lg md:text-2xl font-black text-slate-900">{proposalStats.total}<span className="text-sm font-bold">건</span></p>
+          {/* Stats Row — 일반 계정 대시보드와 같은 세 칸(방문자 · 링크 클릭률 · 클릭 TOP 3). */}
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 mb-6 md:mb-8">
+            <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">방문자 수</p>
+              <div className="flex items-end gap-2">
+                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.views.toLocaleString()}</span>
+                {isRealtimeRange && <span className="text-[10px] md:text-sm font-black text-blue-600 mb-0.5">실시간</span>}
+              </div>
             </div>
-            <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">수락됨</p>
-              <p className="text-lg md:text-2xl font-black text-green-600">{proposalStats.accepted}<span className="text-sm font-bold">건</span></p>
+            <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
+              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">링크 클릭률</p>
+              <div className="flex items-end gap-2">
+                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.ctr}%</span>
+                {isRealtimeRange && <span className="text-[10px] md:text-sm font-black text-blue-600 mb-0.5">실시간</span>}
+              </div>
             </div>
-            <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">진행중 협업</p>
-              <p className="text-lg md:text-2xl font-black text-blue-600">{proposalStats.inProgress}<span className="text-sm font-bold">건</span></p>
-            </div>
-            <div className="bg-white p-3 md:p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">이번 달 정산</p>
-              <p className="text-lg md:text-2xl font-black text-slate-900">{monthlySettlement.toLocaleString()}<span className="text-sm font-bold">원</span></p>
+            <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm col-span-2 lg:col-span-1">
+              <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-3">클릭 TOP 3</p>
+              {displayTopItems.length === 0 ? (
+                <p className="text-xs text-slate-300 font-bold">데이터 수집 중</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {displayTopItems.map((item) => (
+                    <div key={item.rank} className="flex items-center gap-2.5">
+                      <span className={`text-xs font-black w-4 ${item.rank === 1 ? 'text-blue-600' : 'text-slate-300'}`}>{item.rank}</span>
+                      <p className="text-xs font-bold text-slate-900 truncate flex-1">{item.name}</p>
+                      <span className="text-[10px] font-bold text-slate-400">{item.clicks}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -461,7 +544,14 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-8">
             <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[1rem] md:rounded-[2.5rem] p-4 md:p-10 text-white flex flex-col justify-between min-h-[210px] md:min-h-[300px] shadow-xl">
               <div>
-                <h3 className="text-sm md:text-2xl font-black mb-1">📢 캠페인 협업</h3>
+                <h3 className="text-sm md:text-2xl font-black mb-1 flex items-center gap-2">
+                  📢 캠페인 협업
+                  {/* 홈에도 같은 표시를 붙인다. 메뉴에만 있으면 홈에 머무는 사람은
+                      인플루언서가 무엇을 올렸는지 모른다. */}
+                  {collabUnread > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full">{collabUnread > 99 ? '99+' : collabUnread}</span>
+                  )}
+                </h3>
                 <p className="opacity-80 font-bold text-[9px] md:text-base">캠페인을 등록하고 크리에이터의 지원을 받아보세요.</p>
               </div>
               <button onClick={() => setCurrentSubView('campaign-collab')} className="bg-white text-blue-700 px-4 py-1.5 rounded-lg font-black text-[9px] md:text-sm w-fit mt-2">캠페인 관리</button>
@@ -525,7 +615,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           {/* 인사이트는 내 계정 데이터를 보는 메뉴라, 캠페인 그룹 위 · DM 자동화 바로 아래에 둔다. */}
           <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <div className="my-3 border-t border-white/10" />
-          <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
+          <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
@@ -554,7 +644,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="🔗" label="관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
           <MobileNavItem icon="📩" label="DM자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           <MobileNavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
-          <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} />
+          <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           <MobileNavItem icon="📊" label="캠페인이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
@@ -580,7 +670,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { setCurrentSubView('dm-automation'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => { setCurrentSubView('tagged-insights'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
-              <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
@@ -609,7 +699,10 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             {subComponent}
           </ErrorBoundary>
         ) : (
-          <DashboardHome />
+          /* 함수를 그대로 부른다. DashboardHome 은 이 컴포넌트 안에서 매번 새로
+             만들어지므로 <DashboardHome /> 로 두면 기간을 고칠 때마다 홈이 통째로
+             다시 마운트되어 날짜 입력칸이 포커스를 잃는다. */
+          DashboardHome()
         )}
       </div>
     </div>

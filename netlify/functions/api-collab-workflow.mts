@@ -196,6 +196,83 @@ const STEP_STAGE_GROUP: Record<string, string[]> = {
   upload: ["upload", "confirm", "settlement"],
 };
 
+/**
+ * 진행사항의 빨간 알림 = 상대가 남긴, 내가 아직 안 본 기록.
+ *
+ * 협업 타임라인(메시지)에는 안 읽은 수가 있었는데 진행사항에는 없었다. 그래서
+ * 인플루언서가 기획안을 올려도 브랜드는 캠페인을 열어 사람을 하나씩 눌러 보기
+ * 전까지 몰랐고, 브랜드가 피드백을 달아도 인플루언서는 다음에 들어올 때까지
+ * 몰랐다. 기록은 이미 collab_events 에 다 쌓여 있으니, "누가 남긴 것을 세는가"만
+ * 정하면 된다.
+ *
+ * 내가 한 일은 세지 않는다 — 알림은 상대가 움직였다는 신호다. 그래서 역할로 한 번
+ * (아래 표), 계정 이름으로 한 번 더 걸러 낸다(담당자 자격과 당사자 계정을 겹쳐 가진
+ * 사람이 있어서 역할만으로는 자기 행동이 자기 알림으로 돌아온다).
+ */
+const NOTIFY_ACTOR_ROLES: Record<string, string[]> = {
+  // 브랜드에게는 인플루언서가 움직인 것만. 담당자가 조건을 다듬거나 정산을 잡는
+  // 일은 브랜드가 할 일이 없는 진행이라 알림으로 세지 않는다.
+  brand: ["influencer"],
+  // 인플루언서에게는 브랜드와 담당자가 움직인 것 모두 — 피드백은 담당자를 거쳐
+  // 전달되기도 해서, 브랜드만 세면 정작 받은 피드백이 표시되지 않는다.
+  influencer: ["brand", "manager"],
+  manager: ["influencer", "brand"],
+};
+
+/**
+ * 기록은 남지만 알림으로는 세지 않는 것.
+ *
+ * feedback_received 는 브랜드가 담당자에게 남긴 원문이다(visible_to_influencer=false).
+ * 인플루언서 화면에는 그 원문이 아예 내려가지 않으므로, 세면 "안 읽은 1건"을 눌러도
+ * 아무것도 새로 보이지 않는다. 정산 서류 제출도 브랜드에게는 내려보내지 않는
+ * 개인정보라(응답에서 빠진다) 브랜드 쪽에서는 세지 않는다.
+ */
+const NOTIFY_MUTED_TYPES: Record<string, string[]> = {
+  brand: ["feedback_received", "settlement_info_saved"],
+  influencer: ["feedback_received"],
+  manager: ["feedback_received"],
+};
+
+/** 목록 조회의 role 파라미터를 알림 기준이 있는 세 역할 중 하나로 좁힌다. */
+const notifyRoleOf = (role: string): "brand" | "influencer" | "manager" =>
+  role === "brand" || role === "manager" ? role : "influencer";
+
+/**
+ * 협업별 안 읽은 기록 수.
+ *
+ * 사람마다 "이 협업을 여기까지 봤다"는 시각 한 줄(collab_event_seen)과 비교한다.
+ * 한 번도 열지 않았으면 상대가 남긴 기록 전부가 안 읽은 것이다.
+ *
+ * 표가 아직 없는 환경(마이그레이션 전 배포)에서도 목록 자체는 열려야 하므로,
+ * 실패하면 0 건으로 둔다 — 알림이 안 뜨는 것과 협업 목록이 안 열리는 것은 무게가
+ * 다르다.
+ */
+async function unreadEventCounts(
+  db: any, ids: string[], viewer: string, role: string,
+): Promise<Map<string, number>> {
+  if (ids.length === 0 || !viewer) return new Map();
+  const actorRoles = NOTIFY_ACTOR_ROLES[notifyRoleOf(role)];
+  const mutedTypes = NOTIFY_MUTED_TYPES[notifyRoleOf(role)];
+  try {
+    const rows = (await db.sql`
+      SELECT ce.collab_id, COUNT(*)::int AS unread
+      FROM collab_events ce
+      LEFT JOIN collab_event_seen s
+             ON s.collab_id = ce.collab_id AND s.username = ${viewer}
+      WHERE ce.collab_id = ANY(${ids})
+        AND ce.actor_role = ANY(${actorRoles})
+        AND NOT (ce.type = ANY(${mutedTypes}))
+        AND LOWER(REPLACE(COALESCE(ce.actor_username, ''), 'biz/', '')) <> ${viewer}
+        AND (s.seen_at IS NULL OR ce.created_at > s.seen_at)
+      GROUP BY ce.collab_id
+    `) as any[];
+    return new Map(rows.map((r) => [String(r.collab_id), Number(r.unread) || 0]));
+  } catch (err) {
+    console.error("[collab-workflow] 안 읽은 기록 집계 실패:", err);
+    return new Map();
+  }
+}
+
 async function resolveStepStage(db: any, collabId: string, stepKey: string) {
   const keys = STEP_STAGE_KEYS[stepKey] || [];
   if (keys.length === 0) return null;
@@ -506,9 +583,40 @@ export default async (req: Request, context: Context) => {
         `) as any[];
       }
 
+      const ids = rows.map((r) => r.id);
+      const viewer = norm(caller.username);
+
+      /**
+       * 숫자만 묻는 조회.
+       *
+       * 대시보드 메뉴의 빨간 표시는 2분에 한 번씩 이것만 부른다. 협업 목록 전체를
+       * 조립하면(단계 · 제출물 · 배송 · 캠페인 표지…) 화면에 쓰지도 않는 값을
+       * 열 번쯤 더 읽게 되므로, 협업 타임라인의 unread=1 과 같은 방식으로 합계만
+       * 돌려준다. 캠페인별 합계도 함께 보낸다 — 브랜드 화면은 캠페인 카드 위에
+       * 표시를 붙인다.
+       */
+      if (url.searchParams.get("unread") === "1") {
+        const counts = await unreadEventCounts(db, ids, viewer, role);
+        const byCollab: Record<string, number> = {};
+        const byCampaign: Record<string, number> = {};
+        let unreadTotal = 0;
+        for (const row of rows) {
+          // 취소된 협업의 기록은 세지 않는다. 아무도 할 일이 없는 협업 때문에
+          // 메뉴에 표시가 남아 있으면 지울 방법이 없다.
+          if (row.status === "cancelled") continue;
+          const count = counts.get(row.id) || 0;
+          if (!count) continue;
+          byCollab[row.id] = count;
+          if (row.campaign_id) {
+            byCampaign[row.campaign_id] = (byCampaign[row.campaign_id] || 0) + count;
+          }
+          unreadTotal += count;
+        }
+        return Response.json({ unreadTotal, byCampaign, byCollab });
+      }
+
       if (rows.length === 0) return Response.json({ collabs: [] });
 
-      const ids = rows.map((r) => r.id);
       const creatorNames = [...new Set(rows.map((r) => norm(r.creator_username)).filter(Boolean))];
       const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter(Boolean))];
       const [
@@ -565,6 +673,11 @@ export default async (req: Request, context: Context) => {
           WHERE collab_id = ANY(${ids}) AND kind = 'guide' AND COALESCE(file_url, '') <> ''
         `,
       ]);
+      /**
+       * 협업마다 "상대가 남긴, 내가 안 본 기록"의 수. 카드 위에 붙는 빨간 표시가
+       * 이 값이다 — 목록을 열어 놓고 있는 화면도 상대가 움직였는지 알 수 있다.
+       */
+      const unreadMap = await unreadEventCounts(db, ids, viewer, role);
       const openMap = new Map(openFeedback.map((r) => [r.collab_id, r.open_count]));
 
       /**
@@ -759,6 +872,8 @@ export default async (req: Request, context: Context) => {
           /** 인플루언서가 열어 볼 가이드가 올라와 있는가. 첫 칸의 차례를 가른다. */
           guideReady: guideAssetSet.has(row.id) || campaignGuideReady(campaign),
           openFeedbackCount: openMap.get(row.id) || 0,
+          /** 상대가 남긴, 내가 아직 안 본 진행 기록 수. */
+          unreadEvents: unreadMap.get(row.id) || 0,
           shipping: {
             filled: ship.filled,
             status: ship.status,
@@ -2389,6 +2504,23 @@ export default async (req: Request, context: Context) => {
           summary: "협업 취소",
           payload: { reason },
         });
+        return Response.json({ success: true });
+      }
+
+      // 진행사항을 열었다 = 여기까지 봤다 --------------------------------
+      /**
+       * 진행사항 화면을 열면 그 협업의 기록은 다 본 것으로 둔다. 메시지처럼 한 줄씩
+       * 읽는 화면이 아니라 열면 전부 보이기 때문이다.
+       *
+       * 여기서는 원장에 기록을 남기지 않는다. 읽음은 상대가 알아야 할 진행이 아니고,
+       * 남기면 그 줄이 다시 상대의 안 읽은 수로 세어져 서로 알림을 주고받는다.
+       */
+      case "mark_events_seen": {
+        await db.sql`
+          INSERT INTO collab_event_seen (collab_id, username, seen_at)
+          VALUES (${collabId}, ${norm(caller.username)}, NOW())
+          ON CONFLICT (collab_id, username) DO UPDATE SET seen_at = NOW()
+        `;
         return Response.json({ success: true });
       }
 

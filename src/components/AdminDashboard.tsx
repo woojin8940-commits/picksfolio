@@ -59,6 +59,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [timelineUnread, setTimelineUnread] = useState(0);
+  /**
+   * 캠페인 협업 진행사항의 안 읽은 수.
+   *
+   * 예전에는 브랜드가 기획안에 피드백을 달아도 인플루언서 쪽에는 아무 표시가 없어서,
+   * 협업 메뉴를 눌러 사람이 직접 들어가 확인해야 했다. 안 읽은 표시가 있는 곳은
+   * 협업 타임라인(메시지)뿐이었다. 진행사항도 같은 방식으로 표시한다.
+   */
+  const [collabUnread, setCollabUnread] = useState(0);
   const [startDate, setStartDate] = useState(() => todayInSeoul());
   const [endDate, setEndDate] = useState(() => todayInSeoul());
 
@@ -125,6 +133,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     } catch {}
   }, 120000, !!userName && currentSubView !== 'timeline', userName, 4000);
+
+  // 진행사항의 빨간 표시. 협업 화면에 들어가 있는 동안에는 묻지 않는다 — 그 화면이
+  // 협업을 열 때마다 읽음을 남기므로, 화면을 벗어난 뒤 다시 세는 것이 맞다.
+  useVisiblePolling(async signal => {
+    if (!userName) return;
+    const { unreadTotal } = await apiService.getCollabUnread('influencer', { signal });
+    if (!signal.aborted) setCollabUnread(unreadTotal);
+  }, 120000, !!userName && currentSubView !== 'my-collabs', userName, 4000);
 
   const fetchStats = async (signal: AbortSignal) => {
     if (!userName) return;
@@ -252,6 +268,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')}
             active={currentSubView === 'my-collabs'}
             onClick={onNavigateMyCollabs}
+            badge={collabUnread}
           />
           <NavItem
             icon="📨"
@@ -320,7 +337,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             label={t('nav.more', '더보기', 'More')}
             active={['timeline','calendar','open-schedule','settlement','membership','campaigns','insights'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
-            badge={timelineUnread}
+            /* 협업 타임라인과 캠페인 협업이 모두 이 서랍 안에 있다. 둘을 합쳐서
+               보여 주지 않으면, 진행사항에 새 피드백이 왔을 때 아래 막대에는 아무
+               표시가 없어 서랍을 열어 볼 이유가 없다. */
+            badge={timelineUnread + collabUnread}
           />
         </div>
       </nav>
@@ -356,7 +376,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label={t('nav.timeline', '협업 타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
@@ -486,7 +506,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-              <QuickCard icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} onClick={onNavigateMyCollabs} />
+              <QuickCard icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} onClick={onNavigateMyCollabs} badge={collabUnread} />
               <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
               <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />
               <QuickCard icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} onClick={onNavigateCalendar} />
@@ -556,11 +576,16 @@ const StatCard: React.FC<{ id?: string; label: string; value: string; trend?: st
   </div>
 );
 
-const QuickCard: React.FC<{ icon: string; label: string; onClick?: () => void }> = ({ icon, label, onClick }) => (
+const QuickCard: React.FC<{ icon: string; label: string; onClick?: () => void; badge?: number }> = ({ icon, label, onClick, badge }) => (
   <button
     onClick={onClick}
-    className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left group"
+    className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-300 hover:shadow-md transition-all text-left group relative"
   >
+    {/* 홈에서도 같은 표시를 붙인다. 메뉴에만 있으면 홈에 머무는 사람은 새 피드백이
+        온 것을 모른다. */}
+    {badge != null && badge > 0 && (
+      <span className="absolute top-2 right-2 bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full">{badge > 99 ? '99+' : badge}</span>
+    )}
     <span className="text-xl md:text-2xl block mb-2 group-hover:scale-110 transition-transform">{icon}</span>
     <p className="text-xs md:text-sm font-black text-slate-900">{label}</p>
   </button>
