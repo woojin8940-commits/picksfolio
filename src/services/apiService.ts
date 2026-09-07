@@ -929,8 +929,6 @@ export interface DmScheduledJob {
   messageType?: 'text' | 'carousel';
   /** 캐러셀 카드(형식이 carousel 일 때). */
   cards?: DmCarouselCard[];
-  /** 캐러셀과 함께 보낼 인사말. */
-  intro?: string;
   /** 댓글에서 만들어진 예약이면 그 댓글 ID(비공개 답장으로 나간다). */
   commentId?: string;
   /** 댓글이 달린 시각. 비공개 답장은 이 시각부터 7일 안에만 보낼 수 있다. */
@@ -959,13 +957,6 @@ export interface DmAutomationItem {
   // 메시지 형식 — 'text'(텍스트+버튼) 또는 'carousel'(캐러셀 카드).
   messageType: 'text' | 'carousel';
   message: string;
-  /**
-   * 캐러셀 앞에 먼저 보낼 인사말(선택).
-   *
-   * `message` 를 재사용하지 않는다 — 텍스트 형식으로 써 둔 본문이 형식만 캐러셀로
-   * 바꿨다고 갑자기 함께 발송되면, 사용자가 화면에서 본 적 없는 문구가 나간다.
-   */
-  cardIntro?: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
   /**
@@ -4482,8 +4473,6 @@ export const apiService = {
     messageType?: 'text' | 'carousel';
     buttons?: DmMessageButton[];
     cards?: DmCarouselCard[];
-    /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
-    intro?: string;
     /** 댓글에 함께 남길 공개 답글 문구. 비어 있으면 답글은 달지 않는다. */
     replies?: string[];
     ruleId?: string;

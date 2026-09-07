@@ -57,7 +57,6 @@ const blankAutomation = (t: TranslateFn): DmAutomationItem => ({
   mediaIds: [],
   messageType: 'text',
   message: defaultDmMessage(t),
-  cardIntro: '',
   buttons: [{ id: genId('btn'), label: defaultButtonLabel(t), url: '' }],
   cards: [],
   sendMode: 'instant',
@@ -78,7 +77,6 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
   mediaIds: Array.isArray(a.mediaIds) ? a.mediaIds : [],
   mediaScope: a.mediaScope === 'selected' ? 'selected' : 'all',
   messageType: a.messageType === 'carousel' ? 'carousel' : 'text',
-  cardIntro: typeof a.cardIntro === 'string' ? a.cardIntro : '',
   // 예약 시각이 없는 예약은 성립하지 않는다(발송 시점을 알 수 없다) → 즉시 발송으로 본다.
   sendMode: a.sendMode === 'scheduled' && a.scheduledAt ? 'scheduled' : 'instant',
   scheduledAt: typeof a.scheduledAt === 'string' ? a.scheduledAt : '',
@@ -267,15 +265,12 @@ const DmPreview: React.FC<{
   igUsername: string;
   messageType: DmAutomationItem['messageType'];
   message: string;
-  /** 캐러셀 앞에 먼저 도착하는 인사말(선택). */
-  intro?: string;
   buttons: DmMessageButton[];
   cards: DmCarouselCard[];
-}> = ({ igUsername, messageType, message, intro = '', buttons, cards }) => {
+}> = ({ igUsername, messageType, message, buttons, cards }) => {
   // 미리보기도 발송기와 같은 기준으로 카드를 고른다(제목 또는 올바른 이미지 주소).
   const validCards = cards.filter(cardSendable);
   const isCarousel = messageType === 'carousel' && validCards.length > 0;
-  const introText = intro.trim();
   // 실제로 발송되는 버튼만(라벨 + 올바른 http/https URL) 미리보기에 표시한다.
   const validButtons = buttons.filter((b) => b.label.trim() && isValidLinkUrl(b.url));
   // 본문이 카드 제목 한도를 넘으면 본문 텍스트와 버튼 카드가 두 개의 버블로 도착한다.
@@ -315,18 +310,6 @@ const DmPreview: React.FC<{
                 </div>
               ))}
               </div>
-              {/*
-                인사말은 카드 뒤에 온다. 댓글로 트리거된 DM 은 비공개 답장 1통이
-                전부여서, 그 한 통에는 카드가 들어가고 인사말은 대화가 이미 열려
-                있는 상대에게만 이어서 도착한다(그래서 흐리게 표시한다).
-              */}
-              {introText && (
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm opacity-70">
-                  <p data-user-content className="text-[13px] text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                    {introText}
-                  </p>
-                </div>
-              )}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -383,9 +366,6 @@ const DmPreview: React.FC<{
       {isCarousel && (
         <p className="mt-3 text-[10px] text-slate-400 font-bold leading-relaxed">
           캐러셀 카드 {validCards.length}장이 발송됩니다. 카드는 인스타그램 모바일 앱에서만 표시되고 웹(instagram.com) DM 화면에서는 보이지 않습니다.
-          {introText
-            ? ' 인사말 텍스트는 카드에 이어 보내지만, 인스타그램은 댓글 1건당 DM을 1통만 허용해 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.'
-            : ''}
         </p>
       )}
     </div>
@@ -1209,24 +1189,18 @@ const AutomationEditor: React.FC<{
               ) : (
                 /* 캐러셀 카드 빌더 — 이미지·문구·버튼·순서를 여기서 만든다. */
                 <div className="space-y-4">
-                  <div>
-                    <label className="flex items-center gap-1.5 text-xs font-black text-slate-500 mb-2">
-                      <AlignLeft size={13} /> 인사말 <span className="text-slate-300 font-bold">(선택)</span>
-                    </label>
-                    <textarea
-                      value={draft.cardIntro || ''}
-                      onChange={(e) => patch({ cardIntro: e.target.value })}
-                      rows={2}
-                      maxLength={1000}
-                      placeholder="예: 문의 주셔서 감사합니다! 아래에서 골라보세요 😊"
-                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-pink-500 resize-none"
-                    />
-                    <p className="text-[10px] text-slate-400 font-bold mt-1 leading-relaxed">
-                      카드가 먼저 도착하고 인사말은 그 뒤에 보냅니다. 인스타그램은 댓글 1건당 DM을 1통만
-                      허용하기 때문에, 인사말은 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.
-                      꼭 전하고 싶은 문구라면 카드의 제목·설명에 적어 주세요.
-                    </p>
-                  </div>
+                  {/*
+                    캐러셀에는 인사말 입력칸을 두지 않는다. 인스타그램 메시지 한 통에는
+                    텍스트와 첨부(캐러셀) 중 하나만 담을 수 있고, 댓글 자동 DM 은 댓글
+                    1건당 비공개 답장 1통이 전부다. 인사말을 따로 받아 두면 대화창이
+                    이미 열린 상대에게만 도착해 "적었는데 안 갔다"가 된다. 전하고 싶은
+                    문구는 카드의 제목·설명에 적는다.
+                  */}
+                  <p className="flex items-start gap-1.5 text-[11px] text-slate-400 font-bold leading-relaxed">
+                    <AlignLeft size={13} className="shrink-0 mt-px" />
+                    캐러셀은 카드 한 통으로 발송됩니다. 인스타그램이 메시지 한 통에 텍스트와 카드를
+                    함께 담지 못하기 때문에, 인사말처럼 전하고 싶은 문구는 카드의 제목·설명에 적어 주세요.
+                  </p>
 
                   <CarouselBuilder
                     userName={userName}
@@ -1243,14 +1217,14 @@ const AutomationEditor: React.FC<{
           {/* 우: 미리보기 (데스크톱 고정) */}
           <div className="hidden lg:block bg-slate-50/60 border-l border-slate-100 p-6">
             <div className="sticky top-0">
-              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} intro={draft.cardIntro} buttons={draft.buttons} cards={draft.cards} />
+              <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
             </div>
           </div>
         </div>
 
         {/* 모바일 미리보기 */}
         <div className="lg:hidden px-5 pb-2">
-          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} intro={draft.cardIntro} buttons={draft.buttons} cards={draft.cards} />
+          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
         </div>
 
         {/* 푸터 */}
@@ -2073,10 +2047,10 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                 <div className="flex items-start gap-1.5 text-[12px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2.5 mb-3">
                   <CornerDownRight size={13} className="mt-0.5 shrink-0 text-slate-400" />
                   {(() => {
-                    // 목록에는 실제로 먼저 도착하는 문구를 보여준다 — 인사말이 있으면
-                    // 그것이 첫 메시지이고, 없으면 첫 카드의 제목이 카드에 적힌다.
+                    // 목록에는 실제로 도착하는 문구를 보여준다 — 캐러셀은 카드 한 통이
+                    // 전부이므로 첫 카드의 제목이 상대가 보는 첫 문구다.
                     const line = a.messageType === 'carousel'
-                      ? (a.cardIntro || '').trim() || (a.cards || []).find((c) => c.title.trim())?.title || ''
+                      ? (a.cards || []).find((c) => c.title.trim())?.title || ''
                       : a.message;
                     if (!line) return <span className="line-clamp-2">이미지 카드 캐러셀 메시지</span>;
                     // 저장된 발송 문구는 사용자가 쓴 내용이다. 화면 번역이 손대면 목록에

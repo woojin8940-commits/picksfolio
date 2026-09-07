@@ -89,8 +89,6 @@ interface SendBody {
   buttons?: DmButton[];
   messageType?: "text" | "carousel";
   cards?: DmCard[];
-  /** 캐러셀 앞에 먼저 보낼 인사말(선택). */
-  intro?: string;
   /**
    * 댓글에 남길 공개 답글 문구. 여러 개면 대상마다 하나를 무작위로 고른다
    * (자동 발송과 같은 방식). 비어 있으면 답글을 달지 않는다.
@@ -164,7 +162,6 @@ export default async (req: Request, context: Context) => {
   const username = (body.username || "").toLowerCase();
   const recipientId = (body.recipientId || "").trim();
   const message = (body.message || "").trim();
-  const intro = (body.intro || "").trim();
   /**
    * 캐러셀은 본문 텍스트 없이 카드만으로 보내는 것이 정상이다.
    *
@@ -181,7 +178,7 @@ export default async (req: Request, context: Context) => {
     .filter(Boolean);
 
   // DM 본문 없이 답글만 보내는 것도, 카드만 보내는 것도 발송이다. 전부 비었을 때만 거절한다.
-  if (!username || (!message && !intro && !hasCards && replies.length === 0)) {
+  if (!username || (!message && !hasCards && replies.length === 0)) {
     return Response.json(
       { error: "username 과 보낼 내용(DM 본문 · 캐러셀 카드 · 댓글 답글)은 필수입니다." },
       { status: 400 },
@@ -260,10 +257,9 @@ export default async (req: Request, context: Context) => {
     message,
     buttons: body.buttons,
     cards: body.cards,
-    intro,
   };
   const emptyPlan: DmPlan = { messages: [], bestEffortFrom: 0 };
-  const hasAnyContent = Boolean(message || intro || hasCards);
+  const hasAnyContent = Boolean(message || hasCards);
   const commentPlan: DmPlan = hasAnyContent ? buildCommentDmPlan(dmContent) : emptyPlan;
   const directPlan: DmPlan = hasAnyContent ? buildDirectDmPlan(dmContent) : emptyPlan;
   // 내용 지문·에코 표시·"보낼 내용 없음" 판단은 댓글 작성자 경로(주 사용 경로)를 기준으로 한다.

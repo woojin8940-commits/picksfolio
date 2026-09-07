@@ -31,6 +31,27 @@ const GRAPH_VERSION = "v21.0";
  * 목록부터 차례로 좁혀가며 시도하고, 마지막에는 최소한 댓글·메시지 구독을 살린다.
  */
 export const WEBHOOK_FIELDS = "comments,messages,messaging_postbacks,message_echoes";
+/**
+ * 이 중 하나라도 빠지면 자동화가 트리거되지 않는 필수 필드.
+ *
+ * `message_echoes` 는 여기 없다 — 그 필드는 "이 앱을 거치지 않고 나간 DM"을 알려 주는
+ * 진단용이고, 계정 사정으로 메타가 영구히 거절하는 경우가 있다. 그런 계정에서 필수와
+ * 부가를 구분하지 않으면 구독은 사실상 정상인데도 자기 수리가 영영 끝나지 않아, 설정
+ * 화면을 열 때마다 같은 거절을 되부르는 대기가 로딩으로 나간다.
+ */
+export const REQUIRED_WEBHOOK_FIELDS = ["comments", "messages", "messaging_postbacks"];
+
+/** 구독된 필드 목록이 자동화를 돌리기에 충분한지. */
+export function webhookFieldsSufficient(fields?: string | null): boolean {
+  const have = new Set(
+    String(fields || "")
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean),
+  );
+  return REQUIRED_WEBHOOK_FIELDS.every((f) => have.has(f));
+}
+
 /** 넓은 목록이 거절될 때 차례로 시도할 대체 목록. 마지막이 최소 구성이다. */
 const FALLBACK_FIELDS = [
   "comments,messages,messaging_postbacks",

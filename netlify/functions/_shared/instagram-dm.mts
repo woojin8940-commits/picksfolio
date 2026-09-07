@@ -44,12 +44,6 @@ export interface DmContent {
   message?: string;
   buttons?: DmButton[];
   cards?: DmCard[];
-  /**
-   * 캐러셀 앞에 먼저 보낼 인사말(선택). 텍스트 형식의 `message` 와 따로 둔다 —
-   * 형식만 캐러셀로 바꿨다고 텍스트용 본문이 함께 나가면, 사용자가 편집 화면에서
-   * 본 적 없는 문구가 발송된다.
-   */
-  intro?: string;
 }
 
 /** 제네릭 템플릿 카드 제목/부제목 길이 제한. */
@@ -197,20 +191,16 @@ function genericTemplate(elements: unknown[]) {
  */
 export function buildDmMessages(content: DmContent): Record<string, unknown>[] {
   let message = (content.message || "").trim();
-  const intro = (content.intro || "").trim();
 
   if (content.messageType === "carousel") {
     const elements = toCardElements(content.cards);
-    if (elements.length > 0) {
-      // 인사말을 적어 두면 텍스트 한 통이 먼저 도착하고, 이어서 카드가 도착한다.
-      return intro
-        ? [{ text: intro.slice(0, TEXT_MAX) }, genericTemplate(elements)]
-        : [genericTemplate(elements)];
-    }
-    // 보낼 카드가 하나도 없으면 아래 텍스트 처리로 폴백한다. 이때 인사말은 본문
-    // 자리를 대신한다 — 카드가 전부 비어 있다고 인사말까지 버리면, 문구를 적어 둔
-    // 사용자에게 아무것도 도착하지 않는다.
-    if (!message) message = intro;
+    // 캐러셀은 카드 한 통이 메시지 전부다. 인스타그램은 메시지 한 통에 텍스트와
+    // 첨부를 함께 담지 못하고, 댓글 비공개 답장은 한 통이 전부라서 텍스트를 따로
+    // 붙여도 확실히 도착하지 않는다. 그래서 문구는 카드의 제목·설명으로만 나간다.
+    if (elements.length > 0) return [genericTemplate(elements)];
+    // 보낼 카드가 하나도 없으면 아래 텍스트 처리로 폴백한다 — 카드가 전부 비어
+    // 있는데 아무것도 보내지 않으면 그 한 번의 발송 기회를 그냥 날린다.
+    if (!message) message = cardsFallbackText(content.cards);
   }
 
   const buttons = toWebUrlButtons(content.buttons);
@@ -259,21 +249,17 @@ export interface DmPlan {
  * 댓글 비공개 답장(`recipient: { comment_id }`)용 발송 계획.
  *
  * 인스타그램은 댓글 1건당 비공개 답장 1통만 허용하고, 댓글은 대화창을 열어주지
- * 않는다. 그래서 **가장 중요한 내용이 첫 통이어야** 한다. 캐러셀 설정이라면 카드가
- * 먼저 나가고, 인사말은 (대화창이 이미 열려 있는 상대에게만 도착하는) 부가 메시지로
- * 뒤에 붙는다. 예전에는 인사말을 먼저 보내 캐러셀이 사라졌다.
+ * 않는다. 그래서 **가장 중요한 내용이 첫 통이어야** 한다. 캐러셀 설정이면 그 한 통이
+ * 카드이고, 카드가 형식 오류로 거부될 때만 제목·설명·링크를 글로 옮긴 대체 텍스트가
+ * 나간다. 카드 앞뒤에 텍스트를 따로 붙이지 않는다 — 그 통은 도착하지 못한다.
  */
 export function buildCommentDmPlan(content: DmContent): DmPlan {
-  const intro = (content.intro || "").trim();
-
   if (content.messageType === "carousel") {
     const elements = toCardElements(content.cards);
     if (elements.length > 0) {
-      const messages: Record<string, unknown>[] = [genericTemplate(elements)];
-      if (intro) messages.push({ text: intro.slice(0, TEXT_MAX) });
-      const fallbackText = intro || cardsFallbackText(content.cards);
+      const fallbackText = cardsFallbackText(content.cards);
       return {
-        messages,
+        messages: [genericTemplate(elements)],
         bestEffortFrom: 1,
         fallback: fallbackText ? { text: fallbackText.slice(0, TEXT_MAX) } : undefined,
       };

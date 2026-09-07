@@ -64,8 +64,11 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   const [selectedRuleId, setSelectedRuleId] = useState<string>('custom');
   const [messageType, setMessageType] = useState<'text' | 'carousel'>('text');
   /**
-   * 텍스트 형식에서는 DM 본문, 캐러셀 형식에서는 카드 앞에 먼저 보내는 인사말이다.
-   * (캐러셀에서는 비워 둘 수 있다 — 그때는 카드만 발송된다.)
+   * DM 본문. 텍스트 형식에서만 쓴다.
+   *
+   * 캐러셀은 카드 한 통이 메시지 전부다 — 인스타그램은 메시지 한 통에 텍스트와
+   * 첨부(캐러셀)를 함께 담지 못하고, 댓글 자동 DM 은 댓글 1건당 비공개 답장 1통만
+   * 허용한다. 그래서 캐러셀에서는 이 칸을 아예 보여주지 않는다.
    */
   const [message, setMessage] = useState(defaultMessage);
   /**
@@ -115,13 +118,13 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
   /**
    * 자동화 한 건의 설정을 이 화면으로 옮긴다.
    *
-   * 캐러셀 자동화는 본문 대신 카드가 내용이므로, 카드와 인사말을 함께 가져와야
-   * 편집 화면에서 만든 것과 같은 메시지가 나간다.
+   * 캐러셀 자동화는 본문 대신 카드가 내용이므로 카드를 가져오고 본문은 비워 둔다.
+   * 그래야 편집 화면에서 만든 것과 같은 메시지가 나간다.
    */
   const loadFrom = (a: DmAutomationItem) => {
     const carousel = a.messageType === 'carousel';
     setMessageType(carousel ? 'carousel' : 'text');
-    setMessage(carousel ? a.cardIntro || '' : a.message || '');
+    setMessage(carousel ? '' : a.message || '');
     setCards(carousel ? [...(a.cards || [])] : []);
     setButtons(a.buttons?.length ? [...a.buttons] : []);
     setReplies(repliesOf(a));
@@ -131,8 +134,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
    * 본문 입력.
    *
    * 예전에는 여기서 형식을 텍스트로 되돌렸다. 그래서 캐러셀 자동화를 고른 뒤 문구를
-   * 한 글자만 손대도 카드가 조용히 빠지고 텍스트만 나갔다. 지금은 캐러셀에서 이 칸이
-   * 인사말이므로 형식을 바꾸지 않는다(형식은 템플릿 선택으로만 정해진다).
+   * 한 글자만 손대도 카드가 조용히 빠지고 텍스트만 나갔다. 형식은 템플릿 선택으로만
+   * 정해진다(캐러셀에서는 이 칸이 보이지 않는다).
    */
   const handleMessageChange = (value: string) => setMessage(value);
 
@@ -234,9 +237,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
-        // 캐러셀에서는 이 칸이 본문이 아니라 카드에 이어 보내는 인사말이다.
+        // 캐러셀은 카드가 메시지 전부다 — 본문은 텍스트 형식에서만 보낸다.
         message: isCarousel ? '' : message.trim(),
-        intro: isCarousel ? message.trim() : undefined,
         messageType,
         buttons: isCarousel ? undefined : validButtons,
         cards: isCarousel ? sendableCards : undefined,
@@ -457,29 +459,32 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             </div>
           )}
 
-          {/* DM 메시지 본문 (캐러셀에서는 카드에 이어 보내는 인사말) */}
-          <div>
-            <label className="block text-xs font-black text-slate-700 mb-1.5">
-              {messageType === 'carousel'
-                ? '인사말 (선택)'
-                : t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => handleMessageChange(e.target.value)}
-              rows={3}
-              placeholder={messageType === 'carousel'
-                ? '비워 두면 카드만 발송됩니다.'
-                : t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
-              className="w-full p-4 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 resize-none"
-            />
-            {messageType === 'carousel' && (
-              <p className="text-[11px] text-slate-500 font-medium mt-1.5">
-                카드가 먼저 도착하고 인사말은 그 뒤에 보냅니다. 인스타그램은 댓글 1건당 DM을 1통만 허용해,
-                인사말은 상대가 이전에 DM을 보낸 적이 있을 때만 함께 도착합니다.
-              </p>
-            )}
-          </div>
+          {/*
+            DM 메시지 본문 — 텍스트 형식에서만 받는다.
+
+            캐러셀에는 따로 적을 문구 칸을 두지 않는다. 인스타그램 메시지 한 통에는
+            텍스트와 첨부(카드) 중 하나만 담기고, 댓글 자동 DM 은 댓글 1건당 비공개
+            답장 1통이 전부라서, 문구를 따로 받아도 확실히 도착하지 않는다.
+          */}
+          {messageType === 'carousel' ? (
+            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+              캐러셀은 카드 한 통으로 발송됩니다. 전하고 싶은 문구는 자동화 편집에서 카드의
+              제목·설명에 적어 주세요.
+            </p>
+          ) : (
+            <div>
+              <label className="block text-xs font-black text-slate-700 mb-1.5">
+                {t('dm.messageText', 'DM 메시지 내용', 'DM Message Content')}
+              </label>
+              <textarea
+                value={message}
+                onChange={(e) => handleMessageChange(e.target.value)}
+                rows={3}
+                placeholder={t('dm.messagePlaceholder', '발송할 DM 문구를 입력하세요.', 'Type the DM message to send.')}
+                className="w-full p-4 rounded-2xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 resize-none"
+              />
+            </div>
+          )}
 
           {/* 댓글 공개 답글 — 입력해 두면 DM 과 함께 나간다 */}
           <div>

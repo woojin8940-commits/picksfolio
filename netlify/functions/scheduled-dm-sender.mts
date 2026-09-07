@@ -140,7 +140,6 @@ export default async () => {
         message: job.message,
         buttons: job.buttons,
         cards: job.cards,
-        intro: job.intro,
       };
       const plan = isPrivateReply ? buildCommentDmPlan(content) : buildDirectDmPlan(content);
       if (plan.messages.length === 0) {
