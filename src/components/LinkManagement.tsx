@@ -23,17 +23,9 @@ import {
 } from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
 
-const TEXT_COLOR_PRESETS = ['#37352f', '#0f172a', '#6b7280', '#2563EB', '#2563eb', '#dc2626', '#059669', '#d97706'];
-const HIGHLIGHT_COLOR_PRESETS: { value: string; label: string }[] = [
-  { value: 'transparent', label: '없음' },
-  { value: '#FEF3C7', label: '노랑' },
-  { value: '#FEE2E2', label: '빨강' },
-  { value: '#DBEAFE', label: '파랑' },
-  { value: '#D1FAE5', label: '초록' },
-  { value: '#FCE7F3', label: '분홍' },
-  { value: '#E0E7FF', label: '보라' },
-  { value: '#F1F5F9', label: '회색' }
-];
+// 텍스트 블록의 글씨색 · 배경색은 프리셋 색동그라미를 늘어놓지 않고 ColorPicker
+// 하나로만 고른다. 프리셋 여덟 개를 담으면 글씨 서식 줄이 두세 줄로 접히면서 편집
+// 화면이 아래로 밀렸고, 어차피 원하는 색은 팔레트에서 직접 고르는 편이 빠르다.
 
 // 테마 프리셋의 기본 포인트 색상 외에, 자주 쓰는 색을 한 번에 고를 수 있게 하는
 // 빠른 선택용 팔레트. 여기 없는 색은 ColorPicker 로 직접 지정한다.
@@ -231,20 +223,22 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     return 'medium';
   });
   /**
-   * 소개(bio)는 빈 값으로 시작한다.
+   * 표시 이름과 소개는 둘 다 빈 값으로 시작한다.
    *
-   * 예전에는 '패션과 뷰티를 사랑하는 크리에이터입니다.' 를 미리 넣어 두었다. 예시를
-   * 보여 주려던 값인데, 저장을 한 번 누르면 그 문장이 그대로 자기 페이지 소개로
-   * 올라갔다 — 적은 적이 없는 문장이 남의 페이지에 붙는 셈이다. 예시는 입력칸
-   * placeholder 로 보여 주면 되고, 값은 사람이 적은 것만 담는다.
+   * 예전에는 소개칸에 '패션과 뷰티를 사랑하는 크리에이터입니다.' 를, 이름칸에는 로그인
+   * 아이디를 미리 넣어 두었다. 예시를 보여 주려던 값인데, 저장을 한 번 누르면 그 값이
+   * 그대로 자기 페이지에 올라갔다 — 적은 적이 없는 문장과 아이디가 커버 사진 위에
+   * 붙는 셈이고, 지우려고 칸을 비우면 다시 아이디가 나왔다. 예시는 입력칸
+   * placeholder 로 보여 주면 되고, 값은 사람이 적은 것만 담는다. 둘 다 비어 있으면
+   * 개인페이지는 커버 사진만 보여 준다(UserPage · PagePreview).
    */
   const [profile, setProfile] = useState(() => {
     try {
       const saved = localStorage.getItem(`picks_profile_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : { name: userName, bio: '', avatar_url: '' };
+      return saved ? JSON.parse(saved) : { name: '', bio: '', avatar_url: '' };
     } catch (e) {
       console.error('Error parsing profile:', e);
-      return { name: userName, bio: '', avatar_url: '' };
+      return { name: '', bio: '', avatar_url: '' };
     }
   });
 
@@ -1608,7 +1602,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     value={profile.name || ''}
                     onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 font-black text-base focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
-                    placeholder="개인페이지에 보일 이름"
+                    placeholder="개인페이지에 보일 이름 — 비워 두면 이름이 나오지 않아요"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1617,7 +1611,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     value={profile.bio || ''}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
-                    placeholder="예) 패션·뷰티 크리에이터 — 비워 두면 이름만 나와요"
+                    placeholder="예) 패션·뷰티 크리에이터 — 비워 두면 소개가 나오지 않아요"
                     rows={2}
                   />
                 </div>
@@ -1979,7 +1973,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 imagePosition: coverPosition,
               }}
               profile={profile}
-              userName={userName}
               portfolioFontSize={portfolioFontSize}
               socials={socials}
               homePriority={homePriority}
@@ -2203,17 +2196,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         {showTextColorPicker && (
                           <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">글씨색</p>
-                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
-                              {TEXT_COLOR_PRESETS.map(c => (
-                                <button key={c}
-                                  onMouseDown={e => e.preventDefault()}
-                                  onClick={() => { applyTextColor(c); setShowTextColorPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all ${editForm.color === c ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
-                                  style={{ backgroundColor: c }}
-                                />
-                              ))}
-                            </div>
-                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500 whitespace-nowrap">
                               <ColorPicker
                                 value={editForm.color || '#37352f'}
                                 onChange={applyTextColor}
@@ -2239,19 +2222,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         {showTextHighlightPicker && (
                           <div className="absolute top-full mt-2 right-0 z-50 bg-white rounded-xl border border-[#E2E8F0] shadow-xl p-3 space-y-2">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">배경색</p>
-                            <div className="flex gap-1.5 flex-wrap max-w-[200px]">
-                              {HIGHLIGHT_COLOR_PRESETS.map(c => (
-                                <button key={c.value}
-                                  onMouseDown={e => e.preventDefault()}
-                                  onClick={() => { applyTextHighlight(c.value); setShowTextHighlightPicker(false); }}
-                                  className={`w-7 h-7 rounded-lg border-2 transition-all flex items-center justify-center text-[8px] font-bold ${editForm.highlight === c.value ? 'border-blue-600 scale-110' : 'border-slate-200 hover:scale-105'}`}
-                                  style={{ backgroundColor: c.value === 'transparent' ? '#fff' : c.value }}
-                                >
-                                  {c.value === 'transparent' ? '✕' : ''}
-                                </button>
-                              ))}
-                            </div>
-                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500 whitespace-nowrap">
                               <ColorPicker
                                 value={(editForm.highlight && editForm.highlight !== 'transparent') ? editForm.highlight : '#FEF3C7'}
                                 onChange={applyTextHighlight}
@@ -2260,6 +2231,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                               />
                               팔레트에서 직접 선택
                             </label>
+                            {/* 칠한 배경을 되돌리는 길. 프리셋의 '없음'(✕)을 걷어내면서 이 한
+                                줄만 남긴다 — 이것까지 없으면 한 번 깐 배경색을 지울 수 없다. */}
+                            <button
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => { applyTextHighlight('transparent'); setShowTextHighlightPicker(false); }}
+                              className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg py-1.5 whitespace-nowrap transition-colors"
+                            >
+                              배경색 지우기
+                            </button>
                           </div>
                         )}
                       </div>
@@ -2432,7 +2412,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   accentColor={accentColor}
                   header={{ color: fullDesignRef.current.portfolioHeaderColor, image: coverImage, imagePosition: coverPosition }}
                   profile={profile}
-                  userName={userName}
                   portfolioFontSize={portfolioFontSize}
                   socials={socials}
                   homePriority={homePriority}

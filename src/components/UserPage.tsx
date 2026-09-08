@@ -844,6 +844,25 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     }`} style={{ color: design.accentColor }}>{profile?.bio}</p>
   ) : null;
 
+  /**
+   * 커버 사진 위에 얹히는 이름 · 소개 묶음.
+   *
+   * 이름도 소개와 같다 — 적지 않았으면 아무것도 그리지 않는다. 예전에는 이름 자리에
+   * 로그인 아이디(@아이디)를 대신 넣었는데, 표시 이름을 비워 둔 사람의 커버 사진 위에
+   * 아이디가 큰 글씨로 올라갔고 지울 방법이 없었다(칸을 비우면 다시 아이디가 나왔다).
+   * 둘 다 비면 이 자리는 통째로 사라져서 커버 사진만 남는다.
+   *
+   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다.
+   */
+  const coverIdentity = ((profile?.full_name || '').trim() || (profile?.bio || '').trim()) ? (
+    <div className="absolute bottom-6 left-6 right-6">
+      {(profile?.full_name || '').trim() && (
+        <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name}</h3>
+      )}
+      {bioLine}
+    </div>
+  ) : null;
+
   const visibleAboutSections = (profile?.aboutSections || []).filter(
     s => (s.title || '').trim() || (s.content || '').trim()
   );
@@ -968,10 +987,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                 />
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
-              <div className="absolute bottom-6 left-6 right-6">
-                 <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
-                 {bioLine}
-              </div>
+              {coverIdentity}
             </div>
 
             <div className="px-4 pt-4 pb-8 space-y-12">
@@ -1307,10 +1323,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                 />
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
-              <div className="absolute bottom-6 left-6 right-6">
-                 <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name || username}</h3>
-                 {bioLine}
-              </div>
+              {coverIdentity}
             </div>
 
             <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4 md:-mx-8">

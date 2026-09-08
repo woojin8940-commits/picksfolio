@@ -12,6 +12,12 @@ import {
   toCampaignCollabStatuses,
   uploadWindow,
 } from '../utils/campaignCollabStatus';
+import {
+  CAMPAIGN_CHIP_COLORS,
+  buildCampaignColorMap,
+  campaignChipColor,
+  campaignColorKey,
+} from '../utils/campaignChipColor';
 
 interface BusinessEntCalendarProps {
   businessUsername: string;
@@ -289,15 +295,38 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
   }, [rows, byCollabId, today]);
 
   /**
-   * 점의 색. 마감이 지났는데 안 올라온 건을 회색으로 두면 놓친 것을 놓친 줄 모른다.
+   * 점의 색 — 어느 캠페인인가.
    *
-   * 기간짜리 일정은 마지막 날(`to`)을 기준으로 본다 — 24일에 23~26일 일정을 빨갛게
-   * 칠하면 아직 이틀 남은 약속이 이미 깨진 것처럼 보인다.
+   * 예전에는 상태(예정 파랑 · 완료 초록 · 마감 지남 빨강)를 색으로 말했다. 그런데 여러
+   * 캠페인을 동시에 돌리면 칸마다 똑같은 파란 막대가 쌓여서, 어느 막대가 어느 캠페인의
+   * 업로드인지 구분되지 않았다(칸에 적히는 것은 인플루언서 아이디다). 그래서 배경색은
+   * 캠페인마다 다르게 두고, 상태는 아이콘과 글자색으로 남긴다.
+   *
+   * 마감이 지났는데 안 올라온 건은 글자를 빨강으로 둔다 — 회색으로 두면 놓친 것을 놓친
+   * 줄 모른다. 기간짜리 일정은 마지막 날(`to`)을 기준으로 본다 — 24일에 23~26일 일정을
+   * 빨갛게 칠하면 아직 이틀 남은 약속이 이미 깨진 것처럼 보인다.
    */
-  const chipClass = (ev: UploadChip) => {
-    if (ev.done) return 'bg-emerald-100 text-emerald-700';
-    if (ev.to < today) return 'bg-red-100 text-red-700';
-    return 'bg-blue-100 text-blue-700';
+  /** 캠페인 하나를 가리키는 키. 캠페인 id 가 없는 줄(직접 보낸 제안)은 업체명·제목으로 본다. */
+  const colorKeyOf = (row: CollabRow) =>
+    campaignColorKey(row._campaignId || `${row.company_name}|${row.title}`);
+
+  /** 이 달력에 놓인 캠페인들에 색을 나눠 둔 표. 같은 색이 두 캠페인에 가지 않게 한다. */
+  const campaignColors = useMemo(
+    () => buildCampaignColorMap(rows.map(colorKeyOf)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows],
+  );
+
+  const chipColorOf = (ev: UploadChip) => {
+    const key = colorKeyOf(ev.row);
+    return campaignColors.get(key) || campaignChipColor(key);
+  };
+
+  const chipStyle = (ev: UploadChip): React.CSSProperties => {
+    const color = chipColorOf(ev);
+    if (ev.done) return { backgroundColor: color.bg, color: '#047857' };
+    if (ev.to < today) return { backgroundColor: color.bg, color: '#DC2626' };
+    return { backgroundColor: color.bg, color: color.text };
   };
 
   const chipLabel = (ev: UploadChip) =>
@@ -511,7 +540,8 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
                             ]
                               .filter(Boolean)
                               .join(' · ')}
-                            className={`text-[10px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)} ${
+                            style={chipStyle(ev)}
+                            className={`text-[10px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${
                               !spanned
                                 ? 'rounded'
                                 : `${ev.isStart ? 'rounded-l' : '-ml-2 md:-ml-3'} ${
@@ -714,17 +744,22 @@ const BusinessEntCalendar: React.FC<BusinessEntCalendarProps> = ({ businessUsern
               정산금 탭에서 볼 수 있습니다.
             </p>
             <div className="space-y-2.5">
+              <div className="flex items-start gap-2">
+                <div className="flex gap-0.5 shrink-0 pt-0.5">
+                  {CAMPAIGN_CHIP_COLORS.slice(0, 5).map(c => (
+                    <div key={c.dot} className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: c.dot }} />
+                  ))}
+                </div>
+                <span className="text-sm font-bold text-slate-600">캠페인마다 다른 색 (같은 캠페인은 늘 같은 색)</span>
+              </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-400" />
                 <span className="text-sm font-bold text-slate-600">⬆️ 업로드 예정</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-red-400" />
-                <span className="text-sm font-bold text-slate-600">⚠️ 마감 지남 (미업로드)</span>
+                <span className="text-sm font-bold text-red-600">⚠️ 마감 지남 (미업로드) — 글씨가 빨강</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-emerald-400" />
-                <span className="text-sm font-bold text-slate-600">✅ 업로드 완료</span>
+                <span className="text-sm font-bold text-emerald-700">✅ 업로드 완료 — 글씨가 초록</span>
               </div>
             </div>
           </div>

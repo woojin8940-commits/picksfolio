@@ -152,14 +152,17 @@ export default async (req: Request, context: Context) => {
             ? {
                 ...legacySiteData,
                 profile: legacySiteData.profile || {
-                  name: profile.full_name || username,
+                  // 표시 이름은 사람이 적은 것만 담는다. 예전에는 비어 있으면 로그인
+                  // 아이디를 대신 넣었는데, 그 값이 커버 사진 위에 큰 글씨로 올라가고
+                  // 링크 관리에서 지워도 다시 채워졌다. 비면 이름 줄 자체가 없다.
+                  name: profile.full_name || "",
                   bio: profile.bio || "",
                   avatar_url: profile.avatar_url || "",
                 },
               }
             : {
                 profile: {
-                  name: profile.full_name || username,
+                  name: profile.full_name || "",
                   bio: profile.bio || "",
                   avatar_url: profile.avatar_url || "",
                 },
