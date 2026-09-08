@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Hash } from 'lucide-react';
-import { AnimatePresence } from 'framer-motion';
 import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
 import { getPublicProfileByUsername, supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
@@ -10,13 +9,15 @@ import PlatformLogo from './PlatformLogo';
 import { externalLinkProps, openExternalUrl } from '../utils/externalLink';
 import { normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
-import { ViewerSignaling } from '../services/webrtcSignaling';
+import type { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import MediaAuto from './MediaAuto';
-import LiveStream from './LiveStream';
 import { renderPortfolioHtml } from './richText';
 import { useLanguage } from '../contexts/LanguageContext';
+
+const loadLiveStream = () => import('./LiveStream');
+const LiveStream = React.lazy(loadLiveStream);
 
 interface UserPageProps {
   username: string;
@@ -185,27 +186,23 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         }
       }
 
-      // Fetch live state and site data in parallel for faster load
-      let apiLiveResult: any = null;
+      apiService.getLiveState(normalizedUsername)
+        .then((apiLiveResult) => {
+          if (!apiLiveResult) return;
+          setLiveState({
+            isLive: apiLiveResult.isLive,
+            currentProduct: apiLiveResult.currentProduct,
+            viewerCount: apiLiveResult.viewerCount || 0,
+            activeMaterial: apiLiveResult.activeMaterial
+          });
+        })
+        .catch(() => {});
+
       let apiDataResult: any = null;
       try {
-        const [liveRes, siteRes] = await Promise.allSettled([
-          apiService.getLiveState(normalizedUsername),
-          apiService.getSiteData(normalizedUsername),
-        ]);
-        if (liveRes.status === 'fulfilled') apiLiveResult = liveRes.value;
-        if (siteRes.status === 'fulfilled') apiDataResult = siteRes.value;
+        apiDataResult = await apiService.getSiteData(normalizedUsername);
       } catch (e) {
-        console.warn('[UserPage] Parallel API load failed:', e);
-      }
-
-      if (apiLiveResult) {
-        setLiveState({
-          isLive: apiLiveResult.isLive,
-          currentProduct: apiLiveResult.currentProduct,
-          viewerCount: apiLiveResult.viewerCount || 0,
-          activeMaterial: apiLiveResult.activeMaterial
-        });
+        console.warn('[UserPage] Site API load failed:', e);
       }
 
       try {
@@ -483,11 +480,18 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   // This eliminates the ~5-15s signaling roundtrip delay when opening the live modal
   const preSignalingRef = useRef<ViewerSignaling | null>(null);
   useEffect(() => {
+    let cancelled = false;
     if (liveState.isLive && !showLiveModal && !preSignalingRef.current) {
-      console.log('[UserPage] Live detected, pre-connecting WebRTC signaling');
-      const signaling = new ViewerSignaling(normalizedUsername);
-      preSignalingRef.current = signaling;
-      signaling.connect();
+      loadLiveStream().catch(() => {});
+      import('../services/webrtcSignaling')
+        .then(({ ViewerSignaling }) => {
+          if (cancelled || !liveState.isLive || showLiveModal || preSignalingRef.current) return;
+          console.log('[UserPage] Live detected, pre-connecting WebRTC signaling');
+          const signaling = new ViewerSignaling(normalizedUsername);
+          preSignalingRef.current = signaling;
+          signaling.connect();
+        })
+        .catch(() => {});
     }
     // Clean up pre-connection if broadcast ends and modal is not open
     if (!liveState.isLive && !showLiveModal && preSignalingRef.current) {
@@ -495,6 +499,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       preSignalingRef.current.disconnect();
       preSignalingRef.current = null;
     }
+    return () => {
+      cancelled = true;
+    };
   }, [liveState.isLive, showLiveModal, normalizedUsername]);
 
   // Preload/decode the active material image so it appears instantly inside
@@ -1705,8 +1712,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         {selectedBlockId && <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[90] transition-opacity" onClick={() => setSelectedBlockId(null)}></div>}
         
         {/* Live Commerce Modal - keep mounted once opened, only close on user action */}
-        <AnimatePresence>
-          {showLiveModal && (
+        {showLiveModal && (
+          <React.Suspense fallback={null}>
             <LiveStream
               username={username}
               currentProduct={liveState.currentProduct}
@@ -1715,8 +1722,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               onClose={() => setShowLiveModal(false)}
               preConnectedSignaling={preSignalingRef.current}
             />
-          )}
-        </AnimatePresence>
+          </React.Suspense>
+        )}
 
 
         </div>

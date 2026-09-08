@@ -1,16 +1,13 @@
 import { getDatabase } from "@picks/netlify-database";
-import { getStore } from "@netlify/blobs";
-import { createClient } from "@supabase/supabase-js";
 import type { Config, Context } from "@netlify/functions";
 import { createUniqueProfileCode, hasConnectedSiteContent, recoverSiteDataFromBlob } from "./_shared/site-data-recovery.mts";
-import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { offloadEmbeddedMedia } from "./_shared/embedded-media.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
-function getSupabaseAdmin() {
+async function getSupabaseAdmin() {
   const serviceKey = Netlify.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!serviceKey) return null;
+  const { createClient } = await import("@supabase/supabase-js");
   return createClient(SUPABASE_URL, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -18,6 +15,17 @@ function getSupabaseAdmin() {
 
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_SNAPSHOTS_PER_USER = 20;
+
+function publicSiteResponse(data: Record<string, any>, username: string): Response {
+  return new Response(JSON.stringify(data), {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Netlify-CDN-Cache-Control": "public, durable, max-age=60, stale-while-revalidate=300",
+      "Netlify-Cache-Tag": `site-${encodeURIComponent(username)}`,
+    },
+  });
+}
 
 function isDestructiveUpdate(existing: Record<string, any>, incoming: Record<string, any>): boolean {
   if (!hasConnectedSiteContent(existing)) return false;
@@ -97,39 +105,31 @@ export default async (req: Request, context: Context) => {
           dbData.coverUpdatedAt = result[0].cover_updated_at;
         }
         if (hasConnectedSiteContent(dbData)) {
-          return new Response(JSON.stringify(dbData), {
-            headers: {
-              "Content-Type": "application/json",
-              // Keep the public-page response fresh so edits appear right after
-              // saving. A short s-maxage with must-revalidate avoids serving
-              // stale content for up to 30s after an update.
-              "Cache-Control": "public, max-age=0, s-maxage=2, must-revalidate",
-            },
-          });
+          return publicSiteResponse(dbData, username);
         }
 
         try {
           const restored = await recoverSiteDataFromBlob(db, username);
           if (restored && hasConnectedSiteContent(restored)) {
-            return Response.json(restored);
+            return publicSiteResponse(restored, username);
           }
         } catch (blobErr) {
           console.warn("[api-site] Blob content recovery failed:", blobErr);
         }
 
-        return Response.json(dbData);
+        return publicSiteResponse(dbData, username);
       }
 
       try {
         const blobData = await recoverSiteDataFromBlob(db, username);
         if (blobData) {
-          return Response.json(blobData);
+          return publicSiteResponse(blobData, username);
         }
       } catch (blobErr) {
         console.warn("[api-site] Blob fallback failed:", blobErr);
       }
 
-      const supabase = getSupabaseAdmin();
+      const supabase = await getSupabaseAdmin();
       if (supabase) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -177,13 +177,14 @@ export default async (req: Request, context: Context) => {
           `;
 
           try {
+            const { getStore } = await import("@netlify/blobs");
             const blobStore = getStore({ name: "site-data", consistency: "strong" });
             await blobStore.setJSON(username, initialData);
           } catch (syncErr) {
             console.warn("[api-site] Blob sync after Supabase fallback failed:", syncErr);
           }
 
-          return Response.json(initialData);
+          return publicSiteResponse(initialData, username);
         }
       }
 
@@ -194,6 +195,7 @@ export default async (req: Request, context: Context) => {
       // 링크 관리의 모든 저장(프로필 · 블록 · 상품 링크 · 디자인 · SNS)이 이 경로를
       // 지난다. 지금까지는 아이디만 알면 남의 페이지 내용을 바꿀 수 있었다.
       // (GET 은 공개 페이지 렌더링에 쓰이므로 그대로 열어둔다.)
+      const { requireAccountOwner } = await import("./_shared/user-auth.mts");
       const auth = await requireAccountOwner(req, username);
       if (!auth.ok) return auth.response;
 
@@ -226,6 +228,7 @@ export default async (req: Request, context: Context) => {
       // 요청과 이미 저장된 문서 양쪽에 적용한다 — 한 번 박히면 그 뒤의 모든 저장이
       // 그 덩치를 읽고·스냅샷 뜨고·다시 쓰고·블롭까지 복사하느라 실패했다.
       // (자세한 배경은 _shared/embedded-media.mts)
+      const { offloadEmbeddedMedia } = await import("./_shared/embedded-media.mts");
       const offloaded = await offloadEmbeddedMedia({ stored: storedData, incoming: body }, username);
       const existingData = offloaded.value.stored;
       body = offloaded.value.incoming;
@@ -336,12 +339,16 @@ export default async (req: Request, context: Context) => {
           SELECT data FROM site_data WHERE username = ${username}
         `;
         if (mergedResult.length > 0 && mergedResult[0].data) {
+          const { getStore } = await import("@netlify/blobs");
           const blobStore = getStore({ name: "site-data", consistency: "strong" });
           await blobStore.setJSON(username, mergedResult[0].data);
         }
       } catch (syncErr) {
         console.warn("[api-site] Blob sync failed:", syncErr);
       }
+
+      const { purgeCache } = await import("@netlify/functions");
+      await purgeCache({ tags: [`site-${encodeURIComponent(username)}`] }).catch(() => {});
 
       return Response.json({ success: true });
     }

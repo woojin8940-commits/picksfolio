@@ -100,6 +100,13 @@ const RESERVED_PATHS = new Set([
   'api', 'assets', 'toss', 'portone', 'index.html', 'favicon.ico',
 ]);
 
+function initialPublicProfileUsername(): string {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+  if (!path || path.includes('/') || path === 'membership') return '';
+  if (TOP_LEVEL_VIEWS.includes(path as View) || SLASH_ALIASES[path] || RESERVED_PATHS.has(path)) return '';
+  return path;
+}
+
 // 지연 로딩 화면은 모두 utils/lazyRoute 의 LazyRoute 로 감싼다 — 로딩 표시와
 // 오류 경계가 항상 함께 붙어야, 청크를 못 받은 화면이 로딩 표시에서 멈춘 것처럼
 // 보이지 않는다.
@@ -222,13 +229,14 @@ const App: React.FC = () => {
   // to be dead, an app launch falls back to the homepage (where the user can log
   // in) instead of dropping them straight onto the login form.
   const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
-  const [view, setView] = useState<View>(() => launchViewRef.current ?? 'home');
+  const initialPublicUserRef = useRef<string>(launchViewRef.current ? '' : initialPublicProfileUsername());
+  const [view, setView] = useState<View>(() => launchViewRef.current ?? (initialPublicUserRef.current ? 'user-page' : 'home'));
   const [subView, setSubView] = useState<SubView>('dashboard');
   const subViewRef = useRef(subView);
   subViewRef.current = subView;
   /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
-  const [targetUser, setTargetUser] = useState('');
+  const [targetUser, setTargetUser] = useState(initialPublicUserRef.current);
   const [initialId, setInitialId] = useState('');
   const [userName, setUserName] = useState(() => sessionGet('picks_user_session') || '');
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!sessionGet('picks_user_session'));
@@ -513,7 +521,8 @@ const App: React.FC = () => {
         || sessionStorage.getItem('kakao_provider_token')
         || sessionStorage.getItem('kakao_client_phone')
         || sessionStorage.getItem('kakao_client_name'));
-      const shouldUseKakaoSetupFirst = isKakaoUser && (event === 'SIGNED_IN' || hasKakaoHandoff || isOAuthCallbackRef.current);
+      const shouldUseKakaoSetupFirst = isKakaoUser && !!fallbackUsername
+        && (event === 'SIGNED_IN' || hasKakaoHandoff || isOAuthCallbackRef.current);
       let profileData: any = null;
       if (!shouldUseKakaoSetupFirst) {
         profileData = await safeFetchProfile(uid, {
@@ -551,9 +560,17 @@ const App: React.FC = () => {
       // 가져올 정보가 없는데도(provider_token 은 OAuth 콜백에서만 생긴다)
       // 최대 15초까지 기다리게 만들어 대시보드 진입을 늦춘다. 그래서 새 정보가
       // 실제로 있을 때(로그인 직후 또는 프로필 미완성)만 호출한다.
-      const needsKakaoProfileSetup = !(profileData?.username || '').trim()
-        || event === 'SIGNED_IN'
-        || hasKakaoHandoff;
+      const kakaoProfileUsername = String(profileData?.username || '').trim();
+      const hasCompleteKakaoProfile = !!kakaoProfileUsername
+        && !kakaoProfileUsername.startsWith('_kakao_')
+        && !kakaoProfileUsername.startsWith('_kk_');
+      const needsKakaoProfileSetup = !hasCompleteKakaoProfile || profileData?._fallback === true;
+
+      if (isKakaoUser && hasCompleteKakaoProfile && profileData?._fallback !== true) {
+        sessionStorage.removeItem('kakao_provider_token');
+        sessionStorage.removeItem('kakao_client_phone');
+        sessionStorage.removeItem('kakao_client_name');
+      }
 
       if (isKakaoUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && needsKakaoProfileSetup) {
         const effectiveProviderToken = session.provider_token || capturedProviderToken || sessionStorage.getItem('kakao_provider_token') || '';
@@ -1367,7 +1384,8 @@ const App: React.FC = () => {
       }, ms));
     };
 
-    later(600, () => {
+    later(400, () => {
+      import('./components/LinkManagement').catch(() => {});
       import('./components/DmAutomation').catch(() => {});
       import('./components/CreatorInsights').catch(() => {});
       import('./components/BusinessCalendar').catch(() => {});
@@ -1383,7 +1401,7 @@ const App: React.FC = () => {
         })
         .catch(() => undefined);
     });
-    later(1800, () => {
+    later(900, () => {
       import('./components/BusinessDashboard').catch(() => {});
       import('./components/BusinessTimeline').catch(() => {});
       import('./components/UserCampaignBrowse').catch(() => {});
@@ -1402,7 +1420,7 @@ const App: React.FC = () => {
         })
         .catch(() => undefined);
     });
-    later(3200, () => {
+    later(1600, () => {
       import('./components/MembershipPlan').catch(() => {});
       import('./components/OpenScheduleManagement').catch(() => {});
       getApiService()

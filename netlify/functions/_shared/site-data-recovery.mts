@@ -1,5 +1,3 @@
-import { getStore } from "@netlify/blobs";
-
 type Database = {
   sql: (strings: TemplateStringsArray, ...values: any[]) => any;
 };
@@ -58,6 +56,7 @@ export async function createUniqueProfileCode(db: Database): Promise<string> {
 
 export async function recoverSiteDataFromBlob(db: Database, username: string): Promise<Record<string, any> | null> {
   const clean = username.trim().toLowerCase();
+  const { getStore } = await import("@netlify/blobs");
   const blobStore = getStore({ name: "site-data", consistency: "strong" });
 
   for (const key of siteDataBlobKeys(clean)) {
