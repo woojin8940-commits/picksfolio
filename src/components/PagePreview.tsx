@@ -25,7 +25,6 @@ interface PagePreviewProps {
   /** Cover header background/image. */
   header: { color?: string; image?: string; imagePosition?: string | number };
   profile: { name?: string; bio?: string };
-  userName: string;
   portfolioFontSize: PortfolioFontSize;
   socials: any;
   homePriority: HomePriority;
@@ -47,7 +46,6 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   accentColor,
   header,
   profile,
-  userName,
   portfolioFontSize,
   socials,
   homePriority,
@@ -95,17 +93,24 @@ const PagePreview: React.FC<PagePreviewProps> = ({
           className="absolute inset-0"
           style={{ background: `linear-gradient(to top, ${surface} 0%, ${surface}88 20%, transparent 50%)` }}
         />
-        <div className="absolute bottom-2 left-3 right-3">
-          <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name || userName}</h3>
-          {/* 소개를 적지 않았으면 이 줄은 없다 — 실제 페이지도 대신 넣는 문구가 없다. */}
-          {(profile.bio || '').trim() && (
-            <p className={`font-black uppercase tracking-[0.2em] ${
-              portfolioFontSize === 'small' ? 'text-[5px]' :
-              portfolioFontSize === 'large' ? 'text-[8px]' :
-              'text-[6px]'
-            }`} style={{ color: accentColor }}>{profile.bio}</p>
-          )}
-        </div>
+        {/* 표시 이름과 소개는 적은 것만 나온다. 둘 다 비어 있으면 이 자리에 아무것도
+            그리지 않고 커버 사진만 남는다 — 실제 페이지(UserPage)와 같은 규칙이다.
+            예전에는 이름 자리에 로그인 아이디를 대신 넣어서, 지우고 싶어도 지울 수
+            없는 글자가 커버 위에 남았다. */}
+        {((profile.name || '').trim() || (profile.bio || '').trim()) && (
+          <div className="absolute bottom-2 left-3 right-3">
+            {(profile.name || '').trim() && (
+              <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name}</h3>
+            )}
+            {(profile.bio || '').trim() && (
+              <p className={`font-black uppercase tracking-[0.2em] ${
+                portfolioFontSize === 'small' ? 'text-[5px]' :
+                portfolioFontSize === 'large' ? 'text-[8px]' :
+                'text-[6px]'
+              }`} style={{ color: accentColor }}>{profile.bio}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Contact / action buttons — must mirror the real personal page exactly.

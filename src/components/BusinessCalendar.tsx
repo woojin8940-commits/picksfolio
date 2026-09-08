@@ -11,6 +11,13 @@ import {
   toCampaignCollabStatuses,
   uploadWindow,
 } from '../utils/campaignCollabStatus';
+import {
+  CAMPAIGN_CHIP_COLORS,
+  CANCELLED_CHIP_COLOR,
+  buildCampaignColorMap,
+  campaignChipColor,
+  campaignColorKey,
+} from '../utils/campaignChipColor';
 
 interface BusinessCalendarProps {
   userName: string;
@@ -725,21 +732,47 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   }, [collabRecords, campaignCollabItems, campaignCollabs, acceptedProposals, settlementEventsMap, today]);
 
   /**
-   * 점의 색. 지난 업로드 마감을 회색으로 두면 놓친 것을 놓친 줄 모른다.
+   * 점의 색 — 어느 캠페인인가.
    *
+   * 예전에는 상태(예정 파랑 · 완료 초록 · 마감 지남 빨강)를 색으로 말했다. 그런데 한
+   * 달에 여러 캠페인을 진행하면 칸마다 똑같은 파란 막대가 쌓여서, 어느 막대가 어느
+   * 캠페인인지는 잘린 제목을 읽어야만 알 수 있었다. 그래서 배경색은 캠페인마다 다르게
+   * 두고(campaignChipColor — 같은 캠페인은 늘 같은 색), 상태는 아이콘과 글자색으로
+   * 남긴다. 아이콘은 잘리지 않는 맨 앞에 붙으므로 좁은 칸에서도 읽힌다.
+   *
+   * 마감이 지난 업로드는 글자를 빨강으로 둔다 — 회색으로 두면 놓친 것을 놓친 줄 모른다.
    * 예정일이 지난 정산은 빨강으로 두지 않는다. 지급 회차는 담당자가 앞뒤로 조정하는
    * 값이고, 인플루언서가 오늘 할 수 있는 일이 없는 날짜에 경고색을 쓰면 자기 마감을
    * 놓친 날과 구별되지 않는다.
    */
-  const chipClass = (ev: DayChip) => {
-    if (ev.cancelled) return 'bg-slate-100 text-slate-400 line-through';
-    if (ev.kind === 'settlement') {
-      return ev.done ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700';
+  /** 이 달력에 놓인 캠페인들에 색을 나눠 둔 표. 같은 색이 두 캠페인에 가지 않게 한다. */
+  const campaignColors = useMemo(
+    () =>
+      buildCampaignColorMap(
+        Object.values(dayChipsMap)
+          .flat()
+          .map(ev => campaignColorKey(ev.company, ev.title)),
+      ),
+    [dayChipsMap],
+  );
+
+  const chipColorOf = (ev: DayChip) => {
+    const key = campaignColorKey(ev.company, ev.title);
+    return campaignColors.get(key) || campaignChipColor(key);
+  };
+
+  /** 기간짜리 일정은 마지막 날이 지나야 놓친 것이다. */
+  const isOverdue = (ev: DayChip) =>
+    ev.kind === 'upload' && !ev.done && !ev.cancelled && ev.to < today;
+
+  const chipStyle = (ev: DayChip): React.CSSProperties => {
+    if (ev.cancelled) {
+      return { backgroundColor: CANCELLED_CHIP_COLOR.bg, color: CANCELLED_CHIP_COLOR.text };
     }
-    if (ev.done) return 'bg-emerald-100 text-emerald-700';
-    // 기간짜리 일정은 마지막 날이 지나야 놓친 것이다.
-    if (ev.to < today) return 'bg-red-100 text-red-700';
-    return 'bg-blue-100 text-blue-700';
+    const color = chipColorOf(ev);
+    if (ev.done) return { backgroundColor: color.bg, color: '#047857' };
+    if (isOverdue(ev)) return { backgroundColor: color.bg, color: '#DC2626' };
+    return { backgroundColor: color.bg, color: color.text };
   };
 
   const getCategoryBadge = (category: string) => {
@@ -1146,6 +1179,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                     <div className="mt-1.5">
                       {chips.slice(0, 3).map(ev => {
                         const spanned = ev.from !== ev.to;
+                        const overdue = isOverdue(ev);
                         const icon =
                           ev.kind === 'settlement'
                             ? ev.done
@@ -1153,7 +1187,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                               : '💰'
                             : ev.done
                               ? '✅'
-                              : '⬆️';
+                              : overdue
+                                ? '⚠️'
+                                : '⬆️';
                         return (
                           <div
                             key={ev.id}
@@ -1162,14 +1198,19 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                                 ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
                                 : ev.done
                                   ? '업로드 완료'
-                                  : '업로드 예정',
+                                  : overdue
+                                    ? '마감 지남 (미업로드)'
+                                    : '업로드 예정',
                               spanned ? `희망 게시 ${ev.from} ~ ${ev.to}` : '',
                               ev.title,
                               ev.company,
                             ]
                               .filter(Boolean)
                               .join(' · ')}
-                            className={`text-[11px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${chipClass(ev)} ${
+                            style={chipStyle(ev)}
+                            className={`text-[11px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${
+                              ev.cancelled ? 'line-through' : ''
+                            } ${
                               !spanned
                                 ? 'rounded'
                                 : `${ev.isStart ? 'rounded-l' : '-ml-2 md:-ml-3'} ${
@@ -1503,7 +1544,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             )}
           </div>
 
-          {/* Legend — 달력이 찍는 것은 업로드하는 날과 정산이 들어오는 날, 둘뿐이다. */}
+          {/* Legend — 달력이 찍는 것은 업로드하는 날과 정산이 들어오는 날, 둘뿐이다.
+              색은 캠페인을, 아이콘과 글자색은 상태를 가리킨다. */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">범례</h4>
             <p className="text-[11px] font-bold text-slate-400 mb-3 leading-relaxed">
@@ -1513,25 +1555,26 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               밀립니다. 협업 기간과 금액 합계는 협업 내역 탭에서 볼 수 있습니다.
             </p>
             <div className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-blue-400" />
-                <span className="text-sm font-bold text-slate-600">⬆️ 업로드 예정</span>
+              <div className="flex items-start gap-2">
+                <div className="flex gap-0.5 shrink-0 pt-0.5">
+                  {CAMPAIGN_CHIP_COLORS.slice(0, 5).map(c => (
+                    <div key={c.dot} className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: c.dot }} />
+                  ))}
+                </div>
+                <span className="text-sm font-bold text-slate-600">캠페인마다 다른 색 (같은 캠페인은 늘 같은 색)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-red-400" />
-                <span className="text-sm font-bold text-slate-600">마감 지남 (미업로드)</span>
+                <span className="text-sm font-bold text-slate-600">⬆️ 업로드 예정 · 💰 정산 예정 (업로드 익월 말일)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-violet-400" />
-                <span className="text-sm font-bold text-slate-600">💰 정산 예정 (업로드 익월 말일)</span>
+                <span className="text-sm font-bold text-red-600">⚠️ 마감 지남 (미업로드) — 글씨가 빨강</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 rounded-full bg-emerald-400" />
-                <span className="text-sm font-bold text-slate-600">✅ 업로드 완료 · 💸 입금 완료</span>
+                <span className="text-sm font-bold text-emerald-700">✅ 업로드 완료 · 💸 입금 완료 — 글씨가 초록</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3.5 h-3.5 rounded-full bg-slate-300" />
-                <span className="text-sm font-bold text-slate-600">취소</span>
+                <span className="text-sm font-bold text-slate-600">취소 (회색 · 취소선)</span>
               </div>
             </div>
           </div>
