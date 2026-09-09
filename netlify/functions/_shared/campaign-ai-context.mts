@@ -11,9 +11,21 @@ import { normalizeRewardMode } from "./reward-mode.mts";
  * 실으면 "이 캠페인 기준으로 고쳐 달라"는 요청이 대화 전체를 훑는 일이 된다. 협업
  * 전체를 아는 AI 는 협업 타임라인 쪽에 그대로 있다.
  *
+ * ── 기획의 근거는 진행 화면의 가이드 파일이다 ─────────────────────────
+ * 예전에는 캠페인 등록 때 브랜드가 적어 둔 글(캠페인 설명, 지원 요건, 원하는 영상
+ * 컨셉, 가이드라인 메모)을 그대로 프롬프트에 실었다. 그래서 기획안이 그 글의 말투와
+ * 표현을 되풀이하는 일이 잦았다 — 등록 칸은 지원자를 모으려고 쓴 홍보 문구이고,
+ * 실제로 지켜야 하는 촬영 규칙·필수 표기·금지 표현은 브랜드가 진행 화면(가이드
+ * 단계·자료함)에 올리는 가이드 파일에 들어 있다. 두 개가 어긋나면 기획안은 파일이
+ * 아니라 등록 문구를 따라갔다.
+ *
+ * 그래서 이제 등록 때 적은 글은 아예 싣지 않는다. 기획 내용의 근거는 브랜드가 진행
+ * 화면에 올린 가이드 파일 하나뿐이고, 그 파일은 요청에 첨부되어 모델이 직접 읽는다.
+ * 파일이 없으면 지어내지 않고 "가이드 파일이 필요하다"고 말하게 한다.
+ *
  * 담는 것은 다섯 덩어리다.
- *   1. 캠페인 브리프 — 제품, 채널, 형식, 브랜드가 원하는 컨셉, 일정
- *   2. 가이드라인 — 브랜드가 올린 필수 표기·요건(글)과 파일 주소
+ *   1. 이 캠페인이 무엇인지 — 캠페인·브랜드 이름, 채널·형식, 지금 단계와 마감
+ *   2. 가이드 파일 — 브랜드가 진행 화면에 올린 파일의 목록(내용은 첨부로 간다)
  *   3. 지금 기획안 — 장면별 설명·자막·나레이션 (고치라는 요청의 대상)
  *   4. 지금 본문 캡션
  *   5. 브랜드 피드백 — 어느 장면에 붙은 말인지까지
@@ -67,13 +79,23 @@ export interface GuideFileRef {
   fileName: string;
   fileType: string;
   from: string;
+  /** 브랜드가 진행 화면(가이드 단계·자료함)에 올린 파일인가. 아니면 캠페인 등록 첨부. */
+  fromProgress: boolean;
 }
 
 export interface CampaignFocusContext {
   /** 프롬프트에 그대로 붙일 문자열. */
   text: string;
-  /** 브랜드가 올린 가이드라인 파일. 캠페인 등록분과 협업 자료함의 guide 파일을 합친 것. */
+  /**
+   * 기획의 근거가 되는 가이드 파일.
+   *
+   * 브랜드가 진행 화면에 올린 파일이 먼저다. 한 번에 첨부할 수 있는 파일 수에 한도가
+   * 있어서(api-collab-ai 의 GUIDE_MAX_FILES), 순서가 곧 "무엇이 잘려 나가는가"다 —
+   * 진행 화면의 가이드가 등록 첨부에 밀려 잘리면 이 기능이 무의미해진다.
+   */
   guideRefs: GuideFileRef[];
+  /** 진행 화면에 올라온 가이드 파일이 하나라도 있는가(없으면 화면과 모델에 알린다). */
+  hasProgressGuide: boolean;
   /** 지금 제출돼 있는 기획안. 없으면 빈 배열. */
   plan: { scenes: CampaignScene[]; body: string; version: number } | null;
   /** 지금 제출돼 있는 인스타 본문 캡션. */
@@ -117,6 +139,7 @@ const guidelineFileRefs = (raw: unknown, from: string): GuideFileRef[] => {
       fileName: String(f.name || f.fileName || "가이드라인"),
       fileType: String(f.mimeType || f.fileType || ""),
       from,
+      fromProgress: false,
     }));
 };
 
@@ -138,14 +161,16 @@ export async function buildCampaignFocusContext(
   // 소유 확인을 조회 조건에 함께 건다. 화면이 보낸 collabId 는 사람이 고칠 수 있어서,
   // 이 조건이 없으면 남의 협업 아이디를 적어 그 캠페인의 기획안과 브랜드 피드백을
   // 답변으로 받아 갈 수 있다.
+  // 캠페인 등록 때 브랜드가 적은 글(description·requirements·video_concept·
+  // guideline_note)은 일부러 읽지 않는다 — 기획안은 진행 화면의 가이드 파일을 근거로
+  // 써야 한다. 등록분에서 가져오는 것은 이름표(제목·브랜드·채널·형식)와, 진행 화면에
+  // 가이드 파일이 아예 없을 때만 쓰는 예비 첨부(guideline_files)뿐이다.
   const rows = (await db.sql`
     SELECT cc.id, cc.campaign_id, cc.campaign_title, cc.company_name, cc.status,
            cc.current_stage_key,
            c.title, c.brand_name, c.category, c.reward_mode,
-           c.description, c.requirements, c.product_name, c.product_url,
-           c.upload_channel, c.content_format, c.video_concept,
-           c.guideline_note, c.guideline_url, c.guideline_files,
-           c.second_use_fee, c.second_use_note, c.upload_from, c.upload_to
+           c.upload_channel, c.content_format, c.guideline_files,
+           c.upload_from, c.upload_to
     FROM campaign_collabs cc
     LEFT JOIN campaigns c ON c.id = cc.campaign_id
     WHERE cc.id = ${collabId} AND cc.creator_username = ${username}
@@ -155,8 +180,10 @@ export async function buildCampaignFocusContext(
   if (!collab) return null;
 
   const [termRows, stageRows, deliverableRows, feedbackRows, assetRows] = (await Promise.all([
+    // 일정만 읽는다. 담당자가 적어 둔 guide_note/guide_url 도 글이라서 기획의 근거로는
+    // 쓰지 않는다 — 근거는 가이드 파일 하나로 모아 둔다.
     db.sql`
-      SELECT fee, script_due, content_due, upload_due, guide_note, guide_url, locked_at
+      SELECT fee, script_due, content_due, upload_due, locked_at
       FROM collab_terms WHERE collab_id = ${collabId}
     `,
     db.sql`
@@ -205,17 +232,27 @@ export async function buildCampaignFocusContext(
   }
   const caption = String(videoPayload.caption || "");
 
-  // 가이드라인 파일은 두 곳에서 온다 — 캠페인 등록 때 올린 것과 협업 자료함의 guide
-  // 파일. 화면(api-collab-workflow 의 guideline)과 같은 방식으로 합치고 중복을 뺀다.
-  const guideRefs: GuideFileRef[] = [
-    ...guidelineFileRefs(collab.guideline_files, `${brand || "브랜드"}(캠페인 가이드라인)`),
-    ...(assetRows || []).map((a) => ({
+  // 가이드 파일. 진행 화면(가이드 단계·자료함)에 올라온 것이 먼저다.
+  //
+  // 캠페인 등록 때 올린 첨부는 진행 화면에 아무 파일도 없을 때만 쓴다. 첨부 한도가
+  // 있어서 둘을 그냥 합치면, 등록 때 올린 오래된 파일이 앞자리를 차지하고 정작 브랜드가
+  // 진행 화면에 올린 최신 가이드가 잘려 나갈 수 있다. 지금 지켜야 하는 규칙이 적힌
+  // 파일은 진행 화면 쪽이다.
+  const progressRefs: GuideFileRef[] = (assetRows || [])
+    .map((a) => ({
       url: String(a.file_url),
       fileName: String(a.title || a.file_name || "가이드 파일"),
       fileType: String(a.mime_type || ""),
-      from: `${brand || "브랜드"}(협업 가이드 파일)`,
-    })),
-  ].filter((f, i, all) => f.url && all.findIndex((x) => x.url === f.url) === i);
+      from: `${brand || "브랜드"}(진행 화면에 올린 가이드 파일)`,
+      fromProgress: true,
+    }))
+    .filter((f) => f.url);
+  const hasProgressGuide = progressRefs.length > 0;
+  const guideRefs: GuideFileRef[] = (
+    hasProgressGuide
+      ? progressRefs
+      : guidelineFileRefs(collab.guideline_files, `${brand || "브랜드"}(캠페인 등록 첨부)`)
+  ).filter((f, i, all) => f.url && all.findIndex((x) => x.url === f.url) === i);
 
   const currentStage =
     (stageRows || []).find((s) => s.stage_key === collab.current_stage_key) ||
@@ -226,12 +263,15 @@ export async function buildCampaignFocusContext(
   const lines: string[] = [];
 
   lines.push(`[이 캠페인]`);
+  lines.push(
+    "아래는 이름표입니다. 기획 내용(장면, 대사, 필수 표기)의 근거는 첨부된 가이드 " +
+      "파일이고, 캠페인 등록 때 브랜드가 적어 둔 소개글·요건·컨셉 메모는 일부러 " +
+      "여기에 싣지 않았습니다. 없는 사실을 이름표에서 추측해 채우지 마세요.",
+  );
   lines.push(`- 캠페인: ${campaignTitle}`);
   if (brand) lines.push(`- 브랜드: ${brand}`);
   lines.push(`- 진행 방식: ${REWARD_MODE_LABEL[mode] || mode}`);
   if (collab.category) lines.push(`- 카테고리: ${collab.category}`);
-  if (collab.product_name) lines.push(`- 제품: ${oneLine(collab.product_name, 120)}`);
-  if (collab.product_url) lines.push(`- 제품 링크: ${oneLine(collab.product_url, 160)}`);
   if (collab.upload_channel) lines.push(`- 업로드 채널: ${oneLine(collab.upload_channel, 60)}`);
   if (collab.content_format) lines.push(`- 콘텐츠 형식: ${oneLine(collab.content_format, 60)}`);
   if (currentStage) {
@@ -250,33 +290,42 @@ export async function buildCampaignFocusContext(
       : "",
   ].filter(Boolean);
   if (dues.length) lines.push(`- 일정: ${dues.join(" · ")}`);
-  if (Number(collab.second_use_fee || 0) > 0 || collab.second_use_note) {
-    lines.push(`- 2차 활용: ${oneLine(collab.second_use_note, 120) || "브랜드가 2차 활용을 요청한 캠페인"}`);
-  }
-  if (collab.video_concept) {
-    lines.push(`- 브랜드가 원하는 영상 컨셉: ${oneLine(collab.video_concept, 600)}`);
-  }
-  if (collab.description) lines.push(`- 캠페인 설명: ${oneLine(collab.description, 500)}`);
-  if (collab.requirements) lines.push(`- 지원 요건: ${oneLine(collab.requirements, 300)}`);
 
   lines.push("");
-  lines.push("[브랜드 가이드라인]");
-  const guideNote = String(collab.guideline_note || "").trim();
-  const termGuideNote = String(term?.guide_note || "").trim();
-  if (guideNote) lines.push(`- 필수 표기·요건(캠페인 가이드라인): ${oneLine(guideNote, 1600)}`);
-  if (termGuideNote) lines.push(`- 담당자가 정리한 가이드: ${oneLine(termGuideNote, 600)}`);
-  const guideUrl = String(term?.guide_url || collab.guideline_url || "").trim();
-  if (guideUrl) lines.push(`- 가이드 링크: ${oneLine(guideUrl, 160)}`);
+  lines.push("[브랜드 가이드 파일 — 기획의 유일한 근거]");
   if (guideRefs.length) {
     lines.push(
-      `- 가이드라인 파일 ${guideRefs.length}개: ${guideRefs.map((f) => f.fileName).join(", ")}` +
-        " (이 파일들은 이 요청에 함께 첨부되어 있습니다. 끝까지 읽고 그대로 반영하세요.)",
+      `- ${hasProgressGuide ? "브랜드가 진행 화면에 올린" : "캠페인 등록 때 첨부된"} 가이드 파일 ` +
+        `${guideRefs.length}개: ${guideRefs.map((f) => f.fileName).join(", ")}`,
     );
-  }
-  if (!guideNote && !termGuideNote && !guideUrl && guideRefs.length === 0) {
     lines.push(
-      "- 아직 올라온 가이드라인이 없습니다. 지어내지 말고, 일반적으로 확인해야 할 항목을 " +
-        "'담당자 확인 필요'로 남기세요.",
+      "- 이 파일들은 이 요청에 이미지·PDF 로 함께 첨부되어 있습니다. 기획안이나 본문을 " +
+        "쓰기 전에 먼저 끝까지 읽고, 거기 적힌 필수 표기·필수 장면·금지 사항을 실제 장면 " +
+        "안에 배치하세요.",
+    );
+    if (!hasProgressGuide) {
+      lines.push(
+        "- 진행 화면(가이드 단계)에는 아직 파일이 없어서 캠페인 등록 때 첨부된 파일을 " +
+          "읽고 있습니다. 이 파일이 최신 가이드가 아닐 수 있으니, 답 끝에 '진행 화면에 " +
+          "올라온 최신 가이드 파일이 있으면 알려 달라'고 한 줄 남기세요.",
+      );
+    }
+    lines.push(
+      "- 파일에 없는 것은 지어내지 말고 답 끝에 '담당자 확인 필요:' 로 모아 주세요.",
+    );
+  } else {
+    lines.push(
+      "- 아직 가이드 파일이 없습니다. 브랜드가 진행 화면의 가이드 단계에 파일을 올리지 " +
+        "않았습니다.",
+    );
+    lines.push(
+      "- 이 상태에서는 기획안을 지어내지 마세요. '브랜드 가이드 파일이 아직 올라오지 " +
+        "않아서 그 내용대로 쓸 수 없다'고 먼저 알리고, 담당자에게 가이드 파일을 요청하거나 " +
+        "가지고 있는 가이드를 이 대화에 첨부해 달라고 안내하세요.",
+    );
+    lines.push(
+      "- 사용자가 그래도 초안을 원하면, 무엇을 가정하고 썼는지 장면마다 밝히고 확인이 " +
+        "필요한 항목을 '담당자 확인 필요:' 로 남기세요.",
     );
   }
 
@@ -357,6 +406,7 @@ export async function buildCampaignFocusContext(
   return {
     text: lines.join("\n"),
     guideRefs,
+    hasProgressGuide,
     plan: planWork
       ? { scenes: planScenes, body: planBody, version: Number(planWork.version || 1) }
       : null,
