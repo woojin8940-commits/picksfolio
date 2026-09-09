@@ -41,9 +41,6 @@ interface ManagerCampaignSettlementPanelProps {
   onChanged: () => void | Promise<void>;
 }
 
-/** 원천징수(3.3%)를 뗀 실지급액. 서버가 같은 식으로 계산한다. */
-const netOf = (fee: number) => Math.floor(fee * 0.967);
-
 const todayInSeoul = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
@@ -425,9 +422,7 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
                     </div>
                     <p className="text-[11px] text-slate-400 font-bold mt-0.5">
                       {r.fee > 0 ? (
-                        <>
-                          {formatKoreanWon(r.fee)} · 원천징수 3.3% 차감 후 {formatKoreanWon(netOf(r.fee))} 입금
-                        </>
+                        <>정산 금액 {formatKoreanWon(r.fee)}</>
                       ) : (
                         '보수 미확정 · 조건표를 먼저 확정해 주세요'
                       )}

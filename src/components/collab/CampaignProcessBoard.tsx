@@ -1604,8 +1604,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               </p>
               {settlementFee > 0 && (
                 <p className="text-[10px] font-bold text-slate-400 mt-1">
-                  {settlementFee.toLocaleString('ko-KR')}원 · 원천징수 3.3% 차감 후{' '}
-                  {Number(settlement.netFee || Math.floor(settlementFee * 0.967)).toLocaleString('ko-KR')}원 입금
+                  정산 금액 {settlementFee.toLocaleString('ko-KR')}원
                 </p>
               )}
               {settlement.payoutMemo && (

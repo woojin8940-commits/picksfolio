@@ -6,6 +6,7 @@ import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useDragScroll } from '../hooks/useDragScroll';
 
 interface Campaign {
   id: string;
@@ -194,6 +195,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
     { value: 'group_buy', label: isEn ? 'Group Buy' : '공동구매' },
   ];
+
+  /* 칩 줄은 한 줄로 두고 가로로 넘긴다 — 손가락은 그대로, 마우스는 끌어서. */
+  const rewardRowRef = useDragScroll<HTMLDivElement>();
+  const categoryRowRef = useDragScroll<HTMLDivElement>();
 
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => initialListCache?.campaigns || []);
   const [total, setTotal] = useState(() => initialListCache?.total || 0);
@@ -891,7 +896,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
             />
           </div>
         </form>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+        <div
+          ref={rewardRowRef}
+          className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide"
+        >
           {rewardFilters.map(f => (
             <button
               key={f.value}
@@ -908,7 +916,13 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           <span className="ml-auto text-xs font-bold text-slate-400 whitespace-nowrap pl-2">{total}{isEn ? ' total' : '개'}</span>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+        {/* 카테고리 칩. 줄을 접지 않고 한 줄로 세운다 — 필터가 화면을 두 줄씩 먹으면
+            그만큼 캠페인이 밀려 내려간다. 대신 끝의 칩까지 끌어서 닿을 수 있다
+            (손가락은 그대로, 마우스는 useDragScroll 로 끌어서). */}
+        <div
+          ref={categoryRowRef}
+          className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide"
+        >
           <button
             onClick={() => changeCategory('')}
             className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${

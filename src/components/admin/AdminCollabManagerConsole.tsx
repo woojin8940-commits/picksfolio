@@ -915,7 +915,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                             )}
                             {detail.terms?.fee > 0 ? (
                               <p className="text-[10px] text-slate-400 font-bold mt-2">
-                                세후 지급 예상 {formatKoreanWon(detail.terms.netFee)} (원천징수 3.3%)
+                                정산 예정 금액 {formatKoreanWon(detail.terms.fee)}
                               </p>
                             ) : (
                               /* 금액을 넣기 전까지 인플루언서·브랜드 정산 화면에는
@@ -1053,7 +1053,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                 </div>
                                 <p className="text-[10px] text-slate-400 font-bold mb-3">
                                   {fee > 0
-                                    ? `${fee.toLocaleString('ko-KR')}원 · 원천징수 3.3% 차감 후 ${Number(stl.netFee || 0).toLocaleString('ko-KR')}원 입금`
+                                    ? `정산 금액 ${fee.toLocaleString('ko-KR')}원`
                                     : '확정 보수가 없습니다. 조건에 금액을 저장하면 정산 금액이 잡힙니다.'}
                                 </p>
 
@@ -1186,7 +1186,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                                   setReviewNote('');
                                                   notify(
                                                     r.settlement
-                                                      ? `승인 완료. 정산 ${r.settlement.scheduledDate} 예약 (세후 ${formatKoreanWon(r.settlement.net)})`
+                                                      ? `승인 완료. 정산 ${r.settlement.scheduledDate} 예약`
                                                       : '단계를 완료했습니다.',
                                                   );
                                                 })

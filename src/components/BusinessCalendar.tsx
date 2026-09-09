@@ -1390,7 +1390,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                   ))}
                   {activeTab === 'settlements' && (
                     <p className="text-[11px] text-slate-400 font-medium">
-                      지급일은 담당자가 진행사항 정산 단계에서 정합니다. 표시 금액은 원천징수 3.3% 차감 전 금액입니다.
+                      지급일은 담당자가 진행사항 정산 단계에서 정합니다.
                     </p>
                   )}
                 </div>

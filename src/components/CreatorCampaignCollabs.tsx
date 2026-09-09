@@ -290,7 +290,6 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   if (selected) {
     const terms = detail?.terms || null;
     const fee = Number(terms?.fee || 0);
-    const netFee = Number(terms?.netFee || 0);
     const mode = rewardModeOf(selected.campaignRewardMode);
     const badge = collabBadge(selected);
     // 상세에서는 목록 요약이 아니라 방금 읽어 온 상세로 판정한다. 저장 직후 목록이
@@ -387,13 +386,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
             </div>
             <div className="bg-slate-50 rounded-xl px-4 py-3 col-span-2 md:col-span-1">
               <p className="text-[10px] font-black text-slate-400">{isEn ? 'Payout' : '보수'}</p>
+              {/* 확정된 보수 한 값만 적는다. 세금을 뗀 금액을 함께 적던 때에는
+                  같은 칸에 두 금액이 서서, 어느 쪽이 내 보수인지 되묻게 만들었다. */}
               <p className="text-sm font-black text-slate-900 mt-0.5 truncate">
                 {fee > 0 ? formatKoreanWon(fee) : isEn ? 'In negotiation' : '협의 중'}
-                {fee > 0 && (
-                  <span className="text-[11px] text-slate-400 font-bold ml-1.5">
-                    {isEn ? 'net' : '세후'} {formatKoreanWon(netFee)}
-                  </span>
-                )}
               </p>
               {terms && (
                 <p className={`text-[10px] font-black mt-0.5 ${terms.lockedAt ? 'text-emerald-600' : 'text-amber-600'}`}>
@@ -495,7 +491,6 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                 influencerUsername={userName}
                 campaignId={selected.campaignId}
                 feeKrw={fee}
-                netFeeKrw={netFee}
               />
             )}
 
