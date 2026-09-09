@@ -10,6 +10,15 @@ import {
   readClaudeCreditsSynced,
   type ClaudeCredits,
 } from "./_shared/claude-credits.mts";
+import {
+  buildCampaignFocusContext,
+  type CampaignFocusContext,
+} from "./_shared/campaign-ai-context.mts";
+import {
+  CAMPAIGN_AI_SYSTEM_INSTRUCTION,
+  extractCampaignDraft,
+  type CampaignDraft,
+} from "./_shared/campaign-ai-prompt.mts";
 import { resolveContentType } from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import {
@@ -446,6 +455,18 @@ export default async (req: Request) => {
   const userType = body?.userType === "business" ? "business" : "influencer";
   const activeProposalId = String(body?.activeProposalId || "");
   const clientTimelines: CollabMeta[] = Array.isArray(body?.timelines) ? body.timelines : [];
+  // 어느 화면에서 부른 대화인지.
+  //
+  // 'timeline'(기본)은 협업 타임라인 화면이고, 지금까지의 동작 그대로다 — 협업 전체를
+  // 아는 업무 비서다.
+  // 'campaign'은 인플루언서 캠페인 진행 화면의 AI 탭이다. 이쪽은 일부러 좁다. 열어 둔
+  // 캠페인 한 건의 기획안과 인스타 본문을 쓰고 고치는 것만 한다. 그래서 협업 대화도,
+  // 다른 캠페인도 읽지 않는다 — 다른 캠페인의 제품과 가이드가 같은 프롬프트에 섞이면
+  // 기획안에 엉뚱한 브랜드의 필수 문구가 들어간다. 두 화면이 공유하는 것은 역할이
+  // 아니라 배관이다: 멤버십 게이트, 하루 사용량, 가이드 파일 읽기, 모델 호출.
+  const scope = body?.scope === "campaign" ? "campaign" : "timeline";
+  // 캠페인 진행 화면에서 지금 열어 둔 협업. 캠페인 화면에서는 필수다.
+  const campaignFocusId = String(body?.campaignFocusId || "");
   // 사용자가 AI 대화창에서 직접 올린 파일(브랜드 가이드 등). 실제 파일은 업로드 시
   // Blobs 에 저장되므로 여기서는 주소만 받는다.
   const clientAttachments: GuideRef[] = Array.isArray(body?.attachments)
@@ -565,39 +586,104 @@ export default async (req: Request) => {
   // Build the workspace-wide overview (all conversations). Falls back to the
   // legacy single-conversation transcript the client used to send when the
   // overview cannot be assembled.
+  //
+  // 캠페인 화면에서 부른 대화는 이 단계를 아예 건너뛴다. 협업 대화 전체를 읽지 않는
+  // 것이 그 화면 AI 의 설계다 — 안 쓸 사실을 모으느라 조회를 돌릴 이유가 없다.
   let workspaceContext: string | null = null;
   let discoveredGuideRefs: GuideRef[] = [];
-  try {
-    const built = await buildWorkspaceContext(
-      username,
-      userType,
-      activeProposalId,
-      clientTimelines,
-    );
-    workspaceContext = built.text;
-    discoveredGuideRefs = built.guideRefs;
-  } catch (e) {
-    console.error("[collab-ai] failed to build workspace context", e);
+  if (scope !== "campaign") {
+    try {
+      const built = await buildWorkspaceContext(
+        username,
+        userType,
+        activeProposalId,
+        clientTimelines,
+      );
+      workspaceContext = built.text;
+      discoveredGuideRefs = built.guideRefs;
+    } catch (e) {
+      console.error("[collab-ai] failed to build workspace context", e);
+    }
+  }
+
+  // 캠페인 화면이면 그 캠페인 한 건의 사실을 읽는다.
+  //
+  // 화면이 보낸 요약을 쓰지 않고 DB 에서 직접 읽는다. 본문은 사람이 고칠 수 있어서 남의
+  // 협업 아이디를 끼워 넣을 수 있고(그래서 조회 조건에 본인 아이디를 함께 건다), 화면이
+  // 들고 있는 요약에는 정작 필요한 가이드라인·브랜드 피드백·지금 기획안이 없다.
+  //
+  // 여기서 실패하면 답을 만들지 않고 멈춘다. 기획안을 고치라는 요청에 지금 기획안을
+  // 모른 채로 답하면, 사용자는 그 답이 자기 기획안을 고친 것이라고 믿고 반영 버튼을
+  // 누르게 된다 — 사실 없이 지어낸 답이 저장되는 것보다 오류가 낫다.
+  let campaignContext: CampaignFocusContext | null = null;
+  if (scope === "campaign") {
+    if (!campaignFocusId) {
+      return Response.json({ error: "캠페인 정보가 없습니다." }, { status: 400 });
+    }
+    try {
+      campaignContext = await buildCampaignFocusContext(username, campaignFocusId);
+    } catch (e) {
+      console.error("[collab-ai] failed to build campaign context", e);
+      return Response.json(
+        { error: "캠페인 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." },
+        { status: 503 },
+      );
+    }
+    if (!campaignContext) {
+      return Response.json(
+        { error: "캠페인을 찾을 수 없습니다. 화면을 새로 고친 뒤 다시 시도해 주세요." },
+        { status: 404 },
+      );
+    }
+    discoveredGuideRefs = campaignContext.guideRefs;
   }
 
   // 브랜드 기본 가이드 읽기. 사용자가 직접 올린 파일이 있으면 그것을 쓰고, 없으면
   // 지금 보고 있는 협업에 올라온 이미지·PDF 를 가져온다(가이드를 봐야 하는 요청일 때만).
   const lastUserText = [...messages].reverse().find((m) => m.role !== "assistant")?.content || "";
   const wantsGuide = GUIDE_INTENT_RE.test(String(lastUserText));
-  let guideFiles: GuideFile[] = [];
-  let skippedGuideFiles: string[] = [];
-  try {
-    const loaded = await loadGuideFiles(
-      clientAttachments.length > 0
+  // 캠페인 화면에서는 브랜드 가이드라인을 조건 없이 항상 읽는다.
+  //
+  // 타임라인 쪽은 "가이드 봐 줘" 같은 말이 나올 때만 파일을 읽는다 — 대화 대부분이
+  // 파일과 상관없고, 매번 PDF 를 실으면 느려지고 비싸진다. 캠페인 화면은 반대다.
+  // 여기서 하는 일이 기획안과 본문을 쓰는 것뿐이고, 브랜드는 가이드를 반드시 올리므로,
+  // 가이드는 배경 자료가 아니라 그 일의 근거다. 사용자가 "이거 참고해서 써 줘"라고
+  // 말하는지 여부로 필수 표기가 빠지고 말고 해서는 안 된다.
+  //
+  // 사용자가 직접 올린 파일이 있으면 그것을 앞에 두고 브랜드 가이드를 뒤에 붙인다
+  // (타임라인은 지금까지처럼 사용자 첨부가 있으면 그것만 읽는다).
+  const campaignGuideCandidates = [...clientAttachments, ...discoveredGuideRefs].filter(
+    (f, i, all) => all.findIndex((x) => x.url === f.url) === i,
+  );
+  const guideCandidates =
+    scope === "campaign"
+      ? campaignGuideCandidates.slice(0, GUIDE_MAX_FILES)
+      : clientAttachments.length > 0
         ? clientAttachments
         : wantsGuide
           ? discoveredGuideRefs.slice(0, GUIDE_MAX_FILES)
-          : [],
-    );
+          : [];
+  let guideFiles: GuideFile[] = [];
+  let skippedGuideFiles: string[] = [];
+  try {
+    const loaded = await loadGuideFiles(guideCandidates);
     guideFiles = loaded.files;
     skippedGuideFiles = loaded.skipped;
   } catch (e) {
     console.error("[collab-ai] failed to load guide files", e);
+  }
+  // 한 번에 읽을 수 있는 파일 수를 넘긴 것은 모델에게 이름을 알려 준다.
+  //
+  // 캠페인 화면의 프롬프트에는 가이드라인 파일 목록이 이름까지 다 들어 있다. 그중
+  // 일부만 실제로 첨부되면, 모델은 이름만 본 파일도 읽은 것처럼 답할 수 있다 —
+  // 기획안에서 그것은 "가이드에 있었다"고 지어낸 필수 표기가 된다.
+  if (scope === "campaign" && campaignGuideCandidates.length > guideCandidates.length) {
+    skippedGuideFiles = [
+      ...skippedGuideFiles,
+      ...campaignGuideCandidates
+        .slice(guideCandidates.length)
+        .map((f) => String(f.fileName || f.url || "파일")),
+    ];
   }
 
   // 첨부한 파일이 무엇인지 모델에게 한 줄로 알려 준다(이미지·PDF 블록만으로는
@@ -619,7 +705,7 @@ export default async (req: Request) => {
     ? String(context.transcript).slice(-MAX_CONTEXT_CHARS)
     : "";
 
-  const systemInstruction =
+  const baseSystemInstruction =
     "당신은 픽스폴리오(Picksfolio)의 인플루언서·비즈니스 협업을 돕는 유능한 한국어 AI 업무 비서입니다. " +
     "당신의 일은 크게 두 가지이고, 이 두 가지를 가장 잘 해내야 합니다.\n\n" +
     "[역할 1] 인플루언서 콘텐츠 제작 지원 — 초안을 직접 써 준다\n" +
@@ -753,6 +839,28 @@ export default async (req: Request) => {
           `아래는 이 협업의 최근 대화 내용입니다. 이 내용을 바탕으로 답해 주세요:\n${legacyTranscript}`
         : "\n\n현재 불러올 수 있는 협업 대화가 없습니다. 협업이 아직 없다면 콘텐츠 초안 작성이나 일반적인 협업·업무 도움을 제공하세요.");
 
+  // 캠페인 화면은 지시문을 물려받지 않고 갈아 끼운다.
+  //
+  // 위 지시문은 협업 전체를 아는 비서의 것이다. 거기에 캠페인용 규칙을 덧붙이면 두
+  // 지시가 부딪힌다 — "협업 현황을 업체별로 정리하라"와 "이 캠페인만 다뤄라"가 같은
+  // 프롬프트에 있으면 모델은 묻지 않은 다른 캠페인 이야기를 꺼낸다. 하는 일이 다르면
+  // 지시문도 다른 것이 맞다.
+  const systemInstruction = campaignContext
+    ? CAMPAIGN_AI_SYSTEM_INSTRUCTION +
+      `\n\n아래는 지금 열어 둔 캠페인의 사실입니다. 캠페인에 관한 것은 모두 이 데이터와 ` +
+      `첨부 파일을 근거로만 답하고, 없는 값은 지어내지 마세요.\n${campaignContext.text}`
+    : baseSystemInstruction;
+
+  // 캠페인 화면은 기획안 전체를 다시 내놓는다(장면 5개에 설명·자막·나레이션, 거기에
+  // 기계가 읽을 JSON 까지). 3072 로는 JSON 중간에 잘려 반영 버튼이 안 뜬다.
+  // 타임라인 쪽 한도는 건드리지 않는다.
+  const maxOutputTokens = scope === "campaign" ? 4096 : 3072;
+
+  // 초안 떼어내기. 타임라인 화면의 답은 손대지 않는다 — 그쪽 모델은 표식을 붙이라는
+  // 지시를 받지 않았으므로 검사할 것도 없다.
+  const campaignDraftOf = (raw: string): { reply: string; draft: CampaignDraft | null } =>
+    scope === "campaign" ? extractCampaignDraft(raw) : { reply: raw, draft: null };
+
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {
     // Anthropic message format. The large system instruction (role + workspace
@@ -810,7 +918,7 @@ export default async (req: Request) => {
           // 기획안(개요+준수사항+컷 구성+캡션)은 그보다도 길어서 더 여유가 필요하다.
           // 한국어는 토큰이 더 많이 들어간다(크레딧은 실제 사용량으로 차감되므로,
           // 한도를 올려도 짧은 답변의 비용은 그대로다).
-          max_tokens: 3072,
+          max_tokens: maxOutputTokens,
           temperature: 0.6,
           system: [
             { type: "text", text: systemInstruction, cache_control: { type: "ephemeral" } },
@@ -829,11 +937,14 @@ export default async (req: Request) => {
       }
 
       const data = await res.json();
-      const reply: string =
+      const rawReply: string =
         (data?.content || [])
           .map((p: any) => (p?.type === "text" ? p.text || "" : ""))
           .join("")
           .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
+      // 캠페인 화면이면 답 끝에 붙은 초안 덩어리를 떼어낸다. 사용자에게는 글만 보이고,
+      // 떼어낸 초안은 '수정하기' 버튼이 기획안에 반영할 값이 된다.
+      const { reply, draft } = campaignDraftOf(rawReply);
 
       // Deduct credits based on the tokens actually consumed, then (if opted in
       // and the balance is now low) auto-recharge for the next request.
@@ -863,6 +974,7 @@ export default async (req: Request) => {
 
       return Response.json({
         reply,
+        draft,
         model: "claude",
         creditsUsed: charged,
         balanceCredits: saved.balanceCredits,
@@ -916,7 +1028,7 @@ export default async (req: Request) => {
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents,
           // 캡션·숏폼 대본·기획안 초안이 문장 중간에 끊기지 않도록 여유를 둔다.
-          generationConfig: { temperature: 0.6, maxOutputTokens: 3072 },
+          generationConfig: { temperature: 0.6, maxOutputTokens },
         }),
       },
     );
@@ -931,16 +1043,22 @@ export default async (req: Request) => {
     }
 
     const data = await res.json();
-    const reply: string =
+    const rawReply: string =
       (data?.candidates?.[0]?.content?.parts || [])
         .map((p: any) => p?.text || "")
         .join("")
         .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
+    const { reply, draft } = campaignDraftOf(rawReply);
 
     // Record usage only after a successful response.
     if (usageStore) await usageStore.setJSON(usageKey, { count: used + 1 });
 
-    return Response.json({ reply, model: "gemini", remaining: Math.max(0, DAILY_LIMIT - used - 1) });
+    return Response.json({
+      reply,
+      draft,
+      model: "gemini",
+      remaining: Math.max(0, DAILY_LIMIT - used - 1),
+    });
   } catch (e) {
     console.error("[collab-ai] request failed", e);
     return Response.json(

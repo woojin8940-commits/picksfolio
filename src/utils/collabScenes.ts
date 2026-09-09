@@ -41,6 +41,18 @@ export const normalizeScenes = (raw: unknown): StoryboardScene[] => {
 export const sceneIsEmpty = (scene: StoryboardScene) =>
   !scene.visual.trim() && !scene.subtitle.trim() && !scene.narration.trim();
 
+/**
+ * 장면 목록을 줄글로 옮긴다.
+ *
+ * 기획안은 장면 배열로 저장되지만, 담당자 화면과 알림처럼 글로만 읽는 자리가 있어서
+ * 줄글 본문을 함께 보낸다. 인플루언서가 직접 낸 기획안과 AI 초안을 반영한 기획안이
+ * 각자 문장을 조립하면, 같은 기획안이 자리에 따라 다르게 보인다 — 그래서 한 곳에 둔다.
+ */
+export const scenesToBody = (scenes: StoryboardScene[]): string =>
+  scenes
+    .map((s, i) => `장면 ${i + 1}\n설명: ${s.visual}${s.subtitle.trim() ? `\n자막: ${s.subtitle}` : ''}`)
+    .join('\n\n');
+
 /** 뮤즈바이가 권장하는 최소 장면 수. 못 지켜도 제출은 되지만 화면이 알려 준다. */
 export const RECOMMENDED_SCENE_COUNT = 5;
 

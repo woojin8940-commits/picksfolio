@@ -5,6 +5,20 @@ import { randomInt } from "node:crypto";
 
 const PURPOSES = new Set(["signup", "business_signup", "find-id", "reset-password"]);
 
+/**
+ * 인증번호 문자의 발신번호.
+ *
+ * 픽스폴리오 고객센터 번호와 같은 번호로 나간다 — 문자를 받은 사람이 그 번호를
+ * 그대로 저장해 두면 되고, 되전화가 고객센터로 연결된다.
+ *
+ * 실제 값은 `SOLAPI_FROM_NUMBER` 환경변수가 정한다. 알림톡 대체 발송과 라이브
+ * 알림 문자도 같은 변수를 읽으므로, 번호를 바꿀 때는 그 변수 하나만 바꾸면 된다.
+ * 여기 상수는 변수가 비어 있을 때의 기본값이자 "지금 쓰는 번호가 무엇인지"를
+ * 코드에 남겨 두는 자리다. SOLAPI 는 사전등록된 발신번호만 허용하므로, 이 번호는
+ * SOLAPI 콘솔에 등록돼 있어야 문자가 나간다.
+ */
+const DEFAULT_FROM_NUMBER = "070-7954-8452";
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method Not Allowed" }, { status: 405 });
@@ -19,7 +33,7 @@ export default async (req: Request) => {
 
     const apiKey = Netlify.env.get("SOLAPI_API_KEY");
     const apiSecret = Netlify.env.get("SOLAPI_API_SECRET");
-    const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER");
+    const fromNumber = Netlify.env.get("SOLAPI_FROM_NUMBER") || DEFAULT_FROM_NUMBER;
 
     if (!apiKey || !apiSecret || !fromNumber) {
       return Response.json({ error: "서버 설정 오류" }, { status: 500 });

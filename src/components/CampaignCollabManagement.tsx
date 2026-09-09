@@ -155,12 +155,20 @@ const CATEGORIES = [
   { value: 'pet', label: '반려동물' },
   { value: 'interior', label: '인테리어' },
   { value: 'sports', label: '스포츠' },
-  { value: 'entertainment', label: '엔터테인먼트' },
   { value: 'education', label: '교육' },
   { value: 'other', label: '기타' },
 ];
 
-const categoryLabel = (val: string) => CATEGORIES.find(c => c.value === val)?.label || val || '-';
+/**
+ * 목록에서 내린 카테고리의 이름.
+ *
+ * 엔터테인먼트는 등록 폼과 필터 칩에서 뺐다(쓰이지 않는데 칩 줄에서 잘려 보였다).
+ * 그래도 예전에 그 값으로 등록된 캠페인은 이름이 나와야 하므로 여기 남겨 둔다.
+ */
+const RETIRED_CATEGORY_LABELS: Record<string, string> = { entertainment: '엔터테인먼트' };
+
+const categoryLabel = (val: string) =>
+  CATEGORIES.find(c => c.value === val)?.label || RETIRED_CATEGORY_LABELS[val] || val || '-';
 
 // Normalize a username for ownership comparison (strip biz/ prefix, lowercase),
 // mirroring how the backend matches business_username.
@@ -1712,13 +1720,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                보여 주면 필터 때문인 줄 모르고 등록을 다시 하게 된다. */
             <>
               <h3 className="text-lg font-black text-slate-900 mb-2">조건에 맞는 캠페인이 없습니다</h3>
-              <p className="text-sm text-slate-500 font-medium mb-6">고른 진행 방식 · 상태 · 카테고리를 바꿔 보세요</p>
-              <button
-                onClick={() => { setActiveTypeFilter(''); setActiveStatusFilter(''); setActiveCategoryFilter(''); }}
-                className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-black text-sm transition-all"
-              >
-                조건 모두 해제
-              </button>
+              <p className="text-sm text-slate-500 font-medium">고른 진행 방식 · 상태 · 카테고리를 바꿔 보세요</p>
             </>
           ) : (
             <>

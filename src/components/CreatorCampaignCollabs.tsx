@@ -6,6 +6,7 @@ import { CollabStepTurn, nextCollabAction } from '../utils/collabNextAction';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import CampaignInsightPanel from './collab/CampaignInsightPanel';
 import CampaignSettlementPanel from './collab/CampaignSettlementPanel';
+import CampaignAiAssistant from './collab/CampaignAiAssistant';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
@@ -41,7 +42,7 @@ interface CreatorCampaignCollabsProps {
   initialCollabId?: string;
 }
 
-type DetailTab = 'progress' | 'insight' | 'settlement';
+type DetailTab = 'progress' | 'insight' | 'settlement' | 'ai';
 
 const CATEGORY_LABELS: Record<string, string> = {
   beauty: '뷰티', fashion: '패션', food: '식품', lifestyle: '라이프스타일',
@@ -318,6 +319,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
       { key: 'progress', label: isEn ? 'Progress' : '진행사항' },
       { key: 'insight', label: isEn ? 'Insights' : '인사이트' },
       ...(mode.hasSettlement || fee > 0 ? [{ key: 'settlement' as const, label: isEn ? 'Settlement' : '정산' }] : []),
+      // AI 는 정산 옆에 항상 둔다. 정산 탭처럼 조건을 걸지 않는 이유: 이 어시스턴트가
+      // 하는 일(기획안, 마감 정리, 담당자 문의 초안)은 보수가 없는 제품 협찬형에서도
+      // 그대로 필요하다.
+      { key: 'ai' as const, label: 'AI' },
     ];
     const activeTab = TABS.some(t => t.key === detailTab) ? detailTab : 'progress';
 
@@ -491,6 +496,28 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                 campaignId={selected.campaignId}
                 feeKrw={fee}
                 netFeeKrw={netFee}
+              />
+            )}
+
+            {/* -------------------------------------------------- AI
+                가이드 파일 · 지금 기획안 · 브랜드 피드백은 서버가 로그인한 계정으로
+                직접 읽는다. 여기서 넘기는 것은 "어느 캠페인을 열어 두고 있는지"와,
+                이미 불러온 상세(초안 반영 버튼을 잠글지 판단하는 값)뿐이다.
+
+                반영은 진행사항 탭의 '등록하기'와 같은 API 로 간다. 그래서 반영 뒤에는
+                진행사항 탭과 같은 방식으로 다시 불러와야 새 버전이 화면에 보인다. */}
+            {activeTab === 'ai' && (
+              <CampaignAiAssistant
+                userName={userName}
+                collabId={detail.collab.id}
+                detail={detail}
+                campaignTitle={selected.campaignTitle}
+                onNotify={notify}
+                onApplied={async () => {
+                  await refreshDetail(detail.collab.id);
+                  await load();
+                }}
+                isEn={isEn}
               />
             )}
           </>

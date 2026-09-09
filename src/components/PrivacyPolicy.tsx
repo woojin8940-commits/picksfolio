@@ -251,7 +251,7 @@ const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onNavigateHome }) => {
           </p>
           <ul className="space-y-2 text-slate-400 text-sm leading-relaxed">
             <li><span className="text-slate-300 font-bold">책임자:</span> 신우진</li>
-            <li><span className="text-slate-300 font-bold">연락처:</span> 010-3563-8940</li>
+            <li><span className="text-slate-300 font-bold">연락처:</span> 070-7954-8452</li>
             <li><span className="text-slate-300 font-bold">이메일:</span> woojin8940@inplace-ad.com</li>
           </ul>
           <p className="text-slate-400 text-sm leading-relaxed mt-4">

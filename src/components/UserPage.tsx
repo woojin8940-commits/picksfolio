@@ -1658,7 +1658,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)
             </p>
             <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              고객센터 010-3563-8940 | woojin8940@inplace-ad.com
+              고객센터 070-7954-8452 | woojin8940@inplace-ad.com
             </p>
             <div className="flex items-center justify-center gap-3 pt-1">
               <a href="/terms" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
