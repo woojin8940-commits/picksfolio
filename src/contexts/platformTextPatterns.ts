@@ -145,8 +145,8 @@ export const platformTextPatterns = [
     "replacement": "My address to be completed: $1.picks.me"
   },
   {
-    "source": "^승인 완료\\. 정산 (.+?) 예약 \\(세후 (.+?)\\)$",
-    "replacement": "Approved. Settlement $1 Reservation (after tax $2)"
+    "source": "^승인 완료\\. 정산 (.+?) 예약$",
+    "replacement": "Approved. Settlement $1 Reservation"
   },
   {
     "source": "^저장에 실패했습니다\\. \\(HTTP (.+?)\\)$",

@@ -26,8 +26,6 @@ interface CampaignSettlementPanelProps {
   influencerUsername?: string;
   /** 협업 조건에 확정된 내 보수(원). 맨 위 칸이다. */
   feeKrw?: number;
-  /** 원천징수를 뗀 실수령액(원). 서버가 계산해 준 값을 그대로 받는다. */
-  netFeeKrw?: number;
 }
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
@@ -41,7 +39,6 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
   campaignId,
   influencerUsername = '',
   feeKrw = 0,
-  netFeeKrw = 0,
 }) => {
   const [rows, setRows] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,9 +80,6 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
           <p className="text-lg font-black text-slate-900 mt-1">
             {feeKrw > 0 ? formatKoreanWon(feeKrw) : '협의 중'}
           </p>
-          {feeKrw > 0 && (
-            <p className="text-[10px] text-slate-400 font-bold mt-0.5">세후 {formatKoreanWon(netFeeKrw)}</p>
-          )}
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
           <p className="text-[10px] font-black text-slate-400">입금 예정</p>
@@ -143,8 +137,8 @@ const CampaignSettlementPanel: React.FC<CampaignSettlementPanelProps> = ({
       )}
 
       <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-        표시된 금액은 지급 전 금액입니다. 원천징수(3.3%)를 뺀 금액이 입금되며, 지급일은 콘텐츠를 올린 달의
-        다음 달 말일입니다.
+        지급일은 콘텐츠를 올린 달의 다음 달 말일입니다. 세금 신고와 관련된 공제는 지급 단계에서
+        처리되며, 이 화면은 확정된 정산 금액을 그대로 보여 줍니다.
       </p>
     </div>
   );

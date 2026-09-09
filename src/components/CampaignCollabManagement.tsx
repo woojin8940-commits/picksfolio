@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { lazyWithRetry } from '../utils/lazyRoute';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
+import { useDragScroll } from '../hooks/useDragScroll';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
@@ -199,6 +200,11 @@ const writeApplicantCache = (businessUsername: string, campaignId: string, data:
 
 const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ businessUsername, companyName, initialCampaignId }) => {
   const cacheKey = `picks_biz_campaigns_${businessUsername.replace(/^biz\//, '').toLowerCase()}`;
+
+  /* 필터 칩 줄은 한 줄로 둔다. 넘치는 만큼은 마우스로 끌어 넘긴다. */
+  const typeRowRef = useDragScroll<HTMLDivElement>();
+  const statusRowRef = useDragScroll<HTMLDivElement>();
+  const categoryRowRef = useDragScroll<HTMLDivElement>();
 
   const cachedCampaigns = React.useMemo(() => {
     try {
@@ -1646,7 +1652,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       </header>
 
       {/* Type Filter Tabs */}
-      <div className="flex items-center gap-1 mb-2.5 overflow-x-auto pb-1 scrollbar-hide">
+      <div
+        ref={typeRowRef}
+        className="flex items-center gap-1 mb-2.5 overflow-x-auto pb-1 scrollbar-hide"
+      >
         {CAMPAIGN_TYPES.map(ct => (
           <button
             key={ct.value}
@@ -1666,7 +1675,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
       </div>
 
       {/* 모집 상태. 개수를 함께 적는다 — 마감이 몇 건 쌓였는지가 눌러 보기 전에 보인다. */}
-      <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1 scrollbar-hide">
+      <div
+        ref={statusRowRef}
+        className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1 scrollbar-hide"
+      >
         {STATUS_FILTERS.map(sf => (
           <button
             key={sf.value || 'all'}
@@ -1687,7 +1699,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
       {/* 카테고리. 등록할 때 고른 값 그대로다(CATEGORIES 첫 항목은 등록 폼용 안내
           문구라 '전체 카테고리'로 바꿔 낸다). */}
-      <div className="flex items-center gap-1.5 mb-6 overflow-x-auto pb-1 scrollbar-hide">
+      <div
+        ref={categoryRowRef}
+        className="flex items-center gap-1.5 mb-6 overflow-x-auto pb-1 scrollbar-hide"
+      >
         {CATEGORIES.map(cat => (
           <button
             key={cat.value || 'all'}
