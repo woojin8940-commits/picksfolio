@@ -213,3 +213,34 @@ export function isUploadedFileUrl(raw: unknown): boolean {
   // 어차피 서버(directUploadPath)가 정한다.
   return url.startsWith(`${base}/storage/v1/object/public/${DIRECT_UPLOAD_BUCKET}/`);
 }
+
+/**
+ * 저장된 파일의 주소에서 스토리지 안의 경로만 뽑는다. 우리 버킷 주소가 아니면 null.
+ *
+ * `isUploadedFileUrl` 이 "받아도 되는 주소인가"를 보는 것과 달리, 이쪽은 "그 파일의
+ * 바이트를 어디서 읽어야 하는가"를 답한다. 필요해진 이유가 있다 — AI 어시스턴트는
+ * 브랜드 가이드 파일을 주소만 들고 있고, 그 내용을 모델에 실어 보내려면 원본을 직접
+ * 읽어야 한다. 업로드 경로가 함수(Netlify Blobs) → 스토리지 직접 업로드로 바뀐 뒤,
+ * 읽는 쪽이 Blobs 만 알고 있으면 정작 브랜드가 올린 최신 가이드를 한 개도 못 읽는다.
+ *
+ * 주소를 그대로 fetch 하지 않고 경로만 뽑아 스토리지에서 읽는 이유는, 임의의 주소를
+ * 서버가 받아 오는 길(SSRF)을 만들지 않기 위해서다. 우리 버킷 밖의 주소는 여기서
+ * null 이 되고, 호출하는 쪽은 "열어 볼 수 없는 파일"로 처리한다.
+ */
+export function storagePathOf(raw: unknown): string | null {
+  const url = String(raw || "").trim();
+  if (!url) return null;
+
+  const base = String(process.env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+  if (!base) return null;
+  const prefix = `${base}/storage/v1/object/public/${DIRECT_UPLOAD_BUCKET}/`;
+  if (!url.startsWith(prefix)) return null;
+
+  const path = url.slice(prefix.length).split(/[?#]/)[0];
+  if (!path || path.includes("..")) return null;
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}

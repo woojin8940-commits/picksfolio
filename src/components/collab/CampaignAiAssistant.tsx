@@ -66,6 +66,14 @@ interface AiMessage {
   draft?: CampaignDraft | null;
   /** AI 가 처음 준 초안. '원안으로 되돌리기'와 '고쳤음' 표시에만 쓴다. */
   draftOriginal?: CampaignDraft | null;
+  /**
+   * 이 답을 쓸 때 AI 가 실제로 읽은 가이드 파일과, 열지 못한 파일.
+   *
+   * 답만 보면 가이드를 보고 쓴 것인지 알 수 없다. 근거가 답 위에 보이면 엉뚱한
+   * 기획안을 받았을 때 원인을 바로 알 수 있다 — 읽은 파일이 0개면 가이드가 아니라
+   * 캠페인 이름만 보고 쓴 답이므로, 파일을 다시 올려야 한다.
+   */
+  guide?: { read: string[]; unread: string[] } | null;
   /** 반영 버튼을 눌러 저장이 끝났는가. 같은 초안을 두 번 저장하지 않게 잠근다. */
   applied?: boolean;
 }
@@ -311,6 +319,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
               draft: data.draft || null,
               // 고치기 전의 값. 카드에서 고친 뒤에도 원안으로 돌아갈 수 있어야 한다.
               draftOriginal: data.draft || null,
+              guide: data.guide || null,
             },
           ]);
         }
@@ -434,6 +443,50 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
       e.preventDefault();
       send(input);
     }
+  };
+
+  /**
+   * 이 답의 근거. AI 가 실제로 읽은 가이드 파일 이름을 답 위에 한 줄로 보여 준다.
+   *
+   * 읽은 파일이 0개인데도 답이 그럴듯하게 나오는 것이 가장 위험하다 — 사용자는 그것을
+   * 가이드대로 쓴 기획안으로 믿고 제출한다. 그래서 0개일 때는 경고 색으로 보여 주고
+   * 무엇을 해야 하는지 함께 적는다.
+   */
+  const renderGuideBasis = (message: AiMessage) => {
+    const guide = message.guide;
+    if (!guide) return null;
+    const read = Array.isArray(guide.read) ? guide.read : [];
+    const unread = Array.isArray(guide.unread) ? guide.unread : [];
+    if (read.length === 0 && unread.length === 0) return null;
+
+    return (
+      <div
+        className={`mb-1.5 inline-flex flex-wrap items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${
+          read.length > 0
+            ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+            : 'border-amber-200 bg-amber-50 text-amber-700'
+        }`}
+      >
+        {read.length > 0 ? (
+          <span>
+            {isEn ? 'Read from guide: ' : '가이드 파일 읽음: '}
+            {read.join(', ')}
+          </span>
+        ) : (
+          <span>
+            {isEn
+              ? 'No guide file could be opened — this answer is not based on the brand guide. Attach the guide below.'
+              : '가이드 파일을 열지 못했어요 — 이 답은 브랜드 가이드를 근거로 쓴 것이 아닙니다. 아래에서 가이드 파일을 첨부해 주세요.'}
+          </span>
+        )}
+        {unread.length > 0 && (
+          <span className="text-amber-700">
+            {isEn ? ' · Not opened: ' : ' · 열지 못한 파일: '}
+            {unread.join(', ')}
+          </span>
+        )}
+      </div>
+    );
   };
 
   /**
@@ -743,6 +796,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                     {m.role === 'user' ? (normalized.slice(0, 2).toUpperCase() || '나') : '✨'}
                   </div>
                   <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
+                    {m.role === 'assistant' && renderGuideBasis(m)}
                     <div
                       className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] break-words text-left ${
                         m.role === 'user'
