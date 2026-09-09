@@ -19,7 +19,12 @@ import {
   extractCampaignDraft,
   type CampaignDraft,
 } from "./_shared/campaign-ai-prompt.mts";
-import { resolveContentType } from "./_shared/upload-media.mts";
+import { getSupabaseServer } from "./_shared/supabase.mts";
+import {
+  DIRECT_UPLOAD_BUCKET,
+  resolveContentType,
+  storagePathOf,
+} from "./_shared/upload-media.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import {
   applyOperatorMembershipGrant,
@@ -95,14 +100,38 @@ interface CollabComment {
 
 // ── Brand guide files (images / PDFs) ────────────────────────────────────────
 //
-// 브랜드가 주는 "기본 가이드"는 거의 항상 이미지나 PDF 파일로 협업 대화에 올라온다.
-// 그 파일을 파일명만 보고 넘기면 기획안을 쓸 수 없으므로, Blobs 에 저장된 실제 파일을
-// 꺼내 base64 로 모델에 함께 보낸다(클로드: image/document 블록, 제미나이: inlineData).
+// 브랜드가 주는 "기본 가이드"는 거의 항상 이미지나 PDF 파일로 올라온다. 그 파일을
+// 파일명만 보고 넘기면 기획안을 쓸 수 없으므로, 저장된 실제 파일을 꺼내 base64 로
+// 모델에 함께 보낸다(클로드: image/document 블록, 제미나이: inlineData).
+//
+// 파일이 있는 곳은 두 군데다. 업로드 경로가 한 번 바뀌었기 때문이다.
+//   · Netlify Blobs      `/api/images/<key>` — 함수가 파일을 받아 저장하던 예전 경로.
+//                        지금도 AI 대화창의 첨부(`/api/upload-image`)가 이쪽으로 간다.
+//   · 스토리지(Supabase) 공개 주소 — 지금 경로. 브라우저가 서명된 링크로 곧장 올린다.
+//                        브랜드가 진행 화면·자료함·캠페인 등록에 올리는 가이드 파일,
+//                        협업 대화의 첨부가 전부 이쪽이다.
+//
+// 두 번째를 빼놓은 것이 실제 고장이었다. 읽는 쪽이 Blobs 만 알고 있어서, 브랜드가
+// 진행 화면에 올린 가이드는 목록에 이름만 뜨고 내용은 한 번도 모델에 실리지 않았다.
+// 그런데 프롬프트에는 "가이드 파일이 첨부되어 있다"고 적혀 있으니, 모델은 읽지도 못한
+// 가이드를 읽은 것처럼 캠페인 이름표(제목·카테고리)만 보고 기획안을 지어냈다 —
+// 로션 캠페인에 패션 가이드가 붙어 있으면 가이드와 무관한 로션 기획안이 나왔다.
 //
 // 비용과 응답 시간이 파일 크기에 그대로 비례하므로 개수·용량에 상한을 둔다.
 // 파일 한 개 상한은 업로드 상한(10MB)과 맞춰, 올릴 수 있었던 파일이 여기서 조용히
 // 빠지는 일이 없게 한다.
 const GUIDE_MAX_FILES = 3;
+/**
+ * 캠페인 화면은 몇 장 더 읽는다.
+ *
+ * 타임라인 대화에서 가이드 파일은 배경 자료 중 하나지만, 캠페인 화면에서는 기획의
+ * 유일한 근거다. 그런데 브랜드 가이드는 PDF 한 장으로 오지 않는 일이 흔하다 —
+ * 촬영 가이드, 필수 표기, 금지 사항이 이미지 여러 장으로 쪼개져 올라온다. 3장에서
+ * 자르면 뒤쪽에 있던 필수 표기가 기획안에서 통째로 빠지고, 사용자는 그것을 답만
+ * 보고는 알 수 없다. 전체 용량 상한(GUIDE_MAX_TOTAL_BYTES)은 그대로이므로 비용이
+ * 무제한으로 늘지는 않는다.
+ */
+const GUIDE_MAX_FILES_CAMPAIGN = 5;
 const GUIDE_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const GUIDE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 // 모델이 실제로 읽을 수 있는 형식만 보낸다(svg·avif·heic·영상은 제외).
@@ -149,49 +178,101 @@ const blobKeyOf = (url?: string): string | null => {
   }
 };
 
+/** 저장된 파일의 바이트와 서버가 정해 둔 형식. 어느 저장소에서 왔는지는 감춘다. */
+interface StoredBytes {
+  bytes: ArrayBuffer;
+  /** 저장할 때 서버가 정한 형식. 모르면 빈 문자열(호출하는 쪽이 확장자로 판단한다). */
+  contentType: string;
+}
+
 /**
- * 첨부 파일을 Blobs 에서 읽어 모델에 실을 수 있는 형태로 만든다.
+ * 파일 주소 하나를 실제 바이트로 바꾼다. 우리 저장소의 주소가 아니면 null.
+ *
+ * 두 저장소를 여기서 함께 다룬다 — 부르는 쪽이 "이 파일은 어디에 있지"를 알아야 할
+ * 이유가 없고, 한쪽만 아는 코드가 조용히 파일을 빠뜨리는 것이 바로 이 기능의 고장
+ * 원인이었다.
+ */
+async function readStoredFile(url?: string): Promise<StoredBytes | null> {
+  const blobKey = blobKeyOf(url);
+  if (blobKey) {
+    const stored = await getStore("images").getWithMetadata(blobKey, { type: "arrayBuffer" });
+    if (!stored?.data) return null;
+    return {
+      bytes: stored.data as ArrayBuffer,
+      contentType: String((stored.metadata as any)?.contentType || ""),
+    };
+  }
+
+  const path = storagePathOf(url);
+  if (path) {
+    // 공개 버킷이라 주소를 그대로 받아 올 수도 있지만, 경로만 뽑아 스토리지에서 읽는다.
+    // 그러면 임의의 주소를 서버가 대신 받아 오는 길을 만들지 않는다.
+    const { data, error } = await getSupabaseServer()
+      .storage.from(DIRECT_UPLOAD_BUCKET)
+      .download(path);
+    if (error || !data) return null;
+    return { bytes: await data.arrayBuffer(), contentType: String((data as Blob).type || "") };
+  }
+
+  return null;
+}
+
+/**
+ * 첨부 파일을 저장소에서 읽어 모델에 실을 수 있는 형태로 만든다.
  * 형식은 요청 본문 값이 아니라 저장할 때 서버가 정해 둔 값(또는 확장자)으로 판단한다.
  * 읽지 못한 파일은 조용히 버리지 않고 이유와 함께 돌려준다 — 모델이 "이 파일은 못 읽었다"고
- * 사용자에게 알려 줄 수 있어야 한다.
+ * 사용자에게 알려 줄 수 있어야 하고, 무엇보다 못 읽은 가이드를 읽은 것처럼 답해서는
+ * 안 되기 때문이다.
  */
 async function loadGuideFiles(
   refs: GuideRef[],
+  maxFiles: number = GUIDE_MAX_FILES,
 ): Promise<{ files: GuideFile[]; skipped: string[] }> {
   const files: GuideFile[] = [];
   const skipped: string[] = [];
   if (refs.length === 0) return { files, skipped };
 
-  const store = getStore("images");
   const seen = new Set<string>();
   let total = 0;
 
   for (const ref of refs) {
-    const key = blobKeyOf(ref?.url);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    const url = String(ref?.url || "");
+    const fileName = String(
+      ref?.fileName || url.split(/[?#]/)[0].split("/").pop() || "첨부 파일",
+    ).slice(0, 120);
 
-    const fileName = String(ref?.fileName || key.split("/").pop() || "첨부 파일").slice(0, 120);
-    if (files.length >= GUIDE_MAX_FILES) {
-      skipped.push(`${fileName}(한 번에 ${GUIDE_MAX_FILES}개까지만 읽을 수 있음)`);
+    // 같은 파일이 두 곳(자료함·대화 첨부)에 걸쳐 있을 수 있다. 주소로 한 번만 읽는다.
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    if (files.length >= maxFiles) {
+      skipped.push(`${fileName}(한 번에 ${maxFiles}개까지만 읽을 수 있음)`);
       continue;
     }
+
+    // 우리 저장소의 주소가 아니면 읽어 볼 자리조차 없다. 이유를 나눠 두는 것은
+    // 사용자가 할 수 있는 일이 다르기 때문이다 — 자리가 없으면 파일을 다시 올려야
+    // 하고, 자리에 없으면 파일이 지워진 것이다.
+    if (!blobKeyOf(url) && !storagePathOf(url)) {
+      skipped.push(`${fileName}(저장소 주소가 아니라 열어 볼 수 없음 — 다시 올려 주세요)`);
+      continue;
+    }
+
     let mediaType = resolveContentType(fileName, String(ref?.fileType || "")) || "";
 
     try {
-      const blob = await store.getWithMetadata(key, { type: "arrayBuffer" });
-      if (!blob?.data) {
+      const stored = await readStoredFile(url);
+      if (!stored) {
         skipped.push(`${fileName}(파일을 찾지 못함)`);
         continue;
       }
-      const stored = String((blob.metadata as any)?.contentType || "");
-      if (stored) mediaType = stored;
+      if (stored.contentType) mediaType = stored.contentType;
       if (mediaType !== GUIDE_PDF_TYPE && !GUIDE_IMAGE_TYPES.has(mediaType)) {
         skipped.push(`${fileName}(이미지·PDF 가 아니라 열어 볼 수 없음)`);
         continue;
       }
 
-      const bytes = blob.data as ArrayBuffer;
+      const bytes = stored.bytes;
       if (bytes.byteLength === 0) {
         skipped.push(`${fileName}(빈 파일)`);
         continue;
@@ -469,8 +550,10 @@ export default async (req: Request) => {
   const campaignFocusId = String(body?.campaignFocusId || "");
   // 사용자가 AI 대화창에서 직접 올린 파일(브랜드 가이드 등). 실제 파일은 업로드 시
   // Blobs 에 저장되므로 여기서는 주소만 받는다.
+  // 한 번에 읽을 파일 수. 캠페인 화면만 더 넉넉하다(가이드가 기획의 유일한 근거라서).
+  const guideMaxFiles = scope === "campaign" ? GUIDE_MAX_FILES_CAMPAIGN : GUIDE_MAX_FILES;
   const clientAttachments: GuideRef[] = Array.isArray(body?.attachments)
-    ? (body.attachments as GuideRef[]).slice(0, GUIDE_MAX_FILES)
+    ? (body.attachments as GuideRef[]).slice(0, guideMaxFiles)
     : [];
   // Which model to answer with. Gemini (default) is bundled into the AI memberships;
   // Claude is the optional premium model gated on the separately-purchased Claude plan.
@@ -658,16 +741,16 @@ export default async (req: Request) => {
   );
   const guideCandidates =
     scope === "campaign"
-      ? campaignGuideCandidates.slice(0, GUIDE_MAX_FILES)
+      ? campaignGuideCandidates.slice(0, guideMaxFiles)
       : clientAttachments.length > 0
         ? clientAttachments
         : wantsGuide
-          ? discoveredGuideRefs.slice(0, GUIDE_MAX_FILES)
+          ? discoveredGuideRefs.slice(0, guideMaxFiles)
           : [];
   let guideFiles: GuideFile[] = [];
   let skippedGuideFiles: string[] = [];
   try {
-    const loaded = await loadGuideFiles(guideCandidates);
+    const loaded = await loadGuideFiles(guideCandidates, guideMaxFiles);
     guideFiles = loaded.files;
     skippedGuideFiles = loaded.skipped;
   } catch (e) {
@@ -847,31 +930,75 @@ export default async (req: Request) => {
   // 프롬프트에 있으면 모델은 묻지 않은 다른 캠페인 이야기를 꺼낸다. 하는 일이 다르면
   // 지시문도 다른 것이 맞다.
   //
-  // 진행 화면에 브랜드 가이드가 없으면 캠페인 지시문은 "기획안을 지어내지 말고 가이드
-  // 파일을 요청하라"고 말한다. 그런데 사용자가 방금 그 가이드를 대화에 직접 첨부한
-  // 경우가 있다(담당자가 카톡으로 준 PDF 를 올리는 일이 흔하다). 그때까지 파일을
-  // 요청하면, 사용자는 올린 파일을 앞에 두고 다시 올리라는 말을 듣는다. 그래서 이번
-  // 요청에 실제로 실린 파일을 지시문 끝에 한 번 더 못 박는다.
-  const attachedGuideOverride =
-    campaignContext && !campaignContext.hasProgressGuide && guideFiles.length > 0
-      ? `\n\n[이번 요청에 실제로 첨부된 파일 ${guideFiles.length}개] ` +
+  // 이번 요청에 가이드 파일이 "실제로" 실렸는지를 지시문 끝에 못 박는다.
+  //
+  // 캠페인 프롬프트의 가이드 목록은 DB 에 적힌 파일 이름이고, 그 파일이 실제로 모델에
+  // 실렸는지는 여기서(저장소에서 읽어 본 뒤에야) 정해진다. 두 값이 어긋난 채로 보내면
+  // 모델은 이름만 본 파일을 읽은 것처럼 답한다 — 기획안에서 그것은 "가이드에 있었다"고
+  // 지어낸 필수 표기이고, 읽지 못한 가이드 대신 캠페인 이름표(제목·카테고리)를 근거로
+  // 삼은 기획안이다. 그래서 실린 파일과 못 읽은 파일을 마지막에 다시 한 번 적는다.
+  //
+  // 사용자가 방금 대화에 직접 올린 가이드도 이 항목으로 함께 해결된다(담당자가 카톡으로
+  // 준 PDF 를 올리는 일이 흔하다). 진행 화면에 파일이 없다는 이유로 "가이드를 올려
+  // 달라"고 답하면, 사용자는 방금 올린 파일을 앞에 두고 다시 올리라는 말을 듣는다.
+  const campaignGuideStatus = (() => {
+    if (!campaignContext) return "";
+
+    if (guideFiles.length > 0) {
+      return (
+        `\n\n[이번 요청에 실제로 첨부되어 읽을 수 있는 가이드 파일 ${guideFiles.length}개] ` +
         guideFiles.map((f) => f.fileName).join(", ") +
-        "\n위 '브랜드 가이드 파일' 항목에 파일이 없다고 적혀 있어도, 이 파일들은 지금 이 " +
-        "요청에 함께 실려 있습니다. 이 파일을 끝까지 읽고 그 내용을 근거로 기획안·본문을 " +
-        "쓰세요. 가이드 파일을 다시 올려 달라고 하지 마세요."
-      : "";
+        "\n이 파일들은 이 요청에 이미지·PDF 로 함께 실려 있습니다. 위 목록에 파일이 없다고 " +
+        "적혀 있어도 이 항목이 최종입니다 — 가이드 파일을 다시 올려 달라고 하지 마세요.\n" +
+        "기획안·본문을 쓰기 전에 이 파일을 끝까지 읽고, 파일에 적힌 내용만을 근거로 쓰세요. " +
+        "파일 내용이 위 캠페인 이름표(제목·카테고리·형식)와 달라 보여도 **파일을 따르세요.** " +
+        (skippedGuideFiles.length
+          ? `\n다만 다음 파일은 열어 보지 못했습니다: ${skippedGuideFiles.join(", ")}. ` +
+            "이 파일 내용은 아는 척하지 말고, 답 끝에 한 줄로 알려 주세요."
+          : "")
+      );
+    }
+
+    // 읽을 파일이 하나도 없다. 목록에는 이름이 있는데 못 읽은 경우가 가장 위험하다 —
+    // 모델이 목록만 보고 "가이드대로 썼다"는 기획안을 내놓기 때문이다.
+    if (campaignGuideCandidates.length > 0) {
+      return (
+        "\n\n[중요 · 이번 요청에 실제로 첨부된 가이드 파일: 0개]\n" +
+        "위 목록에 가이드 파일 이름이 적혀 있지만, 그 파일을 열지 못해 내용이 이 요청에 " +
+        "실리지 않았습니다" +
+        (skippedGuideFiles.length ? `(${skippedGuideFiles.join(", ")})` : "") +
+        ".\n" +
+        "그러므로 가이드 내용을 아는 척하지 마세요. 기획안이나 본문을 요청받았다면, " +
+        "**가이드 파일을 열지 못해 그 내용대로 쓸 수 없다는 사실을 먼저 알리고** 파일을 " +
+        "이 대화에 다시 첨부해 달라고 안내하세요. 캠페인 제목·카테고리만 보고 제품 기획안을 " +
+        "지어내지 마세요. 사용자가 그래도 초안을 원하면 무엇을 가정했는지 밝히고 쓰세요."
+      );
+    }
+
+    return "";
+  })();
 
   const systemInstruction = campaignContext
     ? CAMPAIGN_AI_SYSTEM_INSTRUCTION +
       `\n\n아래는 지금 열어 둔 캠페인의 사실입니다. 캠페인에 관한 것은 모두 이 데이터와 ` +
       `첨부 파일을 근거로만 답하고, 없는 값은 지어내지 마세요.\n${campaignContext.text}` +
-      attachedGuideOverride
+      campaignGuideStatus
     : baseSystemInstruction;
 
   // 캠페인 화면은 기획안 전체를 다시 내놓는다(장면 5개에 설명·자막·나레이션, 거기에
   // 기계가 읽을 JSON 까지). 3072 로는 JSON 중간에 잘려 반영 버튼이 안 뜬다.
   // 타임라인 쪽 한도는 건드리지 않는다.
   const maxOutputTokens = scope === "campaign" ? 4096 : 3072;
+
+  // 무엇을 근거로 쓴 기획안인지 화면에도 알려 준다.
+  //
+  // 답만 보면 가이드를 읽고 쓴 것인지 알 수 없다. 실제로 읽은 파일 이름이 답 위에
+  // 보이면, 사용자는 엉뚱한 기획안을 받았을 때 "가이드를 못 읽었구나"를 바로 알고
+  // 파일을 다시 올릴 수 있다. 캠페인 화면에서만 내려보낸다.
+  const guideStatus =
+    scope === "campaign"
+      ? { read: guideFiles.map((f) => f.fileName), unread: skippedGuideFiles }
+      : null;
 
   // 초안 떼어내기. 타임라인 화면의 답은 손대지 않는다 — 그쪽 모델은 표식을 붙이라는
   // 지시를 받지 않았으므로 검사할 것도 없다.
@@ -992,6 +1119,7 @@ export default async (req: Request) => {
       return Response.json({
         reply,
         draft,
+        guide: guideStatus,
         model: "claude",
         creditsUsed: charged,
         balanceCredits: saved.balanceCredits,
@@ -1073,6 +1201,7 @@ export default async (req: Request) => {
     return Response.json({
       reply,
       draft,
+      guide: guideStatus,
       model: "gemini",
       remaining: Math.max(0, DAILY_LIMIT - used - 1),
     });
