@@ -55,7 +55,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) =
               <span className="text-slate-400 font-black">{language === 'en' ? 'Address' : '사업장 주소'}</span> {language === 'en' ? '7F #2, 26 Buil-ro 199beon-gil, Wonmi-gu, Bucheon-si, Gyeonggi-do, Korea' : '경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)'}
             </p>
             <p className="text-slate-500 text-sm font-bold">
-              <span className="text-slate-400 font-black">{language === 'en' ? 'Customer Support' : '고객센터'}</span> 010-3563-8940 | woojin8940@inplace-ad.com
+              <span className="text-slate-400 font-black">{language === 'en' ? 'Customer Support' : '고객센터'}</span> 070-7954-8452 | woojin8940@inplace-ad.com
             </p>
           </div>
           <div className="mt-4 flex gap-4">

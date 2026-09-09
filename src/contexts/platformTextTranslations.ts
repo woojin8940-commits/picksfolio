@@ -486,7 +486,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "계정이 연동되었습니다. 지표는 잠시 후 자동으로 채워집니다.": "Your account has been linked. The indicators will automatically populate after a while.",
   "고객 닉네임": "Customer Nickname",
   "고객센터": "Customer Support",
-  "고객센터 010-3563-8940 | woojin8940@inplace-ad.com": "Customer Center 010-3563-8940 | woojin8940@inplace-ad.com",
+  "고객센터 070-7954-8452 | woojin8940@inplace-ad.com": "Customer Center 070-7954-8452 | woojin8940@inplace-ad.com",
   "고객센터를 통해 서면, 이메일로 요청 시 지체 없이 조치하겠습니다.": "We will take action without delay upon request in writing or via email through the customer center.",
   "고객지원:": "Customer Support:",
   "고급스러운": "Luxurious",

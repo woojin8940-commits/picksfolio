@@ -11,6 +11,7 @@ import {
   parseAnchor,
   sceneAnchor,
   sceneIsEmpty,
+  scenesToBody,
 } from '../../utils/collabScenes';
 import {
   CollabStepTurn,
@@ -647,10 +648,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       return;
     }
     // 장면을 줄글로도 함께 보낸다. 담당자 화면과 알림처럼 글로만 읽는 자리가 있다.
-    const body = filled
-      .map((s, i) => `장면 ${i + 1}\n설명: ${s.visual}${s.subtitle.trim() ? `\n자막: ${s.subtitle}` : ''}`)
-      .join('\n\n');
-    await saveWork('plan', { scenes: filled, body }, planFile);
+    await saveWork('plan', { scenes: filled, body: scenesToBody(filled) }, planFile);
   };
 
   /** 저장한 캡션과 지금 칸에 적힌 글이 다른가. 캡션만 고쳐 다시 내는 경우를 위해. */

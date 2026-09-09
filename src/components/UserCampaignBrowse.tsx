@@ -51,6 +51,15 @@ const CATEGORIES_EN: Record<string, string> = {
   entertainment: 'Entertainment', education: 'Education', other: 'Other',
 };
 
+/**
+ * 카테고리 칩 줄에서 내린 카테고리.
+ *
+ * 엔터테인먼트는 실제로 쓰이지 않는데 칩이 가로 스크롤 끝에서 잘려 보였다.
+ * 표시용 이름(CATEGORIES_KO/EN)은 남겨 둔다 — 예전에 이 카테고리로 등록된
+ * 캠페인이 있으면 상세와 카드에서는 이름이 그대로 나와야 한다.
+ */
+const RETIRED_CATEGORIES = new Set(['entertainment']);
+
 const PAGE_SIZE = 12;
 
 type CampaignBrowseListCache = {
@@ -910,7 +919,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           >
             {isEn ? 'All Categories' : '전체 카테고리'}
           </button>
-          {Object.entries(categoriesMap).map(([value, label]) => (
+          {Object.entries(categoriesMap)
+            .filter(([value]) => !RETIRED_CATEGORIES.has(value))
+            .map(([value, label]) => (
             <button
               key={value}
               onClick={() => changeCategory(value)}
@@ -946,14 +957,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
               ? (isEn ? 'Try changing your category or filter selection' : '카테고리나 진행 방식을 바꿔 보세요')
               : (isEn ? 'New campaigns will be listed here once registered' : '새로운 캠페인이 등록되면 여기에 표시됩니다')}
           </p>
-          {(activeCategory || activeFilter) && (
-            <button
-              onClick={() => { changeFilter(''); changeCategory(''); }}
-              className="mt-4 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black"
-            >
-              {isEn ? 'Reset All Filters' : '조건 모두 해제'}
-            </button>
-          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5 md:gap-5 py-1">
