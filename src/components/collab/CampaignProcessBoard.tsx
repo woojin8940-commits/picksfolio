@@ -1319,7 +1319,8 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             {isInfluencer ? (
               <>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  장면 하나에 설명과 자막을 적고, 아래 + 로 다음 장면을 추가하세요. 브랜드는 장면마다 피드백을 답니다.
+                  장면 하나에 설명 · 자막 · 나레이션을 적고, 아래 + 로 다음 장면을 추가하세요. 자막과
+                  나레이션은 없으면 비워 두셔도 됩니다. 브랜드는 장면마다 피드백을 답니다.
                 </p>
                 {scenes.map((scene, i) => (
                   <div key={i} className="rounded-lg border border-slate-200 p-3">
@@ -1350,6 +1351,18 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                           onChange={e => patchScene(i, 'subtitle', e.target.value)}
                           placeholder="화면에 뜨는 글자"
                           className={fieldCls(scene.subtitle)}
+                        />
+                      </Field>
+                      {/* 나레이션은 저장 구조(StoryboardScene)와 검수 화면에는 처음부터
+                          있었는데 이 칸만 없었다. 그래서 대사를 쓰려면 설명 칸에 섞어
+                          적어야 했고, 브랜드는 검수 화면의 빈 나레이션 칸을 보게 됐다. */}
+                      <Field label="나레이션">
+                        <textarea
+                          value={scene.narration}
+                          onChange={e => patchScene(i, 'narration', e.target.value)}
+                          rows={2}
+                          placeholder="말하는 대사 (없으면 비워 두세요)"
+                          className={`${fieldCls(scene.narration)} resize-none leading-relaxed`}
                         />
                       </Field>
                     </div>
@@ -1389,15 +1402,21 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     <span className="text-xs font-black text-slate-900">장면 {i + 1}</span>
                     <div className="mt-1.5 space-y-1.5">
                       <div className="flex gap-2">
-                        <span className="text-[10px] font-black text-slate-400 w-8 flex-shrink-0 pt-0.5">설명</span>
+                        <span className="text-[10px] font-black text-slate-400 w-12 flex-shrink-0 pt-0.5">설명</span>
                         <p className="flex-1 text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
                           {scene.visual || <span className="text-slate-300">비어 있음</span>}
                         </p>
                       </div>
                       <div className="flex gap-2">
-                        <span className="text-[10px] font-black text-slate-400 w-8 flex-shrink-0 pt-0.5">자막</span>
+                        <span className="text-[10px] font-black text-slate-400 w-12 flex-shrink-0 pt-0.5">자막</span>
                         <p className="flex-1 text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
                           {scene.subtitle || <span className="text-slate-300">없음</span>}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="text-[10px] font-black text-slate-400 w-12 flex-shrink-0 pt-0.5">나레이션</span>
+                        <p className="flex-1 text-xs text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                          {scene.narration || <span className="text-slate-300">없음</span>}
                         </p>
                       </div>
                     </div>
