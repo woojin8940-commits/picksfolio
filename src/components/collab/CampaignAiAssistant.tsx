@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiService, authHeaders } from '../../services/apiService';
 import { membershipCovers } from '../../utils/membershipTiers';
-import { StoryboardScene, normalizeScenes, scenesToBody } from '../../utils/collabScenes';
+import {
+  CAPTION_MAX_LENGTH,
+  StoryboardScene,
+  emptyScene,
+  normalizeScenes,
+  sceneIsEmpty,
+  scenesToBody,
+} from '../../utils/collabScenes';
 import { AiMarkdown } from '../AiMarkdown';
 
 /**
@@ -18,10 +25,20 @@ import { AiMarkdown } from '../AiMarkdown';
  * 피드백을 직접 읽는다. 본문으로 받으면 남의 협업 아이디를 끼워 넣을 수 있고, 이
  * 화면이 들고 있는 요약에는 정작 필요한 것이 빠져 있다.
  *
- * ── 검토하고 반영하기 ──────────────────────────────────────────────────
+ * ── 고치고 반영하기 ────────────────────────────────────────────────────
  * AI 가 기획안을 새로 쓰거나 고치면, 서버가 답에서 떼어낸 초안(draft)이 같이 온다.
- * 그 초안을 답 아래 카드로 보여 주고, 사용자가 읽어 본 뒤 버튼을 누르면 기획안에
- * 그대로 저장된다. 저장은 기획안 칸의 '등록하기'와 **완전히 같은 길**로 간다 —
+ * 그 초안을 답 아래 카드로 보여 주는데, 카드는 읽기 전용이 아니다 — 장면 설명·자막·
+ * 나레이션 칸을 그 자리에서 직접 고칠 수 있고, 장면을 더하거나 뺄 수도 있다. AI 초안이
+ * 대개 90% 맞고 한두 문장만 어긋나기 때문이다. 그때 "이 부분만 고쳐 줘"라고 다시
+ * 부탁하면 한 번 더 기다려야 하고, 모델이 손대지 말라던 장면까지 다시 쓰는 일도 있다.
+ * 사용자가 한 글자만 고치고 싶을 때 그 한 글자를 직접 고치는 것이 가장 빠르고 정확하다.
+ *
+ * 그래서 카드에 보이는 값이 곧 저장될 값이다. AI 원안은 따로 들고 있다가(draftOriginal)
+ * '원안으로 되돌리기'로 언제든 돌아갈 수 있게 한다 — 고치다가 지워 버린 문장을 되찾는
+ * 유일한 길이 AI 에게 다시 부탁하는 것이면 안 된다.
+ *
+ * 사용자가 읽어 보고(또는 고치고) 버튼을 누르면 기획안에 그대로 저장된다. 저장은
+ * 기획안 칸의 '등록하기'와 **완전히 같은 길**로 간다 —
  * `save_step_work`. 그래서 버전이 쌓이고(수정본 구조), 그 단계에 열려 있던 브랜드
  * 피드백이 반영 완료로 닫히는 것도 손으로 낸 것과 똑같이 일어난다. AI 전용 저장
  * 경로를 따로 두면 두 길이 언젠가 어긋나고, 어긋난 쪽으로 낸 기획안은 브랜드
@@ -42,8 +59,13 @@ type CampaignDraft =
 interface AiMessage {
   role: 'user' | 'assistant';
   content: string;
-  /** 이 답에 붙어 온 반영 가능한 초안. */
+  /**
+   * 이 답에 붙어 온 초안. 카드에서 고친 값이 여기에 그대로 반영되고, 반영 버튼은 이
+   * 값을 저장한다 — 화면에 보이는 것과 저장되는 것이 다르면 안 된다.
+   */
   draft?: CampaignDraft | null;
+  /** AI 가 처음 준 초안. '원안으로 되돌리기'와 '고쳤음' 표시에만 쓴다. */
+  draftOriginal?: CampaignDraft | null;
   /** 반영 버튼을 눌러 저장이 끝났는가. 같은 초안을 두 번 저장하지 않게 잠근다. */
   applied?: boolean;
 }
@@ -71,8 +93,8 @@ const QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string; needsP
     icon: '📄',
     label: '기획안 작성',
     prompt:
-      '이 캠페인의 기획안을 작성해 주세요. 브랜드가 올린 가이드라인 파일을 먼저 읽고, 꼭 지켜야 할 ' +
-      '표기와 필수 장면을 실제 장면 안에 넣어서 장면별로 써 주세요.',
+      '브랜드가 진행사항에 올린 가이드 파일을 먼저 끝까지 읽고, 그 내용대로 이 캠페인의 기획안을 ' +
+      '작성해 주세요. 가이드에 있는 필수 표기와 필수 장면을 실제 장면 안에 넣어서 장면별로 써 주세요.',
   },
   {
     icon: '✍️',
@@ -86,8 +108,8 @@ const QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string; needsP
     icon: '📝',
     label: '본문 작성',
     prompt:
-      '이 캠페인 게시물에 쓸 인스타그램 본문을 써 주세요. 첫 줄로 시선을 잡고, 가이드라인의 필수 문구와 ' +
-      '해시태그, 계정 태그를 빠짐없이 넣어 주세요.',
+      '브랜드가 올린 가이드 파일을 읽고, 이 캠페인 게시물에 쓸 인스타그램 본문을 써 주세요. 첫 줄로 ' +
+      '시선을 잡고, 가이드의 필수 문구와 해시태그, 계정 태그를 빠짐없이 넣어 주세요.',
   },
   {
     icon: '🔁',
@@ -98,10 +120,19 @@ const QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string; needsP
     icon: '📌',
     label: '가이드 필수사항 정리',
     prompt:
-      '브랜드가 올린 가이드라인 파일을 읽고, 이 캠페인에서 반드시 지켜야 할 것과 하면 안 되는 것을 ' +
-      '체크리스트로 정리해 주세요. 가이드에 없어서 담당자에게 확인해야 할 것도 따로 알려 주세요.',
+      '브랜드가 진행사항에 올린 가이드 파일을 읽고, 이 캠페인에서 반드시 지켜야 할 것과 하면 안 되는 ' +
+      '것을 체크리스트로 정리해 주세요. 가이드에 없어서 담당자에게 확인해야 할 것도 따로 알려 주세요.',
   },
 ];
+
+/**
+ * 저장 한도. api-collab-workflow 의 save_step_work 와 같은 값이다 — 서버가 조용히
+ * 잘라 버리는 것보다, 칸에서 더 안 써지는 편이 낫다.
+ */
+const MAX_SCENES = 40;
+const MAX_VISUAL = 2000;
+const MAX_SUBTITLE = 1000;
+const MAX_NARRATION = 2000;
 
 const MEMBERSHIP_NOTICE =
   'AI 어시스턴트는 AI 협업 멤버십(6,900원) 이상에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.';
@@ -143,35 +174,45 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
   // 서버도 같은 값을 DB 에서 다시 읽는다. 여기서 보는 것은 화면에 쓰기 위한 것이다 —
   // 브랜드 피드백이 몇 건 열려 있는지 보이지 않으면, 사용자는 AI 가 그것을 읽고
   // 고칠 수 있다는 것을 모른 채 피드백을 직접 옮겨 적는다.
-  const { planScenes, hasPlan, planVersion, hasCaption, videoFileReady, openFeedbackCount } =
-    useMemo(() => {
-      const deliverables: any[] = Array.isArray(detail?.deliverables) ? detail.deliverables : [];
-      const feedbacks: any[] = Array.isArray(detail?.feedbacks) ? detail.feedbacks : [];
-      const lastOf = (keys: string[], kind: string) => {
-        const rows = deliverables.filter(
-          (d: any) => keys.includes(String(d.stageKey)) || String(d.kind) === kind,
-        );
-        return rows.length ? rows[rows.length - 1] : null;
-      };
-      const plan = lastOf(PLAN_STAGE_KEYS, 'plan');
-      const video = lastOf(VIDEO_STAGE_KEYS, 'video');
-      const scenes = normalizeScenes(plan?.payload?.scenes);
-      return {
-        planScenes: scenes,
-        hasPlan: scenes.length > 0 || Boolean(String(plan?.payload?.body || '').trim()),
-        planVersion: Number(plan?.version || 0),
-        hasCaption: Boolean(String(video?.payload?.caption || '').trim()),
-        // 본문만 고쳐 다시 낼 수 있는지. 초안 영상이 한 번도 올라가지 않았으면
-        // 서버가 "초안 영상 파일을 올려 주세요"로 막는다(save_step_work 규칙).
-        videoFileReady: Boolean(String(video?.payload?.fileUrl || '').trim()),
-        openFeedbackCount: feedbacks.filter(
-          (f: any) =>
-            ['open', 'relayed'].includes(String(f.status)) &&
-            (PLAN_STAGE_KEYS.includes(String(f.stageKey)) ||
-              VIDEO_STAGE_KEYS.includes(String(f.stageKey))),
-        ).length,
-      };
-    }, [detail]);
+  const {
+    planScenes,
+    hasPlan,
+    planVersion,
+    hasCaption,
+    videoFileReady,
+    openFeedbackCount,
+    guideFileCount,
+  } = useMemo(() => {
+    const deliverables: any[] = Array.isArray(detail?.deliverables) ? detail.deliverables : [];
+    const feedbacks: any[] = Array.isArray(detail?.feedbacks) ? detail.feedbacks : [];
+    const lastOf = (keys: string[], kind: string) => {
+      const rows = deliverables.filter(
+        (d: any) => keys.includes(String(d.stageKey)) || String(d.kind) === kind,
+      );
+      return rows.length ? rows[rows.length - 1] : null;
+    };
+    const plan = lastOf(PLAN_STAGE_KEYS, 'plan');
+    const video = lastOf(VIDEO_STAGE_KEYS, 'video');
+    const scenes = normalizeScenes(plan?.payload?.scenes);
+    return {
+      planScenes: scenes,
+      hasPlan: scenes.length > 0 || Boolean(String(plan?.payload?.body || '').trim()),
+      planVersion: Number(plan?.version || 0),
+      hasCaption: Boolean(String(video?.payload?.caption || '').trim()),
+      // 본문만 고쳐 다시 낼 수 있는지. 초안 영상이 한 번도 올라가지 않았으면
+      // 서버가 "초안 영상 파일을 올려 주세요"로 막는다(save_step_work 규칙).
+      videoFileReady: Boolean(String(video?.payload?.fileUrl || '').trim()),
+      openFeedbackCount: feedbacks.filter(
+        (f: any) =>
+          ['open', 'relayed'].includes(String(f.status)) &&
+          (PLAN_STAGE_KEYS.includes(String(f.stageKey)) ||
+            VIDEO_STAGE_KEYS.includes(String(f.stageKey))),
+      ).length,
+      // 기획의 근거가 되는 가이드 파일이 있는지. 하나도 없으면 AI 는 기획안을 쓰지
+      // 않고 가이드 파일을 요청하므로, 부탁하기 전에 그 사실을 먼저 알려 준다.
+      guideFileCount: Array.isArray(detail?.guideline?.files) ? detail.guideline.files.length : 0,
+    };
+  }, [detail]);
 
   useEffect(() => {
     let alive = true;
@@ -264,7 +305,13 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         } else {
           setMessages(prev => [
             ...prev,
-            { role: 'assistant', content: data.reply || '...', draft: data.draft || null },
+            {
+              role: 'assistant',
+              content: data.reply || '...',
+              draft: data.draft || null,
+              // 고치기 전의 값. 카드에서 고친 뒤에도 원안으로 돌아갈 수 있어야 한다.
+              draftOriginal: data.draft || null,
+            },
           ]);
         }
       } catch {
@@ -280,20 +327,30 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
   );
 
   /**
-   * 검토한 초안을 기획안에 그대로 반영한다.
+   * 카드에 보이는 초안(사용자가 고친 것까지)을 기획안에 그대로 반영한다.
    *
-   * 손으로 낼 때와 같은 action 을 같은 payload 모양으로 보낸다. 줄글 본문도 같은
-   * 함수(scenesToBody)로 만들어서, AI 로 낸 기획안과 직접 낸 기획안이 담당자 화면에서
-   * 다르게 보이지 않게 한다.
+   * 손으로 낼 때와 같은 action 을 같은 payload 모양으로 보낸다. 빈 장면을 걸러내고
+   * 줄글 본문을 만드는 것도 기획안 칸의 '등록하기'(CampaignProcessBoard 의 submitPlan)와
+   * 같은 함수로 한다 — AI 로 낸 기획안과 직접 낸 기획안이 담당자 화면에서 다르게
+   * 보이지 않아야 한다.
    */
   const applyDraft = useCallback(
     async (index: number, draft: CampaignDraft) => {
       if (applying >= 0) return;
+      const filledScenes = draft.kind === 'plan' ? draft.scenes.filter(s => !sceneIsEmpty(s)) : [];
+      if (draft.kind === 'plan' && filledScenes.length === 0) {
+        onNotify('장면 내용을 한 개 이상 채워 주세요.', 'error');
+        return;
+      }
+      if (draft.kind === 'caption' && !draft.text.trim()) {
+        onNotify('본문 내용을 입력해 주세요.', 'error');
+        return;
+      }
       setApplying(index);
       try {
         const payload =
           draft.kind === 'plan'
-            ? { stepKey: 'plan', scenes: draft.scenes, body: scenesToBody(draft.scenes) }
+            ? { stepKey: 'plan', scenes: filledScenes, body: scenesToBody(filledScenes) }
             : { stepKey: 'video', caption: draft.text };
         const res = await apiService.collabAction(
           collabId,
@@ -325,6 +382,53 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
   const dismissDraft = (index: number) =>
     setMessages(prev => prev.map((m, i) => (i === index ? { ...m, draft: null } : m)));
 
+  // ── 카드 안에서 초안 고치기 ────────────────────────────────────────────
+  //
+  // 고친 값은 그 답(message)에 그대로 얹는다. 별도의 '편집 중' 상태를 두지 않는 이유는,
+  // 대화가 길어지면 어느 카드의 편집본이었는지 짝을 맞춰야 하고 그 짝이 한 번 어긋나면
+  // 사용자가 A 카드에서 고친 문장이 B 기획안으로 저장되기 때문이다. 카드 = 저장될 값.
+  const patchDraft = (index: number, next: (draft: CampaignDraft) => CampaignDraft) =>
+    setMessages(prev =>
+      prev.map((m, i) => (i === index && m.draft && !m.applied ? { ...m, draft: next(m.draft) } : m)),
+    );
+
+  const patchScene = (index: number, sceneIndex: number, key: keyof StoryboardScene, value: string) =>
+    patchDraft(index, draft =>
+      draft.kind !== 'plan'
+        ? draft
+        : {
+            ...draft,
+            scenes: draft.scenes.map((s, i) => (i === sceneIndex ? { ...s, [key]: value } : s)),
+          },
+    );
+
+  const addScene = (index: number) =>
+    patchDraft(index, draft =>
+      draft.kind !== 'plan' || draft.scenes.length >= MAX_SCENES
+        ? draft
+        : { ...draft, scenes: [...draft.scenes, emptyScene()] },
+    );
+
+  const removeScene = (index: number, sceneIndex: number) =>
+    patchDraft(index, draft =>
+      draft.kind !== 'plan' || draft.scenes.length <= 1
+        ? draft
+        : { ...draft, scenes: draft.scenes.filter((_, i) => i !== sceneIndex) },
+    );
+
+  const patchCaption = (index: number, value: string) =>
+    patchDraft(index, draft =>
+      draft.kind !== 'caption' ? draft : { ...draft, text: value.slice(0, CAPTION_MAX_LENGTH) },
+    );
+
+  /** AI 가 처음 준 초안으로 되돌린다. */
+  const resetDraft = (index: number) =>
+    setMessages(prev =>
+      prev.map((m, i) =>
+        i === index && m.draftOriginal && !m.applied ? { ...m, draft: m.draftOriginal } : m,
+      ),
+    );
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -332,15 +436,28 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     }
   };
 
-  /** 초안 검토 카드. 저장되기 전의 내용을 기획안 칸과 같은 모양으로 보여 준다. */
+  /**
+   * 초안 카드. 저장되기 전의 내용을 기획안 칸과 같은 모양으로 보여 주고, 그 자리에서
+   * 고칠 수 있게 한다. 여기 보이는 값이 곧 반영 버튼이 저장하는 값이다.
+   */
   const renderDraftCard = (index: number, message: AiMessage) => {
     const draft = message.draft;
     if (!draft) return null;
     const isPlan = draft.kind === 'plan';
     const busy = applying === index;
+    const locked = Boolean(message.applied) || busy;
     // 본문만 고쳐 내려면 이미 올라간 초안 영상이 있어야 한다. 없으면 눌러도 서버가
     // 막으므로, 버튼을 잠그고 이유를 먼저 보여 준다.
     const blocked = !isPlan && !videoFileReady;
+    const edited =
+      Boolean(message.draftOriginal) &&
+      JSON.stringify(message.draftOriginal) !== JSON.stringify(draft);
+    // 저장할 수 있는 상태인가. 서버 규칙(save_step_work)과 같은 기준으로 미리 본다.
+    const filledCount = isPlan ? draft.scenes.filter(s => !sceneIsEmpty(s)).length : 0;
+    const emptyDraft = isPlan ? filledCount === 0 : !draft.text.trim();
+
+    const fieldCls =
+      'w-full rounded-lg border border-violet-100 bg-white px-2.5 py-2 text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 focus:outline-none focus:border-violet-400 disabled:bg-slate-50 disabled:text-slate-500 transition-colors';
 
     return (
       <div className="mt-2 rounded-2xl border-2 border-violet-200 bg-violet-50/40 overflow-hidden">
@@ -351,40 +468,112 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
               {isPlan
                 ? `AI 기획안 초안 · 장면 ${draft.scenes.length}개`
                 : `AI 본문 초안 · ${draft.text.length}자`}
+              {edited && !message.applied && (
+                <span className="ml-1.5 align-middle px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700 text-[9px] font-black">
+                  직접 수정함
+                </span>
+              )}
             </p>
             <p className="text-[10px] font-bold text-slate-500">
               {message.applied
                 ? isPlan
                   ? '기획안에 반영했습니다.'
                   : '본문에 반영했습니다.'
-                : '읽어 보고 아래 버튼을 누르면 이 내용이 그대로 저장됩니다.'}
+                : '칸을 눌러 직접 고칠 수 있어요. 아래 버튼을 누르면 고친 내용이 그대로 저장됩니다.'}
             </p>
           </div>
+          {edited && !message.applied && (
+            <button
+              type="button"
+              onClick={() => resetDraft(index)}
+              disabled={busy}
+              className="shrink-0 text-[10px] font-black text-slate-400 hover:text-violet-700 disabled:opacity-40 transition-colors"
+            >
+              원안으로
+            </button>
+          )}
         </div>
 
-        <div className="px-3.5 py-3 max-h-[340px] overflow-y-auto space-y-2.5">
+        <div className="px-3.5 py-3 max-h-[420px] overflow-y-auto space-y-2.5">
           {isPlan ? (
-            draft.scenes.map((s, i) => (
-              <div key={i} className="rounded-xl bg-white border border-violet-100 px-3 py-2.5">
-                <p className="text-[10px] font-black text-violet-700 mb-1">장면 {i + 1}</p>
-                <p className="text-[12px] text-slate-800 leading-relaxed whitespace-pre-wrap">{s.visual}</p>
-                {s.subtitle.trim() && (
-                  <p className="mt-1.5 text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                    <span className="font-black text-slate-400">자막 </span>
-                    {s.subtitle}
-                  </p>
-                )}
-                {s.narration.trim() && (
-                  <p className="mt-1 text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                    <span className="font-black text-slate-400">나레이션 </span>
-                    {s.narration}
-                  </p>
-                )}
-              </div>
-            ))
+            <>
+              {draft.scenes.map((s, i) => (
+                <div key={i} className="rounded-xl bg-white border border-violet-100 px-3 py-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-black text-violet-700">장면 {i + 1}</p>
+                    {!locked && draft.scenes.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeScene(index, i)}
+                        className="text-[10px] font-black text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        삭제
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 mb-1">설명</p>
+                      <textarea
+                        value={s.visual}
+                        onChange={e => patchScene(index, i, 'visual', e.target.value)}
+                        disabled={locked}
+                        rows={3}
+                        maxLength={MAX_VISUAL}
+                        placeholder="어떤 장면을 어떻게 찍는지"
+                        className={`${fieldCls} resize-none`}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 mb-1">자막</p>
+                      <input
+                        value={s.subtitle}
+                        onChange={e => patchScene(index, i, 'subtitle', e.target.value)}
+                        disabled={locked}
+                        maxLength={MAX_SUBTITLE}
+                        placeholder="화면에 뜨는 글자 (없으면 비워 두세요)"
+                        className={fieldCls}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 mb-1">나레이션</p>
+                      <textarea
+                        value={s.narration}
+                        onChange={e => patchScene(index, i, 'narration', e.target.value)}
+                        disabled={locked}
+                        rows={2}
+                        maxLength={MAX_NARRATION}
+                        placeholder="말하는 대사 (없으면 비워 두세요)"
+                        className={`${fieldCls} resize-none`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {!locked && draft.scenes.length < MAX_SCENES && (
+                <button
+                  type="button"
+                  onClick={() => addScene(index)}
+                  className="w-full py-2 rounded-xl border border-dashed border-violet-200 text-[11px] font-black text-violet-500 hover:border-violet-400 hover:text-violet-700 transition-colors"
+                >
+                  + 장면 추가
+                </button>
+              )}
+            </>
           ) : (
-            <div className="rounded-xl bg-white border border-violet-100 px-3 py-2.5">
-              <p className="text-[12px] text-slate-800 leading-relaxed whitespace-pre-wrap">{draft.text}</p>
+            <div className="rounded-xl bg-white border border-violet-100 px-3 py-2.5 focus-within:border-violet-400 transition-colors">
+              <textarea
+                value={draft.text}
+                onChange={e => patchCaption(index, e.target.value)}
+                disabled={locked}
+                rows={10}
+                maxLength={CAPTION_MAX_LENGTH}
+                placeholder="인스타그램 본문"
+                className="w-full bg-transparent text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 resize-none focus:outline-none disabled:text-slate-500"
+              />
+              <p className="text-right text-[9px] font-black text-slate-300">
+                {draft.text.length} / {CAPTION_MAX_LENGTH}
+              </p>
             </div>
           )}
         </div>
@@ -396,15 +585,27 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
           </p>
         )}
 
+        {emptyDraft && !message.applied && !blocked && (
+          <p className="px-3.5 pb-1 text-[10px] font-bold text-amber-700 leading-relaxed">
+            {isPlan
+              ? '장면 내용을 한 개 이상 채워야 반영할 수 있어요.'
+              : '본문 내용을 채워야 반영할 수 있어요.'}
+          </p>
+        )}
+
         {!message.applied && (
           <div className="px-3.5 pb-3 pt-1.5 flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => applyDraft(index, draft)}
-              disabled={busy || blocked || applying >= 0}
+              disabled={busy || blocked || emptyDraft || applying >= 0}
               className="flex-1 px-3 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
             >
-              {busy ? '반영 중…' : isPlan ? '수정하기 · 기획안에 반영' : '수정하기 · 본문에 반영'}
+              {busy
+                ? '반영 중…'
+                : isPlan
+                  ? `${edited ? '수정한 내용' : '이 내용'}으로 기획안에 반영`
+                  : `${edited ? '수정한 내용' : '이 내용'}으로 본문에 반영`}
             </button>
             <button
               type="button"
@@ -436,7 +637,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             <p className="text-[11px] text-slate-500 font-bold truncate">
               {isEn
                 ? 'Writes and revises the content plan and caption for this campaign'
-                : `이 캠페인의 기획안 · 본문만 쓰고 고쳐요${
+                : `브랜드 가이드 파일을 읽고 이 캠페인의 기획안 · 본문을 씁니다${
                     openFeedbackCount > 0 ? ` · 브랜드 피드백 ${openFeedbackCount}건 확인 중` : ''
                   }`}
             </p>
@@ -469,16 +670,16 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                 </h3>
                 <p className="text-[11px] md:text-xs text-slate-500 leading-relaxed">
                   {isEn ? (
-                    'Ask for a content plan or an Instagram caption for this campaign and it will be written from the brand guideline files. Ask for a revision and it will read the brand feedback and rewrite it — you review the result, then apply it with one button.'
+                    'Ask for a content plan or an Instagram caption and it will be written from the guide files the brand uploaded to the progress tab — not from the campaign listing text. Ask for a revision and it will read the brand feedback and rewrite it. You can edit the draft right in the card, then apply it with one button.'
                   ) : (
                     <>
                       <strong className="text-slate-700">기획안</strong>이나{' '}
-                      <strong className="text-slate-700">본문</strong>을 부탁하면 브랜드가 올린{' '}
-                      <strong className="text-slate-700">가이드 파일</strong>을 읽고 써 드려요. 수정을
-                      부탁하면 <strong className="text-slate-700">브랜드 피드백</strong>을 확인해서
-                      고치고, 그 결과를 검토하신 뒤{' '}
-                      <strong className="text-slate-700">수정하기</strong> 버튼을 누르면 기획안에 그대로
-                      반영됩니다.
+                      <strong className="text-slate-700">본문</strong>을 부탁하면, 브랜드가{' '}
+                      <strong className="text-slate-700">진행사항에 올린 가이드 파일</strong>을 읽고 그
+                      내용대로 써 드려요(캠페인 등록 소개글은 보지 않습니다). 수정을 부탁하면{' '}
+                      <strong className="text-slate-700">브랜드 피드백</strong>을 확인해서 고칩니다.
+                      초안이 나오면 <strong className="text-slate-700">그 자리에서 직접 고칠 수</strong>{' '}
+                      있고, 버튼을 누르면 고친 내용이 기획안에 그대로 반영됩니다.
                       {campaignTitle && (
                         <>
                           {' '}
@@ -493,11 +694,22 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                 {/* 지금 무엇이 있는지 짧게 — 고칠 것이 있는지 보고 부탁하게 한다. */}
                 {!isEn && (
                   <p className="mt-2 text-[10px] font-bold text-slate-400">
+                    {guideFileCount > 0 ? `가이드 파일 ${guideFileCount}개 · ` : ''}
                     {hasPlan
                       ? `현재 기획안 ${planVersion > 0 ? `${planVersion}번째 안 · ` : ''}장면 ${planScenes.length}개`
                       : '아직 제출된 기획안 없음'}
                     {hasCaption ? ' · 본문 작성됨' : ' · 본문 미작성'}
                     {openFeedbackCount > 0 ? ` · 미반영 피드백 ${openFeedbackCount}건` : ''}
+                  </p>
+                )}
+
+                {/* 가이드 파일이 기획의 근거다. 없으면 AI 는 기획안을 지어내지 않고
+                    파일을 요청하므로, 부탁하기 전에 이유를 먼저 밝힌다. */}
+                {guideFileCount === 0 && (
+                  <p className="mt-2 mx-auto max-w-md rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[10px] font-bold text-amber-700 leading-relaxed">
+                    {isEn
+                      ? 'The brand has not uploaded a guide file to the progress tab yet. Ask your manager for it, or attach the guide below — the plan is written from that file.'
+                      : '브랜드가 진행사항에 올린 가이드 파일이 아직 없어요. 기획안은 그 파일을 근거로 쓰기 때문에, 담당자에게 가이드 파일을 요청하시거나 아래 📎 로 직접 첨부해 주세요.'}
                   </p>
                 )}
 
@@ -647,8 +859,8 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             </div>
             <p className="max-w-3xl mx-auto text-[10px] text-slate-400 font-bold mt-1.5 px-1">
               {isEn
-                ? 'Nothing is saved until you press the apply button. Campaign terms and settlement questions go to your manager.'
-                : '반영 버튼을 누르기 전에는 저장되지 않아요. 조건 · 일정 · 정산 문의는 담당자에게 확인해 주세요.'}
+                ? 'Edit the draft in the card if you want; nothing is saved until you press the apply button. Campaign terms and settlement questions go to your manager.'
+                : '초안은 카드에서 직접 고칠 수 있고, 반영 버튼을 누르기 전에는 저장되지 않아요. 조건 · 일정 · 정산 문의는 담당자에게 확인해 주세요.'}
             </p>
           </div>
         </>
