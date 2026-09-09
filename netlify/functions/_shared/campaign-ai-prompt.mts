@@ -110,6 +110,18 @@ export const CAMPAIGN_AI_SYSTEM_INSTRUCTION = `당신은 픽스폴리오 캠페�
 - 설명은 촬영하는 사람이 그대로 찍을 수 있게 구체적으로 — "제품을 보여 준다"가 아니라 "세면대 위에서 펌프를 두 번 눌러 손에 덜어내는 모습을 위에서".
 - 필수 표기·해시태그는 마지막 장면 자막이나 본문에 확실히 넣으세요.
 
+### 나레이션을 원하지 않으면 넣지 마세요
+사용자가 "나레이션 없이", "나레이션 빼고", "자막만으로", "대사 없이", "말 없이", "무성으로", "브이로그 자막형으로" 처럼 나레이션을 원하지 않는다고 하면 **그대로 따르세요.** 나레이션 없는 영상은 실제로 많고(자막형 릴스, 배경음악만 쓰는 컷 편집), 그때 대사를 채워 넣으면 사용자는 장면마다 나레이션을 손으로 지워야 합니다.
+
+나레이션 없이 쓸 때:
+- 모든 장면의 \`narration\` 을 빈 문자열("")로 두세요. "없음", "-", "(나레이션 없음)" 같은 글자를 넣지 마세요 — 그 글자가 그대로 기획안에 저장됩니다.
+- 사람에게 보여 주는 답에서도 나레이션 줄을 아예 쓰지 마세요.
+- 대사로 전하려던 정보는 자막과 설명으로 옮기세요. 나레이션을 빼는 것이 정보를 빼는 것이 되면 안 됩니다.
+- 가이드 파일에 필수 멘트나 구두 표기가 적혀 있으면, 그것은 자막으로 넣고 답 끝의 "담당자 확인 필요:" 에 "가이드의 필수 멘트를 나레이션 없이 자막으로 넣었습니다 — 괜찮은지 확인 부탁드립니다"를 한 줄 남기세요.
+- 한 번 나레이션 없이 쓴 뒤 이어지는 수정 요청에서도 계속 나레이션 없이 유지하세요. 사용자가 다시 넣어 달라고 할 때만 넣습니다.
+
+반대로 "자막 없이"처럼 자막을 원하지 않는다고 하면 같은 방식으로 \`subtitle\` 을 빈 문자열로 두세요.
+
 ## 본문(캡션)을 쓰는 방식
 - 첫 줄은 더보기 전에 보이는 줄이니 가장 중요한 말을 넣으세요.
 - 실제로 써 본 사람의 말투로 쓰고, 가이드의 필수 문구·해시태그·계정 태그를 빠짐없이 넣으세요.
@@ -134,10 +146,27 @@ ${SENTINEL_OPEN} {"kind":"caption","text":"본문 전체"} ${SENTINEL_CLOSE}
 
 한국어로, 존댓말로 답하세요.`;
 
+/**
+ * 빈 칸을 빈 칸으로 적어 주는 모델이 있다 — 나레이션 없이 써 달라고 했을 때
+ * `narration` 을 "" 로 두는 대신 "없음"·"-"·"N/A" 를 넣는다. 그 글자는 그대로
+ * 기획안에 저장되고, 브랜드 검수 화면에는 "나레이션 · 없음"으로 뜬다. 칸 전체가
+ * 이 표현 하나뿐일 때만 빈 칸으로 본다 — 문장 안에 든 "없음"은 건드리지 않는다.
+ */
+const PLACEHOLDER_FIELD = /^(없음|없습니다|해당\s*없음|무|-{1,3}|—|n\/?a|none|null)$/i;
+
+const emptyish = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const bare = trimmed.replace(/^[([{]\s*/, "").replace(/\s*[)\]}]$/, "");
+  // "(나레이션 없음)" 처럼 칸 이름을 함께 적은 경우까지 같은 것으로 본다.
+  const withoutLabel = bare.replace(/^(나레이션|자막|대사|내레이션)\s*[:·]?\s*/, "").trim();
+  return PLACEHOLDER_FIELD.test(bare) || PLACEHOLDER_FIELD.test(withoutLabel) ? "" : trimmed;
+};
+
 const clampScene = (raw: any): DraftScene => ({
   visual: String(raw?.visual ?? raw?.text ?? "").slice(0, MAX_VISUAL),
-  subtitle: String(raw?.subtitle ?? raw?.caption ?? "").slice(0, MAX_SUBTITLE),
-  narration: String(raw?.narration ?? raw?.voice ?? "").slice(0, MAX_NARRATION),
+  subtitle: emptyish(String(raw?.subtitle ?? raw?.caption ?? "")).slice(0, MAX_SUBTITLE),
+  narration: emptyish(String(raw?.narration ?? raw?.voice ?? "")).slice(0, MAX_NARRATION),
 });
 
 const parseDraftJson = (raw: string): CampaignDraft | null => {

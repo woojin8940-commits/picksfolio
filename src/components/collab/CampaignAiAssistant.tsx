@@ -47,6 +47,14 @@ import { AiMarkdown } from '../AiMarkdown';
  * 버튼을 누르기 전에는 아무것도 저장되지 않는다. AI 가 지어낸 문장이 사용자도 모르게
  * 브랜드에게 제출되는 일은 없어야 한다.
  *
+ * ── 대화는 탭을 다녀와도 남는다 ──────────────────────────────────────────
+ * 탭이 바뀌면 이 컴포넌트가 화면에서 내려가므로, 대화를 상태로만 들고 있으면
+ * 진행사항을 확인하고 돌아오는 순간 통째로 사라진다. 그 확인이 이 화면에서 가장 흔한
+ * 동작인데(가이드 파일·브랜드 피드백이 그 탭에 있다) 초안은 반영 전까지 저장되지
+ * 않으니, 돌아오면 되찾을 길이 없었다. 그래서 캠페인별로 세션 저장소에 남긴다 —
+ * 자세한 이유는 아래 `chatStorageKey` 주석에 적었다. 저장 경로(`save_step_work`)와
+ * 수정본 구조는 그대로다. 이 저장소에는 아직 제출하지 않은 대화만 들어간다.
+ *
  * v1 은 제미나이(멤버십 포함 모델)만 쓴다. 클로드는 지갑·크레딧 UI 와 함께 협업
  * 타임라인에 있고, 그 모달을 캠페인 진행 화면에 얹지 않는다.
  */
@@ -113,6 +121,14 @@ const QUICK_PROMPTS: Array<{ icon: string; label: string; prompt: string; needsP
     needsPlan: true,
   },
   {
+    icon: '🔇',
+    label: '나레이션 없는 기획안',
+    prompt:
+      '브랜드가 진행사항에 올린 가이드 파일을 먼저 끝까지 읽고, 그 내용대로 이 캠페인의 기획안을 ' +
+      '작성해 주세요. 나레이션(대사)은 넣지 말고 자막과 장면 설명만으로 써 주세요. 가이드의 필수 ' +
+      '표기와 필수 장면은 자막과 장면 안에 빠짐없이 넣어 주세요.',
+  },
+  {
     icon: '📝',
     label: '본문 작성',
     prompt:
@@ -142,6 +158,73 @@ const MAX_VISUAL = 2000;
 const MAX_SUBTITLE = 1000;
 const MAX_NARRATION = 2000;
 
+/**
+ * 대화를 담아 두는 자리.
+ *
+ * 이 탭은 다른 탭을 누르면 화면에서 내려간다(`activeTab === 'ai' && <CampaignAiAssistant/>`).
+ * 그래서 진행사항을 확인하고 돌아오면 대화가 통째로 사라졌다. 하필 이 화면에서 가장
+ * 흔한 동작이 그것이다 — AI 가 "가이드 파일이 없다"거나 "2번 장면을 이렇게 고쳤다"고
+ * 하면 진행사항 탭에서 실제 파일과 브랜드 피드백을 확인하고 돌아온다. 초안 카드는 반영
+ * 버튼을 누르기 전까지 아무것도 저장하지 않으므로, 그 사이에 사라진 초안을 되찾는 길은
+ * AI 에게 처음부터 다시 부탁하는 것뿐이었다.
+ *
+ * 그래서 캠페인별로 세션 저장소에 남긴다. 서버에 두지 않는다 — 이 대화는 제출물이
+ * 아니다. 저장되는 것은 반영 버튼을 눌러 `save_step_work` 로 간 기획안뿐이고, 그
+ * 경로는 그대로다. 창을 닫으면 대화도 함께 사라진다.
+ */
+const chatStorageKey = (userName: string, collabId: string) =>
+  userName && collabId ? `picks_campaign_ai_chat_${userName}_${collabId}` : '';
+
+/** 남겨 두는 최대 대화 수. 답 하나가 길어서, 넘치면 오래된 것부터 버린다. */
+const MAX_STORED_MESSAGES = 30;
+
+const readStoredChat = (key: string): AiMessage[] => {
+  if (!key || typeof window === 'undefined') return [];
+  try {
+    const raw = sessionStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(parsed)) return [];
+    // 저장소에 있던 값은 지금 코드가 쓴 것이 아닐 수 있다고 보고 최소한만 통과시킨다.
+    // 모양이 어긋난 한 줄 때문에 탭이 아예 안 열리는 것이 대화를 잃는 것보다 나쁘다.
+    return parsed
+      .filter(
+        (m: any) =>
+          m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string',
+      )
+      .map((m: any) => ({
+        role: m.role,
+        content: m.content,
+        draft: m.draft ?? null,
+        draftOriginal: m.draftOriginal ?? null,
+        guide: m.guide ?? null,
+        applied: Boolean(m.applied),
+      }));
+  } catch {
+    return [];
+  }
+};
+
+const writeStoredChat = (key: string, messages: AiMessage[]) => {
+  if (!key || typeof window === 'undefined') return;
+  try {
+    if (messages.length === 0) {
+      sessionStorage.removeItem(key);
+      return;
+    }
+    sessionStorage.setItem(key, JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)));
+  } catch {
+    // 저장소가 꽉 찼다. 마지막 몇 마디라도 남긴다 — 저장에 실패했다고 답을 받은
+    // 직후에 화면이 죽으면, 대화를 잃지 않으려던 것이 대화를 잃게 만든다.
+    try {
+      sessionStorage.setItem(key, JSON.stringify(messages.slice(-4)));
+    } catch {
+      try {
+        sessionStorage.removeItem(key);
+      } catch {}
+    }
+  }
+};
+
 const MEMBERSHIP_NOTICE =
   'AI 어시스턴트는 AI 협업 멤버십(6,900원) 이상에서 이용할 수 있어요. 플랜을 업그레이드하면 바로 사용할 수 있습니다.';
 
@@ -161,8 +244,9 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
   isEn = false,
 }) => {
   const normalized = (userName || '').toLowerCase();
+  const chatKey = chatStorageKey(normalized, collabId);
 
-  const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [messages, setMessages] = useState<AiMessage[]>(() => readStoredChat(chatKey));
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(-1);
@@ -174,9 +258,34 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     return cached ? membershipCovers(cached, 'standard_ai') : null;
   });
 
+  /**
+   * 지금 들고 있는 대화가 어느 캠페인 것인지.
+   *
+   * 목록을 거치지 않고 다른 캠페인이 열리면 이 컴포넌트가 내려가지 않고 collabId 만
+   * 바뀐다. 그때 앞 캠페인의 대화가 그대로 남아 있으면, 사용자는 A 캠페인 기획안
+   * 초안을 B 캠페인 화면에서 보고 반영 버튼을 누른다. 그려 내기 전에 갈아치운다.
+   */
+  const [loadedChatKey, setLoadedChatKey] = useState(chatKey);
+  if (loadedChatKey !== chatKey) {
+    setLoadedChatKey(chatKey);
+    setMessages(readStoredChat(chatKey));
+    setInput('');
+    setFiles([]);
+  }
+
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** 첫 그림을 지났는가. 되살린 대화로 페이지가 튕기지 않게 하려고 본다. */
+  const settledRef = useRef(false);
+
+  // 대화가 바뀔 때마다 남긴다. 답을 받은 뒤에만 저장하면, 카드에서 고친 장면과 반영
+  // 완료 표시가 탭을 다녀오는 사이에 되돌아가 버린다 — 화면과 저장소가 같아야 한다.
+  useEffect(() => {
+    if (loadedChatKey !== chatKey) return;
+    writeStoredChat(chatKey, messages);
+  }, [chatKey, loadedChatKey, messages]);
 
   // ── 지금 이 캠페인의 상태 ────────────────────────────────────────────────
   // 서버도 같은 값을 DB 에서 다시 읽는다. 여기서 보는 것은 화면에 쓰기 위한 것이다 —
@@ -234,7 +343,20 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     };
   }, [aiEnabled, normalized]);
 
+  /**
+   * 마지막 말이 보이게 맞춘다.
+   *
+   * 첫 그림에는 대화 칸만 내려 준다. 되살린 대화는 이미 화면에 있던 것이므로
+   * `scrollIntoView` 로 페이지째 끌어내리면, AI 탭을 누른 순간 화면이 아래로
+   * 튕겨 내려간다. 새로 들어온 답은 그대로 부드럽게 따라간다.
+   */
   useEffect(() => {
+    if (!settledRef.current) {
+      settledRef.current = true;
+      const list = listRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, loading]);
 
@@ -390,6 +512,27 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
 
   const dismissDraft = (index: number) =>
     setMessages(prev => prev.map((m, i) => (i === index ? { ...m, draft: null } : m)));
+
+  /**
+   * 대화를 비운다. 저장소에서도 지워 다음에 탭을 열 때 되살아나지 않게 한다.
+   *
+   * 반영하지 않은 초안이 남아 있으면 한 번 묻는다 — 그 초안은 어디에도 저장돼 있지
+   * 않아서, 지우면 되찾을 길이 AI 에게 다시 부탁하는 것뿐이다.
+   */
+  const clearChat = () => {
+    const hasUnapplied = messages.some(m => m.draft && !m.applied);
+    if (
+      hasUnapplied &&
+      !window.confirm(
+        '아직 기획안에 반영하지 않은 초안이 있어요. 대화를 지우면 그 초안도 함께 사라집니다.\n\n그래도 새 대화를 시작할까요?',
+      )
+    ) {
+      return;
+    }
+    setMessages([]);
+    setInput('');
+    setFiles([]);
+  };
 
   // ── 카드 안에서 초안 고치기 ────────────────────────────────────────────
   //
@@ -695,6 +838,20 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                   }`}
             </p>
           </div>
+          {/* 대화가 남아 있게 되면서 지울 방법도 있어야 한다. 남는 것이 기본인 것은
+              탭을 다녀오는 사이에 초안을 잃지 않기 위해서지만, 다 끝난 기획안 얘기를
+              계속 안고 다음 부탁을 하게 되면 AI 가 앞 대화에 끌려간다. 아직 반영하지
+              않은 초안이 카드에 남아 있을 수 있으니 한 번 묻는다. */}
+          {messages.length > 0 && aiEnabled !== false && (
+            <button
+              type="button"
+              onClick={clearChat}
+              disabled={loading || applying >= 0}
+              className="ml-auto shrink-0 px-2.5 py-1.5 rounded-lg bg-white/80 border border-slate-200 text-[10px] font-black text-slate-500 hover:border-slate-900 hover:text-slate-900 disabled:opacity-40 transition-colors"
+            >
+              {isEn ? 'New chat' : '새 대화'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -715,7 +872,10 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
       ) : (
         <>
           {/* 대화 */}
-          <div className="px-4 md:px-5 py-5 min-h-[280px] max-h-[560px] overflow-y-auto">
+          <div
+            ref={listRef}
+            className="px-4 md:px-5 py-5 min-h-[280px] max-h-[560px] overflow-y-auto"
+          >
             {messages.length === 0 && (
               <div className="max-w-lg mx-auto text-center pt-2">
                 <h3 className="text-sm font-extrabold text-slate-900 mb-1.5">
