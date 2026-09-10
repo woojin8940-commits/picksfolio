@@ -52,7 +52,7 @@ interface AdminCampaignApprovalProps {
 type FilterStatus = 'pending_approval' | 'all' | 'active' | 'admin_rejected' | 'inactive';
 
 const typeLabel = (t: string) => {
-  const map: Record<string, string> = { ad_collab: '광고 협업', group_buy: '공동구매', other: '기타', collaboration: '협업', advertisement: '광고', review: '리뷰', event: '이벤트' };
+  const map: Record<string, string> = { ad_collab: '광고 협업', group_buy: '커머스', other: '기타', collaboration: '협업', advertisement: '광고', review: '리뷰', event: '이벤트' };
   return map[t] || t || '-';
 };
 

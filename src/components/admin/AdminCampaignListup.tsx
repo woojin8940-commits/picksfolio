@@ -114,7 +114,7 @@ const AdminCampaignListup: React.FC<AdminCampaignListupProps> = ({ token }) => {
           <p className="mt-1 text-[11px] font-medium text-slate-400">
             {campaigns.length > 0
               ? '담당자가 없는 캠페인은 목록 위쪽에 표시됩니다.'
-              : '광고비 지급형·공동구매형 캠페인을 승인하면 이 목록에 올라옵니다.'}
+              : '광고비 지급형·커머스형 캠페인을 승인하면 이 목록에 올라옵니다.'}
           </p>
         </div>
       ) : (
