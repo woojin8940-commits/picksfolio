@@ -22,14 +22,14 @@ interface CategoryBlock {
   rankings: CategoryRanking[];
 }
 
-const CATEGORY_ACCENTS: Record<string, { tile: string; chip: string; badge: string }> = {
-  '50000000': { tile: 'bg-blue-50 text-blue-600', chip: 'bg-blue-50 text-blue-600', badge: 'bg-blue-600' },
-  '50000002': { tile: 'bg-rose-50 text-rose-500', chip: 'bg-rose-50 text-rose-600', badge: 'bg-rose-600' },
-  '50000003': { tile: 'bg-sky-50 text-sky-600', chip: 'bg-sky-50 text-sky-700', badge: 'bg-sky-700' },
-  '50000004': { tile: 'bg-amber-50 text-amber-600', chip: 'bg-amber-50 text-amber-700', badge: 'bg-amber-600' },
-  '50000006': { tile: 'bg-emerald-50 text-emerald-600', chip: 'bg-emerald-50 text-emerald-700', badge: 'bg-emerald-600' },
-  '50000008': { tile: 'bg-teal-50 text-teal-600', chip: 'bg-teal-50 text-teal-700', badge: 'bg-teal-700' },
-  '50000009': { tile: 'bg-indigo-50 text-indigo-600', chip: 'bg-indigo-50 text-indigo-700', badge: 'bg-indigo-600' },
+const CATEGORY_ACCENTS: Record<string, { tile: string; chip: string }> = {
+  '50000000': { tile: 'bg-blue-50 text-blue-600', chip: 'bg-blue-50 text-blue-600' },
+  '50000002': { tile: 'bg-rose-50 text-rose-500', chip: 'bg-rose-50 text-rose-600' },
+  '50000003': { tile: 'bg-sky-50 text-sky-600', chip: 'bg-sky-50 text-sky-700' },
+  '50000004': { tile: 'bg-amber-50 text-amber-600', chip: 'bg-amber-50 text-amber-700' },
+  '50000006': { tile: 'bg-emerald-50 text-emerald-600', chip: 'bg-emerald-50 text-emerald-700' },
+  '50000008': { tile: 'bg-teal-50 text-teal-600', chip: 'bg-teal-50 text-teal-700' },
+  '50000009': { tile: 'bg-indigo-50 text-indigo-600', chip: 'bg-indigo-50 text-indigo-700' },
 };
 
 const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
@@ -42,7 +42,10 @@ const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
   '50000009': 'Sports / Leisure',
 };
 
-const DEFAULT_ACCENT = { tile: 'bg-slate-100 text-slate-600', chip: 'bg-slate-50 text-slate-600', badge: 'bg-slate-600' };
+const DEFAULT_ACCENT = { tile: 'bg-slate-100 text-slate-600', chip: 'bg-slate-50 text-slate-600' };
+
+// 순위 번호 배지는 카테고리/순위와 무관하게 동일한 색상을 사용
+const RANK_BADGE = 'bg-blue-600 text-white';
 
 const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
@@ -169,9 +172,7 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
                     >
                       <div className="flex items-center gap-2 md:gap-3 min-w-0">
                         <span
-                          className={`shrink-0 grid place-items-center w-4 h-4 md:w-6 md:h-6 rounded-md md:rounded-lg text-[9px] md:text-[11px] font-black tabular-nums ${
-                            isTop ? `${accent.badge} text-white` : 'bg-slate-100 text-slate-400'
-                          }`}
+                          className={`shrink-0 grid place-items-center w-4 h-4 md:w-6 md:h-6 rounded-md md:rounded-lg text-[9px] md:text-[11px] font-black tabular-nums ${RANK_BADGE}`}
                         >
                           {item.rank}
                         </span>
