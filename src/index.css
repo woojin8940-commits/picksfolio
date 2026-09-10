@@ -423,3 +423,44 @@ body.timeline-chat-open .fixed-bottom-nav {
 .portfolio-rt-editor:focus {
   outline: none;
 }
+
+/* ===== 홈(마케팅) 화면 전용 라이트 테마 =====
+   홈만 종이색을 쓴다. 대시보드·개인페이지·라이브는 그대로 다크다.
+   body 에도 같은 색을 걸어야 iOS 의 overscroll 되돌림 구간과 데스크톱
+   zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. App.tsx 가 view 가
+   'home' 일 때만 이 클래스를 붙이고 떠날 때 뗀다. */
+body.home-paper {
+  background-color: #F4F5FA;
+  color: #0B0F1A;
+}
+
+/* 종이 위에 아주 옅은 점 격자. 흰 배경이 비어 보이지 않게만 하는 정도의 농도다.
+   스크롤하지 않는 배경 레이어에만 얹는다(스크롤 컨테이너에 깔면 매 프레임
+   다시 그린다). */
+.home-dotgrid {
+  background-image: radial-gradient(rgba(11, 15, 26, 0.055) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* 히어로의 떠 있는 카드가 아주 느리게 오르내린다. transform 만 움직여
+   레이아웃을 다시 계산하지 않는다. 좁은 화면에서는 두 카드가 본문 흐름 안에
+   차례로 놓이므로 흔들지 않는다(테일윈드 접두사는 유틸리티가 아닌 이 클래스에
+   붙지 않아 미디어쿼리로 직접 가른다). */
+@keyframes home-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@media (min-width: 1024px) {
+  .home-float-lg {
+    animation: home-float 7s ease-in-out infinite;
+  }
+  .home-float-slow-lg {
+    animation: home-float 9s ease-in-out infinite;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-float-lg,
+  .home-float-slow-lg {
+    animation: none;
+  }
+}
