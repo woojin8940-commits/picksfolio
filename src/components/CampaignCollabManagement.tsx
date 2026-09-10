@@ -139,7 +139,7 @@ interface CampaignCollabManagementProps {
 const CAMPAIGN_TYPES = [
   { value: '', label: '전체' },
   { value: 'ad_collab', label: '광고 협업' },
-  { value: 'group_buy', label: '공동구매' },
+  { value: 'group_buy', label: '커머스' },
   { value: 'other', label: '기타' },
 ];
 
@@ -691,7 +691,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     (campaign.status === 'active' && isPastDeadline(campaign.end_date));
 
   const typeLabel = (type: string) => {
-    const m: Record<string, string> = { ad_collab: '광고 협업', group_buy: '공동구매', other: '기타', collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
+    const m: Record<string, string> = { ad_collab: '광고 협업', group_buy: '커머스', other: '기타', collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트' };
     return m[type] || type;
   };
 

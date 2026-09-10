@@ -301,7 +301,7 @@ const UserSettlement: React.FC<UserSettlementProps> = ({ userName, embedded = fa
             {rate > 0 ? `${rate}%` : '수수료 협의중'}
           </p>
           <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-            {settled ? `공동구매 판매 수수료 · 확정 ${formatFee(s.amount)}` : '공동구매 판매 수수료'}
+            {settled ? `커머스 판매 수수료 · 확정 ${formatFee(s.amount)}` : '커머스 판매 수수료'}
           </p>
         </>
       );

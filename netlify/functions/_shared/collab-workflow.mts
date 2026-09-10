@@ -111,7 +111,7 @@ const SEEDING: StageTemplateSet = {
  */
 const GROUP_BUY: StageTemplateSet = {
   key: "group_buy_v1",
-  label: "공동구매",
+  label: "커머스",
   stages: [
     { key: "terms", title: "조건 확정", owner: "manager", dueOffsetDays: 1, hint: "담당자가 수수료·판매 기간·상품 정보를 확정합니다." },
     { key: "guide", title: "상품 정보 전달", owner: "manager", dueOffsetDays: 2, hint: "상품 상세와 판매 조건을 전달합니다." },
@@ -199,7 +199,7 @@ export function templateForCampaignType(
   _rewardMode?: string | null,
 ): StageTemplateSet {
   const type = String(campaignType || "").trim().toLowerCase();
-  if (type.includes("group_buy") || type.includes("공동구매") || type.includes("commerce")) {
+  if (type.includes("group_buy") || type.includes("공동구매") || type.includes("커머스") || type.includes("commerce")) {
     return GROUP_BUY;
   }
   return CAMPAIGN_PROCESS;

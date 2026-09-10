@@ -51,7 +51,7 @@ const dateOnly = (raw: unknown): string => {
 const REWARD_MODE_LABEL: Record<string, string> = {
   paid: "광고비 지급형",
   barter: "제품 협찬형",
-  groupbuy: "공동구매",
+  groupbuy: "커머스",
 };
 
 const STAGE_STATUS_LABEL: Record<string, string> = {

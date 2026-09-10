@@ -469,8 +469,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         <h2 className="text-xl md:text-3xl font-black text-slate-900">{t('nav.membership', '멤버십 플랜', 'Membership Plans')}</h2>
         <p className="text-slate-500 mt-2 text-sm md:text-base leading-relaxed max-w-3xl">
           {language === 'en'
-            ? 'Choose Standard for content features, AI Collaboration to add AI tools, or Pro Plan for all features including DM automation and the Insights menu. All plans are monthly subscriptions and include VAT.'
-            : '콘텐츠 기능이 필요하면 스탠다드, 협업 AI까지 더하려면 AI 협업, 디엠 자동화와 인사이트 메뉴를 포함해 모든 기능을 쓰려면 프로 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있고, 표시된 금액은 모두 부가세(VAT) 포함입니다.'}
+            ? 'Choose Standard for content features, AI Collaboration to add the timeline AI assistant and the content planning AI, or Pro Plan for all features including DM automation and the Insights menu. All plans are monthly subscriptions and include VAT.'
+            : '콘텐츠 기능이 필요하면 스탠다드, 협업 AI와 콘텐츠 기획 AI까지 더하려면 AI 협업, 디엠 자동화와 인사이트 메뉴를 포함해 모든 기능을 쓰려면 프로 플랜을 선택하세요. 모든 플랜은 월 단위 구독이며 언제든 해지할 수 있고, 표시된 금액은 모두 부가세(VAT) 포함입니다.'}
         </p>
       </header>
 
@@ -614,6 +614,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>스탠다드 멤버십 모든 혜택 포함</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>협업 타임라인 AI 어시스턴트</strong> 이용</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>대화 요약 · 일정 정리 · 답장 초안 작성</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 기획 AI</strong> 이용 — 브랜드 가이드를 읽고 캠페인 기획안 · 본문 작성</li>
             </ul>
 
             {loading ? (
@@ -660,6 +661,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>키워드별 자동 응답 · 발송 이력 확인 · 수동 DM 발송</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>인사이트 메뉴</strong> 이용 — 릴스 조회 · 도달 · 저장 지표를 한눈에</li>
               <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span>협업 타임라인 AI 어시스턴트 포함</li>
+              <li className="flex items-start gap-2"><span className="text-green-500 font-bold shrink-0">✓</span><strong>콘텐츠 기획 AI</strong> 포함 — 캠페인 기획안 · 본문 초안 작성</li>
             </ul>
 
             {loading ? (
@@ -764,6 +766,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
             <li><strong>표시된 모든 금액은 부가세(VAT 10%)가 포함된 금액</strong>입니다. 결제 시 추가로 청구되는 금액은 없습니다.</li>
             <li>스탠다드 멤버십 구독 시 영상 업로드와 콘텐츠 7개 이상 업로드를 이용할 수 있습니다.</li>
             <li>협업 타임라인 AI 어시스턴트(대화 요약 · 일정 정리 · 답장 초안)는 AI 협업 멤버십({STANDARD_AI_PRICE.toLocaleString()}원) 이상에 포함됩니다. 스탠다드 멤버십({STANDARD_PRICE.toLocaleString()}원)에는 포함되지 않습니다.</li>
+            <li><strong>콘텐츠 기획 AI</strong>(브랜드 가이드를 읽고 캠페인 기획안 · 본문 작성)는 AI 협업 멤버십과 프로 플랜에 포함되며, 멤버십을 구독하지 않으면 이용할 수 없습니다.</li>
             <li>프로 플랜은 스탠다드 · AI 협업 멤버십 혜택을 포함하며, 인스타그램 디엠 자동화는 프로 플랜에서만 이용할 수 있습니다.</li>
             <li>디엠 자동화는 인스타그램 댓글에 반응해 자동으로 DM을 보내고, 키워드별 응답 문구와 발송 이력을 관리할 수 있습니다. 인스타그램 프로페셔널(비즈니스 · 크리에이터) 계정 연동이 필요합니다.</li>
             <li><strong>인사이트 메뉴</strong>: 릴스 조회 · 도달 · 저장 지표와 반응 좋은 릴스 TOP 5, AI 콘텐츠 코칭을 함께 제공합니다. 비즈니스 계정은 우리 계정을 태그한 인플루언서 콘텐츠까지 인사이트에서 볼 수 있습니다.</li>
@@ -1001,10 +1004,10 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 {selectedTier === 'pro'
-                  ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트, 인스타그램 디엠 자동화, 인사이트 메뉴(릴스 지표 · 릴스 TOP 5 · AI 코칭)가 즉시 활성화됩니다.'
+                  ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 협업 타임라인 AI 어시스턴트, 콘텐츠 기획 AI, 인스타그램 디엠 자동화, 인사이트 메뉴(릴스 지표 · 릴스 TOP 5 · AI 코칭)가 즉시 활성화됩니다.'
                   : selectedTier === 'standard_ai' || selectedTier === 'commerce'
-                    ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트가 즉시 활성화됩니다. 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'
-                    : '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트는 AI 협업 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'}
+                    ? '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능과 함께 협업 타임라인 AI 어시스턴트와 콘텐츠 기획 AI가 즉시 활성화됩니다. 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'
+                    : '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트와 콘텐츠 기획 AI는 AI 협업 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'}
               </p>
             </div>
             <div className="px-5 py-4 border-t border-slate-100 flex gap-2">

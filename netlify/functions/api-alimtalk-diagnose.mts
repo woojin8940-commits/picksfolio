@@ -43,7 +43,7 @@ export default async (req: Request, context: Context) => {
     // 원인을 찾을 수 없다.
     paused: alimtalkPaused(),
     pauseNotice: alimtalkPaused()
-      ? `⏸️ ${ALIMTALK_PAUSE_NOTICE} (ALIMTALK_PAUSED=false 로 재개)`
+      ? `⏸️ ${ALIMTALK_PAUSE_NOTICE} (환경변수 ALIMTALK_PAUSED 를 지우거나 false 로 두면 재개)`
       : '발송 중 (중지 아님)',
     steps: [],
   }

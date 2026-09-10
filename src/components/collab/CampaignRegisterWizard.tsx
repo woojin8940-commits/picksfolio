@@ -654,7 +654,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       title: picksInfluencer
         ? '예산은 어떻게 정할까요?'
         : isGroupBuy
-          ? '공동구매는 무엇이 다를까요?'
+          ? '커머스는 무엇이 다를까요?'
           : '제품 협찬형은 무엇이 다를까요?',
       body: picksInfluencer
         ? '쓸 수 있는 총액을 적어 주세요. 다음 단계에서 규모별로 인원을 배분할 때, 이 예산 안에서만 담을 수 있게 잔액을 보여 드립니다.'

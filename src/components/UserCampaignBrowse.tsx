@@ -105,12 +105,12 @@ const writeCampaignStatusCache = (username: string, patch: Partial<CampaignBrows
 };
 
 const TYPE_LABELS_KO: Record<string, string> = {
-  ad_collab: '광고 협업', group_buy: '공동구매', other: '기타',
+  ad_collab: '광고 협업', group_buy: '커머스', other: '기타',
   collaboration: '협업', advertisement: '광고/협찬', review: '리뷰', event: '이벤트',
 };
 
 const TYPE_LABELS_EN: Record<string, string> = {
-  ad_collab: 'Ad Collab', group_buy: 'Group Buy', other: 'Other',
+  ad_collab: 'Ad Collab', group_buy: 'Commerce', other: 'Other',
   collaboration: 'Collaboration', advertisement: 'Sponsorship', review: 'Review', event: 'Event',
 };
 
@@ -127,7 +127,7 @@ const modeBadge = (c: Campaign, isEn: boolean): string => {
   if (mode.openApply) {
     if (isEn) {
       if (mode.value === 'barter') return 'Product Sponsorship';
-      if (mode.value === 'groupbuy') return 'Group Buy';
+      if (mode.value === 'groupbuy') return 'Commerce';
     }
     return mode.label;
   }
@@ -193,7 +193,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const rewardFilters = [
     { value: '', label: isEn ? 'All' : '전체' },
     { value: 'ad_collab', label: isEn ? 'Product Sponsorship' : '제품 협찬' },
-    { value: 'group_buy', label: isEn ? 'Group Buy' : '공동구매' },
+    { value: 'group_buy', label: isEn ? 'Commerce' : '커머스' },
   ];
 
   /* 칩 줄은 한 줄로 두고 가로로 넘긴다 — 손가락은 그대로, 마우스는 끌어서. */
@@ -869,7 +869,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-1">{isEn ? 'Campaigns' : '캠페인'}</h2>
         <p className="text-sm text-slate-400 font-medium">
-          {isEn ? 'Apply directly to product sponsorship & group buy campaigns to find collaboration opportunities' : '제품 협찬 · 공동구매 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
+          {isEn ? 'Apply directly to product sponsorship & commerce campaigns to find collaboration opportunities' : '제품 협찬 · 커머스 캠페인에 직접 지원하고 협업 기회를 잡아보세요'}
         </p>
       </div>
 
