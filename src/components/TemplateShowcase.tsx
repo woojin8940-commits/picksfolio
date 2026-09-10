@@ -46,10 +46,10 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
     },
     {
       id: 'minimal',
-      name: language === 'en' ? 'Minimal Brand' : '미니멀 브랜드',
+      name: language === 'en' ? 'Minimal List' : '미니멀 리스트',
       icon: List,
       description: language === 'en' ? 'Clean & organized brand identity' : '깔끔하고 정돈된 브랜드 아이덴티티',
-      title: language === 'en' ? 'Minimal Brand' : '미니멀 브랜드',
+      title: language === 'en' ? 'Minimal List' : '미니멀 리스트',
       subtitle: language === 'en' ? 'Official site experience. Clicking brings brand story sliding up.' : '브랜드 공식 사이트와 동일한 경험을 제공합니다. 클릭 시 브랜드 스토리가 하단에서 스윽 올라옵니다.',
       features: language === 'en' ? ['Minimal Design', 'Brand Storytelling', 'Clean Product List'] : ['미니멀 디자인', '브랜드 스토리텔링', '깔끔한 상품 목록']
     },
@@ -62,7 +62,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="text-center mb-6 md:mb-10">
           <h2 className="text-xl md:text-5xl font-black text-white mb-3 md:mb-6 font-display tracking-tighter">
-            {language === 'en' ? '2 Grid Templates to Match Your Vibe' : '당신의 무드에 맞는 2가지 템플릿'}
+            {language === 'en' ? 'My Own Homepage Template' : '나만의 홈페이지 템플릿'}
           </h2>
           <p className="text-sm md:text-base text-slate-400 font-medium">
             {language === 'en' ? 'Choose the most effective layout for your content.' : '콘텐츠 성격에 따라 가장 효과적인 레이아웃을 선택하세요.'}
@@ -222,7 +222,7 @@ const TemplateShowcase: React.FC<TemplateShowcaseProps> = () => {
                           </div>
                         </div>
                       ) : (
-                        /* 미니멀 브랜드: 실제 페이지와 동일한 전체폭 상품 리스트 행 */
+                        /* 미니멀 리스트: 실제 페이지와 동일한 전체폭 상품 리스트 행 */
                         <div className="px-3 pb-4 space-y-2">
                           {minimalItems.map((item) => (
                             <div
