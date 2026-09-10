@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Clock, BarChart3 } from 'lucide-react';
+import { Clock, BarChart3, LineChart } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { readTrendCache, writeTrendCache } from '../utils/trendCache';
 
@@ -18,16 +18,18 @@ interface CategoryBlock {
   rankings: RankingItem[];
 }
 
-const CATEGORY_COLORS: Record<string, { accent: string; bg: string; text: string; badge: string }> = {
-  '50000000': { accent: 'from-blue-500 to-blue-600', bg: 'bg-blue-500/10', text: 'text-blue-400', badge: 'bg-blue-500/20 text-blue-300' },
-  '50000002': { accent: 'from-pink-500 to-pink-600', bg: 'bg-pink-500/10', text: 'text-pink-400', badge: 'bg-pink-500/20 text-pink-300' },
-  '50000003': { accent: 'from-blue-500 to-blue-600', bg: 'bg-blue-500/10', text: 'text-blue-400', badge: 'bg-blue-500/20 text-blue-300' },
-  '50000004': { accent: 'from-amber-500 to-amber-600', bg: 'bg-amber-500/10', text: 'text-amber-400', badge: 'bg-amber-500/20 text-amber-300' },
-  '50000006': { accent: 'from-green-500 to-green-600', bg: 'bg-green-500/10', text: 'text-green-400', badge: 'bg-green-500/20 text-green-300' },
-  '50000008': { accent: 'from-teal-500 to-teal-600', bg: 'bg-teal-500/10', text: 'text-teal-400', badge: 'bg-teal-500/20 text-teal-300' },
+/* 분야마다 파스텔 한 색. 홈이 종이색이라 예전의 형광 배지 대신 옅은 면과
+   진한 글씨로 구분한다. */
+const CATEGORY_COLORS: Record<string, { tint: string; icon: string; badge: string }> = {
+  '50000000': { tint: '#EDF2FF', icon: '#2563EB', badge: '#2563EB' },
+  '50000002': { tint: '#FCEBEF', icon: '#C4405F', badge: '#C4405F' },
+  '50000003': { tint: '#E8F1FB', icon: '#1E6FA8', badge: '#1E6FA8' },
+  '50000004': { tint: '#FDF4E3', icon: '#B4780B', badge: '#B4780B' },
+  '50000006': { tint: '#E7F3EE', icon: '#0F9D6E', badge: '#0F9D6E' },
+  '50000008': { tint: '#EAF2F3', icon: '#0E7C86', badge: '#0E7C86' },
 };
 
-const DEFAULT_COLOR = { accent: 'from-slate-500 to-slate-600', bg: 'bg-slate-500/10', text: 'text-slate-400', badge: 'bg-slate-500/20 text-slate-300' };
+const DEFAULT_COLOR = { tint: '#F1F3F9', icon: '#5B6382', badge: '#5B6382' };
 
 const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
@@ -96,23 +98,30 @@ const DataBoardSection: React.FC = () => {
     }
   };
 
+  const en = language === 'en';
+
   return (
-    <section className="py-12 md:py-24 bg-background">
+    <section className="relative py-14 md:py-24 overflow-hidden">
+      {/* 트렌드 보드는 종이보다 살짝 밝은 면 위에 올려 앞 섹션과 구분한다. */}
+      <div aria-hidden className="absolute inset-0 -z-10 bg-white" />
+      <div aria-hidden className="absolute inset-0 -z-10 home-dotgrid opacity-40" />
+
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="text-center mb-8 md:mb-12">
-          <h2 className="text-xl md:text-5xl font-black text-white mb-3 md:mb-6 font-display tracking-tighter">
-            {language === 'en' ? 'Real-Time Trend Board' : '실시간 트렌드 보드'}
+        <div className="text-center mb-9 md:mb-14">
+          <span className="text-[11px] md:text-xs font-black tracking-[0.25em] text-[#2563EB]">LIVE TREND</span>
+          <h2 className="mt-3 text-[1.5rem] leading-tight md:text-[3rem] md:leading-[1.1] font-black text-[#0B0F1A] font-display tracking-tighter">
+            {en ? 'Real-Time Trend Board' : '실시간 트렌드 보드'}
           </h2>
-          <p className="text-sm md:text-base text-slate-400 font-medium mb-3">
-            {language === 'en' ? 'Naver DataLab Shopping Insights Top 5 Search Keywords' : '네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5'}
+          <p className="mt-3 text-sm md:text-lg text-[#4A5273] font-medium">
+            {en ? 'Naver DataLab Shopping Insights Top 5 Search Keywords' : '네이버 데이터랩 쇼핑인사이트 분야별 인기검색어 TOP 5'}
           </p>
-          <div className="flex items-center justify-center gap-3 flex-wrap">
-            <span className="flex items-center gap-1.5 bg-blue-500/20 text-blue-300 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
-              <Clock size={12} /> {language === 'en' ? 'Updated daily at 2 PM' : '매일 오후 2시 업데이트'}
+          <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 bg-[#EDF2FF] text-[#2563EB] text-[10px] md:text-xs font-black px-3 py-1.5 rounded-full">
+              <Clock size={12} strokeWidth={2.6} /> {en ? 'Updated daily at 2 PM' : '매일 오후 2시 업데이트'}
             </span>
             {updatedAt && (
-              <span className="flex items-center gap-1.5 bg-white/10 text-slate-400 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full">
-                <Clock size={12} /> {language === 'en' ? `As of ${formatTime(updatedAt)}` : `${formatTime(updatedAt)} 기준`}
+              <span className="inline-flex items-center gap-1.5 bg-[#F1F3F9] text-[#5B6382] text-[10px] md:text-xs font-black px-3 py-1.5 rounded-full">
+                <Clock size={12} strokeWidth={2.6} /> {en ? `As of ${formatTime(updatedAt)}` : `${formatTime(updatedAt)} 기준`}
               </span>
             )}
           </div>
@@ -120,17 +129,43 @@ const DataBoardSection: React.FC = () => {
 
         <div className="max-w-6xl mx-auto grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
           {loading ? (
-            <div className="col-span-full bg-surface rounded-2xl border border-white/5 p-8 text-center">
-              <p className="text-slate-500 font-bold text-sm">{language === 'en' ? 'Loading trend data...' : '데이터를 불러오는 중...'}</p>
-            </div>
+            /* 불러오는 동안에는 카드와 같은 모양의 자리를 그려 둔다. 데이터가
+               들어와도 레이아웃이 흔들리지 않는다. */
+            Array.from({ length: 6 }).map((_, idx) => (
+              <div
+                key={`skeleton-${idx}`}
+                className="bg-white rounded-2xl md:rounded-[2rem] border border-[#0B0F1A]/[0.07] p-3 md:p-6 animate-pulse"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl bg-[#EFF1F7]" />
+                  <div className="h-3 md:h-4 w-20 md:w-28 rounded-full bg-[#EFF1F7]" />
+                </div>
+                <div className="space-y-2 md:space-y-3">
+                  {Array.from({ length: 5 }).map((__, row) => (
+                    <div key={row} className="flex items-center gap-2 md:gap-3">
+                      <div className="w-4 h-3 rounded bg-[#F3F4F9]" />
+                      <div className="h-3 rounded-full bg-[#F3F4F9]" style={{ width: `${72 - row * 8}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
           ) : categories.length === 0 ? (
-            <div className="col-span-full bg-surface rounded-2xl border border-white/5 p-8 text-center">
-              <p className="text-slate-500 font-bold text-sm">{language === 'en' ? 'Trend data not collected yet. Updated daily at 2 PM.' : '트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.'}</p>
+            <div className="col-span-full bg-white rounded-[2rem] border border-[#0B0F1A]/[0.07] px-6 py-12 text-center shadow-[0_20px_50px_-40px_rgba(11,15,26,0.6)]">
+              <span className="w-12 h-12 rounded-2xl bg-[#EDF2FF] flex items-center justify-center mx-auto mb-4">
+                <LineChart size={22} className="text-[#2563EB]" strokeWidth={2.4} />
+              </span>
+              <p className="text-[#0B0F1A] font-black text-sm md:text-base">
+                {en ? 'No trend data collected yet.' : '트렌드 데이터가 아직 수집되지 않았습니다.'}
+              </p>
+              <p className="mt-2 text-[#8B93AE] font-bold text-xs md:text-sm">
+                {en ? 'The board fills in at the 2 PM update.' : '매일 오후 2시 업데이트에 채워집니다.'}
+              </p>
             </div>
           ) : (
             categories.map((cat, catIdx) => {
               const color = CATEGORY_COLORS[cat.cid] ?? DEFAULT_COLOR;
-              const label = language === 'en' ? (CATEGORY_ENGLISH_NAMES[cat.cid] || cat.label) : cat.label;
+              const label = en ? (CATEGORY_ENGLISH_NAMES[cat.cid] || cat.label) : cat.label;
               return (
                 <motion.div
                   key={cat.cid}
@@ -138,17 +173,23 @@ const DataBoardSection: React.FC = () => {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: catIdx * 0.08, duration: 0.4 }}
-                  className="bg-surface rounded-2xl md:rounded-[2rem] border border-white/5 overflow-hidden shadow-xl"
+                  className="bg-white rounded-2xl md:rounded-[2rem] border border-[#0B0F1A]/[0.07] overflow-hidden shadow-[0_24px_60px_-45px_rgba(11,15,26,0.75)]"
                 >
                   <div className="p-3 md:p-6">
                     <div className="flex items-center justify-between mb-3 md:mb-4">
                       <div className="flex items-center gap-1.5 md:gap-2.5 min-w-0">
-                        <div className={`w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl ${color.bg} flex items-center justify-center shrink-0`}>
-                          <BarChart3 size={14} className={color.text} />
+                        <div
+                          className="w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: color.tint }}
+                        >
+                          <BarChart3 size={14} style={{ color: color.icon }} strokeWidth={2.6} />
                         </div>
-                        <h3 className="text-white font-black text-xs md:text-base truncate">{label}</h3>
+                        <h3 className="text-[#0B0F1A] font-black text-xs md:text-base truncate">{label}</h3>
                       </div>
-                      <span className={`hidden md:inline text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full ${color.badge}`}>
+                      <span
+                        className="hidden md:inline text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full"
+                        style={{ backgroundColor: color.tint, color: color.badge }}
+                      >
                         TOP 5
                       </span>
                     </div>
@@ -157,13 +198,20 @@ const DataBoardSection: React.FC = () => {
                       {cat.rankings.slice(0, 5).map((item) => (
                         <div
                           key={`${cat.cid}-${item.rank}`}
-                          className="flex items-center justify-between p-1.5 md:p-3 rounded-lg md:rounded-xl hover:bg-white/5 transition-colors"
+                          className="flex items-center justify-between p-1.5 md:p-2.5 rounded-lg md:rounded-xl hover:bg-[#F6F7FC] transition-colors"
                         >
                           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                            <span className={`w-4 md:w-5 text-center text-[11px] md:text-xs font-black tabular-nums ${item.rank <= 3 ? 'text-white' : 'text-slate-500'}`}>
+                            <span
+                              className="w-4 h-4 md:w-5 md:h-5 rounded md:rounded-md text-center text-[10px] md:text-[11px] font-black tabular-nums flex items-center justify-center shrink-0"
+                              style={
+                                item.rank <= 3
+                                  ? { backgroundColor: color.icon, color: '#FFFFFF' }
+                                  : { backgroundColor: '#F1F3F9', color: '#98A0BC' }
+                              }
+                            >
                               {item.rank}
                             </span>
-                            <span className="text-[11px] md:text-sm font-bold text-slate-300 truncate">
+                            <span className="text-[11px] md:text-sm font-bold text-[#39415C] truncate">
                               {item.keyword}
                             </span>
                           </div>
@@ -177,9 +225,9 @@ const DataBoardSection: React.FC = () => {
           )}
         </div>
 
-        <div className="text-center mt-6 md:mt-10">
-          <p className="text-slate-600 text-[10px] md:text-xs font-medium">
-            {language === 'en' ? 'Source: Naver DataLab Shopping Insights' : '출처: 네이버 데이터랩 쇼핑인사이트'}
+        <div className="text-center mt-7 md:mt-10">
+          <p className="text-[#A6ADC6] text-[10px] md:text-xs font-bold">
+            {en ? 'Source: Naver DataLab Shopping Insights' : '출처: 네이버 데이터랩 쇼핑인사이트'}
           </p>
         </div>
       </div>

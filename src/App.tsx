@@ -26,7 +26,7 @@ import { lazyWithRetry, LazyRoute } from './utils/lazyRoute';
 import { isKakaoSdkSignedIn } from './utils/kakaoLogin';
 
 const UserPage = lazyWithRetry(() => import('./components/UserPage'));
-const TemplateShowcase = lazyWithRetry(() => import('./components/TemplateShowcase'));
+const CampaignShowcase = lazyWithRetry(() => import('./components/CampaignShowcase'));
 const DataBoardSection = lazyWithRetry(() => import('./components/DataBoardSection'));
 // Auth and the logged-in dashboard are not needed for the public homepage, so
 // they are code-split out of the initial bundle for a faster first paint.
@@ -317,6 +317,19 @@ const App: React.FC = () => {
   useEffect(() => { userNameRef.current = userName; }, [userName]);
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
   useEffect(() => { managerCheckedRef.current = managerChecked; }, [managerChecked]);
+
+  // 홈(마케팅) 화면만 종이색 라이트 테마다. 대시보드·개인페이지·라이브는 그대로
+  // 다크를 쓴다. body 에도 색을 걸어야 iOS 의 overscroll 되돌림 구간과 데스크톱
+  // zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. 홈을 떠나면 뗀다.
+  useEffect(() => {
+    const isHome = view === 'home';
+    document.body.classList.toggle('home-paper', isHome);
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    themeMeta?.setAttribute('content', isHome ? '#F4F5FA' : '#2563EB');
+    return () => {
+      document.body.classList.remove('home-paper');
+    };
+  }, [view]);
 
   // `?kakao_login=1` 은 첫 렌더에 "방금 간편로그인으로 들어왔다"를 알리기 위한
   // 표시일 뿐이다(main.tsx 가 붙인다). 위 초기 상태들이 이미 읽었으니 주소에서
@@ -2063,8 +2076,13 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background selection:bg-blue-primary/30 flex flex-col">
+    <div
+      className={`min-h-screen selection:bg-blue-primary/30 flex flex-col ${
+        view === 'home' ? 'bg-[#F4F5FA] text-[#0B0F1A]' : 'bg-background'
+      }`}
+    >
       <SiteHeader
+        variant={view === 'home' ? 'light' : 'dark'}
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}
         onNavigateLogin={() => navigate('login')}
@@ -2076,11 +2094,12 @@ const App: React.FC = () => {
         {view === 'home' ? (
           <>
             <Hero onSignup={(id) => { setInitialId(id); navigate('signup'); }} />
-            <LazyRoute fallback={null}>
-              <TemplateShowcase onSignup={() => navigate('signup')} userName={userName} />
-            </LazyRoute>
+            {/* 히어로 다음은 실시간 트렌드 보드, 그 아래가 캠페인 소개다. */}
             <LazyRoute fallback={null}>
               <DataBoardSection />
+            </LazyRoute>
+            <LazyRoute fallback={null}>
+              <CampaignShowcase onSignup={() => navigate('signup')} />
             </LazyRoute>
           </>
         ) : view === 'signup' ? (
@@ -2152,7 +2171,11 @@ const App: React.FC = () => {
         )}
       </main>
       {view === 'home' && (
-        <Footer onNavigateTerms={() => navigate('terms')} onNavigatePrivacy={() => navigate('privacy')} />
+        <Footer
+          onNavigateTerms={() => navigate('terms')}
+          onNavigatePrivacy={() => navigate('privacy')}
+          onNavigateSignup={() => navigate('signup')}
+        />
       )}
     </div>
   );
