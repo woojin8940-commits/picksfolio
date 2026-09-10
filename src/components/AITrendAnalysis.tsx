@@ -45,7 +45,7 @@ const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
 const DEFAULT_ACCENT = { tile: 'bg-slate-100 text-slate-600', chip: 'bg-slate-50 text-slate-600' };
 
 // 순위 번호 배지는 카테고리/순위와 무관하게 동일한 색상을 사용
-const RANK_BADGE = 'bg-blue-600 text-white';
+const RANK_BADGE = 'bg-blue-100 text-blue-600';
 
 const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
@@ -163,30 +163,23 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
                 </span>
               </div>
               <div className="space-y-0.5 md:space-y-1.5">
-                {cat.rankings.map((item) => {
-                  const isTop = item.rank <= 3;
-                  return (
-                    <div
-                      key={`${cat.cid}-${item.rank}`}
-                      className="flex items-center justify-between px-1 py-1 md:px-2 md:py-1.5 rounded-lg md:rounded-xl hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                        <span
-                          className={`shrink-0 grid place-items-center w-4 h-4 md:w-6 md:h-6 rounded-md md:rounded-lg text-[9px] md:text-[11px] font-black tabular-nums ${RANK_BADGE}`}
-                        >
-                          {item.rank}
-                        </span>
-                        <span
-                          className={`text-[11px] md:text-xs truncate ${
-                            isTop ? 'font-bold text-slate-900' : 'font-semibold text-slate-400'
-                          }`}
-                        >
-                          {item.keyword}
-                        </span>
-                      </div>
+                {cat.rankings.map((item) => (
+                  <div
+                    key={`${cat.cid}-${item.rank}`}
+                    className="flex items-center justify-between px-1 py-1 md:px-2 md:py-1.5 rounded-lg md:rounded-xl hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                      <span
+                        className={`shrink-0 grid place-items-center w-4 h-4 md:w-6 md:h-6 rounded-md md:rounded-lg text-[9px] md:text-[11px] font-black tabular-nums ${RANK_BADGE}`}
+                      >
+                        {item.rank}
+                      </span>
+                      <span className="text-[11px] md:text-xs truncate font-bold text-slate-900">
+                        {item.keyword}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           );
