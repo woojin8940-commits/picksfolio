@@ -1616,12 +1616,15 @@ export default async (req: Request, context: Context) => {
         const stage = await resolveStepStage(db, collabId, "shipping");
         const next = await advanceProcessStage(db, collab, stage, caller.username);
 
+        // 택배사·송장번호·발송일은 payload 에 그대로 담는다. 인플루언서에게 나가는
+        // 발송 완료 알림톡이 그 세 줄을 그대로 읽는다(scheduled-collab-events).
         await logCollabEvent(db, {
           collabId,
           type: "product_shipped",
           ...actor,
           stageKey: stage?.stage_key || "shipping",
           summary: trackingNumber ? `제품 발송 · ${courier || "택배"} ${trackingNumber}` : "제품 발송",
+          payload: { courier, trackingNumber, shippedAt: new Date().toISOString() },
         });
         return Response.json({ success: true, nextStageKey: next?.stage_key || "" });
       }
@@ -1937,7 +1940,10 @@ export default async (req: Request, context: Context) => {
               : stepKey === "upload"
                 ? "업로드 확인 완료"
                 : `${stepKey === "plan" ? "기획안" : "영상"} 확인 완료`,
-          payload: { settlement },
+          // 어느 칸의 확인인지 남긴다. 기획안 검토 완료와 영상 초안 검토 완료는
+          // 서로 다른 알림톡 템플릿으로 나가므로, 알림을 보내는 쪽이 stage_key 만
+          // 보고 짐작하지 않아야 한다.
+          payload: { step: stepKey, settlement },
         });
         return Response.json({ success: true, nextStageKey: next?.stage_key || "", settlement });
       }

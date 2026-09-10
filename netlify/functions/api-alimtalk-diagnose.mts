@@ -2,6 +2,7 @@ import type { Config, Context } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { requireAdmin } from './_shared/admin-auth.mts'
 import { ALIMTALK_PAUSE_NOTICE, alimtalkPaused } from './_shared/alimtalk-pause.mts'
+import { ALIMTALK_TEMPLATE_CATALOG } from './_shared/alimtalk-templates.mts'
 
 /**
  * 알림톡 발송 파이프라인 진단 엔드포인트 — **운영자 전용**
@@ -54,7 +55,10 @@ export default async (req: Request, context: Context) => {
     SOLAPI_API_SECRET: !!Netlify.env.get('SOLAPI_API_SECRET'),
     SOLAPI_FROM_NUMBER: !!Netlify.env.get('SOLAPI_FROM_NUMBER'),
     SOLAPI_KAKAO_PFID: !!Netlify.env.get('SOLAPI_KAKAO_PFID'),
-    SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID: !!Netlify.env.get('SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID'),
+    // 제안 수락 · 거절 통보(api-proposal-item)만 아직 이 환경변수를 쓴다. 나머지
+    // 알림톡의 템플릿 코드는 _shared/alimtalk-templates.mts 에 적혀 있고 Step 5 에서
+    // 실물과 대조한다 — 환경변수에 남은 코드가 삭제된 템플릿을 가리키는 바람에
+    // 모든 발송이 조용히 문자로 대체되던 일을 다시 겪지 않기 위해서다.
     SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID: !!Netlify.env.get('SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID'),
     SOLAPI_KAKAO_LIVE_NOTIFY_TEMPLATE_ID: !!Netlify.env.get('SOLAPI_KAKAO_LIVE_NOTIFY_TEMPLATE_ID'),
     SOLAPI_KAKAO_LIVE_SUBSCRIBE_TEMPLATE_ID: !!Netlify.env.get('SOLAPI_KAKAO_LIVE_SUBSCRIBE_TEMPLATE_ID'),
@@ -68,8 +72,7 @@ export default async (req: Request, context: Context) => {
   if (!envCheck.SOLAPI_API_SECRET) envCheck.issues.push('SOLAPI_API_SECRET 미설정')
   if (!envCheck.SOLAPI_FROM_NUMBER) envCheck.issues.push('SOLAPI_FROM_NUMBER 미설정 (SMS 대체 발송 불가)')
   if (!envCheck.SOLAPI_KAKAO_PFID) envCheck.issues.push('SOLAPI_KAKAO_PFID 미설정 (알림톡 발송 불가)')
-  if (!envCheck.SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID) envCheck.issues.push('SOLAPI_KAKAO_PROPOSAL_TEMPLATE_ID 미설정 (제안서 알림톡 발송 불가)')
-  if (!envCheck.SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID) envCheck.issues.push('SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID 미설정 (비즈니스 수신 알림 발송 불가)')
+  if (!envCheck.SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID) envCheck.issues.push('SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID 미설정 (제안 수락·거절 통보가 문자로 대체됨)')
   if (!envCheck.SOLAPI_KAKAO_LIVE_NOTIFY_TEMPLATE_ID) envCheck.issues.push('SOLAPI_KAKAO_LIVE_NOTIFY_TEMPLATE_ID 미설정 (라이브 시작 알림 발송 불가)')
   if (!envCheck.SOLAPI_KAKAO_LIVE_SUBSCRIBE_TEMPLATE_ID) envCheck.issues.push('SOLAPI_KAKAO_LIVE_SUBSCRIBE_TEMPLATE_ID 미설정 (라이브 알림 신청완료 알림 발송 불가)')
   if (!envCheck.VITE_SUPABASE_URL) envCheck.issues.push('VITE_SUPABASE_URL 미설정 (전화번호 조회 불가)')
@@ -250,6 +253,65 @@ export default async (req: Request, context: Context) => {
     }
 
     diagnostics.steps.push(templateCheck)
+  }
+
+  // Step 5: 코드가 쓰는 승인 템플릿 대조
+  //
+  // 알림톡이 안 나갈 때 가장 흔한 원인은 키도 번호도 아니고 "템플릿이 바뀐 것"이다.
+  // 새 템플릿을 올리면 ID 가 새로 생기고, 예전 ID 로 보낸 발송은 실패해 대체 문자로
+  // 떨어진다(같은 문구가 버튼 없는 문자로 나가고 요금은 문자 요금으로 붙는다).
+  // 그래서 코드가 들고 있는 템플릿 ID·변수 이름을 솔라피에 올라간 것과 대조한다.
+  if (envCheck.SOLAPI_API_KEY && envCheck.SOLAPI_API_SECRET) {
+    const catalogCheck: Record<string, any> = {
+      step: '5. 코드가 쓰는 알림톡 템플릿 대조',
+      status: 'checking',
+      templates: [] as any[],
+      issues: [] as string[],
+    }
+
+    try {
+      const { SolapiMessageService } = await import('solapi')
+      const service = new SolapiMessageService(
+        Netlify.env.get('SOLAPI_API_KEY') || '',
+        Netlify.env.get('SOLAPI_API_SECRET') || '',
+      )
+
+      for (const entry of ALIMTALK_TEMPLATE_CATALOG) {
+        const row: Record<string, any> = { label: entry.label, templateId: entry.template.templateId }
+        try {
+          const remote = await service.getKakaoAlimtalkTemplate(entry.template.templateId)
+          const remoteVars = Array.from(new Set((remote.content || '').match(/#\{[^}]+\}/g) || []))
+          const sentVars = Object.keys(entry.template.variables)
+          const missing = remoteVars.filter((v) => !sentVars.includes(v))
+
+          row.name = remote.name
+          row.templateStatus = remote.status
+          row.missingVariables = missing
+
+          if (remote.status !== 'APPROVED') {
+            catalogCheck.issues.push(`${entry.label}: 템플릿 상태가 ${remote.status} 입니다 (승인 상태여야 발송됩니다).`)
+          }
+          if (missing.length > 0) {
+            catalogCheck.issues.push(`${entry.label}: 템플릿이 요구하는 변수 ${missing.join(', ')} 를 코드가 보내지 않습니다.`)
+          }
+        } catch (err: any) {
+          row.error = err?.message || String(err)
+          catalogCheck.issues.push(
+            `${entry.label}: 템플릿을 찾을 수 없습니다. 템플릿을 새로 올렸다면 _shared/alimtalk-templates.mts 의 ID 를 새 값으로 바꿔야 합니다.`,
+          )
+        }
+        catalogCheck.templates.push(row)
+      }
+
+      catalogCheck.status = catalogCheck.issues.length === 0
+        ? '✅ 템플릿 7종 모두 승인 상태이고 변수도 일치'
+        : `❌ ${catalogCheck.issues.length}개 문제 발견`
+    } catch (err: any) {
+      catalogCheck.status = '❌ 템플릿 목록 조회 실패'
+      catalogCheck.error = err?.message || String(err)
+    }
+
+    diagnostics.steps.push(catalogCheck)
   }
 
   // 종합 판단

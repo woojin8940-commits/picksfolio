@@ -5,6 +5,7 @@ import { ensureTimelineRoom } from "./_shared/timeline-room.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
+import { businessProposalAlimtalk } from "./_shared/alimtalk-templates.mts";
 
 const STORE = "proposals";
 const BIZ_STORE = "business-proposals";
@@ -229,23 +230,20 @@ export default async (req: Request, context: Context) => {
       console.error("[api-proposals] Failed to send proposal push:", pushErr);
     }
 
-    // 비즈니스 수신 알림 - 카카오 알림톡
+    // 비즈니스 제안 도착 알림 - 카카오 알림톡
+    //
+    // 템플릿은 승인된 "비즈니스 제안 도착" 하나만 쓴다. 문구와 변수 이름은
+    // _shared/alimtalk-templates.mts 가 들고 있다 — 예전에는 여기에 템플릿 ID 를
+    // 직접 적어 두었는데, 템플릿을 새로 올린 뒤에도 그 ID 가 남아 발송이 전부
+    // 대체 문자로 떨어졌다.
     try {
-      const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-      const companyName = body.company_name || body.business_username || "기업";
-      const proposalTitle = body.title || "협업 제안";
-      const magicLink = `${siteOrigin}/admin?tab=proposals`;
-
       await sendKakaoAlimtalk({
         username,
-        message: `[픽스폴리오] 새로운 협업 제안\n\n${companyName}에서 "${proposalTitle}" 협업을 제안했습니다.\n\n자세한 내용은 아래 링크에서 확인하세요.\n${magicLink}`,
-        templateId: "KA01TP260409050013707MDcnfpN4ApK",
-        variables: {
-          "#{고객명}": username,
-          "#{업체명}": companyName,
-          "#{프로젝트명}": proposalTitle,
-          "#{링크연결}": magicLink,
-        },
+        ...businessProposalAlimtalk({
+          influencer: username,
+          companyName: body.company_name || body.business_username,
+          proposalTitle: body.title,
+        }),
       });
     } catch (notifErr) {
       console.error("[api-proposals] Failed to send proposal alimtalk:", notifErr);

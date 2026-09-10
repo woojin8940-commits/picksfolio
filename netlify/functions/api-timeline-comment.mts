@@ -3,6 +3,7 @@ import type { Config, Context } from "@netlify/functions";
 import { sendPushToUser } from "./_shared/push.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { participantList, resolveTimelineAccess } from "./_shared/timeline-access.mts";
+import { TIMELINE_ALIMTALK_COOLDOWN_MS, claimAlimtalkSlot } from "./_shared/alimtalk-throttle.mts";
 
 const STORE = "timelines";
 
@@ -204,34 +205,38 @@ export default async (req: Request, context: Context) => {
                 ? "business"
                 : "influencer";
 
-            await mutateBlobJSON<any>("notification-queue", queueKey, (current) => {
-              if (current) {
-                return {
-                  ...current,
-                  messageCount: (current.messageCount || 1) + 1,
-                  lastMessagePreview: messagePreview,
-                  sendAfter: new Date(Date.now() + 30_000).toISOString(),
-                };
-              }
-              return {
+            /**
+             * 알림톡은 이 대화의 "첫 메시지"에만 나간다.
+             *
+             * 예전에는 메시지마다 대기열에 쌓고 30초 뒤 묶어서 보냈다. 묶여도
+             * 대화가 30초보다 길게 이어지면 알림톡은 계속 나갔고, 브랜드가 세
+             * 문장을 나눠 쓰면 인플루언서는 같은 알림을 여러 번 받았다. 이제
+             * 첫 메시지에만 보내고 그 뒤 5분 동안은 보내지 않는다. 5분이 지난
+             * 뒤의 첫 메시지에서 다시 한 번 나간다.
+             */
+            const notifyByAlimtalk = await claimAlimtalkSlot(
+              `timeline_${proposalId}_${recipientUsername}`,
+              TIMELINE_ALIMTALK_COOLDOWN_MS,
+            );
+            if (notifyByAlimtalk) {
+              await mutateBlobJSON<any>("notification-queue", queueKey, () => ({
                 recipientUsername,
                 recipientType,
                 proposalId,
                 companyName: existing.companyName || "",
                 proposalTitle: projectName,
                 senderName,
-                messageCount: 1,
-                firstMessagePreview: messagePreview,
-                lastMessagePreview: messagePreview,
                 magicLink,
                 siteOrigin,
-                sendAfter: new Date(Date.now() + 30_000).toISOString(),
-              };
-            });
+                // 발송은 scheduled-notification-sender 가 맡는다(1분 주기). 응답을
+                // 먼저 돌려준 뒤의 배경 작업이 중간에 끊겨도 알림이 사라지지 않는다.
+                sendAfter: new Date().toISOString(),
+              }));
+            }
 
             // Native push is immediate — its whole value is reaching the
-            // recipient the moment the message lands (the Kakao alimtalk above
-            // is debounced 30s and acts as the fallback when the app is gone).
+            // recipient the moment the message lands, so it is not throttled:
+            // it costs nothing and someone mid-conversation wants every line.
             const pushBody = messagePreview
               || (attachments.length > 0 ? "사진을 보냈어요." : "새 메시지가 도착했어요.");
             await sendPushToUser(recipientUsername, {
