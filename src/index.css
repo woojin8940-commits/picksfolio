@@ -424,14 +424,42 @@ body.timeline-chat-open .fixed-bottom-nav {
   outline: none;
 }
 
-/* ===== 홈(마케팅) 화면 전용 라이트 테마 =====
-   홈만 종이색을 쓴다. 대시보드·개인페이지·라이브는 그대로 다크다.
-   body 에도 같은 색을 걸어야 iOS 의 overscroll 되돌림 구간과 데스크톱
-   zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. App.tsx 가 view 가
-   'home' 일 때만 이 클래스를 붙이고 떠날 때 뗀다. */
+/* ===== 홈·로그인 화면의 라이트(종이) 테마 =====
+   홈과 로그인 계열 화면이 같은 종이색을 쓴다. 대시보드·개인페이지·라이브는
+   그대로 다크다. body 에도 같은 색을 걸어야 iOS 의 overscroll 되돌림 구간과
+   데스크톱 zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. App.tsx 가
+   view 가 'home' · 'login' 일 때 이 클래스를 붙이고 떠날 때 뗀다. */
 body.home-paper {
   background-color: #F4F5FA;
   color: #0B0F1A;
+}
+
+/* 로그인이 끝나기를 기다리는 화면도 같은 종이색이다. 그 화면은 `fixed inset-0`
+   이라 body 색을 직접 갈아 주지 않으면 overscroll 구간과 데스크톱 zoom 의 바깥
+   여백에서 검정이 비친다. AuthLoadingScreen 이 붙였다 뗀다 — 로그인 콜백은
+   리액트가 뜨기 전부터 이 화면이라, index.html 의 정적 마크업이 같은 색을
+   인라인 스타일로 먼저 깔고 이 컴포넌트가 이어받는다. */
+body.auth-paper {
+  background-color: #F4F5FA;
+  color: #0B0F1A;
+}
+
+/* 로그인 계열의 전체 화면 배경. 종이색과 옅은 점 격자를 한 클래스로 묶은 것이다
+   — 홈 히어로의 `.home-dotgrid` + `opacity-70` 과 같은 농도(0.055 × 0.7)이고,
+   레이어를 하나 덜 만든다. */
+.paper-page {
+  background-color: #F4F5FA;
+  background-image: radial-gradient(rgba(11, 15, 26, 0.0385) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* 홈의 히어로가 쓰는 파스텔 얼룩을 로그인 계열 화면에서도 그대로 쓴다.
+   blur 필터 없이 radial-gradient 로만 그려 배경 레이어 하나로 끝낸다. */
+.paper-glow-blue {
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.16), transparent 70%);
+}
+.paper-glow-green {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.13), transparent 70%);
 }
 
 /* 종이 위에 아주 옅은 점 격자. 흰 배경이 비어 보이지 않게만 하는 정도의 농도다.

@@ -68,24 +68,24 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
   }
 
   return (
-    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
-      <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-xs font-black mb-4">
+    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 paper-page overflow-y-auto">
+      <div className="w-full max-w-[440px] bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-6 sm:p-9 md:p-10 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2 bg-white border border-[#0B0F1A]/10 text-[#2563EB] px-3.5 py-1.5 rounded-full text-[11px] font-black mb-4 shadow-sm">
             BUSINESS
           </div>
-          <h1 className="text-3xl font-black text-slate-900 mb-2">{isEn ? 'Business Log In' : '비즈니스 로그인'}</h1>
-          <p className="text-slate-500 text-sm font-medium">{isEn ? 'Sign in to your brand dashboard' : '기업 대시보드에 로그인하세요.'}</p>
+          <h1 className="text-[1.75rem] sm:text-3xl font-black tracking-tighter text-[#0B0F1A] mb-2 font-display">{isEn ? 'Business Log In' : '비즈니스 로그인'}</h1>
+          <p className="text-[#4A5273] text-sm font-medium">{isEn ? 'Sign in to your brand dashboard' : '기업 대시보드에 로그인하세요.'}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Business ID' : '비즈니스 아이디'}</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
+            <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Business ID' : '비즈니스 아이디'}</label>
+            <div className="bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-4 py-3.5 transition-colors focus-within:border-[#2563EB] focus-within:bg-white">
               <input
                 type="text" name="username" placeholder={isEn ? 'Enter business ID' : '비즈니스 아이디를 입력해 주세요'}
                 required value={formData.username} onChange={handleChange}
-                className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold text-sm"
                 disabled={isLoading}
                 autoComplete="username"
                 autoCapitalize="none"
@@ -96,18 +96,18 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Password' : '비밀번호'}</label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 focus-within:border-blue-500 transition-colors">
+            <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Password' : '비밀번호'}</label>
+            <div className="bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-4 py-3.5 transition-colors focus-within:border-[#2563EB] focus-within:bg-white">
               <input
                 type="password" name="password" placeholder={isEn ? 'Enter password' : '비밀번호를 입력해 주세요'}
                 required value={formData.password} onChange={handleChange}
-                className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold text-sm"
                 disabled={isLoading}
                 autoComplete="current-password"
               />
             </div>
             <div className="flex items-center justify-end">
-              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
+              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-[#8B93AE] hover:text-[#2563EB] font-bold transition-colors">
                 {isEn ? 'Find ID / Password' : '아이디/비밀번호 찾기'}
               </button>
             </div>
@@ -115,7 +115,7 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
 
           <button
             type="submit" disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-2xl text-lg font-black transition-all hover:shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-[#2563EB] hover:bg-[#1d4ed8] text-white py-4 rounded-full text-base font-black transition-all shadow-[0_12px_28px_-12px_rgba(37,99,235,0.8)] active:scale-[0.97] mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
@@ -128,21 +128,21 @@ const BusinessLoginPage: React.FC<BusinessLoginPageProps> = ({ onNavigateHome, o
           </button>
         </form>
 
-        <div className="text-center mt-8 space-y-3">
-          <p className="text-slate-400 text-sm font-bold">
+        <div className="text-center mt-6 space-y-3">
+          <p className="text-[#8B93AE] text-sm font-bold">
             {isEn ? "Don't have a business account?" : '비즈니스 계정이 없으신가요?'}{' '}
-            <button onClick={onNavigateBusinessSignup} className="text-slate-800 hover:underline font-black" disabled={isLoading}>
+            <button onClick={onNavigateBusinessSignup} className="text-[#2563EB] hover:underline font-black" disabled={isLoading}>
               {isEn ? 'Sign Up' : '회원가입하기'}
             </button>
           </p>
-          <p className="text-slate-400 text-xs font-bold">
+          <p className="text-[#8B93AE] text-xs font-bold">
             {isEn ? 'Are you an influencer?' : '인플루언서이신가요?'}{' '}
-            <button onClick={onNavigateHome} className="text-slate-500 hover:text-blue-600 hover:underline" disabled={isLoading}>
+            <button onClick={onNavigateHome} className="text-[#39415C] hover:text-[#2563EB] hover:underline" disabled={isLoading}>
               {isEn ? 'Creator Login' : '일반 로그인'}
             </button>
           </p>
           <div className="pt-2">
-            <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">
+            <button onClick={onNavigateHome} className="text-[#8B93AE] text-xs font-bold hover:text-[#0B0F1A] transition-colors">
               {isEn ? 'Return to Home' : '홈으로 돌아가기'}
             </button>
           </div>
