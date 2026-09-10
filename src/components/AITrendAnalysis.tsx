@@ -22,14 +22,14 @@ interface CategoryBlock {
   rankings: CategoryRanking[];
 }
 
-const CATEGORY_ACCENTS: Record<string, { dot: string; chip: string }> = {
-  '50000000': { dot: 'bg-blue-600', chip: 'bg-blue-50 text-blue-700' },
-  '50000002': { dot: 'bg-pink-500', chip: 'bg-pink-50 text-pink-700' },
-  '50000003': { dot: 'bg-blue-500', chip: 'bg-blue-50 text-blue-700' },
-  '50000004': { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700' },
-  '50000006': { dot: 'bg-green-500', chip: 'bg-green-50 text-green-700' },
-  '50000008': { dot: 'bg-teal-500', chip: 'bg-teal-50 text-teal-700' },
-  '50000009': { dot: 'bg-indigo-500', chip: 'bg-indigo-50 text-indigo-700' },
+const CATEGORY_ACCENTS: Record<string, { tile: string; chip: string; badge: string }> = {
+  '50000000': { tile: 'bg-blue-50 text-blue-600', chip: 'bg-blue-50 text-blue-600', badge: 'bg-blue-600' },
+  '50000002': { tile: 'bg-rose-50 text-rose-500', chip: 'bg-rose-50 text-rose-600', badge: 'bg-rose-600' },
+  '50000003': { tile: 'bg-sky-50 text-sky-600', chip: 'bg-sky-50 text-sky-700', badge: 'bg-sky-700' },
+  '50000004': { tile: 'bg-amber-50 text-amber-600', chip: 'bg-amber-50 text-amber-700', badge: 'bg-amber-600' },
+  '50000006': { tile: 'bg-emerald-50 text-emerald-600', chip: 'bg-emerald-50 text-emerald-700', badge: 'bg-emerald-600' },
+  '50000008': { tile: 'bg-teal-50 text-teal-600', chip: 'bg-teal-50 text-teal-700', badge: 'bg-teal-700' },
+  '50000009': { tile: 'bg-indigo-50 text-indigo-600', chip: 'bg-indigo-50 text-indigo-700', badge: 'bg-indigo-600' },
 };
 
 const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
@@ -42,7 +42,7 @@ const CATEGORY_ENGLISH_NAMES: Record<string, string> = {
   '50000009': 'Sports / Leisure',
 };
 
-const DEFAULT_ACCENT = { dot: 'bg-slate-500', chip: 'bg-slate-50 text-slate-700' };
+const DEFAULT_ACCENT = { tile: 'bg-slate-100 text-slate-600', chip: 'bg-slate-50 text-slate-600', badge: 'bg-slate-600' };
 
 const FALLBACK_CATEGORIES: CategoryBlock[] = [];
 
@@ -134,11 +134,11 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-5">
         {loading ? (
-          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
+          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-2xl md:rounded-[1.75rem] border border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.04)] md:shadow-[0_6px_24px_rgba(15,23,42,0.06)] text-[11px] text-slate-400 font-bold py-4 text-center">
             {language === 'en' ? 'Loading category data...' : '카테고리 데이터를 불러오는 중...'}
           </div>
         ) : categories.length === 0 ? (
-          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-xl md:rounded-[2rem] border border-slate-100 shadow-sm text-[11px] text-slate-400 font-bold py-4 text-center">
+          <div className="col-span-2 lg:col-span-3 bg-white p-4 md:p-8 rounded-2xl md:rounded-[1.75rem] border border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.04)] md:shadow-[0_6px_24px_rgba(15,23,42,0.06)] text-[11px] text-slate-400 font-bold py-4 text-center">
             {language === 'en' ? 'Trend data not collected yet. Updated daily at 2 PM.' : '트렌드 데이터가 아직 수집되지 않았습니다. 매일 오후 2시에 업데이트됩니다.'}
           </div>
         ) : null}
@@ -146,33 +146,46 @@ const AITrendAnalysis: React.FC<AITrendAnalysisProps> = ({ embedded = false }) =
           const accent = CATEGORY_ACCENTS[cat.cid] ?? DEFAULT_ACCENT;
           const label = language === 'en' ? (CATEGORY_ENGLISH_NAMES[cat.cid] || cat.label) : cat.label;
           return (
-            <div key={cat.cid} className="bg-white p-2.5 md:p-6 rounded-xl md:rounded-2xl border border-slate-100 shadow-sm">
-              <div className="flex items-center justify-between mb-3 md:mb-4">
-                <h4 className="font-black text-slate-900 flex items-center gap-1.5 text-[11px] md:text-sm min-w-0">
-                  <BarChart3 size={14} className="text-blue-600 shrink-0" />
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${accent.dot}`}></span>
+            <div className="bg-white p-2.5 md:p-6 rounded-2xl md:rounded-[1.75rem] border border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.04)] md:shadow-[0_6px_24px_rgba(15,23,42,0.06)] transition-shadow hover:shadow-[0_10px_32px_rgba(15,23,42,0.09)]" key={cat.cid}>
+              <div className="flex items-center justify-between gap-1.5 mb-2.5 md:mb-4">
+                <h4 className="font-black text-slate-900 flex items-center gap-1.5 md:gap-2.5 text-[11px] md:text-sm min-w-0">
+                  <span className={`shrink-0 grid place-items-center w-5 h-5 md:w-7 md:h-7 rounded-lg md:rounded-xl ${accent.tile}`}>
+                    <BarChart3 size={12} className="md:hidden" strokeWidth={2.5} />
+                    <BarChart3 size={15} className="hidden md:block" strokeWidth={2.5} />
+                  </span>
                   <span className="truncate">{label}</span>
                 </h4>
-                <span className={`hidden md:inline text-[9px] font-black px-2 py-0.5 rounded-full ${accent.chip}`}>
+                <span className={`hidden md:inline shrink-0 text-[9px] font-black tracking-wide px-2 py-1 rounded-lg ${accent.chip}`}>
                   TOP 5
                 </span>
               </div>
               <div className="space-y-0.5 md:space-y-1.5">
-                {cat.rankings.map((item) => (
-                  <div
-                    key={`${cat.cid}-${item.rank}`}
-                    className="flex items-center justify-between p-1.5 md:p-2.5 rounded-lg md:rounded-xl hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 md:gap-2.5 min-w-0">
-                      <span className="w-4 text-[11px] md:text-xs font-black text-slate-400 tabular-nums shrink-0">
-                        {item.rank}
-                      </span>
-                      <span className="text-[11px] md:text-xs font-bold text-slate-700 truncate">
-                        {item.keyword}
-                      </span>
+                {cat.rankings.map((item) => {
+                  const isTop = item.rank <= 3;
+                  return (
+                    <div
+                      key={`${cat.cid}-${item.rank}`}
+                      className="flex items-center justify-between px-1 py-1 md:px-2 md:py-1.5 rounded-lg md:rounded-xl hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                        <span
+                          className={`shrink-0 grid place-items-center w-4 h-4 md:w-6 md:h-6 rounded-md md:rounded-lg text-[9px] md:text-[11px] font-black tabular-nums ${
+                            isTop ? `${accent.badge} text-white` : 'bg-slate-100 text-slate-400'
+                          }`}
+                        >
+                          {item.rank}
+                        </span>
+                        <span
+                          className={`text-[11px] md:text-xs truncate ${
+                            isTop ? 'font-bold text-slate-900' : 'font-semibold text-slate-400'
+                          }`}
+                        >
+                          {item.keyword}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
