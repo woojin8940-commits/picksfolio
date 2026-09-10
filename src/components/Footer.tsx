@@ -16,8 +16,8 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy }) =
             <h2 className="text-xl md:text-2xl font-black text-white mb-5 md:mb-8 tracking-tighter">PICKS</h2>
             <p className="text-slate-500 text-sm font-bold leading-relaxed">
               {language === 'en'
-                ? 'Curating daily life and connecting style with a detailed social link platform.'
-                : '일상을 큐레이션하고 스타일을 연결하는 자세한 소셜 커머스 링크 플랫폼.'}
+                ? 'The all-in-one service for creators — build your own homepage and connect everything with a single link.'
+                : '크리에이터를 위한 올인원 서비스. 나만의 홈페이지로 모든 것을 하나의 링크로 연결하세요.'}
             </p>
           </div>
 

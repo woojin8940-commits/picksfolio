@@ -17,8 +17,8 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
 
       <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl md:text-[4.5rem] font-black leading-[1.15] md:leading-[1.05] mb-4 md:mb-8 tracking-tighter text-white font-display">
-          {language === 'en' ? 'Curate Your Daily Life.' : '일상을 큐레이션하다.'}<br />
-          <span className="text-gradient">{language === 'en' ? 'One Single Link, PICKS' : '단 하나의 링크, PICKS'}</span>
+          {language === 'en' ? 'The All-in-One Service for Creators' : '크리에이터를 위한 올인원 서비스'}<br />
+          <span className="text-gradient">PICKS</span>
         </h1>
 
         <p className="text-sm md:text-lg text-slate-400 mb-6 md:mb-10 max-w-3xl mx-auto leading-relaxed font-medium">
