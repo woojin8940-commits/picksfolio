@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { BusinessProposal, CollabRecord, Settlement } from '../types';
 import { apiService } from '../services/apiService';
 import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '../utils/formatters';
@@ -508,6 +508,29 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     });
     return map;
   }, [settlements]);
+
+  /**
+   * 날짜를 누르면 그날 상세로 데려간다.
+   *
+   * 모바일에서 상세 칸은 달력 여섯 줄 아래에 열린다 — 화면에 보이지 않는 자리다.
+   * 그래서 칸을 눌러도 아무 일도 일어나지 않은 것처럼 보였고, 좁은 칸에 찍힌 막대만
+   * 보고 그것이 무슨 일정인지 알 방법이 없었다. 넓은 화면은 달력 옆·아래가 이미
+   * 한눈에 들어오므로 그대로 둔다.
+   */
+  const detailRef = useRef<HTMLDivElement>(null);
+  const scrollToDetail = useRef(false);
+
+  const toggleDate = (dateStr: string) => {
+    const next = dateStr === selectedDate ? null : dateStr;
+    scrollToDetail.current = Boolean(next) && typeof window !== 'undefined' && window.innerWidth < 768;
+    setSelectedDate(next);
+  };
+
+  useEffect(() => {
+    if (!selectedDate || !scrollToDetail.current) return;
+    scrollToDetail.current = false;
+    detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedDate]);
 
   const selectedProposalEvents = selectedDate ? (proposalEventsMap[selectedDate] || []) : [];
   const selectedCollabEvents = selectedDate ? (collabEventsMap[selectedDate] || []) : [];
@@ -1126,10 +1149,16 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               </div>
             </div>
 
+            {/* 모바일에서는 칸에 제목이 들어가지 않는다. 그래서 무엇을 하면 그 날의
+                일정을 읽을 수 있는지 한 줄로 밝힌다. */}
+            <p className="md:hidden px-4 pb-3 -mt-1 text-[10px] font-bold text-slate-400">
+              날짜를 누르면 그날 일정이 아래에 열립니다.
+            </p>
+
             {/* Weekday Headers */}
             <div className="grid grid-cols-7">
               {weekDays.map(day => (
-                <div key={day} className="p-2.5 text-center text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
+                <div key={day} className="p-1.5 md:p-2.5 text-center text-[11px] md:text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
                   {day}
                 </div>
               ))}
@@ -1140,7 +1169,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 fold so it only appears on scroll. Rows divide the space equally. */}
             <div className="grid grid-cols-7 md:auto-rows-fr md:h-[calc(100vh-170px)]">
               {Array.from({ length: firstDay }).map((_, i) => (
-                <div key={`empty-${i}`} className="p-2 md:p-3 min-h-[80px] md:min-h-0 border-b border-r border-slate-50" />
+                <div key={`empty-${i}`} className="p-1.5 md:p-3 min-h-[72px] md:min-h-0 border-b border-r border-slate-50" />
               ))}
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
@@ -1153,12 +1182,12 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 return (
                   <div
                     key={day}
-                    onClick={() => setSelectedDate(dateStr === selectedDate ? null : dateStr)}
-                    className={`p-2 md:p-3 min-h-[80px] md:min-h-0 overflow-hidden border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                    onClick={() => toggleDate(dateStr)}
+                    className={`p-1.5 md:p-3 min-h-[72px] md:min-h-0 overflow-hidden border-b border-r border-slate-50 cursor-pointer transition-all hover:bg-blue-50/50 ${
                       isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''
                     }`}
                   >
-                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-black ${
+                    <span className={`inline-flex items-center justify-center w-6 h-6 md:w-7 md:h-7 rounded-full text-[13px] md:text-sm font-black ${
                       isToday
                         ? 'bg-blue-600 text-white'
                         : dayOfWeek === 0
@@ -1175,8 +1204,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                         희망 게시 기간이 여러 날이면 같은 일정이 칸마다 놓인다. 기간의
                         가운데 칸은 칸 여백만큼 좌우로 넘겨(-mx) 옆 칸의 막대와 맞붙게
                         하고, 양 끝만 둥글게 둔다 — 그래야 23~26일이 네 개의 점이 아니라
-                        하나의 기간으로 읽힌다. 아이콘과 제목은 시작 칸에만 적는다. */}
-                    <div className="mt-1.5">
+                        하나의 기간으로 읽힌다. 아이콘과 제목은 시작 칸에만 적는다.
+
+                        제목을 적을 수 있는 것은 칸이 넓은 화면에서다. 모바일은 색 막대와
+                        건수만 두고, 무슨 일정인지는 칸을 눌러 아래 상세에서 읽는다. */}
+                    <div className="mt-1 space-y-[3px] md:space-y-0 md:mt-1.5">
                       {chips.slice(0, 3).map(ev => {
                         const spanned = ev.from !== ev.to;
                         const overdue = isOverdue(ev);
@@ -1190,40 +1222,57 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                               : overdue
                                 ? '⚠️'
                                 : '⬆️';
+                        const hint = [
+                          ev.kind === 'settlement'
+                            ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
+                            : ev.done
+                              ? '업로드 완료'
+                              : overdue
+                                ? '마감 지남 (미업로드)'
+                                : '업로드 예정',
+                          spanned ? `희망 게시 ${ev.from} ~ ${ev.to}` : '',
+                          ev.title,
+                          ev.company,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ');
+                        const edges = !spanned
+                          ? 'rounded'
+                          : `${ev.isStart ? 'rounded-l' : '-ml-1.5 md:-ml-3'} ${
+                              ev.isEnd ? 'rounded-r' : '-mr-1.5 md:-mr-3'
+                            }`;
                         return (
-                          <div
-                            key={ev.id}
-                            title={[
-                              ev.kind === 'settlement'
-                                ? `${ev.done ? '입금 완료' : '정산 예정'}${ev.amount ? ` · ${formatFee(ev.amount)}` : ''}`
-                                : ev.done
-                                  ? '업로드 완료'
-                                  : overdue
-                                    ? '마감 지남 (미업로드)'
-                                    : '업로드 예정',
-                              spanned ? `희망 게시 ${ev.from} ~ ${ev.to}` : '',
-                              ev.title,
-                              ev.company,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')}
-                            style={chipStyle(ev)}
-                            className={`text-[11px] md:text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${
-                              ev.cancelled ? 'line-through' : ''
-                            } ${
-                              !spanned
-                                ? 'rounded'
-                                : `${ev.isStart ? 'rounded-l' : '-ml-2 md:-ml-3'} ${
-                                    ev.isEnd ? 'rounded-r' : '-mr-2 md:-mr-3'
-                                  }`
-                            }`}
-                          >
-                            {spanned && !ev.isStart ? ev.title : `${icon} ${ev.title}`}
-                          </div>
+                          <React.Fragment key={ev.id}>
+                            {/* 모바일은 잘린 제목 대신 색 막대만 둔다. 일곱 칸으로 나뉜
+                                한 줄에 제목을 밀어 넣으면 네 글자만 남아서, 어느 협업인지
+                                알려 주지도 못하면서 칸만 빽빽하게 만들었다. 무슨 일정인지는
+                                칸을 눌러 상세에서 본다. */}
+                            <div
+                              title={hint}
+                              style={chipStyle(ev)}
+                              className={`md:hidden h-[5px] ${ev.cancelled ? 'opacity-40' : ''} ${edges}`}
+                            />
+                            <div
+                              title={hint}
+                              style={chipStyle(ev)}
+                              className={`hidden md:block text-xs font-bold py-1 px-1.5 leading-tight overflow-hidden whitespace-nowrap text-ellipsis mb-[1px] ${
+                                ev.cancelled ? 'line-through' : ''
+                              } ${edges}`}
+                            >
+                              {spanned && !ev.isStart ? ev.title : `${icon} ${ev.title}`}
+                            </div>
+                          </React.Fragment>
                         );
                       })}
+                      {/* 막대만 보이는 모바일에서는 그 날의 건수를 적어 둔다 — 누를 것이
+                          있는 날인지 알려 주는 유일한 글자다. */}
+                      {chips.length > 0 && (
+                        <p className="md:hidden text-[9px] font-black text-slate-400 leading-tight pt-0.5">
+                          {chips.length}건
+                        </p>
+                      )}
                       {chips.length > 3 && (
-                        <p className="text-[11px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
+                        <p className="hidden md:block text-[11px] font-bold text-slate-400 px-1">+{chips.length - 3}건</p>
                       )}
                     </div>
                   </div>
@@ -1234,7 +1283,10 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
           {/* Selected Date Detail */}
           {selectedDate && (
-            <div className="mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 md:p-8 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div
+              ref={detailRef}
+              className="mt-4 scroll-mt-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-8 animate-in fade-in slide-in-from-top-2 duration-300"
+            >
               <div className="flex items-center justify-between mb-4">
                 <h4 className="font-black text-slate-900 text-base">
                   {formatDate(selectedDate)} 일정

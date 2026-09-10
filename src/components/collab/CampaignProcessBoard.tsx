@@ -13,6 +13,7 @@ import {
   sceneIsEmpty,
   scenesToBody,
 } from '../../utils/collabScenes';
+import SceneTextarea from './SceneTextarea';
 import {
   CollabStepTurn,
   collabStepTurns,
@@ -136,6 +137,18 @@ const fieldCls = (value: string) =>
   String(value || '').trim()
     ? 'w-full text-xs font-bold text-slate-900 border border-emerald-200 bg-emerald-50/60 rounded-lg px-3 py-2.5 focus:outline-none focus:border-emerald-400 transition-colors'
     : inputCls;
+
+/**
+ * 장면 칸은 한 단계 작은 글씨로 둔다.
+ *
+ * 설명은 대여섯 줄이 보통인데, 다른 입력칸(택배사 · 송장번호)과 같은 크기로 두면
+ * 모바일에서 장면 하나가 화면을 다 덮어서 앞뒤 장면을 함께 볼 수 없었다. 글씨를
+ * 줄이고 좌우 여백을 좁혀, 같은 높이에 설명이 끝까지 들어오게 한다.
+ */
+const sceneFieldCls = (value: string) =>
+  String(value || '').trim()
+    ? 'w-full text-[11px] md:text-xs font-bold text-slate-900 border border-emerald-200 bg-emerald-50/60 rounded-lg px-2.5 py-2 focus:outline-none focus:border-emerald-400 transition-colors'
+    : 'w-full text-[11px] md:text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:border-slate-400 transition-colors';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className="block">
@@ -1323,7 +1336,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   나레이션은 없으면 비워 두셔도 됩니다. 브랜드는 장면마다 피드백을 답니다.
                 </p>
                 {scenes.map((scene, i) => (
-                  <div key={i} className="rounded-lg border border-slate-200 p-3">
+                  <div key={i} className="rounded-lg border border-slate-200 p-2.5 md:p-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-black text-slate-900">장면 {i + 1}</span>
                       {scenes.length > 1 && (
@@ -1337,12 +1350,14 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     </div>
                     <div className="space-y-2">
                       <Field label="설명">
-                        <textarea
+                        {/* 고정 높이(rows=3)로 두면 넉 줄째부터 칸 안에서 잘렸다. 내용만큼
+                            늘려서 적은 글이 한눈에 다 보이게 한다. */}
+                        <SceneTextarea
                           value={scene.visual}
                           onChange={e => patchScene(i, 'visual', e.target.value)}
                           rows={3}
                           placeholder="어떤 장면을 찍는지 (예: 제품을 손에 들고 카메라 정면)"
-                          className={`${fieldCls(scene.visual)} resize-none leading-relaxed`}
+                          className={`${sceneFieldCls(scene.visual)} resize-none overflow-hidden leading-relaxed`}
                         />
                       </Field>
                       <Field label="자막">
@@ -1350,19 +1365,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                           value={scene.subtitle}
                           onChange={e => patchScene(i, 'subtitle', e.target.value)}
                           placeholder="화면에 뜨는 글자"
-                          className={fieldCls(scene.subtitle)}
+                          className={sceneFieldCls(scene.subtitle)}
                         />
                       </Field>
                       {/* 나레이션은 저장 구조(StoryboardScene)와 검수 화면에는 처음부터
                           있었는데 이 칸만 없었다. 그래서 대사를 쓰려면 설명 칸에 섞어
                           적어야 했고, 브랜드는 검수 화면의 빈 나레이션 칸을 보게 됐다. */}
                       <Field label="나레이션">
-                        <textarea
+                        <SceneTextarea
                           value={scene.narration}
                           onChange={e => patchScene(i, 'narration', e.target.value)}
                           rows={2}
-                          placeholder="말하는 대사 (없으면 비워 두세요)"
-                          className={`${fieldCls(scene.narration)} resize-none leading-relaxed`}
+                          placeholder="없으면 비워두세요"
+                          className={`${sceneFieldCls(scene.narration)} resize-none overflow-hidden leading-relaxed`}
                         />
                       </Field>
                     </div>
