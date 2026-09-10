@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
+import { ArrowRight, Briefcase, Lock, Sparkles, User } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { setAccountScope, sessionSet } from '../utils/accountScope';
 import { primeSupabaseSession } from '../services/apiService';
@@ -208,124 +209,201 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
     return <FindAccount accountType="user" onBack={() => setShowFindAccount(false)} />;
   }
 
+  // 홈과 같은 규칙을 쓰는 조각들. 입력칸·버튼이 여러 번 반복되므로 한곳에 모아 둔다.
+  const fieldShell =
+    'flex items-center gap-2.5 bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-4 py-3 transition-colors focus-within:border-[#2563EB] focus-within:bg-white';
+  const fieldInput =
+    'bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold placeholder:text-[#C3C9DC] text-sm';
+
   return (
-    <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-24 sm:pt-28 pb-10 sm:pb-14 bg-midnight overflow-y-auto">
-      <div className="w-full max-w-sm sm:max-w-md bg-white rounded-[22px] sm:rounded-[26px] p-6 sm:p-9 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
-        <div className="text-center mb-7">
-          <h1 className="text-2xl font-black text-slate-900 mb-1">{t('nav.login', '로그인', 'Log In')}</h1>
-          <p className="text-slate-500 text-sm font-medium">
-            {language === 'en' ? 'Welcome back to PICKSFOLIO.' : '픽스폴리오에 다시 오신 것을 환영합니다.'}
+    <div className="relative min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 pt-20 sm:pt-28 pb-12 sm:pb-16 overflow-hidden">
+      {/* 배경은 홈의 히어로와 같다 — 종이색 위에 옅은 점 격자와 파스텔 얼룩 두 개.
+          종이색 자체는 body.home-paper 와 App.tsx 의 바깥 틀이 칠하므로 여기서는
+          무늬만 올린다. 스크롤과 함께 다시 그리지 않도록 배경 레이어에만 얹는다.
+
+          층 순서는 음수 z-index 로 두지 않는다 — 바깥 틀(App.tsx)이 배경색을
+          가지고 있어서, 음수 층은 그 배경보다 먼저 그려져 아예 보이지 않는다.
+          배경 층은 z-0, 내용은 z-10 으로 올려 순서를 못 박는다. */}
+      <div aria-hidden className="absolute inset-0 z-0 home-dotgrid opacity-70" />
+      <div
+        aria-hidden
+        className="absolute -top-24 -right-16 w-[320px] h-[320px] md:w-[520px] md:h-[520px] rounded-full z-0 blur-[90px] paper-glow-blue"
+      />
+      <div
+        aria-hidden
+        className="absolute top-1/2 -left-24 w-[260px] h-[260px] md:w-[400px] md:h-[400px] rounded-full z-0 blur-[90px] paper-glow-green"
+      />
+
+      <div className="relative z-10 w-full max-w-sm sm:max-w-md">
+        {/* 카드 밖의 인사말. 홈의 히어로와 같은 순서(알약 → 큰 제목 → 설명)다. */}
+        <div className="text-center">
+          <span className="inline-flex items-center gap-2 bg-white border border-[#0B0F1A]/10 text-[#2563EB] text-[11px] font-black px-3.5 py-1.5 rounded-full shadow-sm">
+            <Sparkles size={12} strokeWidth={2.8} />
+            {language === 'en' ? 'Creator login' : '크리에이터 로그인'}
+          </span>
+          <h1 className="mt-4 sm:mt-5 text-[1.6rem] sm:text-[2.15rem] leading-[1.18] font-black tracking-tighter text-[#0B0F1A] font-display">
+            {language === 'en' ? (
+              <>
+                Welcome back to{' '}
+                <span className="relative inline-block">
+                  <span className="relative z-10 text-[#2563EB]">PICKSFOLIO</span>
+                  <span
+                    aria-hidden
+                    className="absolute left-0 right-0 bottom-0.5 h-2 sm:h-2.5 -z-0 rounded-full"
+                    style={{ background: 'rgba(37,99,235,0.16)' }}
+                  />
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="relative inline-block">
+                  <span className="relative z-10 text-[#2563EB]">내 링크</span>
+                  <span
+                    aria-hidden
+                    className="absolute left-0 right-0 bottom-0.5 h-2 sm:h-2.5 -z-0 rounded-full"
+                    style={{ background: 'rgba(37,99,235,0.16)' }}
+                  />
+                </span>
+                로 다시 들어가기
+              </>
+            )}
+          </h1>
+          <p className="mt-2.5 sm:mt-3 text-sm text-[#4A5273] font-medium">
+            {language === 'en'
+              ? "Check today's trends and introduce them on your link."
+              : '오늘의 트렌드를 확인 후 링크에 소개해보세요.'}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1.5">
-            <label className="block text-sm font-black text-slate-800 ml-1">
-              {language === 'en' ? 'Username or Email' : '아이디 또는 이메일'}
-            </label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 focus-within:border-blue-500 transition-colors">
-              <input
-                type="text"
-                name="id"
-                placeholder={language === 'en' ? 'Enter username or admin email' : '아이디 또는 관리자 이메일을 입력해 주세요'}
-                required
-                value={formData.id}
-                onChange={handleChange}
-                className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
-                disabled={isLoading}
-                autoComplete="username"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                inputMode="email"
-              />
+        {/* 로그인 카드 — 홈의 흰 카드와 같은 테두리·그림자·둥근 정도다. */}
+        <div className="mt-6 sm:mt-7 bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-5 sm:p-7 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-[#39415C] ml-1">
+                {language === 'en' ? 'Username or Email' : '아이디 또는 이메일'}
+              </label>
+              <div className={fieldShell}>
+                <User size={16} className="text-[#98A0BC] shrink-0" strokeWidth={2.5} />
+                <input
+                  type="text"
+                  name="id"
+                  placeholder={language === 'en' ? 'Enter username or admin email' : '아이디 또는 관리자 이메일'}
+                  required
+                  value={formData.id}
+                  onChange={handleChange}
+                  className={fieldInput}
+                  disabled={isLoading}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  inputMode="email"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-1.5">
-            <label className="block text-sm font-black text-slate-800 ml-1">
-              {language === 'en' ? 'Password' : '비밀번호'}
-            </label>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 focus-within:border-blue-500 transition-colors">
-              <input
-                type="password"
-                name="password"
-                placeholder={language === 'en' ? 'Enter password' : '비밀번호를 입력해 주세요'}
-                required
-                value={formData.password}
-                onChange={handleChange}
-                className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
-                disabled={isLoading}
-                autoComplete="current-password"
-              />
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-[#39415C] ml-1">
+                {language === 'en' ? 'Password' : '비밀번호'}
+              </label>
+              <div className={fieldShell}>
+                <Lock size={16} className="text-[#98A0BC] shrink-0" strokeWidth={2.5} />
+                <input
+                  type="password"
+                  name="password"
+                  placeholder={language === 'en' ? 'Enter password' : '비밀번호를 입력해 주세요'}
+                  required
+                  value={formData.password}
+                  onChange={handleChange}
+                  className={fieldInput}
+                  disabled={isLoading}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowFindAccount(true)}
+                  className="text-[11px] text-[#8B93AE] hover:text-[#2563EB] font-bold transition-colors"
+                >
+                  {language === 'en' ? 'Find ID/Password' : '아이디/비밀번호 찾기'}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center justify-end">
-              <button type="button" onClick={() => setShowFindAccount(true)} className="text-xs text-slate-400 hover:text-blue-600 font-bold transition-colors">
-                {language === 'en' ? 'Find ID/Password' : '아이디/비밀번호 찾기'}
-              </button>
-            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-[#2563EB] hover:bg-[#1d4ed8] text-white py-3.5 rounded-full text-sm font-black transition-all shadow-[0_12px_28px_-12px_rgba(37,99,235,0.8)] active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {isLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  {language === 'en' ? 'Logging in...' : '로그인 중...'}
+                </>
+              ) : (
+                <>
+                  {t('nav.login', '로그인', 'Log In')}
+                  <ArrowRight size={16} strokeWidth={2.8} />
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="relative my-4 flex items-center">
+            <div className="flex-grow border-t border-[#0B0F1A]/[0.08]"></div>
+            <span className="flex-shrink mx-3 text-[#A6ADC6] text-[11px] font-black">
+              {language === 'en' ? 'OR' : '또는'}
+            </span>
+            <div className="flex-grow border-t border-[#0B0F1A]/[0.08]"></div>
           </div>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleKakaoLogin}
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl text-sm font-black transition-all hover:shadow-[0_10px_30px_rgba(124,58,237,0.3)] active:scale-95 mt-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-full text-sm font-black transition-all active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2.5 shadow-[0_10px_24px_-14px_rgba(11,15,26,0.7)]"
+            style={{ backgroundColor: '#FEE500', color: '#000000' }}
           >
-            {isLoading ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                {language === 'en' ? 'Logging in...' : '로그인 중...'}
-              </>
-            ) : (
-              t('nav.login', '로그인', 'Log In')
-            )}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3C6.48 3 2 6.36 2 10.44c0 2.62 1.72 4.92 4.32 6.24-.14.52-.92 3.36-.96 3.58 0 0-.02.16.08.22.1.06.22.02.22.02.3-.04 3.44-2.26 3.98-2.64.76.1 1.56.16 2.36.16 5.52 0 10-3.36 10-7.58C22 6.36 17.52 3 12 3z" fill="#000000"/>
+            </svg>
+            {language === 'en' ? 'Start with Kakao in 1 sec' : '카카오로 1초 만에 시작하기'}
           </button>
-        </form>
 
-        <div className="relative my-4 flex items-center">
-          <div className="flex-grow border-t border-slate-200"></div>
-          <span className="flex-shrink mx-4 text-slate-400 text-xs font-bold">{language === 'en' ? 'OR' : '또는'}</span>
-          <div className="flex-grow border-t border-slate-200"></div>
+          {/* 로그인 유지("간편로그인 저장") 체크는 두지 않는다 — 카카오 로그인 화면이
+              이미 자기 "간편로그인 저장"을 제공한다. 우리 화면에 같은 이름을 하나 더
+              두면 무엇을 저장하는 건지 알 수 없다. utils/loginPersistence 참고. */}
+
+          <p className="text-center mt-5 text-[#8B93AE] text-[13px] font-bold">
+            {language === 'en' ? "Don't have an account?" : '계정이 없으신가요?'}{' '}
+            <button
+              onClick={onNavigateSignup}
+              className="text-[#2563EB] font-black hover:underline"
+              disabled={isLoading}
+            >
+              {t('nav.signup', '회원가입하기', 'Sign Up')}
+            </button>
+          </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleKakaoLogin}
-          disabled={isLoading}
-          className="w-full py-2.5 rounded-2xl text-sm font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-          style={{ backgroundColor: '#FEE500', color: '#000000' }}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M12 3C6.48 3 2 6.36 2 10.44c0 2.62 1.72 4.92 4.32 6.24-.14.52-.92 3.36-.96 3.58 0 0-.02.16.08.22.1.06.22.02.22.02.3-.04 3.44-2.26 3.98-2.64.76.1 1.56.16 2.36.16 5.52 0 10-3.36 10-7.58C22 6.36 17.52 3 12 3z" fill="#000000"/>
-          </svg>
-          {language === 'en' ? 'Start with Kakao in 1 sec' : '카카오로 1초 만에 시작하기'}
-        </button>
-
-        {/* 로그인 유지("간편로그인 저장") 체크는 두지 않는다 — 카카오 로그인 화면이
-            이미 자기 "간편로그인 저장"을 제공한다. 우리 화면에 같은 이름을 하나 더
-            두면 무엇을 저장하는 건지 알 수 없다. utils/loginPersistence 참고. */}
-
-        <div className="text-center mt-4 text-slate-400 text-sm font-bold">
-          {language === 'en' ? "Don't have an account?" : '계정이 없으신가요?'}{' '}
-          <button onClick={onNavigateSignup} className="text-slate-800 hover:underline" disabled={isLoading}>
-            {t('nav.signup', '회원가입하기', 'Sign Up')}
-          </button>
-        </div>
-
+        {/* 비즈니스 로그인은 다른 종류의 계정이라 카드 밖에 둔다 — 크리에이터
+            로그인 버튼과 나란히 두면 어느 쪽을 눌러야 하는지 헷갈린다. */}
         <button
           type="button"
           onClick={() => window.location.href = '/business-login'}
           disabled={isLoading}
-          className="w-full py-2.5 rounded-2xl text-sm font-black transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white mt-2.5"
+          className="w-full mt-4 py-3 rounded-full text-[13px] font-black transition-all active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 bg-white text-[#0B0F1A] border border-[#0B0F1A]/10 hover:border-[#0B0F1A]/25 shadow-sm"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />
-          </svg>
+          <Briefcase size={15} className="text-[#2563EB]" strokeWidth={2.6} />
           {language === 'en' ? 'Business Login' : '비즈니스 회원 로그인하기'}
         </button>
 
-        <div className="text-center mt-2.5">
-          <button onClick={onNavigateHome} className="text-slate-400 text-xs hover:text-slate-600 transition-colors">
+        <div className="text-center mt-4">
+          <button
+            onClick={onNavigateHome}
+            className="text-[#8B93AE] text-xs font-bold hover:text-[#0B0F1A] transition-colors"
+          >
             {language === 'en' ? 'Return to Home' : '홈으로 돌아가기'}
           </button>
         </div>

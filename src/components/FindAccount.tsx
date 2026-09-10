@@ -202,21 +202,21 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
   };
 
   const accentClasses = {
-    ring: 'focus:ring-blue-500/20 focus:border-blue-500 focus-within:border-blue-500',
-    btn: 'bg-blue-600 hover:bg-blue-500',
-    btnShadow: 'hover:shadow-[0_10px_30px_rgba(37,99,235,0.3)]',
-    text: 'text-blue-600',
+    ring: 'focus:ring-[#2563EB]/20 focus:border-[#2563EB] focus-within:border-[#2563EB]',
+    btn: 'bg-[#2563EB] hover:bg-[#1d4ed8]',
+    btnShadow: 'shadow-[0_12px_28px_-12px_rgba(37,99,235,0.8)]',
+    text: 'text-[#2563EB]',
   };
 
   const PhoneVerificationSection = () => (
     <>
       <div className="space-y-2">
-        <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Name' : '이름'}</label>
-        <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+        <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Name' : '이름'}</label>
+        <div className={`bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
           <input
             type="text" value={name}
             onChange={e => setName(e.target.value)}
-            className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+            className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
             placeholder={isEn ? 'Name registered during signup' : '가입 시 등록한 이름'}
             disabled={isVerified}
           />
@@ -224,13 +224,13 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
       </div>
 
       <div className="space-y-2">
-        <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Phone Number' : '휴대폰 번호'}</label>
+        <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Phone Number' : '휴대폰 번호'}</label>
         <div className="flex gap-2">
-          <div className={`flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+          <div className={`flex-1 bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
             <input
               type="tel" value={formatPhoneInput(phone)}
               onChange={e => setPhone(digitsOnly(e.target.value).slice(0, 11))}
-              className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+              className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
               placeholder="010-1234-5678"
               inputMode="numeric"
               disabled={isVerified}
@@ -239,7 +239,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
           <button
             type="button" onClick={handleSendSMS}
             disabled={isSending || isVerified || cooldown > 0}
-            className={`px-4 py-3 ${accentClasses.btn} text-white rounded-2xl font-black text-xs transition-all disabled:opacity-50 whitespace-nowrap flex-shrink-0`}
+            className={`px-4 py-3 ${accentClasses.btn} text-white rounded-full font-black text-xs transition-all disabled:opacity-50 whitespace-nowrap flex-shrink-0`}
           >
             {isSending
               ? (isEn ? 'Sending...' : '발송중...')
@@ -254,13 +254,13 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
       {showVerificationInput && !isVerified && (
         <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-          <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Verification Code' : '인증번호'}</label>
+          <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Verification Code' : '인증번호'}</label>
           <div className="flex gap-2">
-            <div className={`flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+            <div className={`flex-1 bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
               <input
                 type="text" value={verificationCode}
                 onChange={e => setVerificationCode(e.target.value)}
-                className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
                 placeholder={isEn ? '6-digit code' : '6자리 숫자 입력'}
                 maxLength={6}
                 inputMode="numeric"
@@ -269,12 +269,12 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
             <button
               type="button" onClick={handleVerifySMS}
               disabled={isVerifying}
-              className={`px-5 py-3 ${accentClasses.btn} text-white rounded-2xl font-black text-xs transition-all whitespace-nowrap flex-shrink-0 disabled:opacity-50`}
+              className={`px-5 py-3 ${accentClasses.btn} text-white rounded-full font-black text-xs transition-all whitespace-nowrap flex-shrink-0 disabled:opacity-50`}
             >
               {isVerifying ? (isEn ? 'Verifying...' : '확인중...') : (isEn ? 'Verify' : '확인')}
             </button>
           </div>
-          <p className="text-xs text-slate-400 font-medium ml-1">{isEn ? 'Code is valid for 5 minutes.' : '인증번호는 5분 동안 유효합니다.'}</p>
+          <p className="text-xs text-[#8B93AE] font-medium ml-1">{isEn ? 'Code is valid for 5 minutes.' : '인증번호는 5분 동안 유효합니다.'}</p>
         </div>
       )}
     </>
@@ -282,11 +282,11 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
   if (step === 'choose') {
     return (
-      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
-        <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 paper-page overflow-y-auto">
+        <div className="w-full max-w-[440px] bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-6 sm:p-9 md:p-10 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
           <div className="text-center mb-10">
-            <h1 className="text-2xl font-black text-slate-900 mb-2">{isEn ? 'Find Account' : '계정 찾기'}</h1>
-            <p className="text-slate-500 text-sm font-medium">
+            <h1 className="text-2xl font-black text-[#0B0F1A] mb-2">{isEn ? 'Find Account' : '계정 찾기'}</h1>
+            <p className="text-[#4A5273] text-sm font-medium">
               {isEn ? 'Find your ID or reset password with phone verification.' : '휴대폰 인증으로 아이디 찾기 또는 비밀번호를 재설정합니다.'}
             </p>
           </div>
@@ -294,37 +294,37 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
           <div className="space-y-3">
             <button
               onClick={() => { resetState(); setStep('find-id'); }}
-              className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl p-5 text-left transition-all group"
+              className="w-full bg-[#F7F8FC] hover:bg-[#EEF1F8] border border-[#0B0F1A]/[0.08] rounded-2xl p-5 text-left transition-all group"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm flex-shrink-0">
                   🔍
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-900 text-sm">{isEn ? 'Find Username' : '아이디 찾기'}</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">{isEn ? 'Find ID with your name & phone number' : '이름과 전화번호로 아이디를 찾습니다'}</p>
+                  <h3 className="font-black text-[#0B0F1A] text-sm">{isEn ? 'Find Username' : '아이디 찾기'}</h3>
+                  <p className="text-xs text-[#8B93AE] font-medium mt-0.5">{isEn ? 'Find ID with your name & phone number' : '이름과 전화번호로 아이디를 찾습니다'}</p>
                 </div>
               </div>
             </button>
 
             <button
               onClick={() => { resetState(); setStep('reset-pw'); }}
-              className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl p-5 text-left transition-all group"
+              className="w-full bg-[#F7F8FC] hover:bg-[#EEF1F8] border border-[#0B0F1A]/[0.08] rounded-2xl p-5 text-left transition-all group"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl shadow-sm flex-shrink-0">
                   🔑
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-900 text-sm">{isEn ? 'Reset Password' : '비밀번호 재설정'}</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">{isEn ? 'Reset password after phone verification' : '이름·전화번호 인증 후 새 비밀번호를 설정합니다'}</p>
+                  <h3 className="font-black text-[#0B0F1A] text-sm">{isEn ? 'Reset Password' : '비밀번호 재설정'}</h3>
+                  <p className="text-xs text-[#8B93AE] font-medium mt-0.5">{isEn ? 'Reset password after phone verification' : '이름·전화번호 인증 후 새 비밀번호를 설정합니다'}</p>
                 </div>
               </div>
             </button>
           </div>
 
           <div className="text-center mt-8">
-            <button onClick={onBack} className="text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors">
+            <button onClick={onBack} className="text-[#8B93AE] text-sm font-bold hover:text-[#0B0F1A] transition-colors">
               {isEn ? 'Back to Login' : '로그인으로 돌아가기'}
             </button>
           </div>
@@ -335,11 +335,11 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
   if (step === 'find-id') {
     return (
-      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
-        <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 paper-page overflow-y-auto">
+        <div className="w-full max-w-[440px] bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-6 sm:p-9 md:p-10 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-black text-slate-900 mb-2">{isEn ? 'Find Username' : '아이디 찾기'}</h1>
-            <p className="text-slate-500 text-sm font-medium">{isEn ? 'Find ID registered with name & phone number.' : '회원가입 시 등록한 이름과 전화번호로 아이디를 찾습니다.'}</p>
+            <h1 className="text-2xl font-black text-[#0B0F1A] mb-2">{isEn ? 'Find Username' : '아이디 찾기'}</h1>
+            <p className="text-[#4A5273] text-sm font-medium">{isEn ? 'Find ID registered with name & phone number.' : '회원가입 시 등록한 이름과 전화번호로 아이디를 찾습니다.'}</p>
           </div>
 
           <div className="space-y-4">
@@ -348,7 +348,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
             {isVerified && foundAccounts.length === 0 && (
               <button
                 onClick={handleFindId} disabled={isLoading}
-                className={`w-full ${accentClasses.btn} text-white py-4 rounded-2xl text-base font-black transition-all ${accentClasses.btnShadow} active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2`}
+                className={`w-full ${accentClasses.btn} text-white py-3.5 rounded-full text-base font-black transition-all ${accentClasses.btnShadow} active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2`}
               >
                 {isLoading ? (
                   <>
@@ -360,14 +360,14 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
             )}
 
             {foundAccounts.length > 0 && (
-              <div className="bg-slate-50 rounded-2xl p-5 animate-in fade-in duration-300">
-                <h3 className="font-black text-sm text-slate-900 mb-3">{isEn ? 'Found Accounts' : '찾은 계정'}</h3>
+              <div className="bg-[#F7F8FC] border border-[#0B0F1A]/[0.06] rounded-2xl p-5 animate-in fade-in duration-300">
+                <h3 className="font-black text-sm text-[#0B0F1A] mb-3">{isEn ? 'Found Accounts' : '찾은 계정'}</h3>
                 <div className="space-y-2">
                   {foundAccounts.map((acc, i) => (
-                    <div key={i} className="bg-white rounded-xl p-4 border border-slate-100">
+                    <div key={i} className="bg-white rounded-xl p-4 border border-[#0B0F1A]/[0.07]">
                       <p className={`font-black text-base ${accentClasses.text}`}>{acc.username}</p>
-                      {acc.display_name && <p className="text-xs text-slate-500 font-medium mt-0.5">{acc.display_name}</p>}
-                      <p className="text-[10px] text-slate-400 font-bold mt-1">{isEn ? 'Joined: ' : '가입일: '}{new Date(acc.created_at).toLocaleDateString(isEn ? 'en-US' : 'ko-KR')}</p>
+                      {acc.display_name && <p className="text-xs text-[#8B93AE] font-medium mt-0.5">{acc.display_name}</p>}
+                      <p className="text-[10px] text-[#A6ADC6] font-bold mt-1">{isEn ? 'Joined: ' : '가입일: '}{new Date(acc.created_at).toLocaleDateString(isEn ? 'en-US' : 'ko-KR')}</p>
                     </div>
                   ))}
                 </div>
@@ -376,10 +376,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
           </div>
 
           <div className="text-center mt-8 space-y-2">
-            <button onClick={() => setStep('choose')} className="text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors block mx-auto">
+            <button onClick={() => setStep('choose')} className="text-[#8B93AE] text-sm font-bold hover:text-[#0B0F1A] transition-colors block mx-auto">
               {isEn ? 'Choose another option' : '다른 방법으로 찾기'}
             </button>
-            <button onClick={onBack} className="text-slate-400 text-xs font-bold hover:text-slate-600 transition-colors block mx-auto">
+            <button onClick={onBack} className="text-[#8B93AE] text-xs font-bold hover:text-[#0B0F1A] transition-colors block mx-auto">
               {isEn ? 'Back to Login' : '로그인으로 돌아가기'}
             </button>
           </div>
@@ -390,19 +390,19 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
   if (step === 'reset-pw') {
     return (
-      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 bg-midnight overflow-y-auto">
-        <div className="w-full max-w-[440px] bg-white rounded-[32px] sm:rounded-[40px] p-7 sm:p-10 md:p-12 shadow-[0_30px_100px_rgba(0,0,0,0.7)] animate-in fade-in zoom-in duration-500">
+      <div className="min-h-[100dvh] flex items-start justify-center px-4 sm:px-6 py-10 sm:py-20 paper-page overflow-y-auto">
+        <div className="w-full max-w-[440px] bg-white border border-[#0B0F1A]/[0.08] rounded-[1.5rem] sm:rounded-[1.75rem] p-6 sm:p-9 md:p-10 shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] animate-in fade-in slide-in-from-bottom-2 duration-500">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-black text-slate-900 mb-2">{isEn ? 'Reset Password' : '비밀번호 재설정'}</h1>
-            <p className="text-slate-500 text-sm font-medium">{isEn ? 'Set a new password after phone verification.' : '이름·전화번호 인증 후 새 비밀번호를 설정합니다.'}</p>
+            <h1 className="text-2xl font-black text-[#0B0F1A] mb-2">{isEn ? 'Reset Password' : '비밀번호 재설정'}</h1>
+            <p className="text-[#4A5273] text-sm font-medium">{isEn ? 'Set a new password after phone verification.' : '이름·전화번호 인증 후 새 비밀번호를 설정합니다.'}</p>
           </div>
 
           {resultMessage ? (
             <div className="text-center animate-in fade-in duration-300">
               <div className="text-5xl mb-4">✅</div>
-              <p className="font-black text-slate-900 text-base mb-2">{isEn ? 'Password Reset Complete' : '비밀번호 변경 완료'}</p>
-              <p className="text-sm text-slate-500 font-medium mb-6">{resultMessage}</p>
-              <button onClick={onBack} className={`w-full ${accentClasses.btn} text-white py-4 rounded-2xl text-base font-black transition-all`}>
+              <p className="font-black text-[#0B0F1A] text-base mb-2">{isEn ? 'Password Reset Complete' : '비밀번호 변경 완료'}</p>
+              <p className="text-sm text-[#4A5273] font-medium mb-6">{resultMessage}</p>
+              <button onClick={onBack} className={`w-full ${accentClasses.btn} text-white py-3.5 rounded-full text-base font-black transition-all`}>
                 {isEn ? 'Go to Login' : '로그인하러 가기'}
               </button>
             </div>
@@ -413,13 +413,13 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
               {isVerified && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="space-y-2">
-                    <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Username' : '아이디'}</label>
+                    <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Username' : '아이디'}</label>
                     {foundAccounts.length > 1 ? (
-                      <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+                      <div className={`bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
                         <select
                           value={selectedUsername}
                           onChange={e => setSelectedUsername(e.target.value)}
-                          className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                          className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
                         >
                           {foundAccounts.map((acc, i) => (
                             <option key={i} value={acc.username}>{acc.username}{acc.display_name ? ` (${acc.display_name})` : ''}</option>
@@ -427,20 +427,20 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
                         </select>
                       </div>
                     ) : (
-                      <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 flex items-center justify-between">
+                      <div className="bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 flex items-center justify-between">
                         <span className={`font-black ${accentClasses.text}`}>{selectedUsername || (isEn ? 'No verified account found' : '확인된 계정이 없습니다')}</span>
-                        <span className="text-[11px] text-slate-400 font-bold">{isEn ? 'Verified Account' : '인증된 계정'}</span>
+                        <span className="text-[11px] text-[#A6ADC6] font-bold">{isEn ? 'Verified Account' : '인증된 계정'}</span>
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'New Password' : '새 비밀번호'}</label>
-                    <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+                    <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'New Password' : '새 비밀번호'}</label>
+                    <div className={`bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
                       <input
                         type="password" value={newPassword}
                         onChange={e => setNewPassword(e.target.value)}
-                        className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                        className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
                         placeholder={isEn ? 'New password (min 6 chars)' : '새 비밀번호 (6자 이상)'}
                         autoComplete="new-password"
                       />
@@ -448,12 +448,12 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-black text-slate-800 ml-1">{isEn ? 'Confirm Password' : '비밀번호 확인'}</label>
-                    <div className={`bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
+                    <label className="block text-sm font-black text-[#39415C] ml-1">{isEn ? 'Confirm Password' : '비밀번호 확인'}</label>
+                    <div className={`bg-[#F7F8FC] border border-[#0B0F1A]/[0.08] rounded-2xl px-5 py-4 ${accentClasses.ring} transition-colors`}>
                       <input
                         type="password" value={confirmPassword}
                         onChange={e => setConfirmPassword(e.target.value)}
-                        className="bg-transparent border-none outline-none text-slate-900 w-full font-medium"
+                        className="bg-transparent border-none outline-none text-[#0B0F1A] w-full font-bold"
                         placeholder={isEn ? 'Confirm new password' : '비밀번호를 다시 입력해 주세요'}
                         autoComplete="new-password"
                       />
@@ -462,7 +462,7 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
                   <button
                     onClick={handleResetPassword} disabled={isLoading}
-                    className={`w-full ${accentClasses.btn} text-white py-4 rounded-2xl text-base font-black transition-all ${accentClasses.btnShadow} active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2`}
+                    className={`w-full ${accentClasses.btn} text-white py-3.5 rounded-full text-base font-black transition-all ${accentClasses.btnShadow} active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2`}
                   >
                     {isLoading ? (
                       <>
@@ -478,10 +478,10 @@ const FindAccount: React.FC<FindAccountProps> = ({ accountType, onBack }) => {
 
           {!resultMessage && (
             <div className="text-center mt-8 space-y-2">
-              <button onClick={() => setStep('choose')} className="text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors block mx-auto">
+              <button onClick={() => setStep('choose')} className="text-[#8B93AE] text-sm font-bold hover:text-[#0B0F1A] transition-colors block mx-auto">
                 {isEn ? 'Choose another option' : '다른 방법으로 찾기'}
               </button>
-              <button onClick={onBack} className="text-slate-400 text-xs font-bold hover:text-slate-600 transition-colors block mx-auto">
+              <button onClick={onBack} className="text-[#8B93AE] text-xs font-bold hover:text-[#0B0F1A] transition-colors block mx-auto">
                 {isEn ? 'Back to Login' : '로그인으로 돌아가기'}
               </button>
             </div>

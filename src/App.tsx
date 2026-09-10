@@ -318,14 +318,17 @@ const App: React.FC = () => {
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
   useEffect(() => { managerCheckedRef.current = managerChecked; }, [managerChecked]);
 
-  // 홈(마케팅) 화면만 종이색 라이트 테마다. 대시보드·개인페이지·라이브는 그대로
-  // 다크를 쓴다. body 에도 색을 걸어야 iOS 의 overscroll 되돌림 구간과 데스크톱
-  // zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. 홈을 떠나면 뗀다.
+  // 홈과 로그인 화면이 종이색 라이트 테마다. 대시보드·개인페이지·라이브는 그대로
+  // 다크를 쓴다. 로그인이 여기 들어오는 이유는 홈에서 곧바로 넘어오는 화면이라서다
+  // — 예전에는 종이색 홈에서 로그인 버튼을 누르면 화면이 검게 바뀌었다. 로그인을
+  // 기다리는 화면(AuthLoadingScreen)과 대시보드도 밝으므로 이제 로그인 한 번에
+  // 밝기가 뒤집히는 구간이 없다. body 에도 색을 걸어야 iOS 의 overscroll 되돌림
+  // 구간과 데스크톱 zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다.
   useEffect(() => {
-    const isHome = view === 'home';
-    document.body.classList.toggle('home-paper', isHome);
+    const isPaper = view === 'home' || view === 'login' || view === 'business-login';
+    document.body.classList.toggle('home-paper', isPaper);
     const themeMeta = document.querySelector('meta[name="theme-color"]');
-    themeMeta?.setAttribute('content', isHome ? '#F4F5FA' : '#2563EB');
+    themeMeta?.setAttribute('content', isPaper ? '#F4F5FA' : '#2563EB');
     return () => {
       document.body.classList.remove('home-paper');
     };
@@ -2075,14 +2078,19 @@ const App: React.FC = () => {
     return <AuthLoadingScreen />;
   }
 
+  // 종이색(라이트)로 그리는 화면. 헤더도 같이 밝은 판으로 바뀐다. 비즈니스
+  // 로그인은 이 아래까지 오지 않고 위에서 따로 그려지므로(자기 화면 안에서
+  // paper-page 를 쓴다) 여기서는 홈과 로그인만 본다.
+  const isPaperView = view === 'home' || view === 'login';
+
   return (
     <div
       className={`min-h-screen selection:bg-blue-primary/30 flex flex-col ${
-        view === 'home' ? 'bg-[#F4F5FA] text-[#0B0F1A]' : 'bg-background'
+        isPaperView ? 'bg-[#F4F5FA] text-[#0B0F1A]' : 'bg-background'
       }`}
     >
       <SiteHeader
-        variant={view === 'home' ? 'light' : 'dark'}
+        variant={isPaperView ? 'light' : 'dark'}
         onNavigateHome={() => navigate('home')}
         onNavigateSignup={() => navigate('signup')}
         onNavigateLogin={() => navigate('login')}

@@ -65,7 +65,8 @@
       그래서 그 구간에만 AuthLoadingScreen 과 똑같은 그림을 정적 마크업으로 미리
       그려 둔다. 리액트가 뜨면 createRoot 가 #root 안을 비우고 같은 화면을 이어
       그리므로, 넘어가는 순간이 보이지 않는다. 색·크기·문구는 반드시
-      src/components/AuthLoadingScreen.tsx 와 같이 유지해야 한다.
+      src/components/AuthLoadingScreen.tsx 와 같이 유지해야 한다 — 지금은 홈과
+      로그인 화면과 같은 종이색(#F4F5FA)에 PICKS 표시와 파란 스피너다.
 
       로그인 콜백이 아닌 보통의 방문(개인페이지 등)에는 아무것도 그리지 않는다.
       모든 방문에 스피너를 깔면, 지금은 조용히 뜨던 개인페이지에 없던 스피너가
@@ -82,12 +83,23 @@
           if (!isAuthCallback) return;
           var root = document.getElementById('root');
           if (!root) return;
+          // body 색도 함께 종이색으로 바꾼다. 이 화면은 fixed 라 overscroll
+          // 되돌림 구간과 데스크톱 확대가 남기는 바깥 여백을 덮지 못한다.
+          // AuthLoadingScreen 이 자리를 이어받은 뒤 이 인라인 색을 치운다.
+          document.body.style.backgroundColor = '#F4F5FA';
           root.innerHTML =
             '<div style="position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;' +
-            'align-items:center;justify-content:center;background:#050507" role="status" aria-live="polite">' +
-            '<div style="width:40px;height:40px;border:3px solid #60a5fa;border-top-color:transparent;' +
-            'border-radius:9999px;animation:picks-boot-spin 1s linear infinite"></div>' +
-            '<p style="margin:1rem 0 0;font-size:0.875rem;font-weight:700;color:#cbd5e1">로그인 중입니다</p>' +
+            'align-items:center;justify-content:center;background:#F4F5FA' +
+            ';background-image:radial-gradient(circle at 50% 38%, rgba(37,99,235,0.16), transparent 62%),' +
+            'radial-gradient(rgba(11,15,26,0.0385) 1px, transparent 1px);background-size:auto, 22px 22px"' +
+            ' role="status" aria-live="polite">' +
+            '<div style="display:flex;align-items:center;gap:0.375rem">' +
+            '<span style="font-size:1.5rem;font-weight:900;letter-spacing:-0.05em;color:#0B0F1A">PICKS</span>' +
+            '<span style="width:6px;height:6px;border-radius:9999px;background:#2563EB;' +
+            'transform:translateY(6px)"></span></div>' +
+            '<div style="width:40px;height:40px;margin-top:1.5rem;border:3px solid rgba(37,99,235,0.18);' +
+            'border-top-color:#2563EB;border-radius:9999px;animation:picks-boot-spin 1s linear infinite"></div>' +
+            '<p style="margin:1rem 0 0;font-size:0.875rem;font-weight:700;color:#4A5273">로그인 중입니다</p>' +
             '</div>';
           var style = document.createElement('style');
           style.textContent = '@keyframes picks-boot-spin{to{transform:rotate(360deg)}}';
