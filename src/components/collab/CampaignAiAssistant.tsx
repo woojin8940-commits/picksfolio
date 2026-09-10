@@ -10,6 +10,7 @@ import {
   scenesToBody,
 } from '../../utils/collabScenes';
 import { AiMarkdown } from '../AiMarkdown';
+import SceneTextarea from './SceneTextarea';
 
 /**
  * 캠페인 진행 AI — 정산 탭 옆의 'AI' 탭.
@@ -652,15 +653,26 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     const filledCount = isPlan ? draft.scenes.filter(s => !sceneIsEmpty(s)).length : 0;
     const emptyDraft = isPlan ? filledCount === 0 : !draft.text.trim();
 
+    /**
+     * 칸의 글씨는 대화 글씨보다 한 단계 작게 둔다. 모바일에서 장면 설명은 다섯 줄을
+     * 넘기는 일이 흔해서, 같은 크기로 두면 한 장면이 화면을 다 덮는다.
+     */
     const fieldCls =
-      'w-full rounded-lg border border-violet-100 bg-white px-2.5 py-2 text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 focus:outline-none focus:border-violet-400 disabled:bg-slate-50 disabled:text-slate-500 transition-colors';
+      'w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] md:text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 focus:outline-none focus:border-violet-400 disabled:bg-slate-50 disabled:text-slate-500 transition-colors';
 
+    /*
+     * 초안 카드는 말풍선 밖에 둔다(호출부 참고). 그래서 여기서는 테두리로 감싸지
+     * 않는다 — 예전에는 보라색 테두리 상자 안에 장면 상자를 또 넣고, 그 안에서 다시
+     * 세로 스크롤(max-h)을 걸었다. 모바일에서는 상자 세 겹이 좌우 여백을 다 먹고
+     * 남은 좁은 칸 안에서 설명이 몇 줄만 보였다. 감싸는 것을 걷어내고 화면 폭을
+     * 그대로 쓴다.
+     */
     return (
-      <div className="mt-2 rounded-2xl border-2 border-violet-200 bg-violet-50/40 overflow-hidden">
-        <div className="px-3.5 py-2.5 bg-white/70 border-b border-violet-100 flex items-center gap-2">
+      <div className="mt-2">
+        <div className="px-0.5 pb-2 mb-2 border-b border-slate-100 flex items-center gap-2">
           <span className="text-sm leading-none">{isPlan ? '📄' : '📝'}</span>
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] font-black text-slate-900">
+            <p className="text-[11px] md:text-[12px] font-black text-slate-900">
               {isPlan
                 ? `AI 기획안 초안 · 장면 ${draft.scenes.length}개`
                 : `AI 본문 초안 · ${draft.text.length}자`}
@@ -690,11 +702,11 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
           )}
         </div>
 
-        <div className="px-3.5 py-3 max-h-[420px] overflow-y-auto space-y-2.5">
+        <div className="space-y-2">
           {isPlan ? (
             <>
               {draft.scenes.map((s, i) => (
-                <div key={i} className="rounded-xl bg-white border border-violet-100 px-3 py-2.5">
+                <div key={i} className="rounded-xl bg-slate-50/70 px-2 py-2 md:px-2.5 md:py-2.5">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[10px] font-black text-violet-700">장면 {i + 1}</p>
                     {!locked && draft.scenes.length > 1 && (
@@ -710,14 +722,14 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                   <div className="space-y-1.5">
                     <div>
                       <p className="text-[9px] font-black text-slate-400 mb-1">설명</p>
-                      <textarea
+                      <SceneTextarea
                         value={s.visual}
                         onChange={e => patchScene(index, i, 'visual', e.target.value)}
                         disabled={locked}
                         rows={3}
                         maxLength={MAX_VISUAL}
                         placeholder="어떤 장면을 어떻게 찍는지"
-                        className={`${fieldCls} resize-none`}
+                        className={`${fieldCls} resize-none overflow-hidden`}
                       />
                     </div>
                     <div>
@@ -733,14 +745,14 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                     </div>
                     <div>
                       <p className="text-[9px] font-black text-slate-400 mb-1">나레이션</p>
-                      <textarea
+                      <SceneTextarea
                         value={s.narration}
                         onChange={e => patchScene(index, i, 'narration', e.target.value)}
                         disabled={locked}
                         rows={2}
                         maxLength={MAX_NARRATION}
-                        placeholder="말하는 대사 (없으면 비워 두세요)"
-                        className={`${fieldCls} resize-none`}
+                        placeholder="없으면 비워두세요"
+                        className={`${fieldCls} resize-none overflow-hidden`}
                       />
                     </div>
                   </div>
@@ -757,7 +769,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
               )}
             </>
           ) : (
-            <div className="rounded-xl bg-white border border-violet-100 px-3 py-2.5 focus-within:border-violet-400 transition-colors">
+            <div className="rounded-xl bg-slate-50/70 px-2.5 py-2.5 focus-within:bg-slate-50 transition-colors">
               <textarea
                 value={draft.text}
                 onChange={e => patchCaption(index, e.target.value)}
@@ -765,7 +777,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                 rows={10}
                 maxLength={CAPTION_MAX_LENGTH}
                 placeholder="인스타그램 본문"
-                className="w-full bg-transparent text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 resize-none focus:outline-none disabled:text-slate-500"
+                className="w-full bg-transparent text-[11px] md:text-[12px] text-slate-800 leading-relaxed placeholder-slate-300 resize-none focus:outline-none disabled:text-slate-500"
               />
               <p className="text-right text-[9px] font-black text-slate-300">
                 {draft.text.length} / {CAPTION_MAX_LENGTH}
@@ -775,14 +787,14 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         </div>
 
         {blocked && !message.applied && (
-          <p className="px-3.5 pb-1 text-[10px] font-bold text-amber-700 leading-relaxed">
+          <p className="px-0.5 pt-1.5 text-[10px] font-bold text-amber-700 leading-relaxed">
             초안 영상을 한 번 올린 뒤에 본문을 반영할 수 있어요. 콘텐츠 단계에서 영상을 먼저 제출해
             주세요. (그 전에는 위 본문을 복사해 두셔도 됩니다.)
           </p>
         )}
 
         {emptyDraft && !message.applied && !blocked && (
-          <p className="px-3.5 pb-1 text-[10px] font-bold text-amber-700 leading-relaxed">
+          <p className="px-0.5 pt-1.5 text-[10px] font-bold text-amber-700 leading-relaxed">
             {isPlan
               ? '장면 내용을 한 개 이상 채워야 반영할 수 있어요.'
               : '본문 내용을 채워야 반영할 수 있어요.'}
@@ -790,7 +802,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         )}
 
         {!message.applied && (
-          <div className="px-3.5 pb-3 pt-1.5 flex items-center gap-1.5">
+          <div className="pt-2 flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => applyDraft(index, draft)}
@@ -871,10 +883,12 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         </div>
       ) : (
         <>
-          {/* 대화 */}
+          {/* 대화 — 모바일에서는 좌우 여백을 줄이고 칸 안 스크롤(max-h)도 걸지 않는다.
+              카드 안에서 또 스크롤이 생기면 긴 장면 설명을 손가락으로 훑을 때마다
+              어느 스크롤이 움직이는지 알 수 없다. 데스크톱은 그대로 둔다. */}
           <div
             ref={listRef}
-            className="px-4 md:px-5 py-5 min-h-[280px] max-h-[560px] overflow-y-auto"
+            className="px-2.5 md:px-5 py-4 md:py-5 min-h-[280px] md:max-h-[560px] md:overflow-y-auto"
           >
             {messages.length === 0 && (
               <div className="max-w-lg mx-auto text-center pt-2">
@@ -945,29 +959,34 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
 
             <div className="space-y-3 md:space-y-4 max-w-3xl mx-auto">
               {messages.map((m, idx) => (
-                <div key={idx} className={`flex gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                  <div
-                    className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs font-bold shadow-[0_5px_12px_-4px_rgba(76,29,149,0.55)] ${
-                      m.role === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gradient-to-br from-violet-500 to-blue-600 text-white'
-                    }`}
-                  >
-                    {m.role === 'user' ? (normalized.slice(0, 2).toUpperCase() || '나') : '✨'}
-                  </div>
-                  <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
-                    {m.role === 'assistant' && renderGuideBasis(m)}
+                <div key={idx}>
+                  <div className={`flex gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
                     <div
-                      className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] break-words text-left ${
+                      className={`shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center text-xs font-bold shadow-[0_5px_12px_-4px_rgba(76,29,149,0.55)] ${
                         m.role === 'user'
-                          ? 'bg-blue-50 border border-blue-100 text-slate-900 rounded-tr-sm whitespace-pre-wrap shadow-[0_6px_16px_-8px_rgba(37,99,235,0.55)]'
-                          : 'bg-slate-50 border border-slate-100 text-slate-900 rounded-tl-sm shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)]'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gradient-to-br from-violet-500 to-blue-600 text-white'
                       }`}
                     >
-                      {m.role === 'assistant' ? <AiMarkdown content={m.content} /> : m.content}
+                      {m.role === 'user' ? (normalized.slice(0, 2).toUpperCase() || '나') : '✨'}
                     </div>
-                    {m.role === 'assistant' && renderDraftCard(idx, m)}
+                    <div className={`min-w-0 max-w-[82%] ${m.role === 'user' ? 'text-right' : ''}`}>
+                      {m.role === 'assistant' && renderGuideBasis(m)}
+                      <div
+                        className={`inline-block px-3 py-2 md:px-3.5 md:py-2.5 rounded-2xl text-[13px] md:text-[15px] leading-[1.6] break-words text-left ${
+                          m.role === 'user'
+                            ? 'bg-blue-50 border border-blue-100 text-slate-900 rounded-tr-sm whitespace-pre-wrap shadow-[0_6px_16px_-8px_rgba(37,99,235,0.55)]'
+                            : 'bg-slate-50 border border-slate-100 text-slate-900 rounded-tl-sm shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)]'
+                        }`}
+                      >
+                        {m.role === 'assistant' ? <AiMarkdown content={m.content} /> : m.content}
+                      </div>
+                    </div>
                   </div>
+                  {/* 초안 카드는 말풍선 폭(82%)과 아이콘 자리를 벗어나 화면 폭 전체를
+                      쓴다. 장면 설명은 두세 줄이 아니라 여섯 줄인 일이 많은데, 말풍선
+                      안에 두면 그 글이 화면의 절반 폭에 담기고 나머지는 여백으로 남았다. */}
+                  {m.role === 'assistant' && renderDraftCard(idx, m)}
                 </div>
               ))}
 
