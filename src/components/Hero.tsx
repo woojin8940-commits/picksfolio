@@ -91,7 +91,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
       />
 
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-10 lg:gap-14 items-center">
+        <div className="grid lg:grid-cols-[0.9fr_1.1fr] xl:grid-cols-[0.78fr_1.22fr] gap-10 lg:gap-10 items-center">
           {/* ── 왼쪽: 문구와 시작 입력칸 ── */}
           <div className="text-center lg:text-left">
             <span className="inline-flex items-center gap-2 bg-white border border-[#0B0F1A]/10 text-[#2563EB] text-[11px] md:text-xs font-black px-3.5 py-1.5 rounded-full shadow-sm">
@@ -186,7 +186,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
           </div>
 
           {/* ── 오른쪽: 개인페이지 예시 두 장과 트렌드 보드를 겹친 미리보기 ── */}
-          <div className="relative mx-auto w-full max-w-[460px] lg:max-w-none">
+          <div className="relative mx-auto w-full max-w-[640px] lg:max-w-none">
             {/* 예시 두 장을 나란히 둔다. 어두운 테마 · 밝은 테마 한 장씩이라, 페이지
                 생김새가 정해져 있지 않다는 것이 설명 없이 보인다. 아래쪽은 원래도
                 잘려 있어 "더 이어진다"는 느낌이 남는다. */}
