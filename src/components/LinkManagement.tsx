@@ -1245,6 +1245,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     return Array.from(catSet);
   })();
 
+  /** 카테고리 버튼 색 미리보기에 세워 둘 칸 이름. 내 페이지에 카테고리가 하나라도 있으면
+      공개 페이지와 똑같은 순서로 그 이름을 그대로 보여주고, 아직 없으면 예시 이름으로
+      색만 확인할 수 있게 한다. */
+  const categorySwatchLabels = managedCategories.length > 0
+    ? ['전체', ...managedCategories]
+    : ['전체', '패션', '아우터'];
+
   const saveCategoriesToCloud = (cats: string[]) => {
     localStorage.setItem(`picks_categories_${userName.toLowerCase()}`, JSON.stringify(cats));
     apiService.saveSiteData(userName, { linkGridCategories: cats }).catch(err => console.warn('[SaveCategories] 클라우드 동기화 실패:', err));
@@ -2139,13 +2146,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
                   {/* 고른 색이 바로 보이는 줄. 배경은 지금 테마 배경색을 깔아 둔다. */}
                   <div
-                    className="flex items-center gap-2 rounded-xl px-3 py-3 border border-slate-200"
+                    className="flex items-center gap-2 rounded-xl px-3 py-3 border border-slate-200 overflow-x-auto scrollbar-hide"
                     style={{ backgroundColor: themeBackground }}
                   >
-                    {['전체', '패션', '아웃터'].map((cat, idx) => (
+                    {categorySwatchLabels.map((cat, idx) => (
                       <span
                         key={cat}
-                        className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-full border ${
+                        className={`flex-none px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-full border ${
                           idx === 0
                             ? 'text-white border-transparent'
                             : themeIsLight
@@ -2158,6 +2165,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       </span>
                     ))}
                   </div>
+
+                  {managedCategories.length === 0 && (
+                    <p className="text-[11px] font-bold text-slate-400">
+                      아직 카테고리가 없어 예시 이름으로 보여드려요. 카테고리를 만들면 내 페이지의 실제 버튼으로 바뀝니다
+                    </p>
+                  )}
 
                   <div className="grid sm:grid-cols-2 gap-2">
                     {([
