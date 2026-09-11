@@ -93,7 +93,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
       <div className="container mx-auto px-4 sm:px-6">
         <div className="grid lg:grid-cols-[0.9fr_1.1fr] xl:grid-cols-[0.78fr_1.22fr] gap-10 lg:gap-10 items-center">
           {/* ── 왼쪽: 문구와 시작 입력칸 ── */}
-          <div className="text-center lg:text-left">
+          <div className="min-w-0 text-center lg:text-left">
             <span className="inline-flex items-center gap-2 bg-white border border-[#0B0F1A]/10 text-[#2563EB] text-[11px] md:text-xs font-black px-3.5 py-1.5 rounded-full shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-[#2563EB]" />
               {en ? 'The all-in-one service for creators' : '크리에이터를 위한 올인원 서비스'}
@@ -142,11 +142,25 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
               <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 bg-white border border-[#0B0F1A]/10 p-2 md:p-2.5 rounded-[1.5rem] md:rounded-full shadow-[0_18px_45px_-28px_rgba(11,15,26,0.45)]">
                 <div className="flex items-center px-2.5 sm:px-3 md:px-5 flex-1 min-w-0">
                   <span className="text-[#98A0BC] font-bold text-[13px] sm:text-sm md:text-base whitespace-nowrap">picks-folio.com/</span>
+                  {/* size={1} · w-0 은 이 칸이 "타고난 너비"를 갖지 않게 하는 것이다.
+
+                      <input> 은 기본적으로 글자 20 칸 너비를 자기 최소 너비(min-content)
+                      로 들고 다닌다. 휴대폰에서는 index.css 의 'input 은 최소 16px'
+                      규칙이 글자를 키워 그 너비가 314px 까지 갔다. min-w-0 은 칸이
+                      줄어들 수 있게 해 줄 뿐, 부모가 폭을 셀 때 쓰는 min-content 값
+                      자체는 깎지 못한다 — 그래서 314px 이 입력 줄 → 흰 카드 →
+                      히어로 그리드 칸까지 그대로 올라가, 그리드 칸이 화면보다 넓어졌다.
+                      히어로 전체가 그 넓은 칸 안에서 그려지니 오른쪽이 잘리고, 가운데
+                      정렬한 글자도 화면 중앙이 아닌 곳에 앉았다.
+
+                      너비를 명시하면 부모는 그 값(0)을 세므로 타고난 너비가 새지 않고,
+                      flex-1 이 남은 자리를 채워 보이는 모습은 그대로다. */}
                   <input
                     type="text"
                     placeholder={en ? 'yourname' : '아이디'}
                     aria-label={en ? 'Your page address' : '내 페이지 주소'}
-                    className="bg-transparent border-none outline-none text-[#0B0F1A] text-sm md:text-base font-bold px-1 sm:px-1.5 py-2 flex-1 min-w-0 placeholder:text-[#C3C9DC]"
+                    size={1}
+                    className="bg-transparent border-none outline-none text-[#0B0F1A] text-sm md:text-base font-bold px-1 sm:px-1.5 py-2 w-0 flex-1 min-w-0 placeholder:text-[#C3C9DC]"
                     value={handle}
                     onChange={(e) => setHandle(e.target.value)}
                     onKeyDown={(e) => {
@@ -186,7 +200,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
           </div>
 
           {/* ── 오른쪽: 개인페이지 예시 두 장과 트렌드 보드를 겹친 미리보기 ── */}
-          <div className="relative mx-auto w-full max-w-[640px] lg:max-w-none">
+          <div className="relative mx-auto w-full min-w-0 max-w-[640px] lg:max-w-none">
             {/* 예시 두 장을 나란히 둔다. 어두운 테마 · 밝은 테마 한 장씩이라, 페이지
                 생김새가 정해져 있지 않다는 것이 설명 없이 보인다. 아래쪽은 원래도
                 잘려 있어 "더 이어진다"는 느낌이 남는다. */}
