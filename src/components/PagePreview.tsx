@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { externalLinkProps } from '../utils/externalLink';
-import { ExternalLink, ChevronRight, Briefcase } from 'lucide-react';
+import { ExternalLink, ChevronRight, Briefcase, Search } from 'lucide-react';
 import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
@@ -8,7 +8,9 @@ import { enabledDefaultButtons } from '../utils/pageButtons';
 import PlatformLogo from './PlatformLogo';
 import {
   type ThemePreset,
+  type CategoryChipColors,
   PRESET_BACKGROUND,
+  categoryChipStyle,
   isLightBackground,
   normalizeHexColor,
 } from '../utils/themeColor';
@@ -22,6 +24,8 @@ interface PagePreviewProps {
   /** 자유 배경(theme: 'custom')에서 고른 배경색. 프리셋일 때는 무시된다. */
   backgroundColor?: string;
   accentColor: string;
+  /** 카테고리 버튼의 배경·글자색. 고르지 않은 칸은 테마 색으로 그린다. */
+  categoryColors?: CategoryChipColors;
   /** Cover header background/image. */
   header: { color?: string; image?: string; imagePosition?: string | number };
   profile: { name?: string; bio?: string };
@@ -44,6 +48,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   theme,
   backgroundColor,
   accentColor,
+  categoryColors,
   header,
   profile,
   portfolioFontSize,
@@ -129,7 +134,13 @@ const PagePreview: React.FC<PagePreviewProps> = ({
         return (
           <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
             {socials.businessProposal && (
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: accentColor }}>
+              <span
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap"
+                style={{
+                  backgroundColor: normalizeHexColor(socials.businessProposalBg) || accentColor,
+                  color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF',
+                }}
+              >
                 <Briefcase size={5} strokeWidth={2.5} />
                 비즈니스 제안
               </span>
@@ -142,13 +153,18 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                     ? 'bg-white border-slate-200 text-slate-700'
                     : 'bg-white/10 border-white/15 text-white'
                 }`}
+                style={{
+                  backgroundColor: normalizeHexColor(btn.bg) || undefined,
+                  color: normalizeHexColor(btn.text) || undefined,
+                  borderColor: btn.bg ? 'transparent' : undefined,
+                }}
               >
                 <PlatformLogo platform={btn.key} size={7} className="mr-0.5" />
                 {btn.label}
               </span>
             ))}
             {customButtons.map((btn: any) => (
-              <span key={btn.id} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: btn.color || '#2563EB' }}>
+              <span key={btn.id} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
                 <ExternalLink size={5} strokeWidth={2.5} />
                 {btn.label}
               </span>
@@ -180,7 +196,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
               <span
                 key={cat}
                 className={`px-2 py-0.5 text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? 'text-white border-transparent' : isLight ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}
-                style={cat === '전체' ? { backgroundColor: accentColor } : {}}
+                style={categoryChipStyle(categoryColors, cat === '전체', accentColor)}
               >
                 {cat}
               </span>
@@ -188,6 +204,19 @@ const PagePreview: React.FC<PagePreviewProps> = ({
           </div>
         ) : null;
       })()}
+
+      {/* 상품명 검색바.
+          공개 페이지에는 카테고리 버튼 줄과 함께 검색칸이 있다. 미리보기에 없으면
+          버튼 칸에서 검색바를 끄고도 무엇이 사라지는지 확인할 수 없어, 같은 자리에
+          같은 줄을 둔다(미리보기이므로 입력은 받지 않는다). */}
+      {!socials?.hideSearchBar && (
+        <div className="px-2 pb-2">
+          <div className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border ${isLight ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
+            <Search size={6} strokeWidth={2.6} className={isLight ? 'text-slate-400' : 'text-white/40'} />
+            <span className={`text-[6px] font-bold ${isLight ? 'text-slate-400' : 'text-white/40'}`}>상품명 검색...</span>
+          </div>
+        </div>
+      )}
 
       {/* Grid / List Content */}
       {layoutTemplate === 'grid' ? (

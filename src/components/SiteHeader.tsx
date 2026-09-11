@@ -96,7 +96,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
           <>
             <button
               onClick={onNavigateDashboard}
-              className={`px-3 py-2 rounded-full text-xs font-bold uppercase tracking-widest ${ghostBtn}`}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide whitespace-nowrap ${ghostBtn}`}
             >
               {t('nav.dashboard', '대시보드', 'Dashboard')}
             </button>
@@ -106,7 +106,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
                 console.log('Mobile header logout button clicked');
                 onLogout();
               }}
-              className={`px-3.5 py-2 rounded-full text-xs font-bold uppercase tracking-widest cursor-pointer ${primaryBtn}`}
+              className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide whitespace-nowrap cursor-pointer ${primaryBtn}`}
             >
               {t('nav.logout', '로그아웃', 'Log Out')}
             </button>
@@ -114,7 +114,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
         ) : (
           <button
             onClick={onNavigateLogin}
-            className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest ${primaryBtn}`}
+            className={`px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wide whitespace-nowrap ${primaryBtn}`}
           >
             {t('nav.login', '로그인', 'Log In')}
           </button>

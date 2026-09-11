@@ -101,3 +101,41 @@ export function themeIsDark(
   if (design?.theme === 'custom') return !isLightBackground(customBackgroundOf(design));
   return design?.theme === 'midnight';
 }
+
+/** 카테고리 버튼 색으로 고른 값. 없는 칸은 테마 기본 색으로 그린다. */
+export type CategoryChipColors = {
+  categoryBgColor?: string;
+  categoryTextColor?: string;
+  categoryIdleBgColor?: string;
+  categoryIdleTextColor?: string;
+};
+
+/**
+ * 카테고리 버튼 한 칸에 얹을 색.
+ *
+ * 편집기 미리보기 · 공개 페이지가 모두 이 함수를 쓴다. 고르지 않은 칸은 값을 아예
+ * 돌려주지 않는다 — 화면이 이미 갖고 있는 테마 클래스(어두운 배경의 반투명 흰색 등)가
+ * 그대로 남아야 예전 페이지의 생김새가 바뀌지 않는다.
+ */
+export function categoryChipStyle(
+  colors: CategoryChipColors | null | undefined,
+  selected: boolean,
+  accentColor: string,
+): { backgroundColor?: string; color?: string; borderColor?: string } {
+  if (selected) {
+    return {
+      backgroundColor: normalizeHexColor(colors?.categoryBgColor) || accentColor,
+      color: normalizeHexColor(colors?.categoryTextColor) || '#FFFFFF',
+      borderColor: 'transparent',
+    };
+  }
+  const idleBg = normalizeHexColor(colors?.categoryIdleBgColor);
+  const idleText = normalizeHexColor(colors?.categoryIdleTextColor);
+  const style: { backgroundColor?: string; color?: string; borderColor?: string } = {};
+  if (idleBg) {
+    style.backgroundColor = idleBg;
+    style.borderColor = 'transparent';
+  }
+  if (idleText) style.color = idleText;
+  return style;
+}
