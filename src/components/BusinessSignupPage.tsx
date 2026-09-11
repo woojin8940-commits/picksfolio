@@ -224,7 +224,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
             <div className="flex gap-2">
               <input
                 type="text" value={businessNumber} onChange={handleBusinessNumberChange}
-                className={`flex-1 ${inputClass}`} placeholder="000-00-00000" required
+                className={`flex-1 min-w-0 ${inputClass}`} placeholder="000-00-00000" required
                 disabled={isBizVerified}
               />
               <button
@@ -295,7 +295,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
                 type="tel" inputMode="numeric" autoComplete="tel"
                 value={formatPhoneInput(contactPhone)}
                 onChange={(e) => setContactPhone(digitsOnly(e.target.value).slice(0, 11))}
-                className={`flex-1 ${inputClass}`} placeholder="010-1234-5678" required
+                className={`flex-1 min-w-0 ${inputClass}`} placeholder="010-1234-5678" required
               />
               <button
                 type="button" onClick={handleSendSMS} disabled={isSending || isVerified}
@@ -312,7 +312,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
               <div className="flex gap-2">
                 <input
                   type="text" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value)}
-                  className={`flex-1 ${inputClass}`} placeholder="6자리 숫자 입력" maxLength={6}
+                  className={`flex-1 min-w-0 ${inputClass}`} placeholder="6자리 숫자 입력" maxLength={6}
                 />
                 <button
                   type="button" onClick={handleVerifySMS} disabled={isVerifying}
