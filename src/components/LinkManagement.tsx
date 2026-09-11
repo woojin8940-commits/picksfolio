@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, User, Eye } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, User, Eye, Search } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -10,12 +10,14 @@ import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
 import ColorPicker from './ColorPicker';
-import { DEFAULT_BUTTONS, buttonLabelKey, type DefaultButtonKey } from '../utils/pageButtons';
+import { DEFAULT_BUTTONS, buttonLabelKey, buttonBgKey, buttonTextKey, type DefaultButtonKey } from '../utils/pageButtons';
 import PlatformLogo from './PlatformLogo';
 import { sanitizeLinkValue } from '../utils/externalLink';
 import {
   type ThemePreset,
+  type CategoryChipColors,
   THEME_BG_PRESETS,
+  categoryChipStyle,
   PRESET_BACKGROUND,
   DEFAULT_CUSTOM_BACKGROUND,
   isLightBackground,
@@ -43,6 +45,48 @@ const ACCENT_COLOR_PRESETS: { value: string; label: string }[] = [
   { value: '#0EA5E9', label: '스카이' },
   { value: '#64748B', label: '슬레이트' }
 ];
+
+/**
+ * 버튼 하나의 배경색 · 글자색을 고르는 줄.
+ *
+ * 예전에는 커스텀 버튼만 배경색을 고를 수 있었고 글자색은 늘 흰색이었다. 밝은
+ * 배경(크림 · 민트 같은 색)을 고르면 흰 글자가 사라져 버려서, 배경과 글자를 각각
+ * 고를 수 있게 했다. 고르지 않으면 값을 비운 채 저장하지 않으므로, 지금까지 쓰던
+ * 버튼은 예전과 똑같은 색으로 그려진다.
+ */
+const ButtonColorRow: React.FC<{
+  name: string;
+  bg?: string;
+  text?: string;
+  bgFallback: string;
+  textFallback?: string;
+  onBg: (hex?: string) => void;
+  onText: (hex?: string) => void;
+}> = ({ name, bg, text, bgFallback, textFallback = '#FFFFFF', onBg, onText }) => {
+  const bgHex = normalizeHexColor(bg) || bgFallback;
+  const textHex = normalizeHexColor(text) || textFallback;
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <ColorPicker value={bgHex} onChange={onBg} label="배경색" aria-label={`${name} 배경색 선택`} />
+      <ColorPicker value={textHex} onChange={onText} label="글자색" aria-label={`${name} 글자색 선택`} />
+      {/* 고른 두 색이 실제로 어떻게 겹쳐 보이는지 바로 확인하는 칸 */}
+      <span
+        className="inline-flex items-center max-w-[140px] truncate px-3 py-1.5 rounded-full text-[11px] font-black border border-slate-200"
+        style={{ backgroundColor: bgHex, color: textHex }}
+      >
+        {name}
+      </span>
+      {(normalizeHexColor(bg) || normalizeHexColor(text)) && (
+        <button
+          onClick={() => { onBg(undefined); onText(undefined); }}
+          className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+        >
+          기본색으로
+        </button>
+      )}
+    </div>
+  );
+};
 
 interface LinkManagementProps {
   userName: string;
@@ -209,6 +253,29 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       console.error('Error parsing design:', e);
     }
     return 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)';
+  });
+  /**
+   * 카테고리 버튼(상품명 검색바 위 줄)의 색.
+   *
+   * 네 칸 모두 비워 둘 수 있고, 비운 칸은 테마가 정한 색으로 그려진다 — 색을 한 번도
+   * 고르지 않은 페이지는 지금까지와 똑같이 나온다.
+   */
+  const [categoryColors, setCategoryColors] = useState<CategoryChipColors>(() => {
+    try {
+      const saved = localStorage.getItem(`picks_design_${(userName || '').toLowerCase()}`);
+      if (saved) {
+        const design = JSON.parse(saved);
+        return {
+          categoryBgColor: design.categoryBgColor,
+          categoryTextColor: design.categoryTextColor,
+          categoryIdleBgColor: design.categoryIdleBgColor,
+          categoryIdleTextColor: design.categoryIdleTextColor,
+        };
+      }
+    } catch (e) {
+      console.error('Error parsing design:', e);
+    }
+    return {};
   });
   const [portfolioFontSize, setPortfolioFontSize] = useState<'small' | 'medium' | 'large'>(() => {
     try {
@@ -655,6 +722,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
             || DEFAULT_CUSTOM_BACKGROUND,
         );
         setPortfolioFontSize(settings.design.portfolioFontSize || 'medium');
+        setCategoryColors({
+          categoryBgColor: settings.design.categoryBgColor,
+          categoryTextColor: settings.design.categoryTextColor,
+          categoryIdleBgColor: settings.design.categoryIdleBgColor,
+          categoryIdleTextColor: settings.design.categoryIdleTextColor,
+        });
         if (settings.design.portfolioHeaderImage !== undefined) setCoverImage(settings.design.portfolioHeaderImage);
         if (settings.design.portfolioHeaderImagePosition !== undefined) setCoverPosition(settings.design.portfolioHeaderImagePosition);
       }
@@ -802,6 +875,26 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     if (usingDefaultAccent()) setAccentColor(defaultAccentFor(isLightBackground(next)));
   };
 
+  /**
+   * 배경색을 손으로 적는 칸.
+   *
+   * 팔레트에서 고르는 것과 별개로, 브랜드 색을 코드로 받아 온 사람은 그 여섯 자리를
+   * 그대로 넣는 편이 빠르다. 색으로 읽히지 않는 값을 적고 칸을 벗어나면 지금 색으로
+   * 되돌린다 — 잘못 적은 값이 기본색으로 튀어 버리면 무엇이 바뀐 건지 알 수 없다.
+   */
+  const [bgHexDraft, setBgHexDraft] = useState(() => customBg.replace('#', ''));
+  useEffect(() => { setBgHexDraft(customBg.replace('#', '')); }, [customBg]);
+  const commitBgHexDraft = () => {
+    const hex = normalizeHexColor(bgHexDraft);
+    if (hex) handleCustomBackground(hex);
+    else setBgHexDraft(customBg.replace('#', ''));
+  };
+
+  /** 카테고리 버튼 색 한 칸 바꾸기. 같은 색을 다시 누르면 테마 기본색으로 되돌린다. */
+  const setCategoryColor = (key: keyof CategoryChipColors, hex?: string) => {
+    setCategoryColors(prev => ({ ...prev, [key]: hex ? (normalizeHexColor(hex) || undefined) : undefined }));
+  };
+
   const showSuccessFeedback = (message: string) => {
     setIsSaved(true);
     setSaveMessage(message);
@@ -861,6 +954,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       backgroundType: 'solid',
       customGradient: customGradient,
       customBackground: customBg,
+      categoryBgColor: categoryColors.categoryBgColor,
+      categoryTextColor: categoryColors.categoryTextColor,
+      categoryIdleBgColor: categoryColors.categoryIdleBgColor,
+      categoryIdleTextColor: categoryColors.categoryIdleTextColor,
       profileLayout: 'center',
       homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
       portfolioFontSize: portfolioFontSize,
@@ -875,13 +972,39 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     // 저절로 붙어 나온다.
     const cleanedSocials: Record<string, any> = {
       ...socials,
-      customButtons: (socials.customButtons || []).filter((b: any) => (b.label || '').trim() && (b.url || '').trim()),
+      customButtons: (socials.customButtons || [])
+        .filter((b: any) => (b.label || '').trim() && (b.url || '').trim())
+        // 고르지 않은 글자색은 아예 넣지 않는다 — 값이 없으면 페이지가 흰 글자를 쓴다.
+        .map((b: any) => {
+          const textColor = normalizeHexColor(b.textColor);
+          const next = { ...b, color: normalizeHexColor(b.color) || '#2563EB' };
+          if (textColor) next.textColor = textColor; else delete next.textColor;
+          return next;
+        }),
     };
+    // 검색바는 끈 경우만 남긴다 — false 를 저장해 두면 "켜 둔 적 있음"과
+    // "손댄 적 없음"이 구분되지 않아, 나중에 기본값을 바꿀 여지가 사라진다.
+    if (cleanedSocials.hideSearchBar) cleanedSocials.hideSearchBar = true;
+    else delete cleanedSocials.hideSearchBar;
+
+    // 비즈니스 제안 버튼의 색도 같다. 버튼을 껐으면 색도 남기지 않는다.
+    ['businessProposalBg', 'businessProposalText'].forEach(colorKey => {
+      const color = normalizeHexColor(cleanedSocials[colorKey] as string);
+      if (!color || !cleanedSocials.businessProposal) delete cleanedSocials[colorKey];
+      else cleanedSocials[colorKey] = color;
+    });
     DEFAULT_BUTTONS.forEach(def => {
       const labelKey = buttonLabelKey(def.key);
       const label = String(cleanedSocials[labelKey] ?? '').trim();
-      if (!label || !String(cleanedSocials[def.key] ?? '').trim()) delete cleanedSocials[labelKey];
+      const hasUrl = !!String(cleanedSocials[def.key] ?? '').trim();
+      if (!label || !hasUrl) delete cleanedSocials[labelKey];
       else cleanedSocials[labelKey] = label;
+      // 색도 이름과 같은 규칙이다 — 주소가 없는 버튼의 색은 남기지 않는다.
+      [buttonBgKey(def.key), buttonTextKey(def.key)].forEach(colorKey => {
+        const color = normalizeHexColor(cleanedSocials[colorKey] as string);
+        if (!color || !hasUrl) delete cleanedSocials[colorKey];
+        else cleanedSocials[colorKey] = color;
+      });
     });
 
     // 즉시 로컬 저장
@@ -1681,11 +1804,45 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   <Globe size={18} className="text-blue-600" />
                 </div>
 
+                {/* 상품명 검색바 on/off.
+                    검색바는 지금까지 늘 나왔다. 그런데 올린 상품이 몇 개뿐인 페이지에서는
+                    검색칸이 화면만 차지하고(무엇을 검색해야 하는지도 알 수 없다), 링크만
+                    모아 둔 페이지에서는 검색할 대상 자체가 없다. 그래서 끌 수 있게 둔다.
+                    끈 상태만 저장하므로(hideSearchBar), 지금까지 쓰던 페이지는 손대지
+                    않으면 검색바가 그대로 나온다. */}
+                <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3">
+                  <Search size={16} className="text-slate-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="block font-bold text-sm text-slate-700">상품명 검색바</span>
+                    <span className="text-[11px] font-bold text-slate-400">카테고리 버튼 줄 옆에 보이는 검색칸이에요</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!socials.hideSearchBar}
+                    onClick={() => setSocials({ ...socials, hideSearchBar: !socials.hideSearchBar })}
+                    className={`relative w-11 h-6 rounded-full transition-all shrink-0 ${socials.hideSearchBar ? 'bg-slate-300' : 'bg-blue-600'}`}
+                    aria-label="상품명 검색바 켜기/끄기"
+                  >
+                    <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${socials.hideSearchBar ? 'left-1' : 'left-6'}`} />
+                  </button>
+                </div>
+
                 {socials.businessProposal && (
-                  <div className="flex items-center gap-3 bg-blue-50 rounded-xl px-4 py-3">
-                    <Briefcase size={16} className="text-blue-600 shrink-0" />
-                    <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼</span>
-                    <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+                  <div className="bg-blue-50 rounded-xl px-4 py-3 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <Briefcase size={16} className="text-blue-600 shrink-0" />
+                      <span className="flex-1 font-bold text-sm text-blue-700">비즈니스 제안 버튼</span>
+                      <button onClick={() => setSocials({ ...socials, businessProposal: false })} className="p-1 text-blue-300 hover:text-red-500 transition-colors"><X size={14} /></button>
+                    </div>
+                    <ButtonColorRow
+                      name="비즈니스 제안"
+                      bg={socials.businessProposalBg}
+                      text={socials.businessProposalText}
+                      bgFallback={accentColor}
+                      onBg={(hex) => setSocials({ ...socials, businessProposalBg: hex || '' })}
+                      onText={(hex) => setSocials({ ...socials, businessProposalText: hex || '' })}
+                    />
                   </div>
                 )}
 
@@ -1730,6 +1887,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <p className="text-[10px] font-bold text-slate-400">
                       위쪽 이름을 눌러 고칠 수 있어요 — 예: {def.key === 'kakao' ? '공동구매 오픈챗' : `${def.label} 채널`}
                     </p>
+                    <ButtonColorRow
+                      name={socials[buttonLabelKey(def.key)] || def.label}
+                      bg={socials[buttonBgKey(def.key)]}
+                      text={socials[buttonTextKey(def.key)]}
+                      bgFallback={themeIsLight ? '#FFFFFF' : '#2A2A38'}
+                      textFallback={themeIsLight ? '#1E1E2E' : '#FFFFFF'}
+                      onBg={(hex) => setSocials({ ...socials, [buttonBgKey(def.key)]: hex || '' })}
+                      onText={(hex) => setSocials({ ...socials, [buttonTextKey(def.key)]: hex || '' })}
+                    />
                   </div>
                 ))}
 
@@ -1769,19 +1935,22 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         placeholder="https://example.com"
                       />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-slate-400">색상</span>
-                      <ColorPicker
-                        value={btn.color || '#2563EB'}
-                        onChange={(c) => {
-                          const updated = [...(socials.customButtons || [])];
-                          updated[idx] = { ...updated[idx], color: c };
-                          setSocials({ ...socials, customButtons: updated });
-                        }}
-                        triggerClassName="w-7 h-7 rounded-full"
-                        aria-label="버튼 색상 선택"
-                      />
-                    </div>
+                    <ButtonColorRow
+                      name={btn.label || '버튼'}
+                      bg={btn.color}
+                      text={btn.textColor}
+                      bgFallback="#2563EB"
+                      onBg={(hex) => {
+                        const updated = [...(socials.customButtons || [])];
+                        updated[idx] = { ...updated[idx], color: hex || '#2563EB' };
+                        setSocials({ ...socials, customButtons: updated });
+                      }}
+                      onText={(hex) => {
+                        const updated = [...(socials.customButtons || [])];
+                        updated[idx] = { ...updated[idx], textColor: hex || '' };
+                        setSocials({ ...socials, customButtons: updated });
+                      }}
+                    />
                   </div>
                 ))}
 
@@ -1853,14 +2022,17 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                       </div>
                       <div className="text-left min-w-0">
                         <span className="font-black text-sm block">배경색 직접 선택</span>
-                        <span className="text-xs text-slate-500 font-bold">팔레트에서 고르면 글자 색은 자동으로 맞춰집니다</span>
+                        <span className="text-xs text-slate-500 font-bold">팔레트를 열어 원하는 색을 직접 조정할 수 있어요. 글자 색은 자동으로 맞춰집니다</span>
                       </div>
                     </div>
+                    {/* 색동그라미만 두면 눌러서 팔레트가 열린다는 것이 보이지 않았다.
+                        글씨를 붙인 버튼으로 두고, 아래 팔레트에서 색·명암·16진수를
+                        직접 조정한다. */}
                     <ColorPicker
                       value={customBg}
                       onChange={handleCustomBackground}
-                      triggerClassName="w-11 h-11 rounded-2xl flex-shrink-0"
-                      aria-label="배경색 직접 지정"
+                      label="팔레트 열기"
+                      aria-label="배경색 팔레트 열기"
                     />
                   </div>
 
@@ -1881,10 +2053,23 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">배경</span>
-                    <span className="text-xs font-black text-slate-600">
-                      {themePreset === 'custom' ? customBg.toUpperCase() : '프리셋 사용 중'}
+                    <div className="flex items-center rounded-lg border border-slate-200 bg-white px-2 py-1">
+                      <span className="text-xs font-black text-slate-300">#</span>
+                      <input
+                        value={bgHexDraft}
+                        onChange={(e) => setBgHexDraft(e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6).toUpperCase())}
+                        onBlur={commitBgHexDraft}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitBgHexDraft(); }}
+                        maxLength={6}
+                        spellCheck={false}
+                        aria-label="배경색 16진수 코드"
+                        className="w-[60px] bg-transparent text-xs font-black uppercase tracking-wide text-slate-600 outline-none"
+                      />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      {themePreset === 'custom' ? '이 색을 쓰고 있어요' : '프리셋 사용 중'}
                     </span>
                     {themePreset === 'custom' ? (
                       <button
@@ -1942,6 +2127,76 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     </button>
                   </div>
                 </div>
+
+                {/* 카테고리 버튼 색 — 개인페이지의 상품명 검색바 위에 놓이는 그 줄이다.
+                    선택된 칸과 나머지 칸의 배경·글자색을 각각 고른다. 비워 두면 테마가
+                    정한 색으로 그려지므로, 손대지 않은 페이지는 지금까지와 똑같다. */}
+                <div className="p-5 rounded-2xl border-2 border-[#E2E8F0] bg-white space-y-3">
+                  <div>
+                    <span className="font-black text-sm block">카테고리 버튼 색</span>
+                    <span className="text-xs text-slate-500 font-bold">상품명 검색바 위의 버튼 줄입니다. 배경색과 글자색을 따로 고를 수 있어요</span>
+                  </div>
+
+                  {/* 고른 색이 바로 보이는 줄. 배경은 지금 테마 배경색을 깔아 둔다. */}
+                  <div
+                    className="flex items-center gap-2 rounded-xl px-3 py-3 border border-slate-200"
+                    style={{ backgroundColor: themeBackground }}
+                  >
+                    {['전체', '패션', '아웃터'].map((cat, idx) => (
+                      <span
+                        key={cat}
+                        className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap rounded-full border ${
+                          idx === 0
+                            ? 'text-white border-transparent'
+                            : themeIsLight
+                              ? 'bg-white border-slate-200 text-slate-400'
+                              : 'bg-white/10 border-white/20 text-white/50'
+                        }`}
+                        style={categoryChipStyle(categoryColors, idx === 0, accentColor)}
+                      >
+                        {cat}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {([
+                      { key: 'categoryBgColor', label: '선택된 버튼 배경', fallback: accentColor },
+                      { key: 'categoryTextColor', label: '선택된 버튼 글자', fallback: '#FFFFFF' },
+                      { key: 'categoryIdleBgColor', label: '나머지 버튼 배경', fallback: themeIsLight ? '#FFFFFF' : '#2A2A38' },
+                      { key: 'categoryIdleTextColor', label: '나머지 버튼 글자', fallback: themeIsLight ? '#94A3B8' : '#E2E8F0' },
+                    ] as const).map(row => (
+                      <div key={row.key} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                        <span className="flex-1 min-w-0 truncate text-[11px] font-black text-slate-600">{row.label}</span>
+                        <ColorPicker
+                          value={categoryColors[row.key] || row.fallback}
+                          onChange={(c) => setCategoryColor(row.key, c)}
+                          label={categoryColors[row.key] ? String(categoryColors[row.key]).toUpperCase() : '고르기'}
+                          aria-label={`${row.label} 색 고르기`}
+                        />
+                        {categoryColors[row.key] && (
+                          <button
+                            onClick={() => setCategoryColor(row.key, undefined)}
+                            className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                            aria-label={`${row.label} 색 되돌리기`}
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-400">고르지 않은 칸은 테마 색으로 그려집니다</span>
+                    <button
+                      onClick={() => setCategoryColors({})}
+                      className="ml-auto text-[11px] font-bold text-slate-400 hover:text-blue-600 transition-colors"
+                    >
+                      테마 기본색으로
+                    </button>
+                  </div>
+                </div>
               </section>
 
 
@@ -1964,6 +2219,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
         >
             <PagePreview
+              categoryColors={categoryColors}
               theme={themePreset}
               backgroundColor={customBg}
               accentColor={accentColor}
@@ -2407,6 +2663,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
               >
                 <PagePreview
+                  categoryColors={categoryColors}
                   theme={themePreset}
                   backgroundColor={customBg}
                   accentColor={accentColor}

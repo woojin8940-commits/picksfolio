@@ -7,7 +7,7 @@ import { getLinkGridItems } from '../services/settingsService';
 import { enabledDefaultButtons } from '../utils/pageButtons';
 import PlatformLogo from './PlatformLogo';
 import { externalLinkProps, openExternalUrl } from '../utils/externalLink';
-import { normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
+import { categoryChipStyle, normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
 import type { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
@@ -811,6 +811,16 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
    * 안에 들어 있어(components/PlatformLogo) 버튼 바탕은 그대로 두고 마크만 색을
    * 가진다.
    */
+  /**
+   * 상품명 검색바를 보여 줄지.
+   *
+   * 편집기의 버튼 칸에서 끌 수 있다. 끈 상태만 저장되므로(hideSearchBar), 예전에
+   * 저장된 페이지에는 이 값이 없고 검색바는 지금까지처럼 그대로 나온다. 끄면 두
+   * 레이아웃(포트폴리오 · 큐레이션) 양쪽에서 함께 사라진다 — 한쪽만 사라지면
+   * 레이아웃을 바꿨을 때 끈 적 없는 검색바가 다시 나타난다.
+   */
+  const showSearchBar = !socials?.hideSearchBar;
+
   const defaultButtonsBlock = enabledDefaultButtons(socials).map(btn => (
     <a
       key={btn.key}
@@ -820,6 +830,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           ? 'bg-white/10 border-white/15 text-white hover:bg-white/15'
           : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
       }`}
+      /* 색을 직접 고른 버튼만 인라인으로 덮어쓴다 — 고르지 않았으면 위의 테마 색 그대로. */
+      style={{
+        backgroundColor: normalizeHexColor(btn.bg) || undefined,
+        color: normalizeHexColor(btn.text) || undefined,
+        borderColor: btn.bg ? 'transparent' : undefined,
+      }}
     >
       <PlatformLogo platform={btn.key} size={16} className="mr-2" />
       {btn.label}
@@ -1000,14 +1016,14 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   위아래로 조금 여유를 둬서 떠오른 버튼과 그림자가 다 보이게 한다. */}
               <div className="flex gap-2.5 pt-4 pb-2 justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
+                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF' }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
                   </a>
                 )}
                 {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
+                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
                   </a>
@@ -1073,6 +1089,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                {/* 좁은 화면에서는 검색줄을 한 단계 얇게 둔다(py-2.5). 글자와 아이콘
                    크기는 그대로라 눌리는 영역은 충분하고, 모바일에서 유독 두꺼워
                    보이던 느낌만 덜어 낸다. 넓은 화면은 예전 두께를 유지한다. */}
+               {showSearchBar && (
                <div className="px-4 mb-6">
                  <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                    <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
@@ -1090,6 +1107,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                    )}
                  </div>
                </div>
+               )}
 
                <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 -mx-4 md:-mx-8">
                  {categories.map(cat => (
@@ -1097,7 +1115,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                      key={cat}
                      onClick={() => setSelectedCategory(cat)}
                      className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap transition-all rounded-full border ${selectedCategory === cat ? 'text-white border-transparent' : isDark ? 'bg-white/10 border-white/20 text-white/50' : 'bg-white border-slate-200 text-slate-400'}`}
-                     style={selectedCategory === cat ? { backgroundColor: design.accentColor } : {}}
+                     style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
                    >
                      {cat}
                    </button>
@@ -1332,14 +1350,14 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   줄 자체에 위아래 여백이 없어서 떠오르는 모션과 그림자가 더 잘렸다. */}
               <div className="flex gap-2.5 py-1.5 justify-center flex-wrap">
                 {socials.businessProposal && (
-                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: design.accentColor }}>
+                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF' }}>
                     <Briefcase size={14} strokeWidth={2.5} />
                     {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
                   </a>
                 )}
                 {defaultButtonsBlock}
                 {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB' }}>
+                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
                     <ExternalLink size={14} strokeWidth={2.5} />
                     {btn.label}
                   </a>
@@ -1394,7 +1412,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap transition-all rounded-full border ${selectedCategory === cat ? 'text-white border-transparent' : isDark ? 'bg-white/10 border-white/20 text-white/50' : 'bg-white border-slate-200 text-slate-400'}`}
-                  style={selectedCategory === cat ? { backgroundColor: design.accentColor } : {}}
+                  style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
                 >
                   {cat}
                 </button>
@@ -1403,6 +1421,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             {/* Product Search Bar */}
             {/* 큐레이션 레이아웃의 검색줄도 같은 두께를 쓴다. */}
+            {showSearchBar && (
             <div className="px-6 mb-2">
               <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                 <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
@@ -1420,6 +1439,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                 )}
               </div>
             </div>
+            )}
 
             <main className="flex-1 px-4 py-6">
               {/* Supabase Links Grid */}

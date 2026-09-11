@@ -134,7 +134,7 @@ const DataBoardSection: React.FC = () => {
             Array.from({ length: 6 }).map((_, idx) => (
               <div
                 key={`skeleton-${idx}`}
-                className="bg-white rounded-2xl md:rounded-[2rem] border border-[#0B0F1A]/[0.07] p-3 md:p-6 animate-pulse"
+                className="bg-white rounded-2xl md:rounded-[2rem] border border-[#0B0F1A]/[0.07] p-2.5 sm:p-3 md:p-6 animate-pulse"
               >
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl bg-[#EFF1F7]" />
@@ -175,7 +175,7 @@ const DataBoardSection: React.FC = () => {
                   transition={{ delay: catIdx * 0.08, duration: 0.4 }}
                   className="bg-white rounded-2xl md:rounded-[2rem] border border-[#0B0F1A]/[0.07] overflow-hidden shadow-[0_24px_60px_-45px_rgba(11,15,26,0.75)]"
                 >
-                  <div className="p-3 md:p-6">
+                  <div className="p-2.5 sm:p-3 md:p-6">
                     <div className="flex items-center justify-between mb-3 md:mb-4">
                       <div className="flex items-center gap-1.5 md:gap-2.5 min-w-0">
                         <div
@@ -184,7 +184,7 @@ const DataBoardSection: React.FC = () => {
                         >
                           <BarChart3 size={14} style={{ color: color.icon }} strokeWidth={2.6} />
                         </div>
-                        <h3 className="text-[#0B0F1A] font-black text-xs md:text-base truncate">{label}</h3>
+                        <h3 className="text-[#0B0F1A] font-black text-xs md:text-base leading-tight line-clamp-2">{label}</h3>
                       </div>
                       <span
                         className="hidden md:inline text-[9px] md:text-[10px] font-black px-2.5 py-1 rounded-full"
@@ -198,9 +198,9 @@ const DataBoardSection: React.FC = () => {
                       {cat.rankings.slice(0, 5).map((item) => (
                         <div
                           key={`${cat.cid}-${item.rank}`}
-                          className="flex items-center justify-between p-1.5 md:p-2.5 rounded-lg md:rounded-xl hover:bg-[#F6F7FC] transition-colors"
+                          className="flex items-center justify-between px-1 py-1.5 sm:p-1.5 md:p-2.5 rounded-lg md:rounded-xl hover:bg-[#F6F7FC] transition-colors"
                         >
-                          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                          <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0">
                             <span
                               className="w-4 h-4 md:w-5 md:h-5 rounded md:rounded-md text-center text-[10px] md:text-[11px] font-black tabular-nums flex items-center justify-center shrink-0"
                               style={
@@ -211,7 +211,7 @@ const DataBoardSection: React.FC = () => {
                             >
                               {item.rank}
                             </span>
-                            <span className="text-[11px] md:text-sm font-bold text-[#39415C] truncate">
+                            <span className="text-xs md:text-sm font-bold text-[#39415C] leading-tight line-clamp-2">
                               {item.keyword}
                             </span>
                           </div>

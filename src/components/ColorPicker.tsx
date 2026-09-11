@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Pipette } from 'lucide-react';
+import { Palette, Pipette } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /* Color conversion helpers (HEX <-> HSV)                              */
@@ -301,6 +301,14 @@ interface ColorPickerProps {
   triggerClassName?: string;
   /** Optional inline styles merged onto the trigger swatch */
   triggerStyle?: React.CSSProperties;
+  /**
+   * 팔레트를 여는 버튼에 글씨를 함께 보여 준다.
+   *
+   * 색동그라미만 놓으면 그것이 "지금 색"을 보여 주는 표시인지, 눌러서 팔레트를 열 수
+   * 있는 버튼인지 구분되지 않는다. 글씨와 팔레트 아이콘을 붙인 알약 모양으로 두면
+   * 누를 수 있다는 것이 먼저 보인다.
+   */
+  label?: string;
   'aria-label'?: string;
 }
 
@@ -311,6 +319,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({
   onChange,
   triggerClassName = 'w-10 h-10 rounded-full',
   triggerStyle,
+  label,
   'aria-label': ariaLabel = '색상 선택',
 }) => {
   const [open, setOpen] = useState(false);
@@ -337,16 +346,35 @@ const ColorPicker: React.FC<ColorPickerProps> = ({
     setOpen(true);
   };
 
+  const toggle = () => (open ? setOpen(false) : openPanel());
+
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => (open ? setOpen(false) : openPanel())}
-        className={`${triggerClassName} cursor-pointer overflow-hidden border border-slate-200`}
-        style={{ backgroundColor: swatchColor, ...triggerStyle }}
-        aria-label={ariaLabel}
-      />
+      {label ? (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-black text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors shrink-0"
+          aria-label={ariaLabel}
+        >
+          <span
+            className="w-4 h-4 rounded-full border border-slate-200 shrink-0"
+            style={{ backgroundColor: swatchColor }}
+          />
+          {label}
+          <Palette size={13} />
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          className={`${triggerClassName} cursor-pointer overflow-hidden border border-slate-200`}
+          style={{ backgroundColor: swatchColor, ...triggerStyle }}
+          aria-label={ariaLabel}
+        />
+      )}
       {open && createPortal(
         <ColorPickerPanel
           value={swatchColor}

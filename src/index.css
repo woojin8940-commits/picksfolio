@@ -358,6 +358,27 @@ h1, h2, h3, h4, h5, h6 {
   display: none;
 }
 
+/* 히어로 예시 그림(public/hero-example-*.webp) 에 얹는 글자.
+
+   크기는 그림을 담은 카드 너비 기준(cqw)이라 그림 속 글자와 같은 비율로 줄고,
+   max() 앞자리는 휴대폰에서 뭉개지지 않게 두는 바닥값이다. 앞의 px 값은 컨테이너
+   단위를 모르는 브라우저용 대비값이다(그 브라우저는 두 번째 줄을 버린다).
+
+   이 크기를 테일윈드의 `text-[8px]` 같은 클래스로 적으면 안 된다. 바로 아래의
+   '휴대폰 최소 12px' 규칙이 클래스 이름을 문자열로 찾기 때문에 `md:` 접두사가
+   붙어 있어도 걸리고, !important 라 인라인 스타일까지 이긴다 — 폭 180px 짜리
+   페이지 그림에 13px 글자가 얹히면 비워 둔 띠를 넘어 아래 사진을 덮는다. */
+.hero-ex-search {
+  font-size: 7px;
+  font-size: max(5px, 2.25cqw);
+  line-height: 1.2;
+}
+.hero-ex-head {
+  font-size: 8px;
+  font-size: max(6px, 2.65cqw);
+  line-height: 1.2;
+}
+
 /* Mobile readability floor: enforce a minimum 12px on tiny tailwind utilities
    to keep text legible on phones. Keeps existing desktop scaling behaviour. */
 @media (max-width: 767px) {

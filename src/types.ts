@@ -72,6 +72,18 @@ export interface DesignSettings {
    * customBackgroundOf 가 두 필드를 같은 순서로 읽는다.
    */
   customBackground?: string;
+  /**
+   * 카테고리 버튼(상품명 검색바 위의 줄) 색.
+   *
+   * 예전에는 선택된 칸이 포인트 색 + 흰 글씨, 나머지는 테마가 정한 회색으로 고정이었다.
+   * 배경색을 자유롭게 고를 수 있게 되면서 그 고정 색이 어긋나는 경우가 생겼다 — 크림색
+   * 배경에 흰 글씨 버튼이 얹히는 식이다. 그래서 선택된 칸과 선택되지 않은 칸의
+   * 배경·글자색을 따로 고를 수 있게 두고, 비워 두면 지금까지와 같은 테마 색으로 그린다.
+   */
+  categoryBgColor?: string;
+  categoryTextColor?: string;
+  categoryIdleBgColor?: string;
+  categoryIdleTextColor?: string;
   profileLayout: 'center' | 'left';
   homePriority: 'products' | 'portfolio' | 'curation';
   background_image?: string;

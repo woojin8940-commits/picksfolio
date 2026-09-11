@@ -19,9 +19,9 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy, onN
       <div className="container mx-auto px-4 sm:px-6">
         {/* 마지막 한 번 더 권하는 자리. 종이색 위에 먹색 판 하나만 올린다. */}
         {onNavigateSignup && (
-          <div className="mb-12 md:mb-20 rounded-[1.75rem] md:rounded-[2.5rem] bg-[#0B0F1A] px-6 py-8 md:px-12 md:py-12 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-[0_40px_80px_-50px_rgba(11,15,26,0.9)]">
+          <div className="mb-12 md:mb-20 rounded-3xl sm:rounded-[1.75rem] md:rounded-[2.5rem] bg-[#0B0F1A] px-5 py-7 sm:px-6 sm:py-8 md:px-12 md:py-12 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6 shadow-[0_40px_80px_-50px_rgba(11,15,26,0.9)]">
             <div>
-              <h3 className="text-lg md:text-3xl font-black text-white tracking-tighter leading-snug">
+              <h3 className="text-[17px] sm:text-lg md:text-3xl font-black text-white tracking-tighter leading-snug">
                 {en ? 'Your address is still free.' : '내 주소, 아직 비어 있습니다'}
               </h3>
               <p className="mt-2 text-xs md:text-base font-medium text-white/60">
@@ -75,20 +75,20 @@ const Footer: React.FC<FooterProps> = ({ onNavigateTerms, onNavigatePrivacy, onN
         {/* Business Information */}
         <div className="border-t border-[#0B0F1A]/[0.07] pt-8">
           <div className="space-y-2">
-            <p className="text-[#8B93AE] text-sm font-bold">
+            <p className="text-[#8B93AE] text-[12.5px] md:text-sm font-bold">
               <span className="text-[#39415C] font-black">{en ? 'Company Name' : '상호명'}</span> {en ? 'Picksfolio' : '픽스폴리오(Picksfolio)'} | <span className="text-[#39415C] font-black">{en ? 'CEO' : '대표자'}</span> {en ? 'Woojin Shin' : '신우진'}
             </p>
-            <p className="text-[#8B93AE] text-sm font-bold">
-              <span className="text-[#39415C] font-black">{en ? 'Business Registration No.' : '사업자등록번호'}</span> 220-26-01995
+            <p className="text-[#8B93AE] text-[12.5px] md:text-sm font-bold">
+              <span className="text-[#39415C] font-black">{en ? 'Business Registration No.' : '사업자등록번호'}</span> <span className="whitespace-nowrap">220-26-01995</span>
             </p>
-            <p className="text-[#8B93AE] text-sm font-bold">
-              <span className="text-[#39415C] font-black">{en ? 'E-Commerce Permit No.' : '통신판매업신고번호'}</span> {en ? '2026-Bucheon Wonmi-0846' : '제 2026-부천원미-0846 호'}
+            <p className="text-[#8B93AE] text-[12.5px] md:text-sm font-bold">
+              <span className="text-[#39415C] font-black">{en ? 'E-Commerce Permit No.' : '통신판매업신고번호'}</span> <span className="whitespace-nowrap">{en ? '2026-Bucheon Wonmi-0846' : '제 2026-부천원미-0846 호'}</span>
             </p>
-            <p className="text-[#8B93AE] text-sm font-bold">
+            <p className="text-[#8B93AE] text-[12.5px] md:text-sm font-bold">
               <span className="text-[#39415C] font-black">{en ? 'Address' : '사업장 주소'}</span> {en ? '7F #2, 26 Buil-ro 199beon-gil, Wonmi-gu, Bucheon-si, Gyeonggi-do, Korea' : '경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)'}
             </p>
-            <p className="text-[#8B93AE] text-sm font-bold">
-              <span className="text-[#39415C] font-black">{en ? 'Customer Support' : '고객센터'}</span> 070-7954-8452 | woojin8940@inplace-ad.com
+            <p className="text-[#8B93AE] text-[12.5px] md:text-sm font-bold">
+              <span className="text-[#39415C] font-black">{en ? 'Customer Support' : '고객센터'}</span> <span className="whitespace-nowrap">070-7954-8452</span> | <span className="whitespace-nowrap">woojin8940@inplace-ad.com</span>
             </p>
           </div>
           <div className="mt-4 flex gap-4">

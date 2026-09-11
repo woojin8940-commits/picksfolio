@@ -1,31 +1,67 @@
 import React, { useState } from 'react';
-import { ArrowRight, BarChart3, Briefcase, Hash, Link2, TrendingUp } from 'lucide-react';
+import { ArrowRight, BarChart3, Briefcase, Hash, Link2, Search, TrendingUp } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface HeroProps {
   onSignup: (id: string) => void;
 }
 
-/* 히어로의 미리보기 카드에 들어가는 값. 아래 실시간 트렌드 보드와 달리 이쪽은
-   화면 구성을 보여주는 예시라서 카드에 '예시' 표시를 함께 달아 둔다.
-   span 은 실제 개인페이지 그리드와 같은 규칙(6칸 기준, 3=2단·2=3단)이다. */
-const SAMPLE_GRID = [
-  { id: 'g1', img: 'photo-1483985988355-763728e1935b', span: 3, ko: '봄 레이어드', en: 'Spring Layering', cat: 'FASHION', count: 4 },
-  { id: 'g2', img: 'photo-1515886657613-9f3515b0c78f', span: 3, ko: '데일리 스트릿', en: 'Daily Street', cat: 'STREET', count: 3 },
-  { id: 'g3', img: 'photo-1496747611176-843222e1e57c', span: 2, ko: '여름 원피스', en: 'Summer Dress', cat: 'FASHION', count: 5 },
-  { id: 'g4', img: 'photo-1487222477894-8943e31ef7b2', span: 2, ko: '가을 아웃터', en: 'Autumn Outer', cat: 'OUTER', count: 2 },
-  { id: 'g5', img: 'photo-1509631179647-0177331693ae', span: 2, ko: '무드 스튜디오', en: 'Studio Mood', cat: 'LOOKBOOK', count: 6 },
+/* 히어로에 나란히 놓는 개인페이지 예시 두 장.
+
+   예시는 직접 만든 그림(public/hero-example-*.webp)이다. 예전에는 같은 화면을
+   마크업으로 다시 지어 올렸는데, 실제 페이지와 조금씩 어긋나는 짝퉁 페이지가 하나
+   더 늘어나는 일이었다 — 페이지가 바뀔 때마다 이쪽도 같이 고쳐야 했고, 고치지
+   않으면 예시가 거짓이 됐다. 그림 한 장이면 어긋날 자리가 없다.
+
+   그림에는 카테고리 버튼 줄 아래에 빈 띠를 한 칸 비워 두었다. 그 자리에 #머리글과
+   상품명 검색바만 글자로 얹는다(둘은 언어에 따라 문구가 바뀌어야 해서 그림에
+   구워 넣지 않았다). 얹는 위치는 그림 높이 기준 퍼센트라 어떤 크기로 줄여도 띠
+   안에 그대로 들어가고, 글자 크기는 컨테이너 너비 기준(cqw)이라 그림 속 글자와
+   같은 비율로 줄어든다.
+
+   검색바는 한 장에만 얹는다. 검색바는 켜고 끌 수 있는 것이라(편집기의 버튼 칸에
+   on/off 가 있다), 켠 페이지와 끈 페이지를 나란히 두면 그 선택이 있다는 사실이
+   설명 없이 보인다. */
+type HeroExample = {
+  id: string;
+  src: string;
+  /** 어두운 배경의 페이지인가. 얹는 글자·검색바 색이 이걸 본다. */
+  dark: boolean;
+  /** 그림 속 포인트 색. #머리글의 해시 기호에 쓴다. */
+  accent: string;
+  /** 그림 속 카테고리 이름. 머리글은 실제 페이지처럼 '# 이름 ———' 꼴이다. */
+  groupKo: string;
+  groupEn: string;
+  /** 비워 둔 띠 안에서 #머리글이 앉는 높이(그림 높이 기준). */
+  headerTop: string;
+  /** 검색바를 얹을 높이. 없으면 검색바를 끈 페이지다. */
+  searchTop?: string;
+};
+
+const HERO_EXAMPLES: HeroExample[] = [
+  {
+    id: 'dark',
+    src: '/hero-example-dark.webp',
+    dark: true,
+    accent: '#FFFFFF',
+    groupKo: 'TOP',
+    groupEn: 'TOP',
+    headerTop: '50.9%',
+  },
+  {
+    id: 'light',
+    src: '/hero-example-light.webp',
+    dark: false,
+    accent: '#4156AF',
+    groupKo: '캠페인',
+    groupEn: 'CAMPAIGN',
+    searchTop: '50.2%',
+    headerTop: '57.4%',
+  },
 ];
 
-const SAMPLE_CATEGORIES = [
-  { ko: '전체', en: 'All' },
-  { ko: '패션', en: 'Fashion' },
-  { ko: '아웃터', en: 'Outer' },
-  { ko: '룩북', en: 'Lookbook' },
-];
-
-const unsplash = (id: string, w: number, h: number) =>
-  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&h=${h}&q=70`;
+/** 그림에서 카테고리 버튼 줄이 시작하는 자리. 얹는 글자도 같은 선에서 시작한다. */
+const EXAMPLE_INSET = '7.5%';
 
 const SAMPLE_TREND = [
   { ko: '린넨 셔츠', en: 'Linen shirt', delta: '+38.4%' },
@@ -63,7 +99,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
               {en ? 'The all-in-one service for creators' : '크리에이터를 위한 올인원 서비스'}
             </span>
 
-            <h1 className="mt-5 md:mt-7 text-[1.75rem] leading-[1.2] md:text-[4rem] md:leading-[1.06] font-black tracking-tighter text-[#0B0F1A] font-display">
+            <h1 className="mt-5 md:mt-7 text-[1.5rem] leading-[1.25] sm:text-[2.25rem] sm:leading-[1.15] md:text-[4rem] md:leading-[1.06] font-black tracking-tighter text-[#0B0F1A] font-display">
               {en ? (
                 <>
                   Pick today&rsquo;s trend,
@@ -73,7 +109,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
                     <span className="relative z-10 text-[#2563EB]">one link</span>
                     <span
                       aria-hidden
-                      className="absolute left-0 right-0 bottom-0.5 h-2.5 md:h-4 -z-0 rounded-full"
+                      className="absolute left-0 right-0 bottom-0.5 h-2 sm:h-3 md:h-4 -z-0 rounded-full"
                       style={{ background: 'rgba(37,99,235,0.16)' }}
                     />
                   </span>
@@ -86,7 +122,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
                     <span className="relative z-10 text-[#2563EB]">개인 링크</span>
                     <span
                       aria-hidden
-                      className="absolute left-0 right-0 bottom-0.5 h-2.5 md:h-4 -z-0 rounded-full"
+                      className="absolute left-0 right-0 bottom-0.5 h-2 sm:h-3 md:h-4 -z-0 rounded-full"
                       style={{ background: 'rgba(37,99,235,0.16)' }}
                     />
                   </span>{' '}
@@ -104,13 +140,13 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             {/* 시작 입력칸 — 아이디를 적고 누르면 그대로 가입 화면으로 넘어간다. */}
             <div className="mt-7 md:mt-9 max-w-xl mx-auto lg:mx-0">
               <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 bg-white border border-[#0B0F1A]/10 p-2 md:p-2.5 rounded-[1.5rem] md:rounded-full shadow-[0_18px_45px_-28px_rgba(11,15,26,0.45)]">
-                <div className="flex items-center px-3 md:px-5 flex-1 min-w-0">
-                  <span className="text-[#98A0BC] font-bold text-sm md:text-base whitespace-nowrap">picks-folio.com/</span>
+                <div className="flex items-center px-2.5 sm:px-3 md:px-5 flex-1 min-w-0">
+                  <span className="text-[#98A0BC] font-bold text-[13px] sm:text-sm md:text-base whitespace-nowrap">picks-folio.com/</span>
                   <input
                     type="text"
                     placeholder={en ? 'yourname' : '아이디'}
                     aria-label={en ? 'Your page address' : '내 페이지 주소'}
-                    className="bg-transparent border-none outline-none text-[#0B0F1A] text-sm md:text-base font-bold px-1.5 py-2 flex-1 min-w-0 placeholder:text-[#C3C9DC]"
+                    className="bg-transparent border-none outline-none text-[#0B0F1A] text-sm md:text-base font-bold px-1 sm:px-1.5 py-2 flex-1 min-w-0 placeholder:text-[#C3C9DC]"
                     value={handle}
                     onChange={(e) => setHandle(e.target.value)}
                     onKeyDown={(e) => {
@@ -149,97 +185,89 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
             </div>
           </div>
 
-          {/* ── 오른쪽: 개인 링크 페이지와 트렌드 보드를 겹친 미리보기 ── */}
-          <div className="relative mx-auto w-full max-w-[420px] lg:max-w-none">
-            {/* 개인 링크 카드. 커버 사진 → 프로필 → 카테고리 줄 → 그리드 순서로,
-                실제 개인페이지(큐레이션 레이아웃)와 같은 짜임을 축소해 둔 것이다. */}
-            <div className="relative bg-white rounded-[1.75rem] md:rounded-[2.25rem] border border-[#0B0F1A]/[0.08] shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] overflow-hidden home-float-slow-lg">
-              <div className="relative h-32 md:h-44">
-                <img
-                  src={unsplash('photo-1485231183945-fffde7cc051e', 900, 500)}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-white via-white/35 to-transparent" />
-              </div>
-              <div className="px-4 md:px-6 pb-5 md:pb-7 -mt-9 md:-mt-12 relative">
-                <div className="flex items-end justify-between gap-3">
-                  <div className="flex items-end gap-3 min-w-0">
-                    <img
-                      src={unsplash('photo-1488426862026-3ee34a7d66df', 200, 200)}
-                      alt=""
-                      className="w-14 h-14 md:w-16 md:h-16 rounded-2xl object-cover border-[3px] border-white shadow-md shrink-0"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="min-w-0 pb-0.5">
-                      <p className="text-sm md:text-base font-black text-[#0B0F1A] truncate">picks-folio.com/picks</p>
-                      <p className="text-[11px] md:text-xs font-bold text-[#8B93AE] truncate">
-                        {en ? 'Picks · fashion curator' : '픽스 · 패션 큐레이터'}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="hidden md:inline-flex items-center gap-1 bg-[#EAF0FF] text-[#2563EB] text-[10px] font-black px-2.5 py-1 rounded-full shrink-0">
-                    <Briefcase size={11} strokeWidth={2.8} />
-                    {en ? 'Inquiry' : '제안받기'}
-                  </span>
-                </div>
-
-                {/* 카테고리 줄 — 실제 페이지처럼 첫 칸이 선택된 상태다. */}
-                <div className="mt-4 flex items-center gap-1.5 overflow-hidden">
-                  {SAMPLE_CATEGORIES.map((cat, idx) => (
-                    <span
-                      key={cat.ko}
-                      className={`text-[10px] md:text-[11px] font-black px-2.5 py-1 rounded-full border whitespace-nowrap ${
-                        idx === 0
-                          ? 'bg-[#2563EB] text-white border-transparent'
-                          : 'bg-white text-[#A6ADC6] border-[#0B0F1A]/[0.08]'
-                      }`}
-                    >
-                      {en ? cat.en : cat.ko}
-                    </span>
-                  ))}
-                </div>
-
-                {/* 사진 그리드 — 6칸 기준으로 타일이 채워지는 실제 개인페이지 방식 */}
+          {/* ── 오른쪽: 개인페이지 예시 두 장과 트렌드 보드를 겹친 미리보기 ── */}
+          <div className="relative mx-auto w-full max-w-[460px] lg:max-w-none">
+            {/* 예시 두 장을 나란히 둔다. 어두운 테마 · 밝은 테마 한 장씩이라, 페이지
+                생김새가 정해져 있지 않다는 것이 설명 없이 보인다. 아래쪽은 원래도
+                잘려 있어 "더 이어진다"는 느낌이 남는다. */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+              {HERO_EXAMPLES.map((ex, idx) => (
                 <div
-                  className="mt-3 grid grid-flow-dense"
-                  style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '5px' }}
+                  key={ex.id}
+                  className={`relative overflow-hidden rounded-2xl sm:rounded-[1.25rem] md:rounded-[1.75rem] shadow-[0_26px_50px_-28px_rgba(11,15,26,0.38)] md:shadow-[0_40px_80px_-40px_rgba(11,15,26,0.4)] ${
+                    idx === 0 ? 'home-float-slow-lg' : 'home-float-lg'
+                  }`}
+                  /* 얹는 글자 크기를 이 카드 너비 기준(cqw)으로 재기 위한 선언.
+                     px 로 두면 카드가 좁아질 때 그림 속 글자만 작아지고 얹은 글자는
+                     그대로 남아, 둘의 크기가 어긋난다. */
+                  style={{ containerType: 'inline-size' }}
                 >
-                  {SAMPLE_GRID.map((item) => (
-                    <div
-                      key={item.id}
-                      className="relative overflow-hidden aspect-square border border-[#0B0F1A]/[0.06] shadow-sm"
-                      style={{ gridColumn: `span ${item.span}`, borderRadius: '1rem' }}
-                    >
-                      <img
-                        src={unsplash(item.img, 400, 400)}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      <span className="absolute top-2 right-2 bg-black/55 backdrop-blur-md text-white text-[9px] font-black px-1.5 py-0.5 rounded-md border border-white/10">
-                        {item.count}
-                      </span>
-                      <div className="absolute bottom-0 left-0 right-0 p-2 md:p-2.5 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                        <p className="text-[10px] md:text-[11px] font-black text-white truncate tracking-tight">
-                          {en ? item.en : item.ko}
-                        </p>
-                        <p className="hidden md:flex items-center gap-0.5 text-[8px] font-bold text-white/60 tracking-widest mt-0.5">
-                          <Hash size={7} strokeWidth={3} />
-                          {item.cat}
-                        </p>
+                  <img
+                    src={ex.src}
+                    alt={en ? 'Example of a personal page' : '개인페이지 예시'}
+                    width={620}
+                    height={773}
+                    className="block w-full h-auto"
+                    loading={idx === 0 ? undefined : 'lazy'}
+                    decoding="async"
+                  />
+
+                  {/* 상품명 검색바 — 그림에 비워 둔 띠의 위쪽 칸. */}
+                  {ex.searchTop && (
+                    <div className="absolute" style={{ top: ex.searchTop, left: EXAMPLE_INSET, right: EXAMPLE_INSET }}>
+                      {/* 얹는 글자 크기는 index.css 의 .hero-ex-* 에 있다. 테일윈드의
+                          text-[8px] 류로 적으면 '휴대폰 최소 12px' 규칙에 걸려
+                          그림 위에서 글자만 13px 로 커진다. */}
+                      <div
+                        className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border ${ex.dark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}
+                        style={{
+                          gap: 'max(1px, 1.8cqw)',
+                          padding: 'max(1px, 1.7cqw) max(3px, 2.4cqw)',
+                          borderRadius: 'max(4px, 3.4cqw)',
+                        }}
+                      >
+                        <Search
+                          className={`shrink-0 w-1.5 h-1.5 md:w-2 md:h-2 ${ex.dark ? 'text-white/40' : 'text-slate-400'}`}
+                          style={{ width: 'max(5px, 2.7cqw)', height: 'max(5px, 2.7cqw)' }}
+                          strokeWidth={2.6}
+                        />
+                        <span className={`hero-ex-search font-bold truncate ${ex.dark ? 'text-white/40' : 'text-slate-400'}`}>
+                          {en ? 'Search products...' : '상품명 검색...'}
+                        </span>
                       </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* 카테고리 머리글 — 사진 그리드 바로 위, 실제 페이지와 같은 '# 이름 ———' 꼴. */}
+                  <div
+                    className="absolute flex items-center gap-0.5"
+                    style={{ top: ex.headerTop, left: EXAMPLE_INSET, right: EXAMPLE_INSET, gap: 'max(1px, 1.2cqw)' }}
+                  >
+                    <Hash
+                      className="shrink-0 w-2 h-2 md:w-2.5 md:h-2.5"
+                      style={{ width: 'max(6px, 2.9cqw)', height: 'max(6px, 2.9cqw)', color: ex.accent }}
+                      strokeWidth={3}
+                    />
+                    <span
+                      className="hero-ex-head font-black uppercase tracking-wider whitespace-nowrap"
+                      style={{ color: ex.dark ? '#FFFFFF' : '#0F172A' }}
+                    >
+                      {en ? ex.groupEn : ex.groupKo}
+                    </span>
+                    <span
+                      aria-hidden
+                      className={`flex-1 h-px ${ex.dark ? 'bg-white/15' : 'bg-slate-200'}`}
+                      style={{ height: 'max(1px, 0.25cqw)' }}
+                    />
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
 
-            {/* 트렌드 보드 미니 카드. 좁은 화면에서는 링크 카드 아래에 그대로 놓고,
-                넓은 화면에서만 커버 사진 위 왼쪽으로 걸쳐 카드 두 장이 겹친 모양을
-                만든다. 사진 그리드를 가리지 않도록 위쪽에 붙인다. */}
-            <div className="mt-4 lg:mt-0 lg:absolute lg:-top-8 lg:-left-14 w-full lg:w-[248px] bg-white rounded-[1.5rem] border border-[#0B0F1A]/[0.08] shadow-[0_28px_60px_-30px_rgba(11,15,26,0.5)] p-3.5 md:p-4 home-float-lg">
+            {/* 트렌드 보드 미니 카드. 좁은 화면에서는 예시 카드 아래에 그대로 놓고,
+                넓은 화면에서만 왼쪽 아래로 걸쳐 카드가 겹친 모양을 만든다. 예시의
+                커버 사진과 카테고리 줄을 가리지 않도록 아래쪽에 붙인다. */}
+            <div className="mt-4 lg:mt-0 lg:absolute lg:-bottom-10 lg:-left-12 w-full lg:w-[248px] bg-white rounded-[1.5rem] border border-[#0B0F1A]/[0.08] shadow-[0_28px_60px_-30px_rgba(11,15,26,0.5)] p-3.5 md:p-4 home-float-lg">
               <div className="flex items-center justify-between mb-2.5">
                 <span className="inline-flex items-center gap-1.5 text-[11px] md:text-xs font-black text-[#0B0F1A]">
                   <TrendingUp size={13} className="text-[#10B981]" strokeWidth={2.8} />

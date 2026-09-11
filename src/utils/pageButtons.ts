@@ -45,6 +45,17 @@ export const DEFAULT_BUTTONS: DefaultButtonDef[] = [
 export const buttonLabelKey = (key: DefaultButtonKey): string => `${key}Label`;
 
 /**
+ * 색이 저장되는 socials 칸. 주소 칸(`kakao`) 옆의 `kakaoBg` · `kakaoText`.
+ *
+ * 기본 버튼은 배경·글자색을 정해 두고 시작한다(어두운 테마에서는 반투명 흰색,
+ * 밝은 테마에서는 흰 배경). 다만 페이지 전체를 자기 색으로 맞추는 사람에게는 그
+ * 정해진 색이 유일하게 못 바꾸는 자리였다. 그래서 원할 때만 덮어쓸 수 있게 칸을
+ * 나란히 둔다 — 비어 있으면 지금까지와 똑같이 테마 색으로 그린다.
+ */
+export const buttonBgKey = (key: DefaultButtonKey): string => `${key}Bg`;
+export const buttonTextKey = (key: DefaultButtonKey): string => `${key}Text`;
+
+/**
  * 화면에 그릴 버튼 이름.
  *
  * 인플루언서가 적은 이름이 있으면 그것을, 비웠으면 플랫폼 기본 이름을 쓴다 — 이름을
@@ -124,14 +135,21 @@ export const normalizeButtonUrl = (key: DefaultButtonKey, raw: string): string =
   return finish(`https://${value.replace(/^\/+/, '')}`);
 };
 
-/** 값이 들어 있는 기본 버튼만, 정해진 순서대로. 이름은 인플루언서가 적은 것으로. */
+/**
+ * 값이 들어 있는 기본 버튼만, 정해진 순서대로. 이름은 인플루언서가 적은 것으로.
+ *
+ * 색은 직접 고른 값이 있을 때만 담아 준다(`bg` · `text`). 없으면 undefined 로 두어
+ * 화면이 테마 기본 색으로 그리게 한다.
+ */
 export const enabledDefaultButtons = (
   socials: Record<string, any> | null | undefined,
-): Array<DefaultButtonDef & { url: string }> =>
+): Array<DefaultButtonDef & { url: string; bg?: string; text?: string }> =>
   DEFAULT_BUTTONS
     .map(def => ({
       ...def,
       label: resolveButtonLabel(socials, def.key),
       url: normalizeButtonUrl(def.key, String(socials?.[def.key] ?? '')),
+      bg: String(socials?.[buttonBgKey(def.key)] ?? '').trim() || undefined,
+      text: String(socials?.[buttonTextKey(def.key)] ?? '').trim() || undefined,
     }))
     .filter(b => !!b.url);
