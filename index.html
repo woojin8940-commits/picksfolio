@@ -23,14 +23,22 @@
     <meta name="theme-color" content="#2563EB">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
     <title>PICKSFOLIO | 크리에이터를 위한 올인원 서비스</title>
+    <!--
+      검색 결과에 그대로 실리는 소개글. 문구는 메인 홈페이지(Hero · 실시간 트렌드
+      보드 · 캠페인 소개)에서 실제로 하는 말을 그대로 옮긴 것이다 — 여기와 홈이
+      다른 말을 하면 검색으로 들어온 사람이 첫 화면에서 다른 서비스를 만난다.
+      개인페이지(/아이디)에는 크리에이터 본인의 소개글이 들어가야 하므로,
+      netlify/edge-functions/og-image.ts 가 크롤러에게만 이 줄을 바꿔 준다.
+    -->
+    <meta name="description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
     <meta property="og:title" content="PICKS | 크리에이터를 위한 올인원 서비스" />
-    <meta property="og:description" content="크리에이터를 위한 올인원 서비스, PICKS. 데이터로 픽하고, 나만의 홈페이지 템플릿으로 연결하세요." />
+    <meta property="og:description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
     <meta property="og:image" content="https://picks-folio.com/og-image.png" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://picks-folio.com/" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="PICKS | 크리에이터를 위한 올인원 서비스" />
-    <meta name="twitter:description" content="크리에이터를 위한 올인원 서비스, PICKS. 데이터로 픽하고, 나만의 홈페이지 템플릿으로 연결하세요." />
+    <meta name="twitter:description" content="오늘의 트렌드로 픽하고 개인 링크 하나로 연결하세요. 인기검색어를 분야별로 매일 정리해 보여주는 크리에이터 올인원 서비스 PICKS. 브랜드 광고 제안부터 진행·정산까지 담당자가 함께 관리합니다." />
     <meta name="twitter:image" content="https://picks-folio.com/og-image.png" />
     <!--
       폰트는 가변(variable) 판의 dynamic-subset 을 쓴다.

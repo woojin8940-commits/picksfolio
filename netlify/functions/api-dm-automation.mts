@@ -7,13 +7,7 @@ import {
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
 import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
-import {
-  ICE_BREAKER_MAX,
-  ICE_BREAKER_QUESTION_MAX,
-  clearIceBreakers,
-  faqPayload,
-  syncIceBreakers,
-} from "./_shared/instagram-ice-breakers.mts";
+import { clearIceBreakers } from "./_shared/instagram-ice-breakers.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
 import {
   subscribeInstagramWebhooks,
@@ -37,9 +31,10 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  *   - followFilter: 'all' | 'followers' | 'non_followers'
  *   - message + buttons: 실제로 보낼 DM (텍스트 + 링크 버튼)
  *
- * faq: DM 창 첫 화면에 보이는 "자주 묻는 질문" 버튼(인스타그램 아이스브레이커).
- *   최대 4개이고, 이 값은 우리 블롭이 아니라 **인스타그램 프로필**에 저장돼야
- *   화면에 보이므로 저장할 때마다 Graph API 로 밀어 넣는다.
+ * faq: 지워진 기능이다. DM 창 첫 화면의 "자주 묻는 질문" 버튼(인스타그램
+ *   아이스브레이커)이었고, 값이 우리 블롭이 아니라 인스타그램 프로필에 등록되기
+ *   때문에 기능을 지우는 것만으로는 사라지지 않는다. 예전에 등록해 둔 계정은
+ *   설정을 불러올 때 서버가 한 번 지우고(retireIceBreakers) 문서에서도 털어낸다.
  *
  * direct: DM 자체를 트리거로 쓰는 자동화 — 처음 DM 을 받았을 때의 인사말과,
  *   받은 메시지에 특정 단어가 있을 때 보내는 자동 답장. 댓글 자동화(automations)와
@@ -105,25 +100,20 @@ interface DmAutomationItem {
 }
 
 /**
- * "자주 묻는 질문" 한 건 — DM 창 첫 화면의 추천 버튼과, 눌렀을 때 나갈 답변.
+ * 지워진 "자주 묻는 질문" 설정의 흔적.
  *
- * 인스타그램에 등록되는 것은 `question` 뿐이다. 사람이 버튼을 누르면 우리가 심어
- * 둔 payload(`faq_<id>`)가 postback 웹훅으로 돌아오고, 그때 이 `answer` 를 보낸다.
+ * 기능은 없어졌지만 예전에 저장된 문서에는 이 블록이 남아 있고, 무엇보다 질문 버튼
+ * 자체는 우리 블롭이 아니라 인스타그램 프로필에 등록돼 있다. 그대로 두면 상대 DM
+ * 창에는 버튼이 보이는데 눌러도 아무 답이 오지 않는다 — 받는 사람에게는 그냥
+ * 고장난 계정이다. 그래서 이 타입은 "지우기"에만 쓴다.
  */
-interface DmFaqItem {
-  id: string;
-  question: string;
-  answer: string;
-  buttons: DmMessageButton[];
-}
-
-interface DmFaqSettings {
-  enabled: boolean;
-  items: DmFaqItem[];
-  /** 인스타그램에 등록을 마친 시각. 비어 있으면 DM 창에는 아직 안 보인다. */
+interface LegacyDmFaq {
+  enabled?: boolean;
+  items?: unknown[];
   syncedAt?: string;
-  /** 등록에 실패한 이유. 화면에서 그대로 보여준다. */
   syncError?: string;
+  /** 인스타그램에서 지우기를 마지막으로 시도한 시각. 실패한 계정을 하루 간격으로만 다시 시도한다. */
+  retiredAttemptedAt?: string;
 }
 
 /** 처음 DM 을 받았을 때 보낼 인사말. */
@@ -169,8 +159,8 @@ interface DmSettings {
   tokenSource?: string;
   tokenExpiresAt?: string;
   automations: DmAutomationItem[];
-  /** DM 창 첫 화면의 "자주 묻는 질문"(아이스브레이커). */
-  faq?: DmFaqSettings;
+  /** 지워진 기능의 흔적. 인스타그램에 남은 질문 버튼을 지우는 데만 쓴다. */
+  faq?: LegacyDmFaq;
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
   rules: unknown[];
@@ -204,7 +194,6 @@ const DEFAULT_SETTINGS: DmSettings = {
   igAccountId: "",
   igUsername: "",
   automations: [],
-  faq: { enabled: false, items: [] },
   direct: {
     greeting: { enabled: false, message: "", buttons: [], onlyFirstContact: true },
     replies: [],
@@ -258,7 +247,7 @@ function requireImage(raw: string, where: string): string {
   return normalized.slice(0, 1000);
 }
 
-/** 링크 버튼 목록을 정리한다(자동화·FAQ·인사말이 같은 규칙을 쓴다). */
+/** 링크 버튼 목록을 정리한다(자동화·인사말·키워드 답장이 같은 규칙을 쓴다). */
 function sanitizeButtons(raw: any, where: string): DmMessageButton[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -340,30 +329,6 @@ function sanitizeAutomation(a: any): DmAutomationItem {
     createdAt: String(a?.createdAt || new Date().toISOString()),
     updatedAt: a?.updatedAt ? String(a.updatedAt) : undefined,
   };
-}
-
-/**
- * "자주 묻는 질문" 설정을 정리한다.
- *
- * 개수 상한(4개)은 인스타그램이 정한 값이라 우리가 늘릴 수 없다. 넘겨받은 목록을
- * 잘라내는 대신 오류로 되돌려주지는 않는다 — 화면에서 이미 4개로 막고 있고, 여기서
- * 저장 자체를 실패시키면 5번째 항목을 지우기 전까지 아무 수정도 저장하지 못한다.
- */
-function sanitizeFaq(raw: any): DmFaqSettings {
-  const items: DmFaqItem[] = Array.isArray(raw?.items)
-    ? raw.items
-        .slice(0, ICE_BREAKER_MAX)
-        .map((f: any) => ({
-          id: String(f?.id || genId("faq")),
-          question: String(f?.question || "").trim().slice(0, ICE_BREAKER_QUESTION_MAX),
-          answer: String(f?.answer || "").slice(0, 1000),
-          buttons: sanitizeButtons(f?.buttons, "자주 묻는 질문 버튼"),
-        }))
-        // 질문과 답변이 모두 있어야 의미가 있다. 질문만 등록하면 버튼을 눌러도
-        // 아무 답이 없고, 답변만 있으면 버튼 자체가 만들어지지 않는다.
-        .filter((f: DmFaqItem) => f.question && (f.answer.trim() || f.buttons.length > 0))
-    : [];
-  return { enabled: Boolean(raw?.enabled), items };
 }
 
 /** DM 트리거 설정(인사말 · 키워드 자동 답장)을 정리한다. */
@@ -549,6 +514,66 @@ async function healWebhookSubscription(
   return { ...data, ...patch };
 }
 
+/**
+ * 지워진 "자주 묻는 질문" 기능의 잔재를 정리한다.
+ *
+ * 질문 버튼은 우리 블롭이 아니라 **인스타그램 프로필**에 등록돼 있어서, 화면과
+ * 서버 코드를 지운 것만으로는 사라지지 않는다. 그대로 두면 상대 DM 창에는 버튼이
+ * 계속 보이고, 누르면 아무 답도 오지 않는다 — 받는 사람에게는 고장난 계정이고,
+ * 계정 주인에게는 어디서도 지울 수 없는 버튼이다. 설정 화면을 여는 길에 한 번
+ * 지우고 문서에서도 털어낸다.
+ *
+ * 토큰이 없으면(연동 해제·만료) 호출할 것도 없으므로 문서에서만 지운다. 호출이
+ * 실패한 계정은 하루 간격으로만 다시 시도한다 — 메타가 거절하는 계정에서 화면을
+ * 열 때마다 실패를 되부르면 그 대기가 곧 로딩이다.
+ */
+const FAQ_RETIRE_RETRY_MS = 24 * 60 * 60 * 1000;
+
+async function retireIceBreakers(
+  username: string,
+  key: string,
+  data: DmSettings,
+): Promise<DmSettings> {
+  const faq = data.faq;
+  if (!faq) return data;
+
+  const hadButtons = Boolean(faq.syncedAt) || (faq.items || []).length > 0;
+  let clearFailed = false;
+
+  if (hadButtons && data.accessToken) {
+    const lastTry = Date.parse(String(faq.retiredAttemptedAt || "")) || 0;
+    if (Date.now() - lastTry < FAQ_RETIRE_RETRY_MS) return data;
+
+    const cleared = await clearIceBreakers({
+      accessToken: data.accessToken,
+      tokenSource: data.tokenSource,
+      igId: data.igUserId || data.igAccountId,
+    }).catch((e) => ({ ok: false as const, error: (e as Error)?.message }));
+
+    if (!cleared.ok) {
+      clearFailed = true;
+      console.warn("[dm-automation] ice-breaker retire failed:", cleared.error);
+    }
+  }
+
+  // 지우지 못했으면 흔적을 남겨 둔다(내일 다시 시도한다). 지웠거나 지울 것이
+  // 없었으면 블록 자체를 없앤다.
+  const patch: LegacyDmFaq | undefined = clearFailed
+    ? { ...faq, retiredAttemptedAt: new Date().toISOString() }
+    : undefined;
+
+  await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
+    if (!current) return null;
+    const next = { ...current, faq: patch };
+    if (!patch) delete next.faq;
+    return next;
+  }).catch((e) => console.warn("[dm-automation] faq retire save failed:", (e as Error)?.message));
+
+  const next = { ...data, faq: patch };
+  if (!patch) delete next.faq;
+  return next;
+}
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -566,15 +591,16 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     const stored = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
     // 구독이 빠져 있으면 여기서 다시 건다. 화면에 경고를 띄우는 대신이다.
-    const data = await healWebhookSubscription(username, key, stored);
-    const { accessToken, ownerAuthUserId, ...safe } = data;
+    const healed = await healWebhookSubscription(username, key, stored);
+    // 지워진 "자주 묻는 질문" 기능이 인스타그램에 남겨 둔 버튼을 여기서 내린다.
+    const data = await retireIceBreakers(username, key, healed);
+    const { accessToken, ownerAuthUserId, faq, ...safe } = data;
     return Response.json({
       ...DEFAULT_SETTINGS,
       ...safe,
       automations: Array.isArray(data.automations) ? data.automations : [],
-      // 예전에 저장된 문서에는 이 두 블록이 없다. 화면이 `undefined` 를 만나
+      // 예전에 저장된 문서에는 이 블록이 없다. 화면이 `undefined` 를 만나
       // 빈 화면을 그리지 않도록 기본값으로 채워 내려준다.
-      faq: { ...DEFAULT_SETTINGS.faq!, ...(data.faq || {}) },
       direct: {
         greeting: { ...DEFAULT_SETTINGS.direct!.greeting, ...(data.direct?.greeting || {}) },
         replies: Array.isArray(data.direct?.replies) ? data.direct!.replies : [],
@@ -652,145 +678,6 @@ export default async (req: Request, context: Context) => {
         },
         { status: 403 },
       );
-    }
-
-    /**
-     * "자주 묻는 질문"(아이스브레이커) 저장.
-     *
-     * 우리 블롭에만 저장하면 DM 창에는 아무것도 보이지 않는다. 이 값은 인스타그램
-     * 프로필에 등록되는 것이라 저장할 때마다 Graph API 로 밀어 넣어야 한다. 등록
-     * 결과(성공 시각 / 실패 이유)를 문서에 함께 남겨 화면에서 상태를 그대로 보여준다
-     * — 실패를 조용히 넘기면 사용자는 "저장했는데 버튼이 없다"의 이유를 알 수 없다.
-     *
-     * 저장 순서가 중요하다. 먼저 문서에 쓰고(사용자가 입력한 내용은 무슨 일이
-     * 있어도 잃지 않는다), 그다음 인스타그램에 등록한다.
-     */
-    if (body?.action === "saveFaq") {
-      let faq: DmFaqSettings;
-      try {
-        faq = sanitizeFaq(body?.faq);
-      } catch (e) {
-        if (e instanceof InvalidLinkError) {
-          return Response.json({ error: e.message, code: e.code }, { status: 400 });
-        }
-        throw e;
-      }
-
-      let stored: DmSettings | null;
-      try {
-        stored = await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
-          const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
-          return {
-            ...existing,
-            // 등록 결과는 아래에서 다시 찍는다. 지금은 "아직 반영되지 않았다"로 둔다.
-            faq: { ...faq, syncedAt: undefined, syncError: undefined },
-            ownerAuthUserId: !auth.isAdmin && auth.userId ? auth.userId : existing.ownerAuthUserId,
-            updatedAt: now,
-          };
-        });
-      } catch (e) {
-        if (e instanceof BlobWriteConflictError) {
-          return Response.json(
-            {
-              error: "다른 저장이 동시에 진행돼 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-              code: "SAVE_CONFLICT",
-            },
-            { status: 409 },
-          );
-        }
-        throw e;
-      }
-
-      const current = { ...DEFAULT_SETTINGS, ...(stored || {}) };
-      if (!current.accessToken) {
-        return Response.json({
-          success: true,
-          faq: current.faq,
-          warning: "인스타그램 계정을 연동하면 DM 창에 질문 버튼이 표시됩니다.",
-        });
-      }
-
-      /**
-       * 전체 자동 발송 스위치가 꺼져 있으면 인스타그램에 올리지 않는다(올라가 있던
-       * 것은 내린다).
-       *
-       * 웹훅은 버튼 클릭(postback)을 처리하기 전에 이 스위치를 먼저 보므로, 스위치가
-       * 꺼진 채 버튼만 등록해 두면 눌러도 아무 답변이 나가지 않는 버튼이 DM 창에
-       * 남는다. 화면 안내도 "스위치를 끄면 질문 버튼도 함께 내려간다"고 약속하고
-       * 있다.
-       */
-      const switchOff = !current.enabled;
-      const active = current.enabled && faq.enabled ? faq.items : [];
-      const sync = active.length > 0
-        ? await syncIceBreakers({
-            accessToken: current.accessToken,
-            tokenSource: current.tokenSource,
-            igId: current.igUserId || current.igAccountId,
-            entries: active.map((f) => ({ question: f.question, payload: faqPayload(f.id) })),
-          })
-        : await clearIceBreakers({
-            accessToken: current.accessToken,
-            tokenSource: current.tokenSource,
-            igId: current.igUserId || current.igAccountId,
-          });
-
-      // 아무것도 등록하지 않았다면 "등록했다"고 표시하지 않는다.
-      const syncedAt = sync.ok && active.length > 0 ? new Date().toISOString() : undefined;
-      const syncError = sync.ok ? undefined : sync.error || "인스타그램에 등록하지 못했습니다.";
-      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (doc) =>
-        doc ? { ...doc, faq: { ...faq, syncedAt, syncError } } : null,
-      ).catch((e) => console.warn("[dm-automation] faq sync flag save failed:", (e as Error)?.message));
-
-      /**
-       * 질문 버튼을 눌렀을 때 오는 postback 이벤트를 받으려면 계정별 웹훅에
-       * `messaging_postbacks` 가 들어 있어야 한다. 예전에 연동한 계정은 이 필드가
-       * 없어서, 버튼은 보이는데 눌러도 답변이 나가지 않는다. 여기서 한 번 더 건다.
-       */
-      let webhookWarning = "";
-      if (!String(current.webhookFields || "").includes("messaging_postbacks")) {
-        const sub = await subscribeInstagramWebhooks({
-          accessToken: current.accessToken,
-          tokenSource: current.tokenSource,
-          igId: current.igUserId || current.igAccountId,
-        });
-        if (sub.ok) {
-          const achieved = sub.fields || WEBHOOK_FIELDS;
-          await mutateBlobJSON<DmSettings>(STORE_NAME, key, (doc) =>
-            doc
-              ? { ...doc, webhookSubscribedAt: new Date().toISOString(), webhookFields: achieved }
-              : null,
-          ).catch(() => undefined);
-          /**
-           * 구독은 성공했지만 postback 필드가 빠진 경우(계정 연동 방식·앱 권한에
-           * 따라 거절된다). 조용히 넘기면 "버튼은 등록됐는데 눌러도 답이 없다"의
-           * 원인을 화면에서 알 수 없다.
-           */
-          if (!achieved.includes("messaging_postbacks")) {
-            webhookWarning =
-              "질문 버튼 클릭을 받을 웹훅(messaging_postbacks)을 인스타그램이 허용하지 않았습니다. " +
-              "버튼은 보이지만 눌렀을 때 답변이 나가지 않을 수 있어요. 계정을 다시 연동해 주세요.";
-          }
-        } else {
-          webhookWarning = `질문 버튼 클릭을 받을 웹훅을 연결하지 못했습니다: ${sub.error || "알 수 없는 오류"}`;
-        }
-      }
-
-      const warning =
-        [
-          switchOff && faq.enabled && faq.items.length > 0
-            ? "자동 발송 스위치가 꺼져 있어 질문 버튼을 DM 창에 올리지 않았습니다. 스위치를 켜면 함께 올라갑니다."
-            : "",
-          webhookWarning,
-        ]
-          .filter(Boolean)
-          .join(" ") || undefined;
-
-      return Response.json({
-        success: sync.ok,
-        faq: { ...faq, syncedAt, syncError },
-        error: syncError,
-        warning,
-      });
     }
 
     /**
@@ -1091,39 +978,6 @@ export default async (req: Request, context: Context) => {
       }
     }
 
-    /**
-     * 전체 스위치를 끄면 DM 창의 "자주 묻는 질문" 버튼도 함께 내린다(다시 켜면 올린다).
-     *
-     * 이 버튼은 우리 서버가 아니라 인스타그램 프로필에 등록돼 있어서, 스위치를 껐다고
-     * 사라지지 않는다. 그대로 두면 상대 DM 창에는 버튼이 보이는데 눌러도 아무 답이
-     * 오지 않는다 — 받는 사람에게는 그냥 고장난 계정이다.
-     */
-    if (op.kind === "settings" && typeof body.enabled === "boolean" && next.accessToken) {
-      const faq = next.faq;
-      if (faq?.enabled && (faq.items || []).length > 0) {
-        const sync = next.enabled
-          ? await syncIceBreakers({
-              accessToken: next.accessToken,
-              tokenSource: next.tokenSource,
-              igId: next.igUserId || next.igAccountId,
-              entries: faq.items.map((f) => ({ question: f.question, payload: faqPayload(f.id) })),
-            })
-          : await clearIceBreakers({
-              accessToken: next.accessToken,
-              tokenSource: next.tokenSource,
-              igId: next.igUserId || next.igAccountId,
-            });
-        const syncedAt = sync.ok && next.enabled ? new Date().toISOString() : undefined;
-        const syncError = sync.ok ? undefined : sync.error;
-        next.faq = { ...faq, syncedAt, syncError };
-        await mutateBlobJSON<DmSettings>(STORE_NAME, key, (doc) =>
-          doc ? { ...doc, faq: { ...faq, syncedAt, syncError } } : null,
-        ).catch((e) =>
-          console.warn("[dm-automation] faq toggle sync save failed:", (e as Error)?.message),
-        );
-      }
-    }
-
     // 저장된 목록을 그대로 돌려준다. 화면이 이 응답으로 상태를 맞추면, 실제로
     // 발송에 쓰일 내용과 화면에 보이는 내용이 어긋나지 않는다.
     return Response.json({
@@ -1131,7 +985,6 @@ export default async (req: Request, context: Context) => {
       connected: Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),
       enabled: next.enabled,
       automations: Array.isArray(next.automations) ? next.automations : [],
-      faq: next.faq,
       direct: next.direct,
       updatedAt: next.updatedAt,
     });

@@ -8,13 +8,13 @@ import {
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
-  DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+  DmDirectSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
-import { DmFaqSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -1302,15 +1302,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(() => cachedSettings?.externalDm || null);
 
   /**
-   * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
+   * 댓글 자동화와 별도로 저장·발송되는 추가 기능 — DM 수신 자체를 트리거로 쓰는
+   * 인사말·키워드 답장.
    *
-   *  faq     DM 창 첫 화면의 추천 질문 버튼(아이스브레이커).
-   *  direct  DM 수신 자체를 트리거로 쓰는 인사말·키워드 답장.
-   *
-   * 저장 경로(액션)가 각각 다르고 인스타그램 쪽 등록 결과까지 함께 돌아오므로,
-   * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
+   * 저장 경로(액션)가 달라서, 서버가 돌려준 값을 그대로 다시 담아 화면과 실제
+   * 상태를 일치시킨다.
    */
-  const [faq, setFaq] = useState<DmFaqSettings>(() => cachedSettings?.faq || { enabled: false, items: [] });
   const [direct, setDirect] = useState<DmDirectSettings>(() => cachedSettings?.direct || {
     greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
     replies: [],
@@ -1332,7 +1329,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       automations,
       entitled,
       externalDm,
-      faq,
       direct,
       ...overrides,
     } as DmAutomationSettings);
@@ -1370,7 +1366,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
-        if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
@@ -1482,14 +1477,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const prev = enabled;
     const v = !enabled;
     setEnabled(v);
-    const { ok, faq: nextFaq } = await persist({ enabled: v });
+    const { ok } = await persist({ enabled: v });
     if (!ok) setEnabled(prev);
-    // 스위치를 끄면 인스타그램에 올려둔 질문 버튼도 함께 내려간다. 서버가 그 결과를
-    // 돌려주므로 등록 상태 표시가 실제와 어긋나지 않게 반영한다.
-    else {
-      if (nextFaq) setFaq(nextFaq);
-      writeSettingsCache({ enabled: v, faq: nextFaq || faq });
-    }
+    else writeSettingsCache({ enabled: v });
   };
 
   /**
@@ -2085,15 +2075,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
       {/* 추가 기능 — 저장 경로가 달라 별도 컴포넌트로 뺐다. */}
       <div className="mt-6">
-        <DmFaqSection
-          userName={userName}
-          connected={connected}
-          entitled={entitled}
-          masterEnabled={enabled}
-          value={faq}
-          onChange={setFaq}
-          onNotice={notify}
-        />
         <DmTriggerSection
           userName={userName}
           connected={connected}
