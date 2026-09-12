@@ -27,20 +27,17 @@ import {
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { createScheduledJob } from "./_shared/dm-schedule-store.mts";
 import { fetchContactProfile, noteDmContact } from "./_shared/dm-contacts.mts";
-import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
 
 /**
  * 인스타그램 웹훅 수신기.
  * - GET  : Meta 웹훅 검증 챌린지 응답(hub.challenge).
- * - POST : 세 가지 이벤트를 처리한다.
+ * - POST : 두 가지 이벤트를 처리한다.
  *   · 게시물 "댓글" — 사용자의 DM 자동화 규칙과 매칭해 댓글 작성자에게 자동
  *     DM(및 선택 시 공개 답글)을 보낸다.
  *   · 받은 "메시지" — DM 자체를 트리거로 쓰는 자동화. 처음 대화하는 사람에게는
  *     인사말을, 메시지에 등록해 둔 단어가 있으면 그에 맞는 답장을 보낸다.
- *   · "postback" — DM 창 첫 화면의 "자주 묻는 질문"(아이스브레이커) 버튼을 누른
- *     이벤트. payload 로 어떤 질문인지 알아내 미리 정해 둔 답변을 보낸다.
  *
- * 받은 메시지·postback 에 답장하는 것은 인스타그램 24시간 창 안쪽이라 정책상
+ * 받은 메시지에 답장하는 것은 인스타그램 24시간 창 안쪽이라 정책상
  * 안전하다(상대가 방금 우리에게 말을 걸었다). 승인된 권한
  * (`instagram_business_manage_messages`)만으로 동작하고 추가 심사는 필요하지 않다.
  *
@@ -88,14 +85,6 @@ interface DmAutomationItem {
   /** 설정 화면에서 이 자동화를 마지막으로 고친 시각(api-dm-automation 이 찍는다). */
   updatedAt?: string;
 }
-/** DM 창 첫 화면의 "자주 묻는 질문" 한 건. */
-interface DmFaqItem {
-  id: string;
-  question: string;
-  answer: string;
-  buttons?: DmButton[];
-}
-
 /** 처음 DM 을 받았을 때 보낼 인사말. */
 interface DmGreetingSettings {
   enabled: boolean;
@@ -123,7 +112,6 @@ interface DmSettings {
   accessToken?: string;
   tokenSource?: string;
   automations?: DmAutomationItem[];
-  faq?: { enabled?: boolean; items?: DmFaqItem[] };
   direct?: { greeting?: DmGreetingSettings; replies?: DmKeywordReply[] };
   /**
    * 이 설정을 저장한 로그인 사용자 ID.
@@ -325,7 +313,7 @@ function passesFollowFilter(a: DmAutomationItem, follows: boolean | null): boole
 type SendBlock = "switch_off" | "not_connected" | "plan_required";
 
 /**
- * DM 트리거 자동화(인사말 · 키워드 답장 · 질문 버튼 답변)를 실행하는 데 필요한 것들.
+ * DM 트리거 자동화(인사말 · 키워드 답장)를 실행하는 데 필요한 것들.
  *
  * 댓글 자동화와 같은 발송 함수를 쓰지만 수신자가 다르다. 여기서는 상대가 방금
  * 우리에게 메시지를 보냈으므로 IGSID(`{ id }`)로 곧장 보낼 수 있고, 24시간 창이
@@ -396,7 +384,7 @@ async function sendTriggerDm(
     buttons?: DmButton[];
     claimKey: string;
     /** 활동 기록에 남길 트리거 종류. */
-    trigger: "greeting" | "keyword" | "faq";
+    trigger: "greeting" | "keyword";
     ruleId?: string;
     ruleName?: string;
   },
@@ -491,77 +479,6 @@ async function sendTriggerDm(
       error: e?.message || "send error",
     });
   }
-}
-
-/**
- * "자주 묻는 질문" 버튼을 누른 이벤트(postback) 처리.
- *
- * payload 에는 질문 문구가 아니라 항목 ID 가 실려 있다(`faq_<id>`). 문구를 고친
- * 뒤에도 상대 DM 창에 떠 있던 예전 버튼이 올바른 답변을 찾아가야 하기 때문이다.
- */
-async function handleFaqPostback(ctx: DmTriggerContext, event: any): Promise<void> {
-  const postback = event?.postback;
-  if (!postback) return;
-  const senderId = String(event?.sender?.id || "");
-  if (!senderId || ctx.ownIds.has(senderId)) return;
-
-  const faqId = faqIdFromPayload(String(postback?.payload || ""));
-  if (!faqId) return;
-
-  const faq = ctx.settings.faq;
-  const clicked = (faq?.items || []).find((f) => f.id === faqId);
-
-  /**
-   * 버튼 클릭도 상대가 우리에게 말을 건 것이다 — 24시간 창이 열리고, 예약 발송
-   * 대상 명단에도 올라야 한다. 예전에는 postback 을 명단에 남기지 않아서, DM 창을
-   * 열어 버튼만 누른 사람에게는 예약을 걸 방법이 없었다.
-   *
-   * "처음 대화"로는 세지 않는다(`kind: "postback"`). 이 사람이 나중에 직접 첫
-   * 메시지를 보낼 때 인사말이 나가야 한다.
-   */
-  await noteDmContact({
-    username: ctx.username,
-    igsid: senderId,
-    text: clicked?.question,
-    kind: "postback",
-  }).catch(() => undefined);
-  const item = clicked;
-  if (!item) {
-    // 질문을 지운 뒤에도 상대 화면에는 버튼이 남아 있을 수 있다. 답할 내용이 없으니
-    // 아무것도 보내지 않지만, 왜 조용했는지는 기록에 남긴다.
-    await appendLog(ctx.username, {
-      kind: "dm",
-      status: "skipped",
-      trigger: "faq",
-      reason: "삭제된 질문 버튼입니다.",
-      recipientId: senderId,
-    });
-    return;
-  }
-
-  const blocked = await ctx.blocked();
-  if (blocked) {
-    await appendLog(ctx.username, {
-      kind: "dm",
-      status: "skipped",
-      trigger: "faq",
-      reason: blocked,
-      recipientId: senderId,
-      ruleId: item.id,
-    });
-    return;
-  }
-
-  const eventId = String(postback?.mid || event?.message?.mid || `${senderId}_${event?.timestamp || ""}`);
-  await sendTriggerDm(ctx, {
-    recipientId: senderId,
-    message: item.answer,
-    buttons: item.buttons,
-    claimKey: inboundDmKey("faq", eventId),
-    trigger: "faq",
-    ruleId: item.id,
-    ruleName: item.question,
-  });
 }
 
 /**
@@ -770,8 +687,10 @@ export default async (req: Request, _context: Context) => {
        * 메시지 이벤트는 연동 방식에 따라 `entry.messaging` 또는 `entry.changes`
        * (field: messages / message_echoes / messaging_postbacks)로 온다. 양쪽 다 받는다.
        *
-       * 한 배열에 받은 메시지 · 우리가 보낸 에코 · 질문 버튼 클릭이 섞여 오므로,
-       * 아래에서 각 처리기가 자기 것만 골라낸다.
+       * 한 배열에 받은 메시지와 우리가 보낸 에코가 섞여 오므로, 아래에서 각
+       * 처리기가 자기 것만 골라낸다. `messaging_postbacks` 는 지워진 "자주 묻는
+       * 질문" 버튼의 잔재로만 도착하고 답할 내용이 없어 그대로 지나간다(구독은
+       * 그대로 둔다 — 필드를 빼면 예전에 연동한 계정을 전부 다시 구독해야 한다).
        */
       const messagingEvents = [
         ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
@@ -806,8 +725,7 @@ export default async (req: Request, _context: Context) => {
       };
 
       /**
-       * DM 자체를 트리거로 쓰는 자동화 — 받은 메시지(인사말 · 키워드 답장)와
-       * 질문 버튼 클릭(postback).
+       * DM 자체를 트리거로 쓰는 자동화 — 받은 메시지(인사말 · 키워드 답장).
        *
        * 댓글 자동화와 달리 상대가 방금 우리에게 말을 걸었으므로 24시간 창이 열려
        * 있고, IGSID 로 곧장 보낼 수 있다.
@@ -821,9 +739,6 @@ export default async (req: Request, _context: Context) => {
         blocked: sendBlockedReason,
       };
       for (const event of messagingEvents) {
-        await handleFaqPostback(triggerCtx, event).catch((e) =>
-          console.warn("[ig-webhook] faq postback failed:", (e as Error)?.message),
-        );
         await handleInboundMessage(triggerCtx, event).catch((e) =>
           console.warn("[ig-webhook] inbound DM trigger failed:", (e as Error)?.message),
         );

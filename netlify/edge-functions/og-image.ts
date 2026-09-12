@@ -128,6 +128,13 @@ export default async (req: Request, context: Context) => {
 
     // Replace OG meta tags
     const updatedHtml = html
+      // index.html 의 <meta name="description"> 은 홈 소개글이다. 크리에이터
+      // 페이지를 검색 결과에 그대로 실으면 모든 개인페이지가 홈과 똑같은
+      // 설명을 달고 나가므로, 여기서 본인 소개글로 바꿔 준다.
+      .replace(
+        /<meta name="description" content="[^"]*"\s*\/?>/,
+        `<meta name="description" content="${escapeAttr(ogDescription)}" />`,
+      )
       .replace(
         /<meta property="og:title" content="[^"]*"\s*\/?>/,
         `<meta property="og:title" content="${escapeAttr(ogTitle)}" />`,

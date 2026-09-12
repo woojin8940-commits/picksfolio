@@ -768,8 +768,6 @@ export interface DmAutomationSettings {
   igUsername: string;
   hasAccessToken: boolean;
   automations: DmAutomationItem[];
-  /** DM 창 첫 화면의 "자주 묻는 질문"(인스타그램 아이스브레이커). */
-  faq?: DmFaqSettings;
   /** DM 수신을 트리거로 쓰는 자동화(첫 인사말 · 키워드 자동 답장). */
   direct?: DmDirectSettings;
   rules?: DmRule[];
@@ -828,31 +826,6 @@ export interface DmCarouselCard {
   buttonUrl: string;
 }
 
-/**
- * DM 창 첫 화면에 보이는 "자주 묻는 질문" 한 건.
- *
- * 인스타그램 아이스브레이커로 등록된다. 등록되는 것은 `question`(버튼 문구)이고,
- * 사람이 버튼을 누르면 `answer` 가 자동으로 발송된다.
- */
-export interface DmFaqItem {
-  id: string;
-  question: string;
-  answer: string;
-  buttons: DmMessageButton[];
-}
-
-export interface DmFaqSettings {
-  enabled: boolean;
-  items: DmFaqItem[];
-  /**
-   * 인스타그램에 등록을 마친 시각. 비어 있으면 저장은 됐지만 DM 창에는 아직
-   * 보이지 않는 상태다(대개 연동이 끊겼거나 권한이 부족한 경우).
-   */
-  syncedAt?: string;
-  /** 등록 실패 이유. */
-  syncError?: string;
-}
-
 /** 처음 DM 을 받았을 때 자동으로 보낼 인사말. */
 export interface DmGreetingSettings {
   enabled: boolean;
@@ -878,11 +851,6 @@ export interface DmDirectSettings {
   greeting: DmGreetingSettings;
   replies: DmKeywordReply[];
 }
-
-/** 인스타그램이 허용하는 "자주 묻는 질문" 최대 개수. 우리가 늘릴 수 없는 값이다. */
-export const DM_FAQ_MAX = 4;
-/** 질문 버튼 문구 길이 제한. */
-export const DM_FAQ_QUESTION_MAX = 80;
 
 /**
  * 예약 발송 대상 — 이 계정에 DM 을 보낸 적이 있는 사람.
@@ -4226,7 +4194,7 @@ export const apiService = {
     },
   ): Promise<{
     ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean;
-    faq?: DmFaqSettings; direct?: DmDirectSettings;
+    direct?: DmDirectSettings;
   }> {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
@@ -4246,10 +4214,6 @@ export const apiService = {
           // 서버가 확정한 전체 스위치 상태. 화면이 이 값을 따라가야 "켜져 있다고
           // 보이는데 발송은 안 되는" 상태가 생기지 않는다.
           enabled: typeof data?.enabled === 'boolean' ? data.enabled : undefined,
-          // 전체 스위치를 끄면 서버가 인스타그램에 올려둔 질문 버튼도 함께 내린다
-          // (버튼은 남아 있는데 답변이 안 나가면 받는 사람만 헛걸음한다). 등록 시각·
-          // 실패 이유가 그 응답에 실려 오므로 화면이 그대로 따라가야 한다.
-          faq: data?.faq && typeof data.faq === 'object' ? data.faq : undefined,
           direct: data?.direct && typeof data.direct === 'object' ? data.direct : undefined,
         };
       }
@@ -4300,45 +4264,6 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to resubscribe DM webhook:', e);
       return { ok: false, error: '네트워크 오류로 웹훅 구독을 다시 걸지 못했습니다.' };
-    }
-  },
-
-  /**
-   * "자주 묻는 질문"(아이스브레이커) 저장.
-   *
-   * 이 설정은 우리 서버가 아니라 **인스타그램 프로필**에 등록돼야 DM 창에 보인다.
-   * 서버가 저장과 등록을 함께 처리하고 그 결과(`faq.syncedAt` / `faq.syncError`)를
-   * 돌려주므로, 화면은 그 값으로 "실제로 보이는 상태"를 표시한다.
-   */
-  async saveDmFaq(
-    username: string,
-    faq: DmFaqSettings,
-  ): Promise<{ ok: boolean; error?: string; warning?: string; faq?: DmFaqSettings }> {
-    try {
-      const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
-        method: 'POST',
-        headers: await authHeadersWithTimeout(
-          { 'Content-Type': 'application/json' },
-          { account: username },
-        ),
-        body: JSON.stringify({ action: 'saveFaq', faq }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok) {
-        return { ok: false, error: data?.error || `저장에 실패했습니다. (HTTP ${res.status})` };
-      }
-      clearMemory(`dmAutomation:${normalizeAccount(username)}`);
-      // 저장은 됐지만 인스타그램 등록이 실패한 경우도 있다(success: false). 그때도
-      // 입력한 내용은 보관되므로 faq 를 함께 돌려준다.
-      return {
-        ok: data?.success === true,
-        error: data?.error,
-        warning: data?.warning,
-        faq: data?.faq,
-      };
-    } catch (e) {
-      console.error('[API] Failed to save DM FAQ:', e);
-      return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
     }
   },
 
