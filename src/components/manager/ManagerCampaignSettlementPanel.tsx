@@ -57,10 +57,19 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
 
   /** 브랜드 일괄 정산금 수납 기록. 없으면 아직 확인 전이다. */
   const [brand, setBrand] = useState<any>(null);
-  /** 청구 근거 — 확정 보수 합계와 인원(서버 계산). */
-  const [billing, setBilling] = useState<{ amount: number; headcount: number; pendingCount: number } | null>(
-    null,
-  );
+  /**
+   * 청구 근거 — 브랜드에게 청구할 광고비 합계와 인원(서버 계산).
+   *
+   * 금액은 리스트업에 적힌 광고비다. 인플루언서에게 나갈 보수(payoutAmount)는 그보다
+   * 작고, 그 차액이 픽스폴리오 마진이다 — 한동안 이 자리에 보수 합계를 청구 금액으로
+   * 보여 줬고, 그대로 입금받으면 마진이 0원이 됐다.
+   */
+  const [billing, setBilling] = useState<{
+    amount: number;
+    headcount: number;
+    pendingCount: number;
+    payoutAmount?: number;
+  } | null>(null);
   const [brandLoading, setBrandLoading] = useState(true);
   const [brandBusy, setBrandBusy] = useState(false);
   /** 입금 확인 칸을 펼쳤는지. 기본은 접어 둔다 — 대개 확인은 한 번뿐이다. */
@@ -162,6 +171,9 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
 
   /** 브랜드가 보내야 하는 금액. 담당자가 적은 청구액이 있으면 그것이 먼저다. */
   const invoiceAmount = Number(brand?.invoiceAmount || 0) || Number(billing?.amount || 0) || totals.total;
+  /** 인플루언서에게 나갈 보수 합계와 그 차액. 마진이 0원 이하면 광고비를 잘못 적은 것이다. */
+  const payoutTotal = Number(billing?.payoutAmount || 0);
+  const marginAmount = invoiceAmount - payoutTotal;
 
   const markReceived = async () => {
     const amount = digitsOf(amountInput) || invoiceAmount;
@@ -269,15 +281,25 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
           <p className="text-[10px] font-black text-slate-400">청구 금액</p>
           <p className="text-lg font-black text-slate-900">{formatKoreanWon(invoiceAmount) || '0원'}</p>
           <p className="text-[10px] font-bold text-slate-400">
-            인플루언서 {billing?.headcount ?? totals.headcount}명 확정 보수 합계
+            인플루언서 {billing?.headcount ?? totals.headcount}명 광고비 합계
           </p>
+          {/* 지급 합계와 마진. 청구 금액이 보수와 같아지면(마진 0원) 여기서 바로 보인다 —
+              광고비를 적지 않은 후보가 섞여 있을 때 그렇다. */}
+          {payoutTotal > 0 && (
+            <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+              지급 {formatKoreanWon(payoutTotal)} · 마진{' '}
+              <span className={marginAmount > 0 ? 'text-emerald-600' : 'text-rose-500'}>
+                {marginAmount > 0 ? formatKoreanWon(marginAmount) : '없음'}
+              </span>
+            </p>
+          )}
         </div>
       </div>
 
       {Number(billing?.pendingCount || 0) > 0 && !brandReceived && (
         <p className="text-[11px] font-bold text-amber-600 mt-2">
-          조건이 아직 확정되지 않은 협업 {billing?.pendingCount}건이 청구 금액에 빠져 있습니다. 조건표를 먼저
-          확정해 주세요.
+          광고비가 아직 적히지 않은 협업 {billing?.pendingCount}건이 청구 금액에 빠져 있습니다. 인플루언서
+          명단에서 광고비를 먼저 적어 주세요.
         </p>
       )}
 

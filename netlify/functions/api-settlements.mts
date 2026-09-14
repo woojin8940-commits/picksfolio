@@ -13,6 +13,7 @@ import { normalizeRewardMode } from "./_shared/reward-mode.mts";
 import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { settlementDateFrom } from "./_shared/collab-workflow.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
+import { resolveBrandAmount } from "./_shared/brand-billing.mts";
 
 /**
  * 캠페인 협업의 정산 금액은 담당자가 확정한 조건(collab_terms.fee)에서 온다.
@@ -22,6 +23,11 @@ import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tomb
  * 그래서 담당자가 금액을 넣기 전까지는 0원이 아니라 "협의중"으로 보여야 한다.
  * 광고비 지급형은 캠페인에 적힌 금액(reward_amount)을 그대로 쓰되, 담당자가 조건을
  * 다시 확정했다면 그 값이 우선한다.
+ *
+ * 여기까지는 인플루언서가 받을 금액이다. 브랜드가 보는 줄은 같은 숫자가 아니다 —
+ * 브랜드는 픽스폴리오에 광고비를 보내고 인플루언서 지급은 픽스폴리오가 하므로,
+ * 브랜드 화면의 금액은 리스트업에 적힌 광고비여야 한다(brandAmountOf). 두 숫자를
+ * 같게 두면 브랜드가 보낼 금액이 인플루언서 보수와 같아져 마진이 0원이 된다.
  */
 function derivedAmount(row: any): { amount: number; pending: boolean } {
   const managerFee = parseAmount(row?.manager_fee || 0);
@@ -32,6 +38,27 @@ function derivedAmount(row: any): { amount: number; pending: boolean } {
 
   const rewardAmount = parseAmount(row?.reward_amount || 0);
   return { amount: rewardAmount, pending: rewardAmount <= 0 };
+}
+
+/**
+ * 브랜드가 픽스폴리오에 보낼 금액.
+ *
+ * 기준은 담당자가 명단에 적고 브랜드가 그걸 보고 고른 광고비(campaign_listups)다.
+ * 규칙은 _shared/brand-billing.mts 에 모여 있고, 캠페인 정산 탭의 청구 금액
+ * (api-campaign-brand-settlement)도 같은 규칙을 쓴다 — 두 화면이 다른 금액을 말하면
+ * 브랜드는 어느 쪽을 보낼지 알 수 없다.
+ *
+ * 공동구매는 광고비 자체가 판매 뒤에 정해지므로 금액 대신 "협의중"으로 남는다.
+ */
+function brandAmountOf(row: any): { amount: number; pending: boolean } {
+  if (normalizeRewardMode(row?.reward_mode) === "groupbuy") return { amount: 0, pending: true };
+  return resolveBrandAmount({
+    quotedTotal: parseAmount(row?.brand_quote || 0),
+    listed: Boolean(row?.listup_id),
+    // 리스트업 없이 공개 모집으로 들어온 건. 브랜드가 캠페인에 직접 적은 광고비가
+    // 조건표에 들어와 있다.
+    payoutFee: derivedAmount(row).amount,
+  });
 }
 
 
@@ -130,9 +157,21 @@ async function loadDerivedSettlements(
   username: string,
   role: string,
   today: string,
-): Promise<{ derived: any[]; rewardByProposalId: Map<string, { mode: string; rate: number }> }> {
+): Promise<{
+  derived: any[];
+  rewardByProposalId: Map<string, { mode: string; rate: number }>;
+  /**
+   * 브랜드가 보낼 금액. 브랜드 역할로 읽을 때만 채운다.
+   *
+   * 파생 행은 이 지도를 만들면서 금액을 함께 정하지만, 담당자가 업로드를 확인해
+   * 만들어 둔 명시 항목(blob)에는 인플루언서 보수가 적혀 있다 — 같은 줄을 브랜드가
+   * 열면 보낼 금액이 보수로 보인다. 그래서 읽는 자리에서 이 지도로 덮는다.
+   */
+  brandAmountByProposalId: Map<string, { amount: number; pending: boolean }>;
+}> {
   const rewardByProposalId = new Map<string, { mode: string; rate: number }>();
-  if (!db) return { derived: [], rewardByProposalId };
+  const brandAmountByProposalId = new Map<string, { amount: number; pending: boolean }>();
+  if (!db) return { derived: [], rewardByProposalId, brandAmountByProposalId };
 
   const isBiz = role === "business";
   const [proposalRows, campaignRows] = await Promise.all([
@@ -157,6 +196,11 @@ async function loadDerivedSettlements(
                  c.reward_amount, c.reward_mode, c.groupbuy_commission_rate,
                  c.start_date, c.end_date, ca.created_at,
                  ct.fee as manager_fee,
+                 -- 브랜드가 보낼 금액의 근거. 담당자가 명단에 적고 브랜드가 보고 고른
+                 -- 광고비이며, 인플루언서에게 줄 보수(ct.fee)와는 다른 숫자다.
+                 -- 같은 캠페인에 같은 사람은 한 번만 올라가므로 줄이 늘지 않는다.
+                 cl.id AS listup_id,
+                 COALESCE(cl.quoted_fee, 0) + COALESCE(cl.quoted_second_use_fee, 0) AS brand_quote,
                  -- 정산 예정일의 기준이 되는 업로드일. 실제 등록일이 먼저고,
                  -- 없으면 확인 시각, 그다음이 확정 조건의 업로드 마감이다.
                  ct.upload_due, cc.upload_confirmed_at,
@@ -168,6 +212,9 @@ async function loadDerivedSettlements(
             ON cc.campaign_id = ca.campaign_id
            AND LOWER(cc.creator_username) = LOWER(ca.applicant_username)
           LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+          LEFT JOIN campaign_listups cl
+            ON cl.campaign_id = ca.campaign_id
+           AND LOWER(cl.influencer_username) = LOWER(ca.applicant_username)
           WHERE ca.status = 'accepted'
             AND COALESCE(c.reward_mode, 'paid') <> 'barter'
             AND LOWER(REGEXP_REPLACE(COALESCE(c.business_username, ''), '^biz/', '')) = ${username}
@@ -225,7 +272,10 @@ async function loadDerivedSettlements(
     rewardByProposalId.set(propId, { mode, rate });
 
     const isListup = row.source === "listup";
-    const { amount, pending } = derivedAmount(row);
+    // 브랜드 줄에는 광고비, 인플루언서 줄에는 보수. 같은 협업이라도 두 사람이 보는
+    // 금액이 다르고, 그 차액이 픽스폴리오 마진이다.
+    const { amount, pending } = isBiz ? brandAmountOf(row) : derivedAmount(row);
+    if (isBiz) brandAmountByProposalId.set(propId, { amount, pending });
     const payout = derivedSettlementDate(row);
     derived.push({
       id: `${DERIVED_ID_PREFIX}${propId}`,
@@ -246,7 +296,7 @@ async function loadDerivedSettlements(
     });
   }
 
-  return { derived, rewardByProposalId };
+  return { derived, rewardByProposalId, brandAmountByProposalId };
 }
 
 /** 데이터베이스 연결. 없으면(로컬·장애) 파생 정산 없이 명시 항목만 돌려준다. */
@@ -269,12 +319,37 @@ async function openDatabase(): Promise<any> {
 function shapeSettlement(
   row: any,
   rewardByProposalId: Map<string, { mode: string; rate: number }>,
+  brandAmountByProposalId?: Map<string, { amount: number; pending: boolean }>,
 ): any {
-  const reward = rewardByProposalId.get(String(row?.proposal_id || "")) || null;
+  const proposalId = String(row?.proposal_id || "");
+  const reward = rewardByProposalId.get(proposalId) || null;
   const mode = normalizeRewardMode(reward?.mode);
+  const source = sourceOfProposalId(row?.proposal_id);
+  /**
+   * 브랜드가 열었을 때 캠페인 협업 줄의 금액은 광고비로 덮는다.
+   *
+   * 담당자가 업로드를 확인하면 정산 항목이 만들어지는데(scheduleSettlementFor) 그
+   * 금액은 인플루언서에게 줄 보수이고, 같은 항목이 브랜드 쪽에도 저장된다. 브랜드가
+   * 보낼 금액은 그 숫자가 아니다. 메모도 원천징수 후 지급액을 적어 두므로 브랜드
+   * 줄에서는 걷어낸다 — 브랜드가 확인할 일이 아니고, 보낼 금액과 다른 숫자가 같은
+   * 줄에 붙어 있으면 어느 쪽을 보내야 하는지 알 수 없다.
+   *
+   * 비즈니스 제안 협업(source = 'proposal')은 브랜드가 인플루언서에게 직접 보내는
+   * 건이라 덮지 않는다 — 그 금액이 곧 브랜드가 보낼 금액이다.
+   */
+  const brandAmount =
+    source === "campaign" ? brandAmountByProposalId?.get(proposalId) || null : null;
+
   return {
     ...row,
-    source: sourceOfProposalId(row?.proposal_id),
+    ...(brandAmount
+      ? {
+          amount: brandAmount.amount,
+          amount_pending: brandAmount.pending,
+          memo: String(row?.memo || "").includes("원천징수") ? "" : String(row?.memo || ""),
+        }
+      : {}),
+    source,
     reward_mode: mode,
     /** 공동구매 판매 수수료(%). 공동구매가 아니면 0. */
     groupbuy_rate: mode === "groupbuy" ? Number(reward?.rate || 0) : 0,
@@ -315,7 +390,7 @@ export default async (req: Request) => {
         if (s.id) seenProposalIds.add(s.id);
       }
 
-      const { derived, rewardByProposalId } = await loadDerivedSettlements(
+      const { derived, rewardByProposalId, brandAmountByProposalId } = await loadDerivedSettlements(
         dbInstance,
         username,
         role,
@@ -333,7 +408,7 @@ export default async (req: Request) => {
       // 남아 "지웠는데 아직 있다"가 된다.
       const combinedSettlements = [...(explicitRecords || []), ...autoDerivedSettlements]
         .filter((s: any) => isProposalAlive(deletedIds, s?.proposal_id))
-        .map((s: any) => shapeSettlement(s, rewardByProposalId));
+        .map((s: any) => shapeSettlement(s, rewardByProposalId, brandAmountByProposalId));
 
       /**
        * 브랜드에게는 "내가 보낸 일괄 정산금이 접수됐는가"를 함께 내려보낸다.

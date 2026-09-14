@@ -300,12 +300,14 @@ export default async (req: Request) => {
       const name = (b.name || "").toString().trim();
       const contact = (b.contact || "").toString().trim();
       /**
-       * 카카오톡 아이디.
+       * 카카오톡 아이디. 인플루언서 등록서에서는 필수다.
        *
        * 담당자가 후보에게 연락하는 길은 대부분 카카오톡이다(전화는 받지 않는 시간대가
-       * 있고, 광고 협업 메일은 스팸함으로 들어간다). 필수는 아니다 — 전화번호만 남기는
-       * 사람도 있고, 그 사람의 접수를 막을 이유는 없다. 아이디에는 '@' 를 붙여 적는
-       * 사람이 많아 앞의 기호는 떼어 저장한다(같은 아이디가 두 모양으로 남지 않게).
+       * 있고, 광고 협업 메일은 스팸함으로 들어간다). 한동안 선택으로 두었는데, 비워 둔
+       * 등록서는 명단에 올라가도 제안을 들고 갈 길이 없어 그대로 묻혔다 — 연락이 닿지
+       * 않는 후보는 브랜드에게 내밀 수 없고, 담당자가 나중에 한 명씩 연락처를 찾아
+       * 다니게 된다. 아이디에는 '@' 를 붙여 적는 사람이 많아 앞의 기호는 떼어 저장한다
+       * (같은 아이디가 두 모양으로 남지 않게).
        */
       const kakao_id = (b.kakao_id || "").toString().trim().replace(/^@+/, "").slice(0, 80);
 
@@ -331,6 +333,15 @@ export default async (req: Request) => {
         if (splitCategories(b.category).length === 0) {
           return Response.json(
             { error: "카테고리를 최소 1개 골라 주세요. 캠페인은 분야로 인플루언서를 찾습니다." },
+            { status: 400 },
+          );
+        }
+
+        // 카톡 아이디도 같은 이유로 받는다(위 설명 참고). 화면에서도 막지만 이 경로는
+        // 로그인 없이 열려 있어 여기서도 본다.
+        if (!kakao_id) {
+          return Response.json(
+            { error: "카카오톡 아이디를 입력해 주세요. 담당자가 카톡으로 제안을 보냅니다." },
             { status: 400 },
           );
         }
@@ -571,6 +582,16 @@ export default async (req: Request) => {
           );
         }
 
+        // 카톡 아이디는 접수 때 필수이므로 수정에서 비울 수도 없다 — 연락이 닿지 않는
+        // 등록서로 되돌아가면 명단에 올려도 제안을 보낼 수 없다.
+        const kakao_id = text("kakao_id", row.kakao_id).replace(/^@+/, "").slice(0, 80);
+        if (!kakao_id) {
+          return Response.json(
+            { error: "카카오톡 아이디를 입력해 주세요. 담당자가 카톡으로 제안을 보냅니다." },
+            { status: 400 },
+          );
+        }
+
         // 연동을 마친 계정이면 인스타 팔로워는 검증된 값이 대표값이다(접수 때와 같은 규칙).
         const linked = await loadLinkedChannel(db, req, String(row.applicant_username || username));
         const metaFollowers = linked ? Math.max(0, Number(linked.followers || 0)) : 0;
@@ -609,7 +630,7 @@ export default async (req: Request) => {
           UPDATE collab_directory_applications SET
             name = ${name},
             contact = ${contact},
-            kakao_id = ${text("kakao_id", row.kakao_id).replace(/^@+/, "").slice(0, 80)},
+            kakao_id = ${kakao_id},
             instagram_url = ${instagram_url},
             youtube_url = ${text("youtube_url", row.youtube_url)},
             tiktok_url = ${tiktok_url},

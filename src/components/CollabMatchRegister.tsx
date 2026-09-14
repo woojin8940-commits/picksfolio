@@ -771,6 +771,14 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
         setSubmitting(false);
         return;
       }
+      // 카톡 아이디도 연락 수단이다. 담당자가 제안을 들고 가는 길이 대부분 카카오톡이라
+      // (전화는 받지 않는 시간대가 있고, 협업 메일은 스팸함으로 들어간다) 비어 있으면
+      // 명단에 올라가도 연락이 닿지 않는다.
+      if (variant === 'influencer' && !(payload as { kakao_id?: string }).kakao_id?.trim()) {
+        setNotice({ type: 'err', text: '카카오톡 아이디를 입력해 주세요. 담당자가 카톡으로 제안을 보냅니다.' });
+        setSubmitting(false);
+        return;
+      }
       // 분야가 비어 있으면 캠페인 후보로 추려지지 않는다. 등록만 되고 아무 연락도
       // 오지 않는 상태를 만들지 않으려면 여기서 막는 편이 낫다.
       if (variant === 'influencer' && selectedCategories.length === 0) {
@@ -1092,10 +1100,11 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                 <div className="space-y-3">
                   <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
                   <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: formatContact(v) }))} placeholder="010-0000-0000 / 이메일" />
-                  {/* 카톡 아이디 — 담당자가 실제로 가장 많이 쓰는 연락 수단이다.
-                      전화는 받지 않고 메일은 스팸함으로 가는 일이 잦아, 적어 두면
-                      제안이 훨씬 빨리 닿는다. 필수는 아니다. */}
-                  <Field label="카카오톡 아이디" value={infForm.kakao_id} onChange={v => setInfForm(f => ({ ...f, kakao_id: v.replace(/\s/g, '') }))} placeholder="선택 · 담당자가 카톡으로 연락합니다" />
+                  {/* 카톡 아이디 — 담당자가 실제로 가장 많이 쓰는 연락 수단이라 필수로
+                      받는다. 전화는 받지 않는 시간대가 있고 광고 협업 메일은 스팸함으로
+                      들어가서, 카톡 아이디가 없는 등록서는 제안을 들고 갈 길이 사실상
+                      끊긴다 — 담당자가 연락을 못 해 그대로 묻히는 일이 잦았다. */}
+                  <Field label="카카오톡 아이디" required value={infForm.kakao_id} onChange={v => setInfForm(f => ({ ...f, kakao_id: v.replace(/\s/g, '') }))} placeholder="담당자가 카톡으로 연락합니다" />
 
                   {/* 인스타 계정 연동 — 브랜드가 보는 숫자의 출처가 여기서 정해진다. */}
                   <div className="pt-1">

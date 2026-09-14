@@ -33,8 +33,10 @@ import type { Settlement } from '../../types';
  *
  * ── 캠페인 한 건을 볼 때(campaignId) ──
  * 캠페인 정산 탭에서는 회차로 쪼개지 않고 "픽스폴리오에 보낼 금액" 한 칸만 세운다.
- * 그 금액은 정산 항목의 합이 아니라 진행이 확정된 인플루언서들의 보수 합계
- * (api-campaign-brand-settlement 의 billingBasis)다. 정산 항목은 담당자가 업로드를
+ * 그 금액은 정산 항목의 합이 아니라 진행이 확정된 인플루언서들의 광고비 합계
+ * (api-campaign-brand-settlement 의 billingBasis)다 — 인플루언서가 받는 보수가 아니라
+ * 브랜드가 명단에서 보고 고른 광고비이고, 개별 지급은 그 뒤 픽스폴리오가 한다. 정산
+ * 항목은 담당자가 업로드를
  * 확인한 뒤에야 생기므로, 그것만 더하면 이미 진행을 시작한 사람의 금액이 화면에
  * 없다 — 브랜드는 보낼 금액을 알 수 없고, 등록할 때 적은 예산과도 다르다(명단은
  * 협의하면서 늘거나 줄고, 예산은 그 전에 적은 희망값이다).
@@ -120,7 +122,7 @@ type CampaignBilling = {
   received: boolean;
   /** 금액의 근거가 된 인원. */
   headcount: number;
-  /** 보수가 아직 잠기지 않아 금액에 들어가지 않은 인원. */
+  /** 광고비가 아직 확정되지 않아 금액에 들어가지 않은 인원. */
   pendingCount: number;
   memo: string;
 };
@@ -284,7 +286,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
                 <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(billing.amount)}</p>
                 <p className="text-[11px] text-slate-400 font-bold mt-1">
                   {billing.headcount > 0
-                    ? `진행 확정 인플루언서 ${billing.headcount}명 기준`
+                    ? `진행 확정 인플루언서 ${billing.headcount}명 광고비 기준`
                     : '아직 진행이 확정된 인플루언서가 없습니다'}
                   {billing.invoiced ? ' · 청구서 발행' : ''}
                 </p>
@@ -308,7 +310,7 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
             )}
             {billing.pendingCount > 0 && (
               <p className="text-[11px] text-amber-600 font-bold mt-1">
-                금액 조율 중 {billing.pendingCount}명이 아직 포함되지 않았습니다.
+                광고비 조율 중 {billing.pendingCount}명이 아직 포함되지 않았습니다.
               </p>
             )}
             {billing.memo && (
@@ -317,9 +319,9 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-            등록할 때 적은 예산이 아니라 실제로 진행이 확정된 인플루언서들의 정산금 합계입니다. 명단이 늘거나
-            줄면 이 금액도 따라 바뀝니다. 인플루언서 개별 지급과 원천징수(3.3%)는 입금 확인 후 픽스폴리오가
-            처리하고, 세금계산서도 그때 발행됩니다.
+            등록할 때 적은 예산이 아니라 실제로 진행이 확정된 인플루언서들의 광고비 합계입니다. 명단에서 보신
+            광고비가 그대로 더해지고, 명단이 늘거나 줄면 이 금액도 따라 바뀝니다. 인플루언서 개별 지급과
+            원천징수(3.3%)는 입금 확인 후 픽스폴리오가 처리하고, 세금계산서도 그때 발행됩니다.
           </p>
         </>
       ) : (

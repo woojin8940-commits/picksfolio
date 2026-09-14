@@ -2,6 +2,7 @@ import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { resolveBrandAmount } from "./_shared/brand-billing.mts";
 
 /**
  * 브랜드 일괄 정산금 수납 — 담당자가 "브랜드 돈이 들어왔다"를 남기는 자리.
@@ -20,8 +21,10 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  *     입금이 접수됐는지 담당자에게 묻지 않아도 된다(api-settlements 가 정산 항목에
  *     이 값을 실어 보낸다).
  *
- * 청구액은 확정된 보수의 합계를 기본값으로 계산해 함께 내려보낸다 — 담당자가 금액을
- * 다시 적지 않아도 "얼마가 들어와야 하는가"가 화면에 있어야 통장과 대조할 수 있다.
+ * 청구액은 리스트업에 적힌 광고비의 합계를 기본값으로 계산해 함께 내려보낸다 —
+ * 담당자가 금액을 다시 적지 않아도 "얼마가 들어와야 하는가"가 화면에 있어야 통장과
+ * 대조할 수 있다. 인플루언서에게 줄 보수가 아니라 브랜드가 보고 고른 광고비라는 점이
+ * 중요하다(billingBasis).
  *
  * 담당자가 적는 것은 실제로 들어온 금액 하나뿐이고, 남는 사실은 "입금이 되었는가"
  * 하나다. 입금 날짜는 받지도, 남기지도 않는다 — 담당자는 통장을 열어 확인한 그 자리에서
@@ -38,7 +41,7 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  * 읽기(GET)는 그 캠페인의 브랜드 계정도 할 수 있다. 브랜드가 정산 화면에서 알아야
  * 하는 것은 두 가지뿐이다 — "픽스폴리오에 얼마를 보내야 하는가"와 "보낸 것이
  * 접수됐는가". 앞의 금액은 등록할 때 적은 예산이 아니라 실제로 진행이 확정된
- * 인플루언서들의 보수 합계(billingBasis)여야 한다. 명단은 협의하면서 늘거나 줄고,
+ * 인플루언서들의 광고비 합계(billingBasis)여야 한다. 명단은 협의하면서 늘거나 줄고,
  * 예산은 그 전에 적은 희망값이라 청구서와 맞는 일이 드물다. 브랜드 응답에는 사람별
  * 지급 진행(누가 언제 얼마를 받는지)은 담지 않는다 — 픽스폴리오와 인플루언서 사이의
  * 일이고, 브랜드가 확인할 수도 손댈 수도 없는 남의 진행이다.
@@ -70,28 +73,62 @@ const shapeBrandSettlement = (row: any) => ({
 });
 
 /**
- * 청구 근거 — 이 캠페인에서 인플루언서에게 나갈 확정 보수의 합계와 인원.
+ * 청구 근거 — 이 캠페인에서 브랜드가 보낼 광고비의 합계와 인원.
  *
- * 브랜드 정산 화면의 '일괄 정산 총액'과 같은 값이어야 한다. 그 화면은 정산 항목의
- * 금액을 더하고 여기서는 조건표의 보수를 더하는데, 정산 항목의 금액이 조건표에서
- * 오므로(scheduleSettlementFor) 같은 값이 된다.
+ * 금액의 출처는 리스트업에 적힌 광고비(제시가 + 2차 활용)다. 인플루언서에게 줄
+ * 보수(collab_terms.fee)가 아니다 — 규칙과 그 이유는 _shared/brand-billing.mts 에 적어
+ * 두었다. 한동안 보수를 더해 보여 줬고, 그 금액을 그대로 입금받으면 픽스폴리오 마진이
+ * 0원이 됐다.
+ *
+ * 리스트업 행은 협업 아이디(수락하면 채워진다)로 먼저 찾고, 아직 연결되지 않은 행은
+ * 캠페인 + 인플루언서 아이디로 찾는다. 같은 캠페인에 같은 사람은 한 번만 올라가므로
+ * (UNIQUE) 둘 중 어느 쪽으로 찾아도 같은 행이다.
+ *
+ * 지급 쪽 합계(payoutAmount)도 함께 낸다 — 담당자 화면이 청구액과 나란히 두고 마진을
+ * 확인하는 값이고, 브랜드 응답에는 담지 않는다.
  */
 async function billingBasis(db: any, campaignId: string) {
   const rows = (await db.sql`
-    SELECT COALESCE(SUM(ct.fee), 0) AS total,
-           COUNT(*) AS headcount,
-           COUNT(*) FILTER (WHERE COALESCE(ct.fee, 0) <= 0) AS pending_count
+    SELECT cc.id,
+           lq.listup_id,
+           COALESCE(lq.quoted_total, 0) AS quoted_total,
+           COALESCE(ct.fee, 0) AS payout_fee
     FROM campaign_collabs cc
     LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
+    LEFT JOIN LATERAL (
+      SELECT l.id AS listup_id,
+             COALESCE(l.quoted_fee, 0) + COALESCE(l.quoted_second_use_fee, 0) AS quoted_total
+      FROM campaign_listups l
+      WHERE l.campaign_id = cc.campaign_id
+        AND (l.collab_id = cc.id OR LOWER(l.influencer_username) = LOWER(cc.creator_username))
+      ORDER BY (l.collab_id = cc.id) DESC
+      LIMIT 1
+    ) lq ON TRUE
     WHERE cc.campaign_id = ${campaignId}
       AND cc.status IN ('in_progress', 'completed')
   `) as any[];
-  const row = rows?.[0] || {};
+
+  let amount = 0;
+  let payoutAmount = 0;
+  let pendingCount = 0;
+  for (const row of rows || []) {
+    const billed = resolveBrandAmount({
+      quotedTotal: Number(row.quoted_total || 0),
+      listed: Boolean(row.listup_id),
+      payoutFee: Number(row.payout_fee || 0),
+    });
+    amount += billed.amount;
+    payoutAmount += Math.max(0, Number(row.payout_fee || 0));
+    if (billed.pending) pendingCount += 1;
+  }
+
   return {
-    amount: Number(row.total || 0),
-    headcount: Number(row.headcount || 0),
-    /** 조건이 아직 잠기지 않아 합계에 들어가지 않은 인원. 청구 전에 확인해야 한다. */
-    pendingCount: Number(row.pending_count || 0),
+    amount,
+    headcount: (rows || []).length,
+    /** 광고비가 아직 적히지 않아 합계에 들어가지 않은 인원. 청구 전에 채워야 한다. */
+    pendingCount,
+    /** 인플루언서에게 나갈 보수 합계. 담당자만 본다. */
+    payoutAmount,
   };
 }
 
@@ -129,7 +166,7 @@ export default async (req: Request) => {
         ]);
         const row = (rows as any[])?.[0];
         // 청구서를 발행했으면 그 금액이 브랜드가 보낼 금액이다. 아직 발행 전이면
-        // 확정 보수 합계가 그 자리를 대신한다 — 지금 진행이 확정된 만큼의 금액이다.
+        // 확정된 광고비 합계가 그 자리를 대신한다 — 지금 진행이 확정된 만큼의 금액이다.
         const invoiceAmount = Number(row?.invoice_amount || 0);
         return Response.json({
           settlement: {
@@ -146,7 +183,7 @@ export default async (req: Request) => {
           basis: {
             /** 진행이 확정된 인플루언서 수. 금액을 대조할 근거로만 쓴다. */
             headcount: billing.headcount,
-            /** 보수가 아직 잠기지 않아 금액에 들어가지 않은 인원. */
+            /** 광고비가 아직 적히지 않아 금액에 들어가지 않은 인원. */
             pendingCount: billing.pendingCount,
             confirmedAmount: billing.amount,
           },
@@ -186,7 +223,7 @@ export default async (req: Request) => {
         // 입금 확인 완료. 이 순간부터 사람별 지급이 열린다.
         case "mark_received": {
           const billing = await billingBasis(db, campaignId);
-          // 금액을 적지 않으면 청구액(= 확정 보수 합계)이 그대로 들어온 것으로 본다.
+          // 금액을 적지 않으면 청구액(= 광고비 합계)이 그대로 들어온 것으로 본다.
           // 부분 수납이면 담당자가 실제 입금액을 적는다.
           const invoiceAmount = parseAmount(body.invoiceAmount) || billing.amount;
           const receivedAmount = parseAmount(body.receivedAmount) || invoiceAmount;
