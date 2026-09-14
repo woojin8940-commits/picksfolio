@@ -874,7 +874,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       </div>
 
       {/* 이 화면은 새 캠페인을 찾는 자리 하나만 한다. 진행 중인 캠페인의 단계 ·
-          인사이트 · 정산은 '캠페인 협업' 메뉴에서 브랜드 화면과 같은 모양
+          인사이트 · 정산은 '협업 캠페인' 메뉴에서 브랜드 화면과 같은 모양
           (CreatorCampaignCollabs)으로 열고, 받은 광고 제안도 여기 얹지 않는다.
           두 곳에 같은 상자를 두면 어느 쪽이 지금 상태인지 매번 맞춰 봐야 한다. */}
       <div className="flex flex-col gap-3 mb-6">

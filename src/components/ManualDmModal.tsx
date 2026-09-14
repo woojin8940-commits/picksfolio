@@ -250,9 +250,14 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       // DM 과 댓글 답글은 함께 나간다. 둘 중 하나라도 나갔으면 발송된 것이다.
       const sentCount = (res.count || 0) + (res.replyCount || 0);
       const failedCount = (res.failCount || 0) + (res.replyFailCount || 0);
-      // 서버가 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 이미 만들어 준다.
+      // 서버는 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 만들어 보내 준다.
+      // 잘 나간 발송에서는 이 문장을 쓰지 않는다 — "몇 명 중 몇 명에게 보냈다",
+      //  "중복이라 건너뛰었다" 같은 집계 안내는 보내는 사람이 조치할 것이 없는데도
+      // 발송이 반쯤 잘못된 것처럼 읽힌다. 그래서 성공은 '완료' 한 줄로만 알린다.
+      // 실패·미발송처럼 조치가 필요한 결과에서만 서버 문장을 그대로 보여준다.
       // (플랜 미충족처럼 요청 자체가 거절된 경우는 error 에 이유가 담긴다.)
       const detail = res.message?.trim() || res.error?.trim();
+      const doneMessage = t('dm.sendDone', '완료', 'Done');
 
       if (res.connected === false) {
         outcome = {
@@ -274,17 +279,25 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           ),
           done: false,
         };
-      } else if (sentCount > 0) {
-        // 한 건이라도 나갔으면 성공이다. 건너뛴 대상·남은 대상 안내는 함께 보여준다.
+      } else if (failedCount > 0) {
+        // 일부가 실패했다. 이유는 사용자가 고칠 수 있는 것(문구·대상·연동)이므로 남긴다.
         outcome = {
-          tone: failedCount > 0 || (res.remaining || 0) > 0 ? 'warn' : 'success',
-          message: detail || t('dm.sentAlert', '보냈습니다!', 'Sent!'),
-          done: failedCount === 0 && (res.remaining || 0) === 0,
+          tone: sentCount > 0 ? 'warn' : 'error',
+          message: detail || t(
+            'dm.sendPartialFailed',
+            '일부 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+            'Some messages failed to send. Please try again in a moment.',
+          ),
+          done: false,
         };
+      } else if (sentCount > 0 || res.success) {
+        // 나간 건이 있거나, 못 나간 이유가 "이미 받은 사람"·"다음 차례"뿐이다.
+        // 둘 다 발송이 끝난 것이니 '완료' 한 줄만 보여주고 창을 닫는다.
+        outcome = { tone: 'success', message: doneMessage, done: true };
       } else {
-        // 한 건도 나가지 않았다. 이유(24시간 창·중복·연동 문제)를 그대로 보여준다.
+        // 한 건도 나가지 않고, 서버도 실패로 보았다. 이유를 그대로 보여준다.
         outcome = {
-          tone: res.success ? 'warn' : 'error',
+          tone: 'error',
           message: detail || t(
             'dm.sendNothingSent',
             '발송된 DM이 없습니다. 인스타그램 정책상 최근 24시간 안에 댓글을 남긴 사람에게만 보낼 수 있어요.',

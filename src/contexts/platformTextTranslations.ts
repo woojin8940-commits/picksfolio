@@ -2989,6 +2989,7 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "협업 내역에 남길 메모 (선택)": "A note to leave in the collaboration history (optional)",
   "협업 내역에 일정을 올렸습니다.": "The schedule has been posted in the collaboration history.",
   "협업 내용을 입력하고 캘린더에서 관리하세요": "Enter collaboration details and manage them in the calendar",
+  "협업 캠페인": "Collab Campaigns",
   "협업 메시지": "Collaboration message",
   "협업 목록": "Collaboration List",
   "협업 목록을 불러오지 못했습니다.": "Failed to load collaboration list.",
