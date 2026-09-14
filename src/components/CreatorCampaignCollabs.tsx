@@ -12,7 +12,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 
 /**
- * 캠페인 협업 — 인플루언서가 자기 캠페인을 진행하는 곳.
+ * 협업 캠페인 — 인플루언서가 자기 캠페인을 진행하는 곳.
  *
  * 브랜드 화면(CampaignCollabManagement)과 같은 모양으로 짠다. 캠페인이 카드로
  * 깔리고, 하나를 누르면 그 캠페인의 상세가 열리고, 상세는 진행사항 · 인사이트 ·
@@ -527,7 +527,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
-          <h2 className="text-lg md:text-2xl font-black text-slate-900">{isEn ? 'Campaign Collabs' : '캠페인 협업'}</h2>
+          <h2 className="text-lg md:text-2xl font-black text-slate-900">{isEn ? 'Collab Campaigns' : '협업 캠페인'}</h2>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">
             {isEn
               ? 'Open a campaign to run its steps, insights and settlement.'

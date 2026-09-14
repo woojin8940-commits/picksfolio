@@ -610,7 +610,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
 
         <nav className="flex-1 space-y-1">
           <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => setCurrentSubView('dashboard')} />
-          <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
+          <NavItem icon="🔗" label="링크 관리" active={currentSubView === 'links'} onClick={() => setCurrentSubView('links')} />
           <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => setCurrentSubView('dm-automation')} />
           {/* 인사이트는 내 계정 데이터를 보는 메뉴라, 캠페인 그룹 위 · DM 자동화 바로 아래에 둔다. */}
           <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
@@ -666,7 +666,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto">
               <NavItem icon="🏠" label="대시보드" active={currentSubView === 'dashboard'} onClick={() => { setCurrentSubView('dashboard'); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🔗" label="링크 & 그리드 관리" active={currentSubView === 'links'} onClick={() => { setCurrentSubView('links'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="🔗" label="링크 관리" active={currentSubView === 'links'} onClick={() => { setCurrentSubView('links'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📩" label="DM 자동화" active={currentSubView === 'dm-automation'} onClick={() => { setCurrentSubView('dm-automation'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => { setCurrentSubView('tagged-insights'); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />

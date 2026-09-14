@@ -44,11 +44,11 @@ const translations: Record<string, { ko: string; en: string }> = {
   'nav.manage': { ko: '관리', en: 'Manage' },
   'nav.dmAutomation': { ko: 'DM 자동화', en: 'DM Automation' },
   'nav.insights': { ko: '인사이트', en: 'Insights' },
-  // 캠페인은 새 캠페인을 찾아 지원하는 자리, 캠페인 협업은 선정된 캠페인을 굴리는
-  // 자리다. 둘 다 '캠페인 협업'으로 부르던 때에는 진행하러 들어온 사람이 남의
+  // 캠페인은 새 캠페인을 찾아 지원하는 자리, 협업 캠페인은 선정된 캠페인을 굴리는
+  // 자리다. 둘 다 '캠페인'으로 부르던 때에는 진행하러 들어온 사람이 남의
   // 캠페인 목록에서 자기 캠페인을 찾아야 했다.
   'nav.campaigns': { ko: '캠페인', en: 'Campaigns' },
-  'nav.myCollabs': { ko: '캠페인 협업', en: 'Campaign Collabs' },
+  'nav.myCollabs': { ko: '협업 캠페인', en: 'Collab Campaigns' },
   'nav.inbox': { ko: '비즈니스 수신함', en: 'Inbox' },
   'nav.timeline': { ko: '협업 타임라인', en: 'Timeline' },
   'nav.calendar': { ko: '협업 현황', en: 'Calendar' },
@@ -123,7 +123,13 @@ const translations: Record<string, { ko: string; en: string }> = {
   'dm.sendNow': { ko: '수동 발송하기', en: 'Send DM Now' },
   'dm.cancel': { ko: '취소', en: 'Cancel' },
   'dm.sending': { ko: '발송 중...', en: 'Sending...' },
-  'dm.sentAlert': { ko: '보냈습니다!', en: 'Sent!' },
+  // 수동 발송 결과는 '완료' 한 줄이다. 건수·중복 건너뜀 같은 집계 문장은
+  // 보내는 사람이 조치할 것이 없는데도 발송이 잘못된 것처럼 읽혀서 쓰지 않는다.
+  'dm.sendDone': { ko: '완료', en: 'Done' },
+  'dm.sendPartialFailed': {
+    ko: '일부 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+    en: 'Some messages failed to send. Please try again in a moment.',
+  },
   'dm.sendSuccess': { ko: 'DM이 성공적으로 발송되었습니다!', en: 'DM sent successfully!' },
   'dm.sendFailed': { ko: 'DM 발송에 실패했습니다.', en: 'Failed to send DM.' },
 

@@ -259,13 +259,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             active={currentSubView === 'campaigns'}
             onClick={onNavigateCampaigns}
           />
-          {/* 캠페인과 캠페인 협업은 하는 일이 다르다. 하나는 새 캠페인을 찾아
+          {/* 캠페인과 협업 캠페인은 하는 일이 다르다. 하나는 새 캠페인을 찾아
               지원하는 자리이고, 하나는 선정된 캠페인의 진행사항 · 인사이트 · 정산을
               브랜드 화면과 같은 모양으로 굴리는 자리다. 한 화면에 겹쳐 두면 마감이
               걸린 일이 남의 캠페인 목록 위에 얹힌 상자로 밀린다. */}
           <NavItem
             icon="🤝"
-            label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')}
+            label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')}
             active={currentSubView === 'my-collabs'}
             onClick={onNavigateMyCollabs}
             badge={collabUnread}
@@ -376,7 +376,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <NavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-              <NavItem icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+              <NavItem icon="🤝" label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               <NavItem icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label={t('nav.timeline', '협업 타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
@@ -506,7 +506,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Quick Access Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-              <QuickCard icon="🤝" label={t('nav.myCollabs', '캠페인 협업', 'Campaign Collabs')} onClick={onNavigateMyCollabs} badge={collabUnread} />
+              <QuickCard icon="🤝" label={t('nav.myCollabs', '협업 캠페인', 'Collab Campaigns')} onClick={onNavigateMyCollabs} badge={collabUnread} />
               <QuickCard icon="🔗" label={t('nav.links', '링크 관리', 'Links')} onClick={onNavigateLinks} />
               <QuickCard icon="📨" label={t('nav.inbox', '비즈니스 수신함', 'Inbox')} onClick={onNavigateBusiness} />
               <QuickCard icon="📅" label={t('nav.calendar', '협업 현황', 'Calendar')} onClick={onNavigateCalendar} />
