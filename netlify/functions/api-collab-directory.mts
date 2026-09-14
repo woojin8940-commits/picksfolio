@@ -242,6 +242,7 @@ function shapeOwnApplication(row: any) {
   }
   return {
     ...base,
+    kakao_id: row.kakao_id || "",
     instagram_url: row.instagram_url || "",
     youtube_url: row.youtube_url || "",
     tiktok_url: row.tiktok_url || "",
@@ -298,6 +299,15 @@ export default async (req: Request) => {
       const role = b.role === "brand" ? "brand" : "influencer";
       const name = (b.name || "").toString().trim();
       const contact = (b.contact || "").toString().trim();
+      /**
+       * 카카오톡 아이디.
+       *
+       * 담당자가 후보에게 연락하는 길은 대부분 카카오톡이다(전화는 받지 않는 시간대가
+       * 있고, 광고 협업 메일은 스팸함으로 들어간다). 필수는 아니다 — 전화번호만 남기는
+       * 사람도 있고, 그 사람의 접수를 막을 이유는 없다. 아이디에는 '@' 를 붙여 적는
+       * 사람이 많아 앞의 기호는 떼어 저장한다(같은 아이디가 두 모양으로 남지 않게).
+       */
+      const kakao_id = (b.kakao_id || "").toString().trim().replace(/^@+/, "").slice(0, 80);
 
       if (!name) {
         return Response.json({ error: "이름을 입력해 주세요." }, { status: 400 });
@@ -376,13 +386,13 @@ export default async (req: Request) => {
 
         const inserted = (await db.sql`
           INSERT INTO collab_directory_applications
-            (id, role, applicant_username, name, contact,
+            (id, role, applicant_username, name, contact, kakao_id,
              instagram_url, youtube_url, tiktok_url, naver_blog_url,
              instagram_followers, youtube_followers, tiktok_followers,
              ad_price, post_price, short_price, category,
              follower_count, follower_source, note)
           VALUES
-            (${id}, 'influencer', ${applicantUsername}, ${name}, ${contact},
+            (${id}, 'influencer', ${applicantUsername}, ${name}, ${contact}, ${kakao_id},
              ${instagram_url}, ${youtube_url}, ${tiktok_url}, ${naver_blog_url},
              ${instagram_followers}, ${youtube_followers}, ${tiktok_followers},
              ${ad_price}, ${post_price}, ${short_price}, ${(b.category || "").toString()},
@@ -599,6 +609,7 @@ export default async (req: Request) => {
           UPDATE collab_directory_applications SET
             name = ${name},
             contact = ${contact},
+            kakao_id = ${text("kakao_id", row.kakao_id).replace(/^@+/, "").slice(0, 80)},
             instagram_url = ${instagram_url},
             youtube_url = ${text("youtube_url", row.youtube_url)},
             tiktok_url = ${tiktok_url},

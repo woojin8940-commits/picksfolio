@@ -8,6 +8,7 @@ import InfluencerCandidateCard, {
   registeredPriceOf,
 } from './InfluencerCandidateCard';
 import { CONTENT_FORMATS } from '../../utils/campaignBrief';
+import { parseCategoryList } from '../../utils/creatorCategories';
 
 /**
  * 리스트업 작업대 — 후보를 찾아 명단에 올리고, 골라진 후보에게 제안한다.
@@ -363,6 +364,14 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   );
   const [poolOnly, setPoolOnly] = useState<'' | 'applicant' | 'connected' | 'priced'>('');
   /**
+   * 카테고리로 좁히기. 검색칸에 분야를 적어도 되지만, 그 방식은 담당자가 "이 풀에
+   * 어떤 분야가 들어 있는지"를 먼저 알고 있어야 하고 "뷰티"를 적으면 이름·계정에
+   * 그 글자가 들어간 사람까지 걸린다. 풀에 실제로 있는 분야만 칩으로 세워 두고
+   * 눌러서 고르게 한다 — 인플루언서가 등록서에서 고른 값(snapshot.categories)을
+   * 그대로 읽으므로 화면에 보이는 꼬리표와 걸러지는 기준이 같다.
+   */
+  const [poolCategory, setPoolCategory] = useState('');
+  /**
    * 줄 보기 · 카드 보기. 기본은 줄 보기다 — 카드는 한 명을 판단하는 데는 좋지만
    * 한 화면에 두세 명밖에 들어가지 않아, 여러 명을 견주는 첫 단계에는 맞지 않는다.
    * 줄에서 눈에 걸린 사람만 눌러 카드를 펼친다.
@@ -566,6 +575,9 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
   const poolView = useMemo(() => {
     const priced = (p: any) => registeredPriceOf(p, campaign?.contentFormat);
     const filtered = pool.filter((p: any) => {
+      if (poolCategory && !parseCategoryList(metricsFrom(p).categories).includes(poolCategory)) {
+        return false;
+      }
       if (poolOnly === 'applicant') return !!p.isApplicant;
       if (poolOnly === 'connected') return metricsFrom(p).metricsSource === 'meta_api';
       if (poolOnly === 'priced') return priced(p) > 0;
@@ -582,7 +594,24 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
       const vb = candidateSortValues(b);
       return poolSort === 'views' ? vb.avgViews - va.avgViews : vb.followers - va.followers;
     });
-  }, [pool, poolSort, poolOnly, campaign?.contentFormat]);
+  }, [pool, poolSort, poolOnly, poolCategory, campaign?.contentFormat]);
+
+  /**
+   * 풀에 실제로 들어 있는 카테고리. 고정 목록 14개를 그대로 세우면 후보가 한 명도
+   * 없는 분야까지 눌러 보게 되므로, 내려온 후보에서 모아 사람 수가 많은 순으로
+   * 둔다. 지금 고른 분야는 후보가 0명이 되더라도 남겨 둔다 — 사라지면 다시 해제할
+   * 자리가 없다.
+   */
+  const poolCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    pool.forEach((p: any) => {
+      parseCategoryList(metricsFrom(p).categories).forEach((c) => {
+        counts.set(c, (counts.get(c) || 0) + 1);
+      });
+    });
+    if (poolCategory && !counts.has(poolCategory)) counts.set(poolCategory, 0);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'));
+  }, [pool, poolCategory]);
 
   const poolFormatName =
     formatKindOf(campaign?.contentFormat) === 'post'
@@ -722,6 +751,35 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 </button>
               ))}
             </div>
+
+            {poolCategories.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap mt-2 pt-2 border-t border-slate-100">
+                <span className="text-[10px] font-black text-slate-400 mr-0.5">카테고리</span>
+                <button
+                  onClick={() => setPoolCategory('')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
+                    poolCategory === ''
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  전체
+                </button>
+                {poolCategories.map(([name, count]) => (
+                  <button
+                    key={name}
+                    onClick={() => setPoolCategory(poolCategory === name ? '' : name)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${
+                      poolCategory === name
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {name} {count}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {picked.length > 0 && (

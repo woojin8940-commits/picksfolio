@@ -31,6 +31,14 @@ import type { Settlement } from '../../types';
  * '입금 확인 완료'를 누르면 이 화면의 회차가 '정산완료'가 된다. 인플루언서 개별
  * 지급은 그 뒤에 픽스폴리오가 처리한다.
  *
+ * ── 캠페인 한 건을 볼 때(campaignId) ──
+ * 캠페인 정산 탭에서는 회차로 쪼개지 않고 "픽스폴리오에 보낼 금액" 한 칸만 세운다.
+ * 그 금액은 정산 항목의 합이 아니라 진행이 확정된 인플루언서들의 보수 합계
+ * (api-campaign-brand-settlement 의 billingBasis)다. 정산 항목은 담당자가 업로드를
+ * 확인한 뒤에야 생기므로, 그것만 더하면 이미 진행을 시작한 사람의 금액이 화면에
+ * 없다 — 브랜드는 보낼 금액을 알 수 없고, 등록할 때 적은 예산과도 다르다(명단은
+ * 협의하면서 늘거나 줄고, 예산은 그 전에 적은 희망값이다).
+ *
  * ── 비즈니스 제안으로 직접 한 협업 ──
  * 위 설명은 담당자가 관리하는 캠페인 이야기다. 브랜드가 인플루언서에게 직접 제안해
  * 성사된 협업은 돈도 브랜드가 직접 보낸다 — 픽스폴리오를 거치지 않으니 회차로 묶을
@@ -102,6 +110,21 @@ const isCampaignSettlement = (s: Settlement) =>
 const isBrandPaid = (s: Settlement) =>
   s.brand_settlement ? s.brand_settlement.received : s.status === 'completed';
 
+/** 캠페인 한 건의 청구 요약(브랜드용 응답). */
+type CampaignBilling = {
+  /** 픽스폴리오에 보낼 금액. */
+  amount: number;
+  /** 담당자가 청구서 금액을 확정해 적었는가. */
+  invoiced: boolean;
+  /** 담당자가 입금을 확인했는가 — 이 화면의 '정산완료'. */
+  received: boolean;
+  /** 금액의 근거가 된 인원. */
+  headcount: number;
+  /** 보수가 아직 잠기지 않아 금액에 들어가지 않은 인원. */
+  pendingCount: number;
+  memo: string;
+};
+
 const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
   businessUsername,
   campaignId = '',
@@ -109,6 +132,8 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
   const [rows, setRows] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  /** 캠페인 한 건을 볼 때만 채워진다. 계정 전체 화면에는 청구 단위가 없다. */
+  const [billing, setBilling] = useState<CampaignBilling | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -120,9 +145,22 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
         if (alive) setLoading(false);
         return;
       }
-      const all = await apiService.getSettlements(clean, 'business');
+      const [all, billed] = await Promise.all([
+        apiService.getSettlements(clean, 'business'),
+        campaignId ? apiService.getCampaignBrandSettlement(campaignId) : Promise.resolve(null),
+      ]);
       if (!alive) return;
       setRows(all.filter(s => !campaignId || String(s.proposal_id || '').includes(campaignId)));
+      if (billed?.settlement) {
+        setBilling({
+          amount: Number(billed.settlement.amount || 0),
+          invoiced: Boolean(billed.settlement.invoiced),
+          received: Boolean(billed.settlement.received),
+          headcount: Number(billed.basis?.headcount || 0),
+          pendingCount: Number(billed.basis?.pendingCount || 0),
+          memo: String(billed.settlement.memo || ''),
+        });
+      }
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -234,6 +272,58 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* 캠페인 한 건을 볼 때. 브랜드가 할 일은 "이 금액을 픽스폴리오에 보내기" 하나이고,
+          그 뒤는 담당자의 입금 확인 하나다. 그래서 칸도 하나다 — 회차와 사람별 지급
+          진행은 그리지 않는다. */}
+      {billing ? (
+        <>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black text-slate-400">픽스폴리오에 정산할 금액</p>
+                <p className="text-2xl font-black text-slate-900 mt-1">{formatKRW(billing.amount)}</p>
+                <p className="text-[11px] text-slate-400 font-bold mt-1">
+                  {billing.headcount > 0
+                    ? `진행 확정 인플루언서 ${billing.headcount}명 기준`
+                    : '아직 진행이 확정된 인플루언서가 없습니다'}
+                  {billing.invoiced ? ' · 청구서 발행' : ''}
+                </p>
+              </div>
+              <span
+                className={`px-2.5 py-1 rounded-full text-[10px] font-black flex-shrink-0 ${
+                  billing.received ? 'bg-emerald-600 text-white' : 'bg-blue-50 text-blue-600'
+                }`}
+              >
+                {billing.received ? '정산완료' : '입금 확인 대기'}
+              </span>
+            </div>
+            {billing.received ? (
+              <p className="text-[11px] text-emerald-600 font-bold mt-2">
+                입금 확인 완료 · 인플루언서 지급은 픽스폴리오가 진행합니다.
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-400 font-medium mt-2 leading-relaxed">
+                픽스폴리오 계좌로 한 번 보내 주세요. 담당자가 입금을 확인하면 이 칸이 '정산완료'로 바뀝니다.
+              </p>
+            )}
+            {billing.pendingCount > 0 && (
+              <p className="text-[11px] text-amber-600 font-bold mt-1">
+                금액 조율 중 {billing.pendingCount}명이 아직 포함되지 않았습니다.
+              </p>
+            )}
+            {billing.memo && (
+              <p className="text-[11px] text-slate-500 font-medium mt-1">{billing.memo}</p>
+            )}
+          </div>
+
+          <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+            등록할 때 적은 예산이 아니라 실제로 진행이 확정된 인플루언서들의 정산금 합계입니다. 명단이 늘거나
+            줄면 이 금액도 따라 바뀝니다. 인플루언서 개별 지급과 원천징수(3.3%)는 입금 확인 후 픽스폴리오가
+            처리하고, 세금계산서도 그때 발행됩니다.
+          </p>
+        </>
+      ) : (
+      <>
       {/* 담당자가 관리하는 캠페인 — 회차로 묶어 픽스폴리오로 한 번 보내는 정산. 직접
           지급하는 건만 있으면 이 묶음은 그릴 것이 없다. */}
       {showBatch && (
@@ -332,6 +422,8 @@ const BrandSettlementSummary: React.FC<BrandSettlementSummaryProps> = ({
           처리합니다. 세금계산서는 입금 확인 후 발행됩니다. 지급일은 콘텐츠를 올린 달의 다음 달 말일입니다.
         </p>
         </>
+      )}
+      </>
       )}
 
       {/* 브랜드가 직접 지급하는 건. 회차로 묶지 않고 한 건씩 세운다 — 보낸 사람이

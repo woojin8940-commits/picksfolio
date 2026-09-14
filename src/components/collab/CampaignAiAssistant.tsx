@@ -60,10 +60,16 @@ import SceneTextarea from './SceneTextarea';
  * 타임라인에 있고, 그 모달을 캠페인 진행 화면에 얹지 않는다.
  */
 
-/** 서버가 답 끝의 표식에서 떼어내 주는 초안. campaign-ai-prompt.mts 의 규약과 같다. */
+/**
+ * 서버가 답 끝의 표식에서 떼어내 주는 초안. campaign-ai-prompt.mts 의 규약과 같다.
+ *
+ * `changes` 는 "이번에 무엇을 고쳤는지" 한 줄씩이다(처음 쓴 초안에는 없다). 고친 내용은
+ * 답 글에도 적히지만, 그 글은 문단으로 섞여 있어서 초안 카드를 보며 짚어 볼 수 없었다 —
+ * 브랜드 피드백 세 줄이 전부 반영됐는지 확인하려면 답을 위로 다시 굴려야 했다.
+ */
 type CampaignDraft =
-  | { kind: 'plan'; scenes: StoryboardScene[] }
-  | { kind: 'caption'; text: string };
+  | { kind: 'plan'; scenes: StoryboardScene[]; changes?: string[] }
+  | { kind: 'caption'; text: string; changes?: string[] };
 
 interface AiMessage {
   role: 'user' | 'assistant';
@@ -499,7 +505,10 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         onNotify(
           draft.kind === 'plan'
             ? '기획안에 반영했습니다. 브랜드가 확인하면 알려 드릴게요.'
-            : '본문에 반영했습니다. 브랜드가 확인하면 알려 드릴게요.',
+            : videoFileReady
+              ? '본문에 반영했습니다. 브랜드가 확인하면 알려 드릴게요.'
+              : // 영상이 아직 없으면 브랜드 검토는 시작되지 않는다. 그것까지 말해 준다.
+                '본문에 저장했습니다. 초안 영상을 올리면 브랜드가 영상과 함께 검토합니다.',
         );
         await onApplied?.();
       } catch {
@@ -508,7 +517,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         setApplying(-1);
       }
     },
-    [applying, collabId, onApplied, onNotify],
+    [applying, collabId, onApplied, onNotify, videoFileReady],
   );
 
   const dismissDraft = (index: number) =>
@@ -643,9 +652,17 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     const isPlan = draft.kind === 'plan';
     const busy = applying === index;
     const locked = Boolean(message.applied) || busy;
-    // 본문만 고쳐 내려면 이미 올라간 초안 영상이 있어야 한다. 없으면 눌러도 서버가
-    // 막으므로, 버튼을 잠그고 이유를 먼저 보여 준다.
-    const blocked = !isPlan && !videoFileReady;
+    /*
+     * 본문 초안은 초안 영상이 아직 없어도 반영할 수 있다.
+     *
+     * 예전에는 영상이 올라가기 전까지 버튼을 잠갔다. 서버가 영상 단계의 저장을 영상
+     * 파일 없이는 받지 않았기 때문인데, 실제로는 본문이 영상보다 먼저 나오는 일이
+     * 흔하다(가이드를 읽고 문구부터 정하거나, 본문 캡션 피드백만 먼저 고칠 때). 그때
+     * 이 글을 둘 자리가 없어서 사용자는 다른 곳에 복사해 두었다가 업로드 날 다시
+     * 붙여야 했다. 이제 서버가 본문만 먼저 받아 두고(captionOnly), 영상이 없는 동안
+     * 단계를 브랜드 검토로 넘기지도 않는다. 대신 지금 무슨 일이 일어나는지 적는다.
+     */
+    const captionFirst = !isPlan && !videoFileReady;
     const edited =
       Boolean(message.draftOriginal) &&
       JSON.stringify(message.draftOriginal) !== JSON.stringify(draft);
@@ -701,6 +718,33 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             </button>
           )}
         </div>
+
+        {/*
+          이번에 고친 것.
+          초안 위에 둔다 — 장면을 읽기 전에 "무엇이 달라졌는지"를 먼저 알면, 40줄짜리
+          기획안에서 바뀐 자리를 찾아 대조하는 일이 없어진다. 브랜드 피드백을 반영한
+          답이면 이 목록의 줄 수가 피드백 건수와 같아야 하므로, 여기서 빠진 것도 바로
+          보인다. 처음 쓴 초안에는 목록이 없다(고친 것이 없다).
+        */}
+        {Array.isArray(draft.changes) && draft.changes.length > 0 && (
+          <div className="mb-2 rounded-xl border border-violet-100 bg-violet-50/60 px-2.5 py-2">
+            <p className="text-[10px] font-black text-violet-700 mb-1">
+              이번에 고친 것 {draft.changes.length}가지
+            </p>
+            <ul className="space-y-1">
+              {draft.changes.map((line, i) => (
+                <li key={i} className="flex gap-1.5 text-[10px] md:text-[11px] font-bold text-slate-600 leading-relaxed">
+                  <span className="text-violet-400">·</span>
+                  <span className="min-w-0">{line}</span>
+                </li>
+              ))}
+            </ul>
+            {/* 목록은 AI 가 적은 말이다. 카드에서 직접 고친 값과는 별개라는 것을 밝힌다. */}
+            <p className="mt-1 text-[9px] font-bold text-violet-400">
+              AI 가 적은 수정 내역입니다. 아래 칸에서 직접 고친 내용은 포함되지 않습니다.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-2">
           {isPlan ? (
@@ -786,14 +830,14 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
           )}
         </div>
 
-        {blocked && !message.applied && (
-          <p className="px-0.5 pt-1.5 text-[10px] font-bold text-amber-700 leading-relaxed">
-            초안 영상을 한 번 올린 뒤에 본문을 반영할 수 있어요. 콘텐츠 단계에서 영상을 먼저 제출해
-            주세요. (그 전에는 위 본문을 복사해 두셔도 됩니다.)
+        {captionFirst && !message.applied && (
+          <p className="px-0.5 pt-1.5 text-[10px] font-bold text-slate-500 leading-relaxed">
+            초안 영상이 아직 없어도 본문은 먼저 저장됩니다. 영상을 올리면 브랜드가 영상과 본문을
+            함께 검토해요.
           </p>
         )}
 
-        {emptyDraft && !message.applied && !blocked && (
+        {emptyDraft && !message.applied && (
           <p className="px-0.5 pt-1.5 text-[10px] font-bold text-amber-700 leading-relaxed">
             {isPlan
               ? '장면 내용을 한 개 이상 채워야 반영할 수 있어요.'
@@ -806,7 +850,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             <button
               type="button"
               onClick={() => applyDraft(index, draft)}
-              disabled={busy || blocked || emptyDraft || applying >= 0}
+              disabled={busy || emptyDraft || applying >= 0}
               className="flex-1 px-3 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 disabled:opacity-40 transition-colors"
             >
               {busy

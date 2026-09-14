@@ -271,7 +271,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   const [submitting, setSubmitting] = useState(false);
 
   const [infForm, setInfForm] = useState({
-    name: '', contact: '',
+    name: '', contact: '', kakao_id: '',
     instagram_url: '', instagram_followers: '',
     youtube_url: '', youtube_followers: '',
     tiktok_url: '', tiktok_followers: '',
@@ -414,6 +414,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       setInfForm({
         name: String(app.name || ''),
         contact: String(app.contact || ''),
+        kakao_id: String(app.kakao_id || ''),
         instagram_url: String(app.instagram_url || ''),
         instagram_followers: num(app.instagram_followers),
         youtube_url: String(app.youtube_url || ''),
@@ -594,7 +595,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
 
   const reset = () => {
     setInfForm({
-      name: '', contact: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
+      name: '', contact: '', kakao_id: '', instagram_url: '', instagram_followers: '', youtube_url: '', youtube_followers: '',
       tiktok_url: '', tiktok_followers: '', naver_blog_url: '', post_price: '', short_price: '', category: '',
     });
     setCustomCategory('');
@@ -1091,6 +1092,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                 <div className="space-y-3">
                   <Field label="이름" required value={infForm.name} onChange={v => setInfForm(f => ({ ...f, name: v }))} placeholder="홍길동" />
                   <Field label="연락처" required value={infForm.contact} onChange={v => setInfForm(f => ({ ...f, contact: formatContact(v) }))} placeholder="010-0000-0000 / 이메일" />
+                  {/* 카톡 아이디 — 담당자가 실제로 가장 많이 쓰는 연락 수단이다.
+                      전화는 받지 않고 메일은 스팸함으로 가는 일이 잦아, 적어 두면
+                      제안이 훨씬 빨리 닿는다. 필수는 아니다. */}
+                  <Field label="카카오톡 아이디" value={infForm.kakao_id} onChange={v => setInfForm(f => ({ ...f, kakao_id: v.replace(/\s/g, '') }))} placeholder="선택 · 담당자가 카톡으로 연락합니다" />
 
                   {/* 인스타 계정 연동 — 브랜드가 보는 숫자의 출처가 여기서 정해진다. */}
                   <div className="pt-1">

@@ -130,6 +130,13 @@ const LABEL = 'block text-xs font-black text-slate-700 mb-1.5';
 
 /** 화면에 쉼표를 넣어 보여 주고, 서버에는 숫자만 보낸다(digitsOnly 는 공용 서식에서 온다). */
 
+/**
+ * 담당자 이메일 검사. 완벽한 주소 검사는 하지 않는다 — 정규식으로 걸러낼 수 있는
+ * 것은 "@ 와 점이 있는가"까지이고, 그 이상은 실제로 보내 봐야 안다. 오타를 잡으려는
+ * 것이 아니라 전화번호나 이름이 이메일 칸에 들어간 경우를 막는 것이 목적이다.
+ */
+const isEmail = (raw: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim());
+
 /** 쉼표로 이어 저장된 값 ↔ 배열. 수정 모드에서 기존 캠페인을 되읽을 때 쓴다. */
 const splitCsv = (raw: unknown): string[] =>
   String(raw ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -212,7 +219,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     sns_category: editing?.sns_category || '',
     ad_objective: editing?.ad_objective || 'awareness',
     tier_counts: initialTierCounts(editing),
-    min_views: formatNumberWithCommas(digitsOnly(editing?.min_views || '')),
     target_audience: editing?.target_audience || '',
     influencer_styles: splitCsv(editing?.influencer_styles),
     exclude_keywords: splitCsv(editing?.exclude_keywords),
@@ -414,7 +420,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제품 제공 방식', done: !!form.product_provide, required: true },
       { label: '담당자 이름', done: !!form.contact_person.trim(), required: true },
       { label: '담당자 연락처', done: digitsOnly(form.contact_phone).length >= 9, required: true },
-      { label: '담당자 이메일', done: !!form.contact_email.trim(), required: false },
+      { label: '담당자 이메일', done: isEmail(form.contact_email), required: true },
     ],
     campaign: [
       { label: '진행 방식', done: !!form.reward_mode, required: true },
@@ -435,7 +441,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: 'SNS 채널 카테고리', done: !!form.sns_category, required: true },
       { label: '광고 목적', done: !!form.ad_objective, required: true },
       { label: '규모별 모집 인원', done: headcount > 0 && !overBudget, required: true },
-      { label: '희망 최소 조회수', done: Number(digitsOnly(form.min_views) || 0) > 0, required: false },
       { label: '타겟 오디언스', done: !!form.target_audience.trim(), required: false },
       { label: '인플루언서 스타일', done: form.influencer_styles.length > 0, required: false },
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
@@ -456,6 +461,11 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (!contactPhoneDigits) return '캠페인 담당자 연락처를 입력해 주세요.';
       // 휴대폰(10~11)뿐 아니라 02 지역번호(9)로 적는 브랜드가 있어 9자리부터 받는다.
       if (contactPhoneDigits.length < 9) return '담당자 연락처를 끝까지 입력해 주세요.';
+      // 이메일도 필수다. 계약서 · 세금계산서 · 정산 안내는 전화로 보낼 수 없는
+      // 서류이고, 계정 이메일로 대신 보내면 대행사 계정에서는 이 캠페인을 모르는
+      // 사람에게 간다.
+      if (!form.contact_email.trim()) return '캠페인 담당자 이메일을 입력해 주세요.';
+      if (!isEmail(form.contact_email)) return '담당자 이메일 주소를 다시 확인해 주세요.';
       return '';
     }
     if (key === 'campaign') {
@@ -481,7 +491,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (form.influencer_ages.length === 0) return '희망 연령대를 한 개 이상 선택해 주세요.';
       if (!form.sns_category) return 'SNS 채널 카테고리를 선택해 주세요.';
       if (headcount < 1) return '규모를 고르고 모집 인원을 1명 이상 배분해 주세요.';
-      if (overBudget) return `배분한 인원의 최소 집행액이 예산을 ${formatKoreanWon(floorSum - budgetKrw)} 넘습니다.`;
+      if (overBudget) return `배분한 인원의 집행액이 예산을 ${formatKoreanWon(floorSum - budgetKrw)} 넘습니다.`;
       return '';
     }
     return '';
@@ -518,7 +528,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         ages: form.influencer_ages,
         snsCategory: form.sns_category,
         tierCounts: counts,
-        minViews: Number(digitsOnly(form.min_views) || 0),
         styles: form.influencer_styles,
         excludes: form.exclude_keywords,
         headcount: applyHeadcount,
@@ -577,7 +586,9 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         follower_tiers: picksInfluencer
           ? chosenTiers(counts).filter(t => (counts[t.key] || 0) > 0).map(t => t.key)
           : [],
-        min_views: picksInfluencer ? Number(digitsOnly(form.min_views) || 0) : 0,
+        // 희망 최소 조회수는 더 이상 받지 않는다. 컬럼과 예전 캠페인의 값은 그대로
+        // 두고(이미 저장된 조건이므로), 새로 등록하는 캠페인에서는 0 으로 남긴다.
+        min_views: 0,
         influencer_styles: picksInfluencer ? form.influencer_styles : [],
         exclude_keywords: picksInfluencer ? form.exclude_keywords : [],
         target_audience: picksInfluencer ? form.target_audience : '',
@@ -664,7 +675,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     },
     influencer: {
       title: '규모는 섞는 게 좋을까요?',
-      body: '메가 한 명으로 화제를 만들고 마이크로·나노로 후속 반응을 채우는 구성이 가장 흔합니다. 배분액은 각 규모의 최소 단가 기준이고, 실제 금액은 담당자가 후보를 확정할 때 정해집니다.',
+      body: '메가 한 명으로 화제를 만들고 마이크로·나노로 후속 반응을 채우는 구성이 가장 흔합니다. 배분액은 각 규모 금액 구간의 시작값으로 계산하고, 실제 금액은 담당자가 후보를 확정할 때 그 구간 안에서 정해집니다.',
     },
   };
 
@@ -675,7 +686,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       <div className={`rounded-2xl border p-4 ${overBudget ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="text-[11px] font-black text-slate-500">배분한 최소 집행액</p>
+            <p className="text-[11px] font-black text-slate-500">배분한 집행액</p>
             <p className={`text-lg font-black ${overBudget ? 'text-rose-600' : 'text-slate-900'}`}>
               {formatKoreanWon(floorSum) || '0원'}
               <span className="text-[11px] font-bold text-slate-400 ml-1.5">
@@ -955,14 +966,17 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
 
                 <div className="mt-4">
-                  <label className={LABEL}>담당자 이메일</label>
+                  <label className={LABEL}>담당자 이메일 *</label>
                   <input
                     type="email"
                     value={form.contact_email}
                     onChange={e => patch('contact_email', e.target.value.slice(0, 200))}
                     className={INPUT}
-                    placeholder="비워 두면 계정 이메일을 사용합니다"
+                    placeholder="manager@brand.com"
                   />
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                    계약서 · 세금계산서 · 정산 안내가 이 주소로 갑니다.
+                  </p>
                 </div>
               </div>
             </>
@@ -1291,7 +1305,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                               <span className="text-[10px] text-slate-400 font-bold ml-1.5">{t.followers}</span>
                             </p>
                             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                              1인 {tierFeeLabel(t)} · 최소 {formatKoreanWon(t.minFee * n) || '0원'}
+                              1인 {tierFeeLabel(t)}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
@@ -1330,21 +1344,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     {budgetKrw <= 0 && ' 먼저 캠페인 설정에서 예산을 입력해 주세요.'}
                   </p>
                 )}
-              </div>
-
-              <div>
-                <label className={LABEL}>희망 최소 조회수</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={form.min_views}
-                    onChange={e => patch('min_views', formatNumberWithCommas(digitsOnly(e.target.value)))}
-                    className={`${INPUT} max-w-[200px]`}
-                    placeholder="10,000"
-                  />
-                  <span className="text-sm font-black text-slate-500">회 이상</span>
-                </div>
               </div>
 
               <div>
@@ -1462,7 +1461,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     <span>{formatKoreanWon(budgetKrw) || '0원'}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-white/50">배분(최소)</span>
+                    <span className="text-white/50">배분</span>
                     <span>{formatKoreanWon(floorSum) || '0원'}</span>
                   </div>
                   <div className="flex items-center justify-between">

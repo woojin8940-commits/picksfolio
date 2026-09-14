@@ -62,7 +62,7 @@ export default async (req: Request, context: Context) => {
                    MAX(cc.manager_username) AS collab_manager
             FROM campaign_collabs cc WHERE cc.campaign_id = c.id
           ) cb ON TRUE
-          WHERE c.status = ${status}
+          WHERE c.deleted_at IS NULL AND c.status = ${status}
           ORDER BY c.created_at DESC
         `;
       } else {
@@ -103,11 +103,12 @@ export default async (req: Request, context: Context) => {
                    MAX(cc.manager_username) AS collab_manager
             FROM campaign_collabs cc WHERE cc.campaign_id = c.id
           ) cb ON TRUE
+          WHERE c.deleted_at IS NULL
           ORDER BY c.created_at DESC
         `;
       }
 
-      const pending = await db.sql`SELECT COUNT(*)::int as count FROM campaigns WHERE status = 'pending_approval'`;
+      const pending = await db.sql`SELECT COUNT(*)::int as count FROM campaigns WHERE status = 'pending_approval' AND deleted_at IS NULL`;
 
       return Response.json({
         campaigns: result,

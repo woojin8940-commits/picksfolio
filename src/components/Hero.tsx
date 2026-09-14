@@ -36,6 +36,18 @@ type HeroExample = {
   headerTop: string;
   /** 검색바를 얹을 높이. 없으면 검색바를 끈 페이지다. */
   searchTop?: string;
+  /**
+   * 그림 안에서 커버 사진이 끝나는 높이(그림 높이 기준).
+   *
+   * 실제 개인페이지는 커버 사진 아래를 페이지 배경색으로 녹인다(UserPage 의
+   * coverFade). 예시 그림에는 그 그라데이션이 구워져 있지 않아서, 사진이 배경색과
+   * 만나는 선이 자로 그은 것처럼 딱 끊겨 보였다 — 실제 페이지를 열어 본 사람에게는
+   * 예시가 다른 화면으로 읽힌다. 그래서 이 높이만큼 같은 그라데이션을 얹는다.
+   * 값은 그림에서 사진이 끝나는 줄(620×773 기준 316번째 줄 = 40.9%)이다.
+   */
+  coverBottom?: string;
+  /** 그림 속 페이지 배경색. 커버 그라데이션이 녹아 들어갈 색이다. */
+  pageBg?: string;
 };
 
 const HERO_EXAMPLES: HeroExample[] = [
@@ -47,6 +59,8 @@ const HERO_EXAMPLES: HeroExample[] = [
     groupKo: 'TOP',
     groupEn: 'TOP',
     headerTop: '50.9%',
+    coverBottom: '40.9%',
+    pageBg: '#000000',
   },
   {
     id: 'light',
@@ -225,6 +239,23 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
                     loading={idx === 0 ? undefined : 'lazy'}
                     decoding="async"
                   />
+
+                  {/* 커버 사진 아래 그라데이션. 실제 페이지와 같은 식(UserPage 의
+                      coverFade)으로 만든다 — 아래는 배경색, 위 절반은 투명. 좌우를
+                      아주 조금 비워 두는 것은 그림 가장자리에 있는 1px 테두리 선을
+                      덮지 않기 위해서다. */}
+                  {ex.coverBottom && ex.pageBg && (
+                    <div
+                      aria-hidden
+                      className="absolute top-0 pointer-events-none"
+                      style={{
+                        left: '0.2%',
+                        right: '0.2%',
+                        height: ex.coverBottom,
+                        background: `linear-gradient(to top, ${ex.pageBg} 0%, ${ex.pageBg}88 15%, transparent 50%)`,
+                      }}
+                    />
+                  )}
 
                   {/* 상품명 검색바 — 그림에 비워 둔 띠의 위쪽 칸. */}
                   {ex.searchTop && (

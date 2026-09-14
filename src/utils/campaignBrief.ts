@@ -206,7 +206,7 @@ export const TIERS: TierDef[] = [
     label: '마이크로',
     followers: '팔로워 1만 ~ 10만',
     minFee: 500_000,
-    maxFee: 1_000_000,
+    maxFee: 2_000_000,
     openEnded: false,
     note: '팬층이 뚜렷해 반응률이 가장 안정적입니다',
   },
@@ -214,7 +214,7 @@ export const TIERS: TierDef[] = [
     key: 'macro',
     label: '매크로',
     followers: '팔로워 10만 ~ 50만',
-    minFee: 1_000_000,
+    minFee: 1_500_000,
     maxFee: 5_000_000,
     openEnded: false,
     note: '한 편으로 도달을 크게 끌어올립니다',
@@ -501,7 +501,6 @@ export const derivedRequirements = (input: {
   ages: string[];
   snsCategory: string;
   tierCounts: TierCounts;
-  minViews: number;
   styles: string[];
   excludes: string[];
   /** 지원을 받아 고르는 방식의 모집·협찬 인원. */
@@ -543,7 +542,6 @@ export const derivedRequirements = (input: {
         .join(' · ')}`,
     );
   }
-  if (input.minViews > 0) lines.push(`희망 최소 조회수: ${input.minViews.toLocaleString('ko-KR')}회 이상`);
   if (input.styles.length) lines.push(`선호 스타일: ${input.styles.join(', ')}`);
   if (input.excludes.length) lines.push(`제외 조건: ${input.excludes.join(', ')}`);
   return lines.join('\n');

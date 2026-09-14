@@ -1,6 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * 브랜드 일괄 정산금 수납 — 담당자가 "브랜드 돈이 들어왔다"를 남기는 자리.
@@ -31,8 +32,16 @@ import { requireManager } from "./_shared/manager-auth.mts";
  *   GET   /api/campaign-brand-settlement?campaignId=...
  *   PATCH /api/campaign-brand-settlement  { campaignId, action, ... }
  *
- * 담당자 전용이다. 브랜드는 자기 수납 상태를 정산 화면에서 읽기만 하고(위 참조),
- * 자기 입금을 스스로 확인 처리할 수는 없다 — 통장을 보는 사람이 누르는 버튼이다.
+ * 쓰기(PATCH)는 담당자 전용이다. 브랜드는 자기 입금을 스스로 확인 처리할 수 없다 —
+ * 통장을 보는 사람이 누르는 버튼이다.
+ *
+ * 읽기(GET)는 그 캠페인의 브랜드 계정도 할 수 있다. 브랜드가 정산 화면에서 알아야
+ * 하는 것은 두 가지뿐이다 — "픽스폴리오에 얼마를 보내야 하는가"와 "보낸 것이
+ * 접수됐는가". 앞의 금액은 등록할 때 적은 예산이 아니라 실제로 진행이 확정된
+ * 인플루언서들의 보수 합계(billingBasis)여야 한다. 명단은 협의하면서 늘거나 줄고,
+ * 예산은 그 전에 적은 희망값이라 청구서와 맞는 일이 드물다. 브랜드 응답에는 사람별
+ * 지급 진행(누가 언제 얼마를 받는지)은 담지 않는다 — 픽스폴리오와 인플루언서 사이의
+ * 일이고, 브랜드가 확인할 수도 손댈 수도 없는 남의 진행이다.
  */
 
 const norm = (raw: unknown) => String(raw || "").trim().toLowerCase().replace(/^biz\//, "");
@@ -95,11 +104,10 @@ async function loadCampaign(db: any, campaignId: string) {
 }
 
 export default async (req: Request) => {
-  const auth = await requireManager(req);
-  if (!auth.ok) return auth.response;
-
   const url = new URL(req.url);
   const db = getDatabase();
+
+  const manager = await requireManager(req);
 
   try {
     if (req.method === "GET") {
@@ -108,6 +116,42 @@ export default async (req: Request) => {
 
       const campaign = await loadCampaign(db, campaignId);
       if (!campaign) return jsonError("캠페인을 찾을 수 없습니다.", 404);
+
+      // 담당자가 아니면 그 캠페인의 브랜드 계정인지 본다. 통과하면 브랜드용 요약만
+      // 내보낸다(청구액 · 수납 여부 · 근거 인원).
+      if (!manager.ok) {
+        const owner = await requireAccountOwner(req, String(campaign.business_username || ""));
+        if (!owner.ok) return owner.response;
+
+        const [rows, billing] = await Promise.all([
+          db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}`,
+          billingBasis(db, campaignId),
+        ]);
+        const row = (rows as any[])?.[0];
+        // 청구서를 발행했으면 그 금액이 브랜드가 보낼 금액이다. 아직 발행 전이면
+        // 확정 보수 합계가 그 자리를 대신한다 — 지금 진행이 확정된 만큼의 금액이다.
+        const invoiceAmount = Number(row?.invoice_amount || 0);
+        return Response.json({
+          settlement: {
+            campaignId,
+            /** 브랜드가 픽스폴리오에 보낼 금액. */
+            amount: invoiceAmount || billing.amount,
+            /** 청구서가 발행됐는가(금액을 담당자가 확정해 적었는가). */
+            invoiced: invoiceAmount > 0,
+            /** 담당자가 입금을 확인했는가. 브랜드 화면의 '정산완료'가 이 값이다. */
+            received: Boolean(row?.received_at),
+            receivedAmount: Number(row?.received_amount || 0),
+            memo: String(row?.memo || ""),
+          },
+          basis: {
+            /** 진행이 확정된 인플루언서 수. 금액을 대조할 근거로만 쓴다. */
+            headcount: billing.headcount,
+            /** 보수가 아직 잠기지 않아 금액에 들어가지 않은 인원. */
+            pendingCount: billing.pendingCount,
+            confirmedAmount: billing.amount,
+          },
+        });
+      }
 
       const [rows, billing] = await Promise.all([
         db.sql`SELECT * FROM campaign_brand_settlements WHERE campaign_id = ${campaignId}`,
@@ -128,6 +172,7 @@ export default async (req: Request) => {
     }
 
     if (req.method === "PATCH") {
+      if (!manager.ok) return manager.response;
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const campaignId = String(body.campaignId || "").trim();
       const action = String(body.action || "");
@@ -153,7 +198,7 @@ export default async (req: Request) => {
               received_at, received_by, memo
             ) VALUES (
               ${campaignId}, ${business}, ${invoiceAmount}, ${receivedAmount},
-              NOW(), ${auth.managerUsername}, ${memo}
+              NOW(), ${manager.managerUsername}, ${memo}
             )
             ON CONFLICT (campaign_id) DO UPDATE SET
               business_username = EXCLUDED.business_username,

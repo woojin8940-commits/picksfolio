@@ -3495,16 +3495,20 @@ export const apiService = {
   },
 
   /**
-   * 브랜드 일괄 정산금 수납(담당자).
+   * 브랜드 일괄 정산금 수납.
    *
    * 브랜드는 인플루언서 한 명 한 명에게 송금하지 않고 픽스폴리오에 한 번 보낸다.
    * 그 입금이 확인되기 전에 인플루언서 지급을 닫으면 픽스폴리오 돈이 먼저 나가므로,
    * 담당자 정산 화면의 사람별 '정산완료' 버튼이 이 기록으로 잠긴다.
+   *
+   * 그 캠페인의 브랜드 계정도 읽을 수 있다. 담당자에게는 청구 근거(billing)와 캠페인
+   * 정보가 함께 오고, 브랜드에게는 보낼 금액·수납 여부와 그 근거 인원(basis)만 온다 —
+   * 사람별 지급 진행은 브랜드 응답에 담기지 않는다.
    */
   async getCampaignBrandSettlement(
     campaignId: string,
     opts: { token?: string } = {},
-  ): Promise<{ settlement?: any; billing?: any; campaign?: any; error?: string }> {
+  ): Promise<{ settlement?: any; billing?: any; basis?: any; campaign?: any; error?: string }> {
     try {
       const res = await authedGet(
         `/api/campaign-brand-settlement?campaignId=${encodeURIComponent(campaignId)}`,
