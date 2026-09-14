@@ -3,6 +3,7 @@ import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
 import { contentFormatLabel } from '../../utils/campaignBrief';
 import BrandCollabProgress from '../BrandCollabProgress';
+import BrandContactCard from '../collab/BrandContactCard';
 import { parseGuidelineFiles } from '../collab/CampaignGuidelineEditor';
 import ListupWorkspace from '../collab/ListupWorkspace';
 import CampaignInsightPanel from '../collab/CampaignInsightPanel';
@@ -21,6 +22,9 @@ import ManagerCampaignSettlementPanel from './ManagerCampaignSettlementPanel';
  * 같은 캠페인을 세 사람이 서로 다른 모양의 화면으로 보면 "저 캠페인의 인사이트 탭"
  * 같은 말이 통하지 않는다 — 담당자는 브랜드와 통화하며 같은 자리를 가리켜야 하는
  * 사람이라, 그 어긋남의 비용을 담당자가 전부 낸다.
+ *
+ * 머리말의 '자세히 보기'에는 조건과 함께 브랜드 담당자의 성함 · 연락처 · 메일이
+ * 붙는다. 조건을 확인하는 자리가 곧 그 조건을 물어볼 자리라서다.
  *
  * 탭 넷은 담당자가 캠페인 하나에서 하는 일 전부다.
  *   인플루언서 — 후보를 명단에 올리고, 명단을 브랜드에 넘기고, 확정 기한을 정한다
@@ -528,6 +532,20 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
 
           {showBrief && (
             <div className="mt-4 space-y-4">
+              {/* 이 캠페인을 올린 브랜드 담당자 — 성함 · 연락처 · 메일.
+                  진행사항 탭에도 같은 칸이 붙지만, 조건을 확인하려고 머리말을 펼친
+                  담당자가 "그럼 누구에게 물어보나"를 위해 탭을 옮겨 다니게 된다.
+                  물어볼 사람은 물어볼 내용 옆에 있어야 한다.
+
+                  펼쳤을 때만 붙이므로 연락처 조회도 그때 한 번 일어난다 — 개인정보를
+                  열어 보지도 않은 캠페인까지 미리 내려받지 않는다(BrandContactCard). */}
+              <BrandContactCard
+                campaignId={open.id}
+                businessUsername={open.businessUsername}
+                brandName={open.brandName || open.businessUsername}
+                className="border-slate-200"
+              />
+
               {open.description && (
                 <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
                   {open.description}
