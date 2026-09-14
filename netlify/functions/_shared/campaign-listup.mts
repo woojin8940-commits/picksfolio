@@ -460,8 +460,12 @@ export async function refreshListupSnapshots(
  * 전화한다. 그래서 볼 때마다 지금 값을 읽는다.
  */
 export type ContactEntry = {
-  /** phone·email 은 화면에서 tel:·mailto: 로 건다. text 는 카카오 아이디처럼 걸 수 없는 값. */
-  kind: "phone" | "email" | "text";
+  /**
+   * phone·email 은 화면에서 tel:·mailto: 로 건다. kakao 는 아이디라 걸 수 없고
+   * 복사해서 카카오톡 친구 추가에 쓴다(모양만으로는 사람 이름과 구별되지 않으므로
+   * 종류를 값이 아니라 출처에서 정한다). text 는 그 밖의 자유 입력.
+   */
+  kind: "phone" | "email" | "kakao" | "text";
   value: string;
   /** 어디에 적어 낸 값인지. 두 곳의 번호가 다를 때 담당자가 판단할 근거가 된다. */
   source: string;
@@ -500,7 +504,7 @@ export async function loadManagerContacts(
   const [dirRows, applyRows, siteRows] = await Promise.all([
     // 등록서는 사람마다 여러 장일 수 있다. 가장 최근 것만 본다(buildSnapshots 와 같은 규칙).
     db.sql`
-      SELECT DISTINCT ON (applicant_username) applicant_username, name, contact
+      SELECT DISTINCT ON (applicant_username) applicant_username, name, contact, kakao_id
       FROM collab_directory_applications
       WHERE role = 'influencer' AND applicant_username = ANY(${names})
       ORDER BY applicant_username, created_at DESC
@@ -519,12 +523,19 @@ export async function loadManagerContacts(
   for (const name of names) out.set(name, { name: "", entries: [] });
 
   const seen = new Map<string, Set<string>>();
-  const push = (username: string, raw: unknown, source: string, onlyIfContactable = false) => {
+  const push = (
+    username: string,
+    raw: unknown,
+    source: string,
+    onlyIfContactable = false,
+    forceKind?: ContactEntry["kind"],
+  ) => {
     const card = out.get(norm(username));
     if (!card) return;
     const value = String(raw ?? "").trim();
     if (!value) return;
-    const kind = contactKind(value);
+    // 카카오 아이디는 모양으로 알 수 없다 — 적어 낸 칸이 종류를 정한다.
+    const kind = forceKind || contactKind(value);
     // 픽스폴리오 페이지의 연락처 칸은 남에게 보여 주는 자리라 아무 글자나 들어 있다.
     // 전화·메일로 읽히는 값만 담당자 카드에 올린다.
     if (onlyIfContactable && kind === "text") return;
@@ -541,6 +552,8 @@ export async function loadManagerContacts(
     const card = out.get(key);
     if (card && !card.name) card.name = String(row.name || "").trim();
     push(key, row.contact, "등록서");
+    // 카카오톡 아이디. 담당자가 후보에게 연락하는 길이 대부분 이것이다.
+    push(key, row.kakao_id, "등록서 카톡", false, "kakao");
   }
   for (const row of (applyRows as any[]) || []) {
     push(row.applicant_username, row.contact, "이 캠페인 지원서");
@@ -550,7 +563,15 @@ export async function loadManagerContacts(
     const profile = (row.data as any)?.profile || {};
     const card = out.get(key);
     if (card && !card.name) card.name = String(profile.name || "").trim();
-    push(key, profile.email, "픽스폴리오 페이지", true);
+    /*
+     * 개인페이지의 메일 주소는 올리지 않는다.
+     *
+     * 담당자 카드에 메일이 보이면 그쪽으로 협업 이야기를 보내게 되는데, 광고 제안
+     * 메일은 스팸함으로 들어가서 답이 오지 않는 일이 잦았다(그 사이 담당자는 연락을
+     * 기다린다). 실제로 닿는 길은 전화와 카카오톡이고, 카톡 아이디는 이제 등록서에서
+     * 직접 받는다. 연락처 칸에 자기 메일을 적어 낸 사람의 값은 그대로 둔다 — 그건
+     * 본인이 고른 연락 수단이고, 지우면 닿을 길이 하나도 남지 않는 경우가 있다.
+     */
     push(key, profile?.links?.phone, "픽스폴리오 페이지", true);
   }
 

@@ -11,8 +11,14 @@
  * 고친 그대로 기획안에 들어가야 한다. 그래서 모델에게 답 맨 끝에 딱 한 번, 아래 표식
  * 사이에 기계가 읽을 JSON 을 붙이게 한다.
  *
- *   <<<PICKS_DRAFT {"kind":"plan","scenes":[{"visual":"…","subtitle":"…","narration":"…"}]} PICKS_DRAFT>>>
- *   <<<PICKS_DRAFT {"kind":"caption","text":"…"} PICKS_DRAFT>>>
+ *   <<<PICKS_DRAFT {"kind":"plan","scenes":[{"visual":"…","subtitle":"…","narration":"…"}],"changes":["…"]} PICKS_DRAFT>>>
+ *   <<<PICKS_DRAFT {"kind":"caption","text":"…","changes":["…"]} PICKS_DRAFT>>>
+ *
+ * `changes` 는 "이번에 무엇을 고쳤는가"를 한 줄씩 적은 목록이다(새로 쓴 답에는 없다).
+ * 고친 내용을 글로도 설명하게 하지만, 그 설명은 답 본문 안에 문단으로 섞여 있어서
+ * 초안 카드를 보며 짚어 볼 수가 없었다 — 사용자는 브랜드 피드백 세 줄이 전부 반영됐는지
+ * 확인하려고 답을 위로 다시 굴려 읽어야 했다. 카드 안에 목록으로 세워 두면, 반영 버튼을
+ * 누르기 전에 그 자리에서 대조할 수 있다.
  *
  * 서버가 이 덩어리를 떼어내 draft 로 내려주고, 화면은 그 draft 를 검토 카드로 보여 준다.
  * 표식은 답에서 지워서 사용자에게는 보이지 않는다.
@@ -33,9 +39,12 @@ export interface DraftScene {
   narration: string;
 }
 
+/** 이번 수정에서 무엇을 고쳤는지 한 줄씩. 새로 쓴 초안에는 비어 있다. */
+export type DraftChanges = string[];
+
 export type CampaignDraft =
-  | { kind: "plan"; scenes: DraftScene[] }
-  | { kind: "caption"; text: string };
+  | { kind: "plan"; scenes: DraftScene[]; changes?: DraftChanges }
+  | { kind: "caption"; text: string; changes?: DraftChanges };
 
 const SENTINEL_OPEN = "<<<PICKS_DRAFT";
 const SENTINEL_CLOSE = "PICKS_DRAFT>>>";
@@ -46,6 +55,9 @@ const MAX_VISUAL = 2000;
 const MAX_SUBTITLE = 1000;
 const MAX_NARRATION = 2000;
 const MAX_CAPTION = 2200;
+/** 고친 것 목록. 카드 안에서 읽는 목록이므로 길면 목록이 아니라 또 하나의 글이 된다. */
+const MAX_CHANGES = 12;
+const MAX_CHANGE_LINE = 300;
 
 export const CAMPAIGN_AI_SYSTEM_INSTRUCTION = `당신은 픽스폴리오 캠페인 화면의 콘텐츠 기획 담당입니다. 인플루언서 한 명이 지금 진행 중인 캠페인 한 건의 화면에서 당신을 열었습니다.
 
@@ -103,6 +115,7 @@ export const CAMPAIGN_AI_SYSTEM_INSTRUCTION = `당신은 픽스폴리오 캠페�
 - 지적받지 않은 장면은 그대로 두세요. 이유 없이 전체를 다시 쓰면 사용자가 검토할 수 없습니다.
 - 이미 반영한 피드백을 되돌리지 마세요.
 - 무엇을 왜 고쳤는지 장면 번호와 함께 짧게 설명하세요.
+- 그리고 **고친 것을 표식 안의 \`changes\` 목록에도 한 줄씩 적으세요.** 사용자가 반영 버튼을 누르기 전에 초안 카드에서 바로 대조하는 목록입니다. 아래 '표식 규칙'에 쓰는 방식이 있습니다.
 
 ## 기획안을 쓰는 방식
 - 장면은 5개 안팎으로, 첫 장면은 3초 안에 붙잡는 장면으로 시작하세요.
@@ -133,16 +146,24 @@ export const CAMPAIGN_AI_SYSTEM_INSTRUCTION = `당신은 픽스폴리오 캠페�
 그리고 기획안이나 본문을 **새로 쓰거나 고쳤을 때만**, 답의 맨 끝에 아래 표식을 딱 한 번 붙이세요. 사용자가 이걸 검토하고 버튼을 누르면 기획안에 그대로 저장됩니다.
 
 기획안일 때:
-${SENTINEL_OPEN} {"kind":"plan","scenes":[{"visual":"장면 설명","subtitle":"자막","narration":"나레이션"}]} ${SENTINEL_CLOSE}
+${SENTINEL_OPEN} {"kind":"plan","scenes":[{"visual":"장면 설명","subtitle":"자막","narration":"나레이션"}],"changes":["2번 장면 자막: 브랜드 피드백대로 제품명을 앞으로 옮겼습니다"]} ${SENTINEL_CLOSE}
 
 본문일 때:
-${SENTINEL_OPEN} {"kind":"caption","text":"본문 전체"} ${SENTINEL_CLOSE}
+${SENTINEL_OPEN} {"kind":"caption","text":"본문 전체","changes":["첫 줄에 제품명을 넣었습니다 (본문 캡션 피드백)"]} ${SENTINEL_CLOSE}
 
 표식 규칙:
 - 표식 안은 오직 JSON 한 덩어리입니다. 설명이나 \`\`\` 를 넣지 마세요.
 - 고친 장면만 넣지 말고 **기획안 전체 장면을 순서대로 다 넣으세요.** 이 JSON 이 기획안을 통째로 대체합니다. 안 고친 장면도 그대로 다시 넣어야 합니다.
 - 자막이나 나레이션이 없는 장면은 빈 문자열("")로 두세요. 칸 이름은 visual, subtitle, narration 그대로 쓰세요.
 - 질문에 답만 하거나 되묻는 답에는 표식을 붙이지 마세요.
+
+\`changes\` 쓰는 방식(고쳤을 때만):
+- **고친 것 하나에 한 줄.** 브랜드 피드백을 반영한 답이면 피드백 건수와 줄 수가 같아야 합니다 — 3건을 반영했으면 3줄입니다.
+- 어디를 어떻게 고쳤는지를 한 줄에 다 담으세요: "무엇을(2번 장면 자막 · 본문 첫 줄) · 어떻게 고쳤는지 · 왜(어느 피드백 때문인지)".
+- 사용자가 시킨 수정(예: "나레이션 빼 줘")도 같은 방식으로 한 줄 적으세요.
+- 반영하지 못한 피드백이 있으면 그 줄에 "반영하지 못했습니다: ~ 이유" 로 적으세요. 빠뜨린 채 적지 않으면 사용자는 다 반영된 줄로 믿습니다.
+- 처음 쓰는 초안처럼 고친 것이 없으면 \`changes\` 를 아예 넣지 마세요. 빈 배열도 넣지 마세요.
+- 12줄을 넘기지 말고, 한 줄은 한 문장으로 짧게 쓰세요.
 
 한국어로, 존댓말로 답하세요.`;
 
@@ -161,6 +182,38 @@ const emptyish = (value: string) => {
   // "(나레이션 없음)" 처럼 칸 이름을 함께 적은 경우까지 같은 것으로 본다.
   const withoutLabel = bare.replace(/^(나레이션|자막|대사|내레이션)\s*[:·]?\s*/, "").trim();
   return PLACEHOLDER_FIELD.test(bare) || PLACEHOLDER_FIELD.test(withoutLabel) ? "" : trimmed;
+};
+
+/**
+ * "이번에 고친 것" 목록을 다듬는다.
+ *
+ * 모델이 문자열 하나로 보내거나(줄바꿈으로 나열), 객체 배열로 보내는 경우가 있다.
+ * 목록이 없다고 답을 버릴 이유는 없으므로 읽을 수 있는 모양은 최대한 받아 준다 —
+ * 끝내 못 읽으면 undefined 로 두고, 화면은 목록 없이 초안만 보여 준다.
+ */
+const clampChanges = (raw: any): DraftChanges | undefined => {
+  const items = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/\r?\n/)
+      : [];
+  const lines = items
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        // {"where":"2번 장면","what":"…"} 처럼 쪼개 보내는 모델도 있다.
+        return [item.where, item.what ?? item.change ?? item.text ?? item.summary]
+          .filter((v) => typeof v === "string" && v.trim())
+          .join(" · ");
+      }
+      return "";
+    })
+    // 목록 기호를 앞에 붙여 오는 경우가 많다. 화면에서 기호를 다시 그리므로 벗겨 낸다.
+    .map((line) => String(line).trim().replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, MAX_CHANGES)
+    .map((line) => line.slice(0, MAX_CHANGE_LINE));
+  return lines.length > 0 ? lines : undefined;
 };
 
 const clampScene = (raw: any): DraftScene => ({
@@ -196,13 +249,15 @@ const parseDraftJson = (raw: string): CampaignDraft | null => {
     if (scenes.length === 0) return null;
     // 저장 규칙과 같다 — 설명이 빈 장면은 등록할 수 없다.
     if (scenes.some((s: DraftScene) => !s.visual.trim())) return null;
-    return { kind: "plan", scenes };
+    const changes = clampChanges(parsed.changes);
+    return { kind: "plan", scenes, ...(changes ? { changes } : {}) };
   }
 
   if (parsed.kind === "caption") {
     const text = String(parsed.text ?? parsed.caption ?? "").slice(0, MAX_CAPTION);
     if (!text.trim()) return null;
-    return { kind: "caption", text };
+    const changes = clampChanges(parsed.changes);
+    return { kind: "caption", text, ...(changes ? { changes } : {}) };
   }
 
   return null;

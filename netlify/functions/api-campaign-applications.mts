@@ -53,7 +53,7 @@ export default async (req: Request) => {
         return Response.json({ error: "필수 항목을 입력해 주세요." }, { status: 400 });
       }
 
-      const campaign = await db.sql`SELECT * FROM campaigns WHERE id = ${campaign_id} AND status = 'active'`;
+      const campaign = await db.sql`SELECT * FROM campaigns WHERE id = ${campaign_id} AND status = 'active' AND deleted_at IS NULL`;
       if (campaign.length === 0) {
         return Response.json({ error: "캠페인을 찾을 수 없거나 마감되었습니다." }, { status: 400 });
       }

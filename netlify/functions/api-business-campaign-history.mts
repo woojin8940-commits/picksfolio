@@ -113,9 +113,15 @@ export default async (req: Request, context: Context) => {
   const db = getDatabase();
 
   try {
+    // 삭제한 캠페인도 읽는다(deleted_at 을 조건으로 걸지 않는다).
+    //
+    // 협업 메뉴에서 캠페인을 내리는 것은 "목록 정리"이고, 이 화면은 "지난 집행의
+    // 기록"이다. 둘을 같은 조건으로 묶어 두면 끝난 캠페인을 정리한 브랜드가 자기
+    // 광고비와 성과를 다시 볼 방법이 없어진다. 내려간 캠페인이라는 사실만 함께
+    // 보내서 화면이 배지로 구분한다.
     const campaignRows = (await db.sql`
       SELECT id, title, category, type, status, reward_mode, thumbnail_url,
-             start_date, end_date, budget_krw, created_at
+             start_date, end_date, budget_krw, created_at, deleted_at
       FROM campaigns
       WHERE LOWER(REPLACE(business_username, 'biz/', '')) = ${username}
       ORDER BY created_at DESC
@@ -248,6 +254,8 @@ export default async (req: Request, context: Context) => {
         category: String(c.category || ""),
         type: String(c.type || ""),
         status: String(c.status || ""),
+        /** 협업 메뉴에서 내린 캠페인. 이력에는 남고, 화면에서는 배지로 구분한다. */
+        removed: Boolean(c.deleted_at),
         rewardMode: String(c.reward_mode || ""),
         thumbnailUrl: String(c.thumbnail_url || ""),
         startDate: String(c.start_date || ""),

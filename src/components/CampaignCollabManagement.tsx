@@ -519,9 +519,14 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   };
 
   /**
-   * 캠페인 삭제. 지원 기록과 협업까지 함께 지워지므로(서버가 같은 요청에서 지운다)
-   * 무엇이 사라지는지 제목과 함께 확인받는다. "정말 삭제하시겠습니까?"만 띄우면
-   * 명단이 함께 없어지는 것을 모른 채 누르게 된다.
+   * 캠페인 삭제 — 이 목록에서 내린다.
+   *
+   * 기록은 지우지 않는다(서버가 deleted_at 만 남긴다). 예전에는 지원 기록과 협업까지
+   * 같은 요청에서 지웠는데, 캠페인 이력 메뉴가 그 기록으로 지난 집행과 성과를
+   * 보여 주는 화면이라 정리한 캠페인의 광고비와 조회수가 통째로 사라졌다.
+   *
+   * 그래서 확인 문구도 "되돌릴 수 없다"가 아니라 "어디에서 사라지고 어디에 남는지"를
+   * 말한다 — 지우는 줄 알고 눌렀는데 이력에 남아 있으면 그것도 예상 밖의 일이다.
    */
   const handleDelete = async (campaign: Campaign | string) => {
     const target = typeof campaign === 'string' ? campaigns.find(c => c.id === campaign) : campaign;
@@ -533,9 +538,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
     const peopleLabel = rewardModeOf(target?.reward_mode).openApply ? '지원자' : '인플루언서';
     if (
       !confirm(
-        `'${title}' 캠페인을 삭제합니다.\n\n` +
-          (people > 0 ? `${peopleLabel} ${people}명의 기록과 ` : '') +
-          '진행 기록이 함께 지워지고 되돌릴 수 없습니다.\n계속하시겠습니까?',
+        `'${title}' 캠페인을 이 목록에서 삭제합니다.\n\n` +
+          (people > 0 ? `${peopleLabel} ${people}명의 진행 기록은 ` : '진행 기록은 ') +
+          '캠페인 이력 메뉴에 그대로 남습니다.\n' +
+          '다시 이 목록으로 되돌릴 수는 없습니다.\n계속하시겠습니까?',
       )
     ) {
       return;
@@ -550,7 +556,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         notify(data.error || '삭제에 실패했습니다.', 'error');
         return;
       }
-      notify('캠페인을 삭제했습니다.');
+      notify('캠페인을 삭제했습니다. 진행 기록은 캠페인 이력에 남아 있습니다.');
       await fetchCampaigns();
       if (selectedCampaign?.id === id) setSelectedCampaign(null);
     } catch {
@@ -1048,7 +1054,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </div>
                   {mode.pickInfluencer && (
                     <p className="text-xs text-slate-400 font-medium mt-3 pt-3 border-t border-slate-200">
-                      최소 집행액 {formatKoreanWon(allocatedFloor(tierCounts)) || '0원'}
+                      배분한 집행액 {formatKoreanWon(allocatedFloor(tierCounts)) || '0원'}
                       {budget > 0 && ` · 예산 ${formatKoreanWon(budget)}`}
                     </p>
                   )}

@@ -36,11 +36,12 @@ import {
  * 전부 카카오톡·메일에 있었다. 인플루언서는 "언제 들어오나"를 물어봐야 알 수 있었고,
  * 담당자는 어느 협업의 계좌인지 짝을 맞춰야 했다. 협업 한 줄 안으로 옮긴다.
  *
- * 정산 칸은 브랜드에게 열리지 않는다. 브랜드는 인플루언서에게 개별 송금을 하지 않고
- * (픽스폴리오에 회차마다 한 번 보낸다) 서류를 받고 지급일을 잡고 입금하는 것은 담당자의
- * 일이다. 한동안 브랜드에게도 "제출 완료 / 지급 예정일"까지는 보여 줬지만, 그것은 브랜드가
- * 손댈 수 없는 남의 일정을 사람 수만큼 확인하게 만들었다. 서버도 브랜드 응답에서는 정산
- * 덩어리를 비워 보낸다 — 화면에서 가리는 것만으로는 개발자 도구로 그대로 열린다.
+ * 정산 칸에서 브랜드가 보는 것은 두 줄뿐이다 — 이 협업의 정산금과, 픽스폴리오가 자기
+ * 입금을 확인했는지. 브랜드는 인플루언서에게 개별 송금을 하지 않고(픽스폴리오에 한 번
+ * 보낸다) 서류를 받고 지급일을 잡고 입금하는 것은 담당자의 일이다. 한동안 브랜드에게도
+ * "제출 완료 / 지급 예정일"까지 보여 줬는데, 그것은 브랜드가 손댈 수도 확인할 수도 없는
+ * 남의 일정을 사람 수만큼 읽게 만들었다. 서버도 브랜드 응답에서는 정산 덩어리를 비우고
+ * 입금 접수 여부 하나만 보낸다 — 화면에서 가리는 것만으로는 개발자 도구로 그대로 열린다.
  *
  * 브랜드와 인플루언서가 같은 컴포넌트를 쓴다. 예전에는 양쪽 화면이 따로 있어서 같은
  * 단계를 서로 다른 이름과 다른 순서로 보고 있었다 — 브랜드는 "대본 피드백", 인플루언서는
@@ -182,6 +183,11 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    */
   const brandSettlement = detail?.brandSettlement || null;
   const brandPaid = !brandSettlement || Boolean(brandSettlement.received);
+  /**
+   * 브랜드 응답에도 이 한 가지는 온다 — "내 입금이 접수됐는가". 브랜드 정산 칸의
+   * '완료'가 이 값이고, 인플루언서 지급 진행과는 무관하다.
+   */
+  const brandReceived = Boolean(brandSettlement?.received);
   const collab = detail?.collab || {};
   const isInfluencer = role === 'influencer';
   const isBrandSide = role === 'brand' || role === 'manager';
@@ -214,6 +220,21 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     return rows.length ? rows[rows.length - 1] : null;
   };
 
+  /**
+   * 브랜드가 검토할 초안 영상이 실제로 올라와 있는가.
+   *
+   * 본문 캡션은 영상보다 먼저 저장될 수 있다 — AI 가 써 준 본문을 먼저 반영하거나,
+   * 본문 캡션 피드백만 고쳐 다시 내는 경우다(save_step_work 의 captionOnly). 그래서
+   * "영상 단계에 제출물이 있다"만으로 제출 완료로 읽으면, 브랜드 화면에는 열어 볼
+   * 영상이 없는 검토 요청이 뜬다. 링크로 받던 시절의 제출물도 영상으로 본다.
+   */
+  const videoFilePresent = (): boolean => {
+    const work = workOf('video');
+    return Boolean(
+      String(work?.payload?.fileUrl || '').trim() || String(work?.payload?.link || '').trim(),
+    );
+  };
+
   const feedbacksOf = (step: StepKey) =>
     feedbacks.filter(
       (f: any) => String(f.anchor) === step || STAGE_KEYS[step].includes(String(f.stageKey)),
@@ -227,7 +248,13 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (step === 'upload') return stageDone || Boolean(collab.uploadConfirmedAt);
     // 정산은 단계 행이 아니라 실제 지급으로 닫힌다. 정산할 것이 없는 협업(0원)은
     // 열리지 않은 칸이므로 완료로 그려도 진행을 잘못 말하지 않는다.
-    if (step === 'settlement') return !settlementOpen || Boolean(settlement.paidAt);
+    // 브랜드의 정산 칸은 인플루언서 지급이 아니라 자기 입금의 접수로 닫힌다.
+    // 브랜드 응답에는 settlement.paidAt 이 없으므로 그대로 두면 영원히 진행 중이다.
+    if (step === 'settlement') {
+      if (!settlementOpen) return true;
+      if (role === 'brand') return brandReceived;
+      return Boolean(settlement.paidAt);
+    }
     return stageDone;
   };
 
@@ -277,7 +304,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     const stageSubmitted = String(stageOf(step)?.status || '') === 'submitted';
     if (step === 'shipping') return Boolean(shipping.filled);
     if (step === 'plan') return Boolean(workOf('plan')) || stageSubmitted;
-    if (step === 'video') return Boolean(workOf('video')) || stageSubmitted;
+    if (step === 'video') return videoFilePresent() || stageSubmitted;
     if (step === 'upload') return Boolean(collab.uploadUrl) || stageSubmitted;
     if (step === 'settlement') return Boolean(settlement.submitted);
     return stageSubmitted;
@@ -298,7 +325,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
         guide: { status: String(stageOf('guide')?.status || ''), submitted: Boolean(workOf('guide')) },
         shipping: { status: String(stageOf('shipping')?.status || ''), submitted: Boolean(shipping.filled) },
         plan: { status: String(stageOf('plan')?.status || ''), submitted: Boolean(workOf('plan')) },
-        video: { status: String(stageOf('video')?.status || ''), submitted: Boolean(workOf('video')) },
+        video: { status: String(stageOf('video')?.status || ''), submitted: videoFilePresent() },
         upload: { status: String(stageOf('upload')?.status || ''), submitted: Boolean(collab.uploadUrl) },
       },
       shipping: { filled: Boolean(shipping.filled), status: String(shipping.status || '') },
@@ -370,11 +397,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const solo = Boolean(soloStep) && !showAllSteps;
   // 정산 칸은 업로드 확인 전에는 아예 그리지 않는다. 촬영도 시작하지 않은 시점에
   // "신분증 사본" 줄이 보이면 무엇에 쓰는 서류인지 알 수 없고, 보수가 없는
-  // 협찬형 협업에는 정산할 것이 없다. 브랜드에게는 확인된 뒤에도 열리지 않는다 —
-  // 개별 지급은 브랜드의 일이 아니고, 서버도 브랜드 응답에서 정산을 비워 보낸다.
-  const shownStates = states.filter(
-    s => s.key !== 'settlement' || (settlementOpen && role !== 'brand'),
-  );
+  // 협찬형 협업에는 정산할 것이 없다. 브랜드에게도 확인 뒤에는 열리지만, 그 안에는
+  // 인플루언서 지급 진행 대신 이 협업의 정산금과 입금 접수 여부만 적힌다.
+  const shownStates = states.filter(s => s.key !== 'settlement' || settlementOpen);
   const visibleStates = solo ? shownStates.filter(s => s.key === soloStep) : shownStates;
 
   const [busy, setBusy] = useState(false);
@@ -670,16 +695,20 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /**
    * 초안 영상 제출 — 영상 파일과 본문 캡션을 한 번에 낸다.
    *
-   * 첫 제출에는 영상 파일이 있어야 한다(서버도 같은 규칙으로 막지만 여기서 먼저
-   * 잡는다 — 서버까지 갔다 오면 눌렀는데 잠깐 아무 일도 없다가 빨간 글씨가 뜨는
-   * 모양이 된다). 두 번째부터는 파일 없이도 낼 수 있다: 브랜드 피드백이 캡션 한 줄에
-   * 대한 것일 때 수백 MB 영상을 다시 올리게 할 이유가 없고, 서버가 이미 올라간
-   * 영상을 그대로 이어받는다.
+   * 두 번째 제출부터는 파일 없이도 낼 수 있다: 브랜드 피드백이 캡션 한 줄에 대한
+   * 것일 때 수백 MB 영상을 다시 올리게 할 이유가 없고, 서버가 이미 올라간 영상을
+   * 그대로 이어받는다.
+   *
+   * 영상이 아직 하나도 없을 때도 본문 캡션만 먼저 저장할 수 있다 — 본문은 영상보다
+   * 먼저 나오는 일이 흔하고, 저장해 두지 않으면 그 글을 들고 있을 자리가 없어서
+   * 업로드 당일에 다시 쓰게 된다. 그때는 단계가 '제출됨'으로 넘어가지 않으므로
+   * 브랜드에게 영상 없는 검토 요청이 가지도 않는다(서버의 captionOnly 규칙).
+   * 영상도 본문도 없이 누르는 것만 막는다.
    */
   const submitVideo = async () => {
     const text = caption.trim();
-    if (!videoFile && !videoWork?.payload?.fileUrl) {
-      onNotify('올릴 영상 파일을 선택해 주세요.', 'error');
+    if (!videoFile && !videoWork?.payload?.fileUrl && !text) {
+      onNotify('올릴 영상 파일을 선택하거나 본문 캡션을 적어 주세요.', 'error');
       return;
     }
     if (text.length > CAPTION_MAX_LENGTH) {
@@ -943,8 +972,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    * 단계가 "다음 단계가 열립니다"라는 같은 문장을 썼다. 영상 단계에서 그것은 사실을
    * 절반만 말한 것이다 — 영상 다음은 업로드이고, 열리는 것이 곧 게시 허락이다.
    * `doneNote` 는 이미 닫힌 뒤에 남는 한 줄이다.
+   *
+   * `doneLabel` 은 닫힌 뒤의 줄을 통째로 갈아 끼운다. 영상 단계에서 쓴다 — 브랜드가
+   * 검토를 닫은 뒤에 브랜드가 할 일은 없고, 남은 일은 인플루언서의 업로드다. 그 자리에
+   * "이제 업로드됩니다" 류의 안내를 세워 두면 자기가 눌러야 할 것이 또 있는지 다시
+   * 읽게 된다. 끝난 칸은 끝났다고만 적는다.
    */
-  const renderReviewComplete = (step: StepKey, stepName: string, note = '', doneNote = '') => {
+  const renderReviewComplete = (
+    step: StepKey,
+    stepName: string,
+    note = '',
+    doneNote = '',
+    doneLabel = '',
+  ) => {
     if (!isBrandSide) return null;
 
     if (doneOf(step)) {
@@ -955,7 +995,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
             </svg>
             <p className="text-[11px] font-black text-emerald-700">
-              {stepName} 검토 완료 · 다음 단계로 넘어갔습니다
+              {doneLabel || `${stepName} 검토 완료 · 다음 단계로 넘어갔습니다`}
             </p>
           </div>
           {doneNote && (
@@ -1508,14 +1548,16 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </div>
                 <button
                   onClick={submitVideo}
-                  disabled={busy || (!videoFile && (!videoWork || !captionDirty))}
+                  disabled={busy || (!videoFile && !captionDirty)}
                   className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                 >
-                  {!videoWork
-                    ? '초안 영상 · 본문 올리기'
-                    : videoFile
+                  {videoFile
+                    ? videoWork
                       ? '영상 · 본문 다시 올리기'
-                      : '본문 캡션만 다시 저장'}
+                      : '초안 영상 · 본문 올리기'
+                    : videoFilePresent()
+                      ? '본문 캡션만 다시 저장'
+                      : '본문 캡션 먼저 저장'}
                 </button>
                 {renderUploadProgress()}
                 {videoWork && (
@@ -1585,11 +1627,23 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
               </div>
             )}
 
-            {videoWork && renderReviewComplete(
+            {/* 검토 완료는 열어 볼 영상이 있을 때만. 본문 캡션만 먼저 올라온 상태에서
+                닫으면 브랜드가 한 번도 보지 못한 영상이 그대로 게시된다(서버도 같은
+                판정으로 막는다 — confirm_step). */}
+            {videoWork && !videoFilePresent() && !doneOf('video') && (
+              <p className="text-[11px] font-bold text-amber-700 leading-relaxed">
+                {isBrandSide
+                  ? '본문 캡션이 먼저 올라왔습니다. 초안 영상이 올라오면 영상과 본문을 함께 검토할 수 있어요.'
+                  : '본문 캡션은 저장됐습니다. 초안 영상을 올리면 브랜드가 영상과 본문을 함께 검토합니다.'}
+              </p>
+            )}
+
+            {videoWork && videoFilePresent() && renderReviewComplete(
               'video',
               '영상',
-              '검토를 완료하면 인플루언서에게 바로 업로드 단계가 열립니다. 지금 올라온 영상과 본문 캡션이 그대로 게시된다는 뜻이니, 두 가지를 모두 확인한 뒤 눌러 주세요.',
-              '인플루언서가 이 영상과 본문으로 업로드합니다. 게시물 링크가 올라오면 업로드 단계에서 확인해 주세요.',
+              '검토를 완료하면 이 영상과 본문 캡션이 그대로 게시됩니다. 두 가지를 모두 확인한 뒤 눌러 주세요.',
+              '',
+              '영상 검토 완료',
             )}
 
             {/* 인플루언서에게 주는 초록불. 브랜드가 검토를 닫는 순간 다음 할 일은
@@ -1598,7 +1652,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             {isInfluencer && doneOf('video') && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                 <p className="text-[11px] font-black text-emerald-800">
-                  브랜드 검토 완료 · 이제 업로드해도 됩니다
+                  영상 검토 완료
                 </p>
                 <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
                   검토를 마친 영상과 본문 캡션 그대로 인스타그램에 올려 주세요. 따로 확인받을 것은 없습니다.
@@ -1619,13 +1673,39 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
        *
        * 브랜드에게는 입력 칸이 없다. 신분증 사본과 계좌번호는 응답에도 담기지 않고
        * (서버에서 역할별로 걸러 낸다), 지급을 실행하는 것은 담당자다.
+       *
+       * 브랜드는 인플루언서 지급 진행도 보지 않는다. 돈의 순서가 브랜드 → 픽스폴리오 →
+       * 인플루언서이므로 브랜드가 할 일은 픽스폴리오에 보내는 것 하나이고, 그 뒤의
+       * 지급일·서류·송금은 픽스폴리오와 인플루언서 사이의 일이다. 예전에는 세 역할이
+       * 같은 줄("지급 예정일 ..." / "서류 제출 전")을 봤는데, 브랜드는 자기가 손댈 수도
+       * 확인할 수도 없는 남의 진행을 읽으며 자기 몫이 남은 줄로 오해했다. 브랜드에게는
+       * 이 협업의 정산금과, 자기 입금이 접수됐는지만 적는다 — 캠페인 전체 청구액은
+       * 정산 탭(BrandSettlementSummary)이 맡는다.
        */
       case 'settlement': {
         const paid = Boolean(settlement.paidAt);
         const payoutDate = String(settlement.payoutDate || '');
+        const brandOnly = isBrandSide && !isManager;
         return (
           <div className="space-y-3">
-            {/* 맨 위 한 줄로 "지금 어디까지 왔는가". 세 역할이 같은 문장을 본다. */}
+            {brandOnly ? (
+              <div className={`rounded-lg px-3 py-2.5 ${brandReceived ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
+                <p className={`text-xs font-black ${brandReceived ? 'text-emerald-700' : 'text-slate-500'}`}>
+                  {brandReceived ? '정산 완료' : '픽스폴리오 정산 예정'}
+                </p>
+                {settlementFee > 0 && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-1">
+                    이 협업 정산금 {settlementFee.toLocaleString('ko-KR')}원
+                  </p>
+                )}
+                <p className="text-[10px] font-bold text-slate-400 mt-1 leading-relaxed">
+                  {brandReceived
+                    ? '픽스폴리오가 입금을 확인했습니다. 인플루언서 지급과 원천징수는 픽스폴리오가 진행합니다.'
+                    : '정산은 픽스폴리오에 한 번 보내면 됩니다. 캠페인 정산 탭에서 보낼 금액을 확인해 주세요.'}
+                </p>
+              </div>
+            ) : (
+            /* 맨 위 한 줄로 "지금 어디까지 왔는가". 담당자와 인플루언서가 같은 문장을 본다. */
             <div className={`rounded-lg px-3 py-2.5 ${paid ? 'bg-emerald-50 border border-emerald-100' : payoutDate ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50'}`}>
               <p className={`text-xs font-black ${paid ? 'text-emerald-700' : payoutDate ? 'text-blue-700' : 'text-slate-500'}`}>
                 {paid
@@ -1645,6 +1725,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 <p className="text-[11px] font-medium text-slate-500 mt-1">{settlement.payoutMemo}</p>
               )}
             </div>
+            )}
 
             {isInfluencer && !paid && (
               <>
@@ -1916,10 +1997,16 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (revisionOf(step)) return isInfluencer ? '피드백 반영이 필요합니다' : '수정 요청 전달됨';
     if (step === 'shipping' && shipping.filled) return isInfluencer ? '입력 완료 · 브랜드 발송 대기' : '발송해 주세요';
     if (step === 'plan' && planWork) return isInfluencer ? '입력 완료 · 브랜드 확인 대기' : '확인해 주세요';
-    if (step === 'video' && videoWork) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
+    if (step === 'video' && videoWork) {
+      // 본문 캡션만 저장된 상태. 아직 검토받을 영상이 없다는 것을 양쪽에 그대로 적는다.
+      if (!videoFilePresent()) return isInfluencer ? '본문 저장됨 · 영상을 올려 주세요' : '영상 대기 중';
+      return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
+    }
     if (step === 'upload' && collab.uploadUrl) return isInfluencer ? '등록 완료 · 브랜드 확인 대기' : '확인해 주세요';
     if (step === 'guide' && guideFiles.length === 0) return isBrandSide ? '가이드를 올려 주세요' : '브랜드 준비 중';
     if (step === 'settlement') {
+      // 브랜드는 인플루언서 지급 일정이 아니라 자기 입금의 접수 여부를 본다.
+      if (role === 'brand') return brandReceived ? '정산 완료' : '픽스폴리오 정산 예정';
       if (settlement.paidAt) return '지급 완료';
       if (settlement.payoutDate) return `지급 예정일 ${settlement.payoutDate}`;
       if (settlement.submitted) return isManager ? '지급일을 정해 주세요' : '담당자 확인 대기';
@@ -2103,7 +2190,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 >
                   {/* 내 차례인 줄은 펼쳐도 할 일을 그대로 둔다. 펼침 안내문(lead)으로
                       바뀌면 방금 읽은 요청 문장이 사라진다. */}
-                  {isOpen && !s.action ? s.lead : statusText(s.key, s.done, s.current)}
+                  {isOpen && !s.action
+                    ? /* 정산 안내문만 역할에 따라 다르다 — 브랜드는 서류를 내지 않는다. */
+                      s.key === 'settlement' && role === 'brand'
+                      ? '픽스폴리오에 보낼 정산금입니다.'
+                      : s.lead
+                    : statusText(s.key, s.done, s.current)}
                 </span>
               </span>
               {stage?.dueDate && !s.done && !s.submitted && (!isOpen || solo) && (

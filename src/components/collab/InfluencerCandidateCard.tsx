@@ -303,7 +303,9 @@ const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
 
       {entries.map((e, i) => {
         const value = String(e?.value || '');
-        const kind = e?.kind === 'phone' || e?.kind === 'email' ? e.kind : 'text';
+        // 카톡 아이디는 걸 수 있는 주소가 없다 — 복사해서 친구 추가에 쓴다.
+        const kind =
+          e?.kind === 'phone' || e?.kind === 'email' || e?.kind === 'kakao' ? e.kind : 'text';
         const href =
           kind === 'phone'
             ? `tel:${value.replace(/[^\d+]/g, '')}`
@@ -312,7 +314,21 @@ const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
               : '';
         return (
           <div key={`${value}-${i}`} className="flex items-center gap-2">
-            {kind === 'email' ? (
+            {kind === 'kakao' ? (
+              <svg
+                className="w-3.5 h-3.5 text-amber-500 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-2.6-.34L4 21l1.4-3.6A7.5 7.5 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+            ) : kind === 'email' ? (
               <svg
                 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0"
                 fill="none"

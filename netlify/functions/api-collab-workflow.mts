@@ -1089,11 +1089,18 @@ export default async (req: Request, context: Context) => {
           Number(terms?.fee || 0),
         ),
         /**
-         * 브랜드 일괄 정산금 수납 상태. 담당자에게만 싣는다.
+         * 브랜드 일괄 정산금 수납 상태.
          *
-         * 브랜드에게는 자기 캠페인 정산 화면에 같은 사실이 회차 줄로 보인다
-         * (api-settlements). 인플루언서는 브랜드와 픽스폴리오 사이의 입금과 무관하다 —
-         * 자기 지급일과 지급 상태만 본다.
+         * 담당자에게는 금액까지 싣는다 — 사람별 지급 버튼이 이 값으로 잠긴다.
+         *
+         * 브랜드에게는 "내 입금이 접수됐는가" 하나만 싣는다. 협업 하나의 정산 칸에서
+         * 브랜드가 알아야 하는 것이 그것뿐이다 — 인플루언서에게 언제 얼마가 나가는지는
+         * 픽스폴리오와 인플루언서 사이의 일이고, 브랜드가 확인할 수도 손댈 수도 없다.
+         * 보낼 금액과 청구 상태는 캠페인 정산 화면이 맡는다
+         * (api-campaign-brand-settlement).
+         *
+         * 인플루언서는 브랜드와 픽스폴리오 사이의 입금과 무관하다 — 자기 지급일과
+         * 지급 상태만 본다.
          */
         brandSettlement:
           role === "manager"
@@ -1103,7 +1110,9 @@ export default async (req: Request, context: Context) => {
                 invoiceAmount: Number((brandSettlementRows as any[])?.[0]?.invoice_amount || 0),
                 memo: String((brandSettlementRows as any[])?.[0]?.memo || ""),
               }
-            : null,
+            : role === "brand"
+              ? { received: Boolean((brandSettlementRows as any[])?.[0]?.received_at) }
+              : null,
         threads: {
           influencerSupport: role === "brand" ? null : supportThreadId("influencer_support", collabId),
           // 브랜드↔담당자 방은 만들지 않는다. 브랜드의 의견은 단계별 피드백으로
@@ -1705,7 +1714,22 @@ export default async (req: Request, context: Context) => {
             carriedFileName = String(prev.fileName || "");
           }
         }
-        if (stepKey === "video" && !carriedFileUrl) return jsonError("초안 영상 파일을 올려 주세요.");
+        /**
+         * 본문 캡션만 먼저 저장하는 경우.
+         *
+         * 영상보다 본문이 먼저 나오는 일이 흔하다 — AI 에게 캡션을 받아 두거나, 브랜드가
+         * 본문 캡션에 남긴 피드백을 먼저 고쳐 두는 경우다. 예전에는 영상 파일이 없으면
+         * 이 단계의 저장 자체가 막혀서, 그 캡션을 어디에도 둘 수 없었다(다른 곳에 복사해
+         * 두었다가 영상을 올릴 때 다시 붙여야 했고, 그 사이에 브랜드는 검토할 것이 없었다).
+         *
+         * 대신 두 가지는 지킨다. 영상이 아직 없으므로 단계를 '제출됨'으로 넘기지 않고
+         * (브랜드에게 열 영상이 없는 검토 요청이 가면 안 된다), 닫는 피드백도 본문 캡션에
+         * 붙은 것으로 한정한다. 저장 경로와 버전 쌓기는 손으로 낼 때와 완전히 같다.
+         */
+        const captionOnly = stepKey === "video" && !carriedFileUrl && Boolean(caption);
+        if (stepKey === "video" && !carriedFileUrl && !captionOnly) {
+          return jsonError("초안 영상 파일을 올려 주세요.");
+        }
         if (stepKey === "upload" && !link) return jsonError("게시물 링크를 입력해 주세요.");
 
         const adCode = String((body as any).adCode || "").trim().slice(0, 500);
@@ -1723,7 +1747,7 @@ export default async (req: Request, context: Context) => {
           INSERT INTO collab_deliverables (id, collab_id, stage_key, kind, version, status, payload, submitted_by)
           VALUES (${deliverableId}, ${collabId}, ${stageKey}, ${stepKey}, ${version}, 'submitted', ${JSON.stringify(payload)}, ${caller.username})
         `;
-        if (stage && !["done", "skipped"].includes(stage.status)) {
+        if (stage && !["done", "skipped"].includes(stage.status) && !captionOnly) {
           await db.sql`
             UPDATE collab_stages SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
           `;
@@ -1743,13 +1767,26 @@ export default async (req: Request, context: Context) => {
          * (wont_apply)으로 이미 사유를 남긴 것은 건드리지 않는다 — 그것은 "고치지
          * 않기로 했다"는 별개의 결론이고, 덮어쓰면 브랜드가 읽은 사유가 사라진다.
          */
-        await db.sql`
-          UPDATE collab_feedbacks
-             SET status = 'applied', resolved_by = ${caller.username}, resolved_at = NOW()
-           WHERE collab_id = ${collabId}
-             AND stage_key = ${stageKey}
-             AND status IN ('open', 'relayed')
-        `;
+        if (captionOnly) {
+          // 영상은 아직 내지 않았다. 본문 캡션에 붙은 말만 반영으로 닫는다 — 영상에
+          // 대한 지적까지 함께 닫으면 브랜드 화면에서 고치지 않은 것이 고친 것이 된다.
+          await db.sql`
+            UPDATE collab_feedbacks
+               SET status = 'applied', resolved_by = ${caller.username}, resolved_at = NOW()
+             WHERE collab_id = ${collabId}
+               AND stage_key = ${stageKey}
+               AND anchor = 'caption'
+               AND status IN ('open', 'relayed')
+          `;
+        } else {
+          await db.sql`
+            UPDATE collab_feedbacks
+               SET status = 'applied', resolved_by = ${caller.username}, resolved_at = NOW()
+             WHERE collab_id = ${collabId}
+               AND stage_key = ${stageKey}
+               AND status IN ('open', 'relayed')
+          `;
+        }
 
         if (stepKey === "upload") {
           await db.sql`
@@ -1767,10 +1804,12 @@ export default async (req: Request, context: Context) => {
           type: "deliverable_submitted",
           ...actor,
           stageKey,
-          summary: `${stepKey === "plan" ? "기획안" : stepKey === "video" ? "초안 영상" : "업로드 결과"} 등록 (v${version})`,
-          payload: { deliverableId, kind: stepKey, version },
+          summary: `${
+            stepKey === "plan" ? "기획안" : stepKey === "video" ? (captionOnly ? "본문 캡션" : "초안 영상") : "업로드 결과"
+          } 등록 (v${version})`,
+          payload: { deliverableId, kind: stepKey, version, captionOnly },
         });
-        return Response.json({ success: true, deliverableId, version });
+        return Response.json({ success: true, deliverableId, version, captionOnly });
       }
 
       // 브랜드: 기획안 · 영상 바로 아래에 남기는 피드백 -------------------
@@ -1909,6 +1948,27 @@ export default async (req: Request, context: Context) => {
             409,
           );
         }
+        /*
+         * 영상 검토 완료는 열어 볼 영상이 있을 때만 된다.
+         *
+         * 본문 캡션은 영상보다 먼저 저장될 수 있으므로(save_step_work 의 captionOnly),
+         * 영상 단계에 제출물이 있다는 것만으로는 영상이 올라왔다고 볼 수 없다. 파일 없이
+         * 검토가 닫히면 업로드 단계가 열리고, 브랜드가 한 번도 보지 못한 영상이 그대로
+         * 게시된다.
+         */
+        if (stepKey === "video") {
+          const videoRows = (await db.sql`
+            SELECT payload FROM collab_deliverables
+            WHERE collab_id = ${collabId} AND stage_key = ${stage?.stage_key || "video"}
+            ORDER BY version DESC LIMIT 1
+          `) as any[];
+          const rawVideo = videoRows?.[0]?.payload;
+          const videoPayload = (typeof rawVideo === "string" ? JSON.parse(rawVideo || "{}") : rawVideo) || {};
+          if (!String(videoPayload.fileUrl || "").trim()) {
+            return jsonError("아직 초안 영상이 올라오지 않았습니다.", 409);
+          }
+        }
+
         let settlement: any = null;
 
         if (stepKey === "upload") {

@@ -131,7 +131,10 @@ const loadCampaigns = async (db: any, me: string, mineOnly: boolean) =>
          JOIN collab_stages s ON s.collab_id = cc.id
         WHERE cc.campaign_id = c.id AND cc.status = 'in_progress' AND s.status = 'submitted') AS review_count
     FROM campaigns c
-    WHERE c.status = 'active'
+    -- 브랜드가 목록에서 내린 캠페인(deleted_at)은 담당자 일감에서도 빠진다.
+    -- 이력에는 그대로 남아 있다(api-campaigns 의 DELETE 주석 참고).
+    WHERE c.deleted_at IS NULL
+      AND c.status = 'active'
       AND c.admin_approved_at IS NOT NULL
       AND (${mineOnly} = false OR LOWER(COALESCE(c.manager_username, '')) = ${me})
     ORDER BY

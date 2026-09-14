@@ -92,11 +92,18 @@ const contactEmail = (raw: unknown) => String(raw ?? "").trim().slice(0, 200);
 /**
  * 담당자 칸 검사. 자릿수는 9~11 로 본다 — 휴대폰(10~11)뿐 아니라 02 지역번호(9)로
  * 적는 브랜드가 있어서, 휴대폰만 허용하면 유효한 번호가 반려된다.
+ *
+ * 이메일도 함께 받는다. 계약서 · 세금계산서 · 정산 안내는 전화로 보낼 수 없는
+ * 서류인데, 비워 두면 계정 이메일로 보내게 되고 대행사 계정에서는 이 캠페인을
+ * 모르는 사람에게 간다. 주소 모양은 "@ 와 점이 있는가"까지만 본다 — 그 이상은
+ * 실제로 보내 봐야 알 수 있고, 지나치게 깐깐한 정규식은 멀쩡한 주소를 반려한다.
  */
-const contactError = (person: string, phone: string): string => {
+const contactError = (person: string, phone: string, email: string): string => {
   if (!person) return "캠페인 담당자 이름을 입력해 주세요.";
   if (!phone) return "캠페인 담당자 연락처를 입력해 주세요.";
   if (phone.length < 9 || phone.length > 11) return "담당자 연락처의 자릿수를 확인해 주세요.";
+  if (!email) return "캠페인 담당자 이메일을 입력해 주세요.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "담당자 이메일 주소를 다시 확인해 주세요.";
   return "";
 };
 
@@ -168,6 +175,12 @@ export default async (req: Request) => {
         const shaped = forOwner ? one[0] : stripPrivateFields(one)[0];
         // 담당자 연락처는 파라미터가 아니라 토큰으로 확인된 주인에게만 남긴다.
         const verified = forOwner && (await viewerOwnsAccount(req, owner));
+        // 삭제한 캠페인은 이력으로만 남는다(DELETE 주석 참고). 브랜드 자신은 이력에서
+        // 열어 볼 수 있어야 하지만, 남에게는 없는 캠페인이다 — 목록에서 내렸는데
+        // 주소를 아는 사람에게 그대로 열리면 지원까지 들어온다.
+        if ((result[0] as any).deleted_at && !verified) {
+          return Response.json({ error: "Campaign not found" }, { status: 404 });
+        }
         return Response.json({ campaign: verified ? shaped : stripContact([shaped])[0] });
       }
 
@@ -188,7 +201,8 @@ export default async (req: Request) => {
         SELECT c.*, COALESCE(ac.cnt, 0)::int as application_count
         FROM campaigns c
         LEFT JOIN (SELECT campaign_id, COUNT(*) as cnt FROM campaign_applications GROUP BY campaign_id) ac ON ac.campaign_id = c.id
-        WHERE (${business} = '' OR c.business_username = ${business})
+        WHERE c.deleted_at IS NULL
+          AND (${business} = '' OR c.business_username = ${business})
           AND (${status} = '' OR c.status = ${status})
           AND (${type} = '' OR c.type = ${type})
           AND (${category} = '' OR c.category = ${category})
@@ -250,7 +264,8 @@ export default async (req: Request) => {
       // 한 번 더 본다 — 이 값이 비면 담당자는 다시 "누구에게 전화하나"로 돌아간다.
       const person = contactName(body.contact_person);
       const phone = contactPhone(body.contact_phone);
-      const contactErr = contactError(person, phone);
+      const email = contactEmail(body.contact_email);
+      const contactErr = contactError(person, phone, email);
       if (contactErr) return Response.json({ error: contactErr }, { status: 400 });
 
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -290,7 +305,7 @@ export default async (req: Request) => {
           ${body.sns_category || ""}, ${csv(body.follower_tiers)}, ${briefFee(body.min_views)},
           ${csv(body.influencer_styles)}, ${csv(body.exclude_keywords)},
           ${body.target_audience || ""},
-          ${person}, ${phone}, ${contactEmail(body.contact_email)}
+          ${person}, ${phone}, ${email}
         )
       `;
 
@@ -416,9 +431,19 @@ export default async (req: Request) => {
       const auth = await requireAccountOwner(req, String((existing[0] as any).business_username || ""));
       if (!auth.ok) return auth.response;
 
-      await db.sql`DELETE FROM campaign_collabs WHERE campaign_id = ${id}`;
-      await db.sql`DELETE FROM campaign_applications WHERE campaign_id = ${id}`;
-      await db.sql`DELETE FROM campaigns WHERE id = ${id}`;
+      /**
+       * 삭제는 "목록에서 내린다"까지다. 행은 지우지 않는다.
+       *
+       * 예전에는 캠페인과 함께 협업(campaign_collabs)·지원서(campaign_applications)를
+       * 통째로 지웠다. 그런데 브랜드의 '캠페인 이력' 메뉴는 그 세 표를 읽어 지난
+       * 집행과 성과를 보여 주는 화면이다 — 끝난 캠페인을 협업 메뉴에서 정리하면
+       * 이력에서도 같이 사라졌고, 이미 쓴 광고비와 올라간 콘텐츠 기록이 없어졌다.
+       * 이력은 기록이니 지워지면 안 된다.
+       *
+       * 그래서 시각 하나만 남긴다. 목록·공개 상세·담당자 화면은 이 값이 있는 행을
+       * 건너뛰고(deleted_at IS NULL), 이력 API 는 그대로 읽는다.
+       */
+      await db.sql`UPDATE campaigns SET deleted_at = NOW(), updated_at = NOW() WHERE id = ${id}`;
 
       return Response.json({ success: true });
     } catch (err: any) {

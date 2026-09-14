@@ -40,7 +40,7 @@ export default async (req: Request) => {
           SELECT id, title, brand_name, business_username, type, end_date, created_at,
                  (SELECT COUNT(*)::int FROM campaign_applications WHERE campaign_id = campaigns.id) AS application_count
           FROM campaigns
-          WHERE status = 'active' AND COALESCE(manager_username, '') = ''
+          WHERE deleted_at IS NULL AND status = 'active' AND COALESCE(manager_username, '') = ''
           ORDER BY created_at DESC
           LIMIT 50
         `,
@@ -54,6 +54,7 @@ export default async (req: Request) => {
           FROM campaign_applications ca
           JOIN campaigns c ON c.id = ca.campaign_id
           WHERE ca.status = 'pending'
+            AND c.deleted_at IS NULL
             AND c.status = 'active'
             AND (${mineOnly} = false OR COALESCE(c.manager_username, '') = ${me})
           ORDER BY

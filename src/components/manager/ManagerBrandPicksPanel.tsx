@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatNumberWithCommas } from '../../utils/formatters';
+import { digitsOnly, formatNumberWithCommas } from '../../utils/formatters';
 import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
 
 /**
@@ -11,10 +11,19 @@ import InfluencerCandidateCard from '../collab/InfluencerCandidateCard';
  * 사이 브랜드 화면에는 며칠씩 아무 변화가 없었다. 선택은 기록이 아니라 답을 기다리는
  * 요청이므로 담당자 대시보드의 첫 화면이 이것이다.
  *
- * 여기서 하는 일은 하나뿐이다 — 진행하기. 누르면 협업이 만들어지고 브랜드와
- * 인플루언서 양쪽 진행사항에 같은 건이 뜬다. 조건을 다듬어 제안서로 보내고 싶으면
- * 캠페인 안의 명단으로 들어간다. 이 화면에 제안 폼까지 얹으면 "빨리 진행"과
- * "조건 협의" 두 가지 일이 한 칸에 섞여, 둘 다 반쯤 하게 된다.
+ * 여기서 하는 일은 둘이다 — 금액을 맞추고, 진행하기.
+ *
+ * 금액은 브랜드가 고른 다음에도 움직인다. 담당자가 전화로 협의하면서 "이 사람은
+ * 조금 더" 가 되는 것이 보통이라, 그때마다 캠페인 명단으로 들어가 고치고 다시
+ * 이 화면으로 돌아와 진행을 눌러야 했다. 진행하기가 있는 자리에서 그 금액을 고칠
+ * 수 있어야 한다 — 협업이 만들어지는 순간 굳는 값이 바로 이 두 칸이다.
+ *
+ * 진행하기는 여러 명을 한 번에 누른다. 선택은 캠페인 단위로 내려오는데(브랜드가
+ * 후보 다섯 명을 한꺼번에 고른다) 버튼이 카드마다 하나뿐이면 담당자는 확인창을
+ * 다섯 번 지나야 했다. 캠페인 머리줄에서 고른 사람 전체를 한 번에 넘긴다.
+ *
+ * 제안서를 다듬어 보내는 일은 여전히 캠페인 안의 명단에서 한다. 이 화면에 제안
+ * 폼까지 얹으면 "빨리 진행"과 "조건 협의" 가 한 칸에 섞여 둘 다 반쯤 하게 된다.
  */
 
 interface ManagerBrandPicksPanelProps {
@@ -46,6 +55,14 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
   const [query, setQuery] = useState('');
   /** 담당자가 직접 접거나 펼친 캠페인. 손대지 않은 캠페인은 기본값을 따른다. */
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  /**
+   * 한 번에 진행할 후보. 캠페인이 섞이지 않게 id 만 담고, 버튼은 캠페인 머리줄에서
+   * 자기 그룹에 속한 id 만 골라 쓴다.
+   */
+  const [checked, setChecked] = useState<string[]>([]);
+  /** 금액을 펼쳐 고치고 있는 후보 하나. 두 칸 모두 숫자만 담는다(쉼표는 화면에서만). */
+  const [feeFor, setFeeFor] = useState('');
+  const [feeDraft, setFeeDraft] = useState({ quotedFee: '', payoutFee: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +129,44 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
   const isOpen = (campaignId: string) =>
     toggled[campaignId] !== undefined ? toggled[campaignId] : groups.length <= 3;
 
+  /**
+   * 금액 고치기. 저장은 명단 화면과 같은 quote 액션을 쓴다 — 브랜드 제시가는 컬럼,
+   * 지급 단가는 제안 초안으로 들어가는 그 처리 그대로다. 이미 제안을 보낸 건의
+   * 지급 단가는 서버가 막고 warning 을 돌려주므로, 그 문장을 그대로 띄운다.
+   */
+  const openFeeEditor = (pick: any) => {
+    setFeeFor(pick.id);
+    setFeeDraft({
+      quotedFee: String(pick.quotedFee || ''),
+      payoutFee: String(pick.payoutFee || ''),
+    });
+  };
+
+  const saveFee = async (pick: any) => {
+    setBusyId(pick.id);
+    const res = await apiService.listupAction(pick.id, 'quote', {
+      quote: { fee: Number(feeDraft.quotedFee || 0), secondUseFee: Number(pick.quotedSecondUseFee || 0) },
+      // 지급 단가는 아직 제안을 보내지 않은 건에서만 함께 보낸다. 보낸 건에 실어
+      // 보내면 서버가 경고를 돌려주는데, 담당자가 고친 것도 없이 경고를 읽게 된다.
+      ...(pick.outreachStatus === 'not_sent'
+        ? {
+            payout: {
+              fee: Number(feeDraft.payoutFee || 0),
+              secondUseFee: Number(pick.payoutSecondUseFee || 0),
+            },
+          }
+        : {}),
+    });
+    setBusyId('');
+    if (res.error) {
+      onNotify(res.error, 'error');
+      return;
+    }
+    setFeeFor('');
+    onNotify(res.warning || '금액을 저장했습니다.', res.warning ? 'error' : 'success');
+    await load();
+  };
+
   const startCollab = async (pick: any) => {
     if (
       !window.confirm(
@@ -135,6 +190,38 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
     await load();
   };
 
+  /**
+   * 고른 후보를 순서대로 진행한다. 한 건이 막혀도(이미 수락된 건, 브랜드 선택이
+   * 풀린 건) 나머지는 넘긴다 — 다섯 명 중 하나 때문에 전부 멈추면 담당자는 어디까지
+   * 됐는지 모른 채 다시 눌러야 한다. 끝에 된 수와 막힌 사유를 함께 알린다.
+   */
+  const startCollabBatch = async (rows: any[]) => {
+    const targets = rows.filter((r) => checked.includes(r.id));
+    if (targets.length === 0) return;
+    if (
+      !window.confirm(
+        `선택한 ${targets.length}명의 협업을 시작합니다.\n` +
+          `${targets.map((r) => `@${r.influencerUsername}`).join(', ')}\n\n` +
+          '브랜드와 인플루언서 진행사항에 바로 표시되고 되돌릴 수 없습니다. 계속하시겠습니까?',
+      )
+    ) {
+      return;
+    }
+    setBusyId('batch');
+    let done = 0;
+    const failed: string[] = [];
+    for (const pick of targets) {
+      const res = await apiService.listupAction(pick.id, 'start_collab', {});
+      if (res.error) failed.push(`@${pick.influencerUsername} ${res.error}`);
+      else done += 1;
+    }
+    setBusyId('');
+    setChecked((prev) => prev.filter((id) => !targets.some((t) => t.id === id)));
+    if (done > 0) onNotify(`${done}명의 협업을 시작했습니다. 양쪽 진행사항에 표시됩니다.`);
+    if (failed.length > 0) onNotify(failed.join(' / '), 'error');
+    await load();
+  };
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5">
@@ -145,7 +232,8 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
             {totalRows !== picks.length ? ` / ${picks.length}` : ''})
           </h3>
           <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-            브랜드가 진행을 요청한 사람들입니다. 진행하기를 누르면 협업이 만들어지고 브랜드·인플루언서
+            브랜드가 진행을 요청한 사람들입니다. 금액은 이 자리에서 바로 고칠 수 있고, 여러 명을 골라
+            한 번에 진행할 수 있습니다. 진행하기를 누르면 협업이 만들어지고 브랜드·인플루언서
             진행사항에 함께 표시됩니다.
           </p>
         </div>
@@ -252,6 +340,40 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
               </div>
             </div>
 
+            {/* 한 번에 진행하기. 캠페인 머리줄 바로 아래에 둔다 — 고른 카드가
+                화면 밖으로 밀려도 버튼과 선택 인원이 같은 자리에 남아 있어야 한다. */}
+            {isOpen(group.campaignId) && (() => {
+              const startable = group.rows.filter(r => r.outreachStatus !== 'accepted');
+              const picked = startable.filter(r => checked.includes(r.id));
+              if (startable.length === 0) return null;
+              return (
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() =>
+                      setChecked(prev =>
+                        picked.length === startable.length
+                          ? prev.filter(id => !startable.some(r => r.id === id))
+                          : [...prev.filter(id => !startable.some(r => r.id === id)), ...startable.map(r => r.id)],
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 text-[10px] font-black hover:bg-slate-100"
+                  >
+                    {picked.length === startable.length ? '전체 해제' : `전체 선택 (${startable.length})`}
+                  </button>
+                  <span className="text-[11px] font-black text-slate-400">
+                    {picked.length > 0 ? `${picked.length}명 선택` : '진행할 후보를 고르세요'}
+                  </span>
+                  <button
+                    onClick={() => startCollabBatch(group.rows)}
+                    disabled={picked.length === 0 || busyId === 'batch'}
+                    className="ml-auto px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black hover:bg-blue-500 disabled:opacity-40"
+                  >
+                    {busyId === 'batch' ? '진행 중...' : `선택한 ${picked.length}명 진행하기`}
+                  </button>
+                </div>
+              );
+            })()}
+
             {isOpen(group.campaignId) && (
             <div className="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch bg-slate-50/60">
               {group.rows.map(pick => {
@@ -274,16 +396,86 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
                     }
                   >
                     <div className="space-y-2">
-                      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-0.5">
-                        <span className="text-[11px] text-slate-700 font-bold">
-                          브랜드 제시가{' '}
-                          {pick.quotedFee ? `${formatNumberWithCommas(pick.quotedFee)}원` : '협의'}
-                        </span>
-                        <span className="text-[11px] text-slate-500 font-bold">
-                          지급 단가{' '}
-                          {pick.payoutFee ? `${formatNumberWithCommas(pick.payoutFee)}원` : '미입력'}
-                        </span>
-                      </div>
+                      {/* 금액 칸을 눌러 그 자리에서 고친다. 브랜드 제시가는 브랜드
+                          화면에 찍히는 값이고, 지급 단가는 협업이 만들어질 때 계약
+                          금액이 되는 값이다. 이미 제안을 보낸 건의 지급 단가는 서버가
+                          막으므로 칸을 잠근다. */}
+                      {feeFor === pick.id ? (
+                        <div className="bg-white border border-blue-200 rounded-lg px-3 py-2.5 space-y-2">
+                          <label className="block">
+                            <span className="block text-[10px] font-black text-slate-400 mb-1">
+                              브랜드 제시가 (원)
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={formatNumberWithCommas(feeDraft.quotedFee)}
+                              onChange={e =>
+                                setFeeDraft(prev => ({ ...prev, quotedFee: digitsOnly(e.target.value) }))
+                              }
+                              placeholder="비우면 협의"
+                              className="w-full text-[12px] font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="block text-[10px] font-black text-slate-400 mb-1">
+                              지급 단가 (원)
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={formatNumberWithCommas(feeDraft.payoutFee)}
+                              onChange={e =>
+                                setFeeDraft(prev => ({ ...prev, payoutFee: digitsOnly(e.target.value) }))
+                              }
+                              disabled={pick.outreachStatus !== 'not_sent'}
+                              placeholder={
+                                pick.registeredPayoutFee
+                                  ? `등록 단가 ${formatNumberWithCommas(pick.registeredPayoutFee)}`
+                                  : '비우면 등록 단가'
+                              }
+                              className="w-full text-[12px] font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                            {pick.outreachStatus !== 'not_sent' && (
+                              <span className="block text-[10px] font-bold text-slate-400 mt-1">
+                                제안을 보낸 뒤에는 회수 후에 고칠 수 있습니다.
+                              </span>
+                            )}
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => saveFee(pick)}
+                              disabled={busyId === pick.id}
+                              className="flex-1 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black hover:bg-slate-700 disabled:opacity-40"
+                            >
+                              {busyId === pick.id ? '저장 중...' : '금액 저장'}
+                            </button>
+                            <button
+                              onClick={() => setFeeFor('')}
+                              className="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg text-[10px] font-black hover:bg-slate-200"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                          <span className="text-[11px] text-slate-700 font-bold">
+                            브랜드 제시가{' '}
+                            {pick.quotedFee ? `${formatNumberWithCommas(pick.quotedFee)}원` : '협의'}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-bold">
+                            지급 단가{' '}
+                            {pick.payoutFee ? `${formatNumberWithCommas(pick.payoutFee)}원` : '미입력'}
+                          </span>
+                          <button
+                            onClick={() => openFeeEditor(pick)}
+                            className="ml-auto px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-black hover:bg-slate-200"
+                          >
+                            금액 수정
+                          </button>
+                        </div>
+                      )}
 
                       {pick.brandDecisionNote && (
                         <p className="text-[11px] text-slate-500 font-medium">
@@ -299,13 +491,34 @@ const ManagerBrandPicksPanel: React.FC<ManagerBrandPicksPanelProps> = ({
                         </p>
                       )}
 
-                      <button
-                        onClick={() => startCollab(pick)}
-                        disabled={busyId === pick.id}
-                        className="w-full px-3.5 py-2 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 disabled:opacity-40"
-                      >
-                        {busyId === pick.id ? '진행 중...' : '진행하기'}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        {/* 한 번에 진행할 후보 고르기. 이미 수락된 건은 고를 것이 없다. */}
+                        {pick.outreachStatus !== 'accepted' && (
+                          <button
+                            onClick={() =>
+                              setChecked(prev =>
+                                prev.includes(pick.id)
+                                  ? prev.filter(x => x !== pick.id)
+                                  : [...prev, pick.id],
+                              )
+                            }
+                            className={`px-2.5 py-2 rounded-lg text-[11px] font-black flex-shrink-0 ${
+                              checked.includes(pick.id)
+                                ? 'bg-slate-900 text-white hover:bg-slate-700'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            {checked.includes(pick.id) ? '선택됨' : '선택'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => startCollab(pick)}
+                          disabled={busyId === pick.id || busyId === 'batch'}
+                          className="flex-1 px-3.5 py-2 bg-blue-600 text-white rounded-lg text-[11px] font-black hover:bg-blue-500 disabled:opacity-40"
+                        >
+                          {busyId === pick.id ? '진행 중...' : '진행하기'}
+                        </button>
+                      </div>
                     </div>
                   </InfluencerCandidateCard>
                 );
