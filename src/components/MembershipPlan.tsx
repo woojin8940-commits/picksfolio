@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiService } from '../services/apiService';
 import { toAsciiSafeId } from '../utils/formatters';
 import { loadPortOne } from '../utils/externalScripts';
@@ -64,6 +64,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   // 자동결제 등록용 카드 정보. 입력값은 등록 요청에만 쓰고 화면을 닫을 때 비운다
   // (브라우저·서버 어디에도 저장하지 않는다).
   const [cardForm, setCardForm] = useState({ number: '', expiry: '', birth: '', pw2: '' });
+  const birthRef = useRef<HTMLInputElement | null>(null);
+  const pw2Ref = useRef<HTMLInputElement | null>(null);
   // 결제 대상 플랜 — 멤버십 티어.
   const [selectedTier, setSelectedTier] = useState<MembershipTier>('standard');
 
@@ -119,6 +121,30 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
   useEffect(() => {
     loadClaude();
   }, [loadClaude]);
+
+  /**
+   * 브라우저 비밀번호 관리자가 카드 칸에 넣어 둔 값을 되돌린다.
+   *
+   * 카드 비밀번호 칸이 `type="password"` 라서, 크롬은 바로 앞의 생년월일 칸을
+   * 로그인 아이디 칸으로 짐작하고 저장해 둔 아이디와 비밀번호를 두 칸에 채웠다.
+   * 리액트가 들고 있는 값은 계속 빈 문자열이라, 화면에는 채워져 보이는데 결제를
+   * 누르면 "생년월일 6자리를 입력해 주세요" 가 떴다.
+   *
+   * autoComplete 힌트만으로는 비밀번호 관리 확장 프로그램까지 막지 못해서,
+   * 결제창이 열린 직후 DOM 에 들어온 값을 리액트 값에 맞춰 지운다. 비교 대상이
+   * 리액트 값이므로 사용자가 직접 입력한 숫자는 건드리지 않는다.
+   */
+  useEffect(() => {
+    if (!confirmOpen || payMethod !== 'CARD') return;
+    const sync = () => {
+      if (birthRef.current && birthRef.current.value !== cardForm.birth) birthRef.current.value = cardForm.birth;
+      if (pw2Ref.current && pw2Ref.current.value !== cardForm.pw2) pw2Ref.current.value = cardForm.pw2;
+    };
+    sync();
+    // 자동 채우기는 칸이 그려진 뒤에 들어오기도 한다 — 잠깐 동안 몇 번 더 확인한다.
+    const timers = [50, 200, 600].map((ms) => window.setTimeout(sync, ms));
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [confirmOpen, payMethod, cardForm.birth, cardForm.pw2]);
 
   // Open the Claude plan payment window and, once the payment is verified
   // server-side, mark the plan active and refresh the credit balance.
@@ -967,8 +993,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:border-blue-400"
                       />
                       <input
+                        ref={birthRef}
                         type="text"
                         inputMode="numeric"
+                        name="cardHolderBirth"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
                         maxLength={10}
                         value={cardForm.birth}
                         onChange={(e) => setCardForm({ ...cardForm, birth: e.target.value })}
@@ -977,8 +1009,14 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       />
                     </div>
                     <input
+                      ref={pw2Ref}
                       type="password"
                       inputMode="numeric"
+                      name="cardPasswordTwoDigits"
+                      autoComplete="new-password"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-form-type="other"
                       maxLength={2}
                       value={cardForm.pw2}
                       onChange={(e) => setCardForm({ ...cardForm, pw2: e.target.value })}
