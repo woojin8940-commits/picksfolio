@@ -1,22 +1,28 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { ExternalLink, Share2, Radio, Users, Briefcase, Search, Hash } from 'lucide-react';
-import { Block, BlockDisplayType, DesignSettings, TemplateType, ProductFolder, OpenScheduleItem } from '../types';
+import { Share2, Radio, Users } from 'lucide-react';
+import { Block, DesignSettings, ProductFolder, OpenScheduleItem } from '../types';
 import { getPublicProfileByUsername, supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
-import { enabledDefaultButtons } from '../utils/pageButtons';
-import PlatformLogo from './PlatformLogo';
-import { externalLinkProps, openExternalUrl } from '../utils/externalLink';
-import { categoryChipStyle, normalizeHexColor, themeBackgroundOf, themeIsDark } from '../utils/themeColor';
+import { themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
 import type { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
-import MediaAuto from './MediaAuto';
-import { renderPortfolioHtml } from './richText';
+import PublicPageBody, { DEFAULT_PUBLIC_DESIGN } from './PublicPageBody';
+import ProductSheet from './ProductSheet';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const loadLiveStream = () => import('./LiveStream');
+
+/**
+ * socials 의 기본값.
+ *
+ * liveNotify 는 남겨 둔다 — 예전에 저장된 socials 에 들어 있는 값이라, 없애도
+ * 화면에 영향이 없지만 저장된 JSON 을 덮어쓸 때 키가 사라지는 것을 막기 위해
+ * 기본값에는 그대로 둔다. 라이브 알림 버튼 자체는 더 이상 그리지 않는다.
+ */
+const DEFAULT_SOCIALS = { instagram: '', youtube: '', tiktok: '', phone: '', kakao: '', naver: '', businessProposal: false, liveNotify: false };
 const LiveStream = React.lazy(loadLiveStream);
 
 interface UserPageProps {
@@ -45,7 +51,6 @@ interface LinkData {
   category?: string;
 }
 
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1080&q=70';
 const ENABLE_SUPABASE_REALTIME = import.meta.env.VITE_ENABLE_SUPABASE_REALTIME === '1';
 
 const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
@@ -64,22 +69,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   });
 
   const [design, setDesign] = useState<DesignSettings>(() => {
-    const defaultDesign: DesignSettings = {
-      templateType: TemplateType.SHOPPABLE_GRID,
-      theme: 'white',
-      accentColor: '#2563EB',
-      borderRadius: 'full',
-      gridGap: 1,
-      gridColumns: 2,
-      gridStyle: 'magazine',
-      fontFamily: 'Sans',
-      buttonStyle: 'solid',
-      backgroundType: 'solid',
-      customGradient: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
-      portfolioHeaderColor: 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)',
-      profileLayout: 'center',
-      homePriority: 'curation'
-    };
+    /* 기본값은 미리보기와 함께 쓴다(components/PublicPageBody). */
+    const defaultDesign = DEFAULT_PUBLIC_DESIGN;
 
     try {
       if (!normalizedUsername) return defaultDesign;
@@ -92,18 +83,14 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   });
 
   const [socials, setSocials] = useState(() => {
-    // liveNotify 는 남겨 둔다 — 예전에 저장된 socials 에 들어 있는 값이라, 없애도
-    // 화면에 영향이 없지만 저장된 JSON 을 덮어쓸 때 키가 사라지는 것을 막기 위해
-    // 기본값에는 그대로 둔다. 라이브 알림 버튼 자체는 더 이상 그리지 않는다.
-    const defaultSocials = { instagram: '', youtube: '', tiktok: '', phone: '', kakao: '', naver: '', businessProposal: false, liveNotify: false };
     try {
-      if (!normalizedUsername) return defaultSocials;
+      if (!normalizedUsername) return DEFAULT_SOCIALS;
       const saved = localStorage.getItem(`picks_socials_${normalizedUsername}`);
-      if (saved) return { ...defaultSocials, ...JSON.parse(saved) };
+      if (saved) return { ...DEFAULT_SOCIALS, ...JSON.parse(saved) };
     } catch (e) {
       console.error('Error parsing socials:', e);
     }
-    return defaultSocials;
+    return DEFAULT_SOCIALS;
   });
 
   const [_productFolders, setProductFolders] = useState<ProductFolder[]>(() => {
@@ -247,7 +234,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               } catch { localStorage.setItem(`picks_profile_${normalizedUsername}`, JSON.stringify(apiData.profile)); }
             }
             if (apiData.socials) {
-              setSocials((prev: any) => ({ ...prev, ...(apiData.socials as any) }));
+              /* 서버 값으로 갈아 끼운다(먼저 그려 둔 localStorage 값 위에 덮지 않는다).
+                 켜 둔 값만 저장되는 칸이 있어서 — 검색바는 껐을 때만 hideSearchBar 가
+                 남는다 — 두 벌을 겹치면 서버에서 지워진 값이 예전 localStorage 에서
+                 살아남는다. 검색바를 다시 켜도 이 기기에서만 계속 숨어 있던 이유다. */
+              setSocials({ ...DEFAULT_SOCIALS, ...(apiData.socials as any) });
               localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(apiData.socials));
             }
             if (apiData.productFolders) {
@@ -280,7 +271,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               setBlocks(Array.isArray(parsed) ? parsed : []);
             }
             if (savedDesign) setDesign(prev => ({ ...prev, ...JSON.parse(savedDesign) }));
-            if (savedSocials) setSocials(JSON.parse(savedSocials));
+            if (savedSocials) setSocials({ ...DEFAULT_SOCIALS, ...JSON.parse(savedSocials) });
             if (savedProfile) {
               const parsed = JSON.parse(savedProfile);
               setProfile({
@@ -713,290 +704,64 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     };
   }, [normalizedUsername]);
 
-  const categories = useMemo(() => {
-    const ordered: string[] = [];
-    const seen = new Set<string>();
-    for (const b of blocks) {
-      const c = b.category;
-      if (c && !seen.has(c)) { seen.add(c); ordered.push(c); }
-    }
-    for (const c of linkGridCategories) {
-      if (!seen.has(c)) { seen.add(c); ordered.push(c); }
-    }
-    return ['전체', ...ordered];
-  }, [blocks, linkGridCategories]);
-
-  const filteredBlocks = useMemo(() => {
-    let result = blocks;
-    if (selectedCategory !== '전체') {
-      result = result.filter(b => b.category === selectedCategory);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      result = result.filter(b =>
-        b.title?.toLowerCase().includes(q) ||
-        b.products?.some(p => p.name?.toLowerCase().includes(q))
-      );
-    }
-    return result;
-  }, [blocks, selectedCategory, searchQuery]);
-
-  const orderedCategoryGroups = useMemo(() => {
-    if (selectedCategory !== '전체') return [];
-    const seen = new Set<string>();
-    const order: string[] = [];
-    for (const b of filteredBlocks) {
-      const cat = b.category || '';
-      if (!seen.has(cat)) { seen.add(cat); order.push(cat); }
-    }
-    return order.map(cat => ({
-      category: cat,
-      blocks: filteredBlocks.filter(b => (b.category || '') === cat),
-    }));
-  }, [filteredBlocks, selectedCategory]);
-
-  /**
-   * 실제로 그릴 묶음. 카테고리를 고르지 않았으면 카테고리별로 나눠 그리고, 골랐으면
-   * 그 카테고리의 카드만 한 묶음으로 그린다.
-   *
-   * 예전에는 이 판단을 그리는 자리 네 곳(포트폴리오 · 큐레이션 × 그리드 · 목록)에
-   * 똑같이 적어 두었다. 같은 문장을 네 번 고치지 않도록 한 곳으로 모았다.
-   */
-  const displayGroups = useMemo(
-    () => (selectedCategory === '전체' && orderedCategoryGroups.length > 0
-      ? orderedCategoryGroups
-      : [{ category: '', blocks: filteredBlocks }]),
-    [selectedCategory, orderedCategoryGroups, filteredBlocks],
-  );
-
-  const activeScheduleItems = useMemo(() => {
-    return openSchedule.filter(item => item.isActive && new Date(item.date) >= new Date(new Date().toDateString()));
-  }, [openSchedule]);
-
   const selectedBlock = useMemo(() => blocks.find(b => b.id === selectedBlockId), [blocks, selectedBlockId]);
 
   /**
-   * 카드 전체가 눌리는 자리(일정 블록처럼 `<a>` 로 감쌀 수 없는 곳)에서만 쓴다.
-   * 링크로 그릴 수 있는 버튼은 externalLinkProps 로 진짜 `<a>` 를 만든다 —
-   * 스크립트로 새 탭을 여는 건 팝업으로 취급돼 조용히 막히기 때문이다.
+   * 본문(커버 · 버튼 · 카테고리 · 카드)은 PublicPageBody 가, 상품 서랍은
+   * ProductSheet 가 그린다 — 편집 화면 오른쪽의 미리보기가 같은 컴포넌트를 쓴다.
+   * 여기 남은 값은 본문 아래의 푸터가 쓰는 것뿐이다.
    */
-  const openLink = (url: string) => {
-    openExternalUrl(url);
-  };
-
-
-  const getFontStyle = () => {
-    if (design.fontFamily === 'Serif') return 'font-serif tracking-tight';
-    if (design.fontFamily === 'Mono') return 'font-mono uppercase tracking-tighter';
-    return 'font-sans tracking-tight';
-  };
-
-  // 배경과 명암은 utils/themeColor 한 곳에서 정한다. 자유 배경(theme: 'custom')은
-  // 고른 색의 밝기로 어두운 테마인지를 판단하므로, 크림색을 골라도 글자가 검게 나온다.
-  const themeBg = themeBackgroundOf(design);
   const isDark = themeIsDark(design);
-  /**
-   * 커버 사진 아래를 배경색으로 자연스럽게 녹이는 그라데이션.
-   *
-   * 예전에는 `${themeBg}88` 처럼 배경 문자열에 알파를 붙였는데, 배경이 색이 아니면
-   * (예전 커스텀 배경의 `linear-gradient(...)`) CSS 가 통째로 무효가 되어 덮개가
-   * 사라졌다. 색으로 읽히는 값만 쓰고, 아니면 테마 명암에 맞는 색으로 대체한다.
-   */
-  const coverFadeHex = normalizeHexColor(themeBg) || (isDark ? '#050A15' : '#FFFFFF');
-  const coverFade = `linear-gradient(to top, ${coverFadeHex} 0%, ${coverFadeHex}88 15%, transparent 50%)`;
-  /**
-   * 커버 사진이 뜨기 전에 그 자리를 채우는 배경.
-   *
-   * 커버가 파랗게 번쩍이던 이유가 여기 있었다. design 은 처음에 기본값(파란
-   * 그라데이션)으로 시작해서 — 첫 방문이면 localStorage 에도 저장된 값이 없다 —
-   * 서버에서 실제 설정이 오기 전까지 커버 칸이 파랗게 칠해진다. 그 위에 사진이
-   * 디코딩되는 순간 통째로 갈리니, 페이지를 열 때마다 파란 판이 한 번 스쳤다.
-   *
-   * 그래서 커버 사진이 있는 페이지에서는 사진 밑을 테마 배경색으로 둔다. 사진이
-   * 늦게 와도 갈리는 것은 흰 판(또는 검은 판)에서 사진으로이고, 그건 로딩처럼
-   * 보인다. 사진 없이 색만 쓰는 페이지는 그 색이 최종 결과이므로 그대로 칠한다.
-   *
-   * 문자열 폴백도 고쳤다. 'to br' 은 CSS 에 없는 값이라(bottom right 이어야 한다)
-   * 그 선언이 통째로 무효가 됐고, 커버 칸이 아무 색도 없이 남았다.
-   */
-  const coverPlaceholder = design.portfolioHeaderImage
-    ? coverFadeHex
-    : design.portfolioHeaderColor || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)';
-  const textColor = isDark ? 'text-white' : 'text-slate-900';
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
   /**
-   * 선과 그림자는 메인 홈페이지와 같은 것을 쓴다.
+   * 라이브 방송 띠.
    *
-   * 홈은 흰 바탕 위에 검정을 아주 옅게 섞은 머리카락 선(#0B0F1A 10%)과, 아래로만
-   * 길게 퍼지는 부드러운 그림자로 면을 나눈다. 개인페이지는 그동안 슬레이트 계열
-   * 회색 선(border-slate-100 · border-slate-200)과 `shadow-sm` 을 섞어 써서 테두리가
-   * 푸르스름하고 그림자는 카드에 딱 붙어 보였다 — 같은 서비스인데 홈과 결이 달랐다.
-   * 어두운 테마에서는 같은 역할을 흰색 알파로 대신한다.
-   *
-   * 카드·버튼·검색줄이 모두 이 두 값을 쓰므로, 질감을 손볼 때 한 곳만 고치면 된다.
+   * 커버 사진 위에 얹히는 띠라 두 레이아웃이 같은 자리에 그린다 — 본문의
+   * topBanner 로 넘긴다. 예전에는 포트폴리오 · 큐레이션 분기에 같은 마크업을 두 번
+   * 적어 두어서, 한쪽만 고쳐지면 레이아웃을 바꿨을 때 띠가 달라졌다.
    */
-  const hairline = isDark ? 'border-white/15' : 'border-[#0B0F1A]/10';
-  const softShadow = isDark
-    ? 'shadow-[0_12px_28px_-18px_rgba(0,0,0,0.75)]'
-    : 'shadow-[0_12px_28px_-18px_rgba(11,15,26,0.45)]';
-
-  /**
-   * 카테고리 버튼.
-   *
-   * 예전에는 얇은 회색 선 + 흐린 글자(text-slate-400)에 여백도 좁아서, 누를 수 있는
-   * 버튼인지 그냥 꼬리표인지 구별되지 않았다. 홈의 알약 버튼과 같은 규격으로 맞춘다
-   * — 흰 바탕, 머리카락 선, 아래로 옅게 깔리는 그림자, 읽히는 글자색. 고른 버튼은
-   * 강조색을 그대로 칠하고(아래 categoryChipStyle) 그림자만 한 단계 깊게 둬서 줄에서
-   * 떠오르게 한다.
-   *
-   * 색을 직접 고른 페이지는 categoryChipStyle 이 배경·글자·선색을 인라인으로
-   * 덮어쓰므로, 여기서 정하는 것은 어디까지나 고르지 않았을 때의 기본값이다.
-   */
-  const categoryChipClass = (active: boolean) => [
-    'shrink-0 px-4 py-2 text-[11px] font-black whitespace-nowrap rounded-full border transition-all duration-200 active:scale-95',
-    active
-      ? 'text-white border-transparent shadow-[0_10px_22px_-12px_rgba(11,15,26,0.6)]'
-      : isDark
-        ? 'bg-white/[0.07] border-white/15 text-white/70 hover:bg-white/[0.12] hover:border-white/25'
-        : 'bg-white border-[#0B0F1A]/10 text-[#39415C] shadow-[0_2px_8px_-5px_rgba(11,15,26,0.4)] hover:border-[#0B0F1A]/20 hover:shadow-[0_8px_18px_-10px_rgba(11,15,26,0.45)]',
-  ].join(' ');
-
-  /**
-   * 기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버).
-   *
-   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다 — 예전에 버튼 줄을 두 곳에
-   * 따로 적어 두었더니 한쪽만 고쳐져서 레이아웃을 바꾸면 버튼이 달라지는 일이 있었다.
-   *
-   * 버튼 바탕은 일부러 심심하게 둔다. 강조색(accentColor)은 비즈니스 제안 버튼 하나만
-   * 쓰고, 기본 버튼은 테마에 맞춘 흰/투명 배경 + 얇은 선으로만 구분한다. 버튼 전체를
-   * 브랜드 색(카카오 노랑 · 유튜브 빨강)으로 칠하면 버튼 줄이 알록달록해져서 정작
-   * 눌러야 하는 비즈니스 제안 버튼이 묻힌다.
-   *
-   * 대신 이름 앞에 플랫폼 로고를 붙인다 — 이름만 글자로 있으면 커스텀 버튼과
-   * 구별되지 않아 어디로 가는 버튼인지 읽어야 알 수 있었다. 로고는 브랜드색 타일
-   * 안에 들어 있어(components/PlatformLogo) 버튼 바탕은 그대로 두고 마크만 색을
-   * 가진다.
-   */
-  /**
-   * 상품명 검색바를 보여 줄지.
-   *
-   * 편집기의 버튼 칸에서 끌 수 있다. 끈 상태만 저장되므로(hideSearchBar), 예전에
-   * 저장된 페이지에는 이 값이 없고 검색바는 지금까지처럼 그대로 나온다. 끄면 두
-   * 레이아웃(포트폴리오 · 큐레이션) 양쪽에서 함께 사라진다 — 한쪽만 사라지면
-   * 레이아웃을 바꿨을 때 끈 적 없는 검색바가 다시 나타난다.
-   */
-  const showSearchBar = !socials?.hideSearchBar;
-
-  const defaultButtonsBlock = enabledDefaultButtons(socials).map(btn => (
-    <a
-      key={btn.key}
-      {...externalLinkProps(btn.url)}
-      className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-95 ${softShadow} ${
-        isDark
-          ? 'bg-white/[0.07] border-white/15 text-white hover:bg-white/[0.12] hover:border-white/25'
-          : 'bg-white border-[#0B0F1A]/10 text-[#39415C] hover:border-[#0B0F1A]/20'
-      }`}
-      /* 색을 직접 고른 버튼만 인라인으로 덮어쓴다 — 고르지 않았으면 위의 테마 색 그대로. */
-      style={{
-        backgroundColor: normalizeHexColor(btn.bg) || undefined,
-        color: normalizeHexColor(btn.text) || undefined,
-        borderColor: btn.bg ? 'transparent' : undefined,
-      }}
+  const liveBanner = liveState.isLive ? (
+    <div
+      onClick={() => setShowLiveModal(true)}
+      className="relative cursor-pointer overflow-hidden group w-screen left-1/2 -translate-x-1/2"
     >
-      <PlatformLogo platform={btn.key} size={16} className="mr-2" />
-      {btn.label}
-    </a>
-  ));
-
-  /**
-   * 커버 사진 위, 이름 아래의 한 줄 소개.
-   *
-   * 비어 있으면 아무것도 그리지 않는다. 예전에는 'Visual Storyteller' 를 대신
-   * 넣었는데, 소개를 적지 않은 사람의 페이지에도 영어 문구가 떠서 자기가 쓴 줄인지
-   * 시스템 문구인지 알 수 없었다 — 지우려고 소개칸을 비우면 오히려 그 문구가 다시
-   * 나왔다. 안 적었으면 이름만 나오는 것이 맞다.
-   *
-   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다.
-   */
-  const bioLine = (profile?.bio || '').trim() ? (
-    <p className={`font-black uppercase tracking-[0.3em] ${
-      design.portfolioFontSize === 'small' ? 'text-[8px]' :
-      design.portfolioFontSize === 'large' ? 'text-sm' :
-      'text-[10px]'
-    }`} style={{ color: design.accentColor }}>{profile?.bio}</p>
-  ) : null;
-
-  /**
-   * 커버 사진 위에 얹히는 이름 · 소개 묶음.
-   *
-   * 이름도 소개와 같다 — 적지 않았으면 아무것도 그리지 않는다. 예전에는 이름 자리에
-   * 로그인 아이디(@아이디)를 대신 넣었는데, 표시 이름을 비워 둔 사람의 커버 사진 위에
-   * 아이디가 큰 글씨로 올라갔고 지울 방법이 없었다(칸을 비우면 다시 아이디가 나왔다).
-   * 둘 다 비면 이 자리는 통째로 사라져서 커버 사진만 남는다.
-   *
-   * 가입할 때 저장되는 표시 이름의 기본값은 아이디다(auth-signup). 그것은 저장된
-   * 값이라 링크 관리에서 바꾸거나 비울 수 있다 — 여기서 아이디를 끼워 넣는 것과는
-   * 다르다. 이 자리는 앞으로도 저장된 표시 이름만 그린다.
-   *
-   * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다.
-   */
-  const coverIdentity = ((profile?.full_name || '').trim() || (profile?.bio || '').trim()) ? (
-    <div className="absolute bottom-6 left-6 right-6">
-      {(profile?.full_name || '').trim() && (
-        <h3 className={`text-2xl md:text-3xl font-black tracking-tighter mb-1 ${textColor}`}>{profile?.full_name}</h3>
-      )}
-      {bioLine}
-    </div>
-  ) : null;
-
-  const visibleAboutSections = (profile?.aboutSections || []).filter(
-    s => (s.title || '').trim() || (s.content || '').trim()
-  );
-  const aboutSectionsBlock = visibleAboutSections.length > 0 ? (
-    <div className="mt-6 space-y-2">
-      <h4 className="text-[10px] font-black uppercase tracking-[0.2em] px-2" style={{ color: design.accentColor }}>About</h4>
-      <div className="space-y-2">
-        {visibleAboutSections.map(section => (
-          <details
-            key={section.id}
-            className={`group rounded-xl border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
-          >
-            <summary className={`flex items-center justify-between cursor-pointer px-4 py-3 list-none ${textColor}`}>
-              <span className="text-xs font-black truncate pr-3">{section.title || '소개'}</span>
-              <svg className="w-3 h-3 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </summary>
-            <div className={`px-4 pb-4 -mt-1 text-xs font-medium whitespace-pre-wrap ${subTextColor}`} style={{ lineHeight: 1.75 }}>
-              {section.content}
+      <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 px-4 py-3">
+        <div className="flex items-center justify-between max-w-2xl mx-auto">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-8 h-8 rounded-full border-2 border-white/80 overflow-hidden">
+                <SafeImage src={profile?.avatar_url || DEFAULT_AVATAR} className="w-full h-full object-cover" />
+              </div>
+              <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-600 rounded-full border-2 border-white flex items-center justify-center">
+                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+              </div>
             </div>
-          </details>
-        ))}
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="bg-white/20 backdrop-blur-sm text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">LIVE</span>
+                <span className="text-white text-xs font-black">라이브 방송 중</span>
+              </div>
+              <span className="text-white/70 text-[10px] font-medium">탭하여 시청하기</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-full px-2.5 py-1">
+              <Users size={12} className="text-white" />
+              <span className="text-white text-[10px] font-bold">{liveState.viewerCount.toLocaleString()}</span>
+            </div>
+            <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-all">
+              <Radio size={14} className="text-white" />
+            </div>
+          </div>
+        </div>
       </div>
+      <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
     </div>
   ) : null;
-
-  const backgroundStyle = (design.background_image) ? {
-    backgroundImage: `linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), url(${design.background_image})`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundAttachment: 'fixed'
-  } : { background: themeBg };
-
-  /**
-   * 가운데 칸 바깥(넓은 화면의 좌우 여백)에 깔리는 색.
-   *
-   * 예전에는 위의 backgroundStyle 을 페이지 전체에도 함께 칠했다. 좁은 화면에서는
-   * 가운데 칸이 화면을 꽉 채우니 차이가 없지만, 넓은 화면에서는 고른 배경색이 창
-   * 끝까지 번져서 상단 커버만 한가운데에 떠 있는 그림이 됐다. 지금은 배경색을 커버와
-   * 같은 폭까지만 칠하고 좌우 여백은 흰 종이로 둔다 — 커버의 좌우 경계가 곧 배경색의
-   * 경계다. 배경 사진을 올린 페이지도 같은 폭 안에서만 보인다.
-   */
-  const pageCanvasStyle = { backgroundColor: '#FFFFFF' };
 
   return (
-    <div className={`min-h-screen ${getFontStyle()} ${textColor} userpage-root`} style={pageCanvasStyle}>
+    <>
       {onBackToDashboard && (
         <button
           type="button"
@@ -1011,721 +776,24 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           대시보드
         </button>
       )}
-      {/* PC: Full-width vertical layout */}
-      <div className="min-h-screen">
-        {/* 좌우 여백은 세 겹으로 겹쳐 있었다 — 가운데 칸(px-4/md:px-8) · 큐레이션
-            묶음(px-4) · 그리드 칸(px-4). 모바일에서 한쪽에만 48px 이 쌓여서 max-w-md
-            칸의 실제 내용 폭이 390px 화면에서 294px 밖에 남지 않았다. 세 겹을 그대로
-            두되 값만 줄여 모바일 20px · 데스크톱 40px 로 맞춘다. 카테고리 줄의
-            음수 마진(-mx-*)도 가운데 칸과 같은 값을 써야 칸 끝까지 스크롤된다. */}
-        <div className="max-w-md md:max-w-2xl mx-auto min-h-screen flex flex-col relative px-3 md:px-6" style={backgroundStyle}>
-
-        {design.homePriority === 'portfolio' ? (
-          /* PORTFOLIO LAYOUT */
-          <div className="flex-1 flex flex-col">
-            {/* Live Broadcast Top Banner - Portfolio */}
-            {liveState.isLive && (
-              <div
-                onClick={() => setShowLiveModal(true)}
-                className="relative cursor-pointer overflow-hidden group w-screen left-1/2 -translate-x-1/2"
-              >
-                <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 px-4 py-3">
-                  <div className="flex items-center justify-between max-w-2xl mx-auto">
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <div className="w-8 h-8 rounded-full border-2 border-white/80 overflow-hidden">
-                          <SafeImage src={profile?.avatar_url || DEFAULT_AVATAR} className="w-full h-full object-cover" />
-                        </div>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-600 rounded-full border-2 border-white flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                        </div>
-                      </div>
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                          <span className="bg-white/20 backdrop-blur-sm text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">LIVE</span>
-                          <span className="text-white text-xs font-black">라이브 방송 중</span>
-                        </div>
-                        <span className="text-white/70 text-[10px] font-medium">탭하여 시청하기</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-full px-2.5 py-1">
-                        <Users size={12} className="text-white" />
-                        <span className="text-white text-[10px] font-bold">{liveState.viewerCount.toLocaleString()}</span>
-                      </div>
-                      <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-all">
-                        <Radio size={14} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
-              </div>
-            )}
-
-            <div
-              className="relative aspect-[4/5] flex-shrink-0 -mx-3 md:-mx-6"
-              style={{ background: coverPlaceholder }}
-            >
-              {design.portfolioHeaderImage && (
-                <MediaAuto
-                  src={design.portfolioHeaderImage}
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
-                />
-              )}
-              {/* 커버도 색도 정하지 않은 페이지의 기본 사진. 아래 큐레이션 커버와 같은
-                  컴포넌트로 그린다 — 예전에는 이 한 곳만 SafeImage 라서, 같은 사진이
-                  레이아웃에 따라 한쪽은 번쩍이고 한쪽은 스며들었다. */}
-              {!design.portfolioHeaderImage && !design.portfolioHeaderColor && (
-                <MediaAuto
-                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
-              {coverIdentity}
-            </div>
-
-            <div className="px-2 md:px-4 pt-4 pb-8 space-y-12">
-              {/* Social & Contact Links */}
-              {/* 버튼은 마우스를 올리면 2px 떠오르고 그림자가 생긴다. 예전에는 이 줄에
-                  overflow-x-auto 가 걸려 있어서(가로 스크롤을 켜면 세로도 함께 잘린다)
-                  떠오른 만큼 위가 잘리고 그림자는 아래가 잘렸다 — 버튼 줄 바로 위가
-                  상단 커버 사진이라, 위쪽이 사진에 걸려 잘린 것처럼 보였다. 버튼은
-                  flex-wrap 으로 이미 줄바꿈되니 가로 스크롤은 필요하지 않다. 대신
-                  위아래로 조금 여유를 둬서 떠오른 버튼과 그림자가 다 보이게 한다. */}
-              <div className="flex gap-2.5 pt-4 pb-2 justify-center flex-wrap">
-                {socials.businessProposal && (
-                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF' }}>
-                    <Briefcase size={14} strokeWidth={2.5} />
-                    {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
-                  </a>
-                )}
-                {defaultButtonsBlock}
-                {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
-                    <ExternalLink size={14} strokeWidth={2.5} />
-                    {btn.label}
-                  </a>
-                ))}
-              </div>
-
-              {aboutSectionsBlock}
-
-              {/* Open Schedule Section - Portfolio Layout */}
-              {activeScheduleItems.length > 0 && (
-                <div className="mt-6 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-[1px]" style={{ backgroundColor: design.accentColor }}></div>
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: design.accentColor }}>Upcoming Schedule</h4>
-                  </div>
-                  <div className="space-y-1.5">
-                    {activeScheduleItems.map(item => (
-                      <div
-                        key={item.id}
-                        className={`rounded-xl px-3 py-2.5 border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
-                        onClick={() => item.link && openLink(item.link)}
-                        style={{ cursor: item.link ? 'pointer' : 'default' }}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-black" style={{ backgroundColor: design.accentColor }}>
-                            <div className="text-center leading-none">
-                              <div className="text-[13px] font-black">{new Date(item.date).getDate()}</div>
-                              <div className="text-[7px] uppercase opacity-80 mt-0.5">{new Date(item.date).toLocaleString('ko-KR', { month: 'short' })}</div>
-                            </div>
-                          </div>
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <h5 className={`text-xs font-black truncate ${textColor}`}>{item.title}</h5>
-                            <span className={`text-xs font-bold truncate whitespace-nowrap ${subTextColor}`}>
-                              {new Date(item.date).toLocaleDateString('ko-KR', { weekday: 'short', month: 'long', day: 'numeric' })}{item.time ? ` ${item.time}` : ''}
-                            </span>
-                            {item.description && <p className={`text-[9px] font-medium mt-0.5 truncate ${subTextColor}`}>{item.description}</p>}
-                          </div>
-                          {item.link && (
-                            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${design.accentColor}20` }}>
-                              <ExternalLink size={9} style={{ color: design.accentColor }} />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-
-            </div>
-
-            <div id="curation-section" className="pt-8 px-1 md:px-2">
-               <div className="flex justify-between items-end mb-8 px-1 md:px-2">
-                 <div>
-                   <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-1" style={{ color: design.accentColor }}>My Curations</h4>
-                   <h3 className="text-2xl font-black tracking-tighter">Explore My Picks</h3>
-                 </div>
-                 <div className="text-[10px] font-black opacity-30 uppercase tracking-widest">{filteredBlocks.length} Items</div>
-               </div>
-
-               {/* Product Search Bar */}
-               {/* 좁은 화면에서는 검색줄을 한 단계 얇게 둔다(py-2.5). 글자와 아이콘
-                   크기는 그대로라 눌리는 영역은 충분하고, 모바일에서 유독 두꺼워
-                   보이던 느낌만 덜어 낸다. 넓은 화면은 예전 두께를 유지한다. */}
-               {showSearchBar && (
-               <div className="px-1 md:px-2 mb-6">
-                 <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.06] focus-within:border-white/30' : 'bg-white focus-within:border-[#0B0F1A]/25'}`}>
-                   <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
-                   <input
-                     type="text"
-                     value={searchQuery}
-                     onChange={(e) => setSearchQuery(e.target.value)}
-                     placeholder="상품명 검색..."
-                     className={`flex-1 bg-transparent text-sm font-medium outline-none placeholder:opacity-50 ${isDark ? 'text-white placeholder:text-white/40' : 'text-slate-900 placeholder:text-slate-400'}`}
-                   />
-                   {searchQuery && (
-                     <button onClick={() => setSearchQuery('')} className={`text-xs font-black px-2 py-1 rounded-lg transition-all ${isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                       ✕
-                     </button>
-                   )}
-                 </div>
-               </div>
-               )}
-
-               <div className="mb-7 py-1.5 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 -mx-3 md:-mx-6">
-                 {categories.map(cat => (
-                   <button
-                     key={cat}
-                     onClick={() => setSelectedCategory(cat)}
-                     className={categoryChipClass(selectedCategory === cat)}
-                     style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
-                   >
-                     {cat}
-                   </button>
-                 ))}
-               </div>
-
-               {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                 <div className="w-full px-1 md:px-2" style={{ paddingBottom: '100px' }}>
-                   {displayGroups.map((group) => (
-                     <div key={group.category || '__all'}>
-                       {selectedCategory === '전체' && group.category && (
-                         <div className={`flex items-center gap-3 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                           <Hash size={14} style={{ color: design.accentColor }} />
-                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
-                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                           <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
-                         </div>
-                       )}
-                       <div
-                         className="grid grid-flow-dense transition-all duration-500"
-                         style={{
-                           gridTemplateColumns: 'repeat(6, 1fr)',
-                           gap: `${Math.max(design.gridGap, 4)}px`,
-                         }}
-                       >
-                         {group.blocks.map((block) => {
-                           const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                           const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
-                           const blockDisplay: BlockDisplayType = block.displayType || 'grid';
-
-                           if (blockDisplay === 'text') {
-                             return (
-                               <div
-                                 key={block.id}
-                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6 min-w-0"
-                                 style={{
-                                   gridColumn: `span ${gridSpan}`,
-                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                                   minHeight: '80px',
-                                   backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
-                                 }}
-                               >
-                                 {block.textContent ? (
-                                   <div
-                                     className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:[overflow-wrap:anywhere]"
-                                     style={{
-                                       fontSize: `${block.fontSizePx || 14}px`,
-                                       fontWeight: block.bold ? 'bold' : undefined,
-                                       fontStyle: block.italic ? 'italic' : undefined,
-                                       textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                                       color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                                     }}
-                                     dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
-                                   />
-                                 ) : (
-                                   <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
-                                 )}
-                               </div>
-                             );
-                           }
-
-                           if (blockDisplay === 'minimal') {
-                             return (
-                               <div
-                                 key={block.id}
-                                 onClick={() => {
-                                   setSelectedBlockId(block.id);
-                                   trackClick(username, block.id);
-                                 }}
-                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07]' : 'bg-white'}`}
-                                 style={{
-                                   gridColumn: `span ${gridSpan}`,
-                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                                 }}
-                               >
-                                 {block.coverMedia && (
-                                   <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} border ${hairline}`}>
-                                     <MediaAuto
-                                       src={block.coverMedia || FALLBACK_IMAGE}
-                                       className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                                       style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
-                                     />
-                                   </div>
-                                 )}
-                                 <div className="w-full min-w-0 text-center px-14">
-                                   <div className={`text-[13px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
-                                 </div>
-                                 {(block.products?.length || 0) > 0 && (
-                                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                     <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
-                                   </div>
-                                 )}
-                               </div>
-                             );
-                           }
-
-                           return (
-                             <div
-                               key={block.id}
-                               onClick={() => {
-                                 setSelectedBlockId(block.id);
-                                 trackClick(username, block.id);
-                               }}
-                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} aspect-square`}
-                               style={{
-                                 gridColumn: `span ${gridSpan}`,
-                                 borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                               }}
-                             >
-                               <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
-                               <div className="absolute top-3 right-3">
-                                 <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
-                               </div>
-                               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                                 <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                 <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                               </div>
-                             </div>
-                           );
-                         })}
-                       </div>
-                     </div>
-                   ))}
-                  </div>
-               ) : (
-                <div className="flex flex-col gap-3 pb-32">
-                  {displayGroups.map((group) => (
-                    <div key={group.category || '__all'}>
-                      {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          <Hash size={14} style={{ color: design.accentColor }} />
-                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
-                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
-                        </div>
-                      )}
-                      {group.blocks.map((block) => (
-                        (block.products || []).map(p => (
-                          <a
-                            key={p.id}
-                            {...externalLinkProps(p.link)}
-                            onClick={() => trackClick(username, block.id)}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07] hover:bg-white/[0.12] hover:border-white/25' : 'bg-white hover:border-[#0B0F1A]/20'}`}
-                            style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
-                          >
-                            <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
-                                <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-black truncate">{p.name}</h4>
-                              </div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
-                              <ExternalLink size={12} />
-                            </div>
-                          </a>
-                        ))
-                      ))}
-                    </div>
-                  ))}
-                 </div>
-               )}
-            </div>
-
-          </div>
-        ) : (
-          /* CURATION LAYOUT */
-          <div className="flex-1 flex flex-col">
-            {/* Live Broadcast Top Banner */}
-            {liveState.isLive && (
-              <div
-                onClick={() => setShowLiveModal(true)}
-                className="relative cursor-pointer overflow-hidden group w-screen left-1/2 -translate-x-1/2"
-              >
-                <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 px-4 py-3">
-                  <div className="flex items-center justify-between max-w-2xl mx-auto">
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <div className="w-8 h-8 rounded-full border-2 border-white/80 overflow-hidden">
-                          <SafeImage src={profile?.avatar_url || DEFAULT_AVATAR} className="w-full h-full object-cover" />
-                        </div>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-600 rounded-full border-2 border-white flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                        </div>
-                      </div>
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                          <span className="bg-white/20 backdrop-blur-sm text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">LIVE</span>
-                          <span className="text-white text-xs font-black">라이브 방송 중</span>
-                        </div>
-                        <span className="text-white/70 text-[10px] font-medium">탭하여 시청하기</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-full px-2.5 py-1">
-                        <Users size={12} className="text-white" />
-                        <span className="text-white text-[10px] font-bold">{liveState.viewerCount.toLocaleString()}</span>
-                      </div>
-                      <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-all">
-                        <Radio size={14} className="text-white" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
-              </div>
-            )}
-
-            {/* Large Cover Image for Curation Layout - same style as Portfolio */}
-            <div
-              className="relative aspect-[4/5] flex-shrink-0 -mx-3 md:-mx-6"
-              style={{ background: coverPlaceholder }}
-            >
-              {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
-                <MediaAuto
-                  src={design.portfolioHeaderImage || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&q=70"}
-                  priority
-                  fadeIn
-                  width={1280}
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: `center ${design.portfolioHeaderImagePosition || '50'}%` }}
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-inherit via-transparent to-transparent" style={{ background: coverFade }}></div>
-              {coverIdentity}
-            </div>
-
-            <header className="relative pt-4 pb-6 px-5 md:px-10 text-center shrink-0 overflow-hidden -mx-3 md:-mx-6">
-
-              {/* 위 포트폴리오 레이아웃과 같은 이유로 가로 스크롤을 걷어 냈다. 이쪽은
-                  줄 자체에 위아래 여백이 없어서 떠오르는 모션과 그림자가 더 잘렸다. */}
-              <div className="flex gap-2.5 py-1.5 justify-center flex-wrap">
-                {socials.businessProposal && (
-                  <a {...externalLinkProps(`/${normalizedUsername}/proposal`)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer" style={{ backgroundColor: normalizeHexColor(socials.businessProposalBg) || design.accentColor, color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF' }}>
-                    <Briefcase size={14} strokeWidth={2.5} />
-                    {language === 'en' ? 'Business Proposal' : '비즈니스 제안'}
-                  </a>
-                )}
-                {defaultButtonsBlock}
-                {(socials.customButtons || []).filter((b: any) => b.label?.trim() && b.url?.trim()).map((btn: any) => (
-                  <a key={btn.id} {...externalLinkProps(btn.url)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:brightness-110 transition-all shadow-sm whitespace-nowrap shrink-0" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
-                    <ExternalLink size={14} strokeWidth={2.5} />
-                    {btn.label}
-                  </a>
-                ))}
-              </div>
-
-              {aboutSectionsBlock}
-
-              {/* Open Schedule Section - Curation Layout */}
-              {activeScheduleItems.length > 0 && (
-                <div className="mt-6 px-2 space-y-2">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] px-2" style={{ color: design.accentColor }}>Upcoming Schedule</h4>
-                  <div className="space-y-1.5">
-                    {activeScheduleItems.map(item => (
-                      <div
-                        key={item.id}
-                        className={`rounded-xl px-3 py-2.5 border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
-                        onClick={() => item.link && openLink(item.link)}
-                        style={{ cursor: item.link ? 'pointer' : 'default' }}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-black" style={{ backgroundColor: design.accentColor }}>
-                            <div className="text-center leading-none">
-                              <div className="text-[13px] font-black">{new Date(item.date).getDate()}</div>
-                              <div className="text-[7px] uppercase opacity-80 mt-0.5">{new Date(item.date).toLocaleString('ko-KR', { month: 'short' })}</div>
-                            </div>
-                          </div>
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <h5 className={`text-xs font-black truncate ${textColor}`}>{item.title}</h5>
-                            <span className={`text-xs font-bold truncate whitespace-nowrap ${subTextColor}`}>
-                              {new Date(item.date).toLocaleDateString('ko-KR', { weekday: 'short', month: 'long', day: 'numeric' })}{item.time ? ` ${item.time}` : ''}
-                            </span>
-                            {item.description && <p className={`text-[9px] font-medium mt-0.5 truncate ${subTextColor}`}>{item.description}</p>}
-                          </div>
-                          {item.link && (
-                            <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${design.accentColor}20` }}>
-                              <ExternalLink size={9} style={{ color: design.accentColor }} />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            </header>
-
-            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-5 md:px-10 backdrop-blur-md -mx-3 md:-mx-6">
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={categoryChipClass(selectedCategory === cat)}
-                  style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-
-            {/* Product Search Bar */}
-            {/* 큐레이션 레이아웃의 검색줄도 같은 두께를 쓴다. */}
-            {showSearchBar && (
-            <div className="px-2 md:px-4 mb-2">
-              <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.06] focus-within:border-white/30' : 'bg-white focus-within:border-[#0B0F1A]/25'}`}>
-                <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="상품명 검색..."
-                  className={`flex-1 bg-transparent text-sm font-medium outline-none placeholder:opacity-50 ${isDark ? 'text-white placeholder:text-white/40' : 'text-slate-900 placeholder:text-slate-400'}`}
-                />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className={`text-xs font-black px-2 py-1 rounded-lg transition-all ${isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-            )}
-
-            <main className="flex-1 px-2 md:px-4 py-6">
-              {/* Supabase Links Grid */}
-              {links.length > 0 && (
-                <div className="grid grid-cols-1 gap-4 mb-10">
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] px-2" style={{ color: design.accentColor }}>Featured Links</h4>
-                  <div className={design.templateType === TemplateType.SHOPPABLE_GRID ? "grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6" : "flex flex-col gap-3 md:gap-4"}>
-                    {links.map((link) => (
-                      <a 
-                        {...externalLinkProps(link.url)}
-                        onClick={() => trackClick(username, link.id)}
-                        className={`group relative overflow-hidden transition-all hover:scale-[1.02] shadow-xl ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'} ${design.templateType === TemplateType.SHOPPABLE_GRID ? 'rounded-[2rem] aspect-square border' : 'rounded-2xl p-4 flex items-center gap-4 border'}`}
-                      >
-                        {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                          <>
-                            <SafeImage src={link.image || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt={link.title} />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-5">
-                              <p className="text-white text-xs font-black truncate">{link.title}</p>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-slate-100 dark:bg-slate-800 border border-white/10">
-                              <SafeImage src={link.image || FALLBACK_IMAGE} className="w-full h-full object-cover" alt={link.title} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-black truncate">{link.title}</p>
-                              <p className="text-[10px] opacity-40 font-bold truncate">{link.url.replace('https://', '').replace('http://', '')}</p>
-                            </div>
-                            <ExternalLink size={14} className="opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-opacity" />
-                          </>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                <div className="w-full" style={{ paddingBottom: '100px' }}>
-                  {displayGroups.map((group) => (
-                    <div key={group.category || '__all'}>
-                      {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          <Hash size={14} style={{ color: design.accentColor }} />
-                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
-                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
-                        </div>
-                      )}
-                      <div
-                        className="grid grid-flow-dense"
-                        style={{
-                          gridTemplateColumns: 'repeat(6, 1fr)',
-                          gap: `${Math.max(design.gridGap, 4)}px`,
-                        }}
-                      >
-                        {group.blocks.map((block) => {
-                          const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                          const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
-                          const blockDisplay: BlockDisplayType = block.displayType || 'grid';
-
-                          if (blockDisplay === 'text') {
-                            return (
-                              <div
-                                key={block.id}
-                                className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
-                                style={{
-                                  gridColumn: `span ${gridSpan}`,
-                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
-                                  minHeight: '80px',
-                                  backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
-                                }}
-                              >
-                                {block.textContent ? (
-                                  <div
-                                    className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:[overflow-wrap:anywhere]"
-                                    style={{
-                                      fontSize: `${block.fontSizePx || 14}px`,
-                                      fontWeight: block.bold ? 'bold' : undefined,
-                                      fontStyle: block.italic ? 'italic' : undefined,
-                                      textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                                      color: block.color || (isDark ? 'rgba(255,255,255,0.8)' : '#37352f'),
-                                    }}
-                                    dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
-                                  />
-                                ) : (
-                                  <div className={`text-sm opacity-50 ${isDark ? 'text-white/40' : 'text-slate-300'}`}>텍스트를 입력하세요</div>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          if (blockDisplay === 'minimal') {
-                            return (
-                              <div
-                                key={block.id}
-                                onClick={() => {
-                                  setSelectedBlockId(block.id);
-                                  trackClick(username, block.id);
-                                }}
-                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07]' : 'bg-white'}`}
-                                style={{
-                                  gridColumn: `span ${gridSpan}`,
-                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                                }}
-                              >
-                                {block.coverMedia && (
-                                  <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} border ${hairline}`}>
-                                    <MediaAuto
-                                      src={block.coverMedia || FALLBACK_IMAGE}
-                                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                                      style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined}
-                                    />
-                                  </div>
-                                )}
-                                <div className="w-full min-w-0 text-center px-14">
-                                  <div className={`text-[13px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{block.title}</div>
-                                </div>
-                                {(block.products?.length || 0) > 0 && (
-                                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                    <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products.length}</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={block.id}
-                              onClick={() => {
-                                setSelectedBlockId(block.id);
-                                trackClick(username, block.id);
-                              }}
-                              className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} aspect-square`}
-                              style={{
-                                gridColumn: `span ${gridSpan}`,
-                                borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
-                              }}
-                            >
-                              <MediaAuto src={block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover opacity-90 transition-transform duration-1000 group-hover:scale-105" style={block.coverMediaPosition ? { objectPosition: `${block.coverMediaPosition.x}% ${block.coverMediaPosition.y}%` } : undefined} />
-                              <div className="absolute top-3 right-3">
-                                <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
-                              </div>
-                              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                                <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3 pb-32">
-                  {displayGroups.map((group) => (
-                    <div key={group.category || '__all'}>
-                      {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          <Hash size={14} style={{ color: design.accentColor }} />
-                          <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
-                          <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
-                        </div>
-                      )}
-                      {group.blocks.map((block) => (
-                        (block.products || []).map(p => (
-                          <a
-                            key={p.id}
-                            {...externalLinkProps(p.link)}
-                            onClick={() => trackClick(username, block.id)}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07] hover:bg-white/[0.12] hover:border-white/25' : 'bg-white hover:border-[#0B0F1A]/20'}`}
-                            style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
-                          >
-                            <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
-                                <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-black truncate">{p.name}</h4>
-                              </div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center opacity-100 md:opacity-20 md:group-hover:opacity-100 transition-all shrink-0" style={{ backgroundColor: design.accentColor, color: '#fff' }}>
-                              <ExternalLink size={12} />
-                            </div>
-                          </a>
-                        ))
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </main>
-
-          </div>
-        )}
+      <PublicPageBody
+        design={design}
+        profile={profile}
+        socials={socials}
+        blocks={blocks}
+        linkGridCategories={linkGridCategories}
+        openSchedule={openSchedule}
+        featuredLinks={links}
+        proposalHref={`/${normalizedUsername}/proposal`}
+        language={language}
+        selectedCategory={selectedCategory}
+        onSelectCategory={setSelectedCategory}
+        searchQuery={searchQuery}
+        onSearchQuery={setSearchQuery}
+        onSelectBlock={setSelectedBlockId}
+        onTrackClick={(blockId) => trackClick(username, blockId)}
+        topBanner={liveBanner}
+      >
 
         {/* Footer */}
         <footer className="py-12 flex flex-col items-center space-y-6 shrink-0">
@@ -1780,61 +848,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         </footer>
 
         {/* Product Detail Drawer */}
-        {/* 그림자는 열려 있을 때만 그린다. 이 서랍은 닫혀 있어도 계속 붙어 있고
-            (translate-y-full 로 화면 밖에 내려둔다), 위로 60px 번지는 그림자는
-            화면 밖으로 내려가지 않는다 — 아무것도 누르지 않은 페이지의 아래쪽에
-            서랍 폭만큼 어두운 그라데이션이 늘 올라와 있었고, 그 위에 걸친 사업자
-            정보까지 함께 어두워졌다. */}
-        <div className={`fixed bottom-0 left-0 right-0 max-w-3xl mx-auto p-6 sm:p-8 md:p-10 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] rounded-t-[2.5rem] sm:rounded-t-[3rem] transition-transform duration-500 z-[110] ${selectedBlockId ? 'translate-y-0 shadow-[0_-20px_60px_rgba(0,0,0,0.3)]' : 'translate-y-full shadow-none'} ${isDark ? 'bg-[#0f172a] text-white' : 'bg-white text-slate-900'}`}>
-          <div className={`w-12 h-1 rounded-full mx-auto mb-8 cursor-pointer ${isDark ? 'bg-white/20' : 'bg-slate-200'}`} onClick={() => setSelectedBlockId(null)}></div>
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-blue-600 mb-1">Shop the Selection</h4>
-              <h3 className="text-lg font-black tracking-tight">{selectedBlock?.title}</h3>
-            </div>
-            <button onClick={() => setSelectedBlockId(null)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isDark ? 'bg-white/10 text-white/40 hover:text-white' : 'bg-slate-100 text-slate-400 hover:text-slate-900'}`}>✕</button>
-          </div>
-          <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-2 scrollbar-hide pb-4">
-            {selectedBlock?.products.map((p) => (
-              <div 
-                key={p.id} 
-                className={`flex items-center justify-between p-5 rounded-2xl border group shadow-sm transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:border-blue-200'}`}
-              >
-                <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                  {/* Product Thumbnail */}
-                  <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
-                    <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || selectedBlock?.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <a
-                        {...externalLinkProps(p.link)}
-                        onClick={() => {
-                          trackClick(username, selectedBlockId || '');
-                        }}
-                        className={`text-sm font-black truncate hover:underline cursor-pointer ${isDark ? 'text-white' : 'text-slate-900'}`}
-                      >
-                        {p.name}
-                      </a>
-                    </div>
-                    <span className={`text-[9px] font-bold truncate opacity-60 block ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{p.link.replace('https://', '').replace('http://', '').split('/')[0]}</span>
-                  </div>
-                </div>
-                <a 
-                  {...externalLinkProps(p.link)}
-                  onClick={() => {
-                    trackClick(username, selectedBlockId || '');
-                  }}
-                  className="px-5 py-2.5 rounded-xl text-[10px] font-black text-white shadow-md active:scale-90 transition-all shrink-0 flex items-center justify-center" 
-                  style={{ backgroundColor: design.accentColor }}
-                >
-                  구매하기
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-        {selectedBlockId && <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[90] transition-opacity" onClick={() => setSelectedBlockId(null)}></div>}
+        <ProductSheet
+          block={selectedBlock || null}
+          design={design}
+          onClose={() => setSelectedBlockId(null)}
+          onProductClick={() => trackClick(username, selectedBlockId || '')}
+        />
         
         {/* Live Commerce Modal - keep mounted once opened, only close on user action */}
         {showLiveModal && (
@@ -1850,10 +869,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           </React.Suspense>
         )}
 
-
-        </div>
-      </div>
-    </div>
+      </PublicPageBody>
+    </>
   );
 };
 

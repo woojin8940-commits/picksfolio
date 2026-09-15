@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData, clearLinkCache } from '../services/prefetchService';
 import { apiService, type SaveResult } from '../services/apiService';
-import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification } from '../types';
+import { Block, BlockDisplayType, Product, ProductOption, TemplateType, DesignSettings, ProductFolder, SellerVerification, OpenScheduleItem } from '../types';
 import MediaAuto from './MediaAuto';
 import PhoneFrame from './PhoneFrame';
 import PagePreview from './PagePreview';
@@ -22,6 +22,7 @@ import {
   DEFAULT_CUSTOM_BACKGROUND,
   isLightBackground,
   normalizeHexColor,
+  themeBackgroundOf,
 } from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -357,6 +358,22 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [coverPosition, setCoverPosition] = useState<string | undefined>(() => fullDesignRef.current.portfolioHeaderImagePosition);
   // 모바일에서 실제 개인페이지를 실시간으로 확인할 수 있는 미리보기 시트.
   const [showMobilePreview, setShowMobilePreview] = useState(false);
+
+  /**
+   * 미리보기에 함께 그릴 오픈 일정.
+   *
+   * 일정은 다른 화면(OpenScheduleManagement)에서 관리하므로 여기서는 저장된 값을
+   * 읽어만 온다. 그래도 읽어 오는 이유는, 일정이 있는 페이지에서는 그 칸이 커버
+   * 사진과 카테고리 버튼 사이에 들어가기 때문이다 — 미리보기에만 없으면 여백이
+   * 실제 페이지와 달라 보인다.
+   */
+  const [previewSchedule] = useState<OpenScheduleItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(`picks_schedule_${(userName || '').toLowerCase()}`);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  });
 
   // 이미지를 Base64 데이터 URL로 변환하는 헬퍼
   const blobToDataUrl = (blob: Blob): Promise<string> => {
@@ -938,32 +955,45 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
   };
 
+  /**
+   * 지금 편집 중인 값으로 만든 디자인 한 벌.
+   *
+   * 저장(handleSaveDesign)과 오른쪽 미리보기(PagePreview)가 같은 함수를 쓴다 —
+   * 미리보기가 그리는 것이 곧 저장될 값이다. 예전에는 미리보기에 테마 · 포인트 색 ·
+   * 커버 · 레이아웃을 따로따로 넘겼고(그마저 몇 개는 빠져 있었다), 그래서 저장 전에
+   * 본 화면과 저장 후 페이지가 달랐다.
+   */
+  const buildDesignUpdate = (): DesignSettings => ({
+    ...fullDesignRef.current,
+    templateType: layoutTemplate === 'list' ? TemplateType.LINK_LIST : TemplateType.SHOPPABLE_GRID,
+    theme: themePreset,
+    accentColor: accentColor,
+    borderRadius: 'full',
+    gridGap: 1,
+    gridColumns: columns,
+    gridStyle: 'standard',
+    fontFamily: 'Sans',
+    buttonStyle: 'solid',
+    backgroundType: 'solid',
+    customGradient: customGradient,
+    customBackground: customBg,
+    categoryBgColor: categoryColors.categoryBgColor,
+    categoryTextColor: categoryColors.categoryTextColor,
+    categoryIdleBgColor: categoryColors.categoryIdleBgColor,
+    categoryIdleTextColor: categoryColors.categoryIdleTextColor,
+    profileLayout: 'center',
+    homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
+    portfolioFontSize: portfolioFontSize,
+    portfolioHeaderImage: coverImage,
+    portfolioHeaderImagePosition: coverPosition,
+  }) as DesignSettings;
+
+  /** 미리보기가 그리는 디자인. 저장 버튼이 올릴 값과 같다. */
+  const previewDesign = buildDesignUpdate();
+
   const handleSaveDesign = async () => {
     setIsSaving(true);
-    const designUpdate: Partial<DesignSettings> = {
-      ...fullDesignRef.current,
-      templateType: layoutTemplate === 'list' ? TemplateType.LINK_LIST : TemplateType.SHOPPABLE_GRID,
-      theme: themePreset,
-      accentColor: accentColor,
-      borderRadius: 'full',
-      gridGap: 1,
-      gridColumns: columns,
-      gridStyle: 'standard',
-      fontFamily: 'Sans',
-      buttonStyle: 'solid',
-      backgroundType: 'solid',
-      customGradient: customGradient,
-      customBackground: customBg,
-      categoryBgColor: categoryColors.categoryBgColor,
-      categoryTextColor: categoryColors.categoryTextColor,
-      categoryIdleBgColor: categoryColors.categoryIdleBgColor,
-      categoryIdleTextColor: categoryColors.categoryIdleTextColor,
-      profileLayout: 'center',
-      homePriority: homePriority === 'portfolio' ? 'portfolio' : 'curation',
-      portfolioFontSize: portfolioFontSize,
-      portfolioHeaderImage: coverImage,
-      portfolioHeaderImagePosition: coverPosition,
-    };
+    const designUpdate: Partial<DesignSettings> = buildDesignUpdate();
 
     // 버튼(비즈니스 제안 · 기본 버튼 · 커스텀 버튼)은 모두 socials 에 저장된다. 빈 버튼은 제외.
     //
@@ -1007,6 +1037,18 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       });
     });
 
+    /**
+     * 서버로 올릴 socials.
+     *
+     * 서버는 받은 값을 지금 저장된 값에 겹쳐 쓴다(api-site 의 deepMerge). 그래서
+     * 키를 빼고 보내는 것으로는 이미 저장된 값을 지울 수 없다 — 검색바를 껐다가
+     * 다시 켜면 hideSearchBar 를 payload 에서 빼는 것뿐이니, 서버에는 예전의 true 가
+     * 그대로 남아 검색바가 계속 숨어 있었다. 지워야 하는 값은 null 로 보낸다
+     * (서버가 null 인 칸을 지운다).
+     */
+    const socialsPayload: Record<string, any> = { ...cleanedSocials };
+    if (!cleanedSocials.hideSearchBar) socialsPayload.hideSearchBar = null;
+
     // 즉시 로컬 저장
     fullDesignRef.current = designUpdate as Record<string, any>;
     writeLocal(`picks_profile_${userName.toLowerCase()}`, profile);
@@ -1016,7 +1058,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
     // 클라우드 동기화 완료 후 결과 표시
     try {
-      const result = await apiService.saveSiteDataResult(userName, { design: designUpdate as any, profile, socials: cleanedSocials });
+      const result = await apiService.saveSiteDataResult(userName, { design: designUpdate as any, profile, socials: socialsPayload });
       if (result.ok) {
         clearLinkCache(userName);
         showSuccessFeedback('저장되었습니다!');
@@ -2274,25 +2316,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
           label="실시간 미리보기"
           liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
           contentClassName={themeIsLight ? 'text-slate-900' : 'text-white'}
-          contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
+          contentStyle={{ background: themeBackgroundOf(previewDesign) }}
         >
             <PagePreview
-              categoryColors={categoryColors}
-              theme={themePreset}
-              backgroundColor={customBg}
-              accentColor={accentColor}
-              header={{
-                color: fullDesignRef.current.portfolioHeaderColor,
-                image: coverImage,
-                imagePosition: coverPosition,
-              }}
+              design={previewDesign}
               profile={profile}
-              portfolioFontSize={portfolioFontSize}
               socials={socials}
-              homePriority={homePriority}
-              layoutTemplate={layoutTemplate}
-              curationBlocks={blocks}
+              blocks={blocks}
               managedCategories={managedCategories}
+              openSchedule={previewSchedule}
+              username={userName}
             />
         </PhoneFrame>
         </div>
@@ -2718,21 +2751,16 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                 label="실시간 미리보기"
                 liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
                 contentClassName={themeIsLight ? 'text-slate-900' : 'text-white'}
-                contentStyle={{ background: themePreset === 'white' ? '#F8FAFC' : themeBackground }}
+                contentStyle={{ background: themeBackgroundOf(previewDesign) }}
               >
                 <PagePreview
-                  categoryColors={categoryColors}
-                  theme={themePreset}
-                  backgroundColor={customBg}
-                  accentColor={accentColor}
-                  header={{ color: fullDesignRef.current.portfolioHeaderColor, image: coverImage, imagePosition: coverPosition }}
+                  design={previewDesign}
                   profile={profile}
-                  portfolioFontSize={portfolioFontSize}
                   socials={socials}
-                  homePriority={homePriority}
-                  layoutTemplate={layoutTemplate}
-                  curationBlocks={blocks}
+                  blocks={blocks}
                   managedCategories={managedCategories}
+                  openSchedule={previewSchedule}
+                  username={userName}
                 />
               </PhoneFrame>
             </div>
