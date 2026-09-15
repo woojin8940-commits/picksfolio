@@ -10,7 +10,6 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
-const ADMIN_USERNAMES = ['picksfolio'];
 
 interface LoginPageProps {
   onNavigateHome: () => void;
@@ -120,7 +119,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigateHome, onNavigateSignup,
         const hasSiteData = !!result.has_site_data;
         const phone = result.phone || '';
 
-        if (ADMIN_USERNAMES.includes(username) && onAdminLoginSuccess) {
+        // 운영자로 보낼지는 서버가 알려 준 역할(profiles.role)로만 판단한다.
+        // 예전에는 아이디 목록('picksfolio')을 화면에 박아 두고 골라냈는데, 그
+        // 아이디가 일반 계정에 다시 열린 뒤로는 새 주인이 로그인할 때마다 운영자
+        // 화면으로 끌려가 "관리자 권한이 필요합니다." 만 보게 됐다. 서버의 관리자
+        // 판정(_shared/admin-auth)도 역할을 보므로 같은 기준을 쓴다.
+        const isOperator = String(result.role || 'user').trim().toLowerCase() === 'admin';
+
+        if (isOperator && onAdminLoginSuccess) {
           // 운영자로 들어오는 탭은 운영자 슬롯을 쓴다. 이 표시가 먼저 있어야 아래
           // 저장과 Supabase 세션이 일반 유저 탭의 로그인을 덮지 않는다.
           const slotChanged = setAccountScope('operator');
