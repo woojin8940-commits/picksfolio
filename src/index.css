@@ -446,13 +446,22 @@ body.timeline-chat-open .fixed-bottom-nav {
 }
 
 /* ===== 홈·로그인 화면의 라이트(종이) 테마 =====
-   홈과 로그인 계열 화면이 같은 종이색을 쓴다. 대시보드·개인페이지·라이브는
-   그대로 다크다. body 에도 같은 색을 걸어야 iOS 의 overscroll 되돌림 구간과
-   데스크톱 zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다. App.tsx 가
-   view 가 'home' · 'login' 일 때 이 클래스를 붙이고 떠날 때 뗀다. */
+   홈과 로그인 계열 화면이 같은 종이색을 쓴다. 대시보드와 라이브는 그대로
+   다크이고, 개인페이지는 아래 userpage-canvas 를 쓴다. body 에도 같은 색을
+   걸어야 iOS 의 overscroll 되돌림 구간과 데스크톱 zoom(0.75) 이 남기는 바깥
+   여백이 검게 비치지 않는다. App.tsx 가 view 가 'home' · 'login' 일 때 이
+   클래스를 붙이고 떠날 때 뗀다. */
 body.home-paper {
   background-color: #F4F5FA;
   color: #0B0F1A;
+}
+
+/* 개인페이지(/아이디)의 배경은 상단 커버와 같은 폭까지만 칠하고 그 좌우는 흰
+   여백이다. body 도 같은 흰색으로 맞춰야 iOS overscroll 되돌림 구간과 데스크톱
+   축소가 남기는 바깥 여백에서 기본 다크 배경이 비치지 않는다. UserPage 가 붙였다
+   뗀다. */
+body.userpage-canvas {
+  background-color: #FFFFFF;
 }
 
 /* 로그인이 끝나기를 기다리는 화면도 같은 종이색이다. 그 화면은 `fixed inset-0`

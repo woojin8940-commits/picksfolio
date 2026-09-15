@@ -15,6 +15,14 @@ import React, { useEffect } from 'react';
  * 글자도 스피너 위치도 바뀌지 않아서, 로그인하는 사람 눈에는 로딩 화면이
  * 한 장만 떠 있다가 대시보드로 바뀐다.
  *
+ * 같은 이유로, 로그인 · 가입 계열 화면의 코드를 받아오는 동안에도 이 화면을 쓴다
+ * (App.tsx 의 ROUTE_LOADING_SCREEN · entryFallback). 그 자리들은 예전에 화면
+ * 안쪽에 작은 스피너를 띄우는 기본 표시(utils/lazyRoute 의 RouteFallback)를
+ * 썼는데, 홈에서 로그인 버튼을 누르면 헤더 아래에 회색 "로딩 중..." 이 한 번
+ * 떴다가 이 화면으로 바뀌어 로딩창이 둘로 보였다. 가입 직후 대시보드로 들어갈
+ * 때도 같은 일이 있었다 — 대시보드 껍데기와 그 안의 첫 화면이 서로 다른 청크라
+ * 두 번 기다리는데, 두 번째 기다림만 다른 표시를 쓰고 있었다.
+ *
  * 색은 홈·로그인 화면과 같은 종이색(#F4F5FA)이다. 예전에는 검정이었는데, 홈이
  * 종이색으로 바뀐 뒤로는 로그인 버튼을 누른 순간 화면이 한 번 검게 내려앉았다가
  * 밝은 대시보드(#f8fafc)로 돌아왔다 — 밝은 화면 사이에 검정 한 장이 끼어 있던
@@ -47,9 +55,14 @@ const AuthLoadingScreen: React.FC<{ message?: string }> = ({ message = '로그�
     };
   }, []);
 
+  // z 층을 아주 높게 둔다. 기다리는 동안에는 이 화면 위에 아무것도 남지 않아야
+  // 하는데, 대시보드 안에서도 이 화면이 쓰인다 — 대시보드의 첫 화면 청크를
+  // 기다리는 구간이 그렇다(App.tsx 의 entryFallback). 거기에는 z-[100] 인 모바일
+  // 하단 내비게이션과 z-50 인 사이드바가 이미 떠 있어서, z-50 으로는 로딩 화면
+  // 위로 대시보드 조각이 비집고 올라왔다.
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#F4F5FA]"
+      className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-[#F4F5FA]"
       role="status"
       aria-live="polite"
     >
