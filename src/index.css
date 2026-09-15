@@ -412,6 +412,26 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* 편집 화면 오른쪽 폰 안의 미리보기(components/PagePreview).
+
+   미리보기는 데스크톱 창에 있지만 폭이 약 373px — 휴대폰과 같다. 그래서 글자
+   바닥값도 위의 데스크톱 값(.userpage-root)이 아니라 휴대폰 값(위쪽
+   max-width: 767px 규칙)과 같아야 한다. 데스크톱 폭에서는 그 규칙이 걸리지 않으니
+   여기서 같은 값을 한 번 더 적는다 — 이게 없으면 미리보기의 작은 글자만 실제
+   페이지보다 한두 px 작게 나온다.
+
+   입력칸은 16px 로 못 박는다. 그보다 작으면 모바일 사파리가 칸을 누를 때 화면을
+   확대하고, 그 크기가 곧 실제 페이지의 검색칸 크기다. */
+@media (min-width: 768px) {
+  .userpage-preview [class*="text-[8px]"] { font-size: 12px !important; line-height: 1.3 !important; }
+  .userpage-preview [class*="text-[9px]"] { font-size: 12px !important; line-height: 1.3 !important; }
+  .userpage-preview [class*="text-[10px]"] { font-size: 12px !important; line-height: 1.35 !important; }
+  .userpage-preview [class*="text-[11px]"] { font-size: 13px !important; line-height: 1.4 !important; }
+  .userpage-preview input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]) {
+    font-size: 16px !important;
+  }
+}
+
 /* Bottom-fixed navigation bars: respect iOS home-indicator safe area. */
 .fixed-bottom-nav {
   padding-bottom: env(safe-area-inset-bottom, 0px);

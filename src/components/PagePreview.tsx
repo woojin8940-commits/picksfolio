@@ -1,375 +1,90 @@
 import React, { useState } from 'react';
-import { externalLinkProps } from '../utils/externalLink';
-import { ExternalLink, ChevronRight, Briefcase, Search } from 'lucide-react';
-import SafeImage from './SafeImage';
-import MediaAuto from './MediaAuto';
-import { renderPortfolioHtml } from './richText';
-import { enabledDefaultButtons } from '../utils/pageButtons';
-import PlatformLogo from './PlatformLogo';
-import {
-  type ThemePreset,
-  type CategoryChipColors,
-  PRESET_BACKGROUND,
-  categoryChipStyle,
-  isLightBackground,
-  normalizeHexColor,
-} from '../utils/themeColor';
-
-type LayoutTemplate = 'grid' | 'list';
-type HomePriority = 'curation' | 'portfolio';
-type PortfolioFontSize = 'small' | 'medium' | 'large';
-
-interface PagePreviewProps {
-  theme: ThemePreset;
-  /** 자유 배경(theme: 'custom')에서 고른 배경색. 프리셋일 때는 무시된다. */
-  backgroundColor?: string;
-  accentColor: string;
-  /** 카테고리 버튼의 배경·글자색. 고르지 않은 칸은 테마 색으로 그린다. */
-  categoryColors?: CategoryChipColors;
-  /** Cover header background/image. */
-  header: { color?: string; image?: string; imagePosition?: string | number };
-  profile: { name?: string; bio?: string };
-  portfolioFontSize: PortfolioFontSize;
-  socials: any;
-  homePriority: HomePriority;
-  layoutTemplate: LayoutTemplate;
-  /** Curation / link-grid items. */
-  curationBlocks: any[];
-  /** Explicit curation categories; derived from blocks when omitted. */
-  managedCategories?: string[];
-}
+import { Block, DesignSettings, OpenScheduleItem } from '../types';
+import PublicPageBody, { DEFAULT_PUBLIC_DESIGN, type AboutSection } from './PublicPageBody';
+import ProductSheet from './ProductSheet';
 
 /**
- * Single source of truth for the right-side phone preview used by the
- * Link Grid (LinkManagement) editor. Mirrors the real public page so the
- * editor renders identically to what visitors see.
+ * 편집 화면 오른쪽 폰 안의 미리보기.
+ *
+ * 예전에는 이 파일이 공개 페이지를 손으로 베낀 별개의 화면이었다. 폰 폭에 맞춰
+ * 글자와 여백을 따로 적어 두었기 때문에(text-[5px] · size={5} 같은 값들) 공개
+ * 페이지를 고쳐도 여기는 그대로 남아, 시간이 지나며 둘이 서로 다른 화면이 됐다 —
+ * 미리보기에만 있는 머리글("My Curations / Explore My Picks")이 포트폴리오가 아닌
+ * 레이아웃에도 나오고, 검색바가 카테고리 버튼 아래에 붙고, 배경색이 달랐고
+ * (#1E1E2E 대 #050a15), 소개 · 오픈 일정 · 카테고리 묶음은 아예 없었다.
+ *
+ * 지금은 공개 페이지와 같은 컴포넌트(PublicPageBody · ProductSheet)를 그린다.
+ * 폰 프레임 안(약 373px)이므로 `compact` 로 데스크톱 변형만 빼고, 나머지는 방문자가
+ * 보는 화면 그대로다. 미리보기지만 카테고리 · 검색 · 상품 서랍은 실제로 동작한다 —
+ * 저장하기 전에 눌러 보고 확인할 수 있어야 한다.
  */
+interface PagePreviewProps {
+  /** 지금 편집 중인 값으로 만든 디자인. 저장될 것과 같은 객체여야 한다. */
+  design: DesignSettings;
+  profile: { name?: string; bio?: string; avatar_url?: string; aboutSections?: AboutSection[] };
+  socials: any;
+  blocks: Block[];
+  /** 블록에 아직 쓰이지 않은 카테고리까지 포함한 목록. */
+  managedCategories?: string[];
+  openSchedule?: OpenScheduleItem[];
+  /** 비즈니스 제안 버튼이 갈 주소를 만드는 데 쓴다. */
+  username?: string;
+}
+
 const PagePreview: React.FC<PagePreviewProps> = ({
-  theme,
-  backgroundColor,
-  accentColor,
-  categoryColors,
-  header,
+  design,
   profile,
-  portfolioFontSize,
   socials,
-  homePriority,
-  layoutTemplate,
-  curationBlocks,
-  managedCategories,
+  blocks,
+  managedCategories = [],
+  openSchedule = [],
+  username,
 }) => {
-  const [showBottomSheet, setShowBottomSheet] = useState(false);
-  const [previewSelectedBlock, setPreviewSelectedBlock] = useState<any | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('전체');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
-  /**
-   * 미리보기가 밝은 배경인지. 프리셋은 정해져 있고, 자유 배경은 고른 색의 밝기로
-   * 정한다 — 공개 페이지(UserPage)가 쓰는 판단과 같은 함수를 쓴다.
-   */
-  const surface = theme === 'custom'
-    ? (normalizeHexColor(backgroundColor) || PRESET_BACKGROUND.midnight)
-    : PRESET_BACKGROUND[theme === 'white' ? 'white' : 'midnight'];
-  const isLight = theme === 'custom' ? isLightBackground(surface) : theme === 'white';
-  const blocks = curationBlocks || [];
+  const selectedBlock = React.useMemo(
+    () => blocks.find(b => b.id === selectedBlockId) || null,
+    [blocks, selectedBlockId],
+  );
 
-  /** 공개 페이지(UserPage)와 같은 머리카락 선·그림자. 미리보기는 폰 크기로 줄여
-      그리므로 그림자 거리만 얕게 둔다 — 색과 방향은 같다. */
-  const hairline = isLight ? 'border-[#0B0F1A]/10' : 'border-white/15';
-  const softShadow = isLight
-    ? 'shadow-[0_4px_10px_-7px_rgba(11,15,26,0.45)]'
-    : 'shadow-[0_4px_10px_-7px_rgba(0,0,0,0.75)]';
-
-  const categories = managedCategories ?? (() => {
-    const catSet = new Set<string>();
-    for (const b of blocks) {
-      if (b && b.category) catSet.add(b.category);
-    }
-    return Array.from(catSet);
-  })();
+  /* 공개 페이지는 저장된 디자인을 기본값 위에 얹어 그린다 — 미리보기도 같은 순서로
+     얹어야 아직 고르지 않은 칸이 같은 값으로 채워진다. */
+  const fullDesign = { ...DEFAULT_PUBLIC_DESIGN, ...design };
 
   return (
     <>
-      {/* Cover Header - matching personal page */}
-      <div
-        className="relative aspect-[4/5] flex-shrink-0"
-        style={{ background: header.color || 'linear-gradient(135deg, #2563EB 0%, #4f46e5 100%)' }}
-      >
-        {header.image && (
-          <SafeImage
-            src={header.image}
-            alt=""
-            className="w-full h-full object-cover"
-            style={{ objectPosition: `center ${header.imagePosition || '50'}%` }}
-          />
-        )}
-        <div
-          className="absolute inset-0"
-          style={{ background: `linear-gradient(to top, ${surface} 0%, ${surface}88 20%, transparent 50%)` }}
-        />
-        {/* 표시 이름과 소개는 적은 것만 나온다. 둘 다 비어 있으면 이 자리에 아무것도
-            그리지 않고 커버 사진만 남는다 — 실제 페이지(UserPage)와 같은 규칙이다.
-            예전에는 이름 자리에 로그인 아이디를 대신 넣어서, 지우고 싶어도 지울 수
-            없는 글자가 커버 위에 남았다. */}
-        {((profile.name || '').trim() || (profile.bio || '').trim()) && (
-          <div className="absolute bottom-2 left-3 right-3">
-            {(profile.name || '').trim() && (
-              <h3 className="text-sm font-black tracking-tighter mb-0.5">{profile.name}</h3>
-            )}
-            {(profile.bio || '').trim() && (
-              <p className={`font-black uppercase tracking-[0.2em] ${
-                portfolioFontSize === 'small' ? 'text-[5px]' :
-                portfolioFontSize === 'large' ? 'text-[8px]' :
-                'text-[6px]'
-              }`} style={{ color: accentColor }}>{profile.bio}</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Contact / action buttons — must mirror the real personal page exactly.
-          The public page renders ONLY the business-proposal button, the default
-          buttons (kakao / youtube / tiktok / naver — shown when the user filled in
-          a URL) and the user's custom buttons here (it does NOT show standalone
-          social-network badges), so the preview shows the same set and nothing the
-          user hasn't actually enabled. */}
-      {(() => {
-        const customButtons = (socials.customButtons || []).filter(
-          (b: any) => b.label?.trim() && b.url?.trim()
-        );
-        const defaultButtons = enabledDefaultButtons(socials);
-        const hasAny = socials.businessProposal || defaultButtons.length > 0 || customButtons.length > 0;
-        if (!hasAny) return null;
-        return (
-          <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto scrollbar-hide justify-center flex-wrap">
-            {socials.businessProposal && (
-              <span
-                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap"
-                style={{
-                  backgroundColor: normalizeHexColor(socials.businessProposalBg) || accentColor,
-                  color: normalizeHexColor(socials.businessProposalText) || '#FFFFFF',
-                }}
-              >
-                <Briefcase size={5} strokeWidth={2.5} />
-                비즈니스 제안
-              </span>
-            )}
-            {defaultButtons.map(btn => (
-              <span
-                key={btn.key}
-                className={`flex items-center px-1.5 py-0.5 rounded-md text-[5px] font-bold whitespace-nowrap border ${hairline} ${softShadow} ${
-                  isLight ? 'bg-white text-[#39415C]' : 'bg-white/[0.07] text-white'
-                }`}
-                style={{
-                  backgroundColor: normalizeHexColor(btn.bg) || undefined,
-                  color: normalizeHexColor(btn.text) || undefined,
-                  borderColor: btn.bg ? 'transparent' : undefined,
-                }}
-              >
-                <PlatformLogo platform={btn.key} size={7} className="mr-0.5" />
-                {btn.label}
-              </span>
-            ))}
-            {customButtons.map((btn: any) => (
-              <span key={btn.id} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[5px] font-bold text-white whitespace-nowrap" style={{ backgroundColor: btn.color || '#2563EB', color: normalizeHexColor(btn.textColor) || '#FFFFFF' }}>
-                <ExternalLink size={5} strokeWidth={2.5} />
-                {btn.label}
-              </span>
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* Content sections ordered by homePriority */}
-      <div className="flex flex-col">
-      <div style={{ order: homePriority === 'portfolio' ? 2 : 1 }}>
-      {/* Curation Section Header */}
-      <div className="px-2 pt-3 pb-1">
-        <div className="flex justify-between items-end mb-2">
-          <div>
-            <h4 className="text-[6px] font-black uppercase tracking-[0.15em] mb-0.5" style={{ color: accentColor }}>My Curations</h4>
-            <h3 className="text-[9px] font-black tracking-tighter">Explore My Picks</h3>
-          </div>
-          <div className={`text-[6px] font-black uppercase tracking-widest ${isLight ? 'text-slate-300' : 'text-white/20'}`}>{blocks.length} Items</div>
-        </div>
-      </div>
-
-      {/* Category Tabs */}
-      {(() => {
-        const previewCategories = ['전체', ...categories];
-        return previewCategories.length > 1 ? (
-          <div className="px-1.5 py-1 pb-2 overflow-x-auto scrollbar-hide flex gap-1">
-            {previewCategories.map(cat => (
-              <span
-                key={cat}
-                className={`shrink-0 px-2.5 py-[3px] text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? `text-white border-transparent ${softShadow}` : isLight ? `bg-white text-[#39415C] ${hairline} ${softShadow}` : `bg-white/[0.07] text-white/70 ${hairline}`}`}
-                style={categoryChipStyle(categoryColors, cat === '전체', accentColor)}
-              >
-                {cat}
-              </span>
-            ))}
-          </div>
-        ) : null;
-      })()}
-
-      {/* 상품명 검색바.
-          공개 페이지에는 카테고리 버튼 줄과 함께 검색칸이 있다. 미리보기에 없으면
-          버튼 칸에서 검색바를 끄고도 무엇이 사라지는지 확인할 수 없어, 같은 자리에
-          같은 줄을 둔다(미리보기이므로 입력은 받지 않는다). */}
-      {!socials?.hideSearchBar && (
-        <div className="px-1.5 pb-2">
-          <div className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.06]'}`}>
-            <Search size={6} strokeWidth={2.6} className={isLight ? 'text-slate-400' : 'text-white/40'} />
-            <span className={`text-[6px] font-bold ${isLight ? 'text-slate-400' : 'text-white/40'}`}>상품명 검색...</span>
-          </div>
-        </div>
-      )}
-
-      {/* Grid / List Content */}
-      {layoutTemplate === 'grid' ? (
-        <div className="px-1.5 pb-4">
-          <div
-            className="grid grid-flow-dense"
-            style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '3px' }}
-          >
-            {blocks.map((block) => {
-              const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-              const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
-              const blockDisplay = block.displayType || 'grid';
-              const pos = block.coverMediaPosition || { x: 50, y: 50 };
-
-              if (blockDisplay === 'text') {
-                return (
-                  <div
-                    key={block.id}
-                    onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className="relative overflow-hidden cursor-pointer group flex flex-col justify-center px-2 py-1 min-w-0"
-                    style={{
-                      gridColumn: `span ${gridSpan}`,
-                      minHeight: '30px',
-                      backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
-                    }}
-                  >
-                    {block.textContent ? (
-                      <div
-                        className="text-[7px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:[overflow-wrap:anywhere]"
-                        style={{
-                          fontSize: `${Math.max(5, Math.min(10, (block.fontSizePx || 14) * 0.5))}px`,
-                          fontWeight: block.bold ? 'bold' : undefined,
-                          fontStyle: block.italic ? 'italic' : undefined,
-                          textDecoration: [block.underline ? 'underline' : '', block.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ') || undefined,
-                          color: block.color || (isLight ? '#37352f' : 'rgba(255,255,255,0.8)'),
-                        }}
-                        dangerouslySetInnerHTML={{ __html: renderPortfolioHtml(block.textContent) }}
-                      />
-                    ) : (
-                      <div className={`text-[6px] opacity-50 ${isLight ? 'text-slate-300' : 'text-white/30'}`}>텍스트 입력</div>
-                    )}
-                  </div>
-                );
-              }
-
-              if (blockDisplay === 'minimal') {
-                return (
-                  <div
-                    key={block.id}
-                    onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group border ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.07]'}`}
-                    style={{
-                      gridColumn: `span ${gridSpan}`,
-                      borderRadius: '0.75rem',
-                    }}
-                  >
-                    {block.coverMedia && (
-                      <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg overflow-hidden shrink-0 ${isLight ? 'border border-slate-200' : 'border border-white/10'}`}>
-                        <MediaAuto
-                          src={block.coverMedia}
-                          alt=""
-                          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                          style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
-                        />
-                      </div>
-                    )}
-                    <div className="w-full min-w-0 text-center px-7">
-                      <div className="text-[7px] font-black truncate">{block.title}</div>
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={block.id}
-                  onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                  className={`relative overflow-hidden cursor-pointer group border ${hairline} ${softShadow} aspect-square`}
-                  style={{
-                    gridColumn: `span ${gridSpan}`,
-                    borderRadius: '0.75rem',
-                  }}
-                >
-                  <MediaAuto
-                    src={block.coverMedia}
-                    alt=""
-                    className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-105"
-                    style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
-                  />
-                  <div className="absolute top-1.5 right-1.5">
-                    <span className="bg-black/60 backdrop-blur-md text-[7px] font-black px-1.5 py-0.5 rounded-md text-white border border-white/10">{block.products?.length || 0}</span>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
-                    <div className="text-[7px] font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                    <div className="text-[6px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="px-1.5 pb-4 space-y-1.5">
-          {blocks.flatMap(block =>
-            (block.products || []).map((p: any) => (
-              <div
-                key={p.id}
-                className={`flex items-center justify-between p-2 border transition-all ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.07]'}`}
-                style={{ borderRadius: '0.75rem' }}
-              >
-                <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                  <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${hairline}`}>
-                    <MediaAuto src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
-                  </div>
-                  <span className="text-[8px] font-black truncate">{p.name}</span>
-                </div>
-                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: accentColor, color: '#fff' }}>
-                  <ExternalLink size={8} />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-      </div>
-
-      </div>
-
-      {showBottomSheet && previewSelectedBlock && (
-        <div className="absolute inset-0 z-50 flex flex-col justify-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowBottomSheet(false)}></div>
-          <div className="relative rounded-t-[2rem] p-4 animate-in slide-in-from-bottom duration-300" style={{ background: surface }}>
-            <h3 className="text-[10px] font-black mb-3">연결된 상품</h3>
-            <div className="space-y-2">
-              {(previewSelectedBlock.products || []).map((product: any) => (
-                <a
-                  key={product.id}
-                  {...externalLinkProps(product.link)}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/10'}`}
-                >
-                  <span className="text-[8px] font-black">{product.name}</span>
-                  <ChevronRight size={10} style={{ color: accentColor }} />
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+    <PublicPageBody
+      compact
+      design={fullDesign}
+      profile={{
+        full_name: profile?.name,
+        bio: profile?.bio,
+        avatar_url: profile?.avatar_url,
+        aboutSections: profile?.aboutSections,
+      }}
+      socials={socials}
+      blocks={blocks}
+      linkGridCategories={managedCategories}
+      openSchedule={openSchedule}
+      proposalHref={username ? `/${username}/proposal` : '#'}
+      selectedCategory={selectedCategory}
+      onSelectCategory={setSelectedCategory}
+      searchQuery={searchQuery}
+      onSearchQuery={setSearchQuery}
+      onSelectBlock={setSelectedBlockId}
+    />
+    {/* 서랍은 본문 밖에 둔다 — 본문 안(가운데 칸)은 `relative` 라서, 그 안에서
+        `absolute bottom-0` 은 페이지 맨 아래(스크롤을 다 내린 자리)에 붙는다.
+        본문 밖으로 내면 기준이 폰 프레임이 되어, 실제 페이지에서 `fixed` 가 창
+        아래에 붙는 것과 같은 자리에 올라온다. */}
+    <ProductSheet
+      compact
+      block={selectedBlock}
+      design={fullDesign}
+      onClose={() => setSelectedBlockId(null)}
+    />
     </>
   );
 };
