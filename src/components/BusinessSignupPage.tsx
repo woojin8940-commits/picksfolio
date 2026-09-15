@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, AtSign, Building2, Check, Lock, Mail, Phone, User, X } from 'lucide-react';
 import { digitsOnly, formatPhoneInput } from '../utils/formatters';
+import { checkUsername, prefetchUsername } from '../utils/usernameCheck';
 
 interface BusinessSignupPageProps {
   onNavigateHome: () => void;
@@ -68,32 +69,35 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
 
     setIsCheckingId(true);
     try {
-      const response = await fetch('/.netlify/functions/auth-check-username', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: value }),
-      });
-      const data = await response.json();
+      const result = await checkUsername(value);
 
       // 확인 자체가 실패한 경우는 "사용 불가" 가 아니다. 결과를 남기지 않고 다시
       // 눌러 달라고만 안내한다 — 남겨 두면 쓸 수 있는 아이디가 못 쓰는 아이디로 보인다.
-      if (!response.ok || !data?.success) {
+      if (!result.ok) {
         setIdCheck(null);
-        alert(data?.error || '아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        alert(result.message || '아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
         return;
       }
 
       setIdCheck({
         id: value,
-        state: data.available ? 'available' : 'unavailable',
-        message: data.available ? '사용 가능한 아이디입니다.' : data.error || '이미 사용 중인 아이디입니다.',
+        state: result.available ? 'available' : 'unavailable',
+        message: result.available ? '사용 가능한 아이디입니다.' : result.message || '이미 사용 중인 아이디입니다.',
       });
-    } catch {
-      setIdCheck(null);
-      alert('아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setIsCheckingId(false);
     }
+  }, [username]);
+
+  /**
+   * 입력이 멈추면 답을 미리 받아 둔다(SignupPage 와 같은 방식). 버튼을 누른
+   * 시점에는 왕복이 끝나 있어 기다림이 없다. 받아 둔 답을 idCheck 에 넣지는
+   * 않는다 — 누르지 않았는데 "사용 가능" 이 떠 있으면 안 된다.
+   */
+  useEffect(() => {
+    if (!ID_PATTERN.test(username)) return;
+    const timer = setTimeout(() => prefetchUsername(username), 500);
+    return () => clearTimeout(timer);
   }, [username]);
 
   // 번호를 고치면 직전 인증은 그 번호에 대한 인증이 아니다.
