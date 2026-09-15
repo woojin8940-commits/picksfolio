@@ -7,6 +7,7 @@ import {
   phoneNotVerifiedResponse,
 } from "./_shared/phone-verification.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { checkUsernameRules } from "./_shared/username-rules.mts";
 
 const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
@@ -72,8 +73,11 @@ export default async (req: Request) => {
 
       const cleanUsername = String(username).trim().toLowerCase();
       const cleanContactEmail = String(contact_email).trim().toLowerCase();
-      if (!/^[a-z0-9_]{3,20}$/.test(cleanUsername)) {
-        return Response.json({ success: false, error: "아이디는 영문 소문자, 숫자, 밑줄로 3~20자까지 입력해 주세요." });
+      // 비즈니스 아이디도 같은 profiles.username 칸에 저장되므로(=같은 주소
+      // 공간이다) 크리에이터 가입과 같은 규칙을 쓴다.
+      const usernameRules = checkUsernameRules(cleanUsername);
+      if (!usernameRules.ok) {
+        return Response.json({ success: false, error: usernameRules.error });
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanContactEmail)) {
         return Response.json({ success: false, error: "올바른 이메일 형식이 아닙니다." });

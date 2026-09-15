@@ -325,7 +325,12 @@ const App: React.FC = () => {
   // 밝기가 뒤집히는 구간이 없다. body 에도 색을 걸어야 iOS 의 overscroll 되돌림
   // 구간과 데스크톱 zoom(0.75) 이 남기는 바깥 여백이 검게 비치지 않는다.
   useEffect(() => {
-    const isPaper = view === 'home' || view === 'login' || view === 'business-login';
+    const isPaper =
+      view === 'home' ||
+      view === 'login' ||
+      view === 'signup' ||
+      view === 'business-login' ||
+      view === 'business-signup';
     document.body.classList.toggle('home-paper', isPaper);
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     themeMeta?.setAttribute('content', isPaper ? '#F4F5FA' : '#2563EB');
@@ -2079,9 +2084,9 @@ const App: React.FC = () => {
   }
 
   // 종이색(라이트)로 그리는 화면. 헤더도 같이 밝은 판으로 바뀐다. 비즈니스
-  // 로그인은 이 아래까지 오지 않고 위에서 따로 그려지므로(자기 화면 안에서
-  // paper-page 를 쓴다) 여기서는 홈과 로그인만 본다.
-  const isPaperView = view === 'home' || view === 'login';
+  // 로그인·가입은 이 아래까지 오지 않고 위에서 따로 그려지므로(자기 화면 안에서
+  // paper-page 를 쓴다) 여기서는 홈 · 로그인 · 가입만 본다.
+  const isPaperView = view === 'home' || view === 'login' || view === 'signup';
 
   return (
     <div
