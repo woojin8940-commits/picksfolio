@@ -6,6 +6,7 @@ import {
   findVerifiedPhone,
   phoneNotVerifiedResponse,
 } from "./_shared/phone-verification.mts";
+import { checkUsernameRules } from "./_shared/username-rules.mts";
 
 const SUPABASE_URL =
   "https://rjksilpewohjvtbxrsvu.supabase.co";
@@ -62,11 +63,10 @@ export default async (req: Request) => {
     const email = cleanEmail;
     const cleanPhone = (phone || "").replace(/\D/g, "");
 
-    if (!/^[a-z0-9_]{3,20}$/.test(cleanUsername)) {
-      return Response.json({
-        success: false,
-        error: "아이디는 영문 소문자, 숫자, 밑줄로 3~20자까지 입력해 주세요.",
-      });
+    // 형식·예약어는 가입 화면의 "중복확인"(auth-check-username)과 같은 규칙을 쓴다.
+    const usernameRules = checkUsernameRules(cleanUsername);
+    if (!usernameRules.ok) {
+      return Response.json({ success: false, error: usernameRules.error });
     }
 
     // 휴대폰 인증은 서버에서 확인한다. 화면의 isVerified 만 믿으면 이 함수로 직접
