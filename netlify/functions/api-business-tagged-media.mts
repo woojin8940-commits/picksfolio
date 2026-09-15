@@ -1,7 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { REAUTH_MESSAGE, linkNeedsReauth, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { REAUTH_MESSAGE, applyRenamedHandle, linkNeedsReauth, type MetaLink } from "./_shared/instagram-metrics.mts";
 import {
   CACHE_TTL_HOURS,
   brandLinkUsable,
@@ -23,8 +23,10 @@ import { todayInSeoul } from "./_shared/campaign-recruit.mts";
  * 브랜드 본인(과 관리자)만 본다. 목록에는 어느 인플루언서가 우리를 걸었는지가
  * 들어가므로 남의 브랜드가 열어 볼 값이 아니다.
  *
- * 이 경로는 읽기 전용이다 — 디엠 자동화 설정, 연동 토큰, creator_channels 를
- * 하나도 고치지 않는다. 유일한 쓰기는 목록 캐시(별도 블롭 저장소) 한 줄이다.
+ * 이 경로는 거의 읽기 전용이다 — 디엠 자동화 설정과 연동 토큰, creator_channels 의
+ * 숫자를 고치지 않는다. 쓰는 것은 목록 캐시(별도 블롭)와 오늘자 팔로워 스냅샷 한
+ * 줄이고, 브랜드가 인스타에서 계정 이름을 바꾼 것이 확인되면 연동 정보의 @아이디를
+ * 지금 이름으로 맞춘다 — 그 이름이 곧 이 화면이 언급을 찾는 기준이기 때문이다.
  */
 
 const norm = (raw: string) => String(raw || "").trim().toLowerCase();
@@ -94,6 +96,13 @@ async function loadBrandAccount(
 
   if (!hasToday) {
     const profile = await fetchProfileCounts(link);
+    // 브랜드가 인스타에서 계정 이름을 바꿨을 수 있다. 이 화면의 목록은 연동 정보에
+    // 적힌 @아이디로 언급을 찾으므로, 옛 이름이 남아 있으면 태그된 콘텐츠가 통째로
+    // 비어 보인다. 팔로워 수를 물어보는 이 호출에 지금 이름이 함께 실려 오니, 바뀌었으면
+    // 여기서 연동 정보를 맞춰 둔다(이번 응답의 목록은 캐시가 지나면 새 이름으로 다시 만든다).
+    if (profile.ok) {
+      await applyRenamedHandle(db, username, "dm", link, profile.igUsername);
+    }
     if (profile.ok && profile.followers !== null) {
       await recordFollowerSnapshot(db, username, profile.followers, profile.following, "live");
       series = [
