@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, ArrowUp, ArrowDown, Move, Lock, Camera, Globe, Briefcase, User, Eye, Search } from 'lucide-react';
+import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, Move, Lock, Camera, Globe, Briefcase, User, Eye, Search } from 'lucide-react';
 import ImageCropper from './ImageCropper';
 import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
@@ -1093,6 +1093,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     setShowBlockTypeModal(true);
   };
 
+  /**
+   * 카드를 같은 카테고리 안에서 한 칸 위/아래로 옮긴다.
+   *
+   * 카테고리 묶음의 순서는 handleMoveCategoryGroup 이 맡고, 여기서는 묶음 안의
+   * 순서만 바꾼다 — 그래서 바로 옆칸이 아니라 `같은 카테고리의 바로 옆 카드`와
+   * 자리를 맞바꾼다. 카테고리가 배열에서 붙어 있지 않아도(중간에 다른 카테고리
+   * 카드가 끼어 있어도) 묶음 안에서 보이는 순서는 한 칸씩 움직인다.
+   */
   const handleMoveBlock = (blockId: string, direction: 'up' | 'down') => {
     const block = blocks.find(b => b.id === blockId);
     if (!block) return;
@@ -1117,14 +1125,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  /**
+   * 끌고 지나가는 자리가 받을 수 있는 자리인지 커서로 알린다. 다른 카테고리 위에서는
+   * 금지 커서가 되므로, 떨어뜨려도 아무 일이 없는 이유가 손에서 먼저 읽힌다.
+   */
+  const handleDragOver = (e: React.DragEvent, targetBlockId: string) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    const dragged = blocks.find(b => b.id === draggedBlockId);
+    const target = blocks.find(b => b.id === targetBlockId);
+    const sameCategory = !!dragged && !!target && (dragged.category || '') === (target.category || '');
+    e.dataTransfer.dropEffect = sameCategory ? 'move' : 'none';
   };
 
+  /**
+   * 끌어 옮기기는 같은 카테고리 안에서만 받는다.
+   *
+   * 예전에는 배열의 전체 위치만 보고 옮겼다. 그래서 다른 카테고리의 카드 위에
+   * 떨어뜨리면 그 카테고리 사이로 끼어들었고, 카테고리 묶음의 순서까지 함께
+   * 뒤섞였다 — 묶음 순서는 배열에 먼저 나오는 카드로 정해지기 때문이다. 카테고리를
+   * 옮기는 일은 handleMoveCategoryGroup 이 맡으므로, 여기서는 같은 카테고리끼리만
+   * 자리를 바꾸고 다른 카테고리로 떨어뜨린 것은 아무 일도 없던 것으로 둔다.
+   */
   const handleDrop = (e: React.DragEvent, targetBlockId: string) => {
     e.preventDefault();
     if (!draggedBlockId || draggedBlockId === targetBlockId) {
+      setDraggedBlockId(null);
+      return;
+    }
+    const dragged = blocks.find(b => b.id === draggedBlockId);
+    const target = blocks.find(b => b.id === targetBlockId);
+    if (!dragged || !target || (dragged.category || '') !== (target.category || '')) {
       setDraggedBlockId(null);
       return;
     }
@@ -1353,6 +1383,48 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     saveBlocksToCloud(reordered).catch(() => {});
   };
 
+  /**
+   * 카드 왼쪽의 순서 손잡이.
+   *
+   * 예전에는 옅은 회색 화살표 두 개(14px · text-slate-400)를 그냥 세워 뒀다. 카테고리
+   * 묶음 머리의 `순서` 칸은 흰 버튼 · 얇은 선 · 그림자로 눌리는 것처럼 보이는데 이쪽은
+   * 그렇지 않아서, 같은 카테고리 안에서도 순서를 바꿀 수 있다는 것이 보이지 않았다.
+   * 묶음 쪽과 같은 질감으로 맞추고, 가운데에 지금 몇 번째인지를 적어 둔다 — 눌렀을 때
+   * 무엇이 움직였는지 숫자로 확인된다.
+   *
+   * 두 자리(카테고리별 묶음 · 카테고리 하나만 고른 목록)가 같은 조각을 쓴다. 예전에는
+   * 같은 마크업을 두 번 적어 두어서 한쪽만 고쳐지는 일이 있었다.
+   */
+  const renderOrderHandle = (blockId: string, index: number, total: number) => (
+    <div className="flex flex-col items-center gap-1 flex-shrink-0 bg-slate-100 rounded-xl border border-slate-200 px-1 py-1.5">
+      <button
+        onClick={(e) => { e.stopPropagation(); handleMoveBlock(blockId, 'up'); }}
+        disabled={index === 0}
+        className="p-1 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+        title={language === 'en' ? 'Move up within category' : '카테고리 안에서 위로 이동'}
+        aria-label={language === 'en' ? 'Move up within category' : '카테고리 안에서 위로 이동'}
+      >
+        <ChevronUp size={14} strokeWidth={2.5} />
+      </button>
+      <div
+        className="flex flex-col items-center leading-none cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-all"
+        title={language === 'en' ? 'Drag to reorder' : '끌어서 순서 바꾸기'}
+      >
+        <GripVertical size={14} />
+        <span className="mt-0.5 text-[9px] font-black text-slate-400 tabular-nums">{index + 1}/{total}</span>
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); handleMoveBlock(blockId, 'down'); }}
+        disabled={index === total - 1}
+        className="p-1 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-30 disabled:bg-transparent transition-all text-slate-500 hover:text-blue-600 shadow-sm disabled:shadow-none border border-slate-200 disabled:border-transparent"
+        title={language === 'en' ? 'Move down within category' : '카테고리 안에서 아래로 이동'}
+        aria-label={language === 'en' ? 'Move down within category' : '카테고리 안에서 아래로 이동'}
+      >
+        <ChevronDown size={14} strokeWidth={2.5} />
+      </button>
+    </div>
+  );
+
   const handleSaveEdit = async () => {
     if (!isEditing) return;
 
@@ -1534,11 +1606,20 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
               </div>
 
 
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-sm md:text-base font-black text-[#64748B]">
-                  {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : (language === 'en' ? `All Items (${blocks.length})` : `전체 리스트 (${blocks.length})`)}
-                </h2>
-                <div className="flex items-center gap-3">
+              <div className="flex justify-between items-center gap-3 mb-6">
+                <div className="min-w-0">
+                  <h2 className="text-sm md:text-base font-black text-[#64748B]">
+                    {selectedFolderId ? `${selectedFolderId} (${displayedBlocks.length})` : (language === 'en' ? `All Items (${blocks.length})` : `전체 리스트 (${blocks.length})`)}
+                  </h2>
+                  {/* 화살표가 있는 것은 보이지만 그것이 `카테고리 안에서의 순서`라는 것은
+                      보이지 않는다. 카테고리 묶음의 순서 칸과 헷갈리지 않게 한 줄로 밝힌다. */}
+                  <p className="text-[10px] md:text-[11px] font-bold text-[#94A3B8] mt-0.5">
+                    {language === 'en'
+                      ? 'Use the arrows or drag a card to reorder it within its category.'
+                      : '카드 왼쪽 화살표나 드래그로 같은 카테고리 안에서 순서를 바꿀 수 있어요.'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
                   <button onClick={() => setShowCategoryModal(true)} className="text-slate-500 font-black text-xs md:text-sm flex items-center gap-1 hover:scale-105 transition-all border border-[#E2E8F0] px-3 py-1.5 rounded-full hover:border-blue-300">
                     <Plus size={14} /> {language === 'en' ? 'Manage Categories' : '카테고리 관리'}
                   </button>
@@ -1558,7 +1639,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           <span className="text-[10px] md:text-xs font-bold text-[#94A3B8]">{group.blocks.length}{language === 'en' ? ' items' : '개'}</span>
                         </div>
                         <div className="flex items-center gap-1.5 bg-slate-100 rounded-xl px-1.5 py-1 border border-slate-200">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">{language === 'en' ? 'ORDER' : '순서'}</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 hidden md:inline">{language === 'en' ? 'CATEGORY' : '카테고리 순서'}</span>
                           <button
                             onClick={() => handleMoveCategoryGroup(group.category, 'up')}
                             disabled={groupIndex === 0}
@@ -1584,29 +1665,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             className={`bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
                             draggable
                             onDragStart={e => handleDragStart(e, block.id)}
-                            onDragOver={handleDragOver}
+                            onDragOver={e => handleDragOver(e, block.id)}
                             onDrop={e => handleDrop(e, block.id)}
                             onDragEnd={handleDragEnd}
                           >
-                            <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'up'); }}
-                                disabled={blockIndex === 0}
-                                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
-                              >
-                                <ArrowUp size={14} />
-                              </button>
-                              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-all">
-                                <GripVertical size={16} />
-                              </div>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'down'); }}
-                                disabled={blockIndex === group.blocks.length - 1}
-                                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
-                              >
-                                <ArrowDown size={14} />
-                              </button>
-                            </div>
+                            {renderOrderHandle(block.id, blockIndex, group.blocks.length)}
                             <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
                               <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
                                 {block.displayType === 'text' ? (
@@ -1648,29 +1711,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     className={`bg-white p-4 md:p-6 rounded-[1.5rem] border border-[#E2E8F0] flex items-center gap-3 md:gap-6 hover:border-blue-600 transition-all group shadow-sm ${draggedBlockId === block.id ? 'opacity-50' : ''}`}
                     draggable
                     onDragStart={e => handleDragStart(e, block.id)}
-                    onDragOver={handleDragOver}
+                    onDragOver={e => handleDragOver(e, block.id)}
                     onDrop={e => handleDrop(e, block.id)}
                     onDragEnd={handleDragEnd}
                   >
-                    <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'up'); }}
-                        disabled={blockIndex === 0}
-                        className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
-                      >
-                        <ArrowUp size={14} />
-                      </button>
-                      <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-all">
-                        <GripVertical size={16} />
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, 'down'); }}
-                        disabled={blockIndex === displayedBlocks.length - 1}
-                        className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-20 transition-all text-slate-400"
-                      >
-                        <ArrowDown size={14} />
-                      </button>
-                    </div>
+                    {renderOrderHandle(block.id, blockIndex, displayedBlocks.length)}
                     <div className="flex items-center gap-4 md:gap-6 cursor-pointer flex-1 min-w-0" onClick={() => { setIsEditing(block.id); setEditForm(block); }}>
                     <div className="w-16 h-16 md:w-24 md:h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
                       {block.displayType === 'text' ? (

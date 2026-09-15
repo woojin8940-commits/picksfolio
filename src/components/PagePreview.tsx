@@ -71,6 +71,13 @@ const PagePreview: React.FC<PagePreviewProps> = ({
   const isLight = theme === 'custom' ? isLightBackground(surface) : theme === 'white';
   const blocks = curationBlocks || [];
 
+  /** 공개 페이지(UserPage)와 같은 머리카락 선·그림자. 미리보기는 폰 크기로 줄여
+      그리므로 그림자 거리만 얕게 둔다 — 색과 방향은 같다. */
+  const hairline = isLight ? 'border-[#0B0F1A]/10' : 'border-white/15';
+  const softShadow = isLight
+    ? 'shadow-[0_4px_10px_-7px_rgba(11,15,26,0.45)]'
+    : 'shadow-[0_4px_10px_-7px_rgba(0,0,0,0.75)]';
+
   const categories = managedCategories ?? (() => {
     const catSet = new Set<string>();
     for (const b of blocks) {
@@ -148,10 +155,8 @@ const PagePreview: React.FC<PagePreviewProps> = ({
             {defaultButtons.map(btn => (
               <span
                 key={btn.key}
-                className={`flex items-center px-1.5 py-0.5 rounded-md text-[5px] font-bold whitespace-nowrap border ${
-                  isLight
-                    ? 'bg-white border-slate-200 text-slate-700'
-                    : 'bg-white/10 border-white/15 text-white'
+                className={`flex items-center px-1.5 py-0.5 rounded-md text-[5px] font-bold whitespace-nowrap border ${hairline} ${softShadow} ${
+                  isLight ? 'bg-white text-[#39415C]' : 'bg-white/[0.07] text-white'
                 }`}
                 style={{
                   backgroundColor: normalizeHexColor(btn.bg) || undefined,
@@ -177,7 +182,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       <div className="flex flex-col">
       <div style={{ order: homePriority === 'portfolio' ? 2 : 1 }}>
       {/* Curation Section Header */}
-      <div className="px-3 pt-3 pb-1">
+      <div className="px-2 pt-3 pb-1">
         <div className="flex justify-between items-end mb-2">
           <div>
             <h4 className="text-[6px] font-black uppercase tracking-[0.15em] mb-0.5" style={{ color: accentColor }}>My Curations</h4>
@@ -191,11 +196,11 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       {(() => {
         const previewCategories = ['전체', ...categories];
         return previewCategories.length > 1 ? (
-          <div className="px-2 pb-2 overflow-x-auto scrollbar-hide flex gap-1">
+          <div className="px-1.5 py-1 pb-2 overflow-x-auto scrollbar-hide flex gap-1">
             {previewCategories.map(cat => (
               <span
                 key={cat}
-                className={`px-2 py-0.5 text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? 'text-white border-transparent' : isLight ? 'bg-white border-slate-200 text-slate-400' : 'bg-white/10 border-white/20 text-white/50'}`}
+                className={`shrink-0 px-2.5 py-[3px] text-[6px] font-black whitespace-nowrap rounded-full border ${cat === '전체' ? `text-white border-transparent ${softShadow}` : isLight ? `bg-white text-[#39415C] ${hairline} ${softShadow}` : `bg-white/[0.07] text-white/70 ${hairline}`}`}
                 style={categoryChipStyle(categoryColors, cat === '전체', accentColor)}
               >
                 {cat}
@@ -210,8 +215,8 @@ const PagePreview: React.FC<PagePreviewProps> = ({
           버튼 칸에서 검색바를 끄고도 무엇이 사라지는지 확인할 수 없어, 같은 자리에
           같은 줄을 둔다(미리보기이므로 입력은 받지 않는다). */}
       {!socials?.hideSearchBar && (
-        <div className="px-2 pb-2">
-          <div className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border ${isLight ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
+        <div className="px-1.5 pb-2">
+          <div className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.06]'}`}>
             <Search size={6} strokeWidth={2.6} className={isLight ? 'text-slate-400' : 'text-white/40'} />
             <span className={`text-[6px] font-bold ${isLight ? 'text-slate-400' : 'text-white/40'}`}>상품명 검색...</span>
           </div>
@@ -220,7 +225,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
 
       {/* Grid / List Content */}
       {layoutTemplate === 'grid' ? (
-        <div className="px-2 pb-4">
+        <div className="px-1.5 pb-4">
           <div
             className="grid grid-flow-dense"
             style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '3px' }}
@@ -267,7 +272,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div
                     key={block.id}
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group ${isLight ? 'bg-white border border-slate-200 shadow-[0_2px_7px_-3px_rgba(15,23,42,0.16)]' : 'bg-white/5 border border-white/20 shadow-[0_2px_7px_-3px_rgba(0,0,0,0.5)]'}`}
+                    className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group border ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.07]'}`}
                     style={{
                       gridColumn: `span ${gridSpan}`,
                       borderRadius: '0.75rem',
@@ -294,7 +299,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                 <div
                   key={block.id}
                   onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
-                  className={`relative overflow-hidden cursor-pointer group shadow-sm aspect-square`}
+                  className={`relative overflow-hidden cursor-pointer group border ${hairline} ${softShadow} aspect-square`}
                   style={{
                     gridColumn: `span ${gridSpan}`,
                     borderRadius: '0.75rem',
@@ -319,16 +324,16 @@ const PagePreview: React.FC<PagePreviewProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-3 pb-4 space-y-1.5">
+        <div className="px-1.5 pb-4 space-y-1.5">
           {blocks.flatMap(block =>
             (block.products || []).map((p: any) => (
               <div
                 key={p.id}
-                className={`flex items-center justify-between p-2 border transition-all ${isLight ? 'bg-white border-slate-100' : 'bg-white/5 border-white/10'}`}
+                className={`flex items-center justify-between p-2 border transition-all ${hairline} ${softShadow} ${isLight ? 'bg-white' : 'bg-white/[0.07]'}`}
                 style={{ borderRadius: '0.75rem' }}
               >
                 <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                  <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${isLight ? 'border-slate-200' : 'border-white/10'}`}>
+                  <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border ${hairline}`}>
                     <MediaAuto src={p.image || block.coverMedia} alt="" className="w-full h-full object-cover" />
                   </div>
                   <span className="text-[8px] font-black truncate">{p.name}</span>

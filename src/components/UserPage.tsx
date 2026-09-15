@@ -826,6 +826,43 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
   /**
+   * 선과 그림자는 메인 홈페이지와 같은 것을 쓴다.
+   *
+   * 홈은 흰 바탕 위에 검정을 아주 옅게 섞은 머리카락 선(#0B0F1A 10%)과, 아래로만
+   * 길게 퍼지는 부드러운 그림자로 면을 나눈다. 개인페이지는 그동안 슬레이트 계열
+   * 회색 선(border-slate-100 · border-slate-200)과 `shadow-sm` 을 섞어 써서 테두리가
+   * 푸르스름하고 그림자는 카드에 딱 붙어 보였다 — 같은 서비스인데 홈과 결이 달랐다.
+   * 어두운 테마에서는 같은 역할을 흰색 알파로 대신한다.
+   *
+   * 카드·버튼·검색줄이 모두 이 두 값을 쓰므로, 질감을 손볼 때 한 곳만 고치면 된다.
+   */
+  const hairline = isDark ? 'border-white/15' : 'border-[#0B0F1A]/10';
+  const softShadow = isDark
+    ? 'shadow-[0_12px_28px_-18px_rgba(0,0,0,0.75)]'
+    : 'shadow-[0_12px_28px_-18px_rgba(11,15,26,0.45)]';
+
+  /**
+   * 카테고리 버튼.
+   *
+   * 예전에는 얇은 회색 선 + 흐린 글자(text-slate-400)에 여백도 좁아서, 누를 수 있는
+   * 버튼인지 그냥 꼬리표인지 구별되지 않았다. 홈의 알약 버튼과 같은 규격으로 맞춘다
+   * — 흰 바탕, 머리카락 선, 아래로 옅게 깔리는 그림자, 읽히는 글자색. 고른 버튼은
+   * 강조색을 그대로 칠하고(아래 categoryChipStyle) 그림자만 한 단계 깊게 둬서 줄에서
+   * 떠오르게 한다.
+   *
+   * 색을 직접 고른 페이지는 categoryChipStyle 이 배경·글자·선색을 인라인으로
+   * 덮어쓰므로, 여기서 정하는 것은 어디까지나 고르지 않았을 때의 기본값이다.
+   */
+  const categoryChipClass = (active: boolean) => [
+    'shrink-0 px-4 py-2 text-[11px] font-black whitespace-nowrap rounded-full border transition-all duration-200 active:scale-95',
+    active
+      ? 'text-white border-transparent shadow-[0_10px_22px_-12px_rgba(11,15,26,0.6)]'
+      : isDark
+        ? 'bg-white/[0.07] border-white/15 text-white/70 hover:bg-white/[0.12] hover:border-white/25'
+        : 'bg-white border-[#0B0F1A]/10 text-[#39415C] shadow-[0_2px_8px_-5px_rgba(11,15,26,0.4)] hover:border-[#0B0F1A]/20 hover:shadow-[0_8px_18px_-10px_rgba(11,15,26,0.45)]',
+  ].join(' ');
+
+  /**
    * 기본 버튼(카카오톡 · 유튜브 · 틱톡 · 네이버).
    *
    * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다 — 예전에 버튼 줄을 두 곳에
@@ -855,10 +892,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     <a
       key={btn.key}
       {...externalLinkProps(btn.url)}
-      className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 shadow-sm whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 ${
+      className={`flex items-center px-4 py-2.5 rounded-xl text-xs font-bold border transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer hover:-translate-y-0.5 active:translate-y-0 active:scale-95 ${softShadow} ${
         isDark
-          ? 'bg-white/10 border-white/15 text-white hover:bg-white/15'
-          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+          ? 'bg-white/[0.07] border-white/15 text-white hover:bg-white/[0.12] hover:border-white/25'
+          : 'bg-white border-[#0B0F1A]/10 text-[#39415C] hover:border-[#0B0F1A]/20'
       }`}
       /* 색을 직접 고른 버튼만 인라인으로 덮어쓴다 — 고르지 않았으면 위의 테마 색 그대로. */
       style={{
@@ -923,7 +960,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         {visibleAboutSections.map(section => (
           <details
             key={section.id}
-            className={`group rounded-xl border transition-all ${isDark ? 'bg-white/5 border-white/10' : 'bg-white/80 border-slate-200/50'}`}
+            className={`group rounded-xl border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
           >
             <summary className={`flex items-center justify-between cursor-pointer px-4 py-3 list-none ${textColor}`}>
               <span className="text-xs font-black truncate pr-3">{section.title || '소개'}</span>
@@ -976,7 +1013,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       )}
       {/* PC: Full-width vertical layout */}
       <div className="min-h-screen">
-        <div className="max-w-md md:max-w-2xl mx-auto min-h-screen flex flex-col relative px-4 md:px-8" style={backgroundStyle}>
+        {/* 좌우 여백은 세 겹으로 겹쳐 있었다 — 가운데 칸(px-4/md:px-8) · 큐레이션
+            묶음(px-4) · 그리드 칸(px-4). 모바일에서 한쪽에만 48px 이 쌓여서 max-w-md
+            칸의 실제 내용 폭이 390px 화면에서 294px 밖에 남지 않았다. 세 겹을 그대로
+            두되 값만 줄여 모바일 20px · 데스크톱 40px 로 맞춘다. 카테고리 줄의
+            음수 마진(-mx-*)도 가운데 칸과 같은 값을 써야 칸 끝까지 스크롤된다. */}
+        <div className="max-w-md md:max-w-2xl mx-auto min-h-screen flex flex-col relative px-3 md:px-6" style={backgroundStyle}>
 
         {design.homePriority === 'portfolio' ? (
           /* PORTFOLIO LAYOUT */
@@ -1022,7 +1064,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
             )}
 
             <div
-              className="relative aspect-[4/5] flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-[4/5] flex-shrink-0 -mx-3 md:-mx-6"
               style={{ background: coverPlaceholder }}
             >
               {design.portfolioHeaderImage && (
@@ -1051,7 +1093,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               {coverIdentity}
             </div>
 
-            <div className="px-4 pt-4 pb-8 space-y-12">
+            <div className="px-2 md:px-4 pt-4 pb-8 space-y-12">
               {/* Social & Contact Links */}
               {/* 버튼은 마우스를 올리면 2px 떠오르고 그림자가 생긴다. 예전에는 이 줄에
                   overflow-x-auto 가 걸려 있어서(가로 스크롤을 켜면 세로도 함께 잘린다)
@@ -1088,7 +1130,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                     {activeScheduleItems.map(item => (
                       <div
                         key={item.id}
-                        className={`rounded-xl px-3 py-2.5 border transition-all ${isDark ? 'bg-white/5 border-white/10' : 'bg-white/80 border-slate-200/50'}`}
+                        className={`rounded-xl px-3 py-2.5 border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
                         onClick={() => item.link && openLink(item.link)}
                         style={{ cursor: item.link ? 'pointer' : 'default' }}
                       >
@@ -1121,8 +1163,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             </div>
 
-            <div id="curation-section" className="pt-8 px-4">
-               <div className="flex justify-between items-end mb-8 px-4">
+            <div id="curation-section" className="pt-8 px-1 md:px-2">
+               <div className="flex justify-between items-end mb-8 px-1 md:px-2">
                  <div>
                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-1" style={{ color: design.accentColor }}>My Curations</h4>
                    <h3 className="text-2xl font-black tracking-tighter">Explore My Picks</h3>
@@ -1135,8 +1177,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                    크기는 그대로라 눌리는 영역은 충분하고, 모바일에서 유독 두꺼워
                    보이던 느낌만 덜어 낸다. 넓은 화면은 예전 두께를 유지한다. */}
                {showSearchBar && (
-               <div className="px-4 mb-6">
-                 <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
+               <div className="px-1 md:px-2 mb-6">
+                 <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.06] focus-within:border-white/30' : 'bg-white focus-within:border-[#0B0F1A]/25'}`}>
                    <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                    <input
                      type="text"
@@ -1154,12 +1196,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                </div>
                )}
 
-               <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-8 md:px-12 -mx-4 md:-mx-8">
+               <div className="mb-7 py-1.5 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 -mx-3 md:-mx-6">
                  {categories.map(cat => (
                    <button
                      key={cat}
                      onClick={() => setSelectedCategory(cat)}
-                     className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap transition-all rounded-full border ${selectedCategory === cat ? 'text-white border-transparent' : isDark ? 'bg-white/10 border-white/20 text-white/50' : 'bg-white border-slate-200 text-slate-400'}`}
+                     className={categoryChipClass(selectedCategory === cat)}
                      style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
                    >
                      {cat}
@@ -1168,7 +1210,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                </div>
 
                {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                 <div className="w-full px-4" style={{ paddingBottom: '100px' }}>
+                 <div className="w-full px-1 md:px-2" style={{ paddingBottom: '100px' }}>
                    {displayGroups.map((group) => (
                      <div key={group.category || '__all'}>
                        {selectedCategory === '전체' && group.category && (
@@ -1176,7 +1218,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                            <Hash size={14} style={{ color: design.accentColor }} />
                            <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                            <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                           <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                           <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
                          </div>
                        )}
                        <div
@@ -1230,14 +1272,14 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                    setSelectedBlockId(block.id);
                                    trackClick(username, block.id);
                                  }}
-                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] ${isDark ? 'bg-white/5 border border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
+                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07]' : 'bg-white'}`}
                                  style={{
                                    gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                  }}
                                >
                                  {block.coverMedia && (
-                                   <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} ${isDark ? 'border border-white/10' : 'border border-slate-200'}`}>
+                                   <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} border ${hairline}`}>
                                      <MediaAuto
                                        src={block.coverMedia || FALLBACK_IMAGE}
                                        className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
@@ -1264,7 +1306,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                  setSelectedBlockId(block.id);
                                  trackClick(username, block.id);
                                }}
-                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
+                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} aspect-square`}
                                style={{
                                  gridColumn: `span ${gridSpan}`,
                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
@@ -1294,7 +1336,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
                         </div>
                       )}
                       {group.blocks.map((block) => (
@@ -1303,11 +1345,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                             key={p.id}
                             {...externalLinkProps(p.link)}
                             onClick={() => trackClick(username, block.id)}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07] hover:bg-white/[0.12] hover:border-white/25' : 'bg-white hover:border-[#0B0F1A]/20'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
                           >
                             <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
                                 <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1372,7 +1414,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
-              className="relative aspect-[4/5] flex-shrink-0 -mx-4 md:-mx-8"
+              className="relative aspect-[4/5] flex-shrink-0 -mx-3 md:-mx-6"
               style={{ background: coverPlaceholder }}
             >
               {(design.portfolioHeaderImage || (!design.portfolioHeaderImage && !design.portfolioHeaderColor)) && (
@@ -1389,7 +1431,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               {coverIdentity}
             </div>
 
-            <header className="relative pt-4 pb-6 px-6 text-center shrink-0 overflow-hidden -mx-4 md:-mx-8">
+            <header className="relative pt-4 pb-6 px-5 md:px-10 text-center shrink-0 overflow-hidden -mx-3 md:-mx-6">
 
               {/* 위 포트폴리오 레이아웃과 같은 이유로 가로 스크롤을 걷어 냈다. 이쪽은
                   줄 자체에 위아래 여백이 없어서 떠오르는 모션과 그림자가 더 잘렸다. */}
@@ -1419,7 +1461,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                     {activeScheduleItems.map(item => (
                       <div
                         key={item.id}
-                        className={`rounded-xl px-3 py-2.5 border transition-all ${isDark ? 'bg-white/5 border-white/10' : 'bg-white/80 border-slate-200/50'}`}
+                        className={`rounded-xl px-3 py-2.5 border transition-all ${hairline} ${isDark ? 'bg-white/[0.06]' : 'bg-white/90'}`}
                         onClick={() => item.link && openLink(item.link)}
                         style={{ cursor: item.link ? 'pointer' : 'default' }}
                       >
@@ -1451,12 +1493,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             </header>
 
-            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-8 md:px-12 backdrop-blur-md -mx-4 md:-mx-8">
+            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-5 md:px-10 backdrop-blur-md -mx-3 md:-mx-6">
               {categories.map(cat => (
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 text-[11px] font-black whitespace-nowrap transition-all rounded-full border ${selectedCategory === cat ? 'text-white border-transparent' : isDark ? 'bg-white/10 border-white/20 text-white/50' : 'bg-white border-slate-200 text-slate-400'}`}
+                  className={categoryChipClass(selectedCategory === cat)}
                   style={categoryChipStyle(design, selectedCategory === cat, design.accentColor)}
                 >
                   {cat}
@@ -1467,8 +1509,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
             {/* Product Search Bar */}
             {/* 큐레이션 레이아웃의 검색줄도 같은 두께를 쓴다. */}
             {showSearchBar && (
-            <div className="px-4 mb-2">
-              <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
+            <div className="px-2 md:px-4 mb-2">
+              <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.06] focus-within:border-white/30' : 'bg-white focus-within:border-[#0B0F1A]/25'}`}>
                 <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                 <input
                   type="text"
@@ -1486,7 +1528,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
             </div>
             )}
 
-            <main className="flex-1 px-4 py-6">
+            <main className="flex-1 px-2 md:px-4 py-6">
               {/* Supabase Links Grid */}
               {links.length > 0 && (
                 <div className="grid grid-cols-1 gap-4 mb-10">
@@ -1532,7 +1574,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
                         </div>
                       )}
                       <div
@@ -1586,14 +1628,14 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                   setSelectedBlockId(block.id);
                                   trackClick(username, block.id);
                                 }}
-                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${isDark ? 'bg-white/5 border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
+                                className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07]' : 'bg-white'}`}
                                 style={{
                                   gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                 }}
                               >
                                 {block.coverMedia && (
-                                  <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} ${isDark ? 'border border-white/10' : 'border border-slate-200'}`}>
+                                  <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 overflow-hidden shrink-0 ${design.borderRadius === 'none' ? '' : 'rounded-xl'} border ${hairline}`}>
                                     <MediaAuto
                                       src={block.coverMedia || FALLBACK_IMAGE}
                                       className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
@@ -1620,7 +1662,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                 setSelectedBlockId(block.id);
                                 trackClick(username, block.id);
                               }}
-                              className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
+                              className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] border ${hairline} ${softShadow} aspect-square`}
                               style={{
                                 gridColumn: `span ${gridSpan}`,
                                 borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
@@ -1650,7 +1692,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
-                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+                          <div className={`flex-1 h-px ${isDark ? 'bg-white/10' : 'bg-[#0B0F1A]/10'}`} />
                         </div>
                       )}
                       {group.blocks.map((block) => (
@@ -1659,11 +1701,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                             key={p.id}
                             {...externalLinkProps(p.link)}
                             onClick={() => trackClick(username, block.id)}
-                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] shadow-sm ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-100 hover:border-blue-200'}`}
+                            className={`w-full flex items-center justify-between p-4 group cursor-pointer border transition-all hover:scale-[1.01] ${hairline} ${softShadow} ${isDark ? 'bg-white/[0.07] hover:bg-white/[0.12] hover:border-white/25' : 'bg-white hover:border-[#0B0F1A]/20'}`}
                             style={{ borderRadius: design.borderRadius === 'none' ? '0' : design.borderRadius === 'md' ? '1rem' : '2rem' }}
                           >
                             <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
-                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                              <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
                                 <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || block.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1760,7 +1802,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               >
                 <div className="flex items-center gap-4 flex-1 min-w-0 mr-4">
                   {/* Product Thumbnail */}
-                  <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                  <div className={`w-12 h-12 rounded-2xl overflow-hidden flex-shrink-0 border ${hairline}`}>
                     <MediaAuto src={p.image || (p as any).imageUrl || (p as any).manual_image_url || selectedBlock?.coverMedia || FALLBACK_IMAGE} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
