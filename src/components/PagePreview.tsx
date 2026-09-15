@@ -5,7 +5,6 @@ import SafeImage from './SafeImage';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
 import { enabledDefaultButtons } from '../utils/pageButtons';
-import { GRID_TRACKS, packGridPlacements } from '../utils/gridLayout';
 import PlatformLogo from './PlatformLogo';
 import {
   type ThemePreset,
@@ -71,12 +70,6 @@ const PagePreview: React.FC<PagePreviewProps> = ({
     : PRESET_BACKGROUND[theme === 'white' ? 'white' : 'midnight'];
   const isLight = theme === 'custom' ? isLightBackground(surface) : theme === 'white';
   const blocks = curationBlocks || [];
-
-  /**
-   * 카드가 놓일 자리. 공개 페이지(UserPage)와 같은 함수를 쓴다 — 미리보기가 다른
-   * 방식으로 배치하면 편집기에서 본 모양과 실제 페이지가 어긋난다.
-   */
-  const gridPlacements = packGridPlacements(blocks);
 
   const categories = managedCategories ?? (() => {
     const catSet = new Set<string>();
@@ -229,12 +222,12 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       {layoutTemplate === 'grid' ? (
         <div className="px-2 pb-4">
           <div
-            className="grid"
-            style={{ gridTemplateColumns: `repeat(${GRID_TRACKS}, minmax(0, 1fr))`, gap: '3px' }}
+            className="grid grid-flow-dense"
+            style={{ gridTemplateColumns: 'repeat(6, 1fr)', gap: '3px' }}
           >
             {blocks.map((block) => {
-              const placement = gridPlacements.get(block.id);
-              const gridColumn = `${placement?.colStart ?? 1} / span ${placement?.span ?? GRID_TRACKS}`;
+              const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+              const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
               const blockDisplay = block.displayType || 'grid';
               const pos = block.coverMediaPosition || { x: 50, y: 50 };
 
@@ -245,7 +238,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
                     className="relative overflow-hidden cursor-pointer group flex flex-col justify-center px-2 py-1 min-w-0"
                     style={{
-                      gridColumn,
+                      gridColumn: `span ${gridSpan}`,
                       minHeight: '30px',
                       backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
                     }}
@@ -276,7 +269,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                     onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
                     className={`relative flex items-center min-h-[34px] px-3 py-1.5 cursor-pointer group ${isLight ? 'bg-white border border-slate-200 shadow-[0_2px_7px_-3px_rgba(15,23,42,0.16)]' : 'bg-white/5 border border-white/20 shadow-[0_2px_7px_-3px_rgba(0,0,0,0.5)]'}`}
                     style={{
-                      gridColumn,
+                      gridColumn: `span ${gridSpan}`,
                       borderRadius: '0.75rem',
                     }}
                   >
@@ -303,7 +296,7 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   onClick={() => { setPreviewSelectedBlock(block); setShowBottomSheet(true); }}
                   className={`relative overflow-hidden cursor-pointer group shadow-sm aspect-square`}
                   style={{
-                    gridColumn,
+                    gridColumn: `span ${gridSpan}`,
                     borderRadius: '0.75rem',
                   }}
                 >
@@ -316,12 +309,9 @@ const PagePreview: React.FC<PagePreviewProps> = ({
                   <div className="absolute top-1.5 right-1.5">
                     <span className="bg-black/60 backdrop-blur-md text-[7px] font-black px-1.5 py-0.5 rounded-md text-white border border-white/10">{block.products?.length || 0}</span>
                   </div>
-                  {/* 그늘의 농도와 시작 자리는 공개 페이지(UserPage)와 같게 둔다. */}
-                  <div className="absolute bottom-0 left-0 right-0 px-2 pb-1 pt-4 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
+                  <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
                     <div className="text-[7px] font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                    {block.category && (
-                      <div className="text-[6px] font-bold text-white/60 uppercase tracking-widest mt-0.5">{block.category}</div>
-                    )}
+                    <div className="text-[6px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
                   </div>
                 </div>
               );

@@ -14,7 +14,6 @@ import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
-import { GRID_TRACKS, packGridPlacements, type GridPlacement } from '../utils/gridLayout';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const loadLiveStream = () => import('./LiveStream');
@@ -761,8 +760,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
    * 그 카테고리의 카드만 한 묶음으로 그린다.
    *
    * 예전에는 이 판단을 그리는 자리 네 곳(포트폴리오 · 큐레이션 × 그리드 · 목록)에
-   * 똑같이 적어 두었다. 아래 gridPlacements 가 같은 묶음을 기준으로 자리를 계산해야
-   * 하므로 한 곳으로 모았다.
+   * 똑같이 적어 두었다. 같은 문장을 네 번 고치지 않도록 한 곳으로 모았다.
    */
   const displayGroups = useMemo(
     () => (selectedCategory === '전체' && orderedCategoryGroups.length > 0
@@ -770,21 +768,6 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       : [{ category: '', blocks: filteredBlocks }]),
     [selectedCategory, orderedCategoryGroups, filteredBlocks],
   );
-
-  /**
-   * 카드 id → 그리드에서 차지할 자리. 계산은 utils/gridLayout 한 곳에서 하고
-   * 미리보기(PagePreview)도 같은 함수를 쓴다 — 자리 계산이 갈리면 미리보기와 공개
-   * 페이지의 배치가 서로 달라진다.
-   */
-  const gridPlacements = useMemo(() => {
-    const merged = new Map<string, GridPlacement>();
-    for (const group of displayGroups) {
-      for (const [id, placement] of packGridPlacements(group.blocks)) {
-        merged.set(id, placement);
-      }
-    }
-    return merged;
-  }, [displayGroups]);
 
   const activeScheduleItems = useMemo(() => {
     return openSchedule.filter(item => item.isActive && new Date(item.date) >= new Date(new Date().toDateString()));
@@ -1197,16 +1180,15 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                          </div>
                        )}
                        <div
-                         className="grid transition-all duration-500"
+                         className="grid grid-flow-dense transition-all duration-500"
                          style={{
-                           gridTemplateColumns: `repeat(${GRID_TRACKS}, minmax(0, 1fr))`,
+                           gridTemplateColumns: 'repeat(6, 1fr)',
                            gap: `${Math.max(design.gridGap, 4)}px`,
                          }}
                        >
                          {group.blocks.map((block) => {
-                           const placement = gridPlacements.get(block.id);
-                           // 시작 칸까지 함께 지정한다 — 덜 찬 줄을 가운데로 놓기 위해서다.
-                           const gridColumn = `${placement?.colStart ?? 1} / span ${placement?.span ?? GRID_TRACKS}`;
+                           const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                           const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
                            const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                            if (blockDisplay === 'text') {
@@ -1215,7 +1197,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                  key={block.id}
                                  className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6 min-w-0"
                                  style={{
-                                   gridColumn,
+                                   gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
                                    minHeight: '80px',
                                    backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
@@ -1250,7 +1232,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                  }}
                                  className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] ${isDark ? 'bg-white/5 border border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                  style={{
-                                   gridColumn,
+                                   gridColumn: `span ${gridSpan}`,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                  }}
                                >
@@ -1284,7 +1266,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                }}
                                className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
                                style={{
-                                 gridColumn,
+                                 gridColumn: `span ${gridSpan}`,
                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                }}
                              >
@@ -1292,18 +1274,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                <div className="absolute top-3 right-3">
                                  <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                                </div>
-                               {/* 카드 아래 글씨를 받치는 그늘.
-                                   예전에는 from-black/90 · via-black/40(50%) 이라 글자 칸 높이만큼
-                                   짧은 구간에서 검정까지 떨어졌다 — 밝은 사진 위에서는 사진이
-                                   이어지는 대신 카드 아래에 회색 띠를 덧댄 것처럼 보였다. 지금은
-                                   그늘이 시작하는 자리를 글자 위로 올리고 농도를 낮춰, 글씨는
-                                   그대로 읽히면서 사진이 끊기지 않게 한다. 카테고리를 비워 둔
-                                   카드는 그 줄을 그리지 않는다 — 빈 줄이 그늘 높이만 키웠다. */}
-                               <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 pt-8 md:pt-12 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
+                               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
                                  <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                 {block.category && (
-                                   <div className="text-[9px] font-bold text-white/60 uppercase tracking-widest mt-0.5">{block.category}</div>
-                                 )}
+                                 <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
                                </div>
                              </div>
                            );
@@ -1563,16 +1536,15 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                         </div>
                       )}
                       <div
-                        className="grid"
+                        className="grid grid-flow-dense"
                         style={{
-                          gridTemplateColumns: `repeat(${GRID_TRACKS}, minmax(0, 1fr))`,
+                          gridTemplateColumns: 'repeat(6, 1fr)',
                           gap: `${Math.max(design.gridGap, 4)}px`,
                         }}
                       >
                         {group.blocks.map((block) => {
-                          const placement = gridPlacements.get(block.id);
-                          // 시작 칸까지 함께 지정한다 — 덜 찬 줄을 가운데로 놓기 위해서다.
-                          const gridColumn = `${placement?.colStart ?? 1} / span ${placement?.span ?? GRID_TRACKS}`;
+                          const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
+                          const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
                           const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                           if (blockDisplay === 'text') {
@@ -1581,7 +1553,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                 key={block.id}
                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
                                 style={{
-                                  gridColumn,
+                                  gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
                                   minHeight: '80px',
                                   backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
@@ -1616,7 +1588,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                 }}
                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${isDark ? 'bg-white/5 border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                 style={{
-                                  gridColumn,
+                                  gridColumn: `span ${gridSpan}`,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                 }}
                               >
@@ -1650,7 +1622,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                               }}
                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
                               style={{
-                                gridColumn,
+                                gridColumn: `span ${gridSpan}`,
                                 borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                               }}
                             >
@@ -1658,18 +1630,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                               <div className="absolute top-3 right-3">
                                 <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                               </div>
-                              {/* 카드 아래 글씨를 받치는 그늘.
-                                  예전에는 from-black/90 · via-black/40(50%) 이라 글자 칸 높이만큼
-                                  짧은 구간에서 검정까지 떨어졌다 — 밝은 사진 위에서는 사진이
-                                  이어지는 대신 카드 아래에 회색 띠를 덧댄 것처럼 보였다. 지금은
-                                  그늘이 시작하는 자리를 글자 위로 올리고 농도를 낮춰, 글씨는
-                                  그대로 읽히면서 사진이 끊기지 않게 한다. 카테고리를 비워 둔
-                                  카드는 그 줄을 그리지 않는다 — 빈 줄이 그늘 높이만 키웠다. */}
-                              <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 pt-8 md:pt-12 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
+                              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
                                 <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                {block.category && (
-                                  <div className="text-[9px] font-bold text-white/60 uppercase tracking-widest mt-0.5">{block.category}</div>
-                                )}
+                                <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
                               </div>
                             </div>
                           );
