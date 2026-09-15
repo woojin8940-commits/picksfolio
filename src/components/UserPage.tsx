@@ -14,6 +14,7 @@ import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 import MediaAuto from './MediaAuto';
 import { renderPortfolioHtml } from './richText';
+import { GRID_TRACKS, packGridPlacements, type GridPlacement } from '../utils/gridLayout';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const loadLiveStream = () => import('./LiveStream');
@@ -158,7 +159,18 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     viewerCount: 0
   });
 
-
+  /**
+   * 개인페이지가 열려 있는 동안 body 를 흰 종이색으로 둔다.
+   *
+   * 배경색은 상단 커버와 같은 폭(가운데 칸)까지만 칠하고 그 바깥은 흰 여백이다.
+   * 그 여백을 그리는 칸은 화면 크기만큼만 있어서, iOS 의 overscroll 되돌림 구간과
+   * 데스크톱 축소(zoom)가 남기는 바깥 여백에는 body 색이 비친다 — 기본 body 는
+   * 어두운 색이라 흰 페이지 위아래로 검은 띠가 스쳤다. 떠날 때 되돌려 놓는다.
+   */
+  useEffect(() => {
+    document.body.classList.add('userpage-canvas');
+    return () => document.body.classList.remove('userpage-canvas');
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -312,7 +324,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               }
 
               if (!profileError && profileData) {
-                setProfile(profileData);
+                // 이 화면의 profile.full_name 은 "표시 이름"이다(위의 API 경로는
+                // site_data 의 profile.name 을 여기에 넣는다). profiles.full_name
+                // 은 가입 폼의 실명이라 그대로 넣으면 site_data 를 못 읽은 방문에만
+                // 커버 사진 위의 이름이 실명으로 바뀐다. 표시 이름의 기본값은
+                // 가입 시점과 같은 아이디다(netlify/functions/auth-signup).
+                setProfile({ ...profileData, full_name: profileData.username || '' });
 
                 // Fetch Link Grid Items (New Source of Truth for Blocks)
                 const cloudBlocks = await getLinkGridItems(username);
@@ -739,6 +756,36 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     }));
   }, [filteredBlocks, selectedCategory]);
 
+  /**
+   * 실제로 그릴 묶음. 카테고리를 고르지 않았으면 카테고리별로 나눠 그리고, 골랐으면
+   * 그 카테고리의 카드만 한 묶음으로 그린다.
+   *
+   * 예전에는 이 판단을 그리는 자리 네 곳(포트폴리오 · 큐레이션 × 그리드 · 목록)에
+   * 똑같이 적어 두었다. 아래 gridPlacements 가 같은 묶음을 기준으로 자리를 계산해야
+   * 하므로 한 곳으로 모았다.
+   */
+  const displayGroups = useMemo(
+    () => (selectedCategory === '전체' && orderedCategoryGroups.length > 0
+      ? orderedCategoryGroups
+      : [{ category: '', blocks: filteredBlocks }]),
+    [selectedCategory, orderedCategoryGroups, filteredBlocks],
+  );
+
+  /**
+   * 카드 id → 그리드에서 차지할 자리. 계산은 utils/gridLayout 한 곳에서 하고
+   * 미리보기(PagePreview)도 같은 함수를 쓴다 — 자리 계산이 갈리면 미리보기와 공개
+   * 페이지의 배치가 서로 달라진다.
+   */
+  const gridPlacements = useMemo(() => {
+    const merged = new Map<string, GridPlacement>();
+    for (const group of displayGroups) {
+      for (const [id, placement] of packGridPlacements(group.blocks)) {
+        merged.set(id, placement);
+      }
+    }
+    return merged;
+  }, [displayGroups]);
+
   const activeScheduleItems = useMemo(() => {
     return openSchedule.filter(item => item.isActive && new Date(item.date) >= new Date(new Date().toDateString()));
   }, [openSchedule]);
@@ -868,6 +915,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
    * 아이디가 큰 글씨로 올라갔고 지울 방법이 없었다(칸을 비우면 다시 아이디가 나왔다).
    * 둘 다 비면 이 자리는 통째로 사라져서 커버 사진만 남는다.
    *
+   * 가입할 때 저장되는 표시 이름의 기본값은 아이디다(auth-signup). 그것은 저장된
+   * 값이라 링크 관리에서 바꾸거나 비울 수 있다 — 여기서 아이디를 끼워 넣는 것과는
+   * 다르다. 이 자리는 앞으로도 저장된 표시 이름만 그린다.
+   *
    * 두 레이아웃(포트폴리오 · 큐레이션)이 같은 조각을 쓴다.
    */
   const coverIdentity = ((profile?.full_name || '').trim() || (profile?.bio || '').trim()) ? (
@@ -913,8 +964,19 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     backgroundAttachment: 'fixed'
   } : { background: themeBg };
 
+  /**
+   * 가운데 칸 바깥(넓은 화면의 좌우 여백)에 깔리는 색.
+   *
+   * 예전에는 위의 backgroundStyle 을 페이지 전체에도 함께 칠했다. 좁은 화면에서는
+   * 가운데 칸이 화면을 꽉 채우니 차이가 없지만, 넓은 화면에서는 고른 배경색이 창
+   * 끝까지 번져서 상단 커버만 한가운데에 떠 있는 그림이 됐다. 지금은 배경색을 커버와
+   * 같은 폭까지만 칠하고 좌우 여백은 흰 종이로 둔다 — 커버의 좌우 경계가 곧 배경색의
+   * 경계다. 배경 사진을 올린 페이지도 같은 폭 안에서만 보인다.
+   */
+  const pageCanvasStyle = { backgroundColor: '#FFFFFF' };
+
   return (
-    <div className={`min-h-screen ${getFontStyle()} ${textColor} userpage-root`} style={backgroundStyle}>
+    <div className={`min-h-screen ${getFontStyle()} ${textColor} userpage-root`} style={pageCanvasStyle}>
       {onBackToDashboard && (
         <button
           type="button"
@@ -1109,7 +1171,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                </div>
                )}
 
-               <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 -mx-4 md:-mx-8">
+               <div className="mb-8 overflow-x-auto scrollbar-hide flex gap-2 px-8 md:px-12 -mx-4 md:-mx-8">
                  {categories.map(cat => (
                    <button
                      key={cat}
@@ -1123,11 +1185,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                </div>
 
                {design.templateType === TemplateType.SHOPPABLE_GRID ? (
-                 <div className="w-full -mx-4 md:-mx-8" style={{ paddingBottom: '100px' }}>
-                   {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                 <div className="w-full px-4" style={{ paddingBottom: '100px' }}>
+                   {displayGroups.map((group) => (
                      <div key={group.category || '__all'}>
                        {selectedCategory === '전체' && group.category && (
-                         <div className={`flex items-center gap-3 px-4 md:px-6 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                         <div className={`flex items-center gap-3 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                            <Hash size={14} style={{ color: design.accentColor }} />
                            <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                            <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
@@ -1135,15 +1197,16 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                          </div>
                        )}
                        <div
-                         className="grid grid-flow-dense transition-all duration-500"
+                         className="grid transition-all duration-500"
                          style={{
-                           gridTemplateColumns: 'repeat(6, 1fr)',
+                           gridTemplateColumns: `repeat(${GRID_TRACKS}, minmax(0, 1fr))`,
                            gap: `${Math.max(design.gridGap, 4)}px`,
                          }}
                        >
                          {group.blocks.map((block) => {
-                           const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                           const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
+                           const placement = gridPlacements.get(block.id);
+                           // 시작 칸까지 함께 지정한다 — 덜 찬 줄을 가운데로 놓기 위해서다.
+                           const gridColumn = `${placement?.colStart ?? 1} / span ${placement?.span ?? GRID_TRACKS}`;
                            const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                            if (blockDisplay === 'text') {
@@ -1152,7 +1215,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                  key={block.id}
                                  className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6 min-w-0"
                                  style={{
-                                   gridColumn: `span ${gridSpan}`,
+                                   gridColumn,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
                                    minHeight: '80px',
                                    backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
@@ -1187,7 +1250,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                  }}
                                  className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] ${isDark ? 'bg-white/5 border border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                  style={{
-                                   gridColumn: `span ${gridSpan}`,
+                                   gridColumn,
                                    borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                  }}
                                >
@@ -1221,7 +1284,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                }}
                                className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm aspect-square`}
                                style={{
-                                 gridColumn: `span ${gridSpan}`,
+                                 gridColumn,
                                  borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                }}
                              >
@@ -1229,9 +1292,18 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                <div className="absolute top-3 right-3">
                                  <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                                </div>
-                               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                               {/* 카드 아래 글씨를 받치는 그늘.
+                                   예전에는 from-black/90 · via-black/40(50%) 이라 글자 칸 높이만큼
+                                   짧은 구간에서 검정까지 떨어졌다 — 밝은 사진 위에서는 사진이
+                                   이어지는 대신 카드 아래에 회색 띠를 덧댄 것처럼 보였다. 지금은
+                                   그늘이 시작하는 자리를 글자 위로 올리고 농도를 낮춰, 글씨는
+                                   그대로 읽히면서 사진이 끊기지 않게 한다. 카테고리를 비워 둔
+                                   카드는 그 줄을 그리지 않는다 — 빈 줄이 그늘 높이만 키웠다. */}
+                               <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 pt-8 md:pt-12 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
                                  <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                 <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                                 {block.category && (
+                                   <div className="text-[9px] font-bold text-white/60 uppercase tracking-widest mt-0.5">{block.category}</div>
+                                 )}
                                </div>
                              </div>
                            );
@@ -1242,10 +1314,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                   </div>
                ) : (
                 <div className="flex flex-col gap-3 pb-32">
-                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                  {displayGroups.map((group) => (
                     <div key={group.category || '__all'}>
                       {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 px-2 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <div className={`flex items-center gap-3 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
@@ -1406,7 +1478,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             </header>
 
-            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-4 md:px-8 backdrop-blur-md -mx-4 md:-mx-8">
+            <div className="sticky top-0 z-30 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 overflow-x-auto scrollbar-hide flex gap-2 px-8 md:px-12 backdrop-blur-md -mx-4 md:-mx-8">
               {categories.map(cat => (
                 <button
                   key={cat}
@@ -1422,7 +1494,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
             {/* Product Search Bar */}
             {/* 큐레이션 레이아웃의 검색줄도 같은 두께를 쓴다. */}
             {showSearchBar && (
-            <div className="px-6 mb-2">
+            <div className="px-4 mb-2">
               <div className={`flex items-center gap-3 px-4 py-2.5 md:py-3 rounded-2xl border transition-all ${isDark ? 'bg-white/5 border-white/10 focus-within:border-white/30' : 'bg-white border-slate-200 focus-within:border-blue-300'}`}>
                 <Search size={16} className={`flex-shrink-0 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                 <input
@@ -1480,10 +1552,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
               {design.templateType === TemplateType.SHOPPABLE_GRID ? (
                 <div className="w-full" style={{ paddingBottom: '100px' }}>
-                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                  {displayGroups.map((group) => (
                     <div key={group.category || '__all'}>
                       {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 px-2 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <div className={`flex items-center gap-3 pt-6 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
@@ -1491,15 +1563,16 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                         </div>
                       )}
                       <div
-                        className="grid grid-flow-dense"
+                        className="grid"
                         style={{
-                          gridTemplateColumns: 'repeat(6, 1fr)',
+                          gridTemplateColumns: `repeat(${GRID_TRACKS}, minmax(0, 1fr))`,
                           gap: `${Math.max(design.gridGap, 4)}px`,
                         }}
                       >
                         {group.blocks.map((block) => {
-                          const colSpanVal = block.displayType === 'grid' ? (block.colSpan || 1) : 1;
-                          const gridSpan = colSpanVal === 1 ? 6 : colSpanVal === 2 ? 3 : 2;
+                          const placement = gridPlacements.get(block.id);
+                          // 시작 칸까지 함께 지정한다 — 덜 찬 줄을 가운데로 놓기 위해서다.
+                          const gridColumn = `${placement?.colStart ?? 1} / span ${placement?.span ?? GRID_TRACKS}`;
                           const blockDisplay: BlockDisplayType = block.displayType || 'grid';
 
                           if (blockDisplay === 'text') {
@@ -1508,7 +1581,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                 key={block.id}
                                 className="relative overflow-hidden group transition-all flex flex-col justify-center p-4 md:p-6"
                                 style={{
-                                  gridColumn: `span ${gridSpan}`,
+                                  gridColumn,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem',
                                   minHeight: '80px',
                                   backgroundColor: (block.highlight && block.highlight !== 'transparent') ? block.highlight : undefined,
@@ -1543,7 +1616,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                                 }}
                                 className={`relative flex items-center min-h-[64px] px-5 py-3 group cursor-pointer transition-all active:scale-[0.98] border ${isDark ? 'bg-white/5 border-white/20 shadow-[0_3px_10px_-4px_rgba(0,0,0,0.5)]' : 'bg-white border-slate-200 shadow-[0_3px_10px_-4px_rgba(15,23,42,0.16)]'}`}
                                 style={{
-                                  gridColumn: `span ${gridSpan}`,
+                                  gridColumn,
                                   borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                                 }}
                               >
@@ -1577,7 +1650,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                               }}
                               className={`relative overflow-hidden group cursor-pointer transition-all active:scale-[0.98] shadow-sm border ${isDark ? 'border-white/5' : 'border-slate-100'} aspect-square`}
                               style={{
-                                gridColumn: `span ${gridSpan}`,
+                                gridColumn,
                                 borderRadius: design.borderRadius === 'none' ? '0' : '1rem'
                               }}
                             >
@@ -1585,9 +1658,18 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                               <div className="absolute top-3 right-3">
                                 <span className="bg-black/60 backdrop-blur-md text-[10px] font-black px-2 py-1 rounded-lg text-white border border-white/10 shadow-lg">{block.products?.length || 0}</span>
                               </div>
-                              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+                              {/* 카드 아래 글씨를 받치는 그늘.
+                                  예전에는 from-black/90 · via-black/40(50%) 이라 글자 칸 높이만큼
+                                  짧은 구간에서 검정까지 떨어졌다 — 밝은 사진 위에서는 사진이
+                                  이어지는 대신 카드 아래에 회색 띠를 덧댄 것처럼 보였다. 지금은
+                                  그늘이 시작하는 자리를 글자 위로 올리고 농도를 낮춰, 글씨는
+                                  그대로 읽히면서 사진이 끊기지 않게 한다. 카테고리를 비워 둔
+                                  카드는 그 줄을 그리지 않는다 — 빈 줄이 그늘 높이만 키웠다. */}
+                              <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5 pt-8 md:pt-12 bg-gradient-to-t from-black/70 via-black/25 to-transparent">
                                 <div className="text-xs font-black truncate text-white uppercase tracking-tight">{block.title}</div>
-                                <div className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-0.5">{block.category}</div>
+                                {block.category && (
+                                  <div className="text-[9px] font-bold text-white/60 uppercase tracking-widest mt-0.5">{block.category}</div>
+                                )}
                               </div>
                             </div>
                           );
@@ -1598,10 +1680,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                 </div>
               ) : (
                 <div className="flex flex-col gap-3 pb-32">
-                  {(selectedCategory === '전체' && orderedCategoryGroups.length > 0 ? orderedCategoryGroups : [{ category: '', blocks: filteredBlocks }]).map((group) => (
+                  {displayGroups.map((group) => (
                     <div key={group.category || '__all'}>
                       {selectedCategory === '전체' && group.category && (
-                        <div className={`flex items-center gap-3 px-2 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <div className={`flex items-center gap-3 pt-5 pb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                           <Hash size={14} style={{ color: design.accentColor }} />
                           <span className="text-sm font-black uppercase tracking-wider">{group.category}</span>
                           <span className={`text-[10px] font-bold ${isDark ? 'text-white/30' : 'text-slate-400'}`}>{group.blocks.length}</span>
@@ -1693,7 +1775,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         </footer>
 
         {/* Product Detail Drawer */}
-        <div className={`fixed bottom-0 left-0 right-0 max-w-3xl mx-auto p-6 sm:p-8 md:p-10 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] rounded-t-[2.5rem] sm:rounded-t-[3rem] transition-transform duration-500 z-[110] shadow-[0_-20px_60px_rgba(0,0,0,0.3)] ${selectedBlockId ? 'translate-y-0' : 'translate-y-full'} ${isDark ? 'bg-[#0f172a] text-white' : 'bg-white text-slate-900'}`}>
+        {/* 그림자는 열려 있을 때만 그린다. 이 서랍은 닫혀 있어도 계속 붙어 있고
+            (translate-y-full 로 화면 밖에 내려둔다), 위로 60px 번지는 그림자는
+            화면 밖으로 내려가지 않는다 — 아무것도 누르지 않은 페이지의 아래쪽에
+            서랍 폭만큼 어두운 그라데이션이 늘 올라와 있었고, 그 위에 걸친 사업자
+            정보까지 함께 어두워졌다. */}
+        <div className={`fixed bottom-0 left-0 right-0 max-w-3xl mx-auto p-6 sm:p-8 md:p-10 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] rounded-t-[2.5rem] sm:rounded-t-[3rem] transition-transform duration-500 z-[110] ${selectedBlockId ? 'translate-y-0 shadow-[0_-20px_60px_rgba(0,0,0,0.3)]' : 'translate-y-full shadow-none'} ${isDark ? 'bg-[#0f172a] text-white' : 'bg-white text-slate-900'}`}>
           <div className={`w-12 h-1 rounded-full mx-auto mb-8 cursor-pointer ${isDark ? 'bg-white/20' : 'bg-slate-200'}`} onClick={() => setSelectedBlockId(null)}></div>
           <div className="flex justify-between items-center mb-6">
             <div>

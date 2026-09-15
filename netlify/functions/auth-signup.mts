@@ -190,8 +190,14 @@ export default async (req: Request) => {
         attempts++;
       }
 
+      // 개인페이지에 처음 얹히는 표시 이름은 아이디(= 페이지 주소)다.
+      // 예전에는 가입 폼의 "이름"(full_name)을 넣었다 — 실명으로 가입한 사람의
+      // 커버 사진 위에 본명이 큰 글씨로 올라갔고, 링크 관리에서 지우기 전까지는
+      // 아이디로 들어온 방문자가 보는 이름과 주소가 서로 달랐다. 실명은
+      // profiles.full_name 에만 남고(계정 찾기 · 정산에서 쓴다) 공개 페이지에는
+      // 나오지 않는다. 표시 이름은 링크 관리에서 언제든 바꾸거나 비울 수 있다.
       const initialData = {
-        profile: { name: full_name || cleanUsername, bio: "", avatar_url: "" },
+        profile: { name: cleanUsername, bio: "", avatar_url: "" },
         design: {},
         socials: {},
         category: "",

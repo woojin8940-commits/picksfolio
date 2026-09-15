@@ -58,6 +58,29 @@ const ManagerDashboard = lazyWithRetry(() => import('./components/manager/Manage
 import { openExternalUrl } from './utils/externalLink';
 import { isNativeApp, isPersistentLoginEnv } from './utils/appEnv';
 
+/**
+ * 화면 코드(청크)를 받아오는 동안 띄우는 로딩 화면. 로그인 · 가입 계열은 모두
+ * 이 하나만 쓴다 — 홈과 같은 종이색 · 같은 PICKS 표시라, 홈에서 버튼을 누른
+ * 순간부터 대시보드가 열릴 때까지 화면이 한 장으로 이어진다. 문구만 기본값
+ * ("로그인 중입니다")과 다르게 두는데, 아직 아무것도 누르지 않은 사람에게
+ * 로그인 중이라고 말할 수는 없기 때문이다.
+ */
+const ROUTE_LOADING_SCREEN = <AuthLoadingScreen message="화면을 불러오는 중입니다" />;
+
+/**
+ * Suspense 경계 안에서 자식이 실제로 화면에 붙은 순간을 한 번 알려 주는 빈 조각.
+ *
+ * 청크가 도착하기 전에는 이 자리 전체가 fallback 이라 effect 도 돌지 않는다.
+ * 그래서 "기다림이 끝났다"를 정확히 그 시점에 알 수 있다 — 시간(타이머)으로
+ * 어림하면 청크가 늦게 오는 회선에서 로딩 화면이 중간에 다른 표시로 바뀐다.
+ */
+const MountedSignal: React.FC<{ onMounted: () => void }> = ({ onMounted }) => {
+  useEffect(() => {
+    onMounted();
+  }, [onMounted]);
+  return null;
+};
+
 type ApiService = typeof import('./services/apiService').apiService;
 
 let apiServicePromise: Promise<ApiService> | null = null;
@@ -286,6 +309,14 @@ const App: React.FC = () => {
   // loginTransitioning: true during the brief period between login success and admin dashboard ready.
   // Shows a smooth loading screen instead of a blank/flickering dashboard.
   const [loginTransitioning, setLoginTransitioning] = useState(false);
+
+  // dashboardEntering: 로그인이 끝난 뒤 대시보드의 첫 화면이 실제로 붙을 때까지.
+  // 대시보드 껍데기(AdminDashboard)와 그 안의 첫 화면(가입 직후라면 링크 관리)은
+  // 서로 다른 청크라 차례로 기다린다. 안쪽 기다림에 기본 로딩 표시가 붙으면
+  // 방금까지 보던 로그인 화면이 다른 로딩 표시로 한 번 바뀌어, 로그인 한 번에
+  // 로딩창이 둘로 보였다. 이 구간에는 두 기다림이 같은 화면 하나를 쓴다.
+  const [dashboardEntering, setDashboardEntering] = useState(false);
+  const leaveDashboardEntry = useCallback(() => setDashboardEntering(false), []);
 
 
   // oauthProcessing: true while an OAuth callback (e.g. Kakao) is being processed.
@@ -892,6 +923,7 @@ const App: React.FC = () => {
           // Set loginTransitioning BEFORE clearing oauthProcessing to prevent
           // a brief flash of the login page between the two state updates.
           setLoginTransitioning(true);
+          setDashboardEntering(true);
           // 새 로그인이므로 이전 세션의 "크리에이터 대시보드를 보겠다"는 표시는 지운다.
           clearCreatorIntent();
           if (userRole === 'admin') {
@@ -919,6 +951,7 @@ const App: React.FC = () => {
           // User already has username, redirect away from setup
           console.log('[Auth] Redirecting to /admin because user already has username but was on /setup-link');
           setLoginTransitioning(true);
+          setDashboardEntering(true);
           setOauthProcessing(false);
           navigate('admin');
         } else if ((currentView === 'operator' || currentView === 'operator-login') && userRole !== 'admin') {
@@ -1391,6 +1424,23 @@ const App: React.FC = () => {
     }
   }, [loginTransitioning, view, userName, isLoggedIn]);
 
+  // 대시보드 첫 화면의 기다림을 로그인 화면으로 이어 주는 표시를 내려놓는 자리.
+  // 첫 화면이 붙는 순간은 아래 MountedSignal 이 알려 주지만, (1) 첫 화면이
+  // 대시보드 홈이면 받아올 하위 청크가 없어 신호를 받을 자리가 없고(홈은
+  // children 이 비어 있을 때만 그려진다), (2) 크리에이터 대시보드가 아닌 곳으로
+  // 들어갔으면 쓸 자리가 아예 없다. (3) 청크를 못 받아 오류 화면으로 빠진
+  // 경우에도 신호는 오지 않으므로 시간으로 끊는다 — 그대로 두면 그 뒤 메뉴를
+  // 옮길 때마다 대시보드가 전체 화면 로딩으로 덮인다.
+  useEffect(() => {
+    if (!dashboardEntering) return;
+    if (!loginTransitioning && (view !== 'admin' || subView === 'dashboard')) {
+      setDashboardEntering(false);
+      return;
+    }
+    const timer = setTimeout(() => setDashboardEntering(false), 10000);
+    return () => clearTimeout(timer);
+  }, [dashboardEntering, loginTransitioning, view, subView]);
+
   const wasLoggedInRef = useRef(false);
   useEffect(() => {
     if (isLoggedIn && userName) {
@@ -1786,7 +1836,7 @@ const App: React.FC = () => {
   // Business views
   if (view === 'business-signup') {
     return (
-      <LazyRoute>
+      <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
         <BusinessSignupPage
           onNavigateHome={() => navigate('home')}
           onNavigateLogin={() => navigate('business-login')}
@@ -1797,7 +1847,7 @@ const App: React.FC = () => {
   }
   if (view === 'business-login') {
     return (
-      <LazyRoute>
+      <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
         <BusinessLoginPage
           onNavigateHome={() => navigate('home')}
           onNavigateBusinessSignup={() => navigate('business-signup')}
@@ -1830,7 +1880,7 @@ const App: React.FC = () => {
       return null;
     }
     return (
-      <LazyRoute>
+      <LazyRoute fallback={<AuthLoadingScreen />}>
         <BusinessEnterpriseDashboard
           businessUsername={businessUsername}
           companyName={businessCompanyName}
@@ -1840,7 +1890,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (view === 'operator-login') return <LazyRoute><OperatorLogin onLoginSuccess={(info) => {
+  if (view === 'operator-login') return <LazyRoute fallback={ROUTE_LOADING_SCREEN}><OperatorLogin onLoginSuccess={(info) => {
     // 이 탭은 운영자 슬롯이 된다 — 같은 브라우저의 일반 유저 탭과 로그인이
     // 섞이지 않도록 아래 저장은 모두 운영자 슬롯 키로 들어간다.
     const slotChanged = setAccountScope('operator');
@@ -1867,7 +1917,7 @@ const App: React.FC = () => {
     if (!profileChecked && supabase) {
       return <AuthLoadingScreen />;
     }
-    return <LazyRoute><OperatorDashboard onLogout={() => navigate('operator-login')} /></LazyRoute>;
+    return <LazyRoute fallback={<AuthLoadingScreen />}><OperatorDashboard onLogout={() => navigate('operator-login')} /></LazyRoute>;
   }
   if (view === 'manager') {
     if (!isLoggedIn) {
@@ -1889,7 +1939,7 @@ const App: React.FC = () => {
       return null;
     }
     return (
-      <LazyRoute>
+      <LazyRoute fallback={<AuthLoadingScreen />}>
         <ManagerDashboard
           username={userName}
           displayName={managerDisplayName}
@@ -1950,12 +2000,13 @@ const App: React.FC = () => {
       return <AuthLoadingScreen />;
     }
     return (
-      <LazyRoute>
+      <LazyRoute fallback={<AuthLoadingScreen />}>
         <SetupLink
           userId={authUserId}
           onSetupComplete={(newUsername) => {
             loginNavigationHandledRef.current = true;
             setLoginTransitioning(true);
+            setDashboardEntering(true);
             setUserName(newUsername);
             setIsLoggedIn(true);
             navigate('admin');
@@ -1979,49 +2030,53 @@ const App: React.FC = () => {
       return <AuthLoadingScreen />;
     }
 
+    // 로그인 직후 첫 화면까지는 "로그인 중" 화면을 그대로 유지하고, 그 뒤 메뉴를
+    // 오갈 때는 대시보드를 덮지 않는 제자리 표시(LazyRoute 기본값)를 쓴다.
+    const entryFallback = dashboardEntering ? <AuthLoadingScreen /> : undefined;
+
+    // 아래 화면들은 각자 청크로 갈라져 있어 여는 순간 한 번 기다린다. 기다림을
+    // 감싸는 일은 한 곳(아래 LazyRoute)에서만 하므로 여기서는 화면만 고른다.
     let subComponent: React.ReactNode = null;
 
     switch (subView) {
       case 'links':
-        subComponent = <LazyRoute><LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} /></LazyRoute>;
+        subComponent = <LinkManagement userName={userName} onNavigateMembership={() => setSubView('membership')} />;
         break;
       case 'dm-automation':
-        subComponent = <LazyRoute><DmAutomation userName={userName} /></LazyRoute>;
+        subComponent = <DmAutomation userName={userName} />;
         break;
       case 'insights':
-        subComponent = <LazyRoute><CreatorInsights userName={userName} /></LazyRoute>;
+        subComponent = <CreatorInsights userName={userName} />;
         break;
       case 'business':
-        subComponent = <LazyRoute><BusinessDashboard userName={userName} /></LazyRoute>;
+        subComponent = <BusinessDashboard userName={userName} />;
         break;
       case 'calendar':
-        subComponent = <LazyRoute><BusinessCalendar userName={userName} /></LazyRoute>;
+        subComponent = <BusinessCalendar userName={userName} />;
         break;
       case 'open-schedule':
-        subComponent = <LazyRoute><OpenScheduleManagement userName={userName} /></LazyRoute>;
+        subComponent = <OpenScheduleManagement userName={userName} />;
         break;
       case 'settlement':
-        subComponent = <LazyRoute><UserSettlement userName={userName} /></LazyRoute>;
+        subComponent = <UserSettlement userName={userName} />;
         break;
       case 'timeline':
         subComponent = (
-          <LazyRoute>
-            <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
-          </LazyRoute>
+          <BusinessTimeline userName={userName} initialProposalId={timelineProposalId || undefined} />
         );
         break;
       case 'membership':
-        subComponent = <LazyRoute><MembershipPlan userName={userName} /></LazyRoute>;
+        subComponent = <MembershipPlan userName={userName} />;
         break;
       case 'campaigns':
-        subComponent = <LazyRoute><UserCampaignBrowse userName={userName} /></LazyRoute>;
+        subComponent = <UserCampaignBrowse userName={userName} />;
         break;
       // 캠페인 협업. 선정된 캠페인을 브랜드 화면과 같은 모양으로 — 캠페인 카드가
       // 깔리고, 하나를 누르면 진행사항 · 인사이트 · 정산 탭이 열린다. 캠페인 찾기
       // (UserCampaignBrowse)에는 이 상자를 얹지 않는다. 새 캠페인을 찾는 자리와
       // 이미 시작한 캠페인을 굴리는 자리는 하는 일이 다르다.
       case 'my-collabs':
-        subComponent = <LazyRoute><CreatorCampaignCollabs userName={userName} initialCollabId={collabFocusId || undefined} /></LazyRoute>;
+        subComponent = <CreatorCampaignCollabs userName={userName} initialCollabId={collabFocusId || undefined} />;
         break;
       default:
         subComponent = null; // AdminDashboard will show default dashboard if children is null
@@ -2076,7 +2131,12 @@ const App: React.FC = () => {
       >
         {subComponent ? (
           <ErrorBoundary key={subView}>
-            {subComponent}
+            <LazyRoute fallback={entryFallback}>
+              {subComponent}
+              {/* 첫 화면이 실제로 붙는 순간을 알려 준다 — 그때부터는 로그인
+                  화면을 붙잡아 둘 이유가 없다. */}
+              {dashboardEntering && <MountedSignal onMounted={leaveDashboardEntry} />}
+            </LazyRoute>
           </ErrorBoundary>
         ) : null}
       </AdminDashboard>
@@ -2125,7 +2185,7 @@ const App: React.FC = () => {
             </LazyRoute>
           </>
         ) : view === 'signup' ? (
-          <LazyRoute>
+          <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
           <SignupPage
             initialId={initialId}
             onNavigateHome={() => navigate('home')}
@@ -2134,7 +2194,7 @@ const App: React.FC = () => {
           />
           </LazyRoute>
         ) : (
-          <LazyRoute>
+          <LazyRoute fallback={ROUTE_LOADING_SCREEN}>
           <LoginPage
             onNavigateHome={() => navigate('home')}
             onNavigateSignup={() => navigate('signup')}
@@ -2142,6 +2202,7 @@ const App: React.FC = () => {
               loginNavigationHandledRef.current = true;
               setProfileChecked(true);
               setLoginTransitioning(true);
+              setDashboardEntering(true);
               // 담당자로 배정된 계정이면 첫 화면은 담당자 대시보드다. 다만 이 시점에는
               // Supabase 세션이 아직 없어서(로그인 화면이 이 콜백 뒤에 setSession 을
               // 부른다) 배정 여부를 물을 수 없다. 그래서 여기서는 예전처럼 크리에이터

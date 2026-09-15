@@ -108,9 +108,13 @@ export default async (req: Request) => {
             newCode += chars.charAt(Math.floor(Math.random() * chars.length));
           }
 
+          // 아직 site_data 가 없던 계정에 처음 만들어 주는 페이지. 표시 이름은
+          // auth-signup 과 같은 기준으로 아이디를 넣는다 — 공개 페이지의 이름과
+          // 주소가 어긋나지 않게, 그리고 실명(full_name)이 본인도 모르게 공개
+          // 페이지에 올라가지 않게 한다.
           const initialData: Record<string, any> = {
             profile: {
-              name: profile?.nickname || profile?.full_name || resolvedUsername,
+              name: resolvedUsername,
               bio: profile?.bio || "",
               avatar_url: profile?.avatar_url || "",
             },
