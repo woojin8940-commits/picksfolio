@@ -921,6 +921,15 @@ const App: React.FC = () => {
           setLoginTransitioning(true);
           setOauthProcessing(false);
           navigate('admin');
+        } else if ((currentView === 'operator' || currentView === 'operator-login') && userRole !== 'admin') {
+          // 운영자 화면은 관리자만 쓴다. 일반 계정이 이 주소에 남아 있는 탭은
+          // (아이디만 보고 운영자로 판정하던 시절에 여기로 끌려온 탭이 그렇다)
+          // 새로고침해도 "관리자 권한이 필요합니다." 만 반복해서 보게 되므로,
+          // 자기 대시보드로 돌려보낸다.
+          console.log(`[Auth] Leaving /${currentView} — role "${userRole}" is not an operator`);
+          setOauthProcessing(false);
+          setSubView('dashboard');
+          navigate('admin');
         } else if (settledViews.includes(currentView) && isViewValidForRole(currentView, userRole)) {
           setOauthProcessing(false);
           console.log(`[Auth] Staying on /${currentView} — valid for role "${userRole}"`);

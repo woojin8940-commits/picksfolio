@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { login, acceptInvite, handleAuthCallback, AuthError, MissingIdentityError } from '@netlify/identity';
 
 const ADMIN_EMAILS = ['woojin8940@inplace-ad.com', 'picksfolio@picks.me'];
-const ADMIN_USERNAMES = ['picksfolio', 'picksfolio12'];
 
 interface OperatorLoginProps {
   onLoginSuccess: (info?: { username: string; token: string }) => void;
@@ -117,8 +116,13 @@ const OperatorLogin: React.FC<OperatorLoginProps> = ({ onLoginSuccess }) => {
         return;
       }
 
-      const resolvedEmail = `${usernameClean}@picks.me`;
-      if (!ADMIN_USERNAMES.includes(usernameClean) && !ADMIN_EMAILS.includes(resolvedEmail)) {
+      // 아이디로 들어오는 경우의 관리자 판정은 서버가 알려 준 역할(profiles.role)
+      // 하나로만 한다. 예전에는 아이디 목록과 `<아이디>@picks.me` 로 만들어 낸
+      // 이메일을 관리자 목록과 맞춰 봤는데, 'picksfolio' 아이디가 일반 계정에 다시
+      // 열린 뒤로는 그 두 갈래 모두 새 주인을 운영자로 오인했다. 운영자 API
+      // (_shared/admin-auth)는 역할을 보기 때문에, 그렇게 통과시켜도 대시보드는
+      // "관리자 권한이 필요합니다." 로만 끝났다. 서버와 같은 기준으로 맞춘다.
+      if (String(result.role || 'user').trim().toLowerCase() !== 'admin') {
         setError('관리자 권한이 없는 계정입니다.');
         setLoading(false);
         return;
