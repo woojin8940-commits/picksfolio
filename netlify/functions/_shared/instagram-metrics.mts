@@ -54,6 +54,8 @@ export interface MetaLink {
   igUserId?: string;
   igAccountId?: string;
   igUsername?: string;
+  /** 인스타에서 이름이 바뀐 것을 확인해 igUsername 을 고쳐 쓴 시각. */
+  igUsernameUpdatedAt?: string;
   username?: string;
   /** 토큰이 죽은 것이 확인된 연동. 사람이 다시 동의해 주기 전에는 어떤 호출도 성공하지 않는다. */
   needsReauth?: boolean;
@@ -112,6 +114,11 @@ export interface RecentFeedItem {
 
 export interface MetaMetrics {
   igUsername: string;
+  /**
+   * 연동 계정의 고유 아이디. @이름과 달리 사람이 바꿀 수 없는 값이라, "이름이 바뀐
+   * 같은 계정"과 "다른 계정으로 다시 연동"을 구분하는 근거가 된다(persistMetrics).
+   */
+  igUserId: string;
   followers: number | null;
   following: number | null;
   /** 인스타 프로필 사진 주소. 못 받으면 빈 문자열 — 지난번 값을 지우지 않는다. */
@@ -431,6 +438,134 @@ export async function clearLinkReauthFlag(
   }
 }
 
+/** 앞에 붙은 @ 와 공백을 떼어 낸 인스타 아이디. 비교와 저장에 같은 모양을 쓴다. */
+export const cleanHandle = (raw: unknown) => String(raw || "").trim().replace(/^@+/, "");
+
+/** 인스타 프로필 주소. 아이디가 바뀌면 주소도 따라가야 한다. */
+export const igProfileUrl = (handle: unknown) =>
+  `https://www.instagram.com/${cleanHandle(handle)}/`;
+
+/** 주소에 박혀 있는 아이디. 굳어 있는 주소가 지금 계정을 가리키는지 볼 때 쓴다. */
+export const handleFromIgUrl = (raw: unknown) => {
+  const m = String(raw || "").match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+  return m ? m[1] : "";
+};
+
+/**
+ * 협업 매칭 등록서에 적어 둔 인스타 주소를 바뀐 이름으로 맞춘다.
+ *
+ * 담당자·브랜드가 명단에서 누르는 링크가 그 주소다. 이름이 바뀐 뒤에는 그 주소가 없는
+ * 계정으로 열리고, 그 이름을 누가 새로 가져갔다면 남의 프로필이 열린다.
+ *
+ * 옛 이름을 가리키던 주소만 고친다. 등록서에 연동 계정과 다른 계정을 일부러 적어 둔
+ * 사람의 입력을 우리가 바꿔 쓰지는 않는다 — 옛 이름을 모르면(from 이 빈 값) 무엇이 그
+ * 계정의 주소였는지 판단할 근거가 없으므로 아예 손대지 않는다.
+ */
+async function alignDirectoryInstagramUrl(
+  db: any,
+  username: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (!db || !from || !to) return;
+  try {
+    const rows = (await db.sql`
+      SELECT id, instagram_url
+      FROM collab_directory_applications
+      WHERE LOWER(applicant_username) = ${username.toLowerCase()} AND instagram_url <> ''
+    `) as any[];
+    for (const row of rows || []) {
+      if (handleFromIgUrl(row?.instagram_url).toLowerCase() !== from.toLowerCase()) continue;
+      await db.sql`
+        UPDATE collab_directory_applications
+        SET instagram_url = ${igProfileUrl(to)}, updated_at = NOW()
+        WHERE id = ${row.id}
+      `;
+    }
+  } catch (e) {
+    console.warn("[ig-metrics] 등록서 인스타 주소 반영 실패:", (e as Error)?.message);
+  }
+}
+
+/**
+ * 인스타 아이디가 바뀐 것을 우리 쪽에 반영한다.
+ *
+ * 인스타그램 아이디(@이름)는 사람이 언제든 바꿀 수 있고, 바꿔도 계정(user_id)은
+ * 그대로다. 우리는 연동하는 순간의 이름을 두 곳에 굳혀 둔다 — 연동 정보(igUsername)와
+ * 브랜드가 보는 명단(creator_channels.instagram_handle · instagram_url). 그래서 누군가
+ * 아이디를 바꾸면 그 뒤로는
+ *   · 명단·진행사항에 적힌 @아이디가 없는 계정을 가리키고(링크를 누르면 404),
+ *   · 태그된 콘텐츠는 옛 이름으로 언급을 찾아 아무것도 못 찾고,
+ *   · 댓글 자동 DM 은 "내가 쓴 댓글인지"를 옛 이름으로 판단해 자기 댓글에 답한다.
+ * 어느 것도 사람이 다시 연동해 주기 전에는 스스로 낫지 않는다. 그리고 이름을 바꾼
+ * 사람에게는 우리 화면이 틀렸다는 신호가 아무것도 없다.
+ *
+ * 그래서 메타에 프로필을 물어보는 자리(지표 동기화·프로필 사진 갱신·팔로워 스냅샷
+ * 배치)마다 돌아온 이름을 지금 값과 견주고, 달라졌을 때만 여기서 한 번에 바꿔 쓴다.
+ * 같으면 아무 것도 쓰지 않는다 — 거의 모든 호출이 그렇다.
+ *
+ * 명단 행은 "우리가 연동으로 써 둔 이름" 일 때만 고친다. 인플루언서가 직접 적어 둔
+ * 아이디(metrics_source='self')를 연동 계정 이름으로 덮어쓰면, 적은 적 없는 값이
+ * 자기 화면에 나타난다. 협업 매칭 등록서(collab_directory_applications)의 인스타
+ * 주소도 같은 규칙으로, 옛 이름을 가리키던 주소만 따라가게 한다. db 를 넘기지 않으면
+ * 연동 정보만 고친다.
+ */
+export async function applyRenamedHandle(
+  db: any | null,
+  username: string,
+  scope: MetaLinkScope,
+  link: MetaLink | null,
+  freshHandle: unknown,
+): Promise<{ changed: boolean; from: string; to: string }> {
+  const to = cleanHandle(freshHandle);
+  const from = cleanHandle(link?.igUsername);
+  const unchanged = { changed: false, from, to };
+  // 이름을 못 받았으면 굳혀 둔 값을 지우지 않는다. 같으면 쓸 일이 없다.
+  if (!to || to.toLowerCase() === from.toLowerCase()) return unchanged;
+
+  let changed = false;
+  try {
+    const at = linkLocation(scope, username);
+    const store = getStore({ name: at.store, consistency: "strong" });
+    // 그 사이에 사람이 자동 응답 규칙을 고쳤을 수 있다. 최신 레코드를 다시 읽어
+    // 이름만 갈아 끼운다.
+    const latest = (await store.get(at.key, { type: "json" })) as MetaLink | null;
+    // 연동이 해제된 뒤라면 쓸 자리가 없다. 여기서 새로 만들면 해제한 연동이 되살아난다.
+    if (!latest) return unchanged;
+    await store.setJSON(at.key, {
+      ...latest,
+      igUsername: to,
+      igUsernameUpdatedAt: new Date().toISOString(),
+    });
+    changed = true;
+  } catch (e) {
+    console.warn("[ig-metrics] 바뀐 인스타 아이디 저장 실패:", (e as Error)?.message);
+  }
+
+  if (db) {
+    try {
+      await db.sql`
+        UPDATE creator_channels
+        SET instagram_handle = ${to},
+            instagram_url = ${igProfileUrl(to)},
+            updated_at = NOW()
+        WHERE username = ${username}
+          AND (LOWER(instagram_handle) = LOWER(${from}) OR metrics_source = 'meta_api')
+      `;
+    } catch (e) {
+      console.warn("[ig-metrics] 바뀐 인스타 아이디 반영 실패:", (e as Error)?.message);
+    }
+
+    // 협업 매칭 등록서에 적어 둔 인스타 주소도 같은 계정을 가리키고 있었다면 따라간다.
+    await alignDirectoryInstagramUrl(db, username, from, to);
+  }
+
+  if (changed) {
+    console.log(`[ig-metrics] ${username}: 인스타 아이디 변경 ${from || "?"} → ${to}`);
+  }
+  return { changed, from, to };
+}
+
 /**
  * 갱신 버튼을 켜도 되는 연동인지.
  *
@@ -566,6 +701,10 @@ export async function fetchInstagramMetrics(
     ok: true,
     metrics: {
       igUsername,
+      // 계정 아이디는 연동할 때 받아 둔 값이 가장 믿을 만하다. 프로필 필드로 다시
+      // 물으면(`user_id`) 토큰 종류에 따라 없는 필드여서 요청 전체가 실패할 수 있고,
+      // 그러면 팔로워 수까지 함께 잃는다.
+      igUserId: String(link.igUserId || link.igAccountId || ""),
       followers,
       following,
       profileImage,
@@ -904,6 +1043,12 @@ async function refreshOneChannelImages(db: any, row: any, withMedia: boolean): P
     const source = String(payload?.profile_picture_url || "");
     const nextImage = source ? (await mirrorProfileImage(username, source, prior)) || source : prior;
 
+    // 사진을 물어보는 이 호출에는 지금 인스타 아이디도 함께 실려 온다. 얼굴과 마찬가지로
+    // 이름도 사람이 바꿀 수 있고, 바꾼 뒤에는 명단에 적힌 @아이디가 없는 계정을 가리킨다.
+    // 명단을 여는 길에 도는 주기적 확인은 이것뿐이라, 인플루언서가 갱신을 누르지 않아도
+    // 바뀐 이름이 여기서 반영된다.
+    await applyRenamedHandle(db, username, scope, link, payload?.username);
+
     // 썸네일은 아직 메타 주소로 남은 계정에만, 그것도 요청당 몇 계정까지만 옮긴다.
     const media =
       withMedia && channelNeedsMediaMirror(row)
@@ -995,6 +1140,11 @@ export async function refreshStaleChannelImages(db: any, usernames: string[]): P
  * 단, 그 규칙은 **같은 계정**일 때만 맞다. 다른 인스타그램 계정으로 다시 연동했는데
  * 지난 계정의 평균 조회수·릴스를 물려받으면, 브랜드는 이 사람의 것이 아닌 숫자를
  * 보게 된다. 계정이 바뀌면 물려받지 않고 이번에 받아 온 값만 남긴다.
+ *
+ * 그 "계정이 바뀌었다"를 @이름으로 판단하면 안 된다. 인스타 아이디는 사람이 언제든
+ * 바꿀 수 있고, 이름을 바꾼 것은 계정을 바꾼 것이 아니다. 그래서 바뀌지 않는 계정
+ * 아이디(user_id)를 함께 굳혀 두고 그것으로 견준다. 이름이 바뀐 것으로 확인되면
+ * 숫자는 그대로 이어 쓰고, 아이디와 프로필 주소만 새 이름으로 갈아 끼운다.
  */
 export async function persistMetrics(
   db: any,
@@ -1003,11 +1153,20 @@ export async function persistMetrics(
 ): Promise<any> {
   const existing = await loadChannel(db, username);
 
-  // 계정이 바뀌었는지. 아이디를 못 받았거나 처음 저장이면 판단할 근거가 없으므로
-  // 지금까지처럼 기존 값을 이어 쓴다(같은 계정의 권한 문제일 가능성이 높다).
-  const priorHandle = String(existing?.instagram_handle || "").toLowerCase();
+  // 계정이 바뀌었는지. 판단은 계정 아이디(user_id)로 먼저 한다 — @이름은 사람이
+  // 언제든 바꿀 수 있는 값이라, 이름이 다른 것만 보고 "다른 계정"으로 단정하면
+  // 이름을 바꾼 인플루언서는 그동안 확인해 둔 팔로워·평균 조회수를 잃는다(이번
+  // 응답에서 권한 때문에 못 받은 항목이 0 으로 굳는다). 양쪽 아이디를 다 아는
+  // 경우에만 그 판단을 믿고, 모르면(컬럼이 없던 시절의 옛 행) 지금까지처럼 이름으로
+  // 견준다 — 이름이 그때 우리가 가진 유일한 근거였다.
+  const priorHandle = cleanHandle(existing?.instagram_handle).toLowerCase();
+  const freshHandle = cleanHandle(metrics.igUsername).toLowerCase();
+  const priorId = String(existing?.instagram_user_id || "").trim();
+  const freshId = String(metrics.igUserId || "").trim();
   const sameAccount =
-    !metrics.igUsername || !priorHandle || priorHandle === metrics.igUsername.toLowerCase();
+    priorId && freshId
+      ? priorId === freshId
+      : !freshHandle || !priorHandle || priorHandle === freshHandle;
   const prior = sameAccount ? existing : null;
 
   const followers = metrics.followers ?? Number(prior?.followers || 0);
@@ -1044,7 +1203,7 @@ export async function persistMetrics(
     ),
   ).catch(() => {});
 
-  const handle = metrics.igUsername || String(existing?.instagram_handle || "");
+  const handle = cleanHandle(metrics.igUsername) || cleanHandle(existing?.instagram_handle);
   // 프로필 사진도 같은 규칙이다. 이번 응답에 없으면(권한·필드 미지원) 지난번 주소를
   // 남긴다. 단 계정이 바뀌었으면 물려받지 않는다 — 남의 얼굴이 걸린다.
   //
@@ -1056,24 +1215,30 @@ export async function persistMetrics(
     ? await mirrorProfileImage(username, metrics.profileImage, priorImage)
     : "";
   const profileImage = mirrored || metrics.profileImage || priorImage;
-  // 프로필 주소도 계정을 따라간다. 바뀐 계정에 옛 주소가 남으면 브랜드가 다른 사람의
-  // 프로필을 열어 보게 된다.
-  const igUrl =
-    String(prior?.instagram_url || "") || (handle ? `https://www.instagram.com/${handle}/` : "");
+  // 프로필 주소는 굳어 있던 값을 그대로 물려받지 않고, 그 주소가 지금 아이디를
+  // 가리키는지 확인한다. 아이디를 바꾼 계정에 옛 주소가 남으면 브랜드가 없는 계정을
+  // 열게 되고(404), 그 아이디를 누가 새로 가져갔다면 남의 프로필이 열린다.
+  const priorUrl = String(existing?.instagram_url || "");
+  const urlPointsAtHandle =
+    !!handle && handleFromIgUrl(priorUrl).toLowerCase() === handle.toLowerCase();
+  const igUrl = urlPointsAtHandle ? priorUrl : handle ? igProfileUrl(handle) : priorUrl;
 
   await db.sql`
     INSERT INTO creator_channels (
-      username, instagram_handle, instagram_url, connected, followers, following, avg_views,
-      avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed, synced_at,
-      intro, categories, profile_image, profile_image_checked_at
+      username, instagram_handle, instagram_user_id, instagram_url, connected, followers, following,
+      avg_views, avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed,
+      synced_at, intro, categories, profile_image, profile_image_checked_at
     ) VALUES (
-      ${username}, ${handle}, ${igUrl}, TRUE, ${followers}, ${following}, ${avgViews},
-      ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
+      ${username}, ${handle}, ${freshId}, ${igUrl}, TRUE, ${followers}, ${following},
+      ${avgViews}, ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
       ${JSON.stringify(mirroredReels)}, ${JSON.stringify(mirroredFeed)}, NOW(),
       ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}, NOW()
     )
     ON CONFLICT (username) DO UPDATE SET
       instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
+      -- 계정 아이디는 한 번 채우면 다음 동기화의 "이름이 바뀐 것인가, 다른 계정인가"
+      -- 판단 근거가 된다. 이번에 못 받았다면 지난 값을 지우지 않는다.
+      instagram_user_id = COALESCE(NULLIF(EXCLUDED.instagram_user_id, ''), creator_channels.instagram_user_id),
       instagram_url = COALESCE(NULLIF(EXCLUDED.instagram_url, ''), creator_channels.instagram_url),
       connected = TRUE,
       followers = EXCLUDED.followers,
@@ -1120,6 +1285,10 @@ export async function syncChannelFromMeta(
   }
   // 토큰이 살아 있는 것이 확인됐다. 지난번 일시 오류로 남은 표시가 있으면 지운다.
   if (link.needsReauth) await clearLinkReauthFlag(username, scope);
+  // 방금 프로필을 받아 왔으니 지금 인스타 아이디도 알고 있다. 그 사이에 이름을
+  // 바꿨으면 여기서 반영한다 — 바로 아래 persistMetrics 가 명단 행의 이름을 같은 값으로
+  // 다시 쓰지만, 연동 정보와 협업 등록서의 주소까지 맞추는 것은 이 함수뿐이다.
+  await applyRenamedHandle(db, username, scope, link, fetched.metrics.igUsername);
   const row = await persistMetrics(db, username, fetched.metrics);
   return {
     ok: true,

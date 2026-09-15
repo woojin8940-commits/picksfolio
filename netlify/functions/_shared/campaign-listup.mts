@@ -374,6 +374,9 @@ export async function buildSnapshots(
  * 그래서 숫자는 "비어 있을 때만" 채우고(굳은 값은 절대 덮지 않는다), 만료되는
  * 주소류(프로필 사진·릴스·피드)는 지금 값이 있으면 그쪽을 쓴다. 판단 근거는 그대로
  * 두면서 화면만 살아 있게 하는 절충이다.
+ *
+ * 인스타 @아이디와 프로필 주소도 뒤쪽에 속한다 — 그것은 판단 근거가 아니라 그 사람에게
+ * 가는 주소이고, 인스타에서 이름을 바꾼 뒤에는 굳어 있던 값이 없는 계정을 가리킨다.
  */
 export async function refreshListupSnapshots(
   db: any,
@@ -430,6 +433,12 @@ export async function refreshListupSnapshots(
         reelsCount: fill("reelsCount"),
         connected: frozen?.connected || live.connected,
         metricsSource: frozen?.metricsSource || live.metricsSource,
+        // @아이디와 프로필 주소는 굳히지 않는다. 인스타 아이디는 사람이 언제든 바꿀 수
+        // 있어서, 명단에 올린 날의 이름을 그대로 두면 담당자·브랜드가 지금 없는 계정을
+        // 열게 된다(아래 연락처를 굳히지 않는 것과 같은 이유다). 판단 근거인 숫자는
+        // 그대로 두고, 그 사람에게 가는 주소만 지금 것으로 바꿔 준다.
+        instagramHandle: live.instagramHandle || String(frozen?.instagramHandle || ""),
+        instagramUrl: live.instagramUrl || String(frozen?.instagramUrl || ""),
         profileImage: live.profileImage || String(frozen?.profileImage || ""),
         recentReels: live.recentReels.length
           ? live.recentReels

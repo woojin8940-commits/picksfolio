@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
-import { linkIsUsable, type MetaLink } from "./_shared/instagram-metrics.mts";
+import { applyRenamedHandle, linkIsUsable, type MetaLink, type MetaLinkScope } from "./_shared/instagram-metrics.mts";
 import { fetchProfileCounts, recordFollowerSnapshot } from "./_shared/creator-insights.mts";
 
 /**
@@ -19,6 +19,12 @@ import { fetchProfileCounts, recordFollowerSnapshot } from "./_shared/creator-in
  * creator_channels(브랜드가 보는 숫자)도 건드리지 않는다 — 이 배치가 다른 화면의
  * 숫자를 바꾸면, 밤사이에 브랜드 명단이 조용히 달라지는 일이 생긴다.
  *
+ * 예외가 하나 있다. 팔로워 수를 물어보는 같은 호출에 지금 인스타 아이디(@이름)가
+ * 함께 실려 오는데, 그 이름이 바뀌었으면 여기서 반영한다. 이름은 숫자가 아니라 "이
+ * 계정이 누구인가"이고, 틀린 이름은 명단에서 없는 계정을 가리키는 링크가 된다.
+ * 연동해 둔 계정 전부를 매일 한 번 훑는 곳이 여기뿐이라, 이 자리에서 확인하지 않으면
+ * 이름을 바꾼 사람은 다시 연동할 때까지 옛 이름으로 남는다(applyRenamedHandle).
+ *
  * 토큰이 죽은 계정은 조용히 건너뛴다. 재연동 표시를 남기는 일은 이미 매일 도는
  * 토큰 갱신 배치(scheduled-instagram-token-refresh)가 한다. 두 곳에서 같은 표시를
  * 다투어 쓰면 어느 쪽이 먼저 돌았는지에 따라 화면 안내가 달라진다.
@@ -26,8 +32,8 @@ import { fetchProfileCounts, recordFollowerSnapshot } from "./_shared/creator-in
 
 /** 훑을 보관함. 같은 사용자가 양쪽에 있으면 앞쪽(collab)을 쓴다. */
 const SOURCES = [
-  { store: "collab-instagram", prefix: "ig_" },
-  { store: "dm-automation", prefix: "dm_" },
+  { store: "collab-instagram", prefix: "ig_", scope: "collab" },
+  { store: "dm-automation", prefix: "dm_", scope: "dm" },
 ] as const;
 
 /** 한 번의 실행에서 처리할 계정 수 상한. 실행 시간이 터지지 않게 둔다. */
@@ -39,7 +45,7 @@ export default async () => {
   const db = getDatabase();
 
   // 사용자명 → 쓸 연동. 먼저 담긴 쪽(collab)이 이긴다.
-  const links = new Map<string, MetaLink>();
+  const links = new Map<string, { link: MetaLink; scope: MetaLinkScope }>();
 
   for (const source of SOURCES) {
     try {
@@ -51,7 +57,7 @@ export default async () => {
         const link = (await store.get(blob.key, { type: "json" })) as MetaLink | null;
         // 토큰이 죽은 연동은 부르면 실패한다. 재연동은 사람이 해야 하는 일이다.
         if (!linkIsUsable(link)) continue;
-        links.set(username, link!);
+        links.set(username, { link: link!, scope: source.scope });
         if (links.size >= MAX_ACCOUNTS) break;
       }
     } catch (e) {
@@ -69,13 +75,20 @@ export default async () => {
   let saved = 0;
   let skipped = 0;
   let failed = 0;
+  let renamed = 0;
 
   for (let i = 0; i < entries.length; i += CHUNK) {
     const slice = entries.slice(i, i + CHUNK);
     await Promise.all(
-      slice.map(async ([username, link]) => {
+      slice.map(async ([username, { link, scope }]) => {
         try {
           const profile = await fetchProfileCounts(link);
+          // 이름이 바뀐 것은 팔로워 수를 못 받은 경우와 따로 본다. 실패한 응답의
+          // 이름은 지금 값을 그대로 돌려준 것이라 비교할 값이 아니다.
+          if (profile.ok) {
+            const rename = await applyRenamedHandle(db, username, scope, link, profile.igUsername);
+            if (rename.changed) renamed++;
+          }
           // 팔로워 수를 못 받았으면 남길 값이 없다. 0 을 남기면 그래프에 절벽이 생긴다.
           if (!profile.ok || profile.followers === null) {
             skipped++;
@@ -92,7 +105,8 @@ export default async () => {
   }
 
   console.log(
-    `[follower-snapshot] 완료 — 저장 ${saved}, 건너뜀 ${skipped}, 실패 ${failed} / 대상 ${entries.length}`,
+    `[follower-snapshot] 완료 — 저장 ${saved}, 건너뜀 ${skipped}, 실패 ${failed}, ` +
+      `아이디 변경 ${renamed} / 대상 ${entries.length}`,
   );
 };
 

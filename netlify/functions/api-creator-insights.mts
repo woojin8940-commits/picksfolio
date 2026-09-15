@@ -1,7 +1,7 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
-import { REAUTH_MESSAGE } from "./_shared/instagram-metrics.mts";
+import { REAUTH_MESSAGE, applyRenamedHandle } from "./_shared/instagram-metrics.mts";
 import {
   backfillSnapshotFromChannel,
   CACHE_TTL_MINUTES,
@@ -34,10 +34,14 @@ import {
  * 나가는 값이라, 여기서 계정 주인 외에 열어 줄 이유가 없다. 관리자는 고객 지원을
  * 위해 통과된다(requireAccountOwner 의 기존 규칙).
  *
- * 이 경로는 읽기 전용이다. creator_channels(브랜드가 보는 숫자)도, 연동 토큰도
- * 건드리지 않는다. 쓰는 것은 팔로워 스냅샷 표뿐이다 — 오늘자 한 줄과, 이미 확인해 둔
- * 과거 팔로워 수(creator_channels.synced_at 기준) 한 줄이다. 둘 다 그래프의 점을
- * 채우는 값이고 다른 화면에 영향이 없다.
+ * 이 경로는 사실상 읽기 전용이다. 쓰는 것은 팔로워 스냅샷 표(오늘자 한 줄과, 이미
+ * 확인해 둔 과거 팔로워 수 한 줄)뿐이고, 둘 다 그래프의 점을 채우는 값이라 다른
+ * 화면에 영향이 없다. 지표 숫자를 다시 굳히는 일은 여기서 하지 않는다.
+ *
+ * 한 가지 예외는 인스타 아이디(@이름)다. 본인이 인스타에서 이름을 바꿨다면 방금 받은
+ * 응답이 그 사실을 알려 주는 자리이므로, 연동 정보와 명단의 이름·프로필 주소를 새
+ * 이름으로 맞춘다(applyRenamedHandle). 이름은 브랜드 화면이 이 사람을 찾아가는
+ * 주소여서, 틀린 채로 두면 없는 계정을 가리키는 링크가 된다.
  */
 
 const norm = (raw: string) => String(raw || "").trim().toLowerCase();
@@ -394,6 +398,10 @@ export default async (req: Request) => {
     // 이미 그때 남겼거나, 남길 필요가 없는 어제 값일 수 있다.
     if (!result.cached) {
       await recordFollowerSnapshot(db, username, payload.followers, payload.following, "live");
+      // 같은 응답에 지금 인스타 아이디도 실려 있다. 본인이 인스타에서 이름을 바꾼
+      // 뒤 처음 이 화면을 열면 여기서 확인된다 — 바뀐 이름을 연동 정보와 명단에
+      // 반영해 두지 않으면, 브랜드 화면의 @아이디가 없는 계정을 계속 가리킨다.
+      await applyRenamedHandle(db, username, resolved.scope, resolved.link, payload.igUsername);
     }
 
     // 최근 7일 증감. 스냅샷이 두 개 이상 있어야 말할 수 있는 값이라, 없으면 null 로
