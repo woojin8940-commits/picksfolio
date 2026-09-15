@@ -16,7 +16,9 @@ interface CropRect {
 }
 
 const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspectRatio }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // 크롭 좌표계의 기준. 이미지와 크롭 박스는 모두 이 stage(하단 버튼을 뺀
+  // 나머지 영역) 안에 절대좌표로 그려지므로, 크기도 stage 에서 재야 한다.
+  const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
@@ -26,18 +28,22 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
   const dragStart = useRef<{ mx: number; my: number; crop: CropRect } | null>(null);
 
   const calcDisplayRect = useCallback(() => {
-    if (!containerRef.current || !naturalSize.w) return;
-    const cw = containerRef.current.clientWidth;
-    const ch = containerRef.current.clientHeight;
+    // 화면 전체 높이에서 하단 버튼 높이를 100px 로 어림잡아 빼던 예전 방식은,
+    // 버튼 영역이 실제로 100px 이 아닐 때(안내 문구가 두 줄로 접히는 모바일 등)
+    // 이미지를 stage 밖으로 밀어 overflow:hidden 에 잘리게 만들었다.
+    if (!stageRef.current || !naturalSize.w) return;
+    const cw = stageRef.current.clientWidth;
+    const ch = stageRef.current.clientHeight;
+    if (!cw || !ch) return;
     const padding = 40;
     const maxW = cw - padding * 2;
-    const maxH = ch - padding * 2 - 100;
+    const maxH = ch - padding * 2;
+    if (maxW <= 0 || maxH <= 0) return;
+    // 원본 비율 유지: 가로·세로 중 더 빡빡한 쪽으로만 축소한다.
     const scale = Math.min(maxW / naturalSize.w, maxH / naturalSize.h, 1);
     const dw = naturalSize.w * scale;
     const dh = naturalSize.h * scale;
-    const dx = (cw - dw) / 2;
-    const dy = (ch - 100 - dh) / 2;
-    return { x: dx, y: dy, w: dw, h: dh };
+    return { x: (cw - dw) / 2, y: (ch - dh) / 2, w: dw, h: dh };
   }, [naturalSize]);
 
   const computeFixedCropSize = useCallback((dr: { w: number; h: number }) => {
@@ -85,7 +91,13 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
       setCrop({ x: clampedX, y: clampedY, w: cw, h: ch });
     };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    // stage 자체가 줄어드는 경우(하단 버튼 줄바꿈 등)는 window resize 로 잡히지 않는다.
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
+    if (ro && stageRef.current) ro.observe(stageRef.current);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      ro?.disconnect();
+    };
   }, [imgLoaded, naturalSize, displayRect, calcDisplayRect, computeFixedCropSize, crop]);
 
   const clampPosition = useCallback((c: CropRect): CropRect => {
@@ -151,7 +163,6 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: 'fixed', inset: 0, zIndex: 99999,
         background: 'rgba(0,0,0,0.92)',
@@ -171,7 +182,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
         <X size={28} />
       </button>
 
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div ref={stageRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <img
           ref={imgRef}
           src={src}
@@ -191,6 +202,10 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
                 position: 'absolute',
                 left: displayRect.x, top: displayRect.y,
                 width: displayRect.w, height: displayRect.h,
+                // tailwind preflight 의 `img { max-width: 100% }` 가 inline width 를
+                // 부모 너비로 깎아버리기 때문에 반드시 풀어줘야 한다. 안 풀면 위에서
+                // 계산한 원본 비율이 무시되고 이미지가 눌려 보인다.
+                maxWidth: 'none', maxHeight: 'none',
                 opacity: 0.35,
                 pointerEvents: 'none',
               }}
@@ -222,6 +237,10 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
                   top: displayRect.y - crop.y,
                   width: displayRect.w,
                   height: displayRect.h,
+                  // 이 이미지의 부모는 크롭 창(원본 표시 너비보다 좁다)이다.
+                  // preflight 의 max-width:100% 를 풀지 않으면 여기서 가로만 창
+                  // 너비로 눌려, 선택 영역 안의 사진이 실제보다 세로로 길어 보였다.
+                  maxWidth: 'none', maxHeight: 'none',
                   pointerEvents: 'none',
                 }}
               />
