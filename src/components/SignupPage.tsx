@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, AtSign, Briefcase, Check, Lock, Mail, Phone, Sparkles, User, X } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { digitsOnly, formatPhoneInput } from '../utils/formatters';
+import { checkUsername, prefetchUsername } from '../utils/usernameCheck';
 
 interface SignupPageProps {
   initialId: string;
@@ -87,36 +88,42 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
 
     setIsCheckingId(true);
     try {
-      const response = await fetch('/.netlify/functions/auth-check-username', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: value }),
-      });
-      const data = await response.json();
+      const result = await checkUsername(value);
 
       // 확인에 실패한 경우(서버 오류 · 호출 제한)는 "사용 불가" 가 아니다. 결과를
       // 남기지 않고 다시 눌러 달라고만 안내한다 — 남겨 두면 쓸 수 있는 아이디가
       // 못 쓰는 아이디로 보인다.
-      if (!response.ok || !data?.success) {
+      if (!result.ok) {
         setIdCheck(null);
-        alert(data?.error || (isEn ? 'Could not check the username. Please try again.' : '아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
+        alert(result.message || (isEn ? 'Could not check the username. Please try again.' : '아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
         return;
       }
 
       setIdCheck({
         id: value,
-        state: data.available ? 'available' : 'unavailable',
-        message: data.available
+        state: result.available ? 'available' : 'unavailable',
+        message: result.available
           ? (isEn ? 'This username is available.' : '사용 가능한 아이디입니다.')
-          : data.error || (isEn ? 'This username is already taken.' : '이미 사용 중인 아이디입니다.'),
+          : result.message || (isEn ? 'This username is already taken.' : '이미 사용 중인 아이디입니다.'),
       });
-    } catch {
-      setIdCheck(null);
-      alert(isEn ? 'Could not check the username. Please try again.' : '아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setIsCheckingId(false);
     }
   }, [id, isEn]);
+
+  /**
+   * 입력이 멈추면 답을 미리 받아 둔다. 사용자가 "중복확인" 을 누르는 시점에는
+   * 왕복이 이미 끝나 있어 기다림이 없다.
+   *
+   * 받아 둔 답을 idCheck 에 넣지는 않는다. 누른 적이 없는데 "사용 가능" 표시가
+   * 떠 있으면 확인을 거쳤다는 뜻이 되고, 가입 버튼의 전제(누른 아이디에 대한
+   * 답만 인정)가 흐려진다.
+   */
+  useEffect(() => {
+    if (!ID_PATTERN.test(id)) return;
+    const timer = setTimeout(() => prefetchUsername(id), 500);
+    return () => clearTimeout(timer);
+  }, [id]);
 
   // 전화번호를 고치면 직전 인증은 그 번호에 대한 인증이 아니다. 예전에는 인증
   // 완료 표시가 그대로 남아, 번호를 바꾼 뒤 그대로 가입을 눌러 서버에서 거절당했다.
