@@ -778,13 +778,16 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                     </div>
                     <div>
                       <p className="text-[9px] font-black text-slate-400 mb-1">자막</p>
-                      <input
+                      {/* 설명 · 나레이션과 같은 글상자. 한 줄 <input> 이면 긴 자막의
+                          뒷글자가 칸 밖으로 밀려 휴대폰에서 확인할 수 없었다. */}
+                      <SceneTextarea
                         value={s.subtitle}
                         onChange={e => patchScene(index, i, 'subtitle', e.target.value)}
                         disabled={locked}
+                        rows={2}
                         maxLength={MAX_SUBTITLE}
                         placeholder="화면에 뜨는 글자 (없으면 비워 두세요)"
-                        className={fieldCls}
+                        className={`${fieldCls} resize-none overflow-hidden`}
                       />
                     </div>
                     <div>

@@ -50,7 +50,7 @@ const AuthLoadingScreen: React.FC<{ message?: string }> = ({ message = '로그�
     return () => {
       document.body.classList.remove('auth-paper');
       // index.html 이 리액트보다 먼저 깔아 둔 인라인 색도 여기서 함께 치운다.
-      // 남겨 두면 개인페이지·라이브처럼 다크로 남는 화면의 바깥 여백이 밝게 뜬다.
+      // 남겨 두면 개인페이지처럼 다크로 남는 화면의 바깥 여백이 밝게 뜬다.
       document.body.style.removeProperty('background-color');
     };
   }, []);

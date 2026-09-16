@@ -94,8 +94,6 @@ interface PublicPageBodyProps {
   /** 카드를 눌렀을 때. 상품 서랍은 이 컴포넌트 밖에서 그린다. */
   onSelectBlock: (blockId: string) => void;
   onTrackClick?: (blockId: string) => void;
-  /** 라이브 방송 띠. 공개 페이지만 넘긴다. */
-  topBanner?: React.ReactNode;
   /**
    * 폰 프레임 안에 그리는 중인가.
    *
@@ -125,7 +123,6 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
   onSearchQuery,
   onSelectBlock,
   onTrackClick,
-  topBanner,
   compact = false,
   children,
 }) => {
@@ -602,8 +599,6 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
         {design.homePriority === 'portfolio' ? (
           /* PORTFOLIO LAYOUT */
           <div className="flex-1 flex flex-col">
-            {topBanner}
-
             <div
               className={`relative aspect-[4/5] flex-shrink-0 -mx-3 ${w('md:-mx-6')}`}
               style={{ background: coverPlaceholder }}
@@ -717,8 +712,6 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
         ) : (
           /* CURATION LAYOUT */
           <div className="flex-1 flex flex-col">
-            {topBanner}
-
             {/* Large Cover Image for Curation Layout - same style as Portfolio */}
             <div
               className={`relative aspect-[4/5] flex-shrink-0 -mx-3 ${w('md:-mx-6')}`}

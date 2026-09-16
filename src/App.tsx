@@ -389,7 +389,7 @@ const App: React.FC = () => {
   useEffect(() => { isPlatformManagerRef.current = isPlatformManager; }, [isPlatformManager]);
   useEffect(() => { managerCheckedRef.current = managerChecked; }, [managerChecked]);
 
-  // 홈과 로그인 화면이 종이색 라이트 테마다. 대시보드·개인페이지·라이브는 그대로
+  // 홈과 로그인 화면이 종이색 라이트 테마다. 대시보드·개인페이지는 그대로
   // 다크를 쓴다. 로그인이 여기 들어오는 이유는 홈에서 곧바로 넘어오는 화면이라서다
   // — 예전에는 종이색 홈에서 로그인 버튼을 누르면 화면이 검게 바뀌었다. 로그인을
   // 기다리는 화면(AuthLoadingScreen)과 대시보드도 밝으므로 이제 로그인 한 번에
@@ -606,8 +606,8 @@ const App: React.FC = () => {
 
       // NON-BLOCKING profile fetch: Use safeFetchProfile with 5s timeout.
       // If the fetch fails or times out, immediately proceed with a fallback
-      // (localStorage username or 'Anonymous') so broadcasting/signaling is
-      // never delayed. A background retry will update the profile later.
+      // (localStorage username or 'Anonymous') so the dashboard is never
+      // delayed. A background retry will update the profile later.
       const fallbackUsername = sessionGet('picks_user_session') || '';
       const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
         || sessionStorage.getItem('kakao_provider_token')

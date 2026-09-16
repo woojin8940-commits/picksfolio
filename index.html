@@ -4,20 +4,18 @@
     <meta charset="UTF-8">
     <!--
       interactive-widget=overlays-content: when the on-screen keyboard opens it
-      OVERLAYS the page without resizing either viewport. This keeps the live
-      player's fixed, full-screen container perfectly pinned while a viewer types
-      in chat. `resizes-content` (the previous value) shrank the layout viewport,
-      dragging the fixed player up and briefly revealing the host's page behind it
-      ("화면이 솟는" surge). The chat input is lifted above the keyboard manually
-      via the VisualViewport API (see LiveStream.tsx); ordinary form inputs are
-      still scrolled into view by the browser within the unchanged layout viewport.
+      OVERLAYS the page without resizing either viewport. `resizes-content` (the
+      previous value) shrank the layout viewport, dragging fixed, full-screen
+      overlays (modals, bottom sheets) up and briefly revealing the page behind
+      them ("화면이 솟는" surge). Ordinary form inputs are still scrolled into
+      view by the browser within the unchanged layout viewport.
     -->
     <!--
       maximum-scale=1.0, user-scalable=no: lock the visual viewport so the page
       never zooms. Without this, focusing a text field or double-tapping on
-      mobile magnifies the layout and leaves it stuck mid-zoom — disorienting in
-      the full-screen broadcast/live views. Combined with the >=16px input
-      font-size rule in index.css, this keeps the screen fixed at all times.
+      mobile magnifies the layout and leaves it stuck mid-zoom. Combined with the
+      >=16px input font-size rule in index.css, this keeps the screen fixed at
+      all times.
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
     <meta name="theme-color" content="#2563EB">
@@ -52,12 +50,6 @@
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="preconnect" href="https://rjksilpewohjvtbxrsvu.supabase.co" crossorigin />
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
-    <!--
-      /assets/ 밖에 둔다. 그 폴더의 나머지는 파일명에 내용 해시가 붙는 빌드 산출물이라
-      netlify.toml 에서 1년 immutable 캐시를 걸었는데, 이 파일은 해시가 없어 같은
-      이름으로 내용이 바뀐다 — 같은 규칙에 들어가면 고친 내용이 1년 동안 전달되지 않는다.
-    -->
-    <script src="/vendor/ivs-player-overlay.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -119,10 +111,10 @@
     </script>
     <script type="module" src="/src/main.tsx"></script>
     <!--
-      video.js 와 포트원 결제 SDK 는 여기서 부르지 않는다.
-      둘은 defer 가 없는 일반 <script> 였고, 위의 모듈 진입점은 defer 로 동작하므로
-      리액트는 이 두 개(합계 260KB, 서로 다른 도메인 두 곳)가 내려오고 실행될 때까지
-      시작하지 못했다 — 라이브도 결제도 열지 않는 방문자까지 그 대기를 물었다.
+      포트원 결제 SDK 는 여기서 부르지 않는다.
+      defer 가 없는 일반 <script> 였고, 위의 모듈 진입점은 defer 로 동작하므로
+      리액트는 그것이 내려오고 실행될 때까지 시작하지 못했다 — 결제를 열지 않는
+      방문자까지 그 대기를 물었다.
       지금은 필요한 화면이 utils/externalScripts.ts 로 그 자리에서 불러온다.
     -->
     <script src="/campaign-inject.js" defer></script>

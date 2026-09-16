@@ -2350,13 +2350,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       {isEditing && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={handleCancelEdit}></div>
-          <div className="bg-white w-full max-w-2xl max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
+          <div className="bg-white w-full max-w-2xl max-h-[92vh] modal-maxh-92 sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-5 sm:p-10 pb-4 sm:pb-6 flex justify-between items-center">
               <h3 className="text-xl sm:text-3xl font-black text-[#1E1E2E]">{editForm.displayType === 'text' ? '텍스트 수정' : '포스트 수정'}</h3>
               <button onClick={handleCancelEdit} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-10 pt-0 space-y-6 sm:space-y-10 custom-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-10 pt-0 space-y-6 sm:space-y-10 custom-scrollbar">
               <div className="flex flex-col md:flex-row gap-8">
                 {editForm.displayType !== 'text' && (
                 <div className="w-full md:w-1/2 space-y-4">
@@ -2754,13 +2754,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       {showMobilePreview && (
         <div className="lg:hidden fixed inset-0 z-[320] flex flex-col">
           <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setShowMobilePreview(false)} />
-          <div className="relative z-10 mt-auto bg-[#EEF2F6] rounded-t-[2rem] p-4 pb-6 max-h-[94vh] flex flex-col items-center gap-3 animate-in slide-in-from-bottom duration-300">
+          <div className="relative z-10 mt-auto bg-[#EEF2F6] rounded-t-[2rem] p-4 pb-6 max-h-[94vh] modal-maxh-94 flex flex-col items-center gap-3 animate-in slide-in-from-bottom duration-300">
             <div className="w-10 h-1 rounded-full bg-slate-300" />
             <div className="flex items-center justify-between w-full px-1">
               <h3 className="font-black text-sm text-[#1E1E2E]">실시간 미리보기</h3>
               <button onClick={() => setShowMobilePreview(false)} className="flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -my-2 -mr-2 text-slate-400 hover:text-slate-600 transition-colors" aria-label="닫기"><X size={20} /></button>
             </div>
-            <div className="overflow-y-auto w-full flex justify-center pb-2">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain w-full flex justify-center pb-2">
               <PhoneFrame
                 size="lg"
                 label="실시간 미리보기"
@@ -2787,13 +2787,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       {showBlockTypeModal && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBlockTypeModal(false)}></div>
-          <div className="bg-white w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
+          <div className="bg-white w-full max-w-lg max-h-[92vh] modal-maxh-92 sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-6 sm:p-8 pb-4 flex justify-between items-center">
               <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">콘텐츠 추가</h3>
               <button onClick={() => setShowBlockTypeModal(false)} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8 pt-0 space-y-6">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 sm:p-8 pt-0 space-y-6">
               <div className="space-y-3">
                 <label className="text-xs font-black text-slate-400 uppercase tracking-widest">표시 형식</label>
                 <div className="grid grid-cols-3 gap-3">
@@ -2867,13 +2867,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       {showCategoryModal && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center sm:p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => { setShowCategoryModal(false); setEditingCategoryName(null); }}></div>
-          <div className="bg-white w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
+          <div className="bg-white w-full max-w-lg max-h-[92vh] modal-maxh-92 sm:max-h-[90vh] rounded-t-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 overflow-hidden flex flex-col">
             <div className="p-6 sm:p-8 pb-4 flex justify-between items-center">
               <h3 className="text-xl sm:text-2xl font-black text-[#1E1E2E]">카테고리 관리</h3>
               <button onClick={() => { setShowCategoryModal(false); setEditingCategoryName(null); }} className="text-slate-400 hover:rotate-90 transition-all p-2 -m-2"><X size={24} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8 pt-0 space-y-6">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 sm:p-8 pt-0 space-y-6">
               <div className="flex gap-2">
                 <input
                   type="text"

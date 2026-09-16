@@ -3,14 +3,13 @@ import {
   ActivityIndicator,
   BackHandler,
   Linking,
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -43,9 +42,6 @@ function isInternalUrl(url: string): boolean {
   // PG checkout pages stay inside the WebView so the session is preserved.
   return INTERNAL_SCHEME.test(url);
 }
-
-/** Deep link the web app can navigate to in order to open the native broadcast. */
-const BROADCAST_DEEPLINK = /^picksfolio:\/\/broadcast/i;
 
 /**
  * Android's `intent://…#Intent;…;end` links, which Korean apps (KakaoTalk's web
@@ -90,62 +86,26 @@ function parseAndroidIntent(url: string): {
   };
 }
 
-/** Parse a `key=value&…` query string without relying on URLSearchParams. */
-function parseQuery(url: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const q = url.split('?')[1];
-  if (!q) return out;
-  for (const pair of q.split('&')) {
-    const [k, v = ''] = pair.split('=');
-    if (k) out[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, ' '));
-  }
-  return out;
-}
-
-/** Open the native broadcast screen, forwarding only the params we recognise. */
-function openNativeBroadcast(raw: Record<string, unknown>): void {
-  const params: Record<string, string> = {};
-  for (const key of ['username', 'ingestServer', 'streamKey'] as const) {
-    const value = raw[key];
-    if (typeof value === 'string' && value) params[key] = value;
-  }
-  router.push({ pathname: '/broadcast', params });
-}
-
 /**
  * Injected before the web app loads. Advertises the native shell + native push
  * support and exposes `PicksFolioNative.registerPush(username, userType)` so the
  * web app can hand the signed-in user to the shell, which registers the device's
  * push token for new-message alerts. Kakao login stays on the web flow; the
  * WebView only hands KakaoTalk URLs to the OS.
- *
- * Native broadcast handoff is intentionally NOT advertised
- * (`__PICKSFOLIO_NATIVE_BROADCAST__ = false`). Handing the broadcast off to the
- * standalone fullscreen IVS screen hid the live console (chat, product push,
- * cart status) that the host needs while live. Instead the broadcast now runs
- * inside the WebView (getUserMedia + WebRTC, with the same IVS/RTMPS fallback),
- * so the host keeps the full console on screen while broadcasting and web
- * viewers receive the WebRTC stream as before. `openBroadcast` is still exposed
- * for backwards compatibility but the web app no longer calls it.
  */
 const NATIVE_BRIDGE = `
   (function () {
     if (window.__PICKSFOLIO_NATIVE__) return;
     window.__PICKSFOLIO_NATIVE__ = true;
-    window.__PICKSFOLIO_NATIVE_BROADCAST__ = false;
     window.__PICKSFOLIO_NATIVE_PUSH__ = true;
     window.__PICKSFOLIO_NATIVE_KAKAO__ = false;
     function post(payload) {
       try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}
     }
     window.PicksFolioNative = {
-      version: 4,
-      broadcastSupported: false,
+      version: 5,
       pushSupported: true,
       kakaoSupported: false,
-      openBroadcast: function (opts) {
-        post({ type: 'OPEN_NATIVE_BROADCAST', payload: opts || {} });
-      },
       registerPush: function (username, userType, accessToken) {
         post({ type: 'REGISTER_PUSH', payload: { username: username, userType: userType, accessToken: accessToken } });
       }
@@ -226,26 +186,6 @@ export default function WebAppScreen() {
     webRef.current?.goBack();
   }, []);
 
-  // Ask for the camera + microphone permission once, up front, so the in-WebView
-  // live broadcast can start without a permission prompt interrupting "라이브 시작".
-  // Android remembers the grant, so this is a no-op (no dialog) after the first
-  // time; the system dialog itself is shown in the device's language (Korean).
-  // iOS surfaces its permission prompt from the Info.plist usage strings the
-  // first time getUserMedia runs and likewise remembers the choice.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    (async () => {
-      try {
-        await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        ]);
-      } catch {
-        // Non-fatal: the WebView will request again on first getUserMedia.
-      }
-    })();
-  }, []);
-
   // Android `intent://` link: launch the app it points at, and when that app is
   // missing fall back the way a browser would. A web fallback is loaded in the
   // WebView (not the system browser) so the login/checkout session survives.
@@ -277,12 +217,6 @@ export default function WebAppScreen() {
   const onShouldStartLoad = useCallback(
     (req: { url: string }): boolean => {
       const { url } = req;
-      // Native broadcast deep link: open the IVS broadcast screen instead of
-      // handing the custom scheme to the OS.
-      if (BROADCAST_DEEPLINK.test(url)) {
-        openNativeBroadcast(parseQuery(url));
-        return false;
-      }
       if (KAKAO_TALK_UNIVERSAL_LINK.test(url)) {
         Linking.openURL(url).catch(() => {
           // If KakaoTalk is unavailable, keep the current Kakao login page in
@@ -315,8 +249,8 @@ export default function WebAppScreen() {
     webRef.current?.reload();
   }, []);
 
-  // Bridge: native broadcast and push registration only. Kakao app hand-off is
-  // handled by URL interception above, without a native Kakao SDK bridge.
+  // Bridge: push registration only. Kakao app hand-off is handled by URL
+  // interception above, without a native Kakao SDK bridge.
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
       let msg: { type?: string; payload?: Record<string, unknown> } | null = null;
@@ -325,9 +259,7 @@ export default function WebAppScreen() {
       } catch {
         return;
       }
-      if (msg?.type === 'OPEN_NATIVE_BROADCAST') {
-        openNativeBroadcast(msg.payload ?? {});
-      } else if (msg?.type === 'REGISTER_PUSH') {
+      if (msg?.type === 'REGISTER_PUSH') {
         const username = msg.payload?.username;
         const accessToken = msg.payload?.accessToken;
         const userType = msg.payload?.userType === 'business' ? 'business' : 'influencer';
@@ -345,22 +277,18 @@ export default function WebAppScreen() {
         ref={webRef}
         source={{ uri: sourceUri }}
         style={styles.web}
-        // Advertise the native shell + expose the native broadcast hand-off.
+        // Advertise the native shell + expose the push-registration bridge.
         injectedJavaScriptBeforeContentLoaded={NATIVE_BRIDGE}
         // Keep the auth/session cookies that Kakao + Supabase rely on.
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
         domStorageEnabled
         javaScriptEnabled
-        // Live commerce video + camera/mic for streaming and uploads.
+        // 페이지 안에 실린 영상(캠페인 소재 미리보기 등)은 전체화면으로 튀지 않고
+        // 그 자리에서 재생한다.
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         allowsFullscreenVideo
-        // Camera/mic for in-WebView live broadcasting. Auto-grant the WebView's
-        // getUserMedia request from the app's already-held OS permission so the
-        // host is asked at most once (the system camera/mic dialog, in Korean)
-        // instead of every time they open the live console or go live.
-        mediaCapturePermissionGrantType="grant"
         // File pickers for portfolio/image uploads.
         allowFileAccess
         originWhitelist={['*']}

@@ -365,7 +365,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-5 md:p-6 overflow-y-auto space-y-4 flex-1">
+        <div className="p-5 md:p-6 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0">
           {result && (
             <div className={`p-4 rounded-2xl flex items-start gap-2 text-xs font-bold ${TONE_STYLE[result.tone]}`}>
               {result.tone === 'success' ? (

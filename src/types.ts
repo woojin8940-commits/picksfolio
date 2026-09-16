@@ -11,18 +11,6 @@ export interface ProductOption {
   values: string[];   // e.g. ["S", "M", "L"] or ["블랙", "화이트"]
 }
 
-export interface LiveProductOptionValue {
-  value: string;
-  price?: number;     // absolute KRW override; when set, replaces base unit price for this variant
-  discount?: number;  // percent off (0-100); applied on top of resolved unit price
-}
-
-export interface LiveProductOption {
-  id: string;
-  name: string;
-  values: LiveProductOptionValue[];
-}
-
 export interface Product {
   id: string;
   name: string;

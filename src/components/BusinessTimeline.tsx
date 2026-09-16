@@ -2089,7 +2089,7 @@ const ClaudePlanModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden max-h-[90vh] modal-maxh-90 flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white text-sm">🤖</div>
@@ -2101,7 +2101,7 @@ const ClaudePlanModal: React.FC<{
           <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl" aria-label="닫기">×</button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto">
+        <div className="flex-1 min-h-0 p-5 space-y-4 overflow-y-auto overscroll-contain">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">{error}</div>}
           {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg px-3 py-2">✓ {notice}</div>}
 
