@@ -603,27 +603,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </p>
       </header>
 
-      {/* 출시 혜택 안내 — 코드가 있는 사람이 결제창에서 어디에 넣어야 하는지 찾을 수 있게
-          구독 전 화면에 먼저 알린다. */}
-      {!loading && !membershipActive && (
-        <section className="mb-8 max-w-3xl">
-          <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 p-5 md:p-6">
-            <p className="text-[11px] font-black text-emerald-600 uppercase tracking-widest">
-              {language === 'en' ? 'Launch benefit' : '출시 혜택'}
-            </p>
-            <h3 className="text-base md:text-lg font-black text-slate-900 mt-1">
-              {language === 'en'
-                ? 'Pro Plan free for 6 months with a launch code'
-                : '출시 혜택 코드로 프로 플랜 6개월 무료'}
-            </h3>
-            <p className="text-xs md:text-sm text-slate-600 font-medium mt-1.5 leading-relaxed">
-              {language === 'en'
-                ? `Pick a plan, choose card payment, and enter your ${PROMO_CODE_LENGTH}-digit launch code together with your card details. You are charged nothing today — the Pro Plan is free for 6 months from the day you register, and normal monthly billing starts after that. Cancel any time before then and nothing is charged.`
-                : `플랜을 선택한 뒤 신용카드로 결제하기를 누르고, 카드 정보와 함께 ${PROMO_CODE_LENGTH}자리 코드를 입력하세요. 오늘 결제되는 금액은 없으며 등록일로부터 6개월간 프로 플랜을 무료로 이용하고, 그 이후부터 정상 결제됩니다. 무료 기간 중 해지하면 결제되지 않습니다.`}
-            </p>
-          </div>
-        </section>
-      )}
+      {/* 출시 혜택은 직접 연락한 인플루언서에게만 코드로 안내한다. 광고로 들어온 사용자가
+          혜택의 존재를 알 필요는 없으므로 구독 전 화면에는 아무 안내도 두지 않는다. */}
 
       {successMsg && (
         <div className="mb-6 max-w-2xl bg-green-50 border border-green-200 text-green-700 text-sm font-bold rounded-xl px-4 py-3">
@@ -1072,20 +1053,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               )}
               {promo ? (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                  <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">
-                    출시 혜택 · {promo.planLabel} {promo.freeMonths}개월 무료
-                  </p>
+                  <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">오늘 결제 금액</p>
                   <p className="text-3xl font-black text-emerald-700">
-                    0<span className="text-sm font-bold ml-1">원 / 오늘 결제</span>
-                  </p>
-                  <p className="text-xs font-bold text-emerald-600 mt-2 leading-relaxed">
-                    오늘부터 {promo.freeMonths}개월간 무료로 이용합니다.
-                    {formatDate(promo.freeUntil)
-                      ? ` ${formatDate(promo.freeUntil)}부터 월 ${promo.monthlyPriceKrw.toLocaleString()}원이 자동결제됩니다.`
-                      : ` 이후 월 ${promo.monthlyPriceKrw.toLocaleString()}원이 자동결제됩니다.`}
-                  </p>
-                  <p className="text-[11px] font-medium text-emerald-600/80 mt-1">
-                    무료 기간 중에 해지하면 결제되지 않습니다.
+                    0<span className="text-sm font-bold ml-1">원</span>
                   </p>
                 </div>
               ) : (
@@ -1188,11 +1158,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       법인카드는 생년월일 대신 사업자등록번호 10자리를 입력하세요.
                     </p>
 
-                    {/* 출시 혜택 코드 — 카드 등록과 함께 입력한다. 코드를 넣으면 첫 달 결제
-                        없이 구독이 시작되고, 무료 기간이 끝나는 날부터 이 카드로 정상 결제된다. */}
+                    {/* 코드 입력칸만 남긴다. 무슨 혜택이 있는 코드인지는 직접 연락받은
+                        사람만 알아야 하므로 화면에 설명을 쓰지 않는다. */}
                     <div className="pt-3 mt-1 border-t border-dashed border-slate-200">
                       <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">
-                        출시 혜택 코드 <span className="text-slate-400 normal-case tracking-normal font-bold">(선택)</span>
+                        코드 <span className="text-slate-400 normal-case tracking-normal font-bold">(선택)</span>
                       </p>
                       <div className="flex gap-2">
                         {/* maxLength 에 여유를 둔 이유: 구분자가 섞인 붙여넣기(323-039-109)가
@@ -1233,18 +1203,11 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       </div>
                       {promo && (
                         <p className="text-[11px] font-bold text-emerald-600 mt-2 leading-relaxed">
-                          ✓ {promo.planLabel} {promo.freeMonths}개월 무료 혜택이 적용됩니다.
-                          {formatDate(promo.freeUntil) && ` ${formatDate(promo.freeUntil)}부터 월 ${promo.monthlyPriceKrw.toLocaleString()}원 자동결제.`}
+                          ✓ 코드가 적용되었습니다. 오늘 결제 금액 0원.
                         </p>
                       )}
                       {promoError && (
                         <p className="text-[11px] font-bold text-red-600 mt-2">{promoError}</p>
-                      )}
-                      {!promo && !promoError && (
-                        <p className="text-[11px] text-slate-400 font-medium mt-2 leading-relaxed">
-                          코드가 있으면 입력하세요. 출시 혜택 코드를 등록하면 등록일로부터 6개월간 프로 플랜을
-                          무료로 이용하고, 이후에는 등록한 카드로 정상 결제됩니다. 코드는 계정당 한 번만 사용할 수 있습니다.
-                        </p>
                       )}
                     </div>
                   </div>
@@ -1253,20 +1216,17 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                   <p className="text-[11px] text-slate-400 font-medium mt-2 leading-relaxed">
                     카카오톡 앱에서 카카오페이로 간편하게 결제됩니다.
                     <br />
-                    출시 혜택 코드는 신용카드로 등록할 때 입력할 수 있습니다.
+                    코드는 신용카드로 등록할 때 입력할 수 있습니다.
                   </p>
                 )}
               </div>
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>
                 {promo ? (
-                  <>
-                    <p>✓ 무료 기간에는 결제가 발생하지 않습니다(오늘 결제 금액 0원).</p>
-                    <p>
-                      ✓ {formatDate(promo.freeUntil) ? `${formatDate(promo.freeUntil)}부터 ` : `무료 기간이 끝나면 `}
-                      월 {promo.monthlyPriceKrw.toLocaleString()}원이 등록한 카드로 자동결제되며, 그 전에 해지하면 결제되지 않습니다.
-                    </p>
-                  </>
+                  <p>
+                    ✓ {formatDate(promo.freeUntil) ? `${formatDate(promo.freeUntil)}부터 ` : '무료 기간이 끝나면 '}
+                    월 {promo.monthlyPriceKrw.toLocaleString()}원이 자동결제되며, 그 전에 해지하면 결제되지 않습니다.
+                  </p>
                 ) : (
                   <p>✓ 가입일 기준 매월 자동결제되며, 해지하면 결제한 기간이 끝나는 날 종료됩니다.</p>
                 )}
@@ -1301,7 +1261,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 {saving
                   ? '처리 중...'
                   : promo
-                    ? `${promo.freeMonths}개월 무료로 시작하기`
+                    ? '0원으로 구독 시작'
                     : payMethod === 'CARD'
                       ? `${TIER_PRICE[selectedTier].toLocaleString()}원 결제하고 자동결제 시작`
                       : `${TIER_PRICE[selectedTier].toLocaleString()}원으로 구독 시작`}
