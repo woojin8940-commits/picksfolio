@@ -1082,7 +1082,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       {open && (
         <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4" onClick={closeModal}>
           <div
-            className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom md:fade-in duration-300 shadow-[0_-16px_40px_-16px_rgba(15,23,42,0.5)] md:shadow-[0_28px_60px_-20px_rgba(15,23,42,0.6)]"
+            className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[92vh] modal-maxh-92 overflow-y-auto overscroll-contain animate-in slide-in-from-bottom md:fade-in duration-300 shadow-[0_-16px_40px_-16px_rgba(15,23,42,0.5)] md:shadow-[0_28px_60px_-20px_rgba(15,23,42,0.6)]"
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}

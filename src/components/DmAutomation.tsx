@@ -850,7 +850,12 @@ const AutomationEditor: React.FC<{
           </button>
         </div>
 
-        <div className="overflow-y-auto grid grid-cols-1 lg:grid-cols-[1fr_340px]">
+        {/*
+          스크롤 본문. 부모가 flex 컬럼이므로 `flex-1 min-h-0` 이 둘 다 필요하다 —
+          min-h-0 없이는 flex 항목의 최소 높이가 내용 높이로 잡혀 본문이 카드 높이
+          상한(max-h-[94vh])을 넘겨 버리고, 넘친 만큼이 잘려 스크롤도 되지 않는다.
+        */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain grid grid-cols-1 lg:grid-cols-[1fr_340px]">
           {/* 좌: 설정 */}
           <div className="p-5 md:p-8 space-y-7">
             {/* 이름 */}
@@ -1224,15 +1229,18 @@ const AutomationEditor: React.FC<{
               <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
             </div>
           </div>
-        </div>
 
-        {/* 모바일 미리보기 */}
-        <div className="lg:hidden px-5 pb-2">
-          <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+          {/*
+            모바일 미리보기. 스크롤 본문 안에 둔다 — 밖에 두면 줄어들지 않는
+            형제 항목이 되어 설정 영역을 0 높이까지 밀어낸다.
+          */}
+          <div className="lg:hidden px-5 pb-5">
+            <DmPreview igUsername={igUsername} messageType={draft.messageType} message={draft.message} buttons={draft.buttons} cards={draft.cards} />
+          </div>
         </div>
 
         {/* 푸터 */}
-        <div className="px-5 md:px-8 py-4 border-t border-slate-100 shrink-0">
+        <div className="px-5 md:px-8 py-4 border-t border-slate-100 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-4">
           {saveBlockedReason && (
             <p className="flex items-center gap-1.5 mb-2.5 text-[11px] font-bold text-amber-600">
               <AlertCircle size={12} className="shrink-0" /> {saveBlockedReason}

@@ -388,7 +388,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
 
     // ── 간편결제(카카오페이): PortOne 빌링키로 정기결제 등록 ──
-    // SDK 는 여기서 받는다. 모든 페이지가 미리 받으면 라이브도 결제도 열지 않는
+    // SDK 는 여기서 받는다. 모든 페이지가 미리 받으면 결제를 열지 않는
     // 방문자까지 77KB 를 기다린다.
     try {
       await loadPortOne();

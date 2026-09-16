@@ -146,6 +146,12 @@ const fieldCls = (value: string) =>
  * 설명은 대여섯 줄이 보통인데, 다른 입력칸(택배사 · 송장번호)과 같은 크기로 두면
  * 모바일에서 장면 하나가 화면을 다 덮어서 앞뒤 장면을 함께 볼 수 없었다. 글씨를
  * 줄이고 좌우 여백을 좁혀, 같은 높이에 설명이 끝까지 들어오게 한다.
+ *
+ * 다만 휴대폰(≤768px)에서는 index.css 가 모든 입력칸의 글씨를 16px 로 못 박는다 —
+ * iOS 사파리가 16px 보다 작은 칸에 커서를 놓으면 화면을 확대해 버리기 때문이다.
+ * 그래서 아래 text-[11px] 는 데스크톱 값이고, 휴대폰에서 장면 칸이 커 보이는 것은
+ * 그 확대 방지 규칙 때문이다. 대신 줄간격(leading-snug)과 위아래 여백을 좁혀
+ * 같은 16px 로도 장면 하나가 화면을 덜 차지하게 한다.
  */
 const sceneFieldCls = (value: string) =>
   String(value || '').trim()
@@ -1408,15 +1414,21 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                           onChange={e => patchScene(i, 'visual', e.target.value)}
                           rows={3}
                           placeholder="어떤 장면을 찍는지 (예: 제품을 손에 들고 카메라 정면)"
-                          className={`${sceneFieldCls(scene.visual)} resize-none overflow-hidden leading-relaxed`}
+                          className={`${sceneFieldCls(scene.visual)} resize-none overflow-hidden leading-snug`}
                         />
                       </Field>
                       <Field label="자막">
-                        <input
+                        {/* 한 줄 <input> 이었을 때는 자막이 칸보다 길어지면 뒷글자가
+                            칸 밖으로 밀려 보이지 않았다 — 휴대폰에서는 입력칸 안을
+                            좌우로 끌어야 읽히는데, 그 손짓이 페이지 스크롤과 겹쳐
+                            사실상 확인할 수 없었다. 설명 · 나레이션과 같은 글상자로
+                            바꿔 줄바꿈으로 감싸고 내용만큼 칸을 늘린다. */}
+                        <SceneTextarea
                           value={scene.subtitle}
                           onChange={e => patchScene(i, 'subtitle', e.target.value)}
+                          rows={2}
                           placeholder="화면에 뜨는 글자"
-                          className={sceneFieldCls(scene.subtitle)}
+                          className={`${sceneFieldCls(scene.subtitle)} resize-none overflow-hidden leading-snug`}
                         />
                       </Field>
                       {/* 나레이션은 저장 구조(StoryboardScene)와 검수 화면에는 처음부터
@@ -1428,7 +1440,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                           onChange={e => patchScene(i, 'narration', e.target.value)}
                           rows={2}
                           placeholder="없으면 비워두세요"
-                          className={`${sceneFieldCls(scene.narration)} resize-none overflow-hidden leading-relaxed`}
+                          className={`${sceneFieldCls(scene.narration)} resize-none overflow-hidden leading-snug`}
                         />
                       </Field>
                     </div>

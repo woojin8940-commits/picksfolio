@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { verifyLivePortOnePayment } from "./_shared/portone-live-payment.mts";
+import { verifyPortOnePayment } from "./_shared/portone-payment.mts";
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -12,7 +12,7 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: "Missing params" }, { status: 400 });
     }
 
-    const verified = await verifyLivePortOnePayment({
+    const verified = await verifyPortOnePayment({
       paymentId: String(paymentId),
       payMethod: String(payMethod || ""),
     });
