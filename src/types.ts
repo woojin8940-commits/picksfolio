@@ -198,6 +198,13 @@ export interface SellerVerification {
   membership_canceled_at?: string | null;
   membership_ends_at?: string | null;
   membership_ended_at?: string | null;
+  // 출시 혜택 코드로 시작한 구독. 무료 기간은 별도 상태가 아니라 "첫 청구일을 그만큼
+  // 미룬 구독"으로 표현되므로(next_billing_date = membership_promo_free_until),
+  // 아래 값들은 화면에 "언제까지 무료인지"를 안내하는 데 쓴다.
+  membership_promo_code?: string | null;
+  membership_promo_free_months?: number | null;
+  membership_promo_free_until?: string | null;
+  membership_promo_redeemed_at?: string | null;
   // 라이브 커머스 멤버십(별도 구독)은 판매를 종료했다. 아래 필드는 예전 구독자
   // 기록에만 남아 있는 레거시 값이며 새로 쓰이지 않는다.
   live_plan_active?: boolean;
@@ -215,7 +222,8 @@ export interface MembershipBillingHistoryEntry {
   // 'live_plan' 은 판매 종료된 라이브 커머스 멤버십의 과거 청구 기록에만 남는다.
   tier: 'standard' | 'standard_ai' | 'commerce' | 'pro' | 'live_plan';
   amountKrw: number;
-  kind: 'initial' | 'recurring';
+  // 'promo' 는 출시 혜택 코드로 무료로 시작한 구독의 첫 기록이다(금액 0).
+  kind: 'initial' | 'recurring' | 'promo';
   success: boolean;
   paymentId?: string;
   error?: string;

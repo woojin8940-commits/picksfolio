@@ -223,6 +223,9 @@ export default async (req: Request, context: Context) => {
               ? (stored.membership_plan === 'live' ? 'commerce' : stored.membership_plan || null)
               : null,
             operator_membership_plan: operatorGrant?.active ? operatorGrant.plan : null,
+            // 출시 혜택 코드로 시작한 구독의 무료 기간 종료일(= 첫 청구일). 아직 지나지
+            // 않았다면 이번 달 받는 돈이 없으므로 순수익 집계에서 빼야 한다.
+            membership_promo_free_until: stored?.membership_promo_free_until || null,
           }
         },
       )
@@ -336,6 +339,7 @@ export default async (req: Request, context: Context) => {
                 ? (stored.membership_plan === 'live' ? 'commerce' : stored.membership_plan || null)
                 : null,
               operator_membership_plan: operatorGrant?.active ? operatorGrant.plan : null,
+              membership_promo_free_until: stored?.membership_promo_free_until || null,
             })
           }
           if (users.length < perPage) break

@@ -10,6 +10,9 @@ import { TIER_PRICE, normalizeTier, type MembershipTier } from '../../utils/memb
  * 세 줄기는 원가 구조가 완전히 다르다.
  *
  *   멤버십 — 활성 구독자 × 월 구독료. 추가 원가가 없어 매출이 곧 순수익이다.
+ *            출시 혜택 코드로 무료 이용 중인 구독은 제외한다 — 구독은 활성이지만 이번 달
+ *            들어오는 돈이 없어서, 함께 세면 받지 않은 돈이 순수익으로 잡힌다.
+ *            (무료 기간이 끝나면 정상 청구가 시작되므로 그때부터 자동으로 합산된다.)
  *   캠페인 — 브랜드에게 제시한 금액에서 인플루언서에게 줄 금액을 뺀 차액만 우리 몫이다.
  *            (단가 100만원 인플루언서를 110만원에 넘기면 순수익은 10만원)
  *   AI     — 충전액에서 환불을 빼고, 실제 추론 원가를 다시 뺀 나머지가 순수익이다.
@@ -43,6 +46,8 @@ const won = (n: number) => (Number(n || 0) < 0 ? formatSignedKRW(n) : formatKRW(
 const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview }) => {
   const [membershipRevenue, setMembershipRevenue] = useState<number | null>(null);
   const [membershipBreakdown, setMembershipBreakdown] = useState<Record<MembershipTier, number>>({ standard: 0, standard_ai: 0, commerce: 0, pro: 0 });
+  // 출시 혜택으로 무료 이용 중인 구독자 수와, 무료 기간이 끝나면 들어올 월 금액.
+  const [promoFree, setPromoFree] = useState({ count: 0, upcomingKrw: 0 });
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -55,12 +60,26 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
 
       const rows = (influencers.influencers || []) as any[];
       const counts: Record<MembershipTier, number> = { standard: 0, standard_ai: 0, commerce: 0, pro: 0 };
+      const now = Date.now();
+      let freeCount = 0;
+      let freeUpcoming = 0;
       for (const r of rows) {
         if (!r.membership_active) continue;
         const tier = normalizeTier(r.membership_plan);
-        if (tier) counts[tier]++;
+        if (!tier) continue;
+        // 무료 기간이 아직 끝나지 않은 구독은 이번 달 받는 돈이 없다.
+        const freeUntil = r.membership_promo_free_until
+          ? new Date(r.membership_promo_free_until).getTime()
+          : 0;
+        if (freeUntil > now) {
+          freeCount++;
+          freeUpcoming += PLAN_PRICE[tier];
+          continue;
+        }
+        counts[tier]++;
       }
       setMembershipBreakdown(counts);
+      setPromoFree({ count: freeCount, upcomingKrw: freeUpcoming });
       setMembershipRevenue(
         (Object.keys(counts) as MembershipTier[]).reduce((sum, tier) => sum + counts[tier] * PLAN_PRICE[tier], 0),
       );
@@ -117,6 +136,13 @@ const AdminRevenueCards: React.FC<Props> = ({ token, settlementSummary, overview
             <p className="text-[9px] font-bold text-pink-400/80 mt-1">
               스탠다드 {membershipBreakdown.standard} · AI 협업 {membershipBreakdown.standard_ai} · 프로 {membershipBreakdown.pro}
               {membershipBreakdown.commerce > 0 && ` · 커머스 ${membershipBreakdown.commerce}`}
+            </p>
+          )}
+          {/* 출시 혜택 무료 구독 — 합계에서 빠졌다는 사실과 나중에 들어올 금액을 함께 보여준다.
+              빼기만 하면 "구독자는 늘었는데 순수익이 안 늘었다"로만 보인다. */}
+          {loaded && promoFree.count > 0 && (
+            <p className="text-[9px] font-bold text-emerald-500 mt-1">
+              + 출시 혜택 무료 {promoFree.count}명 (제외) · 무료 종료 후 월 {won(promoFree.upcomingKrw)}
             </p>
           )}
         </div>
