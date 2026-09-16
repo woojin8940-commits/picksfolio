@@ -1404,8 +1404,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       setBanner({ type: 'err', text: '연동에 실패했어요. 잠시 후 다시 시도해주세요.' });
       params.delete('ig_error');
     } else return;
-    // 콜백이 함께 실어 보내는 지표 동기화 결과 — 이 화면에서는 쓰지 않으므로 지운다.
-    params.delete('ig_metrics');
+    // 콜백이 함께 실어 보내는 지표 — 브랜드 매칭 화면이 카드를 바로 그리는 데
+    // 쓰는 값이라 이 화면에서는 쓸 일이 없다. 남기면 주소창에 팔로워 수가 붙어
+    // 다니므로 함께 지운다.
+    ['ig_metrics', 'ig_handle', 'ig_followers', 'ig_following', 'ig_views'].forEach(k =>
+      params.delete(k),
+    );
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     const t = setTimeout(() => setBanner(null), 5000);
@@ -1443,7 +1447,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   };
 
   const connect = async () => {
-    const result = await apiService.instagramConnectUrl(userName);
+    // feature 는 이 화면의 기능이다. 자동 디엠을 끊어 뒀던 사람이 다시 연동하면
+    // 자동 디엠만 되살아난다 — 다른 화면에서 끊어 둔 것은 그대로 둔다.
+    const result = await apiService.instagramConnectUrl(userName, undefined, { feature: 'dm' });
     if (!result.url) {
       setBanner({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
       return;
@@ -1452,7 +1458,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   };
 
   const disconnect = async () => {
-    if (!window.confirm('인스타그램 계정 연동을 해제할까요? 자동화는 보관되지만 DM 발송이 중단됩니다.')) return;
+    if (
+      !window.confirm(
+        '인스타그램 계정 연동을 해제할까요? 자동화는 보관되지만 DM 발송이 중단됩니다.',
+      )
+    )
+      return;
     setDisconnecting(true);
     const ok = await apiService.disconnectInstagram(userName);
     setDisconnecting(false);

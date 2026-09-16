@@ -9,10 +9,11 @@ import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
  * 인스타그램 계정 연동 콜백.
  * - authorize 후 돌아온 code 를 단기 토큰 → 장기 토큰(60일)으로 교환한다.
  * - 연동한 계정의 user_id / username 을 조회해 사용자별 보관함에 저장한다.
- *   보관함은 연동을 시작한 화면에 따라 갈린다(state 의 `p`).
- *     · 디엠 자동화  → dm-automation 블롭. 기존 automations/rules 는 보존한다.
- *     · 캠페인 등록  → collab-instagram 블롭. 캠페인 화면에서 직접 로그인한 계정만
- *       들어가고, 디엠 자동화 연동과 서로를 건드리지 않는다.
+ *   자동 디엠 · 인사이트 · 브랜드 매칭받기가 연동 하나를 함께 쓰므로, 어느 화면에서
+ *   시작해도 공용 보관함(dm-automation 블롭)에 들어간다. 기존 automations/rules 는
+ *   보존한다. state 의 `p='collab'` 로 옛 캠페인 전용 보관함(collab-instagram)에
+ *   쓰는 길이 남아 있지만, 지금 화면들은 그 값을 보내지 않는다 — 배포 직후 캐시된
+ *   옛 화면을 위한 호환 경로다.
  * - 이어서 팔로워·팔로잉과 최근 릴스 평균 조회수를 받아 creator_channels 에 채운다.
  *   연동의 목적이 "픽스폴리오가 그 숫자를 갖고 있는 것"이므로, 동의한 순간 한 번은
  *   받아 둔다. 나중에 누가 갱신 버튼을 눌러 줄 때까지 명단이 비어 있으면 브랜드
@@ -85,6 +86,10 @@ export default async (req: Request, _context: Context) => {
   returnPath = sanitizeReturnPath(verified.payload.r) || returnPath;
   // 캠페인 등록 화면에서 시작한 연동인지. 아래 저장 위치가 이 값으로 갈린다.
   const isCollab = verified.payload.p === "collab";
+  // 어느 기능에서 연동을 시작했는지. 해제는 기능별이므로 다시 연동할 때 되살릴
+  // 기능도 그 하나다 — 자동 디엠을 끊어 둔 사람이 브랜드 매칭 때문에 다시 연동한
+  // 순간 자동 DM 이 다시 나가면, 그 사람은 끄지 않은 것을 켠 적이 된다.
+  const linkFeature = verified.payload.f;
 
   const appId = process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
@@ -177,6 +182,14 @@ export default async (req: Request, _context: Context) => {
     // 않으면, 재연동을 마치고 돌아온 화면이 계속 "다시 연동해 주세요"라고 말한다.
     delete (next as any).needsReauth;
     delete (next as any).tokenInvalidAt;
+    // 이 화면에서 끊어 뒀던 기능을 여기서 되살린다. 다른 기능의 해제 표시는 그대로
+    // 둔다. 지우지 않으면 해제한 화면의 연동 버튼은 눌러도 다시 "연동 안 됨"으로
+    // 돌아오는 버튼이 된다 — 해제한 사람은 끊을 수는 있어도 붙일 수 없게 된다.
+    if (linkFeature && Array.isArray((next as any).featuresOff)) {
+      const left = ((next as any).featuresOff as string[]).filter((f) => f !== linkFeature);
+      if (left.length > 0) (next as any).featuresOff = left;
+      else delete (next as any).featuresOff;
+    }
     await store.setJSON(key, next);
 
     // 웹훅 구독과 역추적 인덱스는 디엠 자동화(댓글·메시지 이벤트)를 위한 것이다.
@@ -224,7 +237,7 @@ export default async (req: Request, _context: Context) => {
     // 부가 기능이고 연동은 그렇지 않으므로 필요한 순간에만 불러온다.
     let metricsSynced = false;
     /**
-     * 방금 받아 온 숫자를 복귀 주소에 함께 실어 보낸다(캠페인 연동만).
+     * 방금 받아 온 숫자를 복귀 주소에 함께 실어 보낸다.
      *
      * 여기서 이미 팔로워·조회수를 받아 저장했는데, 돌아간 화면은 그것을 모른 채
      * 다시 물어본다. 그 왕복 동안 연동을 마치고 온 사람은 "연동 상태 확인 중..."
@@ -242,15 +255,17 @@ export default async (req: Request, _context: Context) => {
       );
       if (synced.ok) {
         metricsSynced = true;
-        if (isCollab) {
-          const row = (synced.row || {}) as any;
-          syncedSummary = {
-            ig_handle: String(row.instagram_handle || next.igUsername || ""),
-            ig_followers: String(Math.max(0, Number(row.followers || 0))),
-            ig_following: String(Math.max(0, Number(row.following || 0))),
-            ig_views: String(Math.max(0, Number(row.avg_views || 0))),
-          };
-        }
+        // 예전에는 캠페인 연동에만 실어 보냈다. 이제 세 화면이 연동 하나를 함께
+        // 쓰므로 브랜드 매칭 화면으로 돌아오는 연동에도 purpose 가 붙지 않는다 —
+        // 조건을 그대로 두면 그 화면은 다시 "연동 상태 확인 중..." 부터 본다.
+        // 읽지 않는 화면은 이 값을 그냥 지운다.
+        const row = (synced.row || {}) as any;
+        syncedSummary = {
+          ig_handle: String(row.instagram_handle || next.igUsername || ""),
+          ig_followers: String(Math.max(0, Number(row.followers || 0))),
+          ig_following: String(Math.max(0, Number(row.following || 0))),
+          ig_views: String(Math.max(0, Number(row.avg_views || 0))),
+        };
       } else {
         console.warn("[ig-oauth] metrics sync failed:", synced.error);
       }

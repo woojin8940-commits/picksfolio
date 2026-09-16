@@ -16,9 +16,15 @@ import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts"
  * 쓰는데, 복귀 지점이 고정돼 있으면 매칭 등록 도중에 연동한 사람이 관리자 화면으로
  * 튕겨 나가 작성 중이던 등록서를 잃는다. 값은 내부 경로만 허용한다.
  *
- * 두 화면은 흐름만 공유하고 연동 자체는 나눈다. `purpose:'collab'` 로 시작한 연동은
- * 캠페인 전용 보관함에 저장되고(콜백 참고), 인스타그램 로그인도 매번 새로 받는다.
- * 디엠 자동화에 붙여 둔 계정이 캠페인 등록서에 자동으로 따라 붙지 않게 하기 위해서다.
+ * 세 화면(자동 디엠 · 인사이트 · 브랜드 매칭받기)은 이제 연동 하나를 함께 쓴다.
+ * 어디서 시작해도 공용 보관함(dm-automation)에 저장되므로, 한 번 연동하면 세 곳이
+ * 모두 연동된 상태가 된다. `purpose:'collab'` 은 옛 캠페인 전용 보관함으로 보내는
+ * 값이라 화면에서는 더 쓰지 않는다 — 옛 클라이언트가 보내올 때를 위해서만 남겨 둔다.
+ *
+ * `forceReauth` 는 보관함과 무관하게 인스타그램 로그인 화면을 매번 새로 띄우는
+ * 값이다. 브랜드 매칭 등록처럼 "지금 이 계정으로 등록한다"를 그 자리에서 확인해야
+ * 하는 화면이 쓴다. 예전에는 이 동작이 purpose 에 묶여 있어서, 보관함을 공용으로
+ * 바꾸는 순간 계정 확인 기회까지 함께 사라졌다.
  *
  * 보안: 예전에는 GET 으로 `?username=` 만 받아 서명 없는 state 를 만들어 곧장
  * 리다이렉트했다. 그러면 누구나 임의의 사용자명이 박힌 authorize 링크를 만들어
@@ -70,9 +76,16 @@ export default async (req: Request, _context: Context) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  // 캠페인(브랜드 매칭) 등록 화면에서 시작한 연동인지. 디엠 자동화 연동과는 보관함도,
-  // 로그인 방식도 다르다 — 아래 force_reauth 와 콜백의 저장 위치가 이 값으로 갈린다.
+  // 옛 캠페인 전용 보관함으로 보내는 값. 지금 화면들은 넘기지 않는다(공용 보관함을
+  // 쓴다). 배포 직후 캐시된 옛 화면이 보내올 수 있어 받아 주기만 한다.
   const isCollab = String(body?.purpose || "") === "collab";
+
+  // 인스타그램 로그인 화면을 매번 새로 띄울지. 보관함 선택과는 별개다.
+  const forceReauth = body?.forceReauth === true || isCollab;
+
+  // 어느 화면에서 시작한 연동인지. 해제는 기능별이므로, 끊어 둔 기능을 되살릴 때
+  // 그 기능 하나만 되살리기 위해 콜백까지 들고 간다(서명 안에 들어간다).
+  const feature = String(body?.feature || "");
 
   const appId = process.env.INSTAGRAM_APP_ID;
   if (!appId) {
@@ -87,6 +100,7 @@ export default async (req: Request, _context: Context) => {
     auth.userId,
     sanitizeReturnPath(body?.returnTo),
     isCollab ? "collab" : undefined,
+    feature,
   );
   if (!issued.ok) {
     return Response.json(
@@ -105,7 +119,7 @@ export default async (req: Request, _context: Context) => {
     // 캠페인 등록은 "지금 이 계정으로 등록한다"를 매번 다시 고르는 자리다. 브라우저에
     // 남아 있는 인스타그램 세션으로 조용히 통과시키면, 등록하는 사람은 어떤 계정이
     // 붙었는지 확인할 기회 없이 남의(혹은 예전) 계정으로 등록서를 내게 된다.
-    (isCollab ? `&force_reauth=true` : ``) +
+    (forceReauth ? `&force_reauth=true` : ``) +
     `&state=${encodeURIComponent(issued.state)}`;
 
   return Response.json({ url: authorizeUrl });

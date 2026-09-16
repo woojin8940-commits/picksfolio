@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatPhone } from '../../utils/formatters';
+import { copyText } from '../../utils/clipboard';
 
 /**
  * 캠페인 담당자의 연락처 — 픽스폴리오 담당자만 보는 칸.
@@ -77,8 +78,10 @@ const BrandContactCard: React.FC<BrandContactCardProps> = ({
     return () => { alive = false; };
   }, [campaignId, businessUsername, token]);
 
-  const copy = (label: string, value: string) => {
-    navigator.clipboard?.writeText(value);
+  // 복사됐을 때만 "복사됨"을 보여 준다. 클립보드가 없는 모바일 인앱 브라우저에서는
+  // writeText 가 조용히 넘어가는데도 복사 표시가 떴다.
+  const copy = async (label: string, value: string) => {
+    if (!(await copyText(value))) return;
     setCopied(label);
     setTimeout(() => setCopied(''), 1500);
   };

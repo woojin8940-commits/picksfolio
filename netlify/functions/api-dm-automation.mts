@@ -7,6 +7,10 @@ import {
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
 import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
+import {
+  adoptSharedInstagramLink,
+  disconnectLinkFeature,
+} from "./_shared/instagram-link-share.mts";
 import { clearIceBreakers } from "./_shared/instagram-ice-breakers.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
 import {
@@ -14,7 +18,8 @@ import {
   webhookFieldsSufficient,
   WEBHOOK_FIELDS,
 } from "./_shared/instagram-webhook-subscribe.mts";
-import { indexDmAccount, unindexDmAccount } from "./_shared/dm-webhook-index.mts";
+import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
+import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
@@ -590,8 +595,22 @@ export default async (req: Request, context: Context) => {
 
   if (req.method === "GET") {
     const stored = ((await store.get(key, { type: "json" })) as DmSettings) || DEFAULT_SETTINGS;
+    /**
+     * 이 화면의 기능(자동 디엠)을 사람이 직접 끊어 뒀는지.
+     *
+     * 연동 토큰은 세 화면이 함께 쓰므로 해제할 때 지우지 않는다. 그래서 문서에는
+     * 토큰이 그대로 남아 있고, 여기서 표시를 보지 않으면 방금 끊은 사람에게 화면이
+     * 계속 "연동됨"을 보여 준다. 끊어 둔 동안은 연동을 옮겨 적지도, 구독을 다시
+     * 걸지도 않는다 — 둘 다 끊은 것을 되돌리는 일이다.
+     */
+    const dmOff = linkFeatureOff(stored as MetaLink, "dm");
+    // 인사이트(또는 캠페인 등록) 화면에서 이미 계정을 붙여 뒀다면 그 연동을 그대로
+    // 쓴다. 같은 계정에 같은 동의 화면을 두 번 지나게 할 이유가 없다. 자동 디엠에
+    // 쓸 수 있는 토큰이 이미 있으면 아무 일도 일어나지 않는다.
+    const linked = await adoptSharedInstagramLink(username, stored);
     // 구독이 빠져 있으면 여기서 다시 건다. 화면에 경고를 띄우는 대신이다.
-    const healed = await healWebhookSubscription(username, key, stored);
+    // 위에서 옮겨 적은 연동에는 구독이 없으므로, 여기서 처음 걸린다.
+    const healed = dmOff ? linked : await healWebhookSubscription(username, key, linked);
     // 지워진 "자주 묻는 질문" 기능이 인스타그램에 남겨 둔 버튼을 여기서 내린다.
     const data = await retireIceBreakers(username, key, healed);
     const { accessToken, ownerAuthUserId, faq, ...safe } = data;
@@ -605,8 +624,8 @@ export default async (req: Request, context: Context) => {
         greeting: { ...DEFAULT_SETTINGS.direct!.greeting, ...(data.direct?.greeting || {}) },
         replies: Array.isArray(data.direct?.replies) ? data.direct!.replies : [],
       },
-      connected: Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
-      hasAccessToken: Boolean(accessToken),
+      connected: !dmOff && Boolean(accessToken) && Boolean(data.igUserId || data.igAccountId),
+      hasAccessToken: !dmOff && Boolean(accessToken),
       /**
        * 어떤 웹훅 필드가 걸려 있는지. 화면은 이 값으로 경고를 띄우지 않는다 —
        * 구독은 위 healWebhookSubscription 이 책임진다. 진단이 필요할 때 응답만 보고
@@ -628,35 +647,11 @@ export default async (req: Request, context: Context) => {
 
     // 연동 해제
     if (body?.action === "disconnect") {
-      let staleIgIds: string[] = [];
-      await mutateBlobJSON<DmSettings>(STORE_NAME, key, (current) => {
-        const existing = { ...DEFAULT_SETTINGS, ...(current || {}) };
-        staleIgIds = Array.from(
-          new Set([existing.igUserId, existing.igAccountId].filter(Boolean) as string[]),
-        );
-        return {
-          ...existing,
-          enabled: false,
-          connected: false,
-          igUserId: "",
-          igAccountId: "",
-          igUsername: "",
-          accessToken: "",
-          tokenSource: undefined,
-          tokenExpiresAt: undefined,
-          // 재연동 시 웹훅 구독을 다시 걸도록 플래그도 비운다.
-          webhookSubscribedAt: undefined,
-          automations: Array.isArray(existing.automations) ? existing.automations : [],
-          rules: Array.isArray(existing.rules) ? existing.rules : [],
-          updatedAt: now,
-        };
-      });
-      // 웹훅 역인덱스(ig_<계정ID> → 사용자명)에서도 자기 이름을 뺀다. 남겨두면 연동을
-      // 끊은 뒤에도 이벤트가 들어올 때마다 설정을 읽어보는 헛일이 계속된다. 키를 통째로
-      // 지우지는 않는다 — 같은 인스타그램 계정을 연동한 다른 사용자가 남아 있을 수 있다.
-      if (staleIgIds.length > 0) {
-        await unindexDmAccount(username, staleIgIds);
-      }
+      // 여기서 끊는 것은 자동 디엠뿐이다. 연동 토큰은 인사이트와 브랜드 매칭받기가
+      // 함께 쓰고 있어 지우지 않는다 — 지우면 이 사람이 고르지 않은 두 기능까지
+      // 멈춘다. 대신 자동화를 내리고, 웹훅 구독과 역인덱스를 풀어 이벤트 자체가
+      // 오지 않게 한다. 자동 응답 문구는 남는다.
+      await disconnectLinkFeature(username, "dm");
       return Response.json({ success: true, connected: false });
     }
 
@@ -935,7 +930,12 @@ export default async (req: Request, context: Context) => {
      * 인덱스가 비어 있어, 댓글 이벤트가 도착해도 주인을 찾지 못해 조용히 버려졌다
      * (자동 발송만 안 되고 수동 발송은 되는 상태의 원인 중 하나다).
      */
-    if (next.igUserId || next.igAccountId) {
+    //
+    // 단, 자동 디엠을 끊어 둔 사람은 채우지 않는다. 해제할 때 인덱스와 구독을 함께
+    // 풀었는데 문구를 한 번 저장하는 것만으로 되살아나면, 끊은 사람의 계정으로 자동
+    // DM 이 다시 나간다. 문구 편집은 연동 없이도 되는 일이라 저장 자체는 막지 않는다.
+    const dmOff = linkFeatureOff(next as MetaLink, "dm");
+    if (!dmOff && (next.igUserId || next.igAccountId)) {
       await indexDmAccount(username, [next.igUserId, next.igAccountId]).catch((e) =>
         console.warn("[dm-automation] index refresh failed:", (e as Error)?.message),
       );
@@ -948,7 +948,7 @@ export default async (req: Request, context: Context) => {
     //
     // 구독 필드 목록이 바뀌었을 때도 한 번 더 건다. 예전에 연동한 계정은 발신 메시지
     // 에코를 구독하지 않은 상태라, 이 앱을 거치지 않고 나간 자동 DM 을 감지하지 못한다.
-    if (next.accessToken && (!next.webhookSubscribedAt || next.webhookFields !== WEBHOOK_FIELDS)) {
+    if (!dmOff && next.accessToken && (!next.webhookSubscribedAt || next.webhookFields !== WEBHOOK_FIELDS)) {
       const sub = await subscribeInstagramWebhooks({
         accessToken: next.accessToken,
         tokenSource: next.tokenSource,
@@ -982,7 +982,7 @@ export default async (req: Request, context: Context) => {
     // 발송에 쓰일 내용과 화면에 보이는 내용이 어긋나지 않는다.
     return Response.json({
       success: true,
-      connected: Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),
+      connected: !dmOff && Boolean(next.accessToken) && Boolean(next.igUserId || next.igAccountId),
       enabled: next.enabled,
       automations: Array.isArray(next.automations) ? next.automations : [],
       direct: next.direct,

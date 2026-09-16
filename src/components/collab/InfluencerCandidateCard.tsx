@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { formatCountKo, formatNumberWithCommas, parseWonText } from '../../utils/formatters';
 import { reelTrendOf, trendIsVolatile, trendTone } from '../../utils/reelTrend';
 import { MediaLink, MediaThumb } from './MediaThumb';
+import { copyText } from '../../utils/clipboard';
 
 /**
  * 인플루언서 후보 카드.
@@ -265,15 +266,10 @@ const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
   // 담당자는 대부분 컴퓨터로 명단을 본다. tel: 링크만 두면 번호를 손으로 다시
   // 적어야 하므로 누르면 바로 복사되게 한다. 클립보드를 못 쓰는 환경에서는
   // 링크 동작만 남는다.
-  const copy = (value: string) => {
-    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-    navigator.clipboard
-      .writeText(value)
-      .then(() => {
-        setCopied(value);
-        window.setTimeout(() => setCopied(''), 1500);
-      })
-      .catch(() => {});
+  const copy = async (value: string) => {
+    if (!(await copyText(value))) return;
+    setCopied(value);
+    window.setTimeout(() => setCopied(''), 1500);
   };
 
   return (

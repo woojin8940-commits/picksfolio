@@ -10,6 +10,7 @@ import { isKakaoLoginCancelled, startKakaoLogin } from '../utils/kakaoLogin';
 import { trackClick } from '../services/analyticsService';
 import { supabase } from '../services/supabase';
 import { openExternalUrl } from '../utils/externalLink';
+import { copyText } from '../utils/clipboard';
 import { ViewerSignaling, ChatMessage, onTurnAllocationFailure } from '../services/webrtcSignaling';
 import { apiService, type ShippingProfile } from '../services/apiService';
 import { PartnerFeed } from './PartnerFeed';
@@ -360,7 +361,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
   // (more reliable inside KakaoTalk/Instagram/Line WebViews). We intentionally do
   // NOT surface the "open in Safari/Chrome" recommendation banner to viewers —
   // most arrive via Instagram/KakaoTalk and the prompt was confusing.
-  const openInExternalBrowser = useCallback(() => {
+  const openInExternalBrowser = useCallback(async () => {
     const url = typeof window !== 'undefined' ? window.location.href : '';
     if (!url) return;
     try {
@@ -388,10 +389,18 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       // escape scheme, so the best we can do is prompt the user to long-press the
       // address bar or tap the "open in Safari" button. Surface an alert with the
       // URL so they can copy it manually as a last resort.
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).catch(() => {});
-      }
-      alert('우측 상단 메뉴에서 "Safari로 열기" 또는 "다른 브라우저로 열기"를 선택해주세요.\n주소가 클립보드에 복사되었습니다.');
+      //
+      // The copy has to be awaited before the message is written: iOS in-app
+      // WebViews are exactly where the Clipboard API is missing, so the old code
+      // promised "주소가 클립보드에 복사되었습니다" on the one browser where the
+      // copy was most likely to have silently done nothing — leaving the viewer
+      // pasting an empty clipboard with no way back.
+      const copied = await copyText(url);
+      alert(
+        copied
+          ? '우측 상단 메뉴에서 "Safari로 열기" 또는 "다른 브라우저로 열기"를 선택해주세요.\n주소가 클립보드에 복사되었습니다.'
+          : `우측 상단 메뉴에서 "Safari로 열기" 또는 "다른 브라우저로 열기"를 선택해주세요.\n\n주소: ${url}`,
+      );
     } catch (e) {
       console.warn('[LiveStream] openInExternalBrowser failed:', e);
     }
@@ -455,18 +464,16 @@ const LiveStream: React.FC<LiveStreamProps> = ({ username, currentProduct: curre
       `proto: ${pageProtocol}`,
       `UA: ${ua}`,
     ].join('\n');
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        navigator.clipboard.writeText(payload).then(() => {
-          setErrorCopied(true);
-          setTimeout(() => setErrorCopied(false), 2000);
-        }).catch(() => {
-          window.prompt('오류 정보를 복사해 운영팀에 보내주세요:', payload);
-        });
+    // 복사가 실제로 됐을 때만 "복사됨"을 보여 준다. 안 되면 직접 고를 수 있게
+    // 프롬프트에 담아 준다 — 이 패널을 보는 사람은 이미 재생이 안 되는 상태다.
+    copyText(payload).then((ok) => {
+      if (ok) {
+        setErrorCopied(true);
+        setTimeout(() => setErrorCopied(false), 2000);
       } else {
         window.prompt('오류 정보를 복사해 운영팀에 보내주세요:', payload);
       }
-    } catch {}
+    });
   }, [lastErrorInfo, username, inAppLabel, onStreamCallCount, pageProtocol, ua]);
   // Diagnostic block: shown to anyone on an in-app browser (KakaoTalk/Instagram/
   // Naver/Line/Facebook WebView) when playback fails, so the viewer can see the

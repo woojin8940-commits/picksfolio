@@ -71,9 +71,9 @@ const RETURN_FLAG = 'collab_match';
  * 연동 상태를 아예 불러오지 않았다. 그러다 보니 연동을 마치고 탭을 닫았다 다시 들어온
  * 사람에게는 연동이 통째로 사라진 것처럼 보였다 — 서버에는 그대로 남아 있는데도.
  *
- * 화면에 뜬 계정이 "디엠 자동화에 붙여 둔 남의 맥락"이 아닌지는 서버가 이미 가려 준다.
- * api-creator-channel 은 purpose='collab' 으로 연동한 토큰만 metaLinked 로 셈한다.
- * 그러니 이 화면은 서버가 말하는 연동 상태를 그대로 믿으면 된다.
+ * 연동은 세 화면(자동 디엠 · 인사이트 · 브랜드 매칭받기)이 함께 쓰는 하나다.
+ * api-creator-channel 이 그 연동을 metaLinked 로 셈해 계정 아이디까지 함께 내려 주므로,
+ * 이 화면은 서버가 말하는 연동 상태를 그대로 믿고 @아이디로 어느 계정인지만 보여 준다.
  *
  * 여기 적어 두는 것은 "마지막으로 확인한 연동 카드"다. 서버 응답이 오기 전 첫 프레임을
  * 채우는 용도이고, 응답이 도착하면 언제나 그 값이 덮는다.
@@ -380,7 +380,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     // 확인을 못 했으면 화면에 있던 카드를 그대로 둔다. 잠깐의 네트워크 오류로 카드가
     // 사라지면, 본인은 연동이 풀린 것으로 읽고 같은 계정을 또 연동하러 간다.
     if (result?.error) return;
-    // metaLinked = 캠페인용(purpose='collab')으로 연동한 토큰이 살아 있다는 뜻.
+    // metaLinked = 세 화면이 함께 쓰는 연동의 토큰이 살아 있다는 뜻.
     // 디엠 자동화에 붙여 둔 계정은 서버가 이미 걸러 내므로 여기서는 그대로 믿는다.
     // needsReauth = 연동은 남아 있는데 토큰이 만료된 상태. "연동 안 됨"과 구분해야
     // 이미 받아 둔 계정 정보를 지우지 않고 "다시 동의해 주세요"라고 말할 수 있다.
@@ -626,9 +626,21 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
       // 임시 저장이 안 되면 값만 잃을 뿐 연동 자체는 진행할 수 있다.
     }
     const returnTo = `${window.location.pathname}?${RETURN_FLAG}=1`;
-    // 'collab' — 캠페인 전용 연동이다. 디엠 자동화와 보관함이 다르고, 인스타그램
-    // 로그인 화면을 매번 새로 띄운다.
-    const result = await apiService.instagramConnectUrl(applicantUsername, returnTo, 'collab');
+    // 자동 디엠 · 인사이트와 같은 연동 하나를 쓴다. 예전에는 이 화면만의 전용
+    // 연동('collab')으로 시작해서, 여기서 연동한 사람이 다른 두 화면에서 "계정을
+    // 먼저 연동해주세요"를 또 만났다 — 같은 계정에 같은 동의 화면을 세 번 지나고,
+    // 만료도 따로 세니 재연동도 세 번이었다.
+    //
+    // forceReauth 는 남긴다. 여기는 "지금 이 계정으로 브랜드에게 등록한다"를 그
+    // 자리에서 확인해야 하는 화면이라, 브라우저에 남은 인스타그램 세션으로 조용히
+    // 통과시키면 어떤 계정이 붙었는지 볼 기회가 없다.
+    //
+    // feature 는 이 화면의 기능이다. 해제는 누른 화면의 기능만 끄므로, 여기서 끊어
+    // 뒀던 사람이 다시 연동할 때 되살아나는 것도 브랜드 매칭받기 하나여야 한다.
+    const result = await apiService.instagramConnectUrl(applicantUsername, returnTo, {
+      forceReauth: true,
+      feature: 'collab',
+    });
     if (!result.url) {
       setLinking(false);
       setNotice({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
@@ -688,9 +700,11 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
   }, [applicantUsername, loadChannel]);
 
   /**
-   * 캠페인 인스타그램 연동을 끊는다.
+   * 인스타그램 연동을 끊는다.
    *
-   * 끊는 것은 이 화면의 연동뿐이다. 디엠 자동화에 따로 붙여 둔 계정은 그대로 남는다.
+   * 끊는 것은 이 화면의 기능(브랜드 매칭받기)뿐이다. 같은 계정으로 돌아가는 자동
+   * 디엠과 인사이트는 그대로 둔다.
+   *
    * 이미 확인된 팔로워·조회수는 지우지 않고 "본인 입력"으로 되돌아간다 — 접수해 둔
    * 등록서가 한순간에 빈칸이 되면, 브랜드가 보던 명단에서도 같이 사라진다.
    *

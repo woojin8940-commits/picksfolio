@@ -4,14 +4,14 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { norm } from "./_shared/collab-workflow.mts";
 import { shapeChannel } from "./_shared/campaign-listup.mts";
+import { disconnectLinkFeature } from "./_shared/instagram-link-share.mts";
 import {
   SHOW_SIZE,
   REAUTH_MESSAGE,
   intOf,
   linkIsUsable,
   linkNeedsReauth,
-  loadMetaLink,
-  deleteMetaLink,
+  resolveSharedLink,
   syncChannelFromMeta,
 } from "./_shared/instagram-metrics.mts";
 
@@ -65,14 +65,19 @@ export default async (req: Request) => {
         if (!auth.ok) return auth.response;
       }
 
-      const [row, link] = await Promise.all([
+      // 기능을 "collab" 으로 밝혀 읽는다. 연동은 세 화면이 함께 쓰지만 해제는
+      // 누른 화면의 기능만 끄므로, 이 화면에서 끊어 둔 사람에게는 같은 토큰이
+      // 남아 있어도 "연동 안 됨"으로 보여야 한다.
+      const [row, resolved] = await Promise.all([
         loadChannel(db, username),
-        loadMetaLink(username, "collab"),
+        resolveSharedLink(username, "collab"),
       ]);
-      // 캠페인 등록 화면에서 직접 로그인한 연동만 본다. 디엠 자동화에 붙여 둔 계정을
-      // 여기서 같이 세면, 등록하는 사람은 고른 적 없는 계정으로 이미 연동된 화면을
-      // 보게 된다. 두 기능은 같은 인스타그램 계정을 쓰더라도 별개의 연동이다.
+      // 자동 디엠·인사이트·브랜드 매칭받기가 연동 하나를 함께 쓴다. 어느 화면에서
+      // 붙였든 여기서도 연동된 것으로 센다 — 예전에는 이 화면이 캠페인 전용 연동만
+      // 봐서, 자동 디엠에 계정을 붙여 둔 사람이 같은 계정으로 한 번 더 동의 화면을
+      // 지나야 했다. 어느 계정인지는 아래 igUsername 으로 함께 보여 준다.
       // 토큰 자체는 절대 내려보내지 않는다.
+      const link = resolved.link;
       const metaLinked = linkIsUsable(link);
       // 토큰이 죽은 연동은 "연동 안 됨"이 아니라 "다시 동의해야 함"이다. 둘을 같은
       // 값으로 내리면 화면은 이미 받아 둔 팔로워 수를 지운 빈 카드를 보여 주게 된다.
@@ -194,9 +199,10 @@ export default async (req: Request) => {
       // 해제는 본인만 할 수 있다. 담당자가 대신 끊으면, 본인은 자기가 고른 적 없는
       // 순간에 브랜드로 나가던 숫자가 멈춘 것을 나중에야 알게 된다.
       //
-      // 지우는 것은 캠페인용 연동(collab)뿐이다. 디엠 자동화에 붙여 둔 같은 계정은
-      // 다른 보관함에 있고 다른 기능이므로 그대로 둔다 — 여기서 함께 끊으면 자동
-      // 응답이 조용히 멈춘다.
+      // 여기서 끊는 것은 이 화면의 기능(브랜드 매칭받기)뿐이다. 연동 토큰은 자동
+      // 디엠과 인사이트가 함께 쓰고 있어 지우지 않는다 — 지우면 이 사람이 고르지
+      // 않은 두 기능까지 멈춘다. 대신 이 기능이 꺼졌다는 표시를 연동에 남겨,
+      // 이 화면과 브랜드가 보는 명단에서만 연동이 없는 것으로 다룬다.
       //
       // 이미 받아 둔 팔로워·조회수는 지우지 않는다. 그 숫자는 연동이 살아 있을 때
       // 실제로 확인된 값이고, 지우면 접수해 둔 등록서와 브랜드가 보는 명단이 한꺼번에
@@ -209,7 +215,7 @@ export default async (req: Request) => {
         // 토큰을 못 지웠으면 연동은 아직 살아 있다. 화면에만 "해제됨"을 띄우면,
         // 사람은 끊은 줄 알지만 지표는 계속 갱신된다. 실패는 실패라고 답한다.
         try {
-          await deleteMetaLink(username, "collab");
+          await disconnectLinkFeature(username, "collab");
         } catch (e: any) {
           console.error("[creator-channel] 연동 해제 실패:", e?.message || e);
           return Response.json(
@@ -240,7 +246,8 @@ export default async (req: Request) => {
         if (!auth.ok) return auth.response;
       }
 
-      const link = await loadMetaLink(username, "collab");
+      const resolved = await resolveSharedLink(username, "collab");
+      const link = resolved.link;
       if (!linkIsUsable(link)) {
         // 한 번도 연동한 적 없는 경우와, 연동했는데 토큰이 죽은 경우는 할 말이 다르다.
         // 전자는 "연동해 주세요", 후자는 "다시 연동해 주세요"다. 화면이 그 둘을
@@ -257,7 +264,10 @@ export default async (req: Request) => {
         );
       }
 
-      const synced = await syncChannelFromMeta(db, username, link!, "collab");
+      // 토큰이 죽은 것이 확인되면 그 연동이 실제로 있는 보관함에 표시해야 한다.
+      // 늘 "collab" 이라고 넘기면 dm 보관함의 연동이 죽어도 표시가 엉뚱한 곳에
+      // 남아, 화면은 계속 멀쩡한 갱신 버튼을 보여 준다.
+      const synced = await syncChannelFromMeta(db, username, link!, resolved.scope || "dm");
       if (!synced.ok) {
         return Response.json({ error: synced.error, code: synced.code }, { status: synced.status });
       }

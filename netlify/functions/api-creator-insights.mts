@@ -374,7 +374,7 @@ export default async (req: Request) => {
         igUsername: String(resolved.link?.igUsername || ""),
         error: resolved.needsReauth
           ? REAUTH_MESSAGE
-          : "인스타그램 계정이 연동되어 있지 않습니다. 캠페인 등록 화면에서 계정을 연동하면 릴스 성과를 불러옵니다.",
+          : "인스타그램 계정이 연동되어 있지 않습니다. 계정을 연동하면 릴스 성과를 불러옵니다.",
         code: resolved.needsReauth ? "META_TOKEN_INVALID" : "META_NOT_LINKED",
         reels: [],
       });

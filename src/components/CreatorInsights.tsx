@@ -28,9 +28,10 @@ import {
 /**
  * 인사이트 — 인플루언서 본인이 자기 계정 성과를 보는 화면.
  *
- * 이 화면은 새 연동을 만들지 않는다. 캠페인 등록에서 붙여 둔 계정(없으면 디엠
- * 자동화에 붙여 둔 계정)의 토큰으로 조회만 한다. 그래서 화면 어디에도 "연동
- * 설정"은 없고, 아직 연동이 없을 때만 기존 연동 흐름으로 내보내는 버튼이 하나 있다.
+ * 이 화면에는 "연동 설정"이 없다. 이미 붙여 둔 계정의 토큰으로 조회만 하고, 아직
+ * 연동이 없을 때만 연동 흐름으로 내보내는 버튼이 하나 있다. 그 버튼은 자동 디엠·
+ * 브랜드 매칭받기와 같은 연동 하나를 만든다 — 세 화면 중 어디서 연동해도 나머지
+ * 두 곳이 함께 연동된다.
  *
  * 릴스 데이터는 서버가 계정별로 굳혀 둔다(기본 30분). 새로고침할 때마다 메타를
  * 다시 부르면 사람 한 명이 시간당 호출 한도를 혼자 태우기 때문이다. 그래서 화면은
@@ -472,7 +473,19 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         ? (isEn ? 'Instagram connection failed. Please try again.' : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.')
         : '',
     );
-    ['ig_insights', 'ig_connected', 'ig_error'].forEach(k => params.delete(k));
+    // 콜백은 방금 받은 팔로워·조회수도 함께 실어 보낸다(브랜드 매칭 화면이 카드를
+    // 바로 그리는 데 쓴다). 이 화면은 자기 인사이트를 따로 불러오므로 쓰지 않고,
+    // 남기면 주소창에 숫자가 붙어 다니므로 함께 지운다.
+    [
+      'ig_insights',
+      'ig_connected',
+      'ig_error',
+      'ig_metrics',
+      'ig_handle',
+      'ig_followers',
+      'ig_following',
+      'ig_views',
+    ].forEach(k => params.delete(k));
     const query = params.toString();
     window.history.replaceState(
       null,
@@ -586,9 +599,13 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
   const startConnect = async () => {
     setConnecting(true);
     setNotice('');
-    // 기존 연동 흐름을 그대로 쓴다(purpose:'collab'). 돌아올 곳만 이 화면으로 표시해 둔다.
+    // 자동 디엠·브랜드 매칭받기와 같은 연동 하나를 쓴다(공용 보관함에 쓴다).
+    // 예전에는 캠페인 전용 연동('collab')으로 시작해서, 여기서 연동한 사람이 자동
+    // 디엠에서 다시 "계정을 먼저 연동해주세요"를 만났다 — 같은 계정에 같은 동의
+    // 화면을 여러 번 지나고, 만료도 각각 세니 재연동도 그만큼 반복됐다.
+    // 돌아올 곳만 이 화면으로 표시해 둔다.
     const returnTo = `${window.location.pathname}?ig_insights=1`;
-    const res = await apiService.instagramConnectUrl(userName, returnTo, 'collab');
+    const res = await apiService.instagramConnectUrl(userName, returnTo);
     if (!res.url) {
       setConnecting(false);
       setNotice(res.error || (isEn ? 'Could not start the connection.' : '연동을 시작하지 못했습니다.'));

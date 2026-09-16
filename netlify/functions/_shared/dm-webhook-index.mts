@@ -153,10 +153,11 @@ export async function indexDmAccount(username: string, igIds: (string | undefine
 export async function unindexDmAccount(
   username: string,
   igIds: (string | undefined)[],
-): Promise<void> {
+): Promise<string[]> {
   const store = indexStore();
   const ids = Array.from(new Set(igIds.filter(Boolean) as string[]));
   const name = username.toLowerCase();
+  const remaining = new Set<string>();
   await Promise.all(
     ids.map(async (id) => {
       try {
@@ -164,11 +165,16 @@ export async function unindexDmAccount(
           current.includes(name) ? current.filter((u) => u !== name) : null,
         );
         if (left.length === 0) await store.delete(idKey(id)).catch(() => {});
+        else for (const who of left) remaining.add(who);
       } catch (e) {
         console.warn("[dm-index] index cleanup failed:", (e as Error)?.message);
       }
     }),
   );
+  // 같은 인스타그램 계정을 연동해 둔 다른 사용자가 남아 있는지. 계정별 웹훅 구독
+  // (`subscribed_apps`)은 계정 하나에 하나뿐이라 우리 쪽 사용자들이 나눠 쓴다 —
+  // 한 사람이 자동 디엠을 끊었다고 구독을 내리면 남은 사람의 자동 DM 도 함께 멈춘다.
+  return Array.from(remaining);
 }
 
 /** 저장된 설정에서 이 IG ID 를 쓰는 사용자명을 모두 찾는다. */
