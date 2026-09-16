@@ -4,6 +4,7 @@ import { formatKoreanWon, formatPhone, formatCountKo } from '../utils/formatters
 import BrandContactCard from './collab/BrandContactCard';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 /**
  * 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
@@ -517,6 +518,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  // 가이드라인 보기 창을 뒤로가기로 닫는다.
+  useCloseOnBack(guideOpen, () => setGuideOpen(false));
   /** 진행사항 화면에서 바로 올리는 가이드 파일. */
   const [guideUploading, setGuideUploading] = useState(false);
   const loadRequestRef = React.useRef(0);
@@ -1486,8 +1489,8 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
 
       {/* 작성한 가이드라인 보기 */}
       {guideOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6">
-          <div className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[210] bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6">
+          <div className="bg-white w-full md:max-w-lg rounded-t-3xl md:rounded-3xl max-h-[85vh] modal-maxh-85 overflow-y-auto">
             <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex items-center justify-between gap-3">
               <h3 className="text-base font-black text-slate-900">작성한 가이드라인</h3>
               <button

@@ -3,6 +3,7 @@ import { Plus, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
 import { OpenScheduleItem } from '../types';
 import { apiService } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface OpenScheduleManagementProps {
   userName: string;
@@ -19,6 +20,9 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
     }
   });
   const [showForm, setShowForm] = useState(false);
+  // 항목이 여러 개인 입력 창이라 휴대폰에서는 닫기 버튼이 접힌 아래쪽에 있다.
+  // 뒤로가기로도 닫히게 한다.
+  useCloseOnBack(showForm, () => setShowForm(false));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ title: '', date: '', time: '', description: '', link: '' });
   const [isSaving, setIsSaving] = useState(false);
@@ -207,10 +211,13 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
           )}
         </div>
 
-        {/* Add/Edit Form Modal */}
+        {/* Add/Edit Form Modal — 입력칸이 여러 개라 휴대폰 화면보다 길다.
+            감싼 상자가 스크롤하고 카드는 my-auto 로 둔다: 들어갈 자리가 있으면
+            가운데, 넘치면 위에서부터 스크롤되어 저장 버튼까지 닿는다.
+            여백도 휴대폰에서는 p-5 로 줄여 내용 폭을 벌었다. */}
         {showForm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-            <div className="bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="modal-overlay fixed inset-0 bg-black/50 backdrop-blur-sm z-[210] flex items-start justify-center overflow-y-auto overscroll-contain" onClick={() => setShowForm(false)}>
+            <div className="bg-white rounded-3xl my-auto p-5 md:p-8 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
               <h3 className="text-xl font-black text-[#1E1E2E] mb-6">{editingId ? (language === 'en' ? 'Edit Schedule' : '일정 수정') : (language === 'en' ? 'New Schedule' : '새 오픈 일정')}</h3>
               <div className="space-y-4">
                 <div>

@@ -13,6 +13,7 @@ import LanguageSwitcher from './LanguageSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
 
 import ErrorBoundary from './ErrorBoundary';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface AdminDashboardProps {
   userName: string;
@@ -58,6 +59,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // 서랍은 화면을 가득 덮는다. 덮인 화면에서 뒤로가기를 누르는 것은 자연스러운
+  // 반응인데 그게 앱을 떠나는 동작이면 사용자는 서랍에 갇힌다. 뒤로가기로 닫는다.
+  useCloseOnBack(isMobileMenuOpen, () => setIsMobileMenuOpen(false));
   const [timelineUnread, setTimelineUnread] = useState(0);
   /**
    * 캠페인 협업 진행사항의 안 읽은 수.
@@ -358,7 +362,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 aria-label={t('common.close', '닫기', 'Close')}
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-white/5 hover:text-white"
+                className="shrink-0 w-11 h-11 -mr-1.5 flex items-center justify-center rounded-full text-slate-400 hover:bg-white/5 hover:text-white"
               >
                 ✕
               </button>
@@ -529,11 +533,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 };
 
+/* 아래 막대의 칸 하나. 네 칸이 화면을 넷으로 나누니 한 칸은 320px 폰에서 약
+   76px 뿐이고, 가장 긴 이름('비즈니스 수신함')이 재어 보면 74.8px 로 겨우
+   1.7px 만 남는다 — 지금은 넘치지 않지만 여유가 없다. whitespace-nowrap 을
+   떼어 두면 이름이 조금만 길어지거나 글꼴이 바뀌어도 옆 칸으로 번지는 대신
+   자기 칸 안에서 접힌다(body 의 word-break: keep-all 이 낱말은 안 쪼갠다).
+   지금 쓰는 이름들은 그대로 한 줄이라 보이는 모양은 달라지지 않는다. */
 const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void; badge?: number }> = ({ icon, label, active, onClick, onMouseEnter, badge }) => (
   <button
     onClick={onClick}
     onMouseEnter={onMouseEnter}
-    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative ${active ? 'text-blue-400' : 'text-slate-500'}`}
+    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative min-w-0 ${active ? 'text-blue-400' : 'text-slate-500'}`}
   >
     <span className="text-lg leading-none mb-0.5 relative">
       {icon}
@@ -541,7 +551,7 @@ const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; o
         <span className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[8px] font-bold min-w-[14px] h-[14px] flex items-center justify-center px-0.5 rounded-full">{badge > 99 ? '99+' : badge}</span>
       )}
     </span>
-    <span className="text-[11px] font-black tracking-tighter whitespace-nowrap">{label}</span>
+    <span className="text-[11px] font-black tracking-tighter leading-tight text-center w-full">{label}</span>
   </button>
 );
 

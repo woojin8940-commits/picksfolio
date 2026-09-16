@@ -4,6 +4,7 @@ import { toAsciiSafeId } from '../utils/formatters';
 import { loadPortOne } from '../utils/externalScripts';
 import { payClaudePlan } from '../utils/claudeCharge';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import {
   PORTONE_STORE_ID,
   channelKeyFor,
@@ -236,6 +237,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     setPromo(null);
     setPromoError(null);
   };
+
+  // 휴대폰에서는 이 창들을 뒤로가기로도 닫을 수 있게 한다. 특히 결제 확인 창은
+  // 내용이 길어 닫기 버튼이 위로 밀려나 있는 경우가 많아, 뒤로가기가 막혀 있으면
+  // 앱을 떠나는 것 말고는 나올 길이 없다.
+  useCloseOnBack(confirmOpen, closeConfirm);
+  useCloseOnBack(cancelOpen, () => { setCancelOpen(false); setError(null); });
+  useCloseOnBack(claudeOpen, () => { setClaudeOpen(false); setClaudeError(null); });
 
   /**
    * 코드를 확인한다. 여기서 코드가 소진되지는 않고(등록은 결제 요청에서 함께 처리된다),
@@ -918,11 +926,17 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </div>
       </section>
 
+      {/* 아래 세 창의 닫기(×) 버튼은 32px 이었다. 손끝이 닿는 최소 크기(44px)보다
+          작아서 휴대폰에서는 눌렀다고 생각했는데 안 닫히는 일이 생긴다. 창을 닫는
+          유일한 버튼이 그러면 사용자는 갇힌 것으로 받아들인다. 휴대폰에서만 44px 로
+          키우고(마우스로는 32px 도 충분하니 md 부터는 그대로), 늘어난 12px 은 음수
+          마진으로 머리말의 여백(px-5 py-4) 안으로 흘려보낸다 — 그래야 머리말이
+          두꺼워져 본문이 볼 높이를 빼앗기지 않는다. */}
       {/* 해지 안내 모달 — 해지해도 결제한 이용 기간은 남는다는 점을 먼저 알린다. */}
       {cancelOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <div className="modal-overlay fixed inset-0 z-[210] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
+          <div className="modal-card bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <p className="text-xs font-black text-amber-500 uppercase tracking-widest">
                   {currentPlan ? TIER_LABEL[currentPlan] : '멤버십'}
@@ -934,13 +948,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <button
                 type="button"
                 onClick={() => { setCancelOpen(false); setError(null); }}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl"
+                className="shrink-0 w-11 h-11 md:w-8 md:h-8 -my-1.5 -mr-2 md:my-0 md:mr-0 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-2xl md:text-xl"
                 aria-label="닫기"
               >
                 ×
               </button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="modal-body p-5 space-y-4">
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
                   {error}
@@ -1028,10 +1042,15 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </div>
       )}
 
+      {/* 결제 확인 창. z-[210] 인 이유가 있다 — 대시보드의 모바일 아래 막대가
+          z-[100], 그 서랍이 z-[200] 이라, 예전처럼 z-50 으로 두면 막대가 창의
+          아래쪽을 덮어 결제 버튼을 가렸다(문의로 들어온 그 화면이다).
+          크기는 .modal-overlay / .modal-card / .modal-body 세 클래스가 잡는다:
+          내용이 길어도 본문만 스크롤하고 결제 버튼 줄은 화면 안에 남는다. */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <div className="modal-overlay fixed inset-0 z-[210] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
+          <div className="modal-card bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <p className="text-xs font-black text-blue-500 uppercase tracking-widest">{TIER_LABEL[selectedTier]}</p>
                 <h3 className="text-lg font-black text-slate-900">구독 결제 확인</h3>
@@ -1039,13 +1058,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <button
                 type="button"
                 onClick={closeConfirm}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl"
+                className="shrink-0 w-11 h-11 md:w-8 md:h-8 -my-1.5 -mr-2 md:my-0 md:mr-0 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-2xl md:text-xl"
                 aria-label="닫기"
               >
                 ×
               </button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="modal-body p-5 space-y-4">
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
                   {error}
@@ -1166,7 +1185,19 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       </p>
                       <div className="flex gap-2">
                         {/* maxLength 에 여유를 둔 이유: 구분자가 섞인 붙여넣기(323-039-109)가
-                            잘려 들어오면 앞자리만 남는다. 넉넉히 받고 숫자만 남긴다. */}
+                            잘려 들어오면 앞자리만 남는다. 넉넉히 받고 숫자만 남긴다.
+
+                            min-w-0 이 꼭 있어야 한다. flex 자식은 기본값이
+                            min-width:auto 라 자기 내용 너비 밑으로는 줄어들지
+                            않는다. 이 칸의 내용 너비는 placeholder('9자리 코드
+                            입력') 가 정하는데, index.css 가 휴대폰 입력칸을
+                            16px 로 못 박고 여기에 tracking-[0.2em] 까지 붙어서
+                            332px 이 나온다 — 폭 390px 폰의 이 줄(326px)보다
+                            넓다. 그래서 flex-1 만 있던 동안에는 줄이 89~159px
+                            넘쳐서(320·360·390px 폰 모두) 옆의 '코드 확인'
+                            버튼이 오른쪽으로 잘려 나갔고, 그 가로 넘침이 화면을
+                            옆으로 밀어 아래 막대까지 잘려 보이게 했다.
+                            min-w-0 으로 풀면 칸이 남는 폭까지 줄어 넘침이 0 이 된다. */}
                         <input
                           type="text"
                           inputMode="numeric"
@@ -1184,7 +1215,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                             setPromoError(null);
                           }}
                           placeholder={`${PROMO_CODE_LENGTH}자리 코드 입력`}
-                          className={`flex-1 px-3 py-2.5 rounded-xl border text-sm font-bold tracking-[0.2em] focus:outline-none ${
+                          className={`flex-1 min-w-0 px-3 py-2.5 rounded-xl border text-sm font-bold tracking-[0.2em] focus:outline-none ${
                             promo
                               ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
                               : promoError
@@ -1239,7 +1270,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                     : '구독을 시작하면 영상 업로드 · 콘텐츠 업로드 등 스탠다드 기능이 즉시 활성화됩니다. 협업 타임라인 AI 어시스턴트와 콘텐츠 기획 AI는 AI 협업 멤버십, 디엠 자동화는 프로 플랜에서 이용할 수 있습니다.'}
               </p>
             </div>
-            <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
+            <div className="shrink-0 px-5 py-4 border-t border-slate-100 flex gap-2">
               <button
                 type="button"
                 onClick={closeConfirm}
@@ -1271,9 +1302,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         </div>
       )}
       {claudeOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <div className="modal-overlay fixed inset-0 z-[210] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
+          <div className="modal-card bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <p className="text-xs font-black text-orange-500 uppercase tracking-widest">클로드 플랜 · 🤖 Claude</p>
                 <h3 className="text-lg font-black text-slate-900">클로드 플랜 시작</h3>
@@ -1281,13 +1312,13 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
               <button
                 type="button"
                 onClick={() => { setClaudeOpen(false); setClaudeError(null); }}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xl"
+                className="shrink-0 w-11 h-11 md:w-8 md:h-8 -my-1.5 -mr-2 md:my-0 md:mr-0 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-2xl md:text-xl"
                 aria-label="닫기"
               >
                 ×
               </button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="modal-body p-5 space-y-4">
               {claudeError && (
                 <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg px-3 py-2">
                   {claudeError}
@@ -1316,7 +1347,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                 <p>✓ 남은 크레딧은 멤버십 플랜 화면과 협업 타임라인 AI 입력창에서 확인할 수 있습니다.</p>
               </div>
             </div>
-            <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
+            <div className="shrink-0 px-5 py-4 border-t border-slate-100 flex gap-2">
               <button
                 type="button"
                 onClick={() => { setClaudeOpen(false); setClaudeError(null); }}

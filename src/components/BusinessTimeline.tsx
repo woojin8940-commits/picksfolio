@@ -10,6 +10,7 @@ import { isNativeApp } from '../utils/appEnv';
 import { membershipCovers } from '../utils/membershipTiers';
 import { AiMarkdown } from './AiMarkdown';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { mergeTimelineMessages } from '../utils/timelineMessages';
 
 interface AiMessage {
@@ -306,6 +307,24 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     }
     return () => document.body.classList.remove('timeline-chat-open');
   }, [selectedTimeline, aiActive]);
+
+  /**
+   * 대화가 열려 있는 동안에는 뒤로가기로 목록으로 돌아온다.
+   *
+   * 위에서 아래 막대를 감추기 때문에 이 화면은 앱에서 나갈 길이 가장 좁다. 남은
+   * 길은 머리말의 화살표 하나뿐인데, 그마저 손끝보다 작았다(아래에서 44px 로
+   * 넓혔다). 휴대폰에서 뒤로가기를 누르면 목록이 아니라 앱 밖으로 나가 버렸으니,
+   * 화살표를 못 찾은 사용자에게는 사실상 갇힌 화면이었다.
+   *
+   * AI 대화와 협업 대화 중 무엇이 열려 있었든 목록으로 모은다. 되돌아갈 자리가
+   * 하나뿐이면 뒤로가기를 몇 번 눌러야 하는지 헤아릴 필요가 없다.
+   */
+  useCloseOnBack(!!selectedTimeline || aiActive, () => {
+    setAiActive(false);
+    setSelectedTimeline(null);
+    setShowList(true);
+    fetchTimelines();
+  });
 
   useEffect(() => {
     aiEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -1212,16 +1231,19 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         {/* Channel Header (Slack-style) */}
         <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 md:px-5 md:py-3 shadow-[0_6px_16px_-10px_rgba(15,23,42,0.5)] z-10">
           <div className="flex items-center gap-2 md:gap-3">
-            {/* Mobile back button */}
+            {/* 휴대폰 뒤로가기 버튼. 손끝이 닿는 최소 크기는 44px 인데 p-1 + 16px
+                아이콘은 24px 였다. 아래 막대까지 감춘 화면에서 눈에 보이는 유일한
+                출구가 이 버튼이므로 44px 로 넓힌다. -my-1.5 는 넓힌 높이를 머리말의
+                위아래 여백 안으로 흘려보내, 대화가 차지할 높이를 빼앗지 않게 한다. */}
             <button
               onClick={() => {
                 setSelectedTimeline(null);
                 setShowList(true);
                 fetchTimelines();
               }}
-              className="md:hidden p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              className="md:hidden flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -my-1.5 -ml-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <svg className="w-4 h-4 md:w-5 md:h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
@@ -1655,9 +1677,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
           <div className="flex items-center gap-2 md:gap-3">
             <button
               onClick={() => { setAiActive(false); setShowList(true); }}
-              className="md:hidden p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              className="md:hidden flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -my-1.5 -ml-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
