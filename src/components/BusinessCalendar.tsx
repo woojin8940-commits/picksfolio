@@ -18,6 +18,7 @@ import {
   campaignChipColor,
   campaignColorKey,
 } from '../utils/campaignChipColor';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface BusinessCalendarProps {
   userName: string;
@@ -172,6 +173,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  // 협업 추가·수정 창도 입력이 많다. 뒤로가기로 닫는다.
+  useCloseOnBack(showAddForm, () => { setShowAddForm(false); resetForm(); });
   const [editingCollab, setEditingCollab] = useState<CollabRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'proposals' | 'collabs' | 'settlements'>('all');
@@ -1828,8 +1831,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
       {/* Add/Edit Collab Modal */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-300">
+        <div className="fixed inset-0 bg-black/50 z-[210] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] modal-maxh-90 overflow-y-auto animate-in zoom-in-95 duration-300">
             <div className="p-6 border-b border-slate-100">
               <h3 className="text-lg font-black text-slate-900">
                 {editingCollab ? '협업 기록 수정' : '협업 기록 추가'}

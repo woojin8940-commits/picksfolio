@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiService, DmAutomationItem, DmCarouselCard, DmMessageButton, InstagramMedia } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface ManualDmModalProps {
   isOpen: boolean;
@@ -332,11 +333,14 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     }
   };
 
+  // 아래 early return 보다 먼저 불러야 한다 — 훅은 렌더마다 같은 순서로 불려야 한다.
+  useCloseOnBack(isOpen, onClose);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 my-8 max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 my-0 md:my-8 max-h-[90vh] modal-maxh-90 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 md:p-6 border-b border-slate-100 bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900 text-white">
           <div className="flex items-center gap-3">

@@ -12,6 +12,7 @@ import {
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
 import { DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
@@ -736,6 +737,9 @@ const AutomationEditor: React.FC<{
   onClose: () => void;
   onSave: (a: DmAutomationItem) => void;
 }> = ({ initial, userName, igUsername, media, mediaLoading, onClose, onSave }) => {
+  // 이 창은 열릴 때만 그려지므로 늘 열린 상태로 두면 된다. 자동응답 편집은 입력이
+  // 많아 휴대폰에서 닫기 버튼이 위로 밀려나므로 뒤로가기로도 닫히게 한다.
+  useCloseOnBack(true, onClose);
   const [draft, setDraft] = useState<DmAutomationItem>(initial);
   const [keywordInput, setKeywordInput] = useState('');
 
@@ -831,8 +835,8 @@ const AutomationEditor: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 md:p-6 animate-in fade-in duration-200">
-      <div className="bg-white w-full md:max-w-4xl md:rounded-[2rem] rounded-t-[2rem] shadow-2xl max-h-[94vh] md:max-h-[90vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300">
+    <div className="fixed inset-0 z-[210] flex items-end md:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-0 md:p-6 animate-in fade-in duration-200">
+      <div className="bg-white w-full md:max-w-4xl md:rounded-[2rem] rounded-t-[2rem] shadow-2xl max-h-[94vh] modal-maxh-94 md:max-h-[90vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 md:px-8 py-4 md:py-5 border-b border-slate-100 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -841,7 +845,7 @@ const AutomationEditor: React.FC<{
             </div>
             <h3 className="text-lg md:text-xl font-black text-slate-900">자동 DM 설정</h3>
           </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
+          <button onClick={onClose} className="shrink-0 w-11 h-11 md:w-9 md:h-9 -my-1 -mr-1 md:m-0 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400" aria-label="닫기">
             <X size={20} />
           </button>
         </div>

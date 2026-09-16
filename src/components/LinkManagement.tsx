@@ -25,6 +25,7 @@ import {
   themeBackgroundOf,
 } from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 // 텍스트 블록의 글씨색 · 배경색은 프리셋 색동그라미를 늘어놓지 않고 ColorPicker
 // 하나로만 고른다. 프리셋 여덟 개를 담으면 글씨 서식 줄이 두세 줄로 접히면서 편집
@@ -358,6 +359,20 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [coverPosition, setCoverPosition] = useState<string | undefined>(() => fullDesignRef.current.portfolioHeaderImagePosition);
   // 모바일에서 실제 개인페이지를 실시간으로 확인할 수 있는 미리보기 시트.
   const [showMobilePreview, setShowMobilePreview] = useState(false);
+
+  /**
+   * 이 화면의 덮인 창들을 뒤로가기로도 닫는다.
+   *
+   * 링크 관리는 링크가 없는 계정이 로그인하면 처음 만나는 화면이라 휴대폰 사용이
+   * 가장 많고, 창도 다섯 개로 가장 많다. 미리보기는 화면을 통째로 덮어서 특히
+   * 갇히기 쉽다. 순서는 겹쳐 열리는 순서(삭제 확인이 가장 위)와 무관하다 —
+   * useCloseOnBack 이 열린 순서대로 항목을 쌓고 맨 위부터 닫는다.
+   */
+  useCloseOnBack(!!isEditing, () => setIsEditing(null));
+  useCloseOnBack(!!confirmDelete, () => setConfirmDelete(null));
+  useCloseOnBack(showMobilePreview, () => setShowMobilePreview(false));
+  useCloseOnBack(showBlockTypeModal, () => setShowBlockTypeModal(false));
+  useCloseOnBack(showCategoryModal, () => { setShowCategoryModal(false); setEditingCategoryName(null); });
 
   /**
    * 미리보기에 함께 그릴 오픈 일정.
@@ -2743,7 +2758,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
             <div className="w-10 h-1 rounded-full bg-slate-300" />
             <div className="flex items-center justify-between w-full px-1">
               <h3 className="font-black text-sm text-[#1E1E2E]">실시간 미리보기</h3>
-              <button onClick={() => setShowMobilePreview(false)} className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
+              <button onClick={() => setShowMobilePreview(false)} className="flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -my-2 -mr-2 text-slate-400 hover:text-slate-600 transition-colors" aria-label="닫기"><X size={20} /></button>
             </div>
             <div className="overflow-y-auto w-full flex justify-center pb-2">
               <PhoneFrame

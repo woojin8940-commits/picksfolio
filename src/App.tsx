@@ -254,9 +254,49 @@ const App: React.FC = () => {
   const launchedIntoDashboardRef = useRef<boolean>(launchViewRef.current !== null);
   const initialPublicUserRef = useRef<string>(launchViewRef.current ? '' : initialPublicProfileUsername());
   const [view, setView] = useState<View>(() => launchViewRef.current ?? (initialPublicUserRef.current ? 'user-page' : 'home'));
-  const [subView, setSubView] = useState<SubView>('dashboard');
+  const [subView, setSubViewState] = useState<SubView>('dashboard');
   const subViewRef = useRef(subView);
   subViewRef.current = subView;
+
+  /**
+   * 대시보드 탭을 히스토리에 남기면서 옮긴다.
+   *
+   * 예전에는 탭이 그냥 상태였다. 주소는 내내 /admin 이라 탭을 옮겨도 히스토리에
+   * 아무것도 쌓이지 않았고, 그래서 휴대폰에서 뒤로가기를 누르면 "이전 탭" 이
+   * 아니라 /admin 이전으로 — 즉 앱 밖으로 — 나갔다. 멤버십이나 인사이트처럼
+   * 아래 막대에 없는 탭(서랍으로만 들어가는 탭)에 들어가면 돌아올 길이 뒤로가기
+   * 뿐인데 그게 앱을 떠나는 동작이었으니, 사용자는 갇힌 것처럼 느낀다.
+   *
+   * 주소는 그대로 두고 히스토리 항목만 쌓는다(pushState 의 첫 인자인 state 에
+   * 탭 이름을 적는다). 주소 체계를 건드리지 않으므로 netlify.toml 의 리다이렉트,
+   * sitemap, 아이디 기반 개인페이지 경로 해석에 영향이 없다. 되돌아올 때는
+   * 아래 popstate 가 state 에서 탭 이름을 읽어 복원한다.
+   */
+  const setSubView = useCallback((next: SubView) => {
+    if (subViewRef.current === next) return;
+    subViewRef.current = next;
+    // 이전 항목의 내용을 물려받지 않는다. 덮인 창이 열린 채로 탭이 바뀌면
+    // (창 안에서 다른 화면으로 보내는 버튼을 누르면) 창 표시까지 새 항목에
+    // 따라와, useCloseOnBack 이 이미 지나간 창의 항목으로 착각한다.
+    window.history.pushState(
+      { picksSubView: next },
+      '',
+      window.location.pathname + window.location.search + window.location.hash,
+    );
+    setSubViewState(next);
+  }, []);
+
+  /**
+   * 히스토리를 쌓지 않고 탭만 맞춘다.
+   *
+   * navigate() 가 이미 항목을 하나 쌓는 자리(로그인 직후 첫 화면 지정 등)와,
+   * 주소를 읽어 화면을 맞추는 라우터·시작 처리에서 쓴다. 거기서 위의 setSubView
+   * 를 쓰면 한 번의 이동에 항목이 두 개 쌓여 뒤로가기를 두 번 눌러야 한다.
+   */
+  const applySubView = useCallback((next: SubView) => {
+    subViewRef.current = next;
+    setSubViewState(next);
+  }, []);
   /** 협업 현황에서 눌러 들어온 캠페인 협업 id. 캠페인 협업 화면이 이것을 펼친다. */
   const [collabFocusId, setCollabFocusId] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState(initialPublicUserRef.current);
@@ -937,12 +977,12 @@ const App: React.FC = () => {
               const rawBlocks = localStorage.getItem(`picks_blocks_${existingUsername.toLowerCase()}`);
               const cachedBlocks = rawBlocks ? JSON.parse(rawBlocks) : null;
               if (Array.isArray(cachedBlocks) && cachedBlocks.length === 0) {
-                setSubView('links');
+                applySubView('links');
               } else {
-                setSubView('dashboard');
+                applySubView('dashboard');
               }
             } catch (e) {
-              setSubView('dashboard');
+              applySubView('dashboard');
             }
             navigate('admin');
           }
@@ -961,7 +1001,7 @@ const App: React.FC = () => {
           // 자기 대시보드로 돌려보낸다.
           console.log(`[Auth] Leaving /${currentView} — role "${userRole}" is not an operator`);
           setOauthProcessing(false);
-          setSubView('dashboard');
+          applySubView('dashboard');
           navigate('admin');
         } else if (settledViews.includes(currentView) && isViewValidForRole(currentView, userRole)) {
           setOauthProcessing(false);
@@ -1535,17 +1575,17 @@ const App: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('collab_match')) {
-      setSubView('campaigns');
+      applySubView('campaigns');
       return;
     }
     // 인사이트 화면에서 시작한 연동(?ig_insights)은 그 화면으로 되돌린다. 아래
     // ig_connected 분기보다 먼저 봐야 한다 — 연동 성공 시 두 파라미터가 함께 붙는다.
     if (params.get('ig_insights')) {
-      setSubView('insights');
+      applySubView('insights');
       return;
     }
     if (params.get('ig_connected') || params.get('ig_error')) {
-      setSubView('dm-automation');
+      applySubView('dm-automation');
     }
   }, []);
 
@@ -1573,7 +1613,7 @@ const App: React.FC = () => {
               setIsLoggedIn(true);
             }
             setTimelineProposalId(timelineParam);
-            setSubView('timeline');
+            applySubView('timeline');
             setView('admin');
           }
           // Clean URL
@@ -1622,6 +1662,47 @@ const App: React.FC = () => {
     return () => window.removeEventListener('navigate-membership', handler);
   }, []);
 
+  /**
+   * 뒤로/앞으로 갈 때 대시보드 탭을 히스토리 항목에 적힌 값으로 되돌린다.
+   *
+   * 아래 handleLocationChange 도 같은 popstate 를 듣지만 저쪽은 주소만 본다.
+   * 탭 이동은 주소를 바꾸지 않으므로(위 setSubView 참고) 저쪽에서는 /admin 을
+   * 다시 열라는 같은 결론이 나올 뿐이고, 탭은 여기서 맞춘다. 두 처리가 겹쳐도
+   * 서로의 결과를 덮지 않는다.
+   */
+  useEffect(() => {
+    const restore = (e: PopStateEvent) => {
+      const next = (e.state as { picksSubView?: SubView } | null)?.picksSubView;
+      // 기록이 없는 항목(대시보드에 들어오기 전에 쌓인 항목)이면 건드리지 않는다.
+      // 그 항목의 주인은 대시보드가 아니므로 탭을 바꿀 이유가 없고, 아래 표시
+      // 효과가 대시보드에서 쌓인 항목에는 늘 값을 남겨 둔다.
+      if (!next || next === subViewRef.current) return;
+      subViewRef.current = next;
+      setSubViewState(next);
+    };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+
+  /**
+   * 지금 히스토리 항목에 "이 항목은 이 탭이었다" 를 적어 둔다.
+   *
+   * 탭 이동은 위 setSubView 가 값을 직접 담아 쌓지만, 대시보드에 처음 들어오는
+   * 항목은 navigate() 가 쌓는다(로그인 직후, /membership 진입, 내 페이지에서
+   * 돌아오기). 그 항목에는 탭 정보가 없어서, 탭을 몇 번 옮긴 뒤 뒤로가기로
+   * 돌아오면 "들어올 때 보던 탭" 이 아니라 아무 탭도 복원되지 않는다. 항목이
+   * 정해진 다음에 한 번 덮어써서 그 구멍을 막는다.
+   */
+  useEffect(() => {
+    const state = (window.history.state || {}) as { picksSubView?: SubView };
+    if (state.picksSubView === subView) return;
+    window.history.replaceState(
+      { ...state, picksSubView: subView },
+      '',
+      window.location.pathname + window.location.search + window.location.hash,
+    );
+  }, [subView]);
+
   useEffect(() => {
     const handleLocationChange = () => {
       const path = window.location.pathname.replace(/^\//, '');
@@ -1661,7 +1742,7 @@ const App: React.FC = () => {
       // /membership 은 netlify.toml 에 리다이렉트까지 있는데(=열리도록 의도한 주소)
       // 화면 이름은 아니다. 멤버십은 대시보드 안의 탭이므로 그 탭을 열어 준다.
       else if (path === 'membership') {
-        setSubView('membership');
+        applySubView('membership');
         setView('admin');
       }
       else if (path.endsWith('/proposal')) {
@@ -1972,7 +2053,7 @@ const App: React.FC = () => {
         // 운영용 버튼이 얹히지 않아야 한다.
         onBackToDashboard={isNativeApp() && isLoggedIn && targetUser.toLowerCase() === userName.toLowerCase()
           ? () => {
-              setSubView('dashboard');
+              applySubView('dashboard');
               navigate('admin');
             }
           : undefined}
@@ -2231,7 +2312,7 @@ const App: React.FC = () => {
                 navigate('admin');
               } else {
                 // No link data — show link management page
-                setSubView('links');
+                applySubView('links');
                 navigate('admin');
               }
             }}

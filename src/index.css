@@ -297,6 +297,75 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ===== 모달(팝업) 공통 크기 — 휴대폰에서 버튼이 화면 밖으로 나가지 않게 =====
+
+   문제는 이랬다. 팝업은 `fixed inset-0 ... flex items-center` 로 화면 한가운데
+   놓고, 안쪽 카드에는 높이 상한이 없었다. 카드 내용이 화면보다 길면 카드가
+   위아래로 똑같이 삐져나가고 — 가운데 정렬이라 — 맨 아래 줄에 있는 결제/확인
+   버튼이 화면 밖에 남는다. 감싼 상자가 `fixed` 라 페이지를 내려도 따라오지
+   않으니 새로고침을 해도 그대로다. 실제로 "모바일에서 다음으로 넘어가는 배너가
+   안 보여서 PC로 가입했다" 는 문의가 이 구조에서 나왔다.
+
+   그래서 세 벌로 나눈다. 감싼 상자(.modal-overlay)가 화면의 실제 높이를 갖고
+   노치·홈바만큼 안쪽으로 물러나고, 카드(.modal-card)는 그 안을 넘지 않는 세로
+   flex 이고, 본문(.modal-body)만 스크롤한다. 머리말과 버튼 줄은 `shrink-0` 으로
+   두면 카드 안에 항상 붙어 있으므로, 내용이 아무리 길어도 버튼은 화면 안이다. */
+.modal-overlay {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 0.75rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 0.75rem);
+}
+
+/* 높이를 휴대폰에서만 다시 못 박는 이유: 데스크톱은 html 에 zoom: 0.75 가
+   걸려 있어서 dvh 로 적은 높이가 0.75 배로 다시 줄어든다(위 live-stream 주석과
+   같은 문제). 데스크톱에서는 inset-0 의 top/bottom 핀만으로 이미 정확하고,
+   zoom 이 1 인 휴대폰에서만 dvh 로 굳힌다 — 주소창과 하단 툴바가 보이는
+   상태의 높이가 dvh 다(vh 는 툴바가 숨은 상태의 큰 값이라 그만큼 넘친다).
+   dvh 를 모르는 구형 브라우저는 두 번째 줄을 버리고 100% 를 쓴다. */
+@media (max-width: 768px) {
+  .modal-overlay {
+    height: 100%;
+    height: 100dvh;
+  }
+}
+
+.modal-card {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  /* flex 자식의 기본 min-height:auto 는 내용 높이보다 작아지지 않으려 해서
+     max-height 를 무시하게 만든다. 0 으로 풀어야 상한이 실제로 걸린다. */
+  min-height: 0;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 이미 max-height 를 vh 로 걸어 둔 창들을 위한 보정.
+
+   휴대폰의 1vh 는 "주소창과 하단 툴바가 숨었을 때" 의 높이다. 툴바가 보이는
+   보통 상태에서는 그보다 10~15% 작으므로, max-h-[90vh] 는 실제로 보이는 높이의
+   100% 를 넘길 수 있다. 그러면 창의 맨 아래(대개 저장·확인 버튼)가 툴바 뒤나
+   화면 밖에 남고, 창 자체가 화면보다 크니 안에서 끝까지 내려도 닿지 않는다.
+   위 .modal-overlay 가 고친 것과 같은 종류의 문제다.
+
+   dvh 는 지금 보이는 높이라서 이 어긋남이 없다. 데스크톱은 html 의 zoom: 0.75
+   때문에 dvh 가 다시 0.75 배로 줄어드니(위 주석 참고) 휴대폰에서만 바꾼다.
+   Tailwind 유틸리티는 @layer utilities 안에 있고 이 규칙은 레이어 밖이라,
+   계층 순서상 같은 요소에 함께 적혀 있어도 여기가 이긴다 — JSX 의 max-h-[..vh]
+   는 데스크톱 값으로 그대로 남는다. */
+@media (max-width: 768px) {
+  .modal-maxh-94 { max-height: 94dvh; }
+  .modal-maxh-90 { max-height: 90dvh; }
+  .modal-maxh-85 { max-height: 85dvh; }
+}
+
 /* Live stream video shows the WHOLE broadcast frame, never a zoom-crop. The
    native app encodes a portrait 9:16 feed; viewers reported the player looking
    "확대"(zoomed) because `object-fit: cover` center-cropped that feed to fill

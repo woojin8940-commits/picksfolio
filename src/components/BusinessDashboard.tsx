@@ -4,6 +4,7 @@ import { apiService } from '../services/apiService';
 import { formatKRW, formatPhone } from '../utils/formatters';
 import { isPastDeadline } from '../utils/campaignRecruit';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface BusinessDashboardProps {
   userName: string;
@@ -62,6 +63,8 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  // 거절 사유 창도 뒤로가기로 닫힌다.
+  useCloseOnBack(!!rejectingId, () => { setRejectingId(null); setRejectionReason(''); });
   const [rejectionReason, setRejectionReason] = useState('');
 
   const fetchProposals = async () => {
@@ -618,9 +621,12 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
         </div>
       )}
 
+      {/* 거절 사유 창. 사유 버튼이 여러 줄로 접히면 휴대폰에서 창이 화면보다
+          길어져 '거절하기' 버튼이 밖으로 나갔고, z-50 이라 아래 막대(z-[100])에
+          가리기도 했다. 감싼 상자가 스크롤하고 막대 위로 올린다. */}
       {rejectingId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setRejectingId(null); setRejectionReason(''); }}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay fixed inset-0 bg-black/50 z-[210] flex items-start justify-center overflow-y-auto overscroll-contain" onClick={() => { setRejectingId(null); setRejectionReason(''); }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full my-auto p-5 md:p-6 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-slate-900 text-lg mb-2">{isEn ? 'Enter Decline Reason' : '거절 사유 입력'}</h3>
             <p className="text-slate-400 text-sm font-bold mb-4">
               {isEn ? 'Decline reason helps our manager offer alternatives to the advertiser. Choose below or enter directly.' : '거절 사유는 관리자가 광고주에게 대안을 제시하고 매칭을 개선하는 데 사용됩니다. 아래에서 선택하거나 직접 입력해 주세요.'}
