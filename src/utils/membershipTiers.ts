@@ -16,6 +16,12 @@
 
 export type MembershipTier = 'standard' | 'standard_ai' | 'commerce' | 'pro';
 
+/**
+ * 출시 혜택 코드 자릿수(숫자). 서버의 netlify/functions/_shared/membership-promo.mts
+ * PROMO_CODE_LENGTH 와 같은 값을 유지한다.
+ */
+export const PROMO_CODE_LENGTH = 9;
+
 export const STANDARD_PRICE = 4900;
 export const STANDARD_AI_PRICE = 6900;
 export const COMMERCE_PRICE = 13900;

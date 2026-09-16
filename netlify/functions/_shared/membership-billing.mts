@@ -98,24 +98,32 @@ export const MAX_BILLING_FAILURES = 3
 
 // ── Anniversary date math ────────────────────────────────────────────────────
 /**
- * Add one calendar month to an ISO timestamp, preserving the day-of-month where
- * possible and clamping to the last day of shorter months (e.g. Jan 31 → Feb 28,
- * Aug 31 → Sep 30). Returns an ISO string at the same UTC time-of-day.
+ * Add `months` calendar months to an ISO timestamp, preserving the day-of-month
+ * where possible and clamping to the last day of shorter months (e.g. Jan 31 →
+ * Feb 28, Aug 31 → Sep 30). Returns an ISO string at the same UTC time-of-day.
+ *
+ * 매월 청구(1개월)와 출시 혜택 무료 기간(6개월)이 같은 날짜 계산을 쓴다 — 무료
+ * 기간은 "첫 청구일을 6개월 뒤로 미룬 구독"이므로, 그 뒤의 매월 청구가 같은
+ * 날짜에 이어지려면 두 계산이 어긋나지 않아야 한다.
  */
-export const addOneMonth = (fromIso: string): string => {
+export const addMonths = (fromIso: string, months: number): string => {
   const base = new Date(fromIso)
+  const step = Math.trunc(months)
   const year = base.getUTCFullYear()
   const month = base.getUTCMonth()
   const day = base.getUTCDate()
 
-  // Last day of the target month (month+1, day 0 = last day of month+1 in JS).
-  const lastDayOfTarget = new Date(Date.UTC(year, month + 2, 0)).getUTCDate()
+  // Last day of the target month (day 0 = last day of the preceding month in JS).
+  const lastDayOfTarget = new Date(Date.UTC(year, month + step + 1, 0)).getUTCDate()
   const targetDay = Math.min(day, lastDayOfTarget)
 
   const next = new Date(base)
-  next.setUTCFullYear(year, month + 1, targetDay)
+  next.setUTCFullYear(year, month + step, targetDay)
   return next.toISOString()
 }
+
+/** Add one calendar month — the monthly billing anniversary step. */
+export const addOneMonth = (fromIso: string): string => addMonths(fromIso, 1)
 
 /** True when `dueIso` is now or in the past (the charge is due). */
 export const isDue = (dueIso: string | null | undefined, now: Date): boolean => {
@@ -258,7 +266,9 @@ export interface MembershipBillingEntry {
   // 'live_plan' 은 판매 종료된 라이브 커머스 멤버십의 과거 청구 기록에만 남는다.
   tier: MembershipTier | 'live_plan'
   amountKrw: number
-  kind: 'initial' | 'recurring'
+  // 'promo' 는 출시 혜택 코드로 시작한 구독의 첫 기록이다 — 청구가 없었으므로
+  // amountKrw 는 0 이고, 무료 기간이 끝나는 날부터 'recurring' 이 이어진다.
+  kind: 'initial' | 'recurring' | 'promo'
   success: boolean
   paymentId?: string
   error?: string

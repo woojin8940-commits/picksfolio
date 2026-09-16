@@ -2181,6 +2181,8 @@ export const apiService = {
   // 지원) 카드 정기결제는 카드 정보를 서버로 보내 수기(키인) 빌링키를 발급받는다. 카드 정보는
   // 우리 서버에 저장하지 않고 PortOne 으로만 전달하며, 이후에는 발급된 빌링키로 매월
   // 자동결제된다. 첫 달 결제까지 성공해야 멤버십이 활성화된다.
+  // promoCode(출시 혜택 코드)를 함께 보내면 첫 달 결제 없이 구독이 시작되고, 코드에 적힌
+  // 무료 기간이 끝나는 날부터 등록한 카드로 정상 결제가 이어진다.
   async subscribeMembershipCard(
     username: string,
     card: {
@@ -2191,21 +2193,65 @@ export const apiService = {
       passwordTwoDigits: string;
     },
     tier: MembershipTier,
-  ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
+    promoCode?: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    data?: SellerVerification;
+    promo?: { code: string; freeMonths: number; freeUntil: string; plan: MembershipTier };
+  }> {
     try {
       const res = await fetch('/api/billing-issue', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ username: username.toLowerCase(), card, tier }),
+        body: JSON.stringify({
+          username: username.toLowerCase(),
+          card,
+          tier,
+          ...(promoCode ? { promoCode } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
         return { success: false, error: json?.error || '카드 등록·결제 실패' };
       }
       if (json.data) writeVerificationCache(username, json.data);
-      return { success: true, data: json.data };
+      return { success: true, data: json.data, promo: json.promo };
     } catch (e) {
       console.error('[API] Failed to subscribe membership by card:', e);
+      return { success: false, error: '네트워크 오류' };
+    }
+  },
+
+  // 출시 혜택 코드 확인. 카드 정보를 넣기 전에 코드가 무엇을 주는지 먼저 보여주는 용도이며,
+  // 여기서 코드가 소진되지는 않는다(등록은 구독 결제 요청에서 함께 처리된다).
+  async checkMembershipPromoCode(
+    username: string,
+    code: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    promo?: {
+      plan: MembershipTier;
+      planLabel: string;
+      freeMonths: number;
+      freeUntil: string;
+      monthlyPriceKrw: number;
+    };
+  }> {
+    try {
+      const res = await fetch('/api/membership-promo', {
+        method: 'POST',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ username: username.toLowerCase(), code }),
+      });
+      const json = await res.json();
+      if (!json?.success) {
+        return { success: false, error: json?.error || '사용할 수 없는 코드입니다.' };
+      }
+      return { success: true, promo: json.promo };
+    } catch (e) {
+      console.error('[API] Failed to check membership promo code:', e);
       return { success: false, error: '네트워크 오류' };
     }
   },
