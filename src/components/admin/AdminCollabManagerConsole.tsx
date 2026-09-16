@@ -5,6 +5,7 @@ import { normalizeScenes, parseAnchor } from '../../utils/collabScenes';
 import BrandContactCard from '../collab/BrandContactCard';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import AdminCampaignListup from './AdminCampaignListup';
+import { copyText } from '../../utils/clipboard';
 
 /**
  * 담당자 협업 콘솔.
@@ -1079,7 +1080,7 @@ const AdminCollabManagerConsole: React.FC<AdminCollabManagerConsoleProps> = ({ t
                                       <div className="flex items-center justify-between gap-3">
                                         <code className="text-xs font-bold text-slate-800 break-all">{stl.accountNumber}</code>
                                         <button
-                                          onClick={() => navigator.clipboard?.writeText(String(stl.accountNumber || ''))}
+                                          onClick={() => void copyText(String(stl.accountNumber || ''))}
                                           className="text-[10px] font-black text-blue-600 flex-shrink-0"
                                         >
                                           복사

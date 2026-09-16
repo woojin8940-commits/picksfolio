@@ -5,6 +5,7 @@ import { formatKRW, formatPhone } from '../utils/formatters';
 import { isPastDeadline } from '../utils/campaignRecruit';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { copyText } from '../utils/clipboard';
 
 interface BusinessDashboardProps {
   userName: string;
@@ -456,10 +457,13 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({ userName }) => {
           </p>
         </div>
         <button
-          onClick={() => {
+          onClick={async () => {
             const url = `${window.location.origin}/${userName}/proposal`;
-            navigator.clipboard.writeText(url);
-            alert(isEn ? 'Proposal link copied to clipboard!\nShare this link with brands.' : '제안 신청 링크가 복사되었습니다!\n브랜드에게 이 링크를 전달하세요.');
+            // 복사 결과를 기다린다. 예전에는 프라미스를 버리고 바로 성공을
+            // 알려서, 클립보드가 없는 모바일 브라우저에서도 복사됐다고 말했다.
+            const ok = await copyText(url);
+            if (ok) alert(isEn ? 'Proposal link copied to clipboard!\nShare this link with brands.' : '제안 신청 링크가 복사되었습니다!\n브랜드에게 이 링크를 전달하세요.');
+            else alert(isEn ? `Copy failed. Use this link:\n${url}` : `복사에 실패했습니다. 이 링크를 사용해 주세요:\n${url}`);
           }}
           className="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-black text-xs md:text-sm hover:bg-slate-800 transition-all shadow-lg flex items-center gap-2"
         >

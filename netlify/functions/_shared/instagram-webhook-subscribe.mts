@@ -169,3 +169,42 @@ export async function subscribeInstagramWebhooks(args: {
   }
   return { ok: false, error: lastError };
 }
+
+/**
+ * 계정별 웹훅 구독을 내린다.
+ *
+ * 자동 디엠만 끊는 해제에서 쓴다. 연동 토큰은 인사이트·브랜드 매칭받기가 계속
+ * 쓰므로 남겨 두는데, 구독까지 그대로 두면 인스타그램은 댓글과 메시지 이벤트를
+ * 계속 보낸다. 우리 쪽에서 "자동 디엠은 껐다"고 걸러 내기는 하지만, 사람이 끊은
+ * 기능의 이벤트를 계속 받는 상태가 남는 것은 해제라고 부를 수 없다. 구독을 내리면
+ * 메타 쪽에서 발송 자체가 멈춘다.
+ *
+ * 실패는 로그로만 남긴다. 구독을 못 내려도 해제는 성립한다 — 자동화는 이미 꺼졌고
+ * 역인덱스에서도 빠져 이벤트가 도착해도 주인을 찾지 못한다. 여기서 오류를 올려
+ * 해제 버튼을 실패로 만들면, 사람은 끊을 수 없는 연동을 붙들게 된다.
+ */
+export async function unsubscribeInstagramWebhooks(args: {
+  accessToken: string;
+  tokenSource?: string;
+  igId?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { accessToken, tokenSource, igId } = args;
+  if (!accessToken) return { ok: false, error: "액세스 토큰이 없습니다." };
+
+  const host = tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com";
+  const target = tokenSource === "instagram_login" ? "me" : igId || "me";
+
+  try {
+    const res = await fetch(
+      `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(target)}/subscribed_apps`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok || data?.error) {
+      return { ok: false, error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})` };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "웹훅 구독 해제 요청 실패" };
+  }
+}

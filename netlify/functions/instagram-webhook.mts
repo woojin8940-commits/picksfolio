@@ -11,6 +11,7 @@ import {
 import type { DmButton, DmCard, DmPlan } from "./_shared/instagram-dm.mts";
 import { noteWebhookReceived, resolveDmAccountByIgId } from "./_shared/dm-webhook-index.mts";
 import { dmAutomationAllowed } from "./_shared/dm-automation-access.mts";
+import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
   claimIfNew,
@@ -716,6 +717,11 @@ export default async (req: Request, _context: Context) => {
        */
       let planAllowed: boolean | null = null;
       const sendBlockedReason = async (): Promise<SendBlock | null> => {
+        // 자동 디엠을 직접 끊어 둔 계정. 해제할 때 구독과 역인덱스를 함께 풀었으니
+        // 여기까지 오는 이벤트는 없어야 하지만, 연동 토큰은 인사이트·브랜드 매칭받기
+        // 때문에 남겨 두므로 발송 직전에 한 번 더 확인한다 — 끊은 사람의 계정에서
+        // 자동 DM 이 나가는 것은 되돌릴 수 없는 일이다.
+        if (linkFeatureOff(settings as MetaLink, "dm")) return "not_connected";
         if (!settings.enabled) return "switch_off";
         if (!accessToken) return "not_connected";
         if (planAllowed === null) {

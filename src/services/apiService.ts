@@ -3810,10 +3810,11 @@ export const apiService = {
   },
 
   /**
-   * 캠페인용 인스타그램 연동 해제.
+   * 브랜드 매칭받기 기능의 인스타그램 연동 해제.
    *
-   * 디엠 자동화 연동(disconnectInstagram)과는 다른 보관함이라 따로 끊는다. 한쪽을
-   * 끊는다고 다른 쪽이 끊기면, 사람은 건드린 적 없는 기능이 멈춘 것을 나중에 안다.
+   * 연동 자체는 자동 디엠·인사이트와 하나를 함께 쓰지만, 끊기는 것은 이 기능
+   * 하나다(disconnectInstagram 은 자동 디엠 하나를 끊는다). 한쪽을 끊는다고 다른
+   * 쪽이 끊기면, 사람은 건드린 적 없는 기능이 멈춘 것을 나중에 안다.
    */
   async disconnectCreatorChannel(username: string): Promise<any> {
     try {
@@ -4450,18 +4451,31 @@ export const apiService = {
   // returnTo 는 연동을 마친 뒤 돌아올 우리 사이트 내부 경로다. 브랜드 매칭 등록처럼
   // 관리자 화면이 아닌 곳에서 연동을 시작하면 이 값을 넘겨 원래 있던 화면으로 복귀한다.
   //
-  // purpose 는 이 연동이 어느 기능의 것인지다. 'collab'(캠페인 등록)로 시작한 연동은
-  // 디엠 자동화와 다른 보관함에 저장되고, 인스타그램 로그인도 매번 새로 받는다.
+  // 자동 디엠 · 인사이트 · 브랜드 매칭받기는 연동 하나를 함께 쓴다. 어느 화면에서
+  // 시작해도 같은 보관함에 저장되므로 purpose 는 넘기지 않는다 — 'collab' 은 옛
+  // 캠페인 전용 보관함으로 보내는 값이라, 넘기면 그 화면만의 연동이 다시 생긴다.
+  //
+  // forceReauth 는 인스타그램 로그인 화면을 매번 새로 띄운다. 브랜드 매칭 등록처럼
+  // "지금 이 계정으로 등록한다"를 그 자리에서 확인해야 하는 화면이 쓴다.
+  //
+  // feature 는 연동을 시작한 화면의 기능이다. 해제는 누른 화면의 기능만 끄기 때문에,
+  // 다시 연동할 때 되살릴 기능도 그 하나여야 한다 — 넘기지 않으면(인사이트) 꺼 둔
+  // 기능은 그대로 꺼진 채 연동만 되살아난다.
   async instagramConnectUrl(
     username: string,
     returnTo?: string,
-    purpose?: 'collab',
+    opts?: { forceReauth?: boolean; feature?: 'dm' | 'collab' },
   ): Promise<{ url?: string; error?: string }> {
     try {
       const res = await fetch('/api/instagram/oauth/start', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
-        body: JSON.stringify({ username: username.toLowerCase(), returnTo, purpose }),
+        body: JSON.stringify({
+          username: username.toLowerCase(),
+          returnTo,
+          forceReauth: opts?.forceReauth === true,
+          feature: opts?.feature,
+        }),
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok || !data?.url) {
@@ -4474,7 +4488,10 @@ export const apiService = {
     }
   },
 
-  // 인스타그램 계정 연동 해제.
+  // 자동 디엠 기능의 인스타그램 연동 해제.
+  //
+  // 끊기는 것은 자동 디엠 하나다. 같은 계정으로 돌아가는 인사이트와 브랜드
+  // 매칭받기는 그대로 남는다(브랜드 매칭받기는 disconnectCreatorChannel 로 끊는다).
   async disconnectInstagram(username: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {

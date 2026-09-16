@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { copyText } from '../../utils/clipboard';
 import { openPostcodeSearch } from '../../utils/daumPostcode';
 import { formatPhone, formatPhoneInput } from '../../utils/formatters';
 import {
@@ -166,6 +167,18 @@ const fmtDate = (value?: string | null) => {
 };
 
 const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefresh, onNotify, focusStep, onlyStep, onStepComplete }) => {
+  /**
+   * 복사 버튼 한 곳. 결과를 보고 알린다.
+   *
+   * 예전에는 `navigator.clipboard?.writeText(...)` 를 부르고 끝냈다. 클립보드가
+   * 없는 모바일 인앱 브라우저에서는 아무 일도 일어나지 않았고(?. 가 조용히
+   * 넘어간다), 권한이 거절되면 아무도 받지 않는 거절된 프라미스가 남았다.
+   */
+  const copyToClipboard = async (text: string, label: string) => {
+    if (await copyText(text)) onNotify(`${label}을 복사했습니다.`);
+    else onNotify(`${label} 복사에 실패했습니다. 직접 선택해 복사해 주세요.`, 'error');
+  };
+
   const stages = useMemo(() => (Array.isArray(detail?.stages) ? detail.stages : []), [detail]);
   const deliverables = useMemo(() => (Array.isArray(detail?.deliverables) ? detail.deliverables : []), [detail]);
   const feedbacks = useMemo(() => (Array.isArray(detail?.feedbacks) ? detail.feedbacks : []), [detail]);
@@ -1127,10 +1140,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
       <div className="flex items-center justify-between gap-3 mb-1.5">
         <p className="text-[10px] font-black text-slate-400">{label}</p>
         <button
-          onClick={() => {
-            navigator.clipboard?.writeText(text);
-            onNotify('본문 캡션을 복사했습니다.');
-          }}
+          onClick={() => void copyToClipboard(text, '본문 캡션')}
           className="text-[10px] font-black text-blue-600 flex-shrink-0"
         >
           복사
@@ -1334,8 +1344,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 {shipping.memo && <p className="text-[11px] text-slate-400 font-bold mt-1">요청사항: {shipping.memo}</p>}
                 <button
                   onClick={() =>
-                    navigator.clipboard?.writeText(
+                    void copyToClipboard(
                       `${shipping.recipient} ${formatPhone(shipping.phone)} ${[shipping.postcode && `(${shipping.postcode})`, shipping.address1, shipping.address2].filter(Boolean).join(' ')}`,
+                      '배송지',
                     )
                   }
                   className="mt-2 text-[10px] font-black text-blue-600"
@@ -1821,7 +1832,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                       <div className="flex items-center justify-between gap-3">
                         <code className="text-xs font-bold text-slate-800 break-all">{settlement.accountNumber}</code>
                         <button
-                          onClick={() => navigator.clipboard?.writeText(String(settlement.accountNumber || ''))}
+                          onClick={() => void copyToClipboard(String(settlement.accountNumber || ''), '계좌번호')}
                           className="text-[10px] font-black text-blue-600 flex-shrink-0"
                         >
                           복사
@@ -1956,7 +1967,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   {collab.adCode ? (
                     <div className="flex items-center justify-between gap-3">
                       <code className="text-xs font-bold text-slate-800 break-all">{collab.adCode}</code>
-                      <button onClick={() => navigator.clipboard?.writeText(collab.adCode)} className="text-[10px] font-black text-blue-600 flex-shrink-0">복사</button>
+                      <button onClick={() => void copyToClipboard(collab.adCode, '광고 코드')} className="text-[10px] font-black text-blue-600 flex-shrink-0">복사</button>
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400 font-medium">인플루언서가 코드를 공유하면 여기에 표시됩니다.</p>

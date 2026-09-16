@@ -6,8 +6,8 @@ import {
   intOf,
   isTokenInvalidError,
   linkIsUsable,
-  loadMetaLink,
-  markLinkNeedsReauth,
+  resolveSharedLink,
+  markSharedLinkNeedsReauth,
   viewsOnMedia,
   type MetaLink,
 } from "./instagram-metrics.mts";
@@ -331,13 +331,17 @@ export async function collectCollabMetrics(
     return { ok: false, source: "unlinked" };
   };
 
+  // 연동은 세 화면이 함께 쓰는 하나다. 캠페인 보관함만 보면, 자동 디엠이나
+  // 인사이트에서 계정을 붙인 인플루언서의 조회수가 영원히 빈칸으로 남는다.
+  // 기능은 "collab" 으로 밝힌다 — 브랜드 매칭받기를 끊은 인플루언서의 게시물
+  // 지표를 계속 받아 오면, 끊은 뒤에도 브랜드가 보는 숫자가 갱신된다.
   const link =
-    opts.link !== undefined ? opts.link : await loadMetaLink(creator, "collab");
+    opts.link !== undefined ? opts.link : (await resolveSharedLink(creator, "collab")).link;
   if (!linkIsUsable(link)) {
     return fallback(
       link
         ? "인플루언서의 인스타그램 연동이 만료되었습니다. 재연동하면 조회수까지 채워집니다."
-        : "인플루언서가 캠페인용 인스타그램 계정을 연동하지 않았습니다.",
+        : "인플루언서가 인스타그램 계정을 연동하지 않았습니다.",
     );
   }
 
@@ -350,7 +354,9 @@ export async function collectCollabMetrics(
   }
 
   if (found.tokenDead) {
-    await markLinkNeedsReauth(creator, "collab");
+    // 이 연동이 어느 보관함에 있었는지는 여기서 알 수 없다(불러온 쪽에서 넘겨받은
+    // 값일 수 있다). 토큰이 같은 보관함을 찾아 표시한다.
+    await markSharedLinkNeedsReauth(creator, link);
     return fallback("인플루언서의 인스타그램 연동이 만료되었습니다. 재연동하면 조회수까지 채워집니다.");
   }
 
@@ -443,7 +449,10 @@ export async function collectCampaignMetrics(
   await mapConcurrent(targets, 4, async row => {
     const creator = norm(row.creator_username);
     if (!linkCache.has(creator)) {
-      linkCache.set(creator, loadMetaLink(creator, "collab"));
+      linkCache.set(
+        creator,
+        resolveSharedLink(creator, "collab").then((r) => r.link),
+      );
     }
     try {
       const res = await collectCollabMetrics(db, row, { link: await linkCache.get(creator) });

@@ -1,10 +1,8 @@
 import { getStore } from "@netlify/blobs";
 import {
   intOf,
-  linkIsUsable,
-  linkNeedsReauth,
-  loadMetaLink,
   isTokenInvalidError,
+  resolveSharedLink,
   markLinkNeedsReauth,
   REAUTH_MESSAGE,
   type MetaLink,
@@ -16,10 +14,10 @@ import { todayInSeoul } from "./campaign-recruit.mts";
 /**
  * 인플루언서 본인 화면("인사이트")이 읽는 릴스 성과.
  *
- * 이 파일은 새 연동을 만들지 않는다. 이미 붙어 있는 토큰(캠페인 등록에서 붙인
- * collab 연동, 없으면 디엠 자동화의 dm 연동)을 그대로 빌려 쓴다. 연동·해제·토큰
- * 갱신 규칙은 전부 instagram-metrics.mts 와 기존 화면들의 것이고, 여기서는
- * 아무것도 고치지 않는다 — 읽기만 한다.
+ * 이 파일은 새 연동을 만들지 않는다. 이미 붙어 있는 토큰(자동 디엠과 공유하는 dm
+ * 연동, 또는 캠페인 등록에서 붙인 collab 연동 중 더 최근 것)을 그대로 빌려 쓴다.
+ * 연동·해제·토큰 갱신 규칙은 전부 instagram-metrics.mts 와 기존 화면들의 것이고,
+ * 여기서는 아무것도 고치지 않는다 — 읽기만 한다.
  *
  * ── 왜 instagram-metrics.mts 를 그대로 쓰지 않는가 ──
  *
@@ -206,33 +204,11 @@ const durationOf = (m: any): number | null => {
 /**
  * 어느 연동으로 인사이트를 읽을지 고른다.
  *
- * 캠페인 등록에서 붙인 연동(collab)을 먼저 본다. 그 자리에서 "이 계정으로 등록한다"를
- * 직접 고른 계정이라 본인이 알고 있는 계정이다. 그게 없으면 디엠 자동화 연동(dm)을
- * 쓴다 — 새로 인증 흐름을 만들지 않는다는 것이 이 화면의 전제이고, 이미 붙여 둔
- * 계정이 있는데 "연동해 주세요"만 보여 주면 사람은 같은 계정을 두 번 붙이게 된다.
- * 어느 연동을 읽었는지는 화면에 @아이디로 함께 보여 주므로, 사람이 보는 숫자가
- * 어느 계정의 것인지 모르는 상태는 생기지 않는다.
- *
- * 여기서 토큰을 고치거나 지우는 일은 없다. 읽기만 한다.
+ * 고르는 규칙 자체는 세 화면이 같으므로 `resolveSharedLink` 한 곳에 있다. 이
+ * 이름은 인사이트 쪽 부르는 자리를 위해 남겨 둔다 — 이 화면이 "자기 연동"을 따로
+ * 갖고 있지 않다는 사실이 이름에서 드러나야 한다.
  */
-export async function resolveInsightsLink(
-  username: string,
-): Promise<{ link: MetaLink | null; scope: MetaLinkScope | null; needsReauth: boolean }> {
-  const order: MetaLinkScope[] = ["collab", "dm"];
-  let needsReauth = false;
-  let fallback: MetaLink | null = null;
-
-  for (const scope of order) {
-    const link = await loadMetaLink(username, scope);
-    if (linkIsUsable(link)) return { link, scope, needsReauth: false };
-    if (linkNeedsReauth(link)) {
-      needsReauth = true;
-      fallback = fallback || link;
-    }
-  }
-
-  return { link: fallback, scope: null, needsReauth };
-}
+export const resolveInsightsLink = resolveSharedLink;
 
 /**
  * 계정별 캐시 키. 사용자명은 소문자 영문·숫자·밑줄·점만 남긴다.

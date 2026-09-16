@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { copyText } from '../../utils/clipboard';
 
 type WorkspaceRole = 'brand' | 'influencer' | 'manager';
 
@@ -221,7 +222,7 @@ const CollabSharedWorkspace: React.FC<Props> = ({ collabId, role, detail, onRefr
           ) : detail?.collab?.adCode ? (
             <div className="rounded-lg bg-slate-50 px-3 py-2 flex items-center justify-between gap-3">
               <code className="text-xs text-slate-700 font-bold break-all">{detail.collab.adCode}</code>
-              <button onClick={() => navigator.clipboard?.writeText(detail.collab.adCode)} className="text-[10px] text-blue-600 font-black shrink-0">복사</button>
+              <button onClick={() => void copyText(detail.collab.adCode)} className="text-[10px] text-blue-600 font-black shrink-0">복사</button>
             </div>
           ) : (
             <p className="text-[11px] text-slate-400 font-medium">인플루언서가 광고코드를 공유하면 이곳에 표시됩니다.</p>

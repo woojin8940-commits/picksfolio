@@ -9,6 +9,7 @@ import { apiService } from '../services/apiService';
 import type { ViewerSignaling } from '../services/webrtcSignaling';
 import SafeImage from './SafeImage';
 import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
+import { shareOrCopy } from '../utils/clipboard';
 import PublicPageBody, { DEFAULT_PUBLIC_DESIGN } from './PublicPageBody';
 import ProductSheet from './ProductSheet';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -798,14 +799,16 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         {/* Footer */}
         <footer className="py-12 flex flex-col items-center space-y-6 shrink-0">
           <button 
-            onClick={() => {
-              navigator.share({
+            onClick={async () => {
+              // 공유 API 가 없는 환경(데스크톱, 구형 인앱 브라우저)에서는
+              // navigator.share 호출 자체가 TypeError 라 버튼이 죽어 있었다.
+              // 시트를 닫은 것도 실패로 받아 "복사되었습니다"를 띄웠다.
+              const result = await shareOrCopy({
                 title: `${username}님의 픽스폴리오`,
-                url: window.location.href
-              }).catch(() => {
-                navigator.clipboard.writeText(window.location.href);
-                alert('링크가 복사되었습니다!');
+                url: window.location.href,
               });
+              if (result === 'copied') alert('링크가 복사되었습니다!');
+              else if (result === 'failed') alert('공유할 수 없습니다. 주소창의 링크를 복사해 주세요.');
             }}
             className="flex items-center gap-2 px-8 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-sm hover:scale-105 transition-all shadow-2xl"
           >

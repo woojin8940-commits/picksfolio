@@ -60,18 +60,52 @@ export interface MetaLink {
   /** 토큰이 죽은 것이 확인된 연동. 사람이 다시 동의해 주기 전에는 어떤 호출도 성공하지 않는다. */
   needsReauth?: boolean;
   tokenInvalidAt?: string;
+  /**
+   * 이 연동 정보를 마지막으로 쓴 시각.
+   *
+   * 예전부터 콜백이 적어 두던 값인데 타입에는 없었다. 연동이 두 군데(dm·collab)에
+   * 남아 있을 때 "어느 쪽이 방금 붙인 것인가"를 가르는 유일한 근거라 타입에 올린다.
+   * 옛 연동에는 없을 수 있으므로 없는 경우를 항상 함께 다뤄야 한다.
+   */
+  updatedAt?: string;
+  /**
+   * 사람이 직접 끊은 기능 목록(`LinkFeature`).
+   *
+   * 연동은 세 화면이 함께 쓰는 하나지만, 해제 버튼은 자기 화면의 기능만 끈다.
+   * 자동 디엠에서 해제한 사람은 자동 DM 이 멈추기를 바란 것이고, 인사이트의
+   * 숫자까지 같이 사라지기를 바란 것이 아니다. 그래서 토큰을 지우는 대신 어느
+   * 기능이 꺼졌는지만 여기 적어 두고, 읽는 쪽이 자기 기능을 확인한다
+   * (`resolveSharedLink` 의 두 번째 인자).
+   */
+  featuresOff?: string[];
 }
+
+/**
+ * 연동 하나를 나눠 쓰는 기능들. 해제의 단위이기도 하다.
+ *
+ *   dm     — 자동 디엠(댓글·메시지 자동 응답).
+ *   collab — 브랜드 매칭받기(브랜드가 보는 명단의 확인된 숫자).
+ *
+ * 인사이트는 여기 없다. 본인만 보는 화면이고 끄는 버튼도 없어서, 끊을 대상이
+ * 아니다 — 연동이 살아 있는 동안은 계속 보인다.
+ */
+export type LinkFeature = "dm" | "collab";
+
+/** 이 연동에서 그 기능이 사람 손으로 꺼져 있는지. */
+export const linkFeatureOff = (link: MetaLink | null, feature: LinkFeature): boolean =>
+  Array.isArray(link?.featuresOff) && link!.featuresOff!.includes(feature);
 
 /**
  * 연동을 어디에 보관하는가.
  *
- * 같은 인스타그램 계정이라도 "디엠 자동화용 연동"과 "캠페인(브랜드 매칭)용 연동"은
- * 서로 다른 것으로 다룬다. 디엠 자동화에 계정을 붙여 뒀다고 캠페인 등록서가 그 계정을
- * 자기 것처럼 쓰기 시작하면, 등록하는 사람은 자기가 어떤 계정을 브랜드에게 보여 주고
- * 있는지 고른 적이 없다. 캠페인은 그 자리에서 직접 로그인한 계정만 쓴다.
+ * 연동은 이제 세 화면(자동 디엠 · 인사이트 · 브랜드 매칭받기)이 함께 쓰는 하나다.
+ * 새로 붙이는 연동은 모두 dm 보관함에 들어가고, 읽을 때는 `resolveSharedLink` 로
+ * 두 곳을 함께 본다. 스코프가 둘로 남아 있는 것은 옛 연동 때문이다 — 세 화면이
+ * 따로 연동하던 시절에 캠페인 등록에서 붙인 토큰이 collab 보관함에 남아 있고,
+ * 그 사람에게 다시 연동을 요구하지 않으려면 계속 읽어 줘야 한다.
  *
- *   dm     — dm-automation 블롭. 자동 응답 규칙과 함께 보관된다.
- *   collab — collab-instagram 블롭. 캠페인 등록 화면에서 로그인한 계정만 들어온다.
+ *   dm     — dm-automation 블롭. 지금 쓰는 곳. 자동 응답 규칙과 함께 보관된다.
+ *   collab — collab-instagram 블롭. 옛 캠페인 전용 연동이 남아 있는 곳(읽기 전용).
  */
 export type MetaLinkScope = "dm" | "collab";
 
@@ -402,6 +436,34 @@ export async function markLinkNeedsReauth(
 }
 
 /**
+ * 어느 보관함에 있는 연동인지 모를 때 죽은 토큰을 기록한다.
+ *
+ * 연동을 읽는 쪽 대부분은 `resolveSharedLink` 로 스코프를 함께 받지만, 캠페인
+ * 성과 수집처럼 이미 읽어 둔 연동을 넘겨받아 쓰는 자리는 그 연동이 두 보관함 중
+ * 어디에 있었는지 모른다. 그때 스코프를 하나로 고정해 두면(예전에는 늘 "collab"
+ * 이었다) 실제로 죽은 연동은 표시 없이 남고, 엉뚱한 보관함의 멀쩡한 연동에 만료
+ * 표시가 붙는다. 화면은 양쪽 모두 틀리게 말한다.
+ *
+ * 그래서 토큰 문자열이 같은 보관함만 찾아 표시한다. 같은 계정을 두 곳에 붙여 둔
+ * 사람은 같은 토큰을 갖고 있으므로 양쪽이 함께 표시되는데, 그것이 사실이다.
+ */
+export async function markSharedLinkNeedsReauth(
+  username: string,
+  link: MetaLink | null,
+): Promise<void> {
+  const token = String(link?.accessToken || "");
+  if (!token) return;
+  const scopes: MetaLinkScope[] = ["dm", "collab"];
+  await Promise.all(
+    scopes.map(async (scope) => {
+      const stored = await loadMetaLink(username, scope);
+      if (String(stored?.accessToken || "") !== token) return;
+      await markLinkNeedsReauth(username, scope);
+    }),
+  );
+}
+
+/**
  * 연동 자체를 지운다 — 사람이 "연동 해제"를 눌렀을 때.
  *
  * 토큰 만료(markLinkNeedsReauth)와 달리 여기서는 보관함을 통째로 비운다. 해제는
@@ -409,7 +471,7 @@ export async function markLinkNeedsReauth(
  *
  * 캠페인용(collab) 보관함에는 토큰과 계정 아이디밖에 없어서 지워도 잃는 것이 없다.
  * 디엠 자동화(dm)는 같은 블롭에 자동 응답 규칙이 함께 들어 있으므로 이 함수 대신
- * 규칙을 남기고 토큰만 비우는 자기 쪽 처리를 쓴다.
+ * 규칙을 남기고 토큰만 비우는 자기 쪽 처리(api-dm-automation 의 disconnect)를 쓴다.
  */
 export async function deleteMetaLink(
   username: string,
@@ -578,6 +640,75 @@ export const linkIsUsable = (link: MetaLink | null): boolean =>
 
 /** 연동은 돼 있으나 토큰이 죽어 다시 동의가 필요한 상태. 화면이 연동 버튼을 보여줄 근거다. */
 export const linkNeedsReauth = (link: MetaLink | null): boolean => !!link?.needsReauth;
+
+/** 이 연동을 마지막으로 쓴 시각(없으면 0). 두 연동 중 어느 쪽이 최신인지 가르는 값. */
+export const linkStampOf = (link: MetaLink | null): number => {
+  const t = Date.parse(String(link?.updatedAt || ""));
+  return Number.isFinite(t) ? t : 0;
+};
+
+/**
+ * 이 사람이 붙여 둔 인스타그램 연동 하나를 찾는다. 연동을 읽는 모든 자리의 입구다.
+ *
+ * 예전에는 화면마다 자기 보관함만 읽었다. 자동 디엠은 dm, 인사이트와 브랜드 매칭
+ * 등록은 collab 이었다. 그래서 한 곳에서 연동을 마친 사람이 다른 화면에서 "계정을
+ * 먼저 연동해 주세요"를 다시 만났다 — 같은 계정에 같은 동의 화면을 세 번 지나고,
+ * 60일 만료도 보관함마다 따로 세니 재연동도 세 번이었다.
+ *
+ * 이제 세 화면이 연동 하나를 함께 쓴다. 새 연동은 dm 보관함에만 쓰지만, 읽을 때는
+ * 두 곳을 모두 보고 **더 최근에 붙인 쪽**을 고른다. 옛 collab 연동만 있는 사람이
+ * 그대로 쓸 수 있어야 하고, 반대로 방금 새로 붙인 연동이 몇 달 전 연동에 가려져
+ * 사람이 고르지도 않은 계정의 숫자를 보게 되어서도 안 된다. 시각을 알 수 없는 옛
+ * 연동끼리는 종전 순서(캠페인 우선)가 그대로 남는다.
+ *
+ * 어느 연동을 읽었는지 알려 주기 위해 스코프를 함께 돌려준다 — 토큰이 죽은 것을
+ * 기록할 때(`markLinkNeedsReauth`) 그 연동이 있는 보관함에 표시해야 한다.
+ *
+ * 여기서 토큰을 고치거나 지우는 일은 없다. 읽기만 한다.
+ *
+ * 부르는 쪽이 어느 기능인지 밝히면(`feature`) 그 기능을 사람이 끊어 둔 연동은
+ * 없는 것으로 답한다. 해제 버튼은 자기 화면의 기능만 끄기 때문이다 — 자동 디엠을
+ * 끊은 사람의 토큰은 그대로 남아 인사이트와 브랜드 매칭받기를 계속 받쳐 주지만,
+ * 자동 디엠 화면에서는 "연동 안 됨"으로 보여야 한다. 기능을 밝히지 않으면
+ * (인사이트처럼 끊을 수 없는 자리) 해제 표시와 무관하게 연동을 그대로 돌려준다.
+ *
+ * @returns link 쓸 수 있는 연동(없으면 만료된 연동, 그것도 없으면 null).
+ *   scope 그 연동이 있는 보관함(쓸 수 있는 연동이 없으면 null).
+ *   needsReauth 연동은 있으나 토큰이 죽어 다시 동의가 필요한 상태.
+ */
+export async function resolveSharedLink(
+  username: string,
+  feature?: LinkFeature,
+): Promise<{ link: MetaLink | null; scope: MetaLinkScope | null; needsReauth: boolean }> {
+  // 순서가 곧 동점일 때의 우선순위다(캠페인 우선). 아래 비교가 `>` 인 이유.
+  const order: MetaLinkScope[] = ["collab", "dm"];
+  const loaded = await Promise.all(
+    order.map(async (scope) => ({ scope, link: await loadMetaLink(username, scope) })),
+  );
+
+  // 이 기능을 끊어 뒀으면 연동이 없는 것으로 답한다. 만료 표시도 함께 감춘다 —
+  // 끊어 둔 기능 화면에 "다시 연동해 주세요"가 뜨면, 끊은 사람에게 끊긴 것을
+  // 고치라고 재촉하는 말이 된다.
+  //
+  // 표시가 한 보관함에만 있어도 끊은 것으로 본다. 해제 표시는 공용 문서(dm)에만
+  // 적히고 옛 캠페인 보관함에는 적을 자리가 없어서, 보관함마다 따로 보면 옛 연동이
+  // 남아 있는 사람은 끊어도 다음 조회에서 그 연동으로 되살아난다. 끊은 것은 보관함이
+  // 아니라 기능이므로 사람의 선택으로 다룬다.
+  if (feature && loaded.some((entry) => linkFeatureOff(entry.link, feature))) {
+    return { link: null, scope: null, needsReauth: false };
+  }
+
+  const usable = loaded.filter((entry) => linkIsUsable(entry.link));
+  if (usable.length > 0) {
+    const best = usable.reduce((a, b) => (linkStampOf(b.link) > linkStampOf(a.link) ? b : a));
+    return { link: best.link, scope: best.scope, needsReauth: false };
+  }
+
+  // 쓸 수 있는 연동이 없다. 토큰이 죽은 것이 확인된 연동이 있으면 그것을 알려 준다 —
+  // "한 번도 연동하지 않음"과 "다시 동의해 주세요"는 사람에게 할 말이 다르다.
+  const stale = loaded.find((entry) => linkNeedsReauth(entry.link));
+  return { link: stale?.link || null, scope: null, needsReauth: Boolean(stale) };
+}
 
 /**
  * 연동된 계정의 프로필(팔로워·팔로잉)과 최근 릴스 성과를 읽어 온다.
@@ -1005,17 +1136,13 @@ async function refreshOneChannelImages(db: any, row: any, withMedia: boolean): P
   const username = String(row?.username || "");
   if (!username) return false;
 
-  // 연동은 두 곳에 따로 보관된다(캠페인용 · 디엠 자동화용). 이 사진이 뜨는 자리는
-  // 캠페인 화면이므로 캠페인 연동을 먼저 본다.
-  let scope: MetaLinkScope = "collab";
-  let link = await loadMetaLink(username, "collab");
-  if (!link?.accessToken) {
-    const dm = await loadMetaLink(username, "dm");
-    if (dm?.accessToken) {
-      link = dm;
-      scope = "dm";
-    }
-  }
+  // 세 화면이 함께 쓰는 연동 하나를 찾는다. 만료된 연동이 돌아오면 아래에서
+  // 걸러지고, 그때 표시할 보관함을 알아야 하므로 스코프를 함께 받는다.
+  // 이 사진은 브랜드가 보는 명단에 쓰이므로, 브랜드 매칭받기를 끊어 둔 사람은
+  // 갱신 대상이 아니다.
+  const resolved = await resolveSharedLink(username, "collab");
+  const link = resolved.link;
+  const scope: MetaLinkScope = resolved.scope || "dm";
   const token = String(link?.accessToken || "");
   // 토큰이 없거나 죽은 것이 확인된 연동은 물어볼 것이 없다. 지난 사진을 그대로 두고
   // 도장만 찍는다 — 인플루언서가 재연동하면 그 순간 새 사진이 들어온다.
