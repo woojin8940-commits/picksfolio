@@ -14,6 +14,7 @@ import {
   type InsightReel,
 } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
+import { isNativeApp } from '../utils/appEnv';
 import {
   bandOf,
   buildReelCoaching,
@@ -454,11 +455,20 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
     if (tab !== 'benchmark' || benchmark || benchmarkLoading) return;
     loadBenchmark();
   }, [tab, benchmark, benchmarkLoading, loadBenchmark]);
+  /**
+   * 프로 플랜 자격. 서버는 막을 때만 이 값을 내려 주므로, 없으면 자격이 있는 것이다.
+   *
+   * 자격이 없으면 아래에서 화면 전체를 플랜 안내로 바꾼다. 그 동안 딸린 조회(추이)는
+   * 부르지 않는다 — 서버가 같은 이유로 막을 요청을, 기간 버튼을 누르는 수만큼 보내는
+   * 셈이 된다.
+   */
+  const entitled = data?.entitled !== false;
+
   // 오늘자 점이 남은 뒤에 읽는다(loadedAt 주석 참고). 기간을 바꾸면 그때 다시 읽는다.
   useEffect(() => {
-    if (!loadedAt) return;
+    if (!loadedAt || !entitled) return;
     loadSeries(range);
-  }, [loadSeries, range, loadedAt]);
+  }, [loadSeries, range, loadedAt, entitled]);
 
   // 연동 콜백에서 돌아온 경우. 결과를 한 줄로 알리고 주소창의 표식은 지운다 —
   // 남겨 두면 다음 새로고침 때도 이 화면으로 끌려온다. 디엠 자동화 화면이 쓰는
@@ -626,6 +636,58 @@ const CreatorInsights: React.FC<{ userName: string }> = ({ userName }) => {
         </div>
         <div className="h-56 rounded-[1.5rem] bg-slate-100 animate-pulse mb-6" />
         <div className="h-72 rounded-[1.5rem] bg-slate-100 animate-pulse" />
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------ 프로 플랜이 아닌 경우
+  /**
+   * 인사이트는 디엠 자동화와 같은 프로 플랜 전용 기능이다.
+   *
+   * 연동 안내보다 먼저 본다. 구독하지 않은 사람에게 연동 버튼을 먼저 보여 주면,
+   * 동의 화면까지 지나 계정을 붙이고 돌아와서야 "프로 플랜 전용"을 읽는다.
+   *
+   * 안내 모양과 문구는 디엠 자동화 쪽 프로 플랜 카드에 맞춘다 — 같은 플랜을 같은
+   * 이유로 권하는 자리라, 둘이 달라 보이면 각각 다른 상품처럼 읽힌다.
+   */
+  if (!entitled) {
+    return (
+      <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
+        <Header isEn={isEn} />
+        <section className="rounded-2xl border-2 border-indigo-200 bg-white p-6 md:p-8 shadow-sm max-w-2xl">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-xl shrink-0 shadow-md">
+              🚀
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base md:text-lg font-black text-slate-900">
+                {isEn ? 'Insights is a Pro Plan feature' : '인사이트는 프로 플랜 전용 기능입니다'}
+              </h3>
+              {isNativeApp() ? (
+                <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                  {isEn
+                    ? 'The Pro Plan unlocks every membership benefit along with your Instagram insights. You can subscribe on the PICKS Folio website — it applies to the app right away.'
+                    : '프로 플랜에 가입하면 모든 멤버십 혜택과 함께 인스타그램 인사이트를 볼 수 있어요. 가입은 PICKS Folio 웹사이트에서 할 수 있으며, 웹에서 가입하면 앱에서도 그대로 이용됩니다.'}
+                </p>
+              ) : (
+                <>
+                  <p className="text-slate-500 text-xs md:text-sm font-medium mt-1 leading-relaxed">
+                    {isEn
+                      ? 'The Pro Plan (₩18,700/month, VAT included) unlocks every membership benefit along with reel performance, follower analysis and benchmarks.'
+                      : '프로 플랜(월 18,700원 · 부가세 포함)을 구독하면 모든 멤버십 플랜 혜택과 함께 릴스 성과 · 팔로워 분석 · 벤치마킹을 볼 수 있어요.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
+                    className="mt-4 px-5 py-2.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 transition-all shadow-md hover:shadow-lg"
+                  >
+                    {isEn ? 'See membership plans' : '멤버십 플랜 보기'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
     );
   }

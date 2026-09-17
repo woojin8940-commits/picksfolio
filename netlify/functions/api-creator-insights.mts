@@ -1,6 +1,11 @@
 import { getDatabase } from "@picks/netlify-database";
 import type { Config } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import {
+  CREATOR_INSIGHTS_REQUIRED_MESSAGE,
+  CREATOR_INSIGHTS_TIER,
+  creatorInsightsAllowed,
+} from "./_shared/creator-insights-access.mts";
 import { REAUTH_MESSAGE, applyRenamedHandle } from "./_shared/instagram-metrics.mts";
 import {
   backfillSnapshotFromChannel,
@@ -33,6 +38,9 @@ import {
  * 본인만 본다. 남의 계정 인사이트는 브랜드가 보는 명단(리스트업)에도 평균값으로만
  * 나가는 값이라, 여기서 계정 주인 외에 열어 줄 이유가 없다. 관리자는 고객 지원을
  * 위해 통과된다(requireAccountOwner 의 기존 규칙).
+ *
+ * 그리고 프로 플랜 구독자만 본다(creator-insights-access). 네 갈래 앞에서 한 번에
+ * 막고, 막힌 사람에게는 자격 정보를 담은 응답을 내려 화면이 플랜 안내를 그리게 한다.
  *
  * 이 경로는 사실상 읽기 전용이다. 쓰는 것은 팔로워 스냅샷 표(오늘자 한 줄과, 이미
  * 확인해 둔 과거 팔로워 수 한 줄)뿐이고, 둘 다 그래프의 점을 채우는 값이라 다른
@@ -172,10 +180,44 @@ export default async (req: Request) => {
   const auth = await requireAccountOwner(req, username);
   if (!auth.ok) return auth.response;
 
-  const db = getDatabase();
   const isSeries = url.pathname.endsWith("/followers");
   const isDemographics = url.pathname.endsWith("/demographics");
   const isBenchmark = url.pathname.endsWith("/benchmark");
+
+  // -------------------------------------------------------------------------
+  // 프로 플랜 게이트
+  // -------------------------------------------------------------------------
+  //
+  // 인사이트는 디엠 자동화와 같은 프로 플랜 전용 기능이다. 네 갈래를 한 자리에서
+  // 막는다 — 요약만 막고 추이·벤치마킹을 열어 두면 같은 숫자를 다른 문으로 내주는
+  // 셈이고, 화면은 어느 한 칸만 비어 있는 이유를 설명할 수 없다.
+  //
+  // 막힌 것을 200 으로 알린다(403 이 아니다). 화면이 이 응답을 받아 플랜 안내를
+  // 그려야 하는데, 실패로 내려가면 클라이언트가 "불러오지 못했습니다"만 남기고
+  // 자격 정보를 버린다 — 사람은 왜 비어 있는지 모른 채 새로고침만 누르게 된다.
+  //
+  // 대신 갈래마다 그 갈래가 돌려주던 빈 모양을 맞춰 보낸다. 목록 자리에 undefined 가
+  // 오면 화면이 그 값을 훑다가 멈춘다.
+  if (!(await creatorInsightsAllowed(username, auth.userId))) {
+    const denied = {
+      entitled: false,
+      requiredTier: CREATOR_INSIGHTS_TIER,
+      error: CREATOR_INSIGHTS_REQUIRED_MESSAGE,
+      code: "MEMBERSHIP_REQUIRED",
+    };
+    if (isBenchmark) {
+      return Response.json({ ...denied, ok: false, reason: "not_entitled" });
+    }
+    if (isDemographics) {
+      return Response.json({ ...denied, reason: "not_entitled", age: [], gender: [], country: [] });
+    }
+    if (isSeries) {
+      return Response.json({ ...denied, days: 7, points: [], collecting: false });
+    }
+    return Response.json({ ...denied, reels: [] });
+  }
+
+  const db = getDatabase();
 
   // -------------------------------------------------------------------------
   // 벤치마킹 — 같은 팔로워 규모의 평균과 견주기

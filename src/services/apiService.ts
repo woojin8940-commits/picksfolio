@@ -619,6 +619,14 @@ export interface InsightReel {
 }
 
 export interface CreatorInsightsResponse {
+  /**
+   * 프로 플랜 자격. 인사이트는 디엠 자동화와 같은 프로 플랜 전용 기능이다.
+   *
+   * 없으면(undefined) 자격이 있는 것으로 본다 — 서버는 막을 때만 이 값을 내려보내고,
+   * 자격이 있는 응답에는 붙이지 않는다. 디엠 자동화 설정 응답과 같은 규칙이다.
+   */
+  entitled?: boolean;
+  requiredTier?: MembershipTier;
   connected?: boolean;
   needsReauth?: boolean;
   igUsername?: string;
@@ -3272,7 +3280,15 @@ export const apiService = {
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          return { reels: [], error: json?.error || '인사이트를 불러오지 못했습니다.', code: json?.code };
+          // 자격(entitled)은 실패 응답에서도 살려 둔다. 삼키면 화면이 플랜 안내
+          // 대신 "불러오지 못했습니다"를 띄우고, 사람은 새로고침만 반복한다.
+          return {
+            reels: [],
+            error: json?.error || '인사이트를 불러오지 못했습니다.',
+            code: json?.code,
+            entitled: json?.entitled,
+            requiredTier: json?.requiredTier,
+          };
         }
         return json as CreatorInsightsResponse;
       } catch (e) {
