@@ -1542,9 +1542,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   };
 
   const connect = async () => {
-    // feature 는 이 화면의 기능이다. 자동 디엠을 끊어 뒀던 사람이 다시 연동하면
-    // 자동 디엠만 되살아난다 — 다른 화면에서 끊어 둔 것은 그대로 둔다.
-    const result = await apiService.instagramConnectUrl(userName, undefined, { feature: 'dm' });
+    // 연동은 기능을 가리지 않는다. 여기서 계정을 붙이면 자동 디엠 · 인사이트 ·
+    // 브랜드 매칭받기가 함께 살아난다(서버가 꺼 둔 기능 표시를 지운다).
+    const result = await apiService.instagramConnectUrl(userName);
     if (!result.url) {
       setBanner({ type: 'err', text: result.error || '연동을 시작하지 못했습니다.' });
       return;
@@ -1555,7 +1555,9 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const disconnect = async () => {
     if (
       !window.confirm(
-        '인스타그램 계정 연동을 해제할까요? 자동화는 보관되지만 DM 발송이 중단됩니다.',
+        '인스타그램 계정 연동을 해제할까요?\n\n' +
+          '자동화는 보관되지만 DM 발송이 중단되고, 인사이트도 함께 해제됩니다.\n' +
+          '브랜드 매칭받기는 그대로 유지됩니다.',
       )
     )
       return;

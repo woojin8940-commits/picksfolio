@@ -9,6 +9,8 @@ import { warmFeedCache } from "./_shared/instagram-feed.mts";
 /**
  * 인스타그램 계정 연동 콜백.
  * - authorize 후 돌아온 code 를 단기 토큰 → 장기 토큰(60일)으로 교환한다.
+ * - 연동을 마치면 끊어 뒀던 기능 표시(featuresOff)를 통째로 지운다. 어느 화면에서
+ *   시작한 연동이든 자동 디엠 · 인사이트 · 브랜드 매칭받기가 함께 살아난다.
  * - 연동한 계정의 user_id / username 을 조회해 사용자별 보관함에 저장한다.
  *   자동 디엠 · 인사이트 · 브랜드 매칭받기가 연동 하나를 함께 쓰므로, 어느 화면에서
  *   시작해도 공용 보관함(dm-automation 블롭)에 들어간다. 기존 automations/rules 는
@@ -87,11 +89,6 @@ export default async (req: Request, _context: Context) => {
   returnPath = sanitizeReturnPath(verified.payload.r) || returnPath;
   // 캠페인 등록 화면에서 시작한 연동인지. 아래 저장 위치가 이 값으로 갈린다.
   const isCollab = verified.payload.p === "collab";
-  // 어느 기능에서 연동을 시작했는지. 해제는 기능별이므로 다시 연동할 때 되살릴
-  // 기능도 그 하나다 — 자동 디엠을 끊어 둔 사람이 브랜드 매칭 때문에 다시 연동한
-  // 순간 자동 DM 이 다시 나가면, 그 사람은 끄지 않은 것을 켠 적이 된다.
-  const linkFeature = verified.payload.f;
-
   const appId = process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
   if (!appId || !appSecret) return fail("missing_app_config");
@@ -183,14 +180,17 @@ export default async (req: Request, _context: Context) => {
     // 않으면, 재연동을 마치고 돌아온 화면이 계속 "다시 연동해 주세요"라고 말한다.
     delete (next as any).needsReauth;
     delete (next as any).tokenInvalidAt;
-    // 이 화면에서 끊어 뒀던 기능을 여기서 되살린다. 다른 기능의 해제 표시는 그대로
-    // 둔다. 지우지 않으면 해제한 화면의 연동 버튼은 눌러도 다시 "연동 안 됨"으로
-    // 돌아오는 버튼이 된다 — 해제한 사람은 끊을 수는 있어도 붙일 수 없게 된다.
-    if (linkFeature && Array.isArray((next as any).featuresOff)) {
-      const left = ((next as any).featuresOff as string[]).filter((f) => f !== linkFeature);
-      if (left.length > 0) (next as any).featuresOff = left;
-      else delete (next as any).featuresOff;
-    }
+    // 끊어 뒀던 기능을 전부 되살린다. 어느 화면에서 시작한 연동인지는 보지 않는다.
+    //
+    // 연동 화면에서 사람이 하는 일은 "이 계정을 붙인다" 하나다. 그런데 예전에는
+    // 시작한 화면의 기능만 되살려서, 자동 디엠을 끊어 둔 사람이 브랜드 매칭받기에서
+    // 연동을 마치고 자동 디엠으로 가면 거기는 여전히 "계정을 먼저 연동해주세요"였다 —
+    // 방금 연동한 사람에게 같은 동의 화면을 한 번 더 지나라는 말이 된다.
+    //
+    // 자동 DM 이 저절로 나가기 시작하는 것은 아니다. 해제할 때 자동화 스위치를
+    // 내려 뒀고(`enabled:false`) 그 값은 여기서 건드리지 않으므로, 발송은 본인이
+    // 다시 켜는 순간부터다. 되살아나는 것은 "연동됨" 상태까지다.
+    delete (next as any).featuresOff;
     await store.setJSON(key, next);
 
     // 웹훅 구독과 역추적 인덱스는 디엠 자동화(댓글·메시지 이벤트)를 위한 것이다.

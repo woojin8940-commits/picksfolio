@@ -207,6 +207,10 @@ const durationOf = (m: any): number | null => {
  * 고르는 규칙 자체는 세 화면이 같으므로 `resolveSharedLink` 한 곳에 있다. 이
  * 이름은 인사이트 쪽 부르는 자리를 위해 남겨 둔다 — 이 화면이 "자기 연동"을 따로
  * 갖고 있지 않다는 사실이 이름에서 드러나야 한다.
+ *
+ * 부르는 쪽은 기능을 `"insights"` 로 밝힌다. 자동 디엠을 해제하면 인사이트도 함께
+ * 꺼지는데(둘 다 내 인스타그램을 읽는 일이다), 기능을 밝히지 않으면 토큰이 그대로
+ * 남아 있어 끊은 사람에게 이 화면이 계속 숫자를 보여 준다.
  */
 export const resolveInsightsLink = resolveSharedLink;
 

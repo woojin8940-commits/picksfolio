@@ -44,6 +44,23 @@ interface CreatorCampaignCollabsProps {
 
 type DetailTab = 'progress' | 'insight' | 'settlement' | 'ai';
 
+/**
+ * 목록 탭.
+ *
+ * 협업은 쌓이기만 하고 지워지지 않는다(기록이니 남아 있어야 한다). 그래서 한 해쯤
+ * 지나면 끝난 캠페인이 격자를 가득 채우고, 지금 마감이 걸린 협업을 그 사이에서
+ * 찾아야 한다. 진행 중인 것과 끝난 것을 나눠 둔다.
+ *
+ *   active  진행 중. 지원 결과를 기다리는 캠페인도 여기 함께 둔다 — 아직 끝나지
+ *           않은 일이고, 선정되면 이 탭 안에서 카드가 옮겨 간다.
+ *   closed  완료 · 취소 · 미선정. 지난 집행을 되짚어 보는 자리다.
+ */
+type ListTab = 'active' | 'closed';
+
+/** 끝난 협업인지. 완료와 취소는 더 할 일이 없다는 점에서 같은 칸에 둔다. */
+const isClosedCollab = (c: any): boolean =>
+  c?.status === 'completed' || c?.status === 'cancelled';
+
 const CATEGORY_LABELS: Record<string, string> = {
   beauty: '뷰티', fashion: '패션', food: '식품', lifestyle: '라이프스타일',
   travel: '여행', health: '건강', tech: 'IT/테크', parenting: '육아',
@@ -73,6 +90,15 @@ const APPLY_STATUS: Record<string, { label: string; cls: string; note: string }>
 type CreatorCollabCache = {
   collabs: any[];
   applications: any[];
+  /**
+   * 마지막으로 확인한 인스타그램 연동 여부.
+   *
+   * 연동이 해제되면 이 화면은 목록 대신 연동 안내를 보여 준다. 그 판정을 서버
+   * 응답이 도착한 뒤에만 하면, 보관해 둔 목록을 먼저 그린 화면이 한 박자 뒤에
+   * 안내로 바뀐다 — 방금 본 협업이 눈앞에서 사라지는 모양이 된다. 지난번 답을
+   * 함께 들고 있으면 첫 화면부터 맞는 쪽을 그릴 수 있다.
+   */
+  metaLinked?: boolean;
   savedAt: number;
 };
 
@@ -141,6 +167,30 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   const [loading, setLoading] = useState(() => !initialCache);
   const [loadError, setLoadError] = useState('');
 
+  /**
+   * 인스타그램 연동 여부. null 은 "아직 모른다".
+   *
+   * 협업 캠페인은 연동된 계정으로 진행하는 일이라, 연동을 끊은 동안에는 목록 대신
+   * 연동 안내만 보여 준다. 다시 연동하면 목록이 그대로 돌아온다 — 끊을 때 지우는
+   * 것은 없다.
+   *
+   * 지난번 답(캐시)으로 시작한다. null 로 시작하면 연동을 끊어 둔 사람도 목록을
+   * 한 번 본 뒤에 안내로 바뀌고, 연동해 둔 사람은 그 반대를 본다. 둘 다 화면이
+   * 한 번 뒤집히는 모양이라, 마지막으로 알던 상태에서 출발하는 편이 낫다.
+   */
+  const [igLinked, setIgLinked] = useState<boolean | null>(() =>
+    typeof initialCache?.metaLinked === 'boolean' ? initialCache.metaLinked : null,
+  );
+  const [listTab, setListTab] = useState<ListTab>('active');
+  const [connecting, setConnecting] = useState(false);
+  const [connectNotice, setConnectNotice] = useState('');
+  /**
+   * igLinked 의 지금 값. 조회가 실패했을 때 "판정을 미룬다"를 하려면 load 안에서
+   * 이전 값을 읽어야 하는데, 상태를 의존성에 넣으면 연동 여부가 바뀔 때마다 load
+   * 가 새로 만들어지고 그때마다 목록을 다시 끌어온다.
+   */
+  const igLinkedRef = React.useRef<boolean | null>(igLinked);
+
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -159,24 +209,38 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
       setLoading(true);
     }
     try {
-      const [collabRes, applyRes] = await Promise.all([
+      // 연동 여부를 목록과 같이 받는다. 따로 부르면 목록이 그려진 뒤에 답이 와서,
+      // 연동을 끊어 둔 사람의 화면이 한 박자 뒤에 안내로 바뀐다.
+      const [collabRes, applyRes, channelRes] = await Promise.all([
         apiService.getCollabs('influencer'),
         fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`)
           .then(r => r.json())
           .catch(() => ({ applications: [] })),
+        apiService.getCreatorChannel(userName).catch(() => ({ error: 'network' })),
       ]);
       const nextCollabs = collabRes.error && cached ? cached.collabs : collabRes.collabs || [];
       const nextApplications = Array.isArray(applyRes?.applications) ? applyRes.applications : cached?.applications || [];
+      // 토큰이 만료된 계정(needsReauth)도 연동된 것으로 본다. 붙여 둔 계정이 있고
+      // 다시 동의만 받으면 되는 상태라, 이 화면을 통째로 감추면 진행 중인 협업까지
+      // 안 보인다. 조회 자체가 실패하면 판정을 미룬다 — 네트워크가 한 번 흔들린
+      // 것으로 협업 목록을 감추면, 사람은 연동이 끊긴 줄 안다.
+      const nextLinked =
+        typeof channelRes?.error === 'string' && channelRes.error
+          ? igLinkedRef.current
+          : Boolean(channelRes?.metaLinked || channelRes?.needsReauth);
       // 실패를 "진행 중인 협업이 없음"으로 그리지 않는다. 예전에는 오류를 버려서,
       // 진행이 확정된 협업이 조회에 실패하면 이 화면이 빈 목록으로 보였다 — 인플루언서
       // 입장에서는 확정된 협업이 사라진 것처럼 보이고, 원인을 알 단서가 없었다.
       setLoadError(collabRes.error || '');
       setCollabs(nextCollabs);
       setApplications(nextApplications);
+      igLinkedRef.current = nextLinked;
+      setIgLinked(nextLinked);
       if (!collabRes.error) {
         writeCreatorCollabCache(userName, {
           collabs: nextCollabs,
           applications: nextApplications,
+          metaLinked: nextLinked === null ? undefined : nextLinked,
           savedAt: Date.now(),
         });
       }
@@ -188,6 +252,58 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   useEffect(() => {
     if (userName) load();
   }, [userName, load]);
+
+  /**
+   * 연동 창에서 돌아온 경우(ig_collabs)만 정리한다.
+   *
+   * 표식을 남겨 두면 다음 새로고침 때도 이 화면으로 끌려오고, 콜백이 함께 실어
+   * 보낸 팔로워·조회수가 주소창에 붙어 다닌다. 이 화면은 그 숫자를 쓰지 않는다.
+   * 이름이 같은 파라미터를 쓰는 다른 화면(인사이트, 자동 디엠)의 처리는 건드리지
+   * 않는다 — 여기서 시작한 흐름에만 ig_collabs 가 붙는다.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('ig_collabs')) return;
+    setConnectNotice(
+      params.get('ig_error')
+        ? isEn
+          ? 'Instagram connection failed. Please try again.'
+          : '인스타그램 연동에 실패했습니다. 다시 시도해 주세요.'
+        : '',
+    );
+    [
+      'ig_collabs',
+      'ig_connected',
+      'ig_error',
+      'ig_metrics',
+      'ig_handle',
+      'ig_followers',
+      'ig_following',
+      'ig_views',
+    ].forEach(k => params.delete(k));
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (query ? `?${query}` : '') + window.location.hash,
+    );
+  }, [isEn]);
+
+  const startConnect = async () => {
+    setConnecting(true);
+    setConnectNotice('');
+    // 연동은 기능을 가리지 않는다. 여기서 계정을 붙이면 자동 디엠 · 인사이트 ·
+    // 브랜드 매칭받기가 함께 살아난다(서버가 꺼 둔 기능 표시를 지운다). 돌아올
+    // 곳만 이 화면으로 표시해 둔다.
+    const returnTo = `${window.location.pathname}?ig_collabs=1`;
+    const res = await apiService.instagramConnectUrl(userName, returnTo);
+    if (!res.url) {
+      setConnecting(false);
+      setConnectNotice(res.error || (isEn ? 'Could not start the connection.' : '연동을 시작하지 못했습니다.'));
+      return;
+    }
+    window.location.href = res.url;
+  };
 
   /**
    * 카드의 빨간 배지만 따로 새로 받는다.
@@ -264,6 +380,36 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     return applications.filter(a => !started.has(String(a.campaign_id)));
   }, [collabs, applications]);
 
+  /**
+   * 탭에 따라 보여 줄 것들.
+   *
+   * 진행중에는 아직 끝나지 않은 협업과, 결과를 기다리는 지원(검토 중 · 선정)이
+   * 함께 온다. 마감됨에는 완료 · 취소된 협업과 미선정 지원이 온다. 지원이 협업으로
+   * 바뀌거나 협업이 완료되면 카드가 저절로 다른 탭으로 옮겨 간다 — 상태 하나만
+   * 보고 나누므로 따로 옮기는 절차가 없다.
+   */
+  const shownCollabs = useMemo(
+    () => collabs.filter(c => (listTab === 'closed' ? isClosedCollab(c) : !isClosedCollab(c))),
+    [collabs, listTab],
+  );
+  const shownWaiting = useMemo(
+    () =>
+      waiting.filter(a =>
+        listTab === 'closed' ? String(a.status) === 'rejected' : String(a.status) !== 'rejected',
+      ),
+    [waiting, listTab],
+  );
+  // 탭에 붙일 개수. 눌러 보기 전에 마감된 것이 몇 건인지 알 수 있어야, 굳이 넘어가
+  // 볼 필요가 있는지 판단할 수 있다.
+  const tabCounts = useMemo(() => {
+    const closedCollabs = collabs.filter(isClosedCollab).length;
+    const closedApplies = waiting.filter(a => String(a.status) === 'rejected').length;
+    return {
+      active: collabs.length - closedCollabs + (waiting.length - closedApplies),
+      closed: closedCollabs + closedApplies,
+    };
+  }, [collabs, waiting]);
+
   const selected = collabs.find(c => c.id === selectedId) || null;
 
   const thumbOf = (url: string, title: string, cls: string) =>
@@ -285,6 +431,51 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
       onClose={() => setToast(null)}
     />
   );
+
+  // ---------------------------------------------------------------- 연동 안내
+  /**
+   * 연동을 끊어 둔 동안에는 목록도 상세도 그리지 않는다.
+   *
+   * 협업 캠페인은 연동한 계정으로 진행하는 일이다 — 단계마다 릴스 성과를 올려야
+   * 하고, 정산도 그 계정 기준으로 맞춘다. 연동이 끊긴 채로 목록을 열어 두면 단계를
+   * 눌러도 인사이트가 비어 있는 화면만 보게 된다. 협업 자체는 그대로 보관되어
+   * 있으니, 다시 연동하면 목록이 그대로 돌아온다.
+   *
+   * 아직 모르는 동안(null)에는 감추지 않는다. 확인이 안 됐다는 이유로 진행 중인
+   * 협업을 가리는 쪽이 더 나쁘다.
+   */
+  if (igLinked === false) {
+    return (
+      <main className="p-4 md:p-10 w-full animate-in fade-in duration-500 max-w-5xl mx-auto">
+        <header className="mb-6">
+          <h2 className="text-lg md:text-2xl font-black text-slate-900">{isEn ? 'Collab Campaigns' : '협업 캠페인'}</h2>
+        </header>
+        <div className="bg-white border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-6 md:p-10 shadow-sm max-w-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-2xl mb-4">🤝</div>
+          <h3 className="text-base md:text-xl font-black text-slate-900 mb-2">
+            {isEn ? 'Connect your Instagram account' : '인스타그램 계정을 연동해 주세요'}
+          </h3>
+          <p className="text-xs md:text-sm text-slate-500 font-medium leading-relaxed mb-6">
+            {isEn
+              ? 'Collab campaigns run on your connected account. Your campaigns are kept — connect again and they come right back.'
+              : '협업 캠페인은 연동한 계정으로 진행합니다. 진행하던 협업은 그대로 보관되어 있어, 다시 연동하면 바로 이어서 볼 수 있어요.'}
+          </p>
+          <button
+            type="button"
+            onClick={startConnect}
+            disabled={connecting}
+            className="rounded-xl bg-slate-900 text-white font-black text-xs md:text-sm px-5 py-3 hover:bg-slate-800 active:scale-[0.98] transition-all disabled:opacity-60"
+          >
+            {connecting
+              ? isEn ? 'Opening…' : '연동 창을 여는 중'
+              : isEn ? 'Connect Instagram' : '인스타그램 연동하기'}
+          </button>
+          {connectNotice && <p className="text-[11px] font-bold text-rose-600 mt-3">{connectNotice}</p>}
+        </div>
+        {toastEl}
+      </main>
+    );
+  }
 
   // ------------------------------------------------------------------ 상세
   if (selected) {
@@ -542,6 +733,29 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
         </button>
       </header>
 
+      {/* 진행중 · 마감됨. 끝난 협업은 지워지지 않고 쌓이기만 하므로, 시간이 지나면
+          지금 손댈 협업이 지난 기록 사이에 묻힌다. 기본은 진행중이다. */}
+      {!loading && !loadError && (collabs.length > 0 || waiting.length > 0) && (
+        <div className="flex items-center gap-1.5 mb-4 p-1 bg-slate-100 rounded-xl w-full md:w-auto md:inline-flex">
+          {([
+            { key: 'active' as ListTab, label: isEn ? 'In progress' : '진행중', count: tabCounts.active },
+            { key: 'closed' as ListTab, label: isEn ? 'Closed' : '마감됨', count: tabCounts.closed },
+          ]).map(t => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setListTab(t.key)}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-black transition-colors ${
+                listTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              {t.label}
+              <span className={`ml-1.5 ${listTab === t.key ? 'text-blue-600' : 'text-slate-400'}`}>{t.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-20">
           <div className="w-10 h-10 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
@@ -578,9 +792,9 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
         </div>
       ) : (
         <>
-          {collabs.length > 0 && (
+          {shownCollabs.length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
-              {collabs.map(c => {
+              {shownCollabs.map(c => {
                 const badge = collabBadge(c);
                 const cardAction = actionOf(c);
                 const overdue = (c.daysLeft ?? 1) < 0 && c.status !== 'completed';
@@ -673,18 +887,24 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
 
           {/* 지원해 두고 결과를 기다리는 캠페인. 협업이 아직 없어 열 진행사항이 없으므로
               누를 수 없게 두되, 무엇을 기다리는 중인지는 카드에 적어 둔다. */}
-          {waiting.length > 0 && (
-            <section className="mt-8">
+          {shownWaiting.length > 0 && (
+            <section className={shownCollabs.length > 0 ? 'mt-8' : ''}>
               <h3 className="text-sm font-black text-slate-900 mb-1">
-                {isEn ? 'Waiting for results' : '지원 결과 대기'}
+                {listTab === 'closed'
+                  ? isEn ? 'Not selected' : '미선정 지원'
+                  : isEn ? 'Waiting for results' : '지원 결과 대기'}
               </h3>
               <p className="text-[11px] text-slate-400 font-medium mb-3">
-                {isEn
-                  ? 'Selected campaigns move up to the list above.'
-                  : '선정되면 위 목록으로 옮겨지고 진행 단계가 열립니다.'}
+                {listTab === 'closed'
+                  ? isEn
+                    ? 'These applications did not go through.'
+                    : '이번에는 선정되지 않은 지원입니다.'
+                  : isEn
+                    ? 'Selected campaigns move up to the list above.'
+                    : '선정되면 위 목록으로 옮겨지고 진행 단계가 열립니다.'}
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
-                {waiting.map(a => {
+                {shownWaiting.map(a => {
                   const status = APPLY_STATUS[String(a.status)] || APPLY_STATUS.pending;
                   return (
                     <div key={a.id} className="bg-white rounded-xl border border-slate-100 overflow-hidden opacity-90">
@@ -718,6 +938,28 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                 })}
               </div>
             </section>
+          )}
+
+          {/* 전체가 빈 것과 이 탭만 빈 것은 다른 말이다. 위쪽 안내("지원하면
+              나타납니다")를 여기서 또 보여 주면, 마감된 협업이 있는 사람이
+              진행중 탭에서 "지원한 적 없다"는 말을 듣는다. */}
+          {shownCollabs.length === 0 && shownWaiting.length === 0 && (
+            <div className="text-center py-16">
+              <p className="text-sm text-slate-400 font-bold">
+                {listTab === 'closed'
+                  ? isEn ? 'No closed campaigns yet.' : '마감된 캠페인이 아직 없습니다.'
+                  : isEn ? 'Nothing in progress right now.' : '진행 중인 캠페인이 없습니다.'}
+              </p>
+              {listTab === 'active' && tabCounts.closed > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setListTab('closed')}
+                  className="mt-3 text-xs font-black text-blue-600 hover:text-blue-700"
+                >
+                  {isEn ? `See ${tabCounts.closed} closed` : `마감된 캠페인 ${tabCounts.closed}건 보기`}
+                </button>
+              )}
+            </div>
           )}
         </>
       )}
