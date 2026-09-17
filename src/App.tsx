@@ -399,6 +399,10 @@ const App: React.FC = () => {
       view === 'home' ||
       view === 'login' ||
       view === 'signup' ||
+      // 카카오로 처음 들어온 사람이 링크를 정하는 화면. 로그인 → 로딩 →
+      // 이 화면 → 대시보드가 모두 같은 밝기라야 마지막 한 장만 검게 내려앉지
+      // 않는다(SetupLink 는 바깥 틀 밖에서 그려져 스스로 종이색을 깐다).
+      view === 'setup-link' ||
       view === 'business-login' ||
       view === 'business-signup';
     document.body.classList.toggle('home-paper', isPaper);
