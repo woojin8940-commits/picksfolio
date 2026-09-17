@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
+import { AdBoost, placementSummary, readAdBoosts, subscribeAdBoosts, targetSummary } from '../utils/adBoosts';
 
 /**
  * 광고 현황 — 픽스폴리오 안에서 돌리고 있는 콘텐츠 광고.
@@ -35,7 +36,14 @@ interface BusinessAdStatusProps {
   companyName: string;
 }
 
-type AdStatus = 'active' | 'review' | 'paused' | 'ended';
+/**
+ * 'requested' 는 캠페인 이력에서 부스팅으로 집행을 요청한 광고다.
+ *
+ * 검수 중('review')과 구분해서 둔다. 검수는 메타가 소재를 보고 있는 상태이고,
+ * 요청은 아직 메타로 넘어가지도 않은 상태다 — 집행 권한 심사가 끝나야 넘어간다.
+ * 둘을 같은 배지로 묶으면 브랜드는 요청한 광고가 이미 메타에 들어갔다고 읽는다.
+ */
+type AdStatus = 'requested' | 'active' | 'review' | 'paused' | 'ended';
 
 type AdItem = {
   id: string;
@@ -56,9 +64,15 @@ type AdItem = {
   conversionValueKrw: number;
   budgetKrw: number;
   spendKrw: number;
+  /** 광고 소재 썸네일. 부스팅으로 만든 광고는 이력에서 고른 게시물 썸네일이 들어온다. */
+  thumbnailUrl?: string;
+  /** 집행할 때 고른 타겟·노출 위치. 부스팅으로 만든 광고에만 있다. */
+  targetLine?: string;
+  placementLine?: string;
 };
 
 const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
+  requested: { label: '집행 요청', cls: 'bg-blue-50 text-blue-600' },
   active: { label: '진행 중', cls: 'bg-emerald-50 text-emerald-600' },
   review: { label: '검수 중', cls: 'bg-amber-50 text-amber-600' },
   paused: { label: '일시중지', cls: 'bg-slate-100 text-slate-500' },
@@ -228,14 +242,24 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
   const badge = STATUS_LABEL[ad.status];
   const m = deriveMetrics(ad);
   const waiting = ad.status === 'review';
+  const requested = ad.status === 'requested';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-5">
       <div className="flex items-start gap-3">
-        {/* 광고 소재 썸네일 자리. 연동되면 게시물 썸네일이 들어온다. */}
-        <div className="w-14 h-14 rounded-xl bg-slate-100 flex-shrink-0 flex items-center justify-center">
-          <span className="text-[9px] text-slate-400 font-black">소재</span>
-        </div>
+        {/* 광고 소재 썸네일. 부스팅으로 만든 광고는 이력에서 고른 게시물이 그대로 소재다. */}
+        {ad.thumbnailUrl ? (
+          <img
+            src={ad.thumbnailUrl}
+            alt=""
+            loading="lazy"
+            className="w-14 h-14 rounded-xl object-cover bg-slate-100 flex-shrink-0"
+          />
+        ) : (
+          <div className="w-14 h-14 rounded-xl bg-slate-100 flex-shrink-0 flex items-center justify-center">
+            <span className="text-[9px] text-slate-400 font-black">소재</span>
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -249,6 +273,11 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
           <p className="text-[10px] text-slate-400 font-medium mt-0.5">
             파트너십 코드 {ad.partnershipCode}
           </p>
+          {(ad.targetLine || ad.placementLine) && (
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+              {[ad.targetLine, ad.placementLine].filter(Boolean).join(' · ')}
+            </p>
+          )}
         </div>
       </div>
 
@@ -345,23 +374,67 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
           검수가 끝나면 노출이 시작되고 지표가 쌓입니다.
         </p>
       )}
+
+      {requested && (
+        <p className="text-[10px] text-blue-600 font-black mt-2 leading-relaxed">
+          캠페인 이력에서 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로
+          집행되고, 그때부터 지표가 쌓입니다.
+        </p>
+      )}
     </div>
   );
 };
 
-const BusinessAdStatus: React.FC<BusinessAdStatusProps> = () => {
+/** 부스팅 요청을 광고 카드가 그대로 읽을 수 있는 모양으로 바꾼다. */
+const boostToAd = (boost: AdBoost): AdItem => ({
+  id: boost.id,
+  campaignTitle: boost.campaignTitle,
+  creatorHandle: boost.creatorHandle,
+  partnershipCode: boost.partnershipCode,
+  status: 'requested',
+  startDate: boost.startDate,
+  endDate: boost.endDate,
+  // 집행 전이라 지표가 없다. 0 으로 두면 카드가 전부 '—' 로 비워 그린다.
+  impressions: 0,
+  clicks: 0,
+  reach: 0,
+  conversions: 0,
+  conversionValueKrw: 0,
+  budgetKrw: boost.budgetKrw,
+  spendKrw: 0,
+  thumbnailUrl: boost.thumbnailUrl,
+  targetLine: targetSummary(boost),
+  placementLine: placementSummary(boost),
+});
+
+const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername }) => {
+  const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
+
   // 필터는 이력 화면과 같은 방식으로 둔다 — 건수가 적어 화면에서 추리는 편이 빠르다.
   const [filter, setFilter] = useState<'' | 'running' | 'ended'>('');
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [boosts, setBoosts] = useState<AdBoost[]>(() => readAdBoosts(cleanUsername));
+
+  // 이력 화면에서 집행을 요청하면 이 목록이 바로 다시 읽는다. 브랜드는 집행 직후
+  // 이 화면으로 넘어오므로, 새로고침해야 보이는 목록은 "집행이 안 됐다"로 읽힌다.
+  useEffect(() => {
+    setBoosts(readAdBoosts(cleanUsername));
+    return subscribeAdBoosts(() => setBoosts(readAdBoosts(cleanUsername)));
+  }, [cleanUsername]);
+
+  // 요청한 광고가 예시 데이터 위로 온다 — 방금 만든 것이 목록 맨 위에 있어야 한다.
+  const allAds = useMemo(() => [...boosts.map(boostToAd), ...MOCK_ADS], [boosts]);
 
   const visible = useMemo(
     () =>
-      MOCK_ADS.filter((ad) => {
-        if (filter === 'running') return ad.status === 'active' || ad.status === 'review';
+      allAds.filter((ad) => {
+        if (filter === 'running') {
+          return ad.status === 'active' || ad.status === 'review' || ad.status === 'requested';
+        }
         if (filter === 'ended') return ad.status === 'ended' || ad.status === 'paused';
         return true;
       }),
-    [filter],
+    [allAds, filter],
   );
 
   const totals = useMemo(() => {
@@ -395,6 +468,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = () => {
   const avgFrequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
   const avgRoas = totals.spend > 0 ? totals.conversionValue / totals.spend : 0;
   const spendPct = totals.budget > 0 ? Math.round((totals.spend / totals.budget) * 100) : 0;
+  // 요청 상태는 아직 돌고 있는 광고가 아니다. 건수에 같이 들어가므로 몇 건인지 적는다.
+  const requestedCount = visible.filter((ad) => ad.status === 'requested').length;
 
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
@@ -415,7 +490,11 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = () => {
           label="집행 중인 광고"
           value={formatNumberWithCommas(totals.ads)}
           unit="건"
-          hint="캠페인 이력에서 고른 콘텐츠를 그대로 광고 소재로 씁니다"
+          hint={
+            requestedCount > 0
+              ? `집행 요청 ${requestedCount}건 포함 · 이력에서 고른 콘텐츠를 그대로 소재로 씁니다`
+              : '캠페인 이력에서 고른 콘텐츠를 그대로 광고 소재로 씁니다'
+          }
         />
         <Kpi
           label="총 노출수"
@@ -488,6 +567,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = () => {
           지표는 메타 광고 관리자와 같은 이름·같은 계산식(CTR · CPC · CPM · 도달 · 빈도 · 전환 · ROAS)으로
           맞춰 두었고, 광고 지표 조회·집행 권한(ads_read · ads_management · business_management) 심사가
           끝나면 아래 숫자는 실제 광고 인사이트로 바뀝니다. 지금 보이는 값은 화면 확인용 예시입니다.
+        </p>
+        <p className="text-[11px] text-blue-600 font-medium mt-2 leading-relaxed">
+          캠페인 이력에서 '메타 광고로 부스팅'으로 집행을 요청한 광고는 '집행 요청' 상태로 이 목록
+          맨 위에 올라옵니다. 심사가 끝나면 요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
         </p>
       </div>
 

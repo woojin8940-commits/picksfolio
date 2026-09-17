@@ -407,7 +407,11 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     case 'campaign-history':
       subComponent = (
         <LazyRoute>
-          <BusinessCampaignHistory businessUsername={businessUsername} companyName={companyName} />
+          <BusinessCampaignHistory
+            businessUsername={businessUsername}
+            companyName={companyName}
+            onViewAdStatus={() => setCurrentSubView('ad-status')}
+          />
         </LazyRoute>
       );
       break;
