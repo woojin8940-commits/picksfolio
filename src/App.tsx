@@ -303,7 +303,6 @@ const App: React.FC = () => {
   const [initialId, setInitialId] = useState('');
   const [userName, setUserName] = useState(() => sessionGet('picks_user_session') || '');
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!sessionGet('picks_user_session'));
-  const [authUserId, setAuthUserId] = useState<string>('');
 
   // Business account state
   const [businessUsername, setBusinessUsername] = useState(() => localStorage.getItem('picks_business_session') || '');
@@ -595,7 +594,6 @@ const App: React.FC = () => {
       }
 
       const uid = session.user.id;
-      setAuthUserId(uid);
       // 새로고침할 때마다 "프로필 확인 중" 스피너가 몇 초씩 뜨던 원인.
       // 캐시된 사용자 이름이 이미 있으면 화면을 막지 않고 그대로 대시보드를
       // 보여주고, 프로필 검증은 아래에서 그대로 이어서 한다(끝나면 최신 값으로
@@ -736,7 +734,6 @@ const App: React.FC = () => {
               console.log('[Auth] 5초 타임아웃: 서버 실패 후 세션 강제 갱신 시작...');
               const { data: refreshData } = await supabase!.auth.refreshSession();
               if (refreshData?.session) {
-                setAuthUserId(refreshData.session.user.id);
                 setIsLoggedIn(true);
                 setProfileChecked(true);
                 setOauthProcessing(false);
@@ -768,8 +765,6 @@ const App: React.FC = () => {
                 error: refreshError?.message,
               });
               if (refreshData?.session) {
-                const refreshUid = refreshData.session.user.id;
-                setAuthUserId(refreshUid);
                 setIsLoggedIn(true);
                 setProfileChecked(true);
                 setOauthProcessing(false);
@@ -1119,8 +1114,6 @@ const App: React.FC = () => {
         // If login flow already handled navigation (ID/password login),
         // just sync the auth state without any view changes
         if (loginNavigationHandledRef.current) {
-          const uid = session.user.id;
-          setAuthUserId(uid);
           const savedUsername = sessionGet('picks_user_session') || userNameRef.current;
           if (savedUsername) {
             setUserName(savedUsername);
@@ -1164,7 +1157,6 @@ const App: React.FC = () => {
         if (!hasLocalSession) {
           setIsLoggedIn(false);
           setUserName('');
-          setAuthUserId('');
           if (viewRef.current === 'admin') {
             navigate('home');
           }
@@ -2083,7 +2075,6 @@ const App: React.FC = () => {
     return (
       <LazyRoute fallback={<AuthLoadingScreen />}>
         <SetupLink
-          userId={authUserId}
           onSetupComplete={(newUsername) => {
             loginNavigationHandledRef.current = true;
             setLoginTransitioning(true);

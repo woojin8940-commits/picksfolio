@@ -21,6 +21,7 @@ import {
 import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { linkFeatureOff, type MetaLink } from "./_shared/instagram-metrics.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
+import { clearFeedCache } from "./_shared/instagram-feed.mts";
 
 /**
  * 인스타그램 DM 자동화 설정 저장/조회 (사용자별).
@@ -652,6 +653,9 @@ export default async (req: Request, context: Context) => {
       // 멈춘다. 대신 자동화를 내리고, 웹훅 구독과 역인덱스를 풀어 이벤트 자체가
       // 오지 않게 한다. 자동 응답 문구는 남는다.
       await disconnectLinkFeature(username, "dm");
+      // 빠르게 보여주려고 보관해 둔 게시물 목록은 여기서 버린다. 남겨 두면 다른
+      // 계정으로 다시 연동한 사람이 잠시나마 예전 계정의 게시물을 보게 된다.
+      await clearFeedCache(username);
       return Response.json({ success: true, connected: false });
     }
 

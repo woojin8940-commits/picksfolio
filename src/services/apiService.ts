@@ -488,6 +488,93 @@ function isRetryableStatus(status: number): boolean {
   return status >= 500;
 }
 
+/** 가입 직후 "나만의 링크"(아이디) 만들기 결과. */
+export interface ClaimUsernameResult {
+  ok: boolean;
+  /** 실제로 저장된 아이디. 실패면 빈 문자열. */
+  username: string;
+  /** 사람이 읽을 수 있는 실패 이유. 성공이면 빈 문자열. */
+  error: string;
+  /**
+   * 서버가 분류한 이유. 화면이 안내를 다르게 해야 하는 값만 쓴다 —
+   * `taken`(다른 이름), `auth`(다시 로그인), 그 외는 "잠시 후 다시 시도".
+   */
+  reason: string;
+}
+
+/**
+ * 가입 직후 정하는 "나만의 링크" 를 저장한다.
+ *
+ * 예전에는 화면(SetupLink)이 수파베이스 `profiles` 로 직접 upsert 했다. 그 경로에서는
+ * 무엇이 잘못됐는지 화면이 알 수 없어 전부 "저장 중 오류가 발생했습니다." 였다 —
+ * 이름이 이미 쓰이고 있어도, 세션이 아직 복구되지 않아 사용자 ID 가 비어 있어도,
+ * RLS 가 막아도 같은 한 줄이었다. 지금은 서버가 이유를 붙여 답한다.
+ *
+ * 401 은 한 번 되살려 다시 보낸다. 링크를 만드는 화면은 인스타그램 연동과 마찬가지로
+ * 로그인 직후(세션 복구와 경합하는 시점)에 열리므로, 토큰이 잠깐 준비되지 않은 것이
+ * "다시 로그인" 으로 끝나면 안 된다. 같은 이름으로 다시 보내도 결과가 같으므로
+ * (서버가 이미 내 것이면 성공으로 답한다) 재시도가 안전하다.
+ */
+export async function claimUsername(username: string): Promise<ClaimUsernameResult> {
+  const body = JSON.stringify({ username });
+  const generic = '링크를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const last = attempt === 1;
+    try {
+      const res = await fetchWithTimeout(
+        '/.netlify/functions/auth-claim-username',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: await authHeadersWithTimeout({ 'Content-Type': 'application/json' }),
+          body,
+        },
+        20_000,
+      );
+
+      if (res.status === 401 && !last) {
+        const refreshed = await refreshSupabaseSession();
+        if (refreshed) continue;
+      }
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.success) {
+        return { ok: true, username: String(data.username || username), error: '', reason: '' };
+      }
+      // 이미 링크가 있는 계정이었다. 그 링크로 그대로 들어가면 된다 — 이 화면에
+      // 갇히는 것보다 낫다. 어느 이름이 쓰였는지는 대시보드가 보여준다.
+      if (data?.reason === 'already_set' && data?.username) {
+        return { ok: true, username: String(data.username), error: '', reason: 'already_set' };
+      }
+      if (res.status === 401) {
+        return {
+          ok: false,
+          username: '',
+          error: String(data?.error || '로그인이 만료되었습니다. 다시 로그인해 주세요.'),
+          reason: 'auth',
+        };
+      }
+      // 서버가 이유를 준 실패(이미 쓰는 이름 · 예약어 · 형식)는 다시 보내도 같다.
+      if (isRetryableStatus(res.status) && !last) continue;
+
+      return {
+        ok: false,
+        username: '',
+        error: String(data?.error || generic),
+        reason: String(data?.reason || 'error'),
+      };
+    } catch (e) {
+      if (!last) continue;
+      console.error('[API] 링크 저장 실패:', e);
+      return { ok: false, username: '', error: generic, reason: 'network' };
+    }
+  }
+
+  return { ok: false, username: '', error: generic, reason: 'error' };
+}
+
 export interface SiteData {
   blocks?: Block[];
   design?: DesignSettings;
@@ -953,6 +1040,26 @@ export interface InstagramMedia {
   thumbnailUrl: string;
   permalink: string;
   timestamp: string;
+}
+
+/**
+ * 게시물 목록 조회 결과.
+ *
+ * 목록만으로는 "게시물이 없는 계정"과 "받아오지 못했다"를 구별할 수 없어서, 화면이
+ * 둘에게 같은 말을 하게 된다. 사유를 함께 들고 다닌다.
+ */
+export interface InstagramMediaResult {
+  media: InstagramMedia[];
+  /** 인스타그램 계정이 연동돼 있는지. 연동 전이면 목록이 비어 있는 게 정상이다. */
+  connected: boolean;
+  /** 더 받을 게 남았을 때의 이어보기 커서. 다 받았으면 빈 문자열. */
+  nextCursor: string;
+  /** 사람에게 보여줄 실패 사유. 성공이면 빈 문자열. */
+  error: string;
+  /** 연동이 만료돼 다시 동의가 필요한 상태. */
+  needsReauth: boolean;
+  /** 지금 받아오지 못해 예전에 보관해 둔 목록을 보여주는 중. */
+  stale: boolean;
 }
 
 // Claude plan credit wallet — public shape returned by /api/claude-credits.
@@ -3352,25 +3459,89 @@ export const apiService = {
     }
   },
 
-  // 연동된 인스타그램 계정의 피드 게시물 목록.
-  // 그래프 API 를 여러 페이지 훑기 때문에 다른 호출보다 여유를 둔다.
-  async getInstagramMedia(username: string): Promise<InstagramMedia[]> {
+  /**
+   * 연동된 인스타그램 계정의 피드 게시물 목록.
+   *
+   * 예전에는 배열만 돌려줬고, 무슨 일이 생기든 빈 배열로 끝났다. 그래서 로그인
+   * 세션이 잠깐 준비되지 않아 401 을 받은 것도, 인스타그램 쪽이 잠시 막힌 것도,
+   * 연동이 만료된 것도 화면에는 전부 "게시물이 없어요"로 보였다 — 게시물이 있는
+   * 사람에게 게시물이 없다고 말하면서, 다시 시도할 방법도 주지 않았다.
+   *
+   * 지금은 결과와 실패 사유를 함께 돌려주고, 화면이 그에 맞는 안내와 "다시 시도"를
+   * 보여준다. 이어보기 커서(`nextCursor`)가 함께 오면 나머지 게시물은 화면이
+   * 배경에서 마저 받는다 — 첫 화면을 몇 초 늦추는 것보다 먼저 보여주는 편이 낫다.
+   *
+   * 401 은 한 번 세션을 되살려 다시 시도한다. 인스타그램 연동을 마치고 돌아오면
+   * 페이지가 통째로 새로 뜨는데, 그 직후에는 세션 복원이 아직 끝나지 않아 첫
+   * 요청이 401 을 받는 일이 잦다(회선이 느린 모바일에서 특히). 설정 조회
+   * (`getDmAutomation`)는 이미 같은 이유로 재시도를 하고 있었고, 이 호출만 빠져
+   * 있어서 "연동은 됐는데 게시물만 안 나오는" 화면이 만들어졌다.
+   */
+  async getInstagramMedia(
+    username: string,
+    opts: { after?: string; refresh?: boolean } = {},
+  ): Promise<InstagramMediaResult> {
     const key = normalizeAccount(username);
+    const after = opts.after || '';
+    const load = async (): Promise<InstagramMediaResult> => {
+      const account = { account: username };
+      const query = new URLSearchParams();
+      if (after) query.set('after', after);
+      if (opts.refresh) query.set('refresh', '1');
+      const path =
+        `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}` +
+        (query.toString() ? `?${query}` : '');
+
+      let lastError: unknown = new Error('Instagram media request failed');
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const res = await fetchWithTimeout(
+            path,
+            { cache: 'no-store', headers: await authHeadersWithTimeout({}, account) },
+            20_000,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            return {
+              media: Array.isArray(data?.media) ? (data.media as InstagramMedia[]) : [],
+              connected: data?.connected !== false,
+              nextCursor: String(data?.nextCursor || ''),
+              error: String(data?.error || ''),
+              needsReauth: Boolean(data?.needsReauth),
+              stale: Boolean(data?.stale),
+            };
+          }
+
+          lastError = new Error(`HTTP ${res.status}`);
+          const transient = res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500;
+          const refreshableAuth = res.status === 401 && !isBusinessRequest(account);
+          if (attempt > 0 || (!transient && !refreshableAuth)) throw lastError;
+          if (refreshableAuth) await refreshSupabaseSession();
+        } catch (error) {
+          lastError = error;
+          if (attempt > 0) throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      throw lastError;
+    };
+
     try {
-      return await readMemory(`instagramMedia:${key}`, 120_000, async () => {
-        const res = await fetchWithTimeout(
-          `/api/instagram/media/${encodeURIComponent(username.toLowerCase())}`,
-          { cache: 'no-store', headers: await authHeadersWithTimeout({}, { account: username }) },
-          25_000,
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        return Array.isArray(data?.media) ? data.media : [];
-      });
+      // 이어보기는 커서마다 다른 응답이라 기억해 둘 이유가 없다. 첫 페이지만
+      // 잠깐 기억해 화면 두 곳이 동시에 물어볼 때의 중복 왕복을 막는다.
+      if (after || opts.refresh) return await load();
+      return await readMemory(`instagramMedia:${key}`, 120_000, load);
     } catch (e) {
       console.error('[API] Failed to get Instagram media:', e);
       clearMemory(`instagramMedia:${key}`);
-      return [];
+      return {
+        media: [],
+        connected: true,
+        nextCursor: '',
+        error: '게시물을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        needsReauth: false,
+        stale: false,
+      };
     }
   },
 

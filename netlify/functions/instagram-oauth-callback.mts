@@ -4,6 +4,7 @@ import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-
 import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
 import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
+import { warmFeedCache } from "./_shared/instagram-feed.mts";
 
 /**
  * 인스타그램 계정 연동 콜백.
@@ -226,6 +227,18 @@ export default async (req: Request, _context: Context) => {
       } else {
         console.warn("[ig-oauth] webhook subscribe failed:", sub.error);
       }
+    }
+
+    // 자동 디엠 화면이 곧바로 보여줄 피드 게시물을 미리 받아 둔다.
+    //
+    // 그 화면은 "어느 게시물에 자동화를 걸까"를 고르는 자리라 게시물 격자가 뜨기
+    // 전에는 할 수 있는 일이 없다. 그런데 연동을 마치고 돌아온 사람에게는 보관된
+    // 목록이 하나도 없어서, 화면이 직접 그래프 API 를 왕복하는 몇 초 동안 빈 칸을
+    // 본다(회선이 느리면 그 왕복이 실패해 "게시물 없음"으로 보이기까지 했다).
+    // 여기서 한 번 받아 두면 돌아온 화면은 보관함만 읽고 바로 그린다.
+    // 실패해도 연동은 성공이다 — 화면이 직접 받아오는 길이 그대로 남아 있다.
+    if (!isCollab) {
+      await warmFeedCache(username, next);
     }
 
     // 동의한 순간 팔로워·팔로잉과 최근 릴스 평균 조회수를 한 번 받아 둔다.
