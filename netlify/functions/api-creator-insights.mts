@@ -292,7 +292,7 @@ export default async (req: Request) => {
   // 버튼 세 번에 같은 값을 세 번 받아 오게 된다. 탭을 열 때 한 번만 부른다.
   if (isDemographics) {
     try {
-      const resolved = await resolveInsightsLink(username);
+      const resolved = await resolveInsightsLink(username, "insights");
       if (!resolved.link || !resolved.scope) {
         return Response.json({
           connected: false,
@@ -365,7 +365,7 @@ export default async (req: Request) => {
   // 계정 요약 + 릴스 목록
   // -------------------------------------------------------------------------
   try {
-    const resolved = await resolveInsightsLink(username);
+    const resolved = await resolveInsightsLink(username, "insights");
     if (!resolved.link || !resolved.scope) {
       // 한 번도 연동한 적 없는 경우와 토큰이 죽은 경우는 할 말이 다르다.
       return Response.json({

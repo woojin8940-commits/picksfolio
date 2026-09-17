@@ -1580,6 +1580,13 @@ const App: React.FC = () => {
       applySubView('insights');
       return;
     }
+    // 협업 캠페인 화면에서 시작한 연동(?ig_collabs)도 마찬가지다. 연동이 끊긴
+    // 동안 그 화면은 목록 대신 연동 안내만 보여 주는데, 연동을 마치고 대시보드로
+    // 떨어지면 방금 되살린 협업 목록을 메뉴에서 다시 찾아 들어가야 한다.
+    if (params.get('ig_collabs')) {
+      applySubView('my-collabs');
+      return;
+    }
     if (params.get('ig_connected') || params.get('ig_error')) {
       applySubView('dm-automation');
     }

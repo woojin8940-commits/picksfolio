@@ -635,11 +635,10 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
     // 자리에서 확인해야 하는 화면이라, 브라우저에 남은 인스타그램 세션으로 조용히
     // 통과시키면 어떤 계정이 붙었는지 볼 기회가 없다.
     //
-    // feature 는 이 화면의 기능이다. 해제는 누른 화면의 기능만 끄므로, 여기서 끊어
-    // 뒀던 사람이 다시 연동할 때 되살아나는 것도 브랜드 매칭받기 하나여야 한다.
+    // 연동은 기능을 가리지 않는다. 여기서 계정을 붙이면 끊어 뒀던 자동 디엠 ·
+    // 인사이트까지 함께 살아난다(서버가 꺼 둔 기능 표시를 지운다).
     const result = await apiService.instagramConnectUrl(applicantUsername, returnTo, {
       forceReauth: true,
-      feature: 'collab',
     });
     if (!result.url) {
       setLinking(false);

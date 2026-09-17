@@ -3780,7 +3780,7 @@ export const apiService = {
   async instagramConnectUrl(
     username: string,
     returnTo?: string,
-    opts?: { forceReauth?: boolean; feature?: 'dm' | 'collab' },
+    opts?: { forceReauth?: boolean },
   ): Promise<{ url?: string; error?: string }> {
     try {
       const res = await fetch('/api/instagram/oauth/start', {
@@ -3790,7 +3790,6 @@ export const apiService = {
           username: username.toLowerCase(),
           returnTo,
           forceReauth: opts?.forceReauth === true,
-          feature: opts?.feature,
         }),
       });
       const data = await res.json().catch(() => ({} as any));
@@ -3804,10 +3803,11 @@ export const apiService = {
     }
   },
 
-  // 자동 디엠 기능의 인스타그램 연동 해제.
+  // 자동 디엠 화면의 인스타그램 연동 해제.
   //
-  // 끊기는 것은 자동 디엠 하나다. 같은 계정으로 돌아가는 인사이트와 브랜드
-  // 매칭받기는 그대로 남는다(브랜드 매칭받기는 disconnectCreatorChannel 로 끊는다).
+  // 끊기는 것은 자동 디엠과 인사이트다. 둘 다 내 인스타그램을 읽는 기능이고,
+  // 인사이트에는 해제 버튼이 따로 없다. 브랜드 매칭받기는 그대로 남는다
+  // (그쪽은 disconnectCreatorChannel 로 끊는다).
   async disconnectInstagram(username: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {

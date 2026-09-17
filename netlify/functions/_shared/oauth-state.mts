@@ -64,15 +64,6 @@ export interface StatePayload {
    * 발급 시점에 아는 사람은 본인뿐이다(인증된 POST 경로에서만 발급한다).
    */
   p?: 'collab'
-  /**
-   * 이 연동을 시작한 화면의 기능. 'dm' = 자동 디엠, 'collab' = 브랜드 매칭받기.
-   *
-   * 해제는 누른 화면의 기능만 끄고 토큰은 남긴다. 그래서 다시 연동할 때 "어느
-   * 기능을 되살리는 것인가"를 알아야 한다 — 모르는 채로 전부 되살리면, 자동 디엠을
-   * 끊어 둔 사람이 인사이트 때문에 다시 연동한 순간 자동 DM 이 다시 나간다.
-   * 기능을 밝히지 않은 연동(인사이트)은 꺼 둔 기능을 그대로 둔다.
-   */
-  f?: 'dm' | 'collab'
 }
 
 /**
@@ -99,7 +90,6 @@ export async function issueSignedState(
   sessionUserId: string,
   returnTo?: string,
   purpose?: string,
-  feature?: string,
 ): Promise<{ ok: true; state: string } | { ok: false; error: string }> {
   const key = signingKey()
   if (!key) return { ok: false, error: 'missing_state_secret' }
@@ -113,7 +103,6 @@ export async function issueSignedState(
   const safeReturn = sanitizeReturnPath(returnTo)
   if (safeReturn) payload.r = safeReturn
   if (purpose === 'collab') payload.p = 'collab'
-  if (feature === 'dm' || feature === 'collab') payload.f = feature
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const state = `${body}.${sign(body, key)}`
 

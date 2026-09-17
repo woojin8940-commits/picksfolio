@@ -25,14 +25,23 @@ import {
  *
  *   adoptSharedInstagramLink   옛 collab 연동을 공용 보관함으로 옮겨 적는다.
  *                              바꾸기 전에 연동해 둔 사람이 다시 연동하지 않게.
- *   disconnectLinkFeature      해제는 누른 화면의 기능만 끈다. 연동이 하나가 됐어도
+ *   disconnectLinkFeature      해제는 누른 화면의 몫만 끈다. 연동이 하나가 됐어도
  *                              해제는 하나가 아니다.
  *
- * 연동은 하나인데 해제는 기능별인 이유는, 그 둘이 사람에게 다른 일이기 때문이다.
- * 연동은 번거로운 절차라 한 번으로 끝나는 것이 이득이지만, 해제는 "이 기능을
- * 그만 쓰겠다"는 뜻이다. 자동 디엠을 끊은 사람이 브랜드에게 보내던 숫자까지
- * 잃거나, 브랜드 매칭을 그만둔 사람의 자동 DM 이 함께 멈추면, 고르지도 않은 것을
- * 잃는다. 그래서 토큰은 남기고 꺼진 기능만 표시한다(`MetaLink.featuresOff`).
+ * 연동은 기능을 가리지 않는다. 자동 디엠에서 붙이든 브랜드 매칭받기에서 붙이든
+ * (인사이트에서 붙이든) 세 기능이 함께 살아난다 — 연동 화면에서 사람이 하는 일은
+ * "이 계정을 붙인다" 하나인데 붙는 범위가 화면마다 다르면, 방금 연동을 마치고도
+ * 비어 있는 메뉴가 남아 같은 동의 화면을 또 지나게 된다.
+ *
+ * 해제는 그렇지 않다. "이 기능을 그만 쓰겠다"는 뜻이라 범위가 좁다.
+ *
+ *   자동 디엠 해제       자동 디엠 + 인사이트. 둘 다 내 인스타그램을 읽는 일이고,
+ *                        인사이트에는 해제 버튼이 따로 없다.
+ *   브랜드 매칭받기 해제  브랜드 매칭받기(협업 캠페인 포함)만. 남에게 내 숫자를
+ *                        보내는 일만 멈추고, 본인이 보는 화면은 그대로 둔다.
+ *
+ * 어느 쪽이든 토큰은 지우지 않는다. 지우면 끊지 않은 기능까지 함께 멈추므로,
+ * 꺼진 기능만 연동 문서에 표시한다(`MetaLink.featuresOff`).
  */
 
 /** 자동 디엠 설정 문서가 있는 곳. api-dm-automation 과 같아야 한다. */
@@ -58,6 +67,25 @@ export interface SharedLinkFields {
   /** 자동 디엠을 끊은 시각. 기록용이고 판단에는 쓰지 않는다. */
   disconnectedAt?: string;
 }
+
+/**
+ * 그 해제 버튼 하나로 함께 꺼지는 기능들.
+ *
+ * 자동 디엠 해제가 인사이트까지 끄는 이유는, 두 화면이 사람에게 같은 일의 앞뒤이기
+ * 때문이다 — 둘 다 "내 인스타그램 계정을 픽스폴리오가 읽는다"이고, 인사이트에는
+ * 해제 버튼이 없어서 자동 디엠에서 끊은 사람에게는 끌 방법이 남지 않는다.
+ *
+ * 브랜드 매칭받기는 혼자 꺼진다. 그 해제는 "브랜드에게 내 숫자를 보내지 않겠다"는
+ * 뜻이라, 본인만 보는 인사이트를 함께 끌 이유가 없다.
+ *
+ * 되살리는 쪽은 이 표를 쓰지 않는다. 연동은 기능을 가리지 않고 전부 켠다
+ * (instagram-oauth-callback).
+ */
+const FEATURES_OFF_WITH: Record<LinkFeature, LinkFeature[]> = {
+  dm: ["dm", "insights"],
+  collab: ["collab"],
+  insights: ["insights"],
+};
 
 /** 이 연동을 마지막으로 쓴 시각(없으면 0). 어느 쪽이 더 최근인지 가르는 값. */
 const stampOf = (value: unknown): number => {
@@ -139,13 +167,13 @@ export async function adoptSharedInstagramLink<T extends SharedLinkFields>(
 }
 
 /**
- * 해제를 누른 화면의 기능 하나만 끊는다.
+ * 해제를 누른 화면의 몫만 끊는다(자동 디엠은 인사이트까지, `FEATURES_OFF_WITH`).
  *
  * 연동 토큰은 지우지 않는다. 세 화면이 그 하나를 함께 쓰고 있어서, 자동 디엠에서
- * 해제를 누른 사람의 토큰을 지우면 인사이트의 숫자와 브랜드가 보는 명단까지 함께
- * 멈춘다 — 그 사람이 고른 것은 자동 DM 을 멈추는 일 하나였다. 대신 꺼진 기능만
- * 연동 문서에 적어 두고(`featuresOff`), 읽는 쪽이 자기 기능을 확인한다
- * (`resolveSharedLink(username, feature)`).
+ * 해제를 누른 사람의 토큰을 지우면 브랜드가 보는 명단까지 함께 멈춘다 — 그 사람이
+ * 고른 것은 자기 인스타그램을 읽는 일을 멈추는 것이었고, 브랜드 매칭을 그만두는
+ * 일이 아니었다. 대신 꺼진 기능만 연동 문서에 적어 두고(`featuresOff`), 읽는 쪽이
+ * 자기 기능을 확인한다(`resolveSharedLink(username, feature)`).
  *
  * 기능별로 실제 정리해야 하는 것이 다르다.
  *
@@ -157,6 +185,10 @@ export async function adoptSharedInstagramLink<T extends SharedLinkFields>(
  *          적히므로, 그 보관함에 옛 토큰이 남아 있으면 해제한 기능이 그대로 살아난다.
  *          브랜드가 보는 명단의 출처를 내리는 일은 부르는 쪽(api-creator-channel)이
  *          같은 요청 안에서 한다 — 거기에 이미 데이터베이스 연결이 있다.
+ *   insights
+ *          표시만 남긴다. 인사이트는 사람이 화면을 열 때 읽기만 하는 기능이라
+ *          내려 둘 구독도, 비울 보관함도 없다. 자동 디엠 해제에 딸려 꺼지는 쪽이라
+ *          이 값으로 직접 부르는 자리는 아직 없다.
  *
  * @returns 웹훅 역인덱스에서 빠진 인스타그램 계정 ID 들. 무엇을 정리했는지 로그로
  *   남기고 싶을 때만 본다.
@@ -181,12 +213,19 @@ export async function disconnectLinkFeature(
       // 연동이 다시 옮겨 적혀 방금 끊은 계정이 되살아난다.
       if (!current) {
         return feature === "dm"
-          ? { enabled: false, connected: false, featuresOff: ["dm"], disconnectedAt: now }
+          ? {
+              enabled: false,
+              connected: false,
+              featuresOff: [...FEATURES_OFF_WITH.dm],
+              disconnectedAt: now,
+            }
           : null;
       }
 
       const off = new Set(Array.isArray(current.featuresOff) ? current.featuresOff : []);
-      off.add(feature);
+      // 이 버튼으로 함께 꺼지는 기능까지 적는다. 자동 디엠 해제에는 인사이트가 딸려
+      // 있고, 그 표시가 없으면 인사이트 메뉴는 끊은 계정의 숫자를 계속 보여 준다.
+      for (const also of FEATURES_OFF_WITH[feature] || [feature]) off.add(also);
       const next: SharedLinkFields & Record<string, unknown> = {
         ...current,
         featuresOff: Array.from(off),

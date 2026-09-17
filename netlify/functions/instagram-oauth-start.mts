@@ -17,8 +17,10 @@ import { issueSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts"
  * 튕겨 나가 작성 중이던 등록서를 잃는다. 값은 내부 경로만 허용한다.
  *
  * 세 화면(자동 디엠 · 인사이트 · 브랜드 매칭받기)은 이제 연동 하나를 함께 쓴다.
- * 어디서 시작해도 공용 보관함(dm-automation)에 저장되므로, 한 번 연동하면 세 곳이
- * 모두 연동된 상태가 된다. `purpose:'collab'` 은 옛 캠페인 전용 보관함으로 보내는
+ * 어디서 시작해도 공용 보관함(dm-automation)에 저장되고, 콜백이 끊어 뒀던 기능
+ * 표시까지 지우므로 한 번 연동하면 세 곳이 모두 연동된 상태가 된다. 어느 화면에서
+ * 시작한 연동인지는 그래서 여기서 묻지 않는다 — 시작한 화면만 되살리던 예전 방식은
+ * 방금 연동을 마친 사람에게 다른 메뉴에서 같은 동의 화면을 한 번 더 요구했다. `purpose:'collab'` 은 옛 캠페인 전용 보관함으로 보내는
  * 값이라 화면에서는 더 쓰지 않는다 — 옛 클라이언트가 보내올 때를 위해서만 남겨 둔다.
  *
  * `forceReauth` 는 보관함과 무관하게 인스타그램 로그인 화면을 매번 새로 띄우는
@@ -83,10 +85,6 @@ export default async (req: Request, _context: Context) => {
   // 인스타그램 로그인 화면을 매번 새로 띄울지. 보관함 선택과는 별개다.
   const forceReauth = body?.forceReauth === true || isCollab;
 
-  // 어느 화면에서 시작한 연동인지. 해제는 기능별이므로, 끊어 둔 기능을 되살릴 때
-  // 그 기능 하나만 되살리기 위해 콜백까지 들고 간다(서명 안에 들어간다).
-  const feature = String(body?.feature || "");
-
   const appId = process.env.INSTAGRAM_APP_ID;
   if (!appId) {
     return Response.json(
@@ -100,7 +98,6 @@ export default async (req: Request, _context: Context) => {
     auth.userId,
     sanitizeReturnPath(body?.returnTo),
     isCollab ? "collab" : undefined,
-    feature,
   );
   if (!issued.ok) {
     return Response.json(
