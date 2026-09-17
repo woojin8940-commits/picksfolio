@@ -370,21 +370,18 @@ export const AD_OBJECTIVES = [
     label: '인지도',
     icon: '📢',
     lines: ['처음 알리는 제품이에요.', '조회수와 도달을 먼저 봅니다'],
-    tip: '같은 시기에 여러 편이 올라가도록 구성을 짜 드려요',
   },
   {
     value: 'engagement',
     label: '반응',
     icon: '💬',
     lines: ['댓글과 저장이 남으면 좋겠어요.', '반응률과 카테고리를 먼저 봅니다'],
-    tip: '팬층과 제품 카테고리가 겹치는 후보를 찾아 드려요',
   },
   {
     value: 'conversion',
     label: '구매',
     icon: '🛒',
     lines: ['링크 클릭과 구매로 이어져야 해요.', '판매 이력과 2차 활용을 먼저 봅니다'],
-    tip: '판매로 이어진 이력이 있는 후보를 찾아 드려요',
   },
 ] as const;
 

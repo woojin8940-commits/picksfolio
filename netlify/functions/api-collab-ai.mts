@@ -144,6 +144,23 @@ const GUIDE_PDF_TYPE = "application/pdf";
 const GUIDE_INTENT_RE =
   /(가이드|기획안|기획|기획서|대본|콘티|캡션|숏폼|릴스|쇼츠|촬영|콘텐츠|첨부|파일|이미지|사진|문서|자료|브랜드|이거|이걸|이대로|위에|pdf|guide)/i;
 
+/**
+ * "본문(캡션)만 써 달라"는 요청을 알아보는 자리.
+ *
+ * 캠페인 화면에서 이 어시스턴트가 내놓는 결과물은 기획안과 본문 두 가지인데, 지시문의
+ * 분량은 기획안 쪽이 압도적이다(가이드 되짚기, 장면 구성, 나레이션 규칙). 그래서
+ * "본문 캡션 작성해줘"라고만 말해도 모델은 기획안을 쓰는 절차로 끌려가 장면부터
+ * 늘어놓거나, 톤이 다른 본문 후보를 세 개 나열하고 표식을 아예 붙이지 않았다. 표식이
+ * 없으면 반영 버튼이 뜨지 않아, 사용자는 완성된 본문을 눈으로 읽고 손으로 옮겨
+ * 적어야 했다 — 기획안·피드백 수정에서는 버튼 한 번으로 끝나는 일이다.
+ *
+ * 그래서 요청이 본문 하나만 가리킬 때는 이 사실을 지시문 끝에 못 박는다. 기획안을
+ * 함께 가리키는 말(기획안·장면·콘티·대본·스토리보드)이 섞여 있으면 적용하지 않는다 —
+ * 그때는 지금까지처럼 기획안 절차를 따르는 것이 맞다.
+ */
+const CAPTION_ONLY_INTENT_RE = /(본문|캡션|caption)/i;
+const PLAN_ALSO_INTENT_RE = /(기획안|기획서|장면|씬|콘티|대본|스토리보드|자막|나레이션|릴스|숏폼|쇼츠)/i;
+
 interface GuideRef {
   url?: string;
   fileName?: string;
@@ -978,11 +995,31 @@ export default async (req: Request) => {
     return "";
   })();
 
+  // 이번 요청이 본문 하나만 가리키는지 — 위 CAPTION_ONLY_INTENT_RE 주석에 이유가 있다.
+  const captionOnlyRequest =
+    scope === "campaign" &&
+    CAPTION_ONLY_INTENT_RE.test(String(lastUserText)) &&
+    !PLAN_ALSO_INTENT_RE.test(String(lastUserText));
+  const captionOnlyDirective = captionOnlyRequest
+    ? "\n\n[이번 요청은 인스타그램 본문(캡션)만 써 달라는 요청입니다]\n" +
+      "- 답에는 본문 하나만 쓰세요. 장면 설명·자막·나레이션 같은 기획안 내용을 쓰지 마세요.\n" +
+      "- 맨 앞의 **가이드에서 확인한 것** 항목은 생략하세요. 가이드 파일은 그대로 끝까지 읽고 " +
+      "필수 문구·해시태그·계정 태그를 본문에 넣되, 확인 목록은 적지 않습니다.\n" +
+      "- 톤이 다른 후보를 여러 개 나열하지 말고 **바로 올릴 수 있는 완성된 본문 하나**만 내세요. " +
+      "사용자는 이 본문을 카드에서 고친 뒤 버튼으로 저장합니다.\n" +
+      "- 답의 맨 끝에 {\"kind\":\"caption\"} 표식을 반드시 딱 한 번 붙이고, 그 안의 text 에는 " +
+      "사람에게 보여 준 본문과 **똑같은 글**을 줄바꿈·해시태그까지 그대로 넣으세요. 표식이 없으면 " +
+      "반영 버튼이 뜨지 않아 사용자가 본문을 손으로 옮겨 적어야 합니다.\n" +
+      "- 기획안 표식(kind:\"plan\")은 붙이지 마세요.\n" +
+      "- 가이드 파일을 읽지 못했다면 본문을 지어내지 말고 그 사실을 먼저 알리세요(표식도 붙이지 않습니다)."
+    : "";
+
   const systemInstruction = campaignContext
     ? CAMPAIGN_AI_SYSTEM_INSTRUCTION +
       `\n\n아래는 지금 열어 둔 캠페인의 사실입니다. 캠페인에 관한 것은 모두 이 데이터와 ` +
       `첨부 파일을 근거로만 답하고, 없는 값은 지어내지 마세요.\n${campaignContext.text}` +
-      campaignGuideStatus
+      campaignGuideStatus +
+      captionOnlyDirective
     : baseSystemInstruction;
 
   // 캠페인 화면은 기획안 전체를 다시 내놓는다(장면 5개에 설명·자막·나레이션, 거기에

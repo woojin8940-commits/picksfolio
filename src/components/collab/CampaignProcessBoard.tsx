@@ -214,8 +214,19 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const isManager = role === 'manager';
   /** 확정 보수. 0원(제품 협찬형)이면 정산 칸 자체가 없다. */
   const settlementFee = Number(detail?.terms?.fee ?? settlement.fee ?? 0);
+  /**
+   * 브랜드가 픽스폴리오에 보낼 광고비(담당자·브랜드 응답에만 있다).
+   *
+   * 인플루언서 보수와 같은 숫자가 아니다 — 담당자가 명단에 적고 브랜드가 그걸 보고
+   * 고른 제시가이며, 보수와의 차액이 픽스폴리오 마진이다. 브랜드 칸에 보수를 그리면
+   * 브랜드가 보낼 금액이 보수와 같아져 마진이 사라지고, 담당자가 조건표를 확정하기
+   * 전이라 보수가 비어 있을 때는 업로드까지 끝낸 협업에 0원이 찍힌다.
+   */
+  const brandBillAmount = Number(detail?.billing?.brandAmount ?? 0);
+  /** 정산 칸에 적는 금액. 브랜드는 자기가 보낼 광고비, 나머지는 인플루언서 보수. */
+  const settlementAmount = role === 'brand' ? brandBillAmount : settlementFee;
   /** 정산 칸을 그릴 수 있는가. 업로드 확인 전에는 무엇에 쓰는 서류인지 알 수 없다. */
-  const settlementOpen = settlementFee > 0 && Boolean(collab.uploadConfirmedAt);
+  const settlementOpen = settlementAmount > 0 && Boolean(collab.uploadConfirmedAt);
   /**
    * 인플루언서가 열어 볼 가이드가 실제로 있는가.
    *
@@ -724,24 +735,27 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
    * 브랜드에게 영상 없는 검토 요청이 가지도 않는다(서버의 captionOnly 규칙).
    * 영상도 본문도 없이 누르는 것만 막는다.
    */
+  /**
+   * 영상과 본문이 둘 다 있어야 낸다.
+   *
+   * 한동안 둘 중 하나만으로도 낼 수 있었다. 그러자 본문만 먼저 저장되는 일이 잦았고,
+   * 브랜드 화면에는 열어 볼 영상이 없는 검토 요청이 떠서 한 차례가 그냥 흘러갔다.
+   * 인스타에 올라가는 것은 영상과 그 아래 본문 한 덩어리이므로 검토도 한 덩어리로
+   * 받는다. 이미 영상이 올라간 뒤 본문만 고쳐 다시 내는 것은 그대로 된다 — 그때는
+   * 검토할 영상이 이미 있다.
+   */
   const submitVideo = async () => {
     const text = caption.trim();
-    if (!videoFile && !videoWork?.payload?.fileUrl && !text) {
-      onNotify('올릴 영상 파일을 선택하거나 본문 캡션을 적어 주세요.', 'error');
+    if (!videoFile && !videoFilePresent()) {
+      onNotify('초안 영상 파일을 먼저 선택해 주세요. 본문 캡션만 올릴 수는 없습니다.', 'error');
+      return;
+    }
+    if (!text) {
+      onNotify('본문 캡션을 함께 적어 주세요. 영상과 본문을 같이 검토받습니다.', 'error');
       return;
     }
     if (text.length > CAPTION_MAX_LENGTH) {
       onNotify(`본문 캡션이 인스타그램 한도(${CAPTION_MAX_LENGTH.toLocaleString()}자)를 넘었습니다.`, 'error');
-      return;
-    }
-    // 캡션을 막지는 않는다 — 영상은 다 됐는데 문구가 아직 안 나온 경우가 있고, 막으면
-    // 검토 자체가 늦어진다. 대신 비워 두면 어떻게 되는지 한 번 말해 준다.
-    if (
-      !text &&
-      !window.confirm(
-        '본문 캡션을 비워 두고 영상만 올릴까요?\n\n인스타에 올릴 때 영상 아래 들어가는 본문도 브랜드 검토를 받아야 합니다. 지금 비워 두면 나중에 이 칸에 적어 다시 저장해 주세요.',
-      )
-    ) {
       return;
     }
     await saveWork('video', { caption: text }, videoFile);
@@ -1170,6 +1184,57 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     </a>
   );
 
+  /** 파일 이름이나 주소로 영상인지 가린다. */
+  const isVideoFile = (url: string, name: string) =>
+    /\.(mp4|mov|m4v|webm|ogv|avi|mkv)(\?|#|$)/i.test(String(name || '')) ||
+    /\.(mp4|mov|m4v|webm|ogv|avi|mkv)(\?|#|$)/i.test(String(url || ''));
+
+  /**
+   * 저장소 파일을 "내려받기"로 여는 주소.
+   *
+   * 스토리지는 download 값이 붙은 요청만 첨부파일로 내려보낸다. 그냥 링크에
+   * download 속성을 달아도 다른 도메인의 파일에는 듣지 않는다.
+   */
+  const downloadHref = (url: string, name: string) => {
+    if (!/^https?:\/\//i.test(url)) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}download=${encodeURIComponent(name || 'file')}`;
+  };
+
+  /**
+   * 제출된 영상 한 편.
+   *
+   * 예전에는 파일 이름 한 줄이었고, 누르면 기기에 따라 곧바로 내려받기가 시작됐다.
+   * 검수하는 쪽이 하려는 일은 "보는 것"인데, 휴대폰에서 100MB 영상을 받아 앨범에서
+   * 찾아 열어야 했다. 그래서 칸 안에서 바로 재생하고, 받아 두고 싶을 때만 내려받기를
+   * 누르게 한다.
+   */
+  const renderVideoFile = (url: string, name: string) => (
+    <div key={url} className="space-y-1.5">
+      <video
+        src={url}
+        controls
+        playsInline
+        preload="metadata"
+        className="w-full rounded-lg bg-black max-h-[60vh]"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 flex-1 text-[11px] font-bold text-slate-500 truncate">{name}</span>
+        <a
+          href={downloadHref(url, name)}
+          download={name}
+          className="flex-shrink-0 px-2.5 py-1 rounded-lg border border-slate-200 text-[10px] font-black text-slate-600 hover:border-slate-900 hover:text-slate-900 transition-colors"
+        >
+          다운로드
+        </a>
+      </div>
+    </div>
+  );
+
+  /** 영상이면 재생 칸, 나머지(PDF·이미지)는 지금까지처럼 줄 하나. */
+  const renderMediaFile = (url: string, name: string) =>
+    isVideoFile(url, name) ? renderVideoFile(url, name) : renderFileLink(url, name);
+
   /**
    * 잠긴 단계의 본문. 입력칸 자리에 "무엇이 끝나야 열리는지" 한 칸이 선다.
    */
@@ -1283,9 +1348,6 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                  "지금 여기를 채워야 제품이 온다"는 것이 어디에도 없었다. */
               <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5">
                 <p className="text-xs font-black text-blue-700">제품을 받을 주소를 입력해 주세요</p>
-                <p className="text-[11px] text-blue-600/90 font-bold mt-0.5 leading-relaxed">
-                  저장하면 브랜드가 바로 발송합니다. 입력한 주소는 이 캠페인의 브랜드에게만 보입니다.
-                </p>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">
@@ -1295,20 +1357,35 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
 
             {/* 주소는 검색으로 받는다. 손으로 적으면 우편번호가 비거나 도로명과
                 지번이 섞여 들어와, 택배를 부치는 쪽이 결국 되묻게 된다. */}
-            <div className="grid grid-cols-[100px_1fr_auto] gap-2 items-end">
-              <Field label="우편번호">
-                <input value={ship.postcode} readOnly onClick={searchAddress} placeholder="검색" className={`${fieldCls(ship.postcode)} cursor-pointer`} />
-              </Field>
-              <Field label="주소">
-                <input value={ship.address1} readOnly onClick={searchAddress} placeholder="주소 찾기를 눌러 주세요" className={`${fieldCls(ship.address1)} cursor-pointer`} />
-              </Field>
+            <div className="flex flex-wrap sm:flex-nowrap items-end gap-2">
+              <div className="w-[100px] flex-none order-1">
+                <Field label="우편번호">
+                  <input value={ship.postcode} readOnly onClick={searchAddress} placeholder="검색" className={`${fieldCls(ship.postcode)} cursor-pointer`} />
+                </Field>
+              </div>
+              {/* 버튼 높이를 입력칸(38px)에 맞춰 고정한다. 글씨 크기가 기기마다
+                  올라가면 버튼만 자라서 위 칸의 이름표를 덮었다. */}
               <button
                 type="button"
                 onClick={searchAddress}
-                className="px-3.5 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 transition-colors flex-shrink-0"
+                className="order-2 sm:order-3 flex-none h-[38px] px-3.5 rounded-lg bg-slate-900 text-white text-[11px] font-black hover:bg-slate-700 transition-colors flex items-center justify-center"
               >
                 주소 찾기
               </button>
+              {/* 고른 주소는 줄을 접어 전부 보여 준다. 한 줄짜리 입력칸에 담으면
+                  긴 도로명이 잘리고, 읽기 전용 칸은 손가락으로 밀어 볼 수도 없어
+                  "내가 고른 주소가 이게 맞나"를 확인할 방법이 없었다. */}
+              <div className="w-full sm:w-auto sm:flex-1 min-w-0 order-3 sm:order-2">
+                <Field label="주소">
+                  <button
+                    type="button"
+                    onClick={searchAddress}
+                    className={`${fieldCls(ship.address1)} text-left whitespace-normal break-words leading-snug min-h-[38px]`}
+                  >
+                    {ship.address1 || <span className="text-slate-400 font-medium">주소 찾기를 눌러 주세요</span>}
+                  </button>
+                </Field>
+              </div>
             </div>
             {postcodeFailed && (
               <p className="text-[10px] font-bold text-amber-600">
@@ -1571,16 +1648,23 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </div>
                 <button
                   onClick={submitVideo}
-                  disabled={busy || (!videoFile && !captionDirty)}
+                  disabled={
+                    busy ||
+                    (!videoFile && !videoFilePresent()) ||
+                    !caption.trim() ||
+                    (!videoFile && !captionDirty)
+                  }
                   className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                 >
-                  {videoFile
-                    ? videoWork
-                      ? '영상 · 본문 다시 올리기'
-                      : '초안 영상 · 본문 올리기'
-                    : videoFilePresent()
-                      ? '본문 캡션만 다시 저장'
-                      : '본문 캡션 먼저 저장'}
+                  {!videoFile && !videoFilePresent()
+                    ? '초안 영상 파일을 선택해 주세요'
+                    : !caption.trim()
+                      ? '본문 캡션을 적어 주세요'
+                      : videoFile
+                        ? videoWork
+                          ? '영상 · 본문 다시 올리기'
+                          : '초안 영상 · 본문 올리기'
+                        : '본문 캡션 다시 저장'}
                 </button>
                 {renderUploadProgress()}
                 {videoWork && (
@@ -1589,7 +1673,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                       지금 올라간 안 · {videoWork.version}번째 · {fmtDate(videoWork.createdAt)}
                     </p>
                     {videoWork.payload?.fileUrl
-                      ? renderFileLink(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')
+                      ? renderMediaFile(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')
                       : videoWork.payload?.link && (
                           <a href={videoWork.payload.link} target="_blank" rel="noopener noreferrer" className="block text-[11px] font-bold text-blue-600 hover:underline break-all">
                             초안 영상 열기
@@ -1615,7 +1699,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     초안 영상 열기
                   </a>
                 )}
-                {videoWork.payload?.fileUrl && renderFileLink(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')}
+                {videoWork.payload?.fileUrl && renderMediaFile(videoWork.payload.fileUrl, videoWork.payload.fileName || '초안 영상')}
                 {videoWork.payload?.caption ? (
                   renderCaptionView(String(videoWork.payload.caption), '인스타 본문 캡션 · 이 글이 영상 아래에 게시됩니다')
                 ) : (
@@ -1675,11 +1759,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             {isInfluencer && doneOf('video') && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                 <p className="text-[11px] font-black text-emerald-800">
-                  영상 검토 완료
+                  영상 검토 완료 · 담당자와 소통 후 업로드 일정을 정하세요
                 </p>
                 <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
-                  검토를 마친 영상과 본문 캡션 그대로 인스타그램에 올려 주세요. 따로 확인받을 것은 없습니다.
-                  올린 뒤 업로드 단계에 게시물 링크와 광고 파트너십 코드만 남기면 끝입니다.
+                  검토를 마친 영상과 본문 캡션은 이대로 확정입니다. 언제 올릴지는 담당자와 이야기해
+                  정한 뒤 게시해 주세요. 올린 뒤 업로드 단계에 게시물 링크와 광고 파트너십 코드를
+                  남기면 끝입니다.
                 </p>
                 {videoWork?.payload?.caption && (
                   <div className="mt-2">
@@ -1716,9 +1801,9 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 <p className={`text-xs font-black ${brandReceived ? 'text-emerald-700' : 'text-slate-500'}`}>
                   {brandReceived ? '정산 완료' : '픽스폴리오 정산 예정'}
                 </p>
-                {settlementFee > 0 && (
+                {brandBillAmount > 0 && (
                   <p className="text-[10px] font-bold text-slate-400 mt-1">
-                    이 협업 정산금 {settlementFee.toLocaleString('ko-KR')}원
+                    이 협업 정산금 {brandBillAmount.toLocaleString('ko-KR')}원
                   </p>
                 )}
                 <p className="text-[10px] font-bold text-slate-400 mt-1 leading-relaxed">
@@ -1943,10 +2028,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             */}
             {isInfluencer && doneOf('video') && !collab.uploadUrl && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-xs font-black text-emerald-800">브랜드 검토 완료 · 지금 업로드해 주세요</p>
+                <p className="text-xs font-black text-emerald-800">
+                  브랜드 검토 완료 · 담당자와 소통 후 업로드 일정을 정하세요
+                </p>
                 <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
-                  검토를 마친 초안 영상과 본문 캡션을 그대로 올리시면 됩니다. 올린 뒤 아래에 게시물 링크와
-                  광고 파트너십 코드를 남겨 주세요.
+                  검토를 마친 초안 영상과 본문 캡션을 그대로 올리시면 됩니다. 올리는 날짜는 담당자와
+                  맞춰 주세요. 올린 뒤 아래에 게시물 링크와 광고 파트너십 코드를 남겨 주세요.
                 </p>
                 {videoWork?.payload?.caption && (
                   <div className="mt-2">

@@ -1,13 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Share2 } from 'lucide-react';
 import { Block, DesignSettings, ProductFolder, OpenScheduleItem } from '../types';
 import { getPublicProfileByUsername, supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
 import { getLinkGridItems } from '../services/settingsService';
-import { themeIsDark } from '../utils/themeColor';
 import { apiService } from '../services/apiService';
-import { shareOrCopy } from '../utils/clipboard';
 import PublicPageBody, { DEFAULT_PUBLIC_DESIGN } from './PublicPageBody';
+import PublicPageFooter from './PublicPageFooter';
 import ProductSheet from './ProductSheet';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -385,13 +383,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
   const selectedBlock = useMemo(() => blocks.find(b => b.id === selectedBlockId), [blocks, selectedBlockId]);
 
-  /**
-   * 본문(커버 · 버튼 · 카테고리 · 카드)은 PublicPageBody 가, 상품 서랍은
-   * ProductSheet 가 그린다 — 편집 화면 오른쪽의 미리보기가 같은 컴포넌트를 쓴다.
-   * 여기 남은 값은 본문 아래의 푸터가 쓰는 것뿐이다.
+  /*
+   * 화면을 그리는 일은 모두 떼어 놓았다 — 본문(커버 · 버튼 · 카테고리 · 카드)은
+   * PublicPageBody, 상품 서랍은 ProductSheet, 맨 아래 푸터는 PublicPageFooter 다.
+   * 편집 화면의 미리보기가 같은 세 컴포넌트를 그리므로 두 화면이 어긋날 수 없다.
    */
-  const isDark = themeIsDark(design);
-  const subTextColor = isDark ? 'text-white/60' : 'text-slate-500';
 
   return (
     <>
@@ -427,59 +423,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         onTrackClick={(blockId) => trackClick(username, blockId)}
       >
 
-        {/* Footer */}
-        <footer className="py-12 flex flex-col items-center space-y-6 shrink-0">
-          <button 
-            onClick={async () => {
-              // 공유 API 가 없는 환경(데스크톱, 구형 인앱 브라우저)에서는
-              // navigator.share 호출 자체가 TypeError 라 버튼이 죽어 있었다.
-              // 시트를 닫은 것도 실패로 받아 "복사되었습니다"를 띄웠다.
-              const result = await shareOrCopy({
-                title: `${username}님의 픽스폴리오`,
-                url: window.location.href,
-              });
-              if (result === 'copied') alert('링크가 복사되었습니다!');
-              else if (result === 'failed') alert('공유할 수 없습니다. 주소창의 링크를 복사해 주세요.');
-            }}
-            className="flex items-center gap-2 px-8 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-sm hover:scale-105 transition-all shadow-2xl"
-          >
-            <Share2 size={18} />
-            페이지 공유하기
-          </button>
-          
-          <div className="flex items-center gap-2 opacity-30 grayscale hover:grayscale-0 transition-all cursor-pointer">
-            <span className="text-[10px] font-black tracking-tighter">POWERED BY</span>
-            <span className="text-sm font-black text-blue-600 tracking-tighter">PICKSFOLIO</span>
-          </div>
-
-          {/* 통신판매중개자 사업자 정보 및 고객센터 (전자상거래법 제20조 / 결제 연동 심사 대응) */}
-          <div className={`w-full max-w-md mx-auto pt-6 mt-2 border-t text-center space-y-1.5 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              본 페이지의 거래는 통신판매중개 플랫폼 픽스폴리오(Picksfolio)를 통해 이루어집니다.
-            </p>
-            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              상호명 픽스폴리오(Picksfolio) | 대표자 신우진
-            </p>
-            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              사업자등록번호 220-26-01995 | 통신판매업신고 제 2026-부천원미-0846 호
-            </p>
-            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              경기도 부천시 원미구 부일로199번길 26, 7층 2호(상동, 서련코아)
-            </p>
-            <p className={`text-[11px] font-bold leading-relaxed ${subTextColor}`}>
-              고객센터 070-7954-8452 | woojin8940@inplace-ad.com
-            </p>
-            <div className="flex items-center justify-center gap-3 pt-1">
-              <a href="/terms" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
-                이용약관
-              </a>
-              <span className={subTextColor}>|</span>
-              <a href="/privacy" className={`text-[11px] font-bold underline underline-offset-2 transition-colors ${isDark ? 'text-white/70 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
-                개인정보처리방침 · 취소/환불/배송 안내
-              </a>
-            </div>
-          </div>
-        </footer>
+        {/* 푸터는 공개 페이지와 미리보기가 같은 파일을 그린다(PublicPageFooter). */}
+        <PublicPageFooter
+          design={design}
+          shareTitle={`${username}님의 픽스폴리오`}
+          shareUrl={typeof window !== 'undefined' ? window.location.href : `/${normalizedUsername}`}
+        />
 
         {/* Product Detail Drawer */}
         <ProductSheet

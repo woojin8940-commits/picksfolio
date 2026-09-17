@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Block, DesignSettings, OpenScheduleItem } from '../types';
 import PublicPageBody, { DEFAULT_PUBLIC_DESIGN, type AboutSection } from './PublicPageBody';
 import ProductSheet from './ProductSheet';
+import PublicPageFooter from './PublicPageFooter';
 
 /**
  * 편집 화면 오른쪽 폰 안의 미리보기.
@@ -74,7 +75,19 @@ const PagePreview: React.FC<PagePreviewProps> = ({
       searchQuery={searchQuery}
       onSearchQuery={setSearchQuery}
       onSelectBlock={setSelectedBlockId}
-    />
+    >
+      {/* 실제 페이지의 맨 아래 한 벌(공유 버튼 · 사업자 정보)을 그대로 그린다.
+          미리보기를 끝까지 내렸을 때 나오는 것이 실제 페이지와 같아야 한다. */}
+      <PublicPageFooter
+        design={fullDesign}
+        shareTitle={`${profile?.name || username || '픽스폴리오'}님의 픽스폴리오`}
+        shareUrl={
+          username
+            ? `${typeof window !== 'undefined' ? window.location.origin : ''}/${username}`
+            : '#'
+        }
+      />
+    </PublicPageBody>
     {/* 서랍은 본문 밖에 둔다 — 본문 안(가운데 칸)은 `relative` 라서, 그 안에서
         `absolute bottom-0` 은 페이지 맨 아래(스크롤을 다 내린 자리)에 붙는다.
         본문 밖으로 내면 기준이 폰 프레임이 되어, 실제 페이지에서 `fixed` 가 창

@@ -1365,12 +1365,12 @@ export async function persistMetrics(
     INSERT INTO creator_channels (
       username, instagram_handle, instagram_user_id, instagram_url, connected, followers, following,
       avg_views, avg_likes, avg_comments, reels_count, metrics_source, recent_reels, recent_feed,
-      synced_at, intro, categories, profile_image, profile_image_checked_at
+      synced_at, intro, categories, profile_image, profile_image_checked_at, metrics_checked_at
     ) VALUES (
       ${username}, ${handle}, ${freshId}, ${igUrl}, TRUE, ${followers}, ${following},
       ${avgViews}, ${avgLikes}, ${avgComments}, ${reelsCount}, 'meta_api',
       ${JSON.stringify(mirroredReels)}, ${JSON.stringify(mirroredFeed)}, NOW(),
-      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}, NOW()
+      ${String(existing?.intro || "")}, ${String(existing?.categories || "")}, ${profileImage}, NOW(), NOW()
     )
     ON CONFLICT (username) DO UPDATE SET
       instagram_handle = COALESCE(NULLIF(EXCLUDED.instagram_handle, ''), creator_channels.instagram_handle),
@@ -1392,11 +1392,31 @@ export async function persistMetrics(
       -- 지표를 통째로 받아 온 이 순간도 "사진을 물어본 시각"이다. 안 찍으면 방금
       -- 동기화한 계정을 명단이 다시 한 번 메타에 물어본다.
       profile_image_checked_at = NOW(),
+      -- 지표를 물어본 시각. 순환 재동기화가 "오래된 계정"을 고르는 기준이다.
+      metrics_checked_at = NOW(),
       synced_at = NOW(),
       updated_at = NOW()
   `;
 
   return await loadChannel(db, username);
+}
+
+/**
+ * "지표를 물어본 시각"만 찍는다.
+ *
+ * 성공한 순간은 persistMetrics 가 synced_at 과 함께 찍는다. 이 함수가 필요한 것은
+ * 실패한 순간이다 — 토큰이 죽었거나 메타가 실패를 돌려준 계정에 도장을 찍지 않으면,
+ * 그 계정이 "가장 오래 안 받아 온 계정"으로 영원히 목록 맨 앞에 남아 뒤에 선 계정은
+ * 한 번도 차례가 오지 않는다.
+ */
+async function stampMetricsCheck(db: any, username: string): Promise<void> {
+  try {
+    await db.sql`
+      UPDATE creator_channels SET metrics_checked_at = NOW() WHERE username = ${username}
+    `;
+  } catch (e) {
+    console.warn("[ig-metrics] 지표 확인 시각 저장 실패:", (e as Error)?.message);
+  }
 }
 
 /**
@@ -1419,6 +1439,8 @@ export async function syncChannelFromMeta(
   const fetched = await fetchInstagramMetrics(link);
   if (!fetched.ok) {
     if (fetched.code === "META_TOKEN_INVALID") await markLinkNeedsReauth(username, scope);
+    // 물어본 것은 사실이다. 실패에도 도장을 찍어야 순환이 이 계정에서 멈추지 않는다.
+    await stampMetricsCheck(db, username);
     return fetched;
   }
   // 토큰이 살아 있는 것이 확인됐다. 지난번 일시 오류로 남은 표시가 있으면 지운다.
@@ -1434,4 +1456,145 @@ export async function syncChannelFromMeta(
     viewsAvailable: fetched.metrics.viewsAvailable,
     sampled: fetched.metrics.reelsCount,
   };
+}
+
+/**
+ * 팔로워·팔로잉 수만 명단 행(creator_channels)에 옮긴다.
+ *
+ * 지표 전체를 다시 받는 것(syncChannelFromMeta)과 나눠 둔다 — 그쪽은 릴스 열두 편의
+ * 인사이트까지 부르므로 연동된 계정 전부를 매일 그렇게 훑을 수는 없다. 반면 팔로워
+ * 수는 이미 다른 일(일별 스냅샷)을 하려고 부른 응답에 함께 실려 오므로, 그 값을
+ * 명단 행에도 옮겨 적는 데는 메타 호출이 한 건도 늘지 않는다.
+ *
+ * 이 한 줄이 없으면 브랜드·담당자·운영자가 보는 팔로워 수는 "인플루언서가 연동한
+ * 날" 또는 "본인이 갱신을 누른 날"의 숫자로 굳는다. 팔로워가 두 배가 된 사람도
+ * 명단에서는 몇 달 전 숫자로 남아, 담당자는 지금 조건에 맞는 사람을 지나친다.
+ *
+ * 건드리는 칸은 팔로워·팔로잉 둘뿐이다. `synced_at` 은 찍지 않는다 — 그 시각은
+ * "지표를 통째로 받아 온 때"라는 뜻이고, 순환 재동기화가 오래된 계정을 고르는
+ * 기준이기도 하다. 여기서 찍으면 모든 계정이 방금 동기화한 것으로 보여 릴스·피드는
+ * 영원히 낡은 채로 남는다.
+ *
+ * 연동이 끊긴 행(connected = FALSE)과 본인이 손으로 적은 행은 손대지 않는다. 그쪽
+ * 숫자는 메타에서 온 값이 아니므로, 지금 토큰으로 받은 값을 섞으면 그 행이 무엇을
+ * 근거로 한 숫자인지 알 수 없게 된다.
+ */
+export async function applyFollowerCounts(
+  db: any,
+  username: string,
+  followers: number,
+  following: number | null,
+): Promise<boolean> {
+  const uname = String(username || "").trim().toLowerCase();
+  // 0 은 "못 받았다"와 구분되지 않는다. 확인된 숫자만 옮긴다.
+  if (!uname || !Number.isFinite(followers) || followers <= 0) return false;
+
+  try {
+    const rows = (await db.sql`
+      UPDATE creator_channels
+      SET followers = ${Math.round(followers)},
+          following = COALESCE(${following === null ? null : Math.round(following)}, following),
+          updated_at = NOW()
+      WHERE username = ${uname}
+        AND connected = TRUE
+        AND metrics_source = 'meta_api'
+        AND (followers IS DISTINCT FROM ${Math.round(followers)}
+             OR (${following === null ? null : Math.round(following)} IS NOT NULL
+                 AND following IS DISTINCT FROM ${following === null ? null : Math.round(following)}))
+      RETURNING username
+    `) as any[];
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (e) {
+    console.warn("[ig-metrics] 팔로워 수 반영 실패:", (e as Error)?.message);
+    return false;
+  }
+}
+
+/**
+ * 지표를 다시 받아 올 간격. 이 시간이 지난 계정만 명부를 여는 길에 다시 묻는다.
+ *
+ * 프로필 사진(6시간)보다 길게 잡는다. 여기서 받는 것은 사진 한 장이 아니라 미디어
+ * 목록과 릴스 인사이트 전체이고, 매일 도는 배치가 이미 같은 일을 순환으로 하고 있다.
+ * 이 길은 배치의 한 바퀴를 기다리지 못하는 계정 — 담당자가 지금 보고 있는 사람 —
+ * 만 앞으로 당겨 오는 역할이다.
+ */
+const CHANNEL_RESYNC_TTL_HOURS = 24;
+/**
+ * 한 번의 요청에서 지표를 다시 받아 올 계정 수 상한.
+ *
+ * 명부 한 화면에 서른 명이 뜨더라도 그 전부를 다시 받으면 담당자가 그 값을 로딩으로
+ * 낸다(그래서 이 일은 응답을 보낸 뒤에 돌린다). 여러 번의 열기에 걸쳐 오래된 계정이
+ * 차례로 정리되므로, 한 번에 좁게 잡는 것이 손실이 아니다.
+ */
+const CHANNEL_RESYNC_BATCH = 2;
+
+/**
+ * 명부에 뜬 사람 중 지표가 가장 오래된 몇 계정만 지금 것으로 다시 받아 온다.
+ *
+ * 왜 사진 갱신(refreshStaleChannelImages)만으로는 부족한가. 그쪽은 그림 주소만
+ * 갈아 끼우고, 굳어 있던 목록의 순서와 개수는 일부러 그대로 둔다 — 브랜드가 무엇을
+ * 보고 골랐는지의 기록이기 때문이다. 그래서 인플루언서가 인스타에서 지운 게시물은
+ * 담당자·운영자 명부에 그대로 남고, 팔로워 수도 연동한 날의 숫자로 남는다. 목록을
+ * 다시 세우는 일은 지표를 통째로 받아 오는 이 길밖에 없다.
+ *
+ * 브랜드가 보는 캠페인 명단에는 이 길을 쓰지 않는다. 그쪽 숫자는 "명단에 올린
+ * 순간의 스냅샷"이어야 하고, 담당자가 사람을 고르려고 보는 명부는 "지금"이어야 한다.
+ *
+ * 실패는 조용히 삼킨다 — 명부가 지표 한 건 때문에 열리지 않으면 안 된다. 호출한
+ * 곳은 응답을 보낸 뒤(waitUntil)에 이것을 돌리므로, 화면은 이 일을 기다리지 않고
+ * 다음 번 열기에서 새 숫자를 본다.
+ */
+export async function resyncStaleChannels(db: any, usernames: string[]): Promise<number> {
+  const names = [
+    ...new Set(
+      (usernames || []).map((n) => String(n || "").trim().toLowerCase()).filter(Boolean),
+    ),
+  ];
+  if (names.length === 0) return 0;
+
+  // 기준 시각은 JS 에서 계산해 넘긴다(refreshStaleChannelImages 와 같은 이유 —
+  // SQL 안에서 간격을 매개변수로 곱하면 같은 질의가 환경에 따라 다르게 풀린다).
+  const cutoff = new Date(Date.now() - CHANNEL_RESYNC_TTL_HOURS * 3600 * 1000).toISOString();
+
+  let stale: any[] = [];
+  try {
+    stale = (await db.sql`
+      SELECT username
+      FROM creator_channels
+      WHERE username = ANY(${names})
+        AND connected = TRUE
+        AND (metrics_checked_at IS NULL OR metrics_checked_at < ${cutoff})
+      ORDER BY metrics_checked_at ASC NULLS FIRST
+      LIMIT ${CHANNEL_RESYNC_BATCH}
+    `) as any[];
+  } catch (e) {
+    console.warn("[ig-metrics] 지표 재동기화 대상 조회 실패:", (e as Error)?.message);
+    return 0;
+  }
+  if (stale.length === 0) return 0;
+
+  const results = await Promise.all(
+    stale.map(async (row) => {
+      const username = String(row?.username || "");
+      if (!username) return false;
+      // 브랜드·담당자 명부에 쓰이는 숫자다. 브랜드 매칭받기를 끊어 둔 사람은
+      // 대상이 아니다(사진 갱신과 같은 규칙).
+      const resolved = await resolveSharedLink(username, "collab");
+      const link = resolved.link;
+      if (!link?.accessToken || link.needsReauth) {
+        // 물어볼 것이 없다. 도장만 찍어 다음 열기에서 이 계정을 다시 고르지 않게 한다.
+        await stampMetricsCheck(db, username);
+        return false;
+      }
+      try {
+        const result = await syncChannelFromMeta(db, username, link, resolved.scope || "dm");
+        return result.ok;
+      } catch (e) {
+        console.warn(`[ig-metrics] ${username} 지표 재동기화 실패:`, (e as Error)?.message);
+        await stampMetricsCheck(db, username);
+        return false;
+      }
+    }),
+  );
+  return results.filter(Boolean).length;
 }

@@ -8,14 +8,14 @@ import {
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
-  DmDirectSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
+  DmDirectSettings, DmFaqSettings, InstagramMedia, DM_CARD_IMAGE_MAX_MB,
 } from '../services/apiService';
 import { isNativeApp } from '../utils/appEnv';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import ManualDmModal from './ManualDmModal';
 import Toggle from './DmToggle';
-import { DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
+import { DmFaqSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmAutomationExtras';
 
 interface DmAutomationProps {
   userName: string;
@@ -574,13 +574,16 @@ const CarouselBuilder: React.FC<{
               </div>
 
               <div className="flex-1 min-w-0 space-y-2">
-                <div className="flex gap-1.5">
+                {/* 카드 한 장이 좁은 칸 안에 들어간다. 그림을 넣는 두 경로는 한 번씩
+                    쓰고 마는 버튼이라, 칸의 자리를 그림 미리보기에 내주도록 낮고
+                    작게 둔다. */}
+                <div className="flex gap-1">
                   <label
-                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2 text-[11px] font-black text-slate-600 ${
+                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-[10px] font-black text-slate-600 ${
                       working ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-pink-400 hover:text-pink-600'
                     }`}
                   >
-                    <Upload size={12} /> 이미지 올리기
+                    <Upload size={11} className="flex-shrink-0" /> 이미지 올리기
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/webp,image/gif"
@@ -598,13 +601,13 @@ const CarouselBuilder: React.FC<{
                     type="button"
                     onClick={() => setPickerFor(pickerFor === c.id ? null : c.id)}
                     disabled={Boolean(working)}
-                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border py-2 text-[11px] font-black transition-colors disabled:opacity-50 ${
+                    className={`flex-1 flex items-center justify-center gap-1 rounded-lg border py-1.5 text-[10px] font-black transition-colors disabled:opacity-50 ${
                       pickerFor === c.id
                         ? 'border-pink-500 bg-pink-50 text-pink-600'
                         : 'border-slate-200 bg-white text-slate-600 hover:border-pink-400 hover:text-pink-600'
                     }`}
                   >
-                    <Images size={12} /> 내 피드에서 고르기
+                    <Images size={11} className="flex-shrink-0" /> 피드에서 고르기
                   </button>
                 </div>
                 {/*
@@ -1367,12 +1370,15 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   const [externalDm, setExternalDm] = useState<DmAutomationSettings['externalDm']>(() => cachedSettings?.externalDm || null);
 
   /**
-   * 댓글 자동화와 별도로 저장·발송되는 추가 기능 — DM 수신 자체를 트리거로 쓰는
-   * 인사말·키워드 답장.
+   * 댓글 자동화와 별도로 저장·발송되는 추가 기능들.
    *
-   * 저장 경로(액션)가 달라서, 서버가 돌려준 값을 그대로 다시 담아 화면과 실제
-   * 상태를 일치시킨다.
+   *  faq     DM 창 첫 화면의 추천 질문 버튼(아이스브레이커).
+   *  direct  DM 수신 자체를 트리거로 쓰는 인사말·키워드 답장.
+   *
+   * 저장 경로(액션)가 각각 다르고 인스타그램 쪽 등록 결과까지 함께 돌아오므로,
+   * 서버가 돌려준 값을 그대로 다시 담아 화면과 실제 상태를 일치시킨다.
    */
+  const [faq, setFaq] = useState<DmFaqSettings>(() => cachedSettings?.faq || { enabled: false, items: [] });
   const [direct, setDirect] = useState<DmDirectSettings>(() => cachedSettings?.direct || {
     greeting: { enabled: false, message: '', buttons: [], onlyFirstContact: true },
     replies: [],
@@ -1394,6 +1400,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       automations,
       entitled,
       externalDm,
+      faq,
       direct,
       ...overrides,
     } as DmAutomationSettings);
@@ -1465,6 +1472,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         setAutomations(nextAutomations);
         setEntitled(s.entitled !== false);
         setExternalDm(s.externalDm || null);
+        if (s.faq) setFaq(s.faq);
         if (s.direct) setDirect(s.direct);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
@@ -1591,9 +1599,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     const prev = enabled;
     const v = !enabled;
     setEnabled(v);
-    const { ok } = await persist({ enabled: v });
+    const { ok, faq: nextFaq } = await persist({ enabled: v });
     if (!ok) setEnabled(prev);
-    else writeSettingsCache({ enabled: v });
+    // 스위치를 끄면 인스타그램에 올려둔 질문 버튼도 함께 내려간다. 서버가 그 결과를
+    // 돌려주므로 등록 상태 표시가 실제와 어긋나지 않게 반영한다.
+    else {
+      if (nextFaq) setFaq(nextFaq);
+      writeSettingsCache({ enabled: v, faq: nextFaq || faq });
+    }
   };
 
   /**
@@ -2231,6 +2244,16 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           masterEnabled={enabled}
           value={direct}
           onChange={setDirect}
+          onNotice={notify}
+        />
+        {/* 자주 묻는 질문(DM 창 추천 질문 버튼)은 "디엠 자동응답" 아래에 둔다. */}
+        <DmFaqSection
+          userName={userName}
+          connected={connected}
+          entitled={entitled}
+          masterEnabled={enabled}
+          value={faq}
+          onChange={setFaq}
           onNotice={notify}
         />
       </div>

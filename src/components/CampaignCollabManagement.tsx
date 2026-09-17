@@ -359,6 +359,27 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   }, [fetchCampaigns, fetchActualSpend]);
 
   /**
+   * 열어 놓은 캠페인의 값을 목록이 새로 읽어 온 값으로 맞춘다.
+   *
+   * 목록(campaigns)은 저장된 사본에서 먼저 그려지고 곧 서버 값으로 바뀌는데, 열려
+   * 있는 캠페인(selectedCampaign)은 누른 순간의 사본을 그대로 들고 있었다. 그래서
+   * 운영자가 승인을 마친 뒤에도 상세 화면 맨 위에는 '관리자 승인 대기 중'이 남아
+   * 있었다 — 목록의 상태 표시는 이미 '모집 중'인데 같은 화면의 위아래가 서로 다른
+   * 말을 했다.
+   *
+   * 값이 같을 때 새 객체를 넣지 않도록 문자열로 비교한다. 그러지 않으면 이 효과가
+   * 자기 자신을 다시 부른다.
+   */
+  useEffect(() => {
+    setSelectedCampaign(prev => {
+      if (!prev) return prev;
+      const fresh = campaigns.find(c => String(c.id) === String(prev.id));
+      if (!fresh || JSON.stringify(fresh) === JSON.stringify(prev)) return prev;
+      return fresh;
+    });
+  }, [campaigns]);
+
+  /**
    * 현황 화면에서 지목해 들어온 캠페인을 진행사항 탭으로 바로 펼친다.
    *
    * 목록이 오기 전에는 펼칠 대상이 없으므로 campaigns 가 채워진 뒤에 한 번 실행된다.
@@ -432,6 +453,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const handleSelectCampaign = (campaign: Campaign) => {
     selectedIdRef.current = campaign.id;
     setSelectedCampaign(campaign);
+    // 누른 값은 저장된 사본일 수 있다. 상세를 열면서 목록을 다시 읽어, 그사이 바뀐
+    // 승인 상태가 상세 화면에 반영되게 한다(위의 동기화 효과가 받아 넣는다).
+    fetchCampaigns();
     setDetailTab('influencer');
     setShowBrief(false);
     setCollabSummary(collabsRef.current.filter(c => c.campaignId === campaign.id));

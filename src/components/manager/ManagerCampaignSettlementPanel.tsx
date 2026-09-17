@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiService } from '../../services/apiService';
+import { copyText } from '../../utils/clipboard';
 import { formatKoreanWon } from '../../utils/formatters';
 
 /**
@@ -26,9 +27,13 @@ import { formatKoreanWon } from '../../utils/formatters';
  * (api-settlements 가 정산 항목에 수납 상태를 실어 보낸다). 브랜드가 "보낸 돈이
  * 접수됐나"를 담당자에게 묻지 않아도 되는 자리가 그것이다.
  *
- * 서류(신분증 사본 · 계좌)는 이 목록에 담지 않는다. 목록 응답에는 제출 여부만
- * 들어 있고, 서류 원본은 진행사항 보드의 정산 칸에서만 열린다 — 개인정보를 캠페인
- * 하나를 열었다는 이유로 스무 명분 내려받게 할 이유가 없다.
+ * 서류(신분증 사본 · 계좌)는 이 목록 응답에 담지 않는다. 목록에는 제출 여부만 들어
+ * 있고 — 개인정보를 캠페인 하나를 열었다는 이유로 스무 명분 내려받게 할 이유가 없다 —
+ * 대신 사람별 줄에서 '정산 정보 보기'를 누르면 그 한 사람의 상세만 따로 읽는다
+ * (getCollabDetail, role=manager). 송금하는 사람이 계좌를 확인하러 진행사항 탭으로
+ * 넘어가 협업을 다시 찾아 여는 일이 지급마다 반복되고 있었고, 그 왕복이 길어서
+ * 담당자는 계좌를 어딘가에 따로 적어 두게 된다. 보는 자리는 여기가 맞고, 다만 한
+ * 사람을 누른 순간에만 그 한 사람의 값이 내려온다.
  */
 
 interface ManagerCampaignSettlementPanelProps {
@@ -54,6 +59,33 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
   onChanged,
 }) => {
   const [busyId, setBusyId] = useState('');
+  /**
+   * 펼쳐 둔 사람의 정산 서류. 누른 사람만 한 명씩 읽어 담는다.
+   *
+   * 값은 협업 아이디로 담아 두므로 접었다 펼치면 다시 읽지 않는다. 화면을 떠나면
+   * 함께 사라진다 — 개인정보를 오래 들고 있을 이유가 없다.
+   */
+  const [docsById, setDocsById] = useState<Record<string, any>>({});
+  const [docsOpenId, setDocsOpenId] = useState('');
+  const [docsLoadingId, setDocsLoadingId] = useState('');
+
+  const toggleDocs = async (collabId: string) => {
+    if (docsOpenId === collabId) {
+      setDocsOpenId('');
+      return;
+    }
+    setDocsOpenId(collabId);
+    if (docsById[collabId] || docsLoadingId === collabId) return;
+    setDocsLoadingId(collabId);
+    const res = await apiService.getCollabDetail(collabId, undefined, 'manager');
+    setDocsLoadingId('');
+    if (res?.error) {
+      onNotify(res.error, 'error');
+      setDocsOpenId('');
+      return;
+    }
+    setDocsById((prev) => ({ ...prev, [collabId]: res?.settlement || {} }));
+  };
 
   /** 브랜드 일괄 정산금 수납 기록. 없으면 아직 확인 전이다. */
   const [brand, setBrand] = useState<any>(null);
@@ -428,7 +460,8 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
                     : { label: '지급일 미정', cls: 'bg-indigo-50 text-indigo-600' }
                   : { label: '서류 대기', cls: 'bg-amber-50 text-amber-600' };
             return (
-              <div key={r.id} className="p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div key={r.id} className="p-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3 min-w-0">
                   {r.image ? (
                     <img src={r.image} alt="" className="w-9 h-9 rounded-full object-cover bg-slate-100 flex-shrink-0" />
@@ -477,6 +510,78 @@ const ManagerCampaignSettlementPanel: React.FC<ManagerCampaignSettlementPanelPro
                     {busyId === r.id ? '처리 중...' : '정산완료'}
                   </button>
                 )}
+              </div>
+
+              {/* 인플루언서가 낸 정산 정보. 누른 사람 한 명분만 따로 읽어 온다. */}
+              <div className="mt-2">
+                <button
+                  onClick={() => toggleDocs(r.id)}
+                  className="text-[11px] font-black text-slate-500 hover:text-slate-800"
+                >
+                  {docsOpenId === r.id ? '정산 정보 접기' : '정산 정보 보기'}
+                  {!r.submitted && <span className="text-slate-300 font-bold"> · 미제출</span>}
+                </button>
+
+                {docsOpenId === r.id && (
+                  <div className="mt-2 rounded-xl bg-slate-50 border border-slate-100 p-3 space-y-1.5">
+                    {docsLoadingId === r.id ? (
+                      <p className="text-[11px] font-bold text-slate-400">불러오는 중...</p>
+                    ) : (() => {
+                      const info = docsById[r.id] || {};
+                      const holder = String(info.accountHolder || '');
+                      const bank = String(info.bankName || '');
+                      const account = String(info.accountNumber || '');
+                      if (!holder && !bank && !account && !info.idCardUrl) {
+                        return (
+                          <p className="text-[11px] font-bold text-slate-400">
+                            인플루언서가 아직 신분증 사본과 계좌를 제출하지 않았습니다.
+                          </p>
+                        );
+                      }
+                      return (
+                        <>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-black text-slate-400">예금주</span>
+                            <span className="text-xs font-black text-slate-800">{holder || '-'}</span>
+                            <span className="text-[10px] font-black text-slate-400 ml-2">은행</span>
+                            <span className="text-xs font-black text-slate-800">{bank || '-'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-black text-slate-400">계좌번호</span>
+                            <span className="text-xs font-black text-slate-800 break-all">
+                              {account || '-'}
+                            </span>
+                            {account && (
+                              <button
+                                onClick={() => copyText(account)}
+                                className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-[10px] font-black text-slate-500 hover:text-slate-800"
+                              >
+                                복사
+                              </button>
+                            )}
+                          </div>
+                          {info.idCardUrl && (
+                            <a
+                              href={info.idCardUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block text-[11px] font-black text-blue-600 hover:underline break-all"
+                            >
+                              신분증 사본 열기 · {info.idCardName || '파일'}
+                            </a>
+                          )}
+                          <p className="text-[10px] font-bold text-slate-400">
+                            {info.submittedAt
+                              ? `제출 ${String(info.submittedAt).slice(0, 10)}`
+                              : '제출일 기록 없음'}
+                            {info.payoutDate ? ` · 지급 예정 ${info.payoutDate}` : ''}
+                          </p>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
               </div>
             );
           })}

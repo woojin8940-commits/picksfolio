@@ -1,7 +1,8 @@
 import { getDatabase } from "@picks/netlify-database";
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { requireManager } from "./_shared/manager-auth.mts";
 import { shapeChannel } from "./_shared/campaign-listup.mts";
+import { refreshStaleChannelImages, resyncStaleChannels } from "./_shared/instagram-metrics.mts";
 
 /**
  * 담당자 인플루언서 명부 — 픽스폴리오에 등록된 인플루언서 전체를 카테고리로 묶어 준다.
@@ -16,6 +17,14 @@ import { shapeChannel } from "./_shared/campaign-listup.mts";
  * 협업 매칭 등록서(collab_directory_applications)다. 둘을 계정 이름으로 겹치되
  * 지표는 본인 등록을 우선한다 — 등록서의 숫자는 접수 시점에 손으로 적은 값이라
  * 시간이 지나면 틀린다.
+ *
+ * 숫자는 읽는 김에 뒤에서 조금씩 최신으로 맞춘다. creator_channels 의 값은 연동하는
+ * 순간과 인플루언서가 '갱신'을 누르는 순간에만 채워져 왔고, 둘 다 인플루언서의 손이
+ * 필요한 일이라 이 화면은 몇 달 전 숫자와 그때의 릴스 목록을 지금 것처럼 보여 줬다 —
+ * 인플루언서가 지운 게시물이 카드에 남고, 팔로워가 두 배가 된 사람도 옛 숫자로
+ * 남았다. 매일 도는 배치(scheduled-follower-snapshot)가 순환으로 같은 일을 하고,
+ * 이 길에서는 담당자가 지금 보고 있는 사람 중 가장 오래된 몇 계정만 앞으로 당겨
+ * 온다. 응답을 보낸 뒤에 돌리므로 화면이 그 값을 로딩으로 내지 않는다.
  */
 
 const norm = (raw: unknown) =>
@@ -57,7 +66,7 @@ const reelTrend = (reels: any[]) => {
   };
 };
 
-export default async (req: Request) => {
+export default async (req: Request, context: Context) => {
   const manager = await requireManager(req);
   if (!manager.ok) return manager.response;
 
@@ -224,6 +233,29 @@ export default async (req: Request) => {
     });
 
     list.sort((a, b) => (b.followers || 0) - (a.followers || 0));
+
+    /*
+     * 응답을 보낸 뒤에 지표를 조금씩 최신으로 맞춘다(위 머리글 참고).
+     *
+     * 두 가지를 나눠 부른다. 얼굴·썸네일만 바꿔 오는 가벼운 길(오래된 6계정까지)과,
+     * 릴스 목록·팔로워 수를 통째로 다시 받는 무거운 길(오래된 2계정까지)이다. 지운
+     * 게시물이 목록에서 사라지는 것은 뒤쪽만 할 수 있다 — 앞쪽은 굳어 있는 목록의
+     * 그림 주소만 갈아 끼우고 사라진 항목은 일부러 그대로 둔다.
+     *
+     * 대상은 화면에 실제로 뜬 사람뿐이다. 실패는 삼킨다 — 명부는 지표 없이도
+     * 그려져야 하고, 이 일은 이미 응답을 보낸 뒤라 화면에 알릴 자리도 없다.
+     */
+    const shown = list.filter((p) => p.connected).map((p) => p.username);
+    if (shown.length > 0) {
+      context.waitUntil(
+        resyncStaleChannels(db, shown)
+          .catch(() => 0)
+          // 순서를 지킨다. 지표를 통째로 받아 온 계정에는 사진 도장도 함께 찍히므로
+          // 뒤따르는 사진 갱신은 그 계정을 다시 고르지 않는다. 둘을 같이 돌리면 같은
+          // 행의 릴스 목록을 두 곳에서 쓰게 되고, 나중에 끝난 쪽이 남는다.
+          .then(() => refreshStaleChannelImages(db, shown).catch(() => 0)),
+      );
+    }
 
     /**
      * 카테고리 집계.
