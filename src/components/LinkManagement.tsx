@@ -2379,7 +2379,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           onPointerMove={handleCoverPosMove}
                           onPointerUp={handleCoverPosUp}
                         >
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-[10px] font-bold pointer-events-none">
+                          {/* 손가락으로는 이 끌기가 듣지 않는다(휴대폰에서는 같은 동작이
+                              화면 넘기기로 먹힌다). 할 수 없는 일을 적어 두면 표지 위에
+                              덮인 글자만 남으므로 넓은 화면에서만 띄운다. */}
+                          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-[10px] font-bold pointer-events-none">
                             <Move size={12} />
                             <span>드래그하여 노출 영역 조정</span>
                           </div>
@@ -2470,7 +2473,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         </button>
                       ))}
                     </div>
-                    <p className="text-[10px] text-slate-400 font-bold mt-1">1칸: 크게 표시 / 2,3칸: 동일 크기로 나열</p>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">한 줄에 몇 개를 놓을지 고릅니다 · 1칸: 가로 전체 / 2칸: 절반 / 3칸: 3분의 1(가장 작게)</p>
                   </div>
                   )}
                   <div>
@@ -2752,32 +2755,46 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       </button>
 
       {showMobilePreview && (
+        /* 휴대폰에서 보는 미리보기에는 폰 프레임을 두지 않는다.
+           프레임은 데스크톱에서 "휴대폰에서 이렇게 보인다"를 알려 주기 위한 그림이다.
+           그런데 휴대폰에서 그 그림을 다시 그리면, 이미 휴대폰인 화면 안에 더 작은
+           휴대폰(폭 300px)이 들어앉는다 — 카드도 글자도 실제 페이지보다 작게 나오니
+           여백과 글자 크기를 여기서 판단할 수 없었다. 프레임과 상태바를 빼고 화면
+           좌우를 꽉 채워, 미리보기가 실제 개인페이지와 같은 폭으로 그려지게 한다.
+           본문·상품 서랍·푸터 모두 공개 페이지와 같은 컴포넌트다(PagePreview). */
         <div className="lg:hidden fixed inset-0 z-[320] flex flex-col">
           <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={() => setShowMobilePreview(false)} />
-          <div className="relative z-10 mt-auto bg-[#EEF2F6] rounded-t-[2rem] p-4 pb-6 max-h-[94vh] modal-maxh-94 flex flex-col items-center gap-3 animate-in slide-in-from-bottom duration-300">
-            <div className="w-10 h-1 rounded-full bg-slate-300" />
-            <div className="flex items-center justify-between w-full px-1">
-              <h3 className="font-black text-sm text-[#1E1E2E]">실시간 미리보기</h3>
-              <button onClick={() => setShowMobilePreview(false)} className="flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -my-2 -mr-2 text-slate-400 hover:text-slate-600 transition-colors" aria-label="닫기"><X size={20} /></button>
+          <div className="relative z-10 mt-auto w-full bg-white rounded-t-[1.5rem] max-h-[94vh] modal-maxh-94 flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100 bg-white shrink-0">
+              <h3 className="font-black text-sm text-[#1E1E2E] pl-1">실시간 미리보기</h3>
+              <div className="flex items-center gap-1">
+                <a
+                  href={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-900 text-white text-[11px] font-black active:scale-95 transition-all"
+                >
+                  실제 페이지 열기
+                </a>
+                <button onClick={() => setShowMobilePreview(false)} className="flex items-center justify-center shrink-0 min-w-[44px] min-h-[44px] -mr-1 text-slate-400 hover:text-slate-600 transition-colors" aria-label="닫기"><X size={20} /></button>
+              </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain w-full flex justify-center pb-2">
-              <PhoneFrame
-                size="lg"
-                label="실시간 미리보기"
-                liveUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/${userName}`}
-                contentClassName={themeIsLight ? 'text-slate-900' : 'text-white'}
-                contentStyle={{ background: themeBackgroundOf(previewDesign) }}
-              >
-                <PagePreview
-                  design={previewDesign}
-                  profile={profile}
-                  socials={socials}
-                  blocks={blocks}
-                  managedCategories={managedCategories}
-                  openSchedule={previewSchedule}
-                  username={userName}
-                />
-              </PhoneFrame>
+            {/* 스크롤 칸에는 position 을 주지 않는다 — 상품 서랍(compact 에서 absolute)이
+                이 칸 대신 위의 relative 칸을 기준으로 잡혀, 실제 페이지에서 fixed 가
+                창 아래에 붙는 것과 같은 자리에 올라온다. */}
+            <div
+              className={`flex-1 min-h-0 overflow-y-auto overscroll-contain w-full ${themeIsLight ? 'text-slate-900' : 'text-white'}`}
+              style={{ background: themeBackgroundOf(previewDesign) }}
+            >
+              <PagePreview
+                design={previewDesign}
+                profile={profile}
+                socials={socials}
+                blocks={blocks}
+                managedCategories={managedCategories}
+                openSchedule={previewSchedule}
+                username={userName}
+              />
             </div>
           </div>
         </div>
@@ -2848,7 +2865,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     </button>
                   ))}
                 </div>
-                <p className="text-[10px] text-slate-400 font-bold text-center">1칸: 크게 표시 / 2,3칸: 동일 크기로 나열</p>
+                <p className="text-[10px] text-slate-400 font-bold text-center">한 줄에 몇 개를 놓을지 고릅니다 · 1칸: 가로 전체 / 2칸: 절반 / 3칸: 3분의 1(가장 작게)</p>
               </div>
               )}
             </div>

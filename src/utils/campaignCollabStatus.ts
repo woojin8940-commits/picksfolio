@@ -84,6 +84,13 @@ export type CampaignCollabStatus = {
   /** 확정 보수(원). 브랜드·인플루언서 본인에게만 응답에 실려 온다. */
   fee: number;
   /**
+   * 담당자가 명단(리스트업)에 올려 시작된 협업인가.
+   *
+   * 협업 현황 달력이 이 값으로 찍을 줄을 고른다 — 담당자가 올린 유가시딩(보수가 있는
+   * 건)만 남기고, 직접 남긴 기록과 브랜드가 보낸 제안은 달력에서 뺀다.
+   */
+  listed: boolean;
+  /**
    * 협업 내역의 분류. 서버가 협업 일정을 내역에 올릴 때 쓰는 규칙과 같게 맞춘다 —
    * 담당자가 일정을 확정하기 전과 후에 같은 협업이 다른 분류로 보이면 안 된다.
    */
@@ -172,6 +179,7 @@ export function toCampaignCollabStatus(row: any, role: CollabActionRole): Campai
     uploadConfirmedAt: String(row?.uploadConfirmedAt || ''),
     uploadedDay: asSeoulDay(row?.uploadedAt) || asSeoulDay(row?.uploadConfirmedAt),
     fee: Number(row?.fee || 0),
+    listed: Boolean(row?.listed),
     category:
       row?.campaignType === 'ad_collab' ? '광고' : row?.campaignType === 'group_buy' ? '커머스' : '기타',
     createdAt: String(row?.createdAt || ''),

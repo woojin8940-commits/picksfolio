@@ -1245,9 +1245,6 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     );
                   })}
                 </div>
-                <p className="text-[11px] font-bold text-blue-600 bg-blue-50 rounded-xl px-3 py-2 mt-2">
-                  💡 {AD_OBJECTIVES.find(o => o.value === form.ad_objective)?.tip}
-                </p>
               </div>
 
               {/* ------------------------------------------ 규모별 모집 인원 */}

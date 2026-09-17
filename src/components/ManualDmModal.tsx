@@ -579,25 +579,41 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
 
             <div className="space-y-2">
               {buttons.map((b, idx) => (
-                <div key={b.id || idx} className="flex items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                  <input
-                    type="text"
-                    value={b.label}
-                    onChange={(e) => handleUpdateButton(b.id, 'label', e.target.value)}
-                    placeholder={t('dm.buttonLabelPlaceholder', '버튼 라벨 (예: 링크 바로가기)', 'Button Label')}
-                    className="w-1/3 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500"
-                  />
+                /* 입력칸은 아무것도 적지 않아도 제 폭을 주장한다(min-content). 그래서
+                   좁은 화면에서 라벨·주소를 한 줄에 두면 주소칸이 회색 바탕을 뚫고
+                   나갔다. 휴대폰에서는 두 줄로 내리고, 한 줄로 두는 넓은 화면에서도
+                   min-w-0 으로 줄어들 수 있게 한다. */
+                <div
+                  key={b.id || idx}
+                  className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100"
+                >
+                  <div className="flex items-center gap-2 min-w-0 sm:w-1/3 sm:flex-none">
+                    <input
+                      type="text"
+                      value={b.label}
+                      onChange={(e) => handleUpdateButton(b.id, 'label', e.target.value)}
+                      placeholder={t('dm.buttonLabelPlaceholder', '버튼 라벨 (예: 링크 바로가기)', 'Button Label')}
+                      className="flex-1 min-w-0 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveButton(b.id)}
+                      className="text-slate-400 hover:text-red-500 p-1 sm:hidden flex-shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                   <input
                     type="url"
                     value={b.url}
                     onChange={(e) => handleUpdateButton(b.id, 'url', e.target.value)}
                     placeholder="https://..."
-                    className="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500"
+                    className="w-full sm:w-auto sm:flex-1 min-w-0 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-pink-500"
                   />
                   <button
                     type="button"
                     onClick={() => handleRemoveButton(b.id)}
-                    className="text-slate-400 hover:text-red-500 p-1"
+                    className="text-slate-400 hover:text-red-500 p-1 hidden sm:block flex-shrink-0"
                   >
                     <Trash2 size={14} />
                   </button>

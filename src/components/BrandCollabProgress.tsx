@@ -975,10 +975,15 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     정도다. 나머지는 담당자가 정리한다. */}
                 {detail.terms && (
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl bg-white border border-slate-200 px-4 py-3">
+                    {/* 브랜드가 보는 금액은 인플루언서 보수가 아니라 자기가 보낼
+                        광고비다(명단에 적힌 제시가 + 2차 활용). 보수를 그리면 보낼
+                        금액이 보수와 같아져 픽스폴리오 마진이 사라진다. */}
                     <div>
-                      <p className="text-[11px] text-slate-400 font-black">보수</p>
+                      <p className="text-[11px] text-slate-400 font-black">광고비</p>
                       <p className="text-sm text-slate-900 font-black">
-                        {detail.terms.fee ? formatKoreanWon(detail.terms.fee) : '협의 중'}
+                        {detail.billing?.brandAmount
+                          ? formatKoreanWon(detail.billing.brandAmount)
+                          : '협의 중'}
                       </p>
                     </div>
                     <div>

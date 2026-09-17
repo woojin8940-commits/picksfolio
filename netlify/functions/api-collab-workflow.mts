@@ -9,6 +9,7 @@ import {
 import { seoulDayOf, todayInSeoul } from "./_shared/campaign-recruit.mts";
 import { refreshStaleChannelImages } from "./_shared/instagram-metrics.mts";
 import { isUploadedFileUrl } from "./_shared/upload-media.mts";
+import { resolveBrandAmount } from "./_shared/brand-billing.mts";
 import {
   canTransitionStage,
   daysUntil,
@@ -622,6 +623,7 @@ export default async (req: Request, context: Context) => {
       const [
         stages, openFeedback, workRows, uploadedRows, shipRows, termRows,
         settlementRows, channelRows, siteRows, campaignRows, guideAssetRows,
+        listupFeeRows,
       ]: any[][] = await Promise.all([
         db.sql`
           SELECT collab_id, stage_key, title, status, due_date, owner_role, seq
@@ -671,6 +673,12 @@ export default async (req: Request, context: Context) => {
         db.sql`
           SELECT DISTINCT collab_id FROM collab_assets
           WHERE collab_id = ANY(${ids}) AND kind = 'guide' AND COALESCE(file_url, '') <> ''
+        `,
+        // 수락된 리스트업 제안의 금액. 조건표가 비어 있는 협업의 보수를 여기서 메운다 —
+        // 상세 화면과 같은 규칙이어야 목록의 0원과 상세의 금액이 어긋나지 않는다.
+        db.sql`
+          SELECT collab_id, offer FROM campaign_listups
+          WHERE collab_id = ANY(${ids})
         `,
       ]);
       /**
@@ -723,6 +731,22 @@ export default async (req: Request, context: Context) => {
        * 정리 중인) 협업은 0원으로 들어오므로, 화면은 잠긴 건수를 함께 센다.
        */
       const termMap = new Map(termRows.map((r) => [r.collab_id, r]));
+      /**
+       * 조건표가 비어 있을 때의 보수 = 인플루언서가 수락한 리스트업 제안의 금액.
+       *
+       * 담당자가 제안을 보내고 인플루언서가 수락하면 그 금액은 이미 합의된 조건이다.
+       * 그런데 담당자가 조건표를 다시 확정하지 않으면 목록의 보수가 0원으로 남아,
+       * 인플루언서 협업 현황과 정산 칸이 무보수 협업처럼 그려졌다.
+       */
+      const listupFeeMap = new Map(
+        (listupFeeRows || []).map((r) => {
+          const offer = (r.offer && typeof r.offer === "object" ? r.offer : {}) as any;
+          const fee = Math.trunc(Number(offer.fee || 0));
+          return [r.collab_id, Number.isFinite(fee) && fee > 0 ? fee : 0];
+        }),
+      );
+      const feeOf = (collabId: string) =>
+        Math.trunc(Number(termMap.get(collabId)?.fee || 0)) || Number(listupFeeMap.get(collabId) || 0);
 
       /**
        * 정산 단계의 사실만. 목록 카드도 "지금 누가 무엇을 해야 하는가"를 이 값으로
@@ -901,8 +925,16 @@ export default async (req: Request, context: Context) => {
            * 합계에서 그만큼 비었다. 인플루언서 조회는 위에서 creator_username = 본인으로
            * 좁혀져 있고 상세 화면은 이미 같은 값을 보여 준다.
            */
-          fee: Number(termMap.get(row.id)?.fee || 0),
+          fee: feeOf(row.id),
           feeLocked: Boolean(termMap.get(row.id)?.locked_at),
+          /**
+           * 담당자가 명단에 올려 시작된 협업인가.
+           *
+           * 협업 현황 달력이 이 값으로 줄을 고른다 — 담당자가 리스트업한 유가시딩만
+           * 찍고, 직접 남긴 기록이나 브랜드 제안은 달력에서 뺀다. 한동안 세 출처를
+           * 모두 찍었고, 그러면 진행 중인 캠페인이 직접 적어 둔 메모에 묻혔다.
+           */
+          listed: listupFeeMap.has(row.id),
           /**
            * 확정된 업로드 마감일. 협업 현황 달력이 이 날짜 하나만 찍는다.
            *
@@ -983,7 +1015,7 @@ export default async (req: Request, context: Context) => {
       if (role === "brand" || role === "manager") {
         context.waitUntil(refreshStaleChannelImages(db, [norm(collab.creator_username)]).catch(() => 0));
       }
-      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, brandSettlementRows, channelRows, siteRows] = await Promise.all([
+      const [stages, deliverables, feedbacks, events, termsRows, scheduleChanges, assets, shippingRows, settlementRows, brandSettlementRows, channelRows, siteRows, listupRows] = await Promise.all([
         loadStages(db, collabId),
         db.sql`SELECT * FROM collab_deliverables WHERE collab_id = ${collabId} ORDER BY created_at ASC` as PromiseLike<any[]>,
         db.sql`SELECT * FROM collab_feedbacks WHERE collab_id = ${collabId} ORDER BY created_at ASC` as PromiseLike<any[]>,
@@ -1009,11 +1041,55 @@ export default async (req: Request, context: Context) => {
         db.sql`
           SELECT username, data FROM site_data WHERE username = ${norm(collab.creator_username)}
         ` as PromiseLike<any[]>,
+        // 금액의 두 번째 근거 — 담당자가 명단에 적은 광고비와 합의된 지급액.
+        //
+        // 조건표(collab_terms)만 보면 금액이 0원으로 남는 구간이 있다. 리스트업 제안을
+        // 인플루언서가 수락해 협업이 만들어졌지만 담당자가 조건을 다시 확정하지
+        // 않았으면 조건표의 보수가 비어 있고, 그러면 업로드까지 끝낸 협업의 정산 칸에
+        // 0원이 찍힌다. 명단에는 금액이 적혀 있는데 화면만 모르는 상태다.
+        //
+        // 한 캠페인에 같은 사람은 한 번만 올라가므로(UNIQUE) 줄이 늘지 않는다.
+        db.sql`
+          SELECT offer, quoted_fee, quoted_second_use_fee
+          FROM campaign_listups
+          WHERE campaign_id = ${collab.campaign_id}
+            AND LOWER(influencer_username) = ${norm(collab.creator_username)}
+          LIMIT 1
+        ` as PromiseLike<any[]>,
       ]);
 
       const template = templateByKey(collab.template_key);
       const today = todayInSeoul();
       const terms = (termsRows as any[])?.[0] || null;
+
+      /**
+       * 이 협업의 두 금액 — 인플루언서가 받을 보수와 브랜드가 보낼 광고비.
+       *
+       * 보수는 확정 조건이 먼저고, 비어 있으면 인플루언서가 수락한 제안의 금액으로
+       * 메운다. 수락한 제안은 이미 양쪽이 합의한 조건이라 "아직 모르는 금액"이 아니다.
+       * 담당자가 조건표를 다시 확정하지 않았다는 이유로 0원을 보여 주면, 인플루언서는
+       * 무보수 협업으로 읽고 담당자는 정산 칸이 열리지 않는 이유를 찾지 못한다.
+       *
+       * 광고비는 명단에 적힌 제시가(+2차 활용)다. 보수와 다른 숫자이고 그 차액이
+       * 픽스폴리오 마진이므로, 브랜드 화면에 보수를 그려 두면 브랜드가 보낼 금액이
+       * 인플루언서 보수와 같아져 마진이 사라진다. 규칙은 _shared/brand-billing.mts.
+       */
+      const listupRow = ((listupRows as any[]) || [])[0] || null;
+      const listupOffer = (listupRow?.offer && typeof listupRow.offer === "object"
+        ? listupRow.offer
+        : {}) as any;
+      const wonOf = (raw: unknown) => {
+        const value = Math.trunc(Number(raw || 0));
+        return Number.isFinite(value) && value > 0 ? value : 0;
+      };
+      const payoutFee = wonOf(terms?.fee) || wonOf(listupOffer.fee);
+      const payoutSecondUseFee =
+        wonOf((terms?.deliverable_spec as any)?.secondUseFee) || wonOf(listupOffer.secondUseFee);
+      const brandBill = resolveBrandAmount({
+        quotedTotal: wonOf(listupRow?.quoted_fee) + wonOf(listupRow?.quoted_second_use_fee),
+        listed: Boolean(listupRow),
+        payoutFee: payoutFee + payoutSecondUseFee,
+      });
 
       // 가이드라인 한 덩어리.
       //
@@ -1086,7 +1162,7 @@ export default async (req: Request, context: Context) => {
         settlement: shapeSettlementInfo(
           (settlementRows as any[])?.[0],
           role,
-          Number(terms?.fee || 0),
+          payoutFee,
         ),
         /**
          * 브랜드 일괄 정산금 수납 상태.
@@ -1168,8 +1244,8 @@ export default async (req: Request, context: Context) => {
         feedbacks: shapeFeedbacks(feedbacks as any[], role),
         terms: terms
           ? {
-              fee: Number(terms.fee || 0),
-              netFee: netAfterWithholding(Number(terms.fee || 0)),
+              fee: payoutFee,
+              netFee: netAfterWithholding(payoutFee),
               rewardType: terms.reward_type || "",
               rewardNote: terms.reward_note || "",
               scriptDue: terms.script_due || "",
@@ -1181,6 +1257,21 @@ export default async (req: Request, context: Context) => {
               lockedAt: terms.locked_at,
             }
           : null,
+        /**
+         * 브랜드가 픽스폴리오에 보낼 금액. 브랜드와 담당자에게만 싣는다.
+         *
+         * 인플루언서에게는 보낼 이유가 없다 — 자기 보수가 아니라 브랜드가 내는 값이고,
+         * 두 숫자를 나란히 받으면 마진을 두고 협상이 시작된다. 브랜드 화면이 이 값을
+         * 쓰지 않으면 보수(payoutFee)가 광고비 자리에 그려져 마진이 0원이 된다.
+         */
+        ...(role === "influencer"
+          ? {}
+          : {
+              billing: {
+                brandAmount: brandBill.amount,
+                brandAmountPending: brandBill.pending,
+              },
+            }),
         scheduleChanges: (scheduleChanges as any[]).map((c) => ({
           id: c.id,
           stageKey: c.stage_key,

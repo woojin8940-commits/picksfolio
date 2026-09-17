@@ -6,7 +6,6 @@ import UserSettlement from './UserSettlement';
 import {
   CampaignCollabStatus,
   daysInWindow,
-  dropProposalsCoveredByCollabs,
   openCampaignCollab,
   toCampaignCollabStatuses,
   uploadWindow,
@@ -675,10 +674,31 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     // 점이 다른 날로 옮겨 다니지 않는다.
     const byCollabId = new Map(campaignCollabs.map(c => [c.id, c]));
 
-    const rows: CollabListItem[] = [
-      ...collabRecords.map(c => ({ ...c, _source: 'manual' as CollabSource })),
-      ...campaignCollabItems,
-    ];
+    /**
+     * 달력에 찍는 것은 담당자가 명단에 올린 유가시딩뿐이다.
+     *
+     * 예전에는 세 출처를 모두 찍었다 — 직접 남긴 협업 기록, 브랜드가 보낸 제안,
+     * 그리고 캠페인 협업. 그러면 실제로 촬영하고 올려야 하는 캠페인이 예전에 적어 둔
+     * 메모와 같은 굵기로 섞여서, 달력을 열어도 이번 달에 무엇을 해야 하는지가
+     * 드러나지 않았다. 보수가 없는 건(무가 · 제품 협찬)도 뺀다 — 일정 관리가 필요한
+     * 것은 돈이 걸린 유가시딩이다.
+     *
+     * 뺀 줄들이 사라지는 것은 아니다. 직접 기록과 제안은 아래 협업 내역 탭에 그대로
+     * 있고, 날짜를 누르면 열리는 상세 칸에도 남는다 — 달력 칸만 비운다.
+     */
+    const rows: CollabListItem[] = campaignCollabItems.filter(c => {
+      const linked = byCollabId.get(String(c._collabId || (c as any).collab_id || ''));
+      if (!linked?.listed) return false;
+      return Number(linked.fee || c.fee || 0) > 0;
+    });
+    /**
+     * 정산 점도 같은 줄들만. 협업이 달력에서 빠졌는데 그 입금일만 남으면 어느 협업의
+     * 돈인지 달력 안에서는 알 수 없다.
+     */
+    const allowedSettlementPrefixes = rows
+      .map(c => String(c._campaignId || ''))
+      .filter(Boolean)
+      .map(id => `campaign_${id}_`);
     rows.forEach(c => {
       const linked = byCollabId.get(String(c._collabId || (c as any).collab_id || ''));
       // 이미 올린 협업은 올린 날 하루에, 아직인 협업은 희망 게시 기간(23~26일) 전체에
@@ -708,27 +728,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       );
     });
 
-    // 브랜드가 직접 보낸 제안. 캠페인 협업으로 이미 찍히는 건은 뺀다 — 같은 일이 제안과
-    // 협업 두 점으로 찍히면 달력이 다시 두 배가 된다.
-    dropProposalsCoveredByCollabs(acceptedProposals, campaignCollabs).forEach(p => {
-      add(
-        {
-          id: `up_p_${p.id}`,
-          kind: 'upload',
-          title: p.title || p.company_name,
-          company: p.company_name,
-          done: isProposalDone(p),
-          cancelled: false,
-        },
-        dayOnly(p.end_date) || dayOnly(p.start_date),
-      );
-    });
-
     // 정산 점. 날짜 판정(지급 완료면 완료일, 아니면 예정일)은 위의 정산 맵이 이미
     // 한 번 했으므로 그 결과를 그대로 쓴다 — 같은 규칙을 두 번 적으면 달력의 점과
     // 아래 상세 목록이 다른 날에 놓인다.
     Object.entries(settlementEventsMap).forEach(([date, list]) =>
-      list.forEach(stl =>
+      list.forEach(stl => {
+        const propId = String((stl as any).proposal_id || '');
+        if (!allowedSettlementPrefixes.some(prefix => propId.startsWith(prefix))) return;
         add(
           {
             id: `stl_${stl.id}`,
@@ -740,8 +746,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             amount: Number(stl.amount || 0),
           },
           date,
-        ),
-      ),
+        );
+      }),
     );
 
     // 남은 일이 먼저다. 한 날에 여러 건이면 아직 끝나지 않은 것부터, 그리고 정산보다
@@ -755,7 +761,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     );
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collabRecords, campaignCollabItems, campaignCollabs, acceptedProposals, settlementEventsMap, today]);
+  }, [campaignCollabItems, campaignCollabs, settlementEventsMap, today]);
 
   /**
    * 점의 색 — 어느 캠페인인가.

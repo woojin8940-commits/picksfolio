@@ -850,6 +850,29 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 if (poolRows && poolOpen !== p.username) {
                   const m = metricsFrom(p);
                   const price = registeredPriceOf(p, campaign?.contentFormat);
+                  /**
+                   * 성함 · 연락처 · 카톡 아이디를 줄 보기에도 적는다.
+                   *
+                   * 명단에 올리기 전에 담당자가 하는 일은 전화나 카톡으로 조건을
+                   * 맞춰 보는 것이다. 카드를 하나씩 펼쳐야 번호가 보이면 후보
+                   * 스무 명에게 연락하려고 스무 번을 펼쳐 닫아야 했다. 서버가
+                   * 담당자 응답에만 contact 를 싣기 때문에(loadManagerContacts)
+                   * 브랜드 화면에는 이 줄이 아예 그려지지 않는다.
+                   *
+                   * 누르는 링크(tel:)는 여기 두지 않는다 — 줄 전체가 버튼이라
+                   * 링크를 넣으면 펼침과 통화가 같은 자리에서 겹친다. 전화·복사는
+                   * 펼친 카드의 연락처 칸이 맡는다.
+                   */
+                  const contact =
+                    p.contact && typeof p.contact === 'object' ? (p.contact as any) : null;
+                  const contactEntries: any[] = Array.isArray(contact?.entries)
+                    ? contact.entries
+                    : [];
+                  const valueOfKind = (kind: string) =>
+                    String(contactEntries.find((e) => e?.kind === kind)?.value || '').trim();
+                  const contactName = String(contact?.name || m.name || '').trim();
+                  const contactPhone = valueOfKind('phone');
+                  const contactKakao = valueOfKind('kakao');
                   return (
                     <button
                       key={p.username}
@@ -898,6 +921,27 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                           <span className="text-[10px] font-black text-emerald-600">연동</span>
                         )}
                       </div>
+                      {contact && (
+                        <div className="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap mt-1 pt-1 border-t border-slate-50">
+                          <span className="text-[10px] font-black text-slate-700">
+                            {contactName || '성함 미등록'}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              contactPhone ? 'text-slate-500' : 'text-slate-300'
+                            }`}
+                          >
+                            {contactPhone || '연락처 미등록'}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              contactKakao ? 'text-slate-500' : 'text-slate-300'
+                            }`}
+                          >
+                            카톡 {contactKakao || '미등록'}
+                          </span>
+                        </div>
+                      )}
                     </button>
                   );
                 }
