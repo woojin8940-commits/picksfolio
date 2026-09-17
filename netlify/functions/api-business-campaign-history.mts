@@ -141,7 +141,7 @@ export default async (req: Request, context: Context) => {
     // 빼되 목록에는 남긴다 — "몇 명이 중간에 빠졌는지"도 이력이다.
     const collabRows = (await db.sql`
       SELECT cc.id, cc.campaign_id, cc.creator_username, cc.status, cc.upload_url,
-             cc.confirmed_at, cc.completed_at, cc.cancelled_at, cc.created_at,
+             cc.ad_code, cc.confirmed_at, cc.completed_at, cc.cancelled_at, cc.created_at,
              COALESCE(ct.fee, 0) AS fee
       FROM campaign_collabs cc
       LEFT JOIN collab_terms ct ON ct.collab_id = cc.id
@@ -218,6 +218,10 @@ export default async (req: Request, context: Context) => {
           status: String(collab.status || ""),
           cancelled,
           uploadUrl,
+          // 인플루언서가 업로드 단계에 남긴 브랜디드 콘텐츠 파트너십 코드.
+          // 이 코드가 있어야 브랜드가 그 게시물을 자기 광고 소재로 돌릴 수 있어서,
+          // 이력 화면에서 부스팅 버튼을 열지 말지를 가르는 값이다.
+          partnershipCode: String(collab.ad_code || "").trim(),
           fee: intOf(collab.fee),
           followers: intOf(channel?.followers),
           metricsSource: String(channel?.metrics_source || ""),

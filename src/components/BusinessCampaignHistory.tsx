@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { authHeaders } from '../services/apiService';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
+import { AdBoost, addAdBoost } from '../utils/adBoosts';
+import AdBoostModal from './AdBoostModal';
 
 /**
  * 캠페인 이력 — 지난 캠페인에서 올라간 게시물의 성과.
@@ -24,6 +26,8 @@ import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 interface BusinessCampaignHistoryProps {
   businessUsername: string;
   companyName: string;
+  /** 부스팅 요청 뒤 광고 현황으로 넘어갈 수 있게 해 준다. */
+  onViewAdStatus?: () => void;
 }
 
 type PostMetric = {
@@ -46,6 +50,14 @@ type HistoryPost = {
   fee: number;
   followers: number;
   metricsSource: string;
+  /**
+   * 인플루언서가 업로드 단계에 남긴 브랜디드 콘텐츠 파트너십 코드.
+   *
+   * 브랜드가 이 게시물을 자기 광고로 돌릴 수 있는지를 가르는 값이다. 코드가 없으면
+   * 메타에서 그 게시물을 광고 소재로 지정할 수 없으니, 버튼을 눌러 보고 나서
+   * 막히는 대신 목록에서 미리 '코드 없음'으로 보여 준다.
+   */
+  partnershipCode: string;
   metrics: PostMetric | null;
   reason: string;
 };
@@ -146,7 +158,7 @@ const Kpi: React.FC<{ label: string; value: string; unit?: string; hint?: string
   </div>
 );
 
-const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ businessUsername }) => {
+const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ businessUsername, onViewAdStatus }) => {
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const cacheKey = `picks_biz_campaign_history_${cleanUsername}`;
 
@@ -164,6 +176,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
   const [status, setStatus] = useState<StatusFilter>('');
   const [sort, setSort] = useState<SortKey>('recent');
   const [openId, setOpenId] = useState<string | null>(null);
+  /** 부스팅 창을 연 게시물. 창이 캠페인 제목·인플루언서·썸네일을 그대로 받아 쓴다. */
+  const [boostTarget, setBoostTarget] = useState<{ campaign: HistoryCampaign; post: HistoryPost } | null>(null);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -504,6 +518,39 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                   게시물 보기
                                 </a>
                               )}
+
+                              {/* 광고로 돌릴 수 있는지를 코드 유무로 먼저 알려 준다.
+                                  버튼만 두면 브랜드는 눌러 본 뒤에야 막힌 이유를 알게 되고,
+                                  그 이유는 브랜드가 아니라 인플루언서가 풀 수 있는 일이다. */}
+                              <div className="mt-2 pt-2 border-t border-slate-100">
+                                {p.partnershipCode ? (
+                                  <p className="text-[10px] font-black text-slate-500 break-all">
+                                    파트너십 코드{' '}
+                                    <span className="text-slate-800">{p.partnershipCode}</span>
+                                  </p>
+                                ) : (
+                                  <p className="text-[10px] font-black text-amber-600">코드 없음</p>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={!p.partnershipCode || p.cancelled}
+                                  onClick={() => setBoostTarget({ campaign: c, post: p })}
+                                  className={`mt-1.5 w-full py-2 rounded-xl text-[11px] font-black transition-colors ${
+                                    p.partnershipCode && !p.cancelled
+                                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                  }`}
+                                >
+                                  메타 광고로 부스팅
+                                </button>
+
+                                {!p.partnershipCode && !p.cancelled && (
+                                  <p className="text-[9px] text-slate-400 font-medium mt-1 leading-tight">
+                                    인플루언서가 업로드 단계에 파트너십 코드를 남기면 광고로 돌릴 수 있습니다.
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -522,6 +569,22 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
             );
           })}
         </div>
+      )}
+
+      {boostTarget && (
+        <AdBoostModal
+          open
+          onClose={() => setBoostTarget(null)}
+          campaignId={boostTarget.campaign.id}
+          campaignTitle={boostTarget.campaign.title || '제목 없음'}
+          collabId={boostTarget.post.collabId}
+          creatorHandle={boostTarget.post.instagramHandle || boostTarget.post.creatorUsername}
+          partnershipCode={boostTarget.post.partnershipCode}
+          // 게시물 썸네일이 아직 안 맞춰졌으면 캠페인 썸네일로 대신한다.
+          thumbnailUrl={boostTarget.post.metrics?.thumbnailUrl || boostTarget.campaign.thumbnailUrl}
+          onSubmitted={(boost: AdBoost) => addAdBoost(cleanUsername, boost)}
+          onViewAdStatus={onViewAdStatus}
+        />
       )}
     </div>
   );
