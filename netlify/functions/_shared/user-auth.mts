@@ -126,7 +126,14 @@ export async function requireSignedInUser(req: Request): Promise<AuthResult> {
     userId: user.id,
     isAdmin: (profile?.role || "").toLowerCase() === "admin",
   };
-  rememberAuth(token, result);
+  // 아이디가 아직 없는 사람은 캐시하지 않는다.
+  //
+  // 가입 직후 "나만의 링크" 를 정하기 전에 나간 요청이 이 자리에 빈 username 을
+  // 남기면, 링크를 만든 뒤에도 최대 1분 동안 같은 토큰으로는 빈 값이 돌아온다.
+  // `requireAccountOwner` 는 그것을 "남의 계정" 으로 읽어 403 을 주므로, 방금 링크를
+  // 만든 사람의 첫 대시보드가 "다른 계정의 정보에는 접근할 수 없습니다." 로 채워진다.
+  // 아이디가 없는 상태는 가입 직후의 짧은 순간뿐이라 캐시로 아낄 것도 없다.
+  if (result.username) rememberAuth(token, result);
   return result;
 }
 

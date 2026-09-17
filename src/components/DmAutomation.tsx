@@ -4,7 +4,7 @@ import {
   Zap, Link2, X, ChevronRight, Sparkles, AlertCircle, Pencil, Power, Users,
   CornerDownRight, Hash, Reply, Eye, MousePointerClick, Image as ImageIcon,
   LayoutGrid, AlignLeft, GalleryHorizontalEnd, Upload, ImagePlus, Copy,
-  ArrowUp, ArrowDown, Images, Clock, CalendarClock,
+  ArrowUp, ArrowDown, Images, Clock, CalendarClock, RefreshCw,
 } from 'lucide-react';
 import {
   apiService, DmAutomationSettings, DmAutomationItem, DmMessageButton, DmCarouselCard,
@@ -85,6 +85,15 @@ const normalizeAutomation = (a: DmAutomationItem): DmAutomationItem => ({
 
 const dmSettingsCacheKey = (username: string) => `picks_dm_automation_${username.toLowerCase()}`;
 const dmMediaCacheKey = (username: string) => `picks_dm_media_${username.toLowerCase()}`;
+
+/**
+ * 첫 응답 뒤에 배경에서 더 받아올 페이지 수 상한.
+ *
+ * 서버가 한 번에 최대 400개를 주므로 여기까지면 사실상 모든 계정을 덮는다. 상한을
+ * 두는 이유는 커서가 어떤 이유로든 끝나지 않을 때 요청이 무한히 이어지지 않게
+ * 하기 위해서다.
+ */
+const MAX_FEED_PAGES = 6;
 
 function readJson<T>(key: string): T | null {
   try {
@@ -392,8 +401,11 @@ const CarouselBuilder: React.FC<{
   cards: DmCarouselCard[];
   media: InstagramMedia[];
   mediaLoading: boolean;
+  /** 게시물을 받아오지 못한 이유. 있으면 "사진이 없다" 대신 이 사유를 보여준다. */
+  mediaError: string;
+  onRetryMedia: () => void;
   onChange: (cards: DmCarouselCard[]) => void;
-}> = ({ userName, cards, media, mediaLoading, onChange }) => {
+}> = ({ userName, cards, media, mediaLoading, mediaError, onRetryMedia, onChange }) => {
   /** 카드별 이미지 작업 상태. 업로드는 몇 초 걸릴 수 있어 진행률을 그대로 보여준다. */
   const [busy, setBusy] = useState<Record<string, { ratio: number; label: string }>>({});
   const [imageError, setImageError] = useState<Record<string, string>>({});
@@ -624,6 +636,19 @@ const CarouselBuilder: React.FC<{
                     <Loader2 size={14} className="animate-spin" />
                     <span className="text-[11px] font-bold">게시물을 불러오는 중…</span>
                   </div>
+                ) : feedPhotos.length === 0 && mediaError ? (
+                  <div className="text-center py-6">
+                    <AlertCircle size={22} className="text-amber-400 mx-auto mb-1.5" />
+                    <p className="text-[11px] font-bold text-slate-600">피드 사진을 불러오지 못했어요</p>
+                    <button
+                      type="button"
+                      onClick={onRetryMedia}
+                      className="mt-2 inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-2.5 py-1.5 text-[10px] font-black hover:bg-slate-800"
+                    >
+                      <RefreshCw size={10} /> 다시 시도
+                    </button>
+                    <p className="text-[10px] text-slate-400 mt-1.5">파일로 직접 올려도 됩니다.</p>
+                  </div>
                 ) : feedPhotos.length === 0 ? (
                   <div className="text-center py-6">
                     <ImageIcon size={22} className="text-slate-300 mx-auto mb-1.5" />
@@ -734,9 +759,12 @@ const AutomationEditor: React.FC<{
   igUsername: string;
   media: InstagramMedia[];
   mediaLoading: boolean;
+  /** 게시물을 받아오지 못한 이유. 목록이 비었을 때 무엇을 해야 하는지 가른다. */
+  mediaError: string;
+  onRetryMedia: () => void;
   onClose: () => void;
   onSave: (a: DmAutomationItem) => void;
-}> = ({ initial, userName, igUsername, media, mediaLoading, onClose, onSave }) => {
+}> = ({ initial, userName, igUsername, media, mediaLoading, mediaError, onRetryMedia, onClose, onSave }) => {
   // 이 창은 열릴 때만 그려지므로 늘 열린 상태로 두면 된다. 자동응답 편집은 입력이
   // 많아 휴대폰에서 닫기 버튼이 위로 밀려나므로 뒤로가기로도 닫히게 한다.
   useCloseOnBack(true, onClose);
@@ -897,6 +925,19 @@ const AutomationEditor: React.FC<{
                 mediaLoading ? (
                   <div className="flex items-center justify-center gap-2 py-8 text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                     <Loader2 size={16} className="animate-spin" /> <span className="text-xs font-bold">게시물을 불러오는 중…</span>
+                  </div>
+                ) : media.length === 0 && mediaError ? (
+                  <div className="text-center py-8 border border-dashed border-amber-200 rounded-2xl bg-amber-50/60">
+                    <AlertCircle size={26} className="text-amber-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">게시물을 불러오지 못했어요</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 px-4 leading-relaxed">{mediaError}</p>
+                    <button
+                      type="button"
+                      onClick={onRetryMedia}
+                      className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-1.5 text-[11px] font-black hover:bg-slate-800"
+                    >
+                      <RefreshCw size={11} /> 다시 시도
+                    </button>
                   </div>
                 ) : media.length === 0 ? (
                   <div className="text-center py-8 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
@@ -1216,6 +1257,8 @@ const AutomationEditor: React.FC<{
                     cards={draft.cards}
                     media={media}
                     mediaLoading={mediaLoading}
+                    mediaError={mediaError}
+                    onRetryMedia={onRetryMedia}
                     onChange={(cards) => patch({ cards })}
                   />
                 </div>
@@ -1299,6 +1342,16 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
 
   const [media, setMedia] = useState<InstagramMedia[]>(() => Array.isArray(cachedMedia) ? cachedMedia : []);
   const [mediaLoading, setMediaLoading] = useState(() => Boolean(cachedSettings?.connected && !cachedMedia?.length));
+  /**
+   * 게시물을 받아오지 못한 이유.
+   *
+   * 빈 목록만으로는 "게시물이 없는 계정"과 "받아오지 못했다"를 구별할 수 없어서,
+   * 화면이 게시물이 있는 사람에게도 "인스타그램에 게시물을 올린 뒤 다시
+   * 확인해주세요"라고 말했다. 사유가 있으면 그 사유와 다시 시도할 방법을 준다.
+   */
+  const [mediaError, setMediaError] = useState('');
+  /** 연동이 만료돼 다시 동의가 필요한 상태. 이때는 "다시 시도"가 아니라 재연동이 답이다. */
+  const [mediaNeedsReauth, setMediaNeedsReauth] = useState(false);
 
   // 디엠 자동화는 프로 플랜 전용 기능이다. 서버가 계정 자격(entitled)을 함께 내려주며,
   // 자격이 없으면 저장·발송이 403 으로 막히므로 화면에서도 업그레이드 안내를 보여준다.
@@ -1346,17 +1399,51 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
     } as DmAutomationSettings);
   };
 
-  const loadMedia = () => {
+  /**
+   * 피드 게시물을 불러온다.
+   *
+   * 서버는 첫 응답을 시간 예산 안에서 끝내고, 남은 게시물이 있으면 이어보기 커서를
+   * 함께 준다. 여기서는 먼저 도착한 만큼을 곧바로 그려 놓고 나머지를 배경에서
+   * 이어 받는다 — 게시물이 많은 계정 때문에 모두가 첫 화면을 몇 초씩 기다릴
+   * 이유는 없다.
+   *
+   * 실패는 지우지 않는다. 예전에는 실패할 때 목록을 빈 배열로 덮어써서, 잠깐의
+   * 오류 한 번에 방금까지 보이던 게시물이 사라지고 "게시물이 없어요"가 남았다.
+   * 지금은 갖고 있던 목록을 그대로 두고 사유만 덧붙인다.
+   */
+  const loadMedia = async (opts: { refresh?: boolean } = {}) => {
     const request = ++requests.current.media;
     setMediaLoading(true);
-    apiService.getInstagramMedia(userName)
-      .then((m) => {
+    setMediaError('');
+    try {
+      const first = await apiService.getInstagramMedia(userName, { refresh: opts.refresh });
+      if (request !== requests.current.media) return;
+
+      let all = first.media;
+      if (all.length > 0 || !first.error) setMedia(all);
+      setMediaNeedsReauth(first.needsReauth);
+      setMediaError(first.error);
+      if (all.length > 0) writeJson(dmMediaCacheKey(userName), all);
+      setMediaLoading(false);
+
+      // 남은 페이지는 화면을 막지 않고 이어 받는다.
+      let cursor = first.nextCursor;
+      for (let page = 0; page < MAX_FEED_PAGES && cursor; page += 1) {
+        const more = await apiService.getInstagramMedia(userName, { after: cursor });
         if (request !== requests.current.media) return;
-        setMedia(m);
-        if (m.length > 0) writeJson(dmMediaCacheKey(userName), m);
-      })
-      .catch(() => { if (request === requests.current.media) setMedia([]); })
-      .finally(() => { if (request === requests.current.media) setMediaLoading(false); });
+        if (more.media.length === 0) break;
+        const seen = new Set(all.map((m) => m.id));
+        all = [...all, ...more.media.filter((m) => m.id && !seen.has(m.id))];
+        setMedia(all);
+        writeJson(dmMediaCacheKey(userName), all);
+        cursor = more.nextCursor;
+      }
+    } catch (e) {
+      if (request !== requests.current.media) return;
+      console.error('[DmAutomation] 게시물을 불러오지 못했습니다:', e);
+      setMediaError('게시물을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      setMediaLoading(false);
+    }
   };
 
   const load = () => {
@@ -1381,7 +1468,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         if (s.direct) setDirect(s.direct);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
-        if (s.connected) loadMedia();
+        if (s.connected) void loadMedia();
       })
       // getDmAutomation 은 스스로 오류를 삼키지만, 앞으로 구현이 바뀌어도 스피너가
       // 남지 않도록 여기서도 반드시 끝을 만든다.
@@ -1480,6 +1567,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       requests.current.media++;
       setReloading(false);
       setMediaLoading(false);
+      setMediaError('');
+      setMediaNeedsReauth(false);
       setConnected(false);
       setEnabled(false);
       setIgUsername('');
@@ -1890,17 +1979,52 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
               <Loader2 size={18} className="animate-spin" /> <span className="text-sm font-bold">게시물을 불러오는 중…</span>
             </div>
+          ) : media.length === 0 && mediaError ? (
+            /* 받아오지 못한 경우. 게시물이 없는 계정과 같은 말을 하면 안 된다 —
+               할 일이 "게시물 올리기"가 아니라 "다시 시도"(또는 재연동)이다. */
+            <div className="text-center py-10 border border-dashed border-amber-200 rounded-2xl bg-amber-50/60">
+              <AlertCircle size={28} className="text-amber-400 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-700">게시물을 불러오지 못했어요</p>
+              <p className="text-xs text-slate-500 mt-1 px-4 leading-relaxed">{mediaError}</p>
+              <button
+                type="button"
+                onClick={() => (mediaNeedsReauth ? connect() : void loadMedia({ refresh: true }))}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3.5 py-2 text-[11px] font-black hover:bg-slate-800"
+              >
+                <RefreshCw size={12} /> {mediaNeedsReauth ? '인스타그램 다시 연동하기' : '다시 시도'}
+              </button>
+            </div>
           ) : media.length === 0 ? (
             <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl bg-slate-50/60">
               <ImageIcon size={28} className="text-slate-300 mx-auto mb-2" />
               <p className="text-sm font-bold text-slate-500">불러올 게시물이 없어요</p>
               <p className="text-xs text-slate-400 mt-1">인스타그램에 게시물을 올린 뒤 다시 확인해주세요.</p>
+              <button
+                type="button"
+                onClick={() => void loadMedia({ refresh: true })}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-white border border-slate-200 text-slate-600 px-3.5 py-2 text-[11px] font-black hover:bg-slate-50"
+              >
+                <RefreshCw size={12} /> 새로고침
+              </button>
             </div>
           ) : (
             <>
               <p className="text-[12px] text-slate-500 font-medium mb-3">
                 게시물을 눌러 해당 게시물에 자동 DM을 설정하세요. 선택한 게시물의 댓글에만 자동으로 반응해요.
               </p>
+              {mediaError && (
+                /* 일부만 받아왔거나 보관해 둔 목록을 보여주는 중. 목록은 그대로 쓰되
+                   "이게 전부가 아닐 수 있다"는 것을 숨기지 않는다. */
+                <p className="flex items-start gap-1.5 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-3">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  <span className="leading-relaxed">
+                    {mediaError}{' '}
+                    <button type="button" onClick={() => void loadMedia({ refresh: true })} className="underline">
+                      다시 시도
+                    </button>
+                  </span>
+                </p>
+              )}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                 {media.map((m) => (
                   <div
@@ -2133,6 +2257,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
           igUsername={igUsername}
           media={media}
           mediaLoading={mediaLoading}
+          mediaError={mediaError}
+          onRetryMedia={() => void loadMedia({ refresh: true })}
           onClose={() => setEditing(null)}
           onSave={saveAutomation}
         />
