@@ -24,6 +24,9 @@ const MembershipPlan = lazyWithRetry(() => import('./MembershipPlan'));
 const BusinessTimeline = lazyWithRetry(() => import('./BusinessTimeline'));
 const CampaignCollabManagement = lazyWithRetry(() => import('./CampaignCollabManagement'));
 const BusinessCampaignHistory = lazyWithRetry(() => import('./BusinessCampaignHistory'));
+// 광고 현황 — 이력에서 고른 콘텐츠를 광고로 돌린 결과를 보는 화면. 메타 광고 API 연동
+// 전이라 아직 예시 데이터로 레이아웃만 서 있다.
+const BusinessAdStatus = lazyWithRetry(() => import('./BusinessAdStatus'));
 // 브랜드용 인사이트(우리 계정을 태그한 인플루언서 콘텐츠). 인플루언서용 인사이트와는
 // 다른 화면이며, 이 대시보드에서만 열린다.
 const BusinessTaggedContent = lazyWithRetry(() => import('./BusinessTaggedContent'));
@@ -34,7 +37,7 @@ interface BusinessEnterpriseDashboardProps {
   onLogout: () => void;
 }
 
-type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab' | 'tagged-insights' | 'campaign-history';
+type BizSubView = 'dashboard' | 'links' | 'trend' | 'dm-automation' | 'inbox' | 'calendar' | 'open-schedule' | 'membership' | 'timeline' | 'campaign-collab' | 'tagged-insights' | 'campaign-history' | 'ad-status';
 
 const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = ({ businessUsername, companyName, onLogout }) => {
   const [currentSubView, setCurrentSubView] = useState<BizSubView>('dashboard');
@@ -114,6 +117,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     later(1700, () => {
       import('./CampaignCollabManagement').catch(() => {});
       import('./BusinessCampaignHistory').catch(() => {});
+      import('./BusinessAdStatus').catch(() => {});
       import('./BusinessTimeline').catch(() => {});
       apiService.getCollabs('brand').catch(() => undefined);
       apiService.getBusinessTaggedMedia(cleanUsername).catch(() => undefined);
@@ -407,6 +411,13 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
         </LazyRoute>
       );
       break;
+    case 'ad-status':
+      subComponent = (
+        <LazyRoute>
+          <BusinessAdStatus businessUsername={businessUsername} companyName={companyName} />
+        </LazyRoute>
+      );
+      break;
     default:
       subComponent = null;
   }
@@ -617,6 +628,8 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <div className="my-3 border-t border-white/10" />
           <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
+          {/* 광고 현황은 이력에서 고른 콘텐츠의 다음 단계라, 이력 바로 아래에 둔다. */}
+          <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
@@ -646,6 +659,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
           <MobileNavItem icon="📈" label="인사이트" active={currentSubView === 'tagged-insights'} onClick={() => setCurrentSubView('tagged-insights')} />
           <MobileNavItem icon="📢" label="캠페인" active={currentSubView === 'campaign-collab'} onClick={() => setCurrentSubView('campaign-collab')} badge={collabUnread} />
           <MobileNavItem icon="📊" label="캠페인이력" active={currentSubView === 'campaign-history'} onClick={() => setCurrentSubView('campaign-history')} />
+          <MobileNavItem icon="📣" label="광고현황" active={currentSubView === 'ad-status'} onClick={() => setCurrentSubView('ad-status')} />
           <MobileNavItem icon="📨" label="제안현황" active={currentSubView === 'inbox'} onClick={() => setCurrentSubView('inbox')} />
           <MobileNavItem icon="💬" label="타임라인" active={currentSubView === 'timeline'} onClick={() => setCurrentSubView('timeline')} badge={timelineUnread} />
           <MobileNavItem icon="📅" label="협업현황" active={currentSubView === 'calendar'} onClick={() => setCurrentSubView('calendar')} />
@@ -672,6 +686,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
               <div className="my-2 border-t border-white/10" />
               <NavItem icon="📢" label="캠페인 협업" active={currentSubView === 'campaign-collab'} onClick={() => { setCurrentSubView('campaign-collab'); setIsMobileMenuOpen(false); }} badge={collabUnread} />
               <NavItem icon="📊" label="캠페인 이력" active={currentSubView === 'campaign-history'} onClick={() => { setCurrentSubView('campaign-history'); setIsMobileMenuOpen(false); }} />
+              <NavItem icon="📣" label="광고 현황" active={currentSubView === 'ad-status'} onClick={() => { setCurrentSubView('ad-status'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="📨" label="비즈니스 제안 현황" active={currentSubView === 'inbox'} onClick={() => { setCurrentSubView('inbox'); setIsMobileMenuOpen(false); }} />
               <NavItem icon="💬" label="협업 타임라인" active={currentSubView === 'timeline'} onClick={() => { setCurrentSubView('timeline'); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
               <NavItem icon="📅" label="협업 현황" active={currentSubView === 'calendar'} onClick={() => { setCurrentSubView('calendar'); setIsMobileMenuOpen(false); }} />

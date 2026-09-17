@@ -114,6 +114,20 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 /** 모집중이 아니면 전부 '마감' 쪽으로 묶는다. 이력 화면에서 필요한 구분은 그 둘이다. */
 type StatusFilter = '' | 'open' | 'closed';
 
+/**
+ * 이력을 가르는 기준은 카테고리가 아니라 성과다. 브랜드가 "지난번에 뭐가 잘 됐지"를
+ * 물을 때 알고 싶은 건 그게 패션 캠페인이었는지가 아니라 조회수·반응·CPV 중 어느
+ * 쪽으로 잘 됐는지다. 그래서 카테고리 구분을 빼고 그 세 축의 정렬만 남긴다.
+ */
+type SortKey = 'recent' | 'views' | 'reactions' | 'cpv';
+
+const SORT_TABS: [SortKey, string][] = [
+  ['recent', '최신순'],
+  ['views', '조회수순'],
+  ['reactions', '좋아요·댓글순'],
+  ['cpv', 'CPV순'],
+];
+
 const Kpi: React.FC<{ label: string; value: string; unit?: string; hint?: string; pending?: boolean }> = ({
   label, value, unit, hint, pending,
 }) => (
@@ -145,12 +159,10 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
   const [campaigns, setCampaigns] = useState<HistoryCampaign[]>(cached?.campaigns || []);
   const [totals, setTotals] = useState<HistoryTotals>(cached?.totals || EMPTY_TOTALS);
-  const [categoryList, setCategoryList] = useState<string[]>(cached?.categories || []);
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState('');
-  const [category, setCategory] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
-  const [sort, setSort] = useState<'recent' | 'views'>('recent');
+  const [sort, setSort] = useState<SortKey>('recent');
   const [openId, setOpenId] = useState<string | null>(null);
 
   const fetchHistory = useCallback(async () => {
@@ -165,7 +177,6 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
       }
       setCampaigns(data.campaigns || []);
       setTotals(data.totals || EMPTY_TOTALS);
-      setCategoryList(data.categories || []);
       setError('');
       try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
     } catch {
@@ -179,18 +190,26 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
 
   const visible = useMemo(() => {
     const rows = campaigns.filter((c) => {
-      if (category && c.category !== category) return false;
       if (status === 'open' && c.status !== 'active') return false;
       if (status === 'closed' && c.status === 'active') return false;
       return true;
     });
-    return sort === 'views'
-      ? [...rows].sort((a, b) => b.views - a.views)
-      : rows;
-  }, [campaigns, category, status, sort]);
+    if (sort === 'recent') return rows;
+    // 집계 전(0)인 캠페인은 성과순 정렬에서 아래로 내린다. 0 을 '가장 저렴한 CPV' 로
+    // 읽히게 두면 아직 숫자가 없는 캠페인이 제일 잘한 것처럼 맨 위에 올라온다.
+    const score = (c: HistoryCampaign) =>
+      sort === 'views' ? c.views : sort === 'reactions' ? c.likes + c.comments : c.cpv;
+    return [...rows].sort((a, b) => {
+      const av = score(a);
+      const bv = score(b);
+      if (av === 0 || bv === 0) return av === bv ? 0 : av === 0 ? 1 : -1;
+      // CPV 는 낮을수록 좋으니 오름차순, 조회수·반응은 높을수록 좋으니 내림차순.
+      return sort === 'cpv' ? av - bv : bv - av;
+    });
+  }, [campaigns, status, sort]);
 
-  // 필터를 걸면 위쪽 합계도 같이 움직여야 한다. 전체 합계만 남으면 "이 카테고리는
-  // 얼마나 됐지"를 볼 수 없다.
+  // 필터를 걸면 위쪽 합계도 같이 움직여야 한다. 전체 합계만 남으면 "지금 모집중인
+  // 건들은 얼마나 됐지"를 볼 수 없다.
   const shown = useMemo(() => {
     const base = { ...EMPTY_TOTALS };
     for (const c of visible) {
@@ -211,7 +230,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
     return base;
   }, [visible]);
 
-  const filtered = !!category || !!status;
+  const filtered = !!status;
   const coverage = shown.uploaded > 0 ? `업로드 ${shown.uploaded}건 중 ${shown.matched}건 집계` : '';
 
   if (loading) {
@@ -300,19 +319,19 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         </p>
       </div>
 
-      {/* 카테고리 · 상태 · 정렬. 이력을 훑는 동작이라 전부 한 줄에 둔다. */}
+      {/* 상태 · 정렬. 이력을 훑는 동작이라 한 줄에 둔다. */}
       <div className="mt-6 flex flex-wrap items-center gap-1.5">
-        {[{ key: '', label: '전체' }, ...categoryList.map((c) => ({ key: c, label: c }))].map((tab) => (
+        {SORT_TABS.map(([key, label]) => (
           <button
-            key={tab.key || 'all'}
-            onClick={() => setCategory(tab.key)}
+            key={key}
+            onClick={() => setSort(key)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-              category === tab.key
+              sort === key
                 ? 'bg-slate-900 text-white'
                 : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
             }`}
           >
-            {tab.label}
+            {label}
           </button>
         ))}
         <span className="w-px h-5 bg-slate-200 mx-1" />
@@ -331,13 +350,6 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
             </button>
           ),
         )}
-        <span className="w-px h-5 bg-slate-200 mx-1" />
-        <button
-          onClick={() => setSort(sort === 'recent' ? 'views' : 'recent')}
-          className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
-        >
-          {sort === 'recent' ? '최신순' : '조회수순'}
-        </button>
       </div>
 
       {visible.length === 0 ? (
@@ -348,7 +360,7 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
           <p className="text-[11px] text-slate-400 font-medium mt-1">
             {campaigns.length === 0
               ? '캠페인 협업에서 캠페인을 등록하면 진행 이력이 이 화면에 쌓입니다.'
-              : '카테고리나 상태 필터를 풀고 다시 확인해 보세요.'}
+              : '상태 필터를 풀고 다시 확인해 보세요.'}
           </p>
         </div>
       ) : (
@@ -383,11 +395,6 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                         {c.removed && (
                           <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-[10px] font-black">
                             목록에서 삭제
-                          </span>
-                        )}
-                        {c.category && (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black">
-                            {c.category}
                           </span>
                         )}
                       </div>
