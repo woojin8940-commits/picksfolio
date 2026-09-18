@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/apiService';
 import { categoryOptions, joinCategoryList, parseCategoryList } from '../utils/creatorCategories';
-import { digitsOnly, formatContact, formatNumberWithCommas, parseWonText } from '../utils/formatters';
+import { compactCountEn, digitsOnly, formatContact, formatNumberWithCommas, parseWonText } from '../utils/formatters';
 
 // 캠페인 협업 "매칭 받기" 등록 버튼 + 모달.
 // variant 로 역할을 고정한다:
@@ -220,6 +220,8 @@ const clearFormDraft = (variant: string, username: string) => {
 
 const compact = (n: number) => {
   if (!n || n < 0) return '0';
+  const english = compactCountEn(n);
+  if (english !== null) return english;
   if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, '')}억`;
   if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}만`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;

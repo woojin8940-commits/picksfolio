@@ -7,6 +7,40 @@
 export const todayInSeoul = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
+/**
+ * 금액·숫자 표기에 쓸 언어. `LanguageProvider` 가 언어를 바꿀 때 함께 바꾼다.
+ *
+ * 금액 서식 함수는 화면 예순 군데가 넘는 곳에서 인자 하나로 불린다. 여기에
+ * 언어를 인자로 더하면 호출부를 모두 고쳐야 하고, 빠뜨린 한 곳이 영어 화면에
+ * '3,000만원' 을 남긴다. DOM 번역으로도 메울 수 없다 — 정규식은 '만'·'억' 을
+ * 숫자로 되돌리는 계산을 못 하기 때문이다. 그래서 서식 단계에서 갈라 준다.
+ *
+ * 이 값은 화면에 보이는 문자열에만 쓴다. 저장·발송되는 금액은 숫자 그대로 다룬다.
+ */
+let displayLocale: 'ko' | 'en' = 'ko';
+
+export const setDisplayLocale = (locale: 'ko' | 'en'): void => {
+  displayLocale = locale;
+};
+
+/**
+ * 만·억으로 접은 숫자의 영어 표기(24,300 → 24.3K). 한국어일 때는 null 을 준다.
+ *
+ * 화면마다 따로 둔 `compact` 들이 이걸 먼저 물어보고, null 이면 원래대로
+ * 만·억으로 접는다. 한국어 표기를 건드리지 않으려고 이렇게 갈랐다.
+ */
+export const compactCountEn = (value: number | null | undefined): string | null => {
+  if (displayLocale !== 'en') return null;
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return null;
+  const trim = (n: number, unit: string) => `${n.toFixed(1).replace(/\.0$/, '')}${unit}`;
+  const abs = Math.abs(num);
+  if (abs >= 1_000_000_000) return trim(num / 1_000_000_000, 'B');
+  if (abs >= 1_000_000) return trim(num / 1_000_000, 'M');
+  if (abs >= 1_000) return trim(num / 1_000, 'K');
+  return num.toLocaleString('en-US');
+};
+
 export const formatNumberWithCommas = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '';
   const numbers = String(value).replace(/[^0-9]/g, '');
@@ -19,9 +53,10 @@ export const stripCommas = (value: string): string => {
 };
 
 export const formatKRW = (value: number | string | null | undefined): string => {
-  if (value === null || value === undefined) return '0원';
+  if (value === null || value === undefined) return displayLocale === 'en' ? '0 KRW' : '0원';
   const num = typeof value === 'string' ? Number(value.replace(/[^0-9]/g, '')) : value;
-  if (isNaN(num)) return '0원';
+  if (isNaN(num)) return displayLocale === 'en' ? '0 KRW' : '0원';
+  if (displayLocale === 'en') return `${formatNumberWithCommas(num)} KRW`;
   return `${formatNumberWithCommas(num)}원`;
 };
 
@@ -33,8 +68,10 @@ export const formatKRW = (value: number | string | null | undefined): string => 
  */
 export const formatSignedKRW = (value: number | null | undefined): string => {
   const num = Number(value || 0);
-  if (!Number.isFinite(num) || num === 0) return '0원';
-  return `${num < 0 ? '-' : '+'}${formatNumberWithCommas(Math.abs(Math.round(num)))}원`;
+  if (!Number.isFinite(num) || num === 0) return displayLocale === 'en' ? '0 KRW' : '0원';
+  const signed = `${num < 0 ? '-' : '+'}${formatNumberWithCommas(Math.abs(Math.round(num)))}`;
+  if (displayLocale === 'en') return `${signed} KRW`;
+  return `${signed}원`;
 };
 
 /**
@@ -50,6 +87,8 @@ export const formatSignedKRW = (value: number | null | undefined): string => {
 export const formatCountKo = (value: number | string | null | undefined): string => {
   const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : Number(value || 0);
   if (!Number.isFinite(num) || num <= 0) return '0';
+  const englishCount = compactCountEn(num);
+  if (englishCount !== null) return englishCount;
   const short = (n: number) => (n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
   if (num >= 100000000) return `${short(num / 100000000)}억`;
   if (num >= 10000) return `${short(num / 10000)}만`;
@@ -64,7 +103,8 @@ export const toAsciiSafeId = (s: string): string =>
 export const formatKoreanWon = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '';
   const num = typeof value === 'string' ? Number(String(value).replace(/[^0-9]/g, '')) : value;
-  if (isNaN(num) || num === 0) return '0원';
+  if (isNaN(num) || num === 0) return displayLocale === 'en' ? '0 KRW' : '0원';
+  if (displayLocale === 'en') return `${formatNumberWithCommas(num)} KRW`;
   const eok = Math.floor(num / 100000000);
   const man = Math.floor((num % 100000000) / 10000);
   const rest = num % 10000;

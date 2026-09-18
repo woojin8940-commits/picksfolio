@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../../services/apiService';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
-import { formatContact } from '../../utils/formatters';
+import { compactCountEn, formatContact } from '../../utils/formatters';
 
 interface DirApplication {
   id: string;
@@ -101,6 +101,8 @@ function insightOf(item: DirApplication): InsightScore | null {
 
 function fmtFollowers(n: number) {
   if (!n) return '0';
+  const english = compactCountEn(n);
+  if (english !== null) return english;
   if (n >= 10000) return `${(n / 10000).toFixed(n % 10000 === 0 ? 0 : 1)}만`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}천`;
   return n.toLocaleString();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
-import { formatContact, formatNumberWithCommas } from '../../utils/formatters';
+import { compactCountEn, formatContact, formatNumberWithCommas } from '../../utils/formatters';
 import { INSIGHT_HINT, insightGrade, insightScoreOf, type InsightScore } from '../../utils/influencerInsight';
 
 /**
@@ -36,6 +36,8 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
 const compact = (n: unknown) => {
   const v = Number(n || 0);
   if (!v) return '—';
+  const english = compactCountEn(v);
+  if (english !== null) return english;
   if (v >= 100000000) return `${(v / 100000000).toFixed(1)}억`;
   if (v >= 10000) return `${(v / 10000).toFixed(v >= 100000 ? 0 : 1)}만`;
   return formatNumberWithCommas(v);

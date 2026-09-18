@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatKRW, formatSignedKRW } from '../../utils/formatters';
+import { compactCountEn, formatKRW, formatSignedKRW } from '../../utils/formatters';
 
 /**
  * 전체 현황 — 운영자가 대시보드를 열자마자 답이 필요한 세 가지만 위에 둔다.
@@ -24,6 +24,8 @@ interface Props {
 /** 팔로워처럼 자릿수가 큰 수는 만/억으로 줄여 읽는다. */
 const compact = (n: number) => {
   const v = Number(n || 0);
+  const english = compactCountEn(v);
+  if (english !== null) return english;
   if (v >= 100000000) return `${(v / 100000000).toFixed(v % 100000000 === 0 ? 0 : 1)}억`;
   if (v >= 10000) return `${(v / 10000).toFixed(v % 10000 === 0 ? 0 : 1)}만`;
   return v.toLocaleString();
