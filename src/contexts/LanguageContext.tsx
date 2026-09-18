@@ -17,10 +17,165 @@ type PlatformTextPattern = {
   replacement: string;
 };
 
+type PatternGlue = {
+  /** 왼쪽이 한글 글자에 공백 없이 맞닿아 있는 캡처 자리의 번호. */
+  left: ReadonlySet<number>;
+  /** 오른쪽이 한글 글자에 공백 없이 맞닿아 있는 캡처 자리의 번호. */
+  right: ReadonlySet<number>;
+};
+
+type CompiledPlatformTextPattern = {
+  expression: RegExp;
+  replacement: string;
+  glue: PatternGlue;
+};
+
 type PlatformTextBundle = {
   translations: Readonly<Record<string, string>>;
   patterns: readonly PlatformTextPattern[];
 };
+
+const HANGUL_PATTERN = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+
+/** 캡처 안에 한글이 남았을 때 그 조각을 다시 번역해 보는 깊이 한계. */
+const MAX_PLATFORM_TEXT_DEPTH = 4;
+
+/**
+ * 패턴에서 한글 글자에 공백 없이 맞닿아 있는 캡처 자리를 미리 찾아 둔다.
+ *
+ * `^(.+?)원$` 의 '원' 처럼 캡처 바로 옆에 붙은 한글은 단위 글자다. 이런 자리는
+ * 숫자가 오는 것을 전제로 쓴 것이므로, 맞닿은 쪽에 한글이 들어오면 그것은
+ * '3,000원' 의 숫자 자리가 아니라 낱말을 가운데서 자른 것이다.
+ *
+ * 패턴은 문자열로 들어오므로 여는 괄호 바로 앞과 닫는 괄호 바로 뒤 글자만 보면
+ * 된다. 백슬래시로 escape 한 괄호(`\\(선택\\)`)와 문자 클래스(`[\\d,]`) 안쪽은
+ * 캡처가 아니므로 건너뛴다.
+ */
+const findPatternGlue = (source: string): PatternGlue => {
+  const left = new Set<number>();
+  const right = new Set<number>();
+  const openGroups: { index: number; start: number }[] = [];
+  let groupCount = 0;
+  let inCharacterClass = false;
+
+  for (let cursor = 0; cursor < source.length; cursor += 1) {
+    const char = source[cursor];
+    if (char === '\\') {
+      cursor += 1;
+      continue;
+    }
+    if (inCharacterClass) {
+      if (char === ']') inCharacterClass = false;
+      continue;
+    }
+    if (char === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+    if (char === '(') {
+      groupCount += 1;
+      openGroups.push({ index: groupCount, start: cursor });
+      continue;
+    }
+    if (char === ')') {
+      const group = openGroups.pop();
+      if (!group) continue;
+      if (HANGUL_PATTERN.test(source[group.start - 1] ?? '')) left.add(group.index);
+      if (HANGUL_PATTERN.test(source[cursor + 1] ?? '')) right.add(group.index);
+    }
+  }
+
+  return { left, right };
+};
+
+const applyReplacement = (replacement: string, groups: readonly string[]) => (
+  replacement.replace(/\$(\d)/g, (token, digit: string) => {
+    const group = groups[Number(digit) - 1];
+    return group === undefined ? token : group;
+  })
+);
+
+/**
+ * 사전에 없는 문구를 패턴으로 옮긴다. 옮겼으면 영어 문구, 못했으면 null.
+ *
+ * 캡처한 조각을 그대로 끼워 넣으면 '광고 현황' 이 'Ad 현황' 처럼 반만 영어가
+ * 된다. 그래서 조각에 한글이 남아 있으면 그 조각을 한 번 더 번역해서 끼운다.
+ * 사전에 없는 조각은 한글로 남지만, 그건 대개 사람 이름이나 캠페인 제목처럼
+ * 사용자가 적은 값이므로 그대로 두는 것이 맞다.
+ *
+ * 한 글자만 남은 조각은 다시 번역하지 않는다. 홀로 놓인 한 음절은 무엇을
+ * 가리키는지 알 수 없어서 — '금' 은 요일이기도 금속이기도 하다 — 사전을 찾으면
+ * 십중팔구 엉뚱한 낱말이 나온다. '10월 4일 (금)' 이 '(Gold)' 가 되는 식이다.
+ */
+export const translateNormalizedPlatformText = (
+  normalized: string,
+  translations: Readonly<Record<string, string>>,
+  patterns: readonly CompiledPlatformTextPattern[],
+  depth = 0,
+): string | null => {
+  const exact = translations[normalized];
+  if (exact) return exact;
+  if (depth >= MAX_PLATFORM_TEXT_DEPTH) return null;
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern.expression);
+    if (!match) continue;
+
+    const resolved: string[] = [];
+    let splitsAWord = false;
+
+    for (let index = 1; index < match.length; index += 1) {
+      const captured = match[index] ?? '';
+      const trimmed = captured.trim();
+
+      /**
+       * 단위 글자와 맞닿은 쪽에 한글이 왔으면 이 패턴은 낱말을 자르고 있다.
+       *
+       * '강원' 을 `^(.+?)원$` 으로 읽으면 '강 KRW', '경기·인천' 을 `^(.+?)천$`
+       * 으로 읽으면 '경기·인 thousand' 가 된다. 그럴 때는 이 패턴을 버리고 다음
+       * 패턴을 보고, 끝까지 맞는 것이 없으면 한국어를 그대로 둔다. 반쯤 옮겨 놓은
+       * '강 KRW' 보다 한국어 '강원' 이 읽을 수 있는 화면이다.
+       *
+       * 조각을 먼저 번역해 보고 판단하면 안 된다. '브랜드 회원' 의 '브랜드 회' 는
+       * 'Brand times' 로 옮겨져 한글이 사라지므로, 낱말을 자른 자리가 멀쩡한
+       * 영어로 위장한 채 통과한다.
+       */
+      if (pattern.glue.left.has(index) && HANGUL_PATTERN.test(trimmed.slice(0, 1))) {
+        splitsAWord = true;
+        break;
+      }
+      if (pattern.glue.right.has(index) && HANGUL_PATTERN.test(trimmed.slice(-1))) {
+        splitsAWord = true;
+        break;
+      }
+
+      let piece = captured;
+      if (HANGUL_PATTERN.test(captured) && trimmed.length > 1 && trimmed !== normalized) {
+        const inner = translateNormalizedPlatformText(
+          trimmed.replace(/\s+/g, ' '),
+          translations,
+          patterns,
+          depth + 1,
+        );
+        if (inner) piece = inner;
+      }
+      resolved.push(piece);
+    }
+
+    if (splitsAWord) continue;
+    return applyReplacement(pattern.replacement, resolved);
+  }
+
+  return null;
+};
+
+export const compilePlatformTextPatterns = (
+  patterns: readonly PlatformTextPattern[],
+): CompiledPlatformTextPattern[] => patterns.map(pattern => ({
+  expression: new RegExp(pattern.source),
+  replacement: pattern.replacement,
+  glue: findPatternGlue(pattern.source),
+}));
 
 let platformTextBundlePromise: Promise<PlatformTextBundle> | null = null;
 
@@ -209,26 +364,40 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return defaultKo || defaultEn || key;
   }, [language]);
 
-  const compiledPlatformTextPatterns = useMemo(() => (
-    (platformTextBundle?.patterns || []).map(pattern => ({
-      expression: new RegExp(pattern.source),
-      replacement: pattern.replacement,
-    }))
-  ), [platformTextBundle]);
+  const compiledPlatformTextPatterns = useMemo(
+    () => compilePlatformTextPatterns(platformTextBundle?.patterns || []),
+    [platformTextBundle],
+  );
+
+  /**
+   * 문구 하나를 번역한 결과를 기억해 둔다. 못 옮긴 문구는 null 로 기억한다.
+   *
+   * 화면 문구는 DOM 이 바뀔 때마다 다시 들어오고, 같은 문구가 목록 줄 수만큼
+   * 반복된다. 패턴이 400 개가 넘는데 캡처까지 다시 번역하므로, 기억해 두지 않으면
+   * 목록을 그릴 때마다 같은 계산을 되풀이한다. 못 옮긴 문구가 가장 비싸다 —
+   * 패턴을 끝까지 다 보고 나서야 없다는 것을 알기 때문이다.
+   */
+  const platformTextCache = useMemo(() => new Map<string, string | null>(), [compiledPlatformTextPatterns]);
 
   const translatePlatformText = useCallback((value: string): string => {
-    if (language !== 'en' || !/[가-힣]/.test(value)) return value;
+    if (language !== 'en' || !HANGUL_PATTERN.test(value)) return value;
     const leadingWhitespace = value.match(/^\s*/)?.[0] ?? '';
     const trailingWhitespace = value.match(/\s*$/)?.[0] ?? '';
     const normalized = value.replace(/\s+/g, ' ').trim();
-    const translated = platformTextBundle?.translations[normalized];
-    if (translated) return `${leadingWhitespace}${translated}${trailingWhitespace}`;
-    for (const pattern of compiledPlatformTextPatterns) {
-      if (!pattern.expression.test(normalized)) continue;
-      return `${leadingWhitespace}${normalized.replace(pattern.expression, pattern.replacement)}${trailingWhitespace}`;
+
+    let translated = platformTextCache.get(normalized);
+    if (translated === undefined) {
+      translated = translateNormalizedPlatformText(
+        normalized,
+        platformTextBundle?.translations || {},
+        compiledPlatformTextPatterns,
+      );
+      platformTextCache.set(normalized, translated);
     }
-    return value;
-  }, [compiledPlatformTextPatterns, language, platformTextBundle]);
+    if (translated === null) return value;
+
+    return `${leadingWhitespace}${translated}${trailingWhitespace}`;
+  }, [compiledPlatformTextPatterns, language, platformTextBundle, platformTextCache]);
 
   const contextValue = useMemo(() => ({
     language,
