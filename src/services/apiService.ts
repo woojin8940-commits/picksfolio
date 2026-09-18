@@ -299,6 +299,47 @@ function notifyAuthLost(): void {
   }
 }
 
+/**
+ * 메타 광고 계정 연동 진단 결과 — 콜백(`meta-ads-oauth-callback`)이 남긴 그대로다.
+ *
+ * 화면이 쓰는 값이 여기 다 들어 있다: 연동한 메타 계정, 접근 가능한 광고 계정 목록,
+ * 그리고 동의 화면에서 실제로 승인·거부된 권한. 토큰은 저장하지 않으므로 없다.
+ */
+export interface MetaAdsProbePayload {
+  ok: boolean;
+  status: number;
+  count?: number;
+  error?: string;
+  errorCode?: number;
+  accountId?: string;
+}
+
+export interface MetaAdsDiagnosisPayload {
+  connected: true;
+  connectedAt: string;
+  metaUserId: string;
+  metaUserName: string;
+  scopesRequested: string[];
+  granted: string[];
+  declined: string[];
+  accounts: {
+    id: string;
+    name: string;
+    businessName: string;
+    currency: string;
+    accountStatus?: number;
+  }[];
+  businesses: { id: string; name: string }[];
+  probes: {
+    me: MetaAdsProbePayload;
+    permissions: MetaAdsProbePayload;
+    adaccounts: MetaAdsProbePayload;
+    businesses: MetaAdsProbePayload;
+    campaigns: MetaAdsProbePayload;
+  };
+  tokenStored: false;
+}
+
 export interface AuthHeaderOptions {
   /**
    * 이 요청이 다루는 계정. 비즈니스 계정이면 그 계정 토큰으로 보낸다.
@@ -3891,6 +3932,103 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to start Instagram OAuth:', e);
       return { error: '네트워크 오류로 연동을 시작하지 못했습니다.' };
+    }
+  },
+
+  /**
+   * 메타 광고 계정 연동 시작 — 서명된 authorize URL 을 받는다.
+   *
+   * 광고 현황의 'Meta 계정 연동하기' 가 쓰는 경로다. 인스타그램 연동과 같은 이유로
+   * 인증된 POST 로만 URL 을 받는다(서명 없는 state 는 계정 연동 CSRF 가 된다).
+   * 돌려받은 URL 은 facebook.com 의 로그인 대화상자이고, 화면은 그 주소로 이동한다.
+   *
+   * returnTo 는 동의를 마친 뒤 돌아올 내부 경로다. 광고 현황은 URL 이 아니라 화면
+   * 상태로 열리는 하위 화면이라, 이 값이 없으면 대시보드 첫 화면에 떨어진다.
+   */
+  async metaAdsConnectUrl(
+    username: string,
+    returnTo?: string,
+  ): Promise<{ url?: string; scopes?: string[]; error?: string }> {
+    try {
+      const res = await fetch('/api/meta-ads/oauth/start', {
+        method: 'POST',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+        body: JSON.stringify({ username: normalizeAccount(username), returnTo }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || !data?.url) {
+        return { error: data?.error || `연동을 시작하지 못했습니다. (HTTP ${res.status})` };
+      }
+      return { url: data.url as string, scopes: Array.isArray(data.scopes) ? data.scopes : [] };
+    } catch (e) {
+      console.error('[API] Failed to start Meta ads OAuth:', e);
+      return { error: '네트워크 오류로 연동을 시작하지 못했습니다.' };
+    }
+  },
+
+  /**
+   * 메타 광고 계정 연동 상태(진단 결과) 조회.
+   *
+   * 화면이 "연동됨"을 스스로 적지 않고 여기서 읽는다 — 연동 여부와 광고 계정 목록,
+   * 권한 승인 상태는 모두 콜백이 메타에 실제로 물어본 결과다. 토큰은 저장하지
+   * 않으므로 이 응답에도 없다.
+   */
+  async metaAdsConnection(username: string): Promise<{
+    connection: MetaAdsDiagnosisPayload | null;
+    scopes: string[];
+    appConfigured: boolean;
+    error?: string;
+  }> {
+    try {
+      const res = await fetchWithTimeout(
+        `/api/meta-ads/connection/${encodeURIComponent(normalizeAccount(username))}`,
+        { headers: await authHeaders({}, { account: username }) },
+      );
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        return {
+          connection: null,
+          scopes: [],
+          appConfigured: true,
+          error: data?.error || `연동 상태를 읽지 못했습니다. (HTTP ${res.status})`,
+        };
+      }
+      return {
+        connection: (data?.connection as MetaAdsDiagnosisPayload) || null,
+        scopes: Array.isArray(data?.scopes) ? data.scopes : [],
+        appConfigured: data?.appConfigured !== false,
+      };
+    } catch (e) {
+      console.error('[API] Failed to read Meta ads connection:', e);
+      return {
+        connection: null,
+        scopes: [],
+        appConfigured: true,
+        error: '네트워크 오류로 연동 상태를 읽지 못했습니다.',
+      };
+    }
+  },
+
+  /**
+   * 메타 광고 계정 연동 해제 — 남겨 둔 진단 결과를 지운다.
+   *
+   * 저장한 토큰이 없으므로 지울 것은 진단 결과뿐이다. 메타 쪽에 남은 앱 권한까지
+   * 회수하려면 페이스북 계정 설정에서 앱을 삭제해야 한다(화면에 그렇게 적어 둔다).
+   */
+  async metaAdsDisconnect(username: string): Promise<boolean> {
+    try {
+      const res = await fetch(
+        `/api/meta-ads/connection/${encodeURIComponent(normalizeAccount(username))}`,
+        {
+          method: 'POST',
+          headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
+          body: JSON.stringify({ action: 'disconnect' }),
+        },
+      );
+      return res.ok;
+    } catch (e) {
+      console.error('[API] Failed to disconnect Meta ads:', e);
+      return false;
     }
   },
 

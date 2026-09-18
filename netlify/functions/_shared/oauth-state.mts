@@ -58,12 +58,17 @@ export interface StatePayload {
   r?: string
   /**
    * 이 연동이 무엇을 위한 것인지. 'collab' = 캠페인(브랜드 매칭) 등록 화면,
-   * 그 밖에는 디엠 자동화. 콜백이 토큰을 어느 보관함에 넣을지를 이 값으로 정한다.
+   * 'ads' = 광고 현황의 메타 광고 계정 연동, 그 밖에는 디엠 자동화. 콜백이 토큰을
+   * 어느 보관함에 넣을지를 이 값으로 정한다.
+   *
+   * 'ads' 는 인스타그램 연동과 **다른 앱·다른 콜백**을 쓴다. 두 흐름이 state 서명 키를
+   * 함께 쓰기 때문에, 이 표시가 없으면 한쪽에서 발급한 state 를 다른 쪽 콜백에 넣어도
+   * 서명을 통과한다 — 콜백마다 자기 용도의 state 만 받게 하려고 남긴다.
    *
    * 클라이언트가 보낸 값이지만 서명 안에 들어가므로 발급 뒤에는 바꿀 수 없고,
    * 발급 시점에 아는 사람은 본인뿐이다(인증된 POST 경로에서만 발급한다).
    */
-  p?: 'collab'
+  p?: 'collab' | 'ads'
 }
 
 /**
@@ -102,7 +107,7 @@ export async function issueSignedState(
   }
   const safeReturn = sanitizeReturnPath(returnTo)
   if (safeReturn) payload.r = safeReturn
-  if (purpose === 'collab') payload.p = 'collab'
+  if (purpose === 'collab' || purpose === 'ads') payload.p = purpose
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const state = `${body}.${sign(body, key)}`
 

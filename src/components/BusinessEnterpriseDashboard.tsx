@@ -289,6 +289,21 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
     if (!signal.aborted) setCollabUnread(unreadTotal);
   }, 120000, !!cleanUsername && currentSubView !== 'campaign-collab', cleanUsername, 4000);
 
+  /**
+   * 메타 광고 계정 연동 콜백 복귀 — 광고 현황으로 되돌린다.
+   *
+   * 하위 화면은 URL 이 아니라 상태로만 관리되므로, 연동을 마치고 페이지가 새로 뜨면
+   * 기본 대시보드에 떨어진다. 그러면 방금 연동을 마친 사람이 결과를 보려고 메뉴에서
+   * 광고 현황을 다시 찾아 들어가야 한다. 파라미터를 읽어 배너를 띄우고 URL 을 정리하는
+   * 일은 광고 현황(BusinessAdStatus)이 한다 — 여기서는 화면만 열어 준다.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('meta_ads_connected') || params.get('meta_ads_error')) {
+      setCurrentSubView('ad-status');
+    }
+  }, []);
+
   useEffect(() => {
     const handleNavigateTimeline = (e: Event) => {
       const detail = (e as CustomEvent).detail;
