@@ -1,15 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Check, ChevronDown, Loader2 } from 'lucide-react';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
-import { formatKoreanWon, formatNumberWithCommas, stripCommas, todayInSeoul } from '../utils/formatters';
-import {
-  AD_AGE_BANDS,
-  AD_PLACEMENTS,
-  AD_REGIONS,
-  AdBoost,
-  AdPlacement,
-} from '../utils/adBoosts';
+import { formatKoreanWon } from '../utils/formatters';
+import { AdBoost } from '../utils/adBoosts';
+import { AdDeliveryFields, labelCls, selectCls, useAdDelivery } from './AdDeliveryFields';
 
 /**
  * 콘텐츠 부스팅 창 — 이력에서 고른 게시물을 광고로 돌리는 설정.
@@ -52,48 +47,6 @@ interface AdBoostModalProps {
   onViewAdStatus?: () => void;
 }
 
-/** 오늘부터 n일 뒤 날짜(Asia/Seoul 기준의 오늘에서 센다). */
-const dateAfter = (days: number): string => {
-  const base = new Date(`${todayInSeoul()}T00:00:00`);
-  base.setDate(base.getDate() + days);
-  return base.toLocaleDateString('en-CA');
-};
-
-const labelCls = 'text-[11px] font-black text-slate-500';
-const fieldCls =
-  'w-full px-3 py-2.5 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-900 ' +
-  'focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors';
-const inputCls = `mt-1.5 ${fieldCls}`;
-/** 드롭다운은 화살표 자리를 비워 두고, 여백은 감싼 쪽에서 준다(화살표를 가운데 맞추려고). */
-const selectCls = `${fieldCls} appearance-none pr-9`;
-
-/** 여러 개를 켜고 끄는 칩. 연령·지역·노출 위치가 같은 모양을 쓴다. */
-const Chip: React.FC<{ label: string; on: boolean; onClick: () => void; box?: boolean }> = ({
-  label, on, onClick, box,
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    aria-pressed={on}
-    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black border transition-colors ${
-      on
-        ? 'bg-blue-50 border-blue-200 text-blue-700'
-        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-    }`}
-  >
-    {box && (
-      <span
-        className={`w-3.5 h-3.5 rounded-[5px] border flex items-center justify-center flex-shrink-0 ${
-          on ? 'bg-blue-600 border-blue-600' : 'border-slate-300'
-        }`}
-      >
-        {on && <Check className="w-2.5 h-2.5 text-white" strokeWidth={4} />}
-      </span>
-    )}
-    {label}
-  </button>
-);
-
 const AdBoostModal: React.FC<AdBoostModalProps> = ({
   open,
   onClose,
@@ -107,13 +60,8 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   onSubmitted,
   onViewAdStatus,
 }) => {
-  const [budget, setBudget] = useState('');
-  const [startDate, setStartDate] = useState(todayInSeoul());
-  const [endDate, setEndDate] = useState(dateAfter(14));
-  const [ageBands, setAgeBands] = useState<string[]>([]);
-  const [regions, setRegions] = useState<string[]>([]);
-  const [placementMode, setPlacementMode] = useState<'auto' | 'manual'>('auto');
-  const [placements, setPlacements] = useState<AdPlacement[]>([]);
+  // 예산 · 기간 · 타겟 · 노출 위치는 '새 광고 만들기' 창과 같은 값·같은 검증을 쓴다.
+  const delivery = useAdDelivery();
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -139,37 +87,13 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
 
   useCloseOnBack(open, onClose);
 
-  const budgetKrw = useMemo(() => parseInt(stripCommas(budget) || '0', 10) || 0, [budget]);
-
-  // 기간으로 나눈 하루 예산. 메타는 하루 단위로 쓰기 때문에, 총 예산만 적으면
-  // 브랜드는 이 광고가 하루에 얼마씩 나가는지를 모른 채 집행하게 된다.
-  const days = useMemo(() => {
-    if (!startDate || !endDate) return 0;
-    const from = new Date(`${startDate}T00:00:00`).getTime();
-    const to = new Date(`${endDate}T00:00:00`).getTime();
-    if (Number.isNaN(from) || Number.isNaN(to) || to < from) return 0;
-    return Math.round((to - from) / 86400000) + 1;
-  }, [startDate, endDate]);
-
-  const dailyBudget = days > 0 && budgetKrw > 0 ? Math.round(budgetKrw / days) : 0;
-
   /** 이 요청이 들어갈 계정. 성공 화면에서 어느 계정으로 갔는지 같이 적는다. */
   const selectedAccount = accounts.find((a) => a.id === adAccountId) || null;
 
-  const toggle = <T extends string>(list: T[], value: T): T[] =>
-    list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-
   const submit = async () => {
-    if (budgetKrw <= 0) {
-      setError('예산을 입력해 주세요.');
-      return;
-    }
-    if (days <= 0) {
-      setError('종료일을 시작일 이후로 정해 주세요.');
-      return;
-    }
-    if (placementMode === 'manual' && placements.length === 0) {
-      setError('노출 위치를 하나 이상 고르거나 자동 노출로 두세요.');
+    const invalid = delivery.validate();
+    if (invalid) {
+      setError(invalid);
       return;
     }
     setError('');
@@ -182,22 +106,17 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
     onSubmitted({
       id: `boost_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       requestedAt: new Date().toISOString(),
+      source: 'partnership',
       campaignId,
       campaignTitle,
       collabId,
       creatorHandle,
       partnershipCode,
       thumbnailUrl,
-      budgetKrw,
-      startDate,
-      endDate,
       // 연동 전이면 계정이 비어 나간다. 광고 현황이 그 요청을 어느 계정에서든
       // 보여 주므로, 연동을 안 했다는 이유로 집행 요청을 막지는 않는다.
       adAccountId: adAccountId || undefined,
-      ageBands,
-      regions,
-      placementMode,
-      placements: placementMode === 'manual' ? placements : [],
+      ...delivery.payload(),
     });
 
     setSubmitting(false);
@@ -235,7 +154,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
             <p className="text-[12px] text-slate-500 font-bold mt-1.5 leading-relaxed">
               {campaignTitle} · @{creatorHandle}
               <br />
-              예산 {formatKoreanWon(budgetKrw)} · {startDate} ~ {endDate}
+              예산 {formatKoreanWon(delivery.budgetKrw)} · {delivery.startDate} ~ {delivery.endDate}
               {selectedAccount && (
                 <>
                   <br />
@@ -342,126 +261,7 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                 )}
               </div>
 
-              <div>
-                <label className={labelCls} htmlFor="boost-budget">총 예산</label>
-                <input
-                  id="boost-budget"
-                  inputMode="numeric"
-                  value={budget}
-                  onChange={(e) => setBudget(formatNumberWithCommas(stripCommas(e.target.value)))}
-                  placeholder="예: 500,000"
-                  className={inputCls}
-                />
-                <p className="text-[10px] text-slate-400 font-bold mt-1">
-                  {dailyBudget > 0
-                    ? `${days}일 집행 기준 하루 약 ${formatKoreanWon(dailyBudget)}`
-                    : '기간으로 나눈 하루 예산을 여기에 적어 드립니다'}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls} htmlFor="boost-start">시작일</label>
-                  <input
-                    id="boost-start"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="boost-end">종료일</label>
-                  <input
-                    id="boost-end"
-                    type="date"
-                    value={endDate}
-                    min={startDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <p className={labelCls}>타겟 연령</p>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {AD_AGE_BANDS.map((band) => (
-                    <Chip
-                      key={band}
-                      label={band}
-                      on={ageBands.includes(band)}
-                      onClick={() => setAgeBands((prev) => toggle(prev, band))}
-                    />
-                  ))}
-                </div>
-                {/* 아무것도 고르지 않은 상태가 "빠뜨렸다"가 아니라 "전체"라는 걸 적어 둔다. */}
-                <p className="text-[10px] text-slate-400 font-bold mt-1.5">
-                  {ageBands.length === 0 ? '고르지 않으면 연령 전체로 집행합니다' : `${ageBands.length}개 연령대`}
-                </p>
-              </div>
-
-              <div>
-                <p className={labelCls}>타겟 지역</p>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {AD_REGIONS.map((region) => (
-                    <Chip
-                      key={region}
-                      label={region}
-                      on={regions.includes(region)}
-                      onClick={() => setRegions((prev) => toggle(prev, region))}
-                    />
-                  ))}
-                </div>
-                <p className="text-[10px] text-slate-400 font-bold mt-1.5">
-                  {regions.length === 0 ? '고르지 않으면 전국으로 집행합니다' : `${regions.length}개 지역`}
-                </p>
-              </div>
-
-              <div>
-                <p className={labelCls}>노출 위치</p>
-                <div className="flex gap-1.5 mt-1.5">
-                  {([['auto', '자동 노출'], ['manual', '직접 선택']] as ['auto' | 'manual', string][]).map(
-                    ([mode, label]) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setPlacementMode(mode)}
-                        className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${
-                          placementMode === mode
-                            ? 'bg-slate-900 border-slate-900 text-white'
-                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ),
-                  )}
-                </div>
-
-                {placementMode === 'auto' ? (
-                  <p className="text-[10px] text-slate-400 font-bold mt-1.5 leading-relaxed">
-                    메타가 피드 · 스토리 · 릴스 · 탐색 중 성과가 나오는 위치로 예산을 나눠 씁니다.
-                  </p>
-                ) : (
-                  <div className="mt-2 animate-in fade-in duration-200">
-                    <div className="flex flex-wrap gap-1.5">
-                      {AD_PLACEMENTS.map((p) => (
-                        <Chip
-                          key={p.value}
-                          box
-                          label={p.label}
-                          on={placements.includes(p.value)}
-                          onClick={() => setPlacements((prev) => toggle(prev, p.value))}
-                        />
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-bold mt-1.5">
-                      고른 위치에만 노출됩니다. 위치를 좁히면 단가가 올라갈 수 있습니다.
-                    </p>
-                  </div>
-                )}
-              </div>
+              <AdDeliveryFields delivery={delivery} idPrefix="boost" />
             </div>
 
             <div className="border-t border-slate-100 px-5 py-4 bg-white">
