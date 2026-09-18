@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { apiService, type TaggedMediaItem, type TaggedMediaResponse } from '../services/apiService';
+import { compactCountEn } from '../utils/formatters';
 
 /**
  * 인사이트 — 브랜드가 "누가 우리를 태그했는지" 보는 화면.
@@ -87,6 +88,8 @@ const C_COMMENTS = '#0d9488';
 /** 큰 숫자는 만·억 단위로 접는다. 카드 안에서 자리를 다투지 않게. */
 const compact = (n: number | null | undefined): string => {
   if (n === null || typeof n === 'undefined' || !Number.isFinite(n) || n < 0) return '—';
+  const english = compactCountEn(n);
+  if (english !== null) return english;
   if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, '')}억`;
   if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}만`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;

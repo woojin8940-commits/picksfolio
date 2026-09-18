@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import PlatformLanguageBridge from '../components/PlatformLanguageBridge';
+import { setDisplayLocale } from '../utils/formatters';
 
 export type Language = 'ko' | 'en';
 
@@ -163,6 +164,15 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return (saved === 'en' || saved === 'ko') ? saved : 'ko';
   });
   const [platformTextBundle, setPlatformTextBundle] = useState<PlatformTextBundle | null>(null);
+
+  /**
+   * 금액 서식을 이 렌더 전에 맞춰 둔다.
+   *
+   * effect 로 미루면 언어를 바꾼 직후 한 번은 옛 표기로 그려지고, 다시 그릴
+   * 일이 없으면 '3,000만원' 이 영어 화면에 그대로 남는다. 자식보다 먼저 도는
+   * 이 자리에서 맞춰 두면 같은 렌더에서 올바른 표기가 나온다.
+   */
+  setDisplayLocale(language);
 
   useEffect(() => {
     if (language !== 'en' || platformTextBundle) return;

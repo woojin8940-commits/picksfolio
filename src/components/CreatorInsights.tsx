@@ -25,6 +25,7 @@ import {
   WEEKDAYS_KO,
   type ReelCoaching,
 } from '../utils/reelCoaching';
+import { compactCountEn } from '../utils/formatters';
 
 /**
  * 인사이트 — 인플루언서 본인이 자기 계정 성과를 보는 화면.
@@ -248,6 +249,8 @@ const sumOf = (reels: InsightReel[], pick: (r: InsightReel) => number | null) =>
 const compact = (n: number | null | undefined): string => {
   if (n === null || typeof n === 'undefined' || !Number.isFinite(n)) return '—';
   if (n < 0) return '—';
+  const english = compactCountEn(n);
+  if (english !== null) return english;
   if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, '')}억`;
   if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')}만`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}천`;
