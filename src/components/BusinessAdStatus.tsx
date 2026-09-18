@@ -1,9 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Settings2 } from 'lucide-react';
+import { ChevronDown, Plus, Settings2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
-import { AdBoost, placementSummary, readAdBoosts, subscribeAdBoosts, targetSummary } from '../utils/adBoosts';
+import {
+  AdBoost,
+  addAdBoost,
+  ctaLabel,
+  findAdPage,
+  findObjective,
+  placementSummary,
+  readAdBoosts,
+  subscribeAdBoosts,
+  targetSummary,
+} from '../utils/adBoosts';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import MetaAdConnectCard from './MetaAdConnectCard';
+import AdCreateModal from './AdCreateModal';
 import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
 
 /**
@@ -38,6 +49,12 @@ import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
  * 된다. 그래서 연동 전에는 화면 전체를 연동 안내로 바꾸고, 연동 후에도 광고 계정을
  * 고르기 전까지는 목록을 열지 않는다. 연동·계정 선택 상태는 utils/adAccounts 에 있고,
  * 부스팅 창도 같은 값을 읽어 '연동 광고 계정' 을 채운다.
+ *
+ * 광고가 이력에서만 출발하지는 않는다. 자체 촬영물이나 인플루언서 콘텐츠가 아직 없는
+ * 신제품처럼, 돌릴 소재가 캠페인 밖에 있는 경우가 있다. 그래서 상단에 '새 광고 만들기'
+ * 를 두고 직접 소재 업로드 창(AdCreateModal)을 연다. 그 요청도 부스팅과 같은 자리에
+ * 저장되어 이 목록에 '집행 요청' 으로 올라오고, 카드에서 '자체 소재' 배지와 광고 목적으로
+ * 구분된다 — 목록을 둘로 나누면 브랜드는 돌고 있는 광고를 두 화면에서 세야 한다.
  */
 
 interface BusinessAdStatusProps {
@@ -46,7 +63,8 @@ interface BusinessAdStatusProps {
 }
 
 /**
- * 'requested' 는 캠페인 이력에서 부스팅으로 집행을 요청한 광고다.
+ * 'requested' 는 픽스폴리오 안에서 집행을 요청한 광고다(이력에서의 부스팅,
+ * 광고 현황에서의 직접 소재 업로드).
  *
  * 검수 중('review')과 구분해서 둔다. 검수는 메타가 소재를 보고 있는 상태이고,
  * 요청은 아직 메타로 넘어가지도 않은 상태다 — 집행 권한 심사가 끝나야 넘어간다.
@@ -57,9 +75,24 @@ type AdStatus = 'requested' | 'active' | 'review' | 'paused' | 'ended';
 type AdItem = {
   id: string;
   campaignTitle: string;
-  creatorHandle: string;
+  /**
+   * 소재를 올린 인플루언서. 브랜드가 직접 올린 소재로 만든 광고에는 없다 —
+   * 그 자리에는 광고가 나가는 페이지 이름을 대신 적는다.
+   */
+  creatorHandle?: string;
   /** 인플루언서가 게시물에 올려 둔 파트너십 코드. 광고로 돌릴 수 있는 근거다. */
-  partnershipCode: string;
+  partnershipCode?: string;
+  /**
+   * 브랜드가 직접 올린 소재로 만든 광고. 파트너십 광고와 한 목록에 섞이므로,
+   * 카드에서 '자체 소재' 배지와 광고 목적으로 구분해 준다.
+   */
+  own?: boolean;
+  /** 자체 소재 광고에서 고른 광고 목적(브랜드 인지도 · 트래픽 · 전환). */
+  objectiveLabel?: string;
+  /** 광고가 나가는 페이지 이름. 자체 소재 광고에만 있다. */
+  pageName?: string;
+  /** CTA 문구와 연결 URL 을 한 줄로. 자체 소재 광고에만 있다. */
+  ctaLine?: string;
   status: AdStatus;
   startDate: string;
   endDate: string;
@@ -290,14 +323,30 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-black text-slate-900 truncate">{ad.campaignTitle}</span>
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${badge.cls}`}>{badge.label}</span>
+            {/* 소재가 어디서 왔는지. 한 목록에 섞여 있으니 카드에서 바로 구분되어야 한다. */}
+            {ad.own && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-violet-50 text-violet-600">
+                자체 소재
+              </span>
+            )}
+            {ad.objectiveLabel && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-slate-100 text-slate-500">
+                {ad.objectiveLabel}
+              </span>
+            )}
           </div>
           <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-            @{ad.creatorHandle}
+            {ad.creatorHandle ? `@${ad.creatorHandle}` : ad.pageName || '자체 소재'}
             {` · ${ad.startDate} ~ ${ad.endDate}`}
           </p>
-          <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-            파트너십 코드 {ad.partnershipCode}
-          </p>
+          {ad.partnershipCode && (
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+              파트너십 코드 {ad.partnershipCode}
+            </p>
+          )}
+          {ad.ctaLine && (
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5 break-all">{ad.ctaLine}</p>
+          )}
           {(ad.targetLine || ad.placementLine) && (
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
               {[ad.targetLine, ad.placementLine].filter(Boolean).join(' · ')}
@@ -402,36 +451,53 @@ const AdCard: React.FC<{ ad: AdItem }> = ({ ad }) => {
 
       {requested && (
         <p className="text-[10px] text-blue-600 font-black mt-2 leading-relaxed">
-          캠페인 이력에서 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로
-          집행되고, 그때부터 지표가 쌓입니다.
+          {ad.own
+            ? '직접 올린 소재로 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로 집행되고, 그때부터 지표가 쌓입니다.'
+            : '캠페인 이력에서 집행을 요청한 광고입니다. 메타 광고 집행 권한 심사가 끝나면 이 조건 그대로 집행되고, 그때부터 지표가 쌓입니다.'}
         </p>
       )}
     </div>
   );
 };
 
-/** 부스팅 요청을 광고 카드가 그대로 읽을 수 있는 모양으로 바꾼다. */
-const boostToAd = (boost: AdBoost): AdItem => ({
-  id: boost.id,
-  campaignTitle: boost.campaignTitle,
-  creatorHandle: boost.creatorHandle,
-  partnershipCode: boost.partnershipCode,
-  status: 'requested',
-  startDate: boost.startDate,
-  endDate: boost.endDate,
-  // 집행 전이라 지표가 없다. 0 으로 두면 카드가 전부 '—' 로 비워 그린다.
-  impressions: 0,
-  clicks: 0,
-  reach: 0,
-  conversions: 0,
-  conversionValueKrw: 0,
-  budgetKrw: boost.budgetKrw,
-  spendKrw: 0,
-  thumbnailUrl: boost.thumbnailUrl,
-  targetLine: targetSummary(boost),
-  placementLine: placementSummary(boost),
-  adAccountId: boost.adAccountId,
-});
+/**
+ * 집행 요청을 광고 카드가 그대로 읽을 수 있는 모양으로 바꾼다.
+ *
+ * 부스팅과 자체 소재 광고가 같은 목록에 들어온다. 다른 것은 위쪽 세 줄뿐이다 —
+ * 제목이 캠페인 이름인지 광고 제목인지, 그 아래가 인플루언서인지 페이지인지,
+ * 근거가 파트너십 코드인지 CTA·연결 URL 인지.
+ */
+const boostToAd = (boost: AdBoost): AdItem => {
+  const own = boost.source === 'own';
+  const page = findAdPage(boost.pageId);
+  return {
+    id: boost.id,
+    campaignTitle: (own ? boost.headline : boost.campaignTitle) || '제목 없음',
+    creatorHandle: own ? undefined : boost.creatorHandle,
+    partnershipCode: own ? undefined : boost.partnershipCode,
+    own,
+    objectiveLabel: findObjective(boost.objective)?.label,
+    pageName: page?.name,
+    ctaLine: own
+      ? [ctaLabel(boost.cta), boost.linkUrl].filter(Boolean).join(' · ') || undefined
+      : undefined,
+    status: 'requested',
+    startDate: boost.startDate,
+    endDate: boost.endDate,
+    // 집행 전이라 지표가 없다. 0 으로 두면 카드가 전부 '—' 로 비워 그린다.
+    impressions: 0,
+    clicks: 0,
+    reach: 0,
+    conversions: 0,
+    conversionValueKrw: 0,
+    budgetKrw: boost.budgetKrw,
+    spendKrw: 0,
+    thumbnailUrl: boost.thumbnailUrl,
+    targetLine: targetSummary(boost),
+    placementLine: placementSummary(boost),
+    adAccountId: boost.adAccountId,
+  };
+};
 
 /**
  * 연동 여부와 상관없이 늘 같은 자리에 두는 안내.
@@ -451,8 +517,9 @@ const ReviewNotice: React.FC = () => (
       끝나면 아래 숫자는 실제 광고 인사이트로 바뀝니다. 지금 보이는 값은 화면 확인용 예시입니다.
     </p>
     <p className="text-[11px] text-blue-600 font-medium mt-2 leading-relaxed">
-      캠페인 이력에서 '메타 광고로 부스팅'으로 집행을 요청한 광고는 '집행 요청' 상태로 이 목록
-      맨 위에 올라옵니다. 심사가 끝나면 요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
+      캠페인 이력에서 '메타 광고로 부스팅'으로 요청한 광고와, 위쪽 '새 광고 만들기'로 직접 올린
+      소재를 집행 요청한 광고는 모두 '집행 요청' 상태로 이 목록 맨 위에 올라옵니다. 심사가 끝나면
+      요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
     </p>
   </div>
 );
@@ -464,6 +531,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const [filter, setFilter] = useState<'' | 'running' | 'ended'>('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [boosts, setBoosts] = useState<AdBoost[]>(() => readAdBoosts(cleanUsername));
+  // 직접 올린 소재로 광고를 만드는 창. 집행 요청은 부스팅과 같은 자리에 저장된다.
+  const [createOpen, setCreateOpen] = useState(false);
 
   const { connection, accounts, account, connected, connect, disconnect, selectAccount } =
     useMetaAdConnection(cleanUsername);
@@ -561,21 +630,36 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </span>
           </div>
           <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
-            캠페인 이력에서 성과가 좋았던 콘텐츠를 광고로 돌린 현황을 확인합니다
+            캠페인 이력에서 고른 콘텐츠와 직접 올린 소재로 돌린 광고 현황을 확인합니다
           </p>
         </div>
 
-        {/* 연동을 마친 뒤에도 계정을 바꾸러 돌아올 자리. 목록 화면에서는 작게 둔다. */}
-        {connected && account && !settingsOpen && (
+        <div className="flex-shrink-0 flex flex-wrap items-center justify-end gap-1.5">
+          {/* 연동을 마친 뒤에도 계정을 바꾸러 돌아올 자리. 목록 화면에서는 작게 둔다. */}
+          {connected && account && !settingsOpen && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-500 hover:bg-slate-50 transition-colors"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              연동 설정
+            </button>
+          )}
+
+          {/*
+            이력에 게시물이 없어도 광고를 시작할 수 있는 자리. 부스팅은 캠페인 이력에서
+            출발하므로, 자체 소재로 돌리려는 브랜드에게는 이 화면에 들어올 문이 없었다.
+          */}
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-500 hover:bg-slate-50 transition-colors"
+            onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[11px] font-black hover:bg-blue-700 transition-colors"
           >
-            <Settings2 className="w-3.5 h-3.5" />
-            연동 설정
+            <Plus className="w-3.5 h-3.5" strokeWidth={3} />
+            새 광고 만들기
           </button>
-        )}
+        </div>
       </div>
 
       {showConnectGuide ? (
@@ -723,7 +807,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                 <>
                   <p className="text-sm text-slate-400 font-bold">이 광고 계정으로 집행한 광고가 아직 없습니다.</p>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    캠페인 이력에서 성과가 좋았던 콘텐츠를 골라 부스팅하면 여기에 올라옵니다.
+                    캠페인 이력에서 성과가 좋았던 콘텐츠를 골라 부스팅하거나, '새 광고 만들기'로 직접
+                    올린 소재를 집행하면 여기에 올라옵니다.
                   </p>
                 </>
               ) : (
@@ -741,6 +826,20 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             </div>
           )}
         </>
+      )}
+
+      {/*
+        집행 요청은 부스팅과 똑같이 addAdBoost 로 남긴다 — 같은 목록, 같은 '집행 요청'
+        상태로 올라가야 브랜드가 두 흐름의 결과를 한 화면에서 센다.
+      */}
+      {/* 닫을 때 지워 둔다 — 다시 열었을 때 지난번 입력이나 성공 화면이 남으면 안 된다. */}
+      {createOpen && (
+        <AdCreateModal
+          open
+          onClose={() => setCreateOpen(false)}
+          account={account}
+          onSubmitted={(boost: AdBoost) => addAdBoost(cleanUsername, boost)}
+        />
       )}
     </div>
   );
