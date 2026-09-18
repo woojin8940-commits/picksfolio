@@ -86,9 +86,9 @@ const SiteHeader: React.FC<HeaderProps> = ({
             {t('nav.login', '로그인', 'Log In')}
           </button>
         )}
-        {/* 종이색 헤더에서는 흰 글씨 토글이 보이지 않는다. compact 판에 밝은
-            색을 넘겨 같은 자리에 그린다. */}
-        <LanguageSwitcher variant={isLight ? 'compact' : 'header'} className={langClass} />
+        {/* 종이색 헤더에서는 흰 글씨 토글이 보이지 않는다. 밝은 배경용
+            판('dashboard')으로 한국어 · English 를 같은 자리에 나란히 그린다. */}
+        <LanguageSwitcher variant={isLight ? 'dashboard' : 'header'} />
       </nav>
 
       <div className="md:hidden flex items-center gap-2">
@@ -119,6 +119,7 @@ const SiteHeader: React.FC<HeaderProps> = ({
             {t('nav.login', '로그인', 'Log In')}
           </button>
         )}
+        {/* 모바일은 로그인 · 대시보드 버튼과 한 줄을 다투므로 한 칸 토글로 둔다. */}
         <LanguageSwitcher variant="compact" className={langClass} />
       </div>
     </header>

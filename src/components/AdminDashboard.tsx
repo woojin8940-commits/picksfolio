@@ -448,7 +448,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span className="md:hidden">{t('nav.myLink', '내 링크', 'My Link')}</span>
                   <svg className="w-3 h-3 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                 </button>
-                <LanguageSwitcher className="bg-slate-900/10 border-slate-200" />
+                {/* 종이색 대시보드 헤더다. 어두운 배경용 판을 쓰면 고르지 않은
+                    쪽 글씨(흰색)가 배경에 묻혀 영어로 바꿀 자리가 안 보인다. */}
+                <LanguageSwitcher variant="dashboard" />
               </div>
             </header>
 
