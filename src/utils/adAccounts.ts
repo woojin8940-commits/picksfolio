@@ -1,27 +1,29 @@
+import { apiService } from '../services/apiService';
+import type { MetaAdsDiagnosisPayload } from '../services/apiService';
+
 /**
  * 메타 광고 계정 연동 — 광고 화면이 "누구의 광고인지"를 아는 자리.
  *
  * 광고 현황과 부스팅 창은 둘 다 메타 광고 계정 위에서 돌아간다. 지표를 읽는 것도,
  * 광고를 만드는 것도 계정 단위이기 때문에, 연동이 없으면 두 화면은 붙일 데이터가
- * 없는 상태다. 지금까지는 그 사실이 화면에 없어서 예시 숫자만 서 있었다.
+ * 없는 상태다. 그래서 연동 상태를 여기 한 군데에 둔다.
  *
- * 그래서 연동 상태를 여기 한 군데에 둔다. 광고 현황이 연동/계정 선택을 하고,
- * 부스팅 창은 같은 값을 읽어 '연동 광고 계정' 을 채운다 — 두 화면이 각자 계정을
- * 기억하면 브랜드는 이력에서 A 계정으로 집행을 요청하고 광고 현황에서는 B 계정을
- * 보는 일이 생긴다.
+ * 예전에는 이 파일이 연동을 mock 으로 처리했다. 버튼을 누르면 localStorage 에
+ * `connected: true` 를 적고 고정된 예시 계정 세 개를 돌려줬다 — 화면은 '연동됨' 이
+ * 되지만 메타 쪽에는 아무 일도 없었고, 그 상태로 고른 광고 계정은 존재하지 않는
+ * 계정이었다. 지금은 실제 페이스북 로그인 대화상자를 지나고(netlify/functions/
+ * meta-ads-oauth-start · -callback), 화면이 보는 값은 서버가 메타에 물어본 결과다.
  *
- * 아직 실제 OAuth 는 붙지 않았다(ads_management · ads_read · business_management
- * 심사 전). 연동 동작은 mock 으로 상태만 바꾸고, 계정 목록도 고정된 예시다. 심사가
- * 끝나면 바꿀 곳은 두 함수뿐이다 — connectMetaAccount() 를 OAuth 리다이렉트로,
- * listAdAccounts() 를 /me/adaccounts 응답으로. 화면은 그대로 둔다.
+ * 연동 상태를 브라우저에 적지 않는 이유가 그것이다 — 화면이 스스로 '연동됨' 을 쓸 수
+ * 있으면 mock 시절의 문제가 그대로 돌아온다. 브라우저에 남는 것은 "이 브라우저에서
+ * 어느 광고 계정을 보고 있는지" 하나뿐이고, 그 값도 서버가 돌려준 목록으로 검증한다.
  *
- * 저장은 브라우저에만 한다. 이 값은 아직 계정의 데이터가 아니라 화면 확인용 임시
- * 기록이고, 실제 연동이 붙으면 토큰과 함께 서버에 남아야 하는 값이다 — 지금 테이블을
- * 먼저 만들어 두면 심사 후 실제 연동 정보와 두 갈래로 갈라진다(adBoosts 와 같은 이유).
+ * 토큰은 어디에도 저장하지 않는다. 광고 권한 심사 전이라 지금 연동의 목적은 진단까지고,
+ * 콜백이 그 요청 안에서만 토큰을 쓰고 버린다.
  */
 
-/** 심사 상태. 'approved' 만 실제로 데이터를 받을 수 있다. */
-export type MetaPermissionStatus = 'approved' | 'pending';
+/** 심사·승인 상태. 'approved' 만 실제로 데이터를 받을 수 있다. */
+export type MetaPermissionStatus = 'approved' | 'pending' | 'declined';
 
 export type MetaPermission = {
   label: string;
@@ -33,10 +35,11 @@ export type MetaPermission = {
 };
 
 /**
- * 연동 안내에 그대로 그리는 권한 목록.
+ * 연동 안내에 그대로 그리는 권한 목록의 기본값(= 연동 전에 보이는 상태).
  *
- * 인스타그램 인사이트만 승인된 상태다. 광고 쪽 세 개는 심사 대기 중이라, 연동을
- * 눌러도 광고 데이터는 아직 오지 않는다 — 그 사실을 목록 위에 먼저 적는다.
+ * 인스타그램 인사이트는 인스타그램 연동에서 이미 승인받은 권한이라 처음부터 승인됨으로
+ * 둔다. 광고 쪽 세 개는 심사 대기 중이다. 연동을 마치면 이 상태는 실제 동의 결과
+ * (`/me/permissions` 의 granted · declined)로 덮인다 — resolveMetaPermissions().
  */
 export const META_PERMISSIONS: MetaPermission[] = [
   {
@@ -62,12 +65,17 @@ export type MetaAdAccount = {
   /** 이 광고 계정이 매달린 비즈니스 관리자 이름. 같은 이름의 계정을 구분해 준다. */
   businessName: string;
   currency: string;
+  /** 메타의 account_status(1 = 활성). 정지된 계정을 화면에서 구분할 수 있게 둔다. */
+  accountStatus?: number;
 };
 
 /**
- * 연동 전 화면 확인용 예시 계정. 실제 연동에서는 /me/adaccounts 응답으로 바뀐다.
- * 한 브랜드가 계정을 여러 개 들고 있는 경우(본사/서브 브랜드, 대행사 계정)를
- * 담아 둔다 — 계정이 하나면 드롭다운이 필요한 이유가 화면에 드러나지 않는다.
+ * 광고 현황의 예시 광고가 매달려 있는 가상 계정.
+ *
+ * 광고 지표 권한 심사 전이라 목록의 숫자는 아직 예시다(그 사실은 화면에 적어 둔다).
+ * 예시 광고도 계정을 나눠 두어야 "계정을 바꾸면 목록이 바뀐다"를 확인할 수 있어서
+ * 남긴다. 연동해서 실제 계정이 생기면 광고 현황이 예시 광고를 그 계정들에 순서대로
+ * 얹는다 — 이제 이 목록이 '연동된 계정' 으로 쓰이는 곳은 없다.
  */
 export const MOCK_AD_ACCOUNTS: MetaAdAccount[] = [
   { id: 'act_1029384756', name: '픽스폴리오 메인 광고 계정', businessName: '픽스폴리오 비즈니스', currency: 'KRW' },
@@ -79,11 +87,13 @@ export type MetaAdConnection = {
   connected: boolean;
   /** 연동 시각(ISO). 연동 설정 화면에서 언제 붙였는지 적어 준다. */
   connectedAt: string | null;
-  /** 연동한 메타 계정 이름. 실제 연동에서는 /me 의 name 이 들어온다. */
+  /** 연동한 메타 계정 이름(/me 의 name). */
   metaUserName: string | null;
   /** 고른 광고 계정. 연동만 하고 아직 고르지 않은 상태가 있어서 따로 둔다. */
   selectedAccountId: string | null;
 };
+
+export type MetaAdDiagnosis = MetaAdsDiagnosisPayload;
 
 const DISCONNECTED: MetaAdConnection = {
   connected: false,
@@ -92,7 +102,10 @@ const DISCONNECTED: MetaAdConnection = {
   selectedAccountId: null,
 };
 
-const keyFor = (username: string) => `picks_meta_ad_connection_${username}`;
+const normalize = (username: string) => (username || '').replace(/^biz\//, '').toLowerCase().trim();
+
+/** 고른 광고 계정만 브라우저에 남긴다. 연동 여부는 서버가 정한다. */
+const selectionKey = (username: string) => `picks_meta_ad_selected_${normalize(username)}`;
 
 /** 같은 탭 안의 다른 화면(광고 현황 ↔ 부스팅 창)에 바뀐 것을 알린다. */
 const CHANGED_EVENT = 'picks:meta-ad-connection-changed';
@@ -103,95 +116,158 @@ const notify = () => {
   } catch {}
 };
 
-export const readAdConnection = (username: string): MetaAdConnection => {
-  try {
-    const raw = localStorage.getItem(keyFor(username));
-    if (!raw) return DISCONNECTED;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || !parsed.connected) return DISCONNECTED;
-    const selectedAccountId =
-      typeof parsed.selectedAccountId === 'string' &&
-      MOCK_AD_ACCOUNTS.some((a) => a.id === parsed.selectedAccountId)
-        ? parsed.selectedAccountId
-        : null;
-    return {
-      connected: true,
-      connectedAt: typeof parsed.connectedAt === 'string' ? parsed.connectedAt : null,
-      metaUserName: typeof parsed.metaUserName === 'string' ? parsed.metaUserName : null,
-      selectedAccountId,
-    };
-  } catch {
-    return DISCONNECTED;
-  }
+/**
+ * 서버에서 읽어 둔 진단 결과. 화면 두 곳(광고 현황·부스팅 창)이 같은 값을 봐야 하고,
+ * 각자 요청하면 같은 것을 두 번 물어본다. 아직 읽지 않은 상태와 "읽었더니 연동 없음"
+ * 은 다른 상태라 undefined / null 로 구분한다.
+ */
+const cache = new Map<string, MetaAdDiagnosis | null>();
+const inflight = new Map<string, Promise<MetaAdDiagnosis | null>>();
+
+export const readCachedDiagnosis = (username: string): MetaAdDiagnosis | null | undefined =>
+  cache.get(normalize(username));
+
+/** 진단 결과를 서버에서 읽어 온다. 이미 읽었으면 그 값을 그대로 쓴다(force 로 갱신). */
+export const loadAdConnection = async (
+  username: string,
+  opts: { force?: boolean } = {},
+): Promise<MetaAdDiagnosis | null> => {
+  const key = normalize(username);
+  if (!key) return null;
+  if (!opts.force && cache.has(key)) return cache.get(key) ?? null;
+
+  const existing = inflight.get(key);
+  if (existing && !opts.force) return existing;
+
+  const request = apiService
+    .metaAdsConnection(key)
+    .then((res) => {
+      // 오류는 "연동 없음"과 다르다. 잠깐 끊긴 것이라면 다음 시도에서 살아나야 하므로
+      // 캐시에 null 을 박아 두지 않는다 — 박아 두면 화면이 연동을 해제된 것으로 읽는다.
+      if (res.error) throw new Error(res.error);
+      cache.set(key, res.connection || null);
+      notify();
+      return res.connection || null;
+    })
+    .finally(() => {
+      inflight.delete(key);
+    });
+
+  inflight.set(key, request);
+  return request;
 };
 
-const write = (username: string, next: MetaAdConnection): MetaAdConnection => {
+/** 진단 결과를 화면이 쓰는 연동 상태로 옮긴다. */
+export const toAdConnection = (
+  username: string,
+  diagnosis: MetaAdDiagnosis | null | undefined,
+): MetaAdConnection => {
+  if (!diagnosis || !diagnosis.connected) return DISCONNECTED;
+  const accounts = diagnosis.accounts || [];
+  let selected: string | null = null;
   try {
-    localStorage.setItem(keyFor(username), JSON.stringify(next));
+    const stored = localStorage.getItem(selectionKey(username));
+    // 서버가 돌려준 목록에 있는 계정만 고른 상태로 인정한다. 계정이 회수되거나
+    // 다른 메타 계정으로 다시 연동하면 예전에 고른 계정은 더 이상 존재하지 않는다.
+    selected = stored && accounts.some((a) => a.id === stored) ? stored : null;
   } catch {
-    // 저장에 실패해도 화면은 바뀐 상태로 둔다 — 이 값은 화면 확인용이라 저장 실패를
-    // 브랜드가 할 일로 바꿔 줄 방법이 없다. 새로고침하면 연동 전으로 돌아간다.
+    selected = null;
   }
-  notify();
-  return next;
+  return {
+    connected: true,
+    connectedAt: diagnosis.connectedAt || null,
+    metaUserName: diagnosis.metaUserName || null,
+    selectedAccountId: selected,
+  };
 };
 
 /**
- * 메타 계정 연동.
+ * 메타 계정 연동 시작 — 실제 페이스북 로그인 대화상자로 이동한다.
  *
- * TODO(실제 OAuth): 심사가 끝나면 이 함수가 곧바로 상태를 바꾸는 대신 메타 로그인
- * 대화상자로 리다이렉트한다 —
- *   window.location.assign(
- *     'https://www.facebook.com/v21.0/dialog/oauth?client_id=…&redirect_uri=…' +
- *     '&scope=ads_management,ads_read,business_management,instagram_manage_insights' +
- *     '&state=…',
- *   )
- * 돌아온 code 는 서버(netlify/functions)에서 장기 토큰으로 바꿔 저장하고, 이 함수는
- * 그 결과를 받아 연동 상태로 둔다. 지금은 연동 후 화면을 확인할 수 있게 mock 으로
- * 바로 '연동됨' 으로 바꾼다.
+ * 서버에서 서명된 authorize URL 을 받아 그 주소로 이동한다. 서명 없는 링크를 화면이
+ * 직접 만들면 임의의 사용자명으로 연동을 강제하는 CSRF 가 성립한다(그래서 URL 발급은
+ * 인증된 POST 한 곳에서만 한다).
+ *
+ * 성공하면 이 함수는 돌아오지 않는다 — 브라우저가 facebook.com 으로 떠난다. 돌아오는
+ * 경우는 시작하지 못한 경우뿐이라 오류만 돌려준다.
  */
-export const connectMetaAccount = (username: string): MetaAdConnection =>
-  write(username, {
-    connected: true,
-    connectedAt: new Date().toISOString(),
-    // 실제 연동에서는 메타에서 받은 사용자 이름이 들어온다.
-    metaUserName: '픽스폴리오 비즈니스 관리자',
-    // 연동만 한 상태로 둔다. 계정은 브랜드가 고르게 한다 — 첫 계정을 자동으로
-    // 골라 두면 어느 계정을 보고 있는지 모른 채 숫자를 읽는다.
-    selectedAccountId: null,
-  });
+export const startMetaAdConnect = async (
+  username: string,
+  returnTo?: string,
+): Promise<{ error?: string }> => {
+  const res = await apiService.metaAdsConnectUrl(normalize(username), returnTo);
+  if (!res.url) return { error: res.error || '연동을 시작하지 못했습니다.' };
+  window.location.assign(res.url);
+  return {};
+};
 
-/** 연동 해제. 실제 연동에서는 서버에 저장한 토큰도 같이 지운다. */
-export const disconnectMetaAccount = (username: string): MetaAdConnection => {
-  try {
-    localStorage.removeItem(keyFor(username));
-  } catch {}
-  notify();
-  return DISCONNECTED;
+/**
+ * 연동 해제 — 서버에 남은 진단 결과와 이 브라우저의 계정 선택을 지운다.
+ *
+ * 저장한 토큰이 없으므로 회수할 것이 없다. 메타 쪽 앱 권한까지 끊으려면 페이스북
+ * 계정 설정에서 앱을 삭제해야 한다 — 화면에 그렇게 적어 둔다.
+ */
+export const disconnectMetaAccount = async (username: string): Promise<MetaAdConnection> => {
+  const key = normalize(username);
+  const ok = await apiService.metaAdsDisconnect(key);
+  if (ok) {
+    cache.set(key, null);
+    try {
+      localStorage.removeItem(selectionKey(username));
+    } catch {}
+    notify();
+  }
+  return ok ? DISCONNECTED : toAdConnection(username, cache.get(key));
 };
 
 /** 광고 계정 선택. 연동이 없으면 아무것도 하지 않는다. */
 export const selectAdAccount = (username: string, accountId: string): MetaAdConnection => {
-  const current = readAdConnection(username);
-  if (!current.connected) return current;
-  return write(username, { ...current, selectedAccountId: accountId });
+  const key = normalize(username);
+  const diagnosis = cache.get(key);
+  if (!diagnosis || !(diagnosis.accounts || []).some((a) => a.id === accountId)) {
+    return toAdConnection(username, diagnosis);
+  }
+  try {
+    localStorage.setItem(selectionKey(username), accountId);
+  } catch {
+    // 저장에 실패해도 이번 화면에서는 고른 계정으로 보여 준다. 새로고침하면 선택이
+    // 풀리지만, 연동 자체는 서버에 남아 있어 다시 고르기만 하면 된다.
+  }
+  notify();
+  return toAdConnection(username, diagnosis);
 };
 
-/** 연동 전에 돌려주는 빈 목록. 매번 새 배열을 만들면 화면이 의존성으로 쓰기 어렵다. */
+/** 연동으로 쓸 수 있게 된 광고 계정 목록(`/me/adaccounts` 응답). 연동 전에는 빈 목록이다. */
 const NO_ACCOUNTS: MetaAdAccount[] = [];
 
-/**
- * 연동으로 쓸 수 있게 된 광고 계정 목록.
- *
- * TODO(실제 연동): GET /me/adaccounts?fields=id,name,currency,account_status,business
- * 응답을 이 모양으로 맞춰 돌려준다. 연동 전에는 목록이 비어 있어야 한다 — 계정을
- * 고를 수 있는 상태와 연동이 된 상태는 같은 것이다.
- */
-export const listAdAccounts = (username: string): MetaAdAccount[] =>
-  readAdConnection(username).connected ? MOCK_AD_ACCOUNTS : NO_ACCOUNTS;
+export const listAdAccounts = (diagnosis: MetaAdDiagnosis | null | undefined): MetaAdAccount[] =>
+  diagnosis?.connected && diagnosis.accounts?.length ? diagnosis.accounts : NO_ACCOUNTS;
 
-export const findAdAccount = (accountId: string | null | undefined): MetaAdAccount | null =>
-  (accountId && MOCK_AD_ACCOUNTS.find((a) => a.id === accountId)) || null;
+export const findAdAccount = (
+  accounts: MetaAdAccount[],
+  accountId: string | null | undefined,
+): MetaAdAccount | null => (accountId && accounts.find((a) => a.id === accountId)) || null;
+
+/**
+ * 권한 목록의 승인 상태를 실제 동의 결과로 덮는다.
+ *
+ * 출처는 콜백이 저장해 둔 `/me/permissions` 응답이다. 세 가지를 구별해야 한다 —
+ * 승인(granted) · 사람이 동의 화면에서 끈 것(declined) · 그리고 요청은 했지만 답이
+ * 없는 것(심사 전 앱에서 생기는 경우). 마지막은 대기중으로 남긴다.
+ *
+ * 인스타그램 인사이트는 이 동의 화면에서 요청하지 않는다(인스타그램 연동에서 받는다).
+ * 메타가 그 권한에 대해 답을 준 경우에만 그 답을 쓰고, 아니면 기본값을 그대로 둔다.
+ */
+export const resolveMetaPermissions = (
+  diagnosis: MetaAdDiagnosis | null | undefined,
+): MetaPermission[] =>
+  META_PERMISSIONS.map((base) => {
+    if (!diagnosis?.connected) return base;
+    if ((diagnosis.granted || []).includes(base.scope)) return { ...base, status: 'approved' };
+    if ((diagnosis.declined || []).includes(base.scope)) return { ...base, status: 'declined' };
+    if ((diagnosis.scopesRequested || []).includes(base.scope)) return { ...base, status: 'pending' };
+    return base;
+  });
 
 /** 연동 상태가 바뀌면 다시 읽도록 구독한다. 다른 탭에서 바꾼 것도 받는다. */
 export const subscribeAdConnection = (onChange: () => void): (() => void) => {

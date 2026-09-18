@@ -524,6 +524,34 @@ const ReviewNotice: React.FC = () => (
   </div>
 );
 
+/**
+ * 연동 콜백이 돌려준 실패 이유를 브랜드가 읽을 수 있는 문장으로 바꾼다.
+ *
+ * 그대로 적으면 `token_exchange_failed` 같은 값이 화면에 서게 되고, 읽는 사람은
+ * 다시 눌러 봐야 하는지 우리에게 물어봐야 하는지 알 수 없다. 원문은 URL 에서 이미
+ * 지워지므로 여기서 문장으로 남긴다.
+ */
+const metaAdsErrorText = (code: string): string => {
+  switch (code) {
+    case 'user_denied':
+    case 'access_denied':
+      return '연동이 취소되었습니다. 광고 계정을 쓰려면 Facebook 동의 화면에서 권한을 허용해 주세요.';
+    case 'missing_app_config':
+      return 'Meta 앱 설정이 준비되지 않아 연동을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.';
+    case 'token_exchange_failed':
+      return 'Meta 로그인 정보를 확인하지 못했습니다. 다시 연동해 주세요.';
+    case 'state_expired':
+    case 'state_used':
+      return '연동 요청이 만료되었습니다. 연동하기를 다시 눌러 주세요.';
+    case 'diagnosis_store_failed':
+      return '연동 결과를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+    case 'missing_code':
+      return 'Meta에서 연동 정보를 받지 못했습니다. 다시 연동해 주세요.';
+    default:
+      return '연동을 마치지 못했습니다. 다시 연동해 주세요.';
+  }
+};
+
 const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername }) => {
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
 
@@ -534,8 +562,55 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   // 직접 올린 소재로 광고를 만드는 창. 집행 요청은 부스팅과 같은 자리에 저장된다.
   const [createOpen, setCreateOpen] = useState(false);
 
-  const { connection, accounts, account, connected, connect, disconnect, selectAccount } =
-    useMetaAdConnection(cleanUsername);
+  const {
+    connection,
+    accounts,
+    account,
+    connected,
+    permissions,
+    diagnosis,
+    loading: connectionLoading,
+    connecting,
+    error: connectionError,
+    connect,
+    disconnect,
+    selectAccount,
+    refresh: refreshConnection,
+  } = useMetaAdConnection(cleanUsername);
+
+  /**
+   * 메타 로그인에서 돌아온 결과(?meta_ads_connected / ?meta_ads_error).
+   *
+   * 콜백은 진단 결과를 저장한 뒤 이 화면으로 돌려보낸다. 파라미터를 읽어 배너를
+   * 띄우고 URL 을 정리한다 — 남겨 두면 새로고침할 때마다 같은 안내가 다시 뜬다.
+   * 연동 상태 자체는 서버에서 다시 읽는다(화면이 파라미터를 보고 '연동됨' 으로
+   * 적으면, 실패한 연동도 성공으로 보일 수 있다).
+   */
+  const [callbackNotice, setCallbackNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ok = params.get('meta_ads_connected');
+    const failed = params.get('meta_ads_error');
+    if (!ok && !failed) return;
+
+    if (ok) {
+      setCallbackNotice({ ok: true, text: 'Meta 계정 연동을 마쳤습니다. 아래에서 광고 계정을 선택해 주세요.' });
+      // 방금 저장된 진단 결과를 읽어 온다(캐시가 아니라 서버에서).
+      void refreshConnection(true);
+    } else {
+      setCallbackNotice({ ok: false, text: metaAdsErrorText(failed || '') });
+    }
+
+    params.delete('meta_ads_connected');
+    params.delete('meta_ads_error');
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    );
+  }, [refreshConnection]);
 
   // '연동 설정' 으로 안내 화면을 다시 펼친 상태. 연동이 되어 있어도 계정을 바꾸거나
   // 다시 연동하러 들어올 수 있어야 하므로 연동 상태와는 따로 둔다.
@@ -548,8 +623,21 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     return subscribeAdBoosts(() => setBoosts(readAdBoosts(cleanUsername)));
   }, [cleanUsername]);
 
-  // 요청한 광고가 예시 데이터 위로 온다 — 방금 만든 것이 목록 맨 위에 있어야 한다.
-  const allAds = useMemo(() => [...boosts.map(boostToAd), ...MOCK_ADS], [boosts]);
+  /**
+   * 요청한 광고가 예시 데이터 위로 온다 — 방금 만든 것이 목록 맨 위에 있어야 한다.
+   *
+   * 예시 광고는 가상 계정(MOCK_AD_ACCOUNTS)에 매달려 있다. 연동해서 실제 광고 계정이
+   * 생기면 그 계정들에 순서대로 얹는다 — 그대로 두면 계정 필터에 아무것도 걸리지 않아
+   * 목록이 빈 화면이 되고, 브랜드는 연동을 하자마자 광고가 사라졌다고 읽는다.
+   */
+  const allAds = useMemo(() => {
+    const examples = MOCK_ADS.map((ad) => {
+      const slot = MOCK_AD_ACCOUNTS.findIndex((a) => a.id === ad.adAccountId);
+      if (slot < 0 || accounts.length === 0) return ad;
+      return { ...ad, adAccountId: accounts[slot % accounts.length].id };
+    });
+    return [...boosts.map(boostToAd), ...examples];
+  }, [boosts, accounts]);
 
   /**
    * 고른 광고 계정의 광고만 남긴다. 광고는 계정 하나에만 속하므로, 계정을 바꾸면
@@ -662,6 +750,28 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
         </div>
       </div>
 
+      {/*
+        메타에서 돌아온 결과. 연동 카드보다 위에 둔다 — 방금 누른 버튼의 결과가
+        카드 안쪽 상태 변화보다 먼저 읽혀야 한다.
+      */}
+      {callbackNotice && (
+        <div
+          className={`mb-3 rounded-2xl border px-4 py-3 ${
+            callbackNotice.ok
+              ? 'bg-emerald-50 border-emerald-100'
+              : 'bg-rose-50 border-rose-100'
+          }`}
+        >
+          <p
+            className={`text-[12px] font-black ${
+              callbackNotice.ok ? 'text-emerald-700' : 'text-rose-600'
+            }`}
+          >
+            {callbackNotice.text}
+          </p>
+        </div>
+      )}
+
       {showConnectGuide ? (
         <>
           <MetaAdConnectCard
@@ -670,9 +780,14 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
             metaUserName={connection.metaUserName}
             accounts={accounts}
             selectedAccountId={connection.selectedAccountId}
+            permissions={permissions}
+            diagnosis={diagnosis}
+            loading={connectionLoading}
+            connecting={connecting}
+            error={connectionError}
             onConnect={connect}
             onDisconnect={() => {
-              disconnect();
+              void disconnect();
               setSettingsOpen(false);
             }}
             onSelectAccount={selectAccount}
