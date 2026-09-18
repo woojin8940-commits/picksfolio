@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Settings2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { AdBoost, placementSummary, readAdBoosts, subscribeAdBoosts, targetSummary } from '../utils/adBoosts';
+import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
+import MetaAdConnectCard from './MetaAdConnectCard';
+import { MOCK_AD_ACCOUNTS } from '../utils/adAccounts';
 
 /**
  * 광고 현황 — 픽스폴리오 안에서 돌리고 있는 콘텐츠 광고.
@@ -29,6 +32,12 @@ import { AdBoost, placementSummary, readAdBoosts, subscribeAdBoosts, targetSumma
  * 세워 두고, 화면 어디에서도 이 숫자를 실제 성과처럼 보이지 않게 한다 — 상단에
  * 연동 준비 중임을 적고, 카드마다 '예시' 표시를 남긴다. 절반만 진짜인 화면이
  * 제일 위험하기 때문이다.
+ *
+ * 그 위에 연동이라는 관문을 하나 둔다. 광고 지표는 메타 광고 계정 단위로만 존재하므로,
+ * 계정이 정해지지 않은 상태에서 요약과 목록을 그리면 "누구의 광고인지 모르는 숫자"가
+ * 된다. 그래서 연동 전에는 화면 전체를 연동 안내로 바꾸고, 연동 후에도 광고 계정을
+ * 고르기 전까지는 목록을 열지 않는다. 연동·계정 선택 상태는 utils/adAccounts 에 있고,
+ * 부스팅 창도 같은 값을 읽어 '연동 광고 계정' 을 채운다.
  */
 
 interface BusinessAdStatusProps {
@@ -69,6 +78,13 @@ type AdItem = {
   /** 집행할 때 고른 타겟·노출 위치. 부스팅으로 만든 광고에만 있다. */
   targetLine?: string;
   placementLine?: string;
+  /**
+   * 이 광고가 들어 있는 메타 광고 계정(act_… ).
+   *
+   * 실제 연동에서도 광고는 계정 하나에만 속하므로, 계정을 바꾸면 목록이 바뀌어야 한다.
+   * 비어 있는 광고(연동 전에 만들어 둔 집행 요청)는 어느 계정에서든 보이게 한다.
+   */
+  adAccountId?: string;
 };
 
 const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
@@ -79,10 +95,16 @@ const STATUS_LABEL: Record<AdStatus, { label: string; cls: string }> = {
   ended: { label: '종료', cls: 'bg-slate-100 text-slate-500' },
 };
 
-/** 연동 전 레이아웃 확인용 예시 데이터. 실제 지표는 메타 광고 API 심사 후 붙는다. */
+/**
+ * 연동 전 레이아웃 확인용 예시 데이터. 실제 지표는 메타 광고 API 심사 후 붙는다.
+ *
+ * 계정을 나눠 둔다 — 연동한 계정이 여러 개일 때 계정을 바꾸면 목록이 실제로 바뀌는지가
+ * 이 화면에서 확인해야 하는 동작이다. '신규 테스트 계정' 에는 일부러 광고를 두지 않았다.
+ */
 const MOCK_ADS: AdItem[] = [
   {
     id: 'mock-1',
+    adAccountId: MOCK_AD_ACCOUNTS[0].id,
     campaignTitle: '여름 신상 원피스 릴스',
     creatorHandle: 'soyeon.daily',
     partnershipCode: 'PF-2K9D4A',
@@ -99,6 +121,7 @@ const MOCK_ADS: AdItem[] = [
   },
   {
     id: 'mock-2',
+    adAccountId: MOCK_AD_ACCOUNTS[0].id,
     campaignTitle: '수분 크림 사용 후기',
     creatorHandle: 'minji_beauty',
     partnershipCode: 'PF-7Q1XB2',
@@ -115,6 +138,7 @@ const MOCK_ADS: AdItem[] = [
   },
   {
     id: 'mock-3',
+    adAccountId: MOCK_AD_ACCOUNTS[1].id,
     campaignTitle: '홈카페 머신 언박싱',
     creatorHandle: 'jun.home',
     partnershipCode: 'PF-5MB8ZZ',
@@ -131,6 +155,7 @@ const MOCK_ADS: AdItem[] = [
   },
   {
     id: 'mock-4',
+    adAccountId: MOCK_AD_ACCOUNTS[1].id,
     campaignTitle: '러닝화 첫 착용 리뷰',
     creatorHandle: 'run_with_hyun',
     partnershipCode: 'PF-3TC6VK',
@@ -405,7 +430,32 @@ const boostToAd = (boost: AdBoost): AdItem => ({
   thumbnailUrl: boost.thumbnailUrl,
   targetLine: targetSummary(boost),
   placementLine: placementSummary(boost),
+  adAccountId: boost.adAccountId,
 });
+
+/**
+ * 연동 여부와 상관없이 늘 같은 자리에 두는 안내.
+ *
+ * 연동을 붙였다고 심사가 끝난 것은 아니다. 연동 후에 이 문구가 사라지면 화면의 숫자가
+ * 그 순간부터 실제 성과로 읽히는데, 광고 권한 심사 전까지는 여전히 예시다. 그래서
+ * 연동 안내 화면에도, 연동 후 목록 화면에도 같은 문구를 남긴다.
+ */
+const ReviewNotice: React.FC = () => (
+  <div className="mt-5 bg-blue-50 border border-blue-100 rounded-2xl p-4">
+    <p className="text-[12px] font-black text-blue-800">메타 광고 연동 준비 중입니다</p>
+    <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
+      인플루언서가 게시물에 파트너십 코드를 올려 두면, 브랜드는 캠페인 이력에서 그 콘텐츠의 인사이트를
+      자세히 보고 성과가 좋은 소재를 골라 픽스폴리오 안에서 바로 광고를 집행할 수 있게 됩니다.
+      지표는 메타 광고 관리자와 같은 이름·같은 계산식(CTR · CPC · CPM · 도달 · 빈도 · 전환 · ROAS)으로
+      맞춰 두었고, 광고 지표 조회·집행 권한(ads_read · ads_management · business_management) 심사가
+      끝나면 아래 숫자는 실제 광고 인사이트로 바뀝니다. 지금 보이는 값은 화면 확인용 예시입니다.
+    </p>
+    <p className="text-[11px] text-blue-600 font-medium mt-2 leading-relaxed">
+      캠페인 이력에서 '메타 광고로 부스팅'으로 집행을 요청한 광고는 '집행 요청' 상태로 이 목록
+      맨 위에 올라옵니다. 심사가 끝나면 요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
+    </p>
+  </div>
+);
 
 const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername }) => {
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
@@ -414,6 +464,13 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const [filter, setFilter] = useState<'' | 'running' | 'ended'>('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [boosts, setBoosts] = useState<AdBoost[]>(() => readAdBoosts(cleanUsername));
+
+  const { connection, accounts, account, connected, connect, disconnect, selectAccount } =
+    useMetaAdConnection(cleanUsername);
+
+  // '연동 설정' 으로 안내 화면을 다시 펼친 상태. 연동이 되어 있어도 계정을 바꾸거나
+  // 다시 연동하러 들어올 수 있어야 하므로 연동 상태와는 따로 둔다.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 이력 화면에서 집행을 요청하면 이 목록이 바로 다시 읽는다. 브랜드는 집행 직후
   // 이 화면으로 넘어오므로, 새로고침해야 보이는 목록은 "집행이 안 됐다"로 읽힌다.
@@ -425,16 +482,28 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   // 요청한 광고가 예시 데이터 위로 온다 — 방금 만든 것이 목록 맨 위에 있어야 한다.
   const allAds = useMemo(() => [...boosts.map(boostToAd), ...MOCK_ADS], [boosts]);
 
+  /**
+   * 고른 광고 계정의 광고만 남긴다. 광고는 계정 하나에만 속하므로, 계정을 바꾸면
+   * 목록과 요약이 같이 바뀌어야 한다 — 실제 연동에서도 같은 규칙이다.
+   *
+   * 계정이 적혀 있지 않은 항목(연동 전에 만들어 둔 집행 요청)은 어느 계정에서든
+   * 보이게 둔다. 계정이 없다는 이유로 숨기면 브랜드는 요청이 사라졌다고 읽는다.
+   */
+  const accountAds = useMemo(
+    () => allAds.filter((ad) => !ad.adAccountId || ad.adAccountId === account?.id),
+    [allAds, account],
+  );
+
   const visible = useMemo(
     () =>
-      allAds.filter((ad) => {
+      accountAds.filter((ad) => {
         if (filter === 'running') {
           return ad.status === 'active' || ad.status === 'review' || ad.status === 'requested';
         }
         if (filter === 'ended') return ad.status === 'ended' || ad.status === 'paused';
         return true;
       }),
-    [allAds, filter],
+    [accountAds, filter],
   );
 
   const totals = useMemo(() => {
@@ -471,138 +540,207 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   // 요청 상태는 아직 돌고 있는 광고가 아니다. 건수에 같이 들어가므로 몇 건인지 적는다.
   const requestedCount = visible.filter((ad) => ad.status === 'requested').length;
 
+  /**
+   * 연동 안내로 화면을 바꾸는 조건.
+   *
+   * 연동이 없을 때, 연동은 됐지만 광고 계정을 아직 고르지 않았을 때, 그리고 '연동 설정'
+   * 으로 직접 열었을 때. 앞의 두 경우는 붙일 데이터가 정해지지 않은 상태라 요약·목록을
+   * 그려도 전부 빈 값이 된다.
+   */
+  const showConnectGuide = !connected || !account || settingsOpen;
+
   return (
     <div className="p-4 md:p-14 w-full animate-in fade-in duration-500">
-      <div className="mb-6 md:mb-10">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-xl md:text-3xl font-black text-slate-900">광고 현황</h2>
-          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-black">
-            예시 데이터
-          </span>
+      <div className="mb-6 md:mb-10 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl md:text-3xl font-black text-slate-900">광고 현황</h2>
+            {/* 연동 여부와 무관하게 남긴다 — 심사 전이라는 사실은 계속 보여야 한다. */}
+            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-black">
+              예시 데이터
+            </span>
+          </div>
+          <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
+            캠페인 이력에서 성과가 좋았던 콘텐츠를 광고로 돌린 현황을 확인합니다
+          </p>
         </div>
-        <p className="text-slate-400 text-xs md:text-sm font-bold mt-1">
-          캠페인 이력에서 성과가 좋았던 콘텐츠를 광고로 돌린 현황을 확인합니다
-        </p>
-      </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Kpi
-          label="집행 중인 광고"
-          value={formatNumberWithCommas(totals.ads)}
-          unit="건"
-          hint={
-            requestedCount > 0
-              ? `집행 요청 ${requestedCount}건 포함 · 이력에서 고른 콘텐츠를 그대로 소재로 씁니다`
-              : '캠페인 이력에서 고른 콘텐츠를 그대로 광고 소재로 씁니다'
-          }
-        />
-        <Kpi
-          label="총 노출수"
-          value={totals.impressions > 0 ? formatNumberWithCommas(totals.impressions) : '—'}
-          unit={totals.impressions > 0 ? '회' : undefined}
-          pending={totals.impressions === 0}
-          hint={`클릭 ${formatNumberWithCommas(totals.clicks)}회`}
-        />
-        <Kpi
-          label="평균 CPC"
-          value={avgCpc > 0 ? formatNumberWithCommas(avgCpc) : '—'}
-          unit={avgCpc > 0 ? '원' : undefined}
-          pending={avgCpc === 0}
-          hint="지출 합계 ÷ 클릭 합계"
-        />
-        <Kpi
-          label="예산 대비 지출"
-          value={`${spendPct}`}
-          unit="%"
-          hint={`예산 ${formatKoreanWon(totals.budget)} 중 ${formatKoreanWon(totals.spend)}`}
-        />
-      </div>
-
-      <MoreToggle
-        open={summaryOpen}
-        onClick={() => setSummaryOpen((v) => !v)}
-        openLabel="전체 지표 더보기"
-        closeLabel="전체 지표 접기"
-      />
-
-      {summaryOpen && (
-        <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 animate-in fade-in duration-200">
-          <Kpi
-            label="평균 CPM"
-            value={avgCpm > 0 ? formatNumberWithCommas(avgCpm) : '—'}
-            unit={avgCpm > 0 ? '원' : undefined}
-            pending={avgCpm === 0}
-            hint="노출 1,000회당 비용"
-          />
-          <Kpi
-            label="총 도달"
-            value={totals.reach > 0 ? formatNumberWithCommas(totals.reach) : '—'}
-            unit={totals.reach > 0 ? '명' : undefined}
-            pending={totals.reach === 0}
-            hint="광고별 도달의 합계입니다 (사람 단위 중복 제거 전)"
-          />
-          <Kpi
-            label="평균 빈도"
-            value={avgFrequency > 0 ? avgFrequency.toFixed(2) : '—'}
-            unit={avgFrequency > 0 ? '회' : undefined}
-            pending={avgFrequency === 0}
-            hint="노출 합계 ÷ 도달 합계"
-          />
-          <Kpi
-            label="평균 ROAS"
-            value={avgRoas > 0 ? avgRoas.toFixed(2) : '—'}
-            unit={avgRoas > 0 ? '배' : undefined}
-            pending={avgRoas === 0}
-            hint={`전환 ${formatNumberWithCommas(totals.conversions)}건 · 전환 가치 ${formatKoreanWon(totals.conversionValue)}`}
-          />
-        </div>
-      )}
-
-      {/* 이 화면의 숫자가 실제 성과가 아니라는 사실을 숫자 바로 아래에 적는다. */}
-      <div className="mt-5 bg-blue-50 border border-blue-100 rounded-2xl p-4">
-        <p className="text-[12px] font-black text-blue-800">메타 광고 연동 준비 중입니다</p>
-        <p className="text-[11px] text-blue-600 font-medium mt-1 leading-relaxed">
-          인플루언서가 게시물에 파트너십 코드를 올려 두면, 브랜드는 캠페인 이력에서 그 콘텐츠의 인사이트를
-          자세히 보고 성과가 좋은 소재를 골라 픽스폴리오 안에서 바로 광고를 집행할 수 있게 됩니다.
-          지표는 메타 광고 관리자와 같은 이름·같은 계산식(CTR · CPC · CPM · 도달 · 빈도 · 전환 · ROAS)으로
-          맞춰 두었고, 광고 지표 조회·집행 권한(ads_read · ads_management · business_management) 심사가
-          끝나면 아래 숫자는 실제 광고 인사이트로 바뀝니다. 지금 보이는 값은 화면 확인용 예시입니다.
-        </p>
-        <p className="text-[11px] text-blue-600 font-medium mt-2 leading-relaxed">
-          캠페인 이력에서 '메타 광고로 부스팅'으로 집행을 요청한 광고는 '집행 요청' 상태로 이 목록
-          맨 위에 올라옵니다. 심사가 끝나면 요청한 예산 · 기간 · 타겟 그대로 집행됩니다.
-        </p>
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center gap-1.5">
-        {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
-          ([key, label]) => (
-            <button
-              key={key || 'all'}
-              onClick={() => setFilter(key)}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
-                filter === key
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              {label}
-            </button>
-          ),
+        {/* 연동을 마친 뒤에도 계정을 바꾸러 돌아올 자리. 목록 화면에서는 작게 둔다. */}
+        {connected && account && !settingsOpen && (
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] font-black text-slate-500 hover:bg-slate-50 transition-colors"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            연동 설정
+          </button>
         )}
       </div>
 
-      {visible.length === 0 ? (
-        <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
-          <p className="text-sm text-slate-400 font-bold">이 조건에 맞는 광고가 없습니다.</p>
-          <p className="text-[11px] text-slate-400 font-medium mt-1">필터를 풀고 다시 확인해 보세요.</p>
-        </div>
+      {showConnectGuide ? (
+        <>
+          <MetaAdConnectCard
+            connected={connected}
+            connectedAt={connection.connectedAt}
+            metaUserName={connection.metaUserName}
+            accounts={accounts}
+            selectedAccountId={connection.selectedAccountId}
+            onConnect={connect}
+            onDisconnect={() => {
+              disconnect();
+              setSettingsOpen(false);
+            }}
+            onSelectAccount={selectAccount}
+            onBack={settingsOpen ? () => setSettingsOpen(false) : undefined}
+          />
+          <ReviewNotice />
+        </>
       ) : (
-        <div className="mt-4 space-y-3">
-          {visible.map((ad) => (
-            <AdCard key={ad.id} ad={ad} />
-          ))}
-        </div>
+        <>
+          {/* 어느 계정의 숫자를 보고 있는지를 요약 바로 위에 둔다. */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3">
+            <label className="text-[11px] font-black text-slate-500" htmlFor="ad-account-select">
+              연동된 광고 계정
+            </label>
+            <div className="relative mt-1.5">
+              <select
+                id="ad-account-select"
+                value={account.id}
+                onChange={(e) => selectAccount(e.target.value)}
+                className="w-full appearance-none pl-3 pr-9 py-2.5 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} · {a.id}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+            <p className="text-[10px] text-slate-400 font-medium mt-1.5 leading-relaxed">
+              {account.businessName} · 이 계정의 광고만 아래에 표시되고, 부스팅 집행도 이 계정으로 들어갑니다.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Kpi
+              label="집행 중인 광고"
+              value={formatNumberWithCommas(totals.ads)}
+              unit="건"
+              hint={
+                requestedCount > 0
+                  ? `집행 요청 ${requestedCount}건 포함 · 이력에서 고른 콘텐츠를 그대로 소재로 씁니다`
+                  : '캠페인 이력에서 고른 콘텐츠를 그대로 광고 소재로 씁니다'
+              }
+            />
+            <Kpi
+              label="총 노출수"
+              value={totals.impressions > 0 ? formatNumberWithCommas(totals.impressions) : '—'}
+              unit={totals.impressions > 0 ? '회' : undefined}
+              pending={totals.impressions === 0}
+              hint={`클릭 ${formatNumberWithCommas(totals.clicks)}회`}
+            />
+            <Kpi
+              label="평균 CPC"
+              value={avgCpc > 0 ? formatNumberWithCommas(avgCpc) : '—'}
+              unit={avgCpc > 0 ? '원' : undefined}
+              pending={avgCpc === 0}
+              hint="지출 합계 ÷ 클릭 합계"
+            />
+            <Kpi
+              label="예산 대비 지출"
+              value={`${spendPct}`}
+              unit="%"
+              hint={`예산 ${formatKoreanWon(totals.budget)} 중 ${formatKoreanWon(totals.spend)}`}
+            />
+          </div>
+
+          <MoreToggle
+            open={summaryOpen}
+            onClick={() => setSummaryOpen((v) => !v)}
+            openLabel="전체 지표 더보기"
+            closeLabel="전체 지표 접기"
+          />
+
+          {summaryOpen && (
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 animate-in fade-in duration-200">
+              <Kpi
+                label="평균 CPM"
+                value={avgCpm > 0 ? formatNumberWithCommas(avgCpm) : '—'}
+                unit={avgCpm > 0 ? '원' : undefined}
+                pending={avgCpm === 0}
+                hint="노출 1,000회당 비용"
+              />
+              <Kpi
+                label="총 도달"
+                value={totals.reach > 0 ? formatNumberWithCommas(totals.reach) : '—'}
+                unit={totals.reach > 0 ? '명' : undefined}
+                pending={totals.reach === 0}
+                hint="광고별 도달의 합계입니다 (사람 단위 중복 제거 전)"
+              />
+              <Kpi
+                label="평균 빈도"
+                value={avgFrequency > 0 ? avgFrequency.toFixed(2) : '—'}
+                unit={avgFrequency > 0 ? '회' : undefined}
+                pending={avgFrequency === 0}
+                hint="노출 합계 ÷ 도달 합계"
+              />
+              <Kpi
+                label="평균 ROAS"
+                value={avgRoas > 0 ? avgRoas.toFixed(2) : '—'}
+                unit={avgRoas > 0 ? '배' : undefined}
+                pending={avgRoas === 0}
+                hint={`전환 ${formatNumberWithCommas(totals.conversions)}건 · 전환 가치 ${formatKoreanWon(totals.conversionValue)}`}
+              />
+            </div>
+          )}
+
+          {/* 이 화면의 숫자가 실제 성과가 아니라는 사실을 숫자 바로 아래에 적는다. */}
+          <ReviewNotice />
+
+          <div className="mt-6 flex flex-wrap items-center gap-1.5">
+            {([['', '전체'], ['running', '진행 중'], ['ended', '종료·중지']] as ['' | 'running' | 'ended', string][]).map(
+              ([key, label]) => (
+                <button
+                  key={key || 'all'}
+                  onClick={() => setFilter(key)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${
+                    filter === key
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ),
+            )}
+          </div>
+
+          {visible.length === 0 ? (
+            <div className="mt-6 bg-white rounded-2xl border border-slate-100 p-10 text-center">
+              {accountAds.length === 0 ? (
+                <>
+                  <p className="text-sm text-slate-400 font-bold">이 광고 계정으로 집행한 광고가 아직 없습니다.</p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1">
+                    캠페인 이력에서 성과가 좋았던 콘텐츠를 골라 부스팅하면 여기에 올라옵니다.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400 font-bold">이 조건에 맞는 광고가 없습니다.</p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1">필터를 풀고 다시 확인해 보세요.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {visible.map((ad) => (
+                <AdCard key={ad.id} ad={ad} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

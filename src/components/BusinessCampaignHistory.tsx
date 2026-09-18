@@ -575,6 +575,8 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
         <AdBoostModal
           open
           onClose={() => setBoostTarget(null)}
+          // 부스팅 창의 '연동 광고 계정' 은 광고 현황에서 연동한 계정을 그대로 읽는다.
+          businessUsername={cleanUsername}
           campaignId={boostTarget.campaign.id}
           campaignTitle={boostTarget.campaign.title || '제목 없음'}
           collabId={boostTarget.post.collabId}

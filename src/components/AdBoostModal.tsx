@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { X, Check, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { X, Check, ChevronDown, Loader2 } from 'lucide-react';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import { formatKoreanWon, formatNumberWithCommas, stripCommas, todayInSeoul } from '../utils/formatters';
 import {
   AD_AGE_BANDS,
@@ -24,6 +25,12 @@ import {
  * 직접 고르는 것은 이유가 있을 때만 하는 선택이어야 한다. 그래서 자동을 켜 둔 채
  * 체크박스를 숨기고, '직접 선택'을 눌렀을 때만 펼친다.
  *
+ * 고르는 항목이 하나 더 있다 — 어느 광고 계정으로 나가는지. 브랜드가 계정을 여러 개
+ * 들고 있으면(본사/서브 브랜드) 같은 콘텐츠를 어느 계정으로 돌리는지가 예산이 어디서
+ * 빠지는지를 결정한다. 이 목록은 광고 현황에서 연동한 계정(utils/adAccounts)을 그대로
+ * 읽고, 기본값은 광고 현황에서 보고 있던 계정이다 — 두 화면이 다른 계정을 가리키면
+ * 브랜드는 A 계정으로 요청하고 B 계정에서 결과를 찾는다.
+ *
  * 집행은 아직 실제로 나가지 않는다(메타 광고 집행 권한 심사 전). 성공 화면에서
  * 그 사실을 분명히 적고, 광고 현황에는 '요청' 상태로만 올린다.
  */
@@ -31,6 +38,8 @@ import {
 interface AdBoostModalProps {
   open: boolean;
   onClose: () => void;
+  /** 연동한 광고 계정을 읽을 때 쓴다. 연동 상태는 브랜드 계정 단위로 저장된다. */
+  businessUsername: string;
   campaignId: string;
   campaignTitle: string;
   collabId: string;
@@ -51,9 +60,12 @@ const dateAfter = (days: number): string => {
 };
 
 const labelCls = 'text-[11px] font-black text-slate-500';
-const inputCls =
-  'mt-1.5 w-full px-3 py-2.5 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-900 ' +
+const fieldCls =
+  'w-full px-3 py-2.5 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-900 ' +
   'focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors';
+const inputCls = `mt-1.5 ${fieldCls}`;
+/** 드롭다운은 화살표 자리를 비워 두고, 여백은 감싼 쪽에서 준다(화살표를 가운데 맞추려고). */
+const selectCls = `${fieldCls} appearance-none pr-9`;
 
 /** 여러 개를 켜고 끄는 칩. 연령·지역·노출 위치가 같은 모양을 쓴다. */
 const Chip: React.FC<{ label: string; on: boolean; onClick: () => void; box?: boolean }> = ({
@@ -85,6 +97,7 @@ const Chip: React.FC<{ label: string; on: boolean; onClick: () => void; box?: bo
 const AdBoostModal: React.FC<AdBoostModalProps> = ({
   open,
   onClose,
+  businessUsername,
   campaignId,
   campaignTitle,
   collabId,
@@ -105,6 +118,25 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
+  // 광고 현황에서 연동·선택한 계정을 그대로 읽는다. 이 창에서 따로 연동하지는 않는다 —
+  // 연동은 계정 단위의 설정이라 광고 현황의 '연동 설정' 한 군데에 둔다.
+  const { accounts, account: currentAccount, connected } = useMetaAdConnection(businessUsername);
+  const [adAccountId, setAdAccountId] = useState('');
+
+  /**
+   * 기본값은 광고 현황에서 보고 있던 계정, 없으면 연동된 첫 계정.
+   *
+   * 창을 열 때마다 맞춰 준다 — 창을 닫고 광고 현황에서 계정을 바꾼 뒤 다시 열면
+   * 그 계정이 기본값이어야 한다.
+   */
+  useEffect(() => {
+    if (!open) return;
+    setAdAccountId((prev) => {
+      if (prev && accounts.some((a) => a.id === prev)) return prev;
+      return currentAccount?.id || accounts[0]?.id || '';
+    });
+  }, [open, accounts, currentAccount]);
+
   useCloseOnBack(open, onClose);
 
   const budgetKrw = useMemo(() => parseInt(stripCommas(budget) || '0', 10) || 0, [budget]);
@@ -120,6 +152,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
   }, [startDate, endDate]);
 
   const dailyBudget = days > 0 && budgetKrw > 0 ? Math.round(budgetKrw / days) : 0;
+
+  /** 이 요청이 들어갈 계정. 성공 화면에서 어느 계정으로 갔는지 같이 적는다. */
+  const selectedAccount = accounts.find((a) => a.id === adAccountId) || null;
 
   const toggle = <T extends string>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -156,6 +191,9 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
       budgetKrw,
       startDate,
       endDate,
+      // 연동 전이면 계정이 비어 나간다. 광고 현황이 그 요청을 어느 계정에서든
+      // 보여 주므로, 연동을 안 했다는 이유로 집행 요청을 막지는 않는다.
+      adAccountId: adAccountId || undefined,
       ageBands,
       regions,
       placementMode,
@@ -198,6 +236,12 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
               {campaignTitle} · @{creatorHandle}
               <br />
               예산 {formatKoreanWon(budgetKrw)} · {startDate} ~ {endDate}
+              {selectedAccount && (
+                <>
+                  <br />
+                  {selectedAccount.name} · {selectedAccount.id}
+                </>
+              )}
             </p>
             <p className="text-[11px] text-amber-600 font-bold mt-3 leading-relaxed">
               메타 광고 집행 권한 심사 전이라 실제 노출은 아직 시작되지 않습니다. 광고 현황에
@@ -257,6 +301,45 @@ const AdBoostModal: React.FC<AdBoostModalProps> = ({
                   이 게시물의 브랜디드 콘텐츠 파트너십 코드를 광고 소재로 써서, 구매 전환을
                   목적으로 집행합니다. 성과는 광고 현황에서 전환수 · 전환당 비용 · ROAS 로 확인합니다.
                 </p>
+              </div>
+
+              {/* 어느 계정에서 예산이 빠지는지. 광고 현황에서 연동한 계정을 그대로 읽는다. */}
+              <div>
+                <label className={labelCls} htmlFor="boost-ad-account">연동 광고 계정</label>
+                {connected && accounts.length > 0 ? (
+                  <>
+                    <div className="relative mt-1.5">
+                      <select
+                        id="boost-ad-account"
+                        value={adAccountId}
+                        onChange={(e) => setAdAccountId(e.target.value)}
+                        className={selectCls}
+                      >
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} · {a.id}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      이 계정으로 집행되고, 광고 현황에서 같은 계정을 골랐을 때 보입니다
+                    </p>
+                  </>
+                ) : (
+                  // 연동이 없으면 고를 계정도 없다. 집행 요청 자체는 막지 않고, 계정이
+                  // 정해지는 시점만 알려 준다 — 연동은 광고 현황에서 한 번만 하면 된다.
+                  <div className="mt-1.5 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+                    <p className="text-[11px] font-black text-amber-800">
+                      Meta 계정이 연동되지 않았습니다
+                    </p>
+                    <p className="text-[10px] text-amber-700 font-medium mt-0.5 leading-relaxed">
+                      광고 현황 화면에서 Meta 계정을 연동하면 광고 계정을 고를 수 있습니다. 지금 요청한
+                      집행은 연동 후 고른 계정으로 들어갑니다.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>

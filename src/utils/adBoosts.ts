@@ -55,6 +55,14 @@ export type AdBoost = {
   partnershipCode: string;
   /** 광고 소재로 쓰는 게시물 썸네일. 없으면 광고 현황이 빈 자리로 그린다. */
   thumbnailUrl: string;
+  /**
+   * 집행할 광고 계정(act_… ). 연동한 계정 중 부스팅 창에서 고른 것이다.
+   *
+   * 광고는 계정 단위로 만들어지므로 요청에 계정이 남아 있어야 심사 후 그대로 집행할
+   * 수 있다. 연동 전에 만든 옛 요청에는 없을 수 있어 optional 로 둔다 — 그 요청은
+   * 광고 현황에서 어느 계정에서든 보이게 한다.
+   */
+  adAccountId?: string;
   budgetKrw: number;
   startDate: string;
   endDate: string;
