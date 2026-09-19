@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { PART_SIZE, resolveContentType, safeExtension, safeKeyPrefix } from "./_shared/upload-media.mts";
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 /**
  * 업로드는 공개 제안서 폼(비로그인 업체)에서도 쓰기 때문에 로그인을 요구하지 않는다.
@@ -51,11 +52,14 @@ export default async (req: Request, context: Context) => {
 
   const formData = await req.formData();
   const file = (formData.get("image") || formData.get("file")) as File | null;
-  const username = (formData.get("username") as string) || "anonymous";
+  const username = String(formData.get("username") || "").trim().toLowerCase();
 
-  if (!file) {
+  if (!file || !username) {
     return Response.json({ error: "No file uploaded" }, { status: 400 });
   }
+
+  const auth = await requireAccountOwner(req, username);
+  if (!auth.ok) return auth.response;
 
   if (file.size > MAX_BYTES) {
     return Response.json(
@@ -68,7 +72,7 @@ export default async (req: Request, context: Context) => {
   const contentType = resolveContentType(file.name, file.type);
   if (!contentType) {
     return Response.json(
-      { error: "이미지·영상·PDF 파일만 올릴 수 있습니다." },
+      { error: "허용되지 않는 파일 형식입니다." },
       { status: 415 },
     );
   }

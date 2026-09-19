@@ -3,7 +3,6 @@ import { getSupabaseServer } from "./_shared/supabase.mts";
 import {
   DIRECT_UPLOAD_BUCKET,
   DIRECT_UPLOAD_MAX_BYTES,
-  DIRECT_UPLOAD_MAX_MB,
   directUploadPath,
   resolveContentType,
 } from "./_shared/upload-media.mts";
@@ -34,6 +33,7 @@ import {
  */
 
 import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
+import { requireSignedInUser } from "./_shared/user-auth.mts";
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 
@@ -42,11 +42,18 @@ export default async (req: Request) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  let signedInUsername = "";
+  if (req.headers.get("authorization")) {
+    const caller = await requireSignedInUser(req);
+    if (!caller.ok) return caller.response;
+    signedInUsername = caller.username;
+  }
+
   // 링크 발급도 횟수를 묶는다. 링크 하나가 곧 저장소 쓰기 한 번이다.
   const limited = await checkRateLimit({
     bucket: "upload-url",
-    key: clientIp(req),
-    limit: 60,
+    key: signedInUsername ? `user:${signedInUsername}` : clientIp(req),
+    limit: signedInUsername ? 60 : 10,
     windowSeconds: 600,
     message: "업로드 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
   });
@@ -58,11 +65,14 @@ export default async (req: Request) => {
   const username = String(body.username || "anonymous");
 
   const contentType = resolveContentType(filename, String(body.mimeType || ""));
-  if (!contentType) return bad("이미지·영상·PDF 파일만 올릴 수 있습니다.", 415);
+  if (!contentType) return bad("허용되지 않는 파일 형식입니다.", 415);
   if (!Number.isFinite(size) || size <= 0) return bad("파일 크기를 알 수 없습니다.");
-  if (size > DIRECT_UPLOAD_MAX_BYTES) {
+  const maxBytes = signedInUsername
+    ? DIRECT_UPLOAD_MAX_BYTES
+    : Math.min(DIRECT_UPLOAD_MAX_BYTES, 20 * 1024 * 1024);
+  if (size > maxBytes) {
     return bad(
-      `파일이 큽니다. ${DIRECT_UPLOAD_MAX_MB}MB 이하로 올려 주세요. ` +
+      `파일이 큽니다. ${Math.floor(maxBytes / (1024 * 1024))}MB 이하로 올려 주세요. ` +
         `(현재 ${(size / (1024 * 1024)).toFixed(1)}MB)`,
       413,
     );
@@ -92,7 +102,7 @@ export default async (req: Request) => {
       contentType,
       publicUrl: pub?.publicUrl || "",
       path,
-      maxBytes: DIRECT_UPLOAD_MAX_BYTES,
+      maxBytes,
     });
   } catch (e) {
     // 스토리지 환경변수가 없거나 스토리지가 응답하지 않는 경우.

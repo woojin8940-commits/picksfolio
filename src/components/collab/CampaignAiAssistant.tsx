@@ -401,14 +401,9 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
         // 붙인 파일을 먼저 올린다. 서버는 주소만 받아 저장소에서 원본을 읽는다.
         const attachments: { url: string; fileName: string; fileType: string }[] = [];
         for (const file of attachedFiles) {
-          const formData = new FormData();
-          formData.append('image', file);
-          formData.append('username', normalized);
-          const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
-          const uploadData = await uploadRes.json().catch(() => null);
-          if (uploadData?.url) {
-            attachments.push({ url: uploadData.url, fileName: file.name, fileType: file.type });
-          }
+          const uploaded = await apiService.uploadAttachment(normalized, file, undefined, 'campaign-ai');
+          if (!uploaded.url) throw new Error(uploaded.error || '파일 업로드에 실패했습니다.');
+          attachments.push({ url: uploaded.url, fileName: file.name, fileType: file.type });
         }
 
         const res = await fetch('/api/collab-ai', {
@@ -452,10 +447,18 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             },
           ]);
         }
-      } catch {
+      } catch (error) {
+        setInput(typed);
+        setFiles(attachedFiles);
         setMessages(prev => [
-          ...prev,
-          { role: 'assistant', content: '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.' },
+          ...prev.slice(0, -1),
+          {
+            role: 'assistant',
+            content:
+              error instanceof Error && error.message
+                ? error.message
+                : '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.',
+          },
         ]);
       } finally {
         setLoading(false);
@@ -592,7 +595,8 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault();
       send(input);
     }
@@ -1067,7 +1071,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                       </div>
                       <button
                         onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                         title="첨부 취소"
                       >
                         <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -67,9 +67,9 @@ export default async (req: Request, context: Context) => {
         const db = getDatabase();
         await db.sql`
           UPDATE timeline_messages
-          SET read_by = array_append(read_by, ${username})
+          SET read_by = array_append(COALESCE(read_by, ARRAY[]::text[]), ${username})
           WHERE proposal_id = ${proposalId}
-          AND NOT (${username} = ANY(read_by))
+          AND NOT (${username} = ANY(COALESCE(read_by, ARRAY[]::text[])))
         `;
       } catch (dbErr) {
         console.error("[timeline-read] Failed to update SQL read_by:", dbErr);

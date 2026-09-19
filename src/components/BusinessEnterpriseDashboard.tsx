@@ -60,6 +60,31 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
   const cleanUsername = (businessUsername || '').replace(/^biz\//, '').toLowerCase();
   const trendCacheKey = `picks_biz_trend`;
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const proposalId = params.get('proposal');
+    const campaignId = params.get('campaign');
+    const tabs: Record<string, BizSubView> = {
+      dashboard: 'dashboard',
+      links: 'links',
+      trend: 'trend',
+      dm: 'dm-automation',
+      inbox: 'inbox',
+      calendar: 'calendar',
+      schedule: 'open-schedule',
+      membership: 'membership',
+      timeline: 'timeline',
+      campaigns: 'campaign-collab',
+      insights: 'tagged-insights',
+      history: 'campaign-history',
+      ads: 'ad-status',
+    };
+    if (tab && tabs[tab]) setCurrentSubView(tabs[tab]);
+    if (tab === 'timeline' && proposalId) setTimelineProposalId(proposalId);
+    if (tab === 'campaigns' && campaignId) setCollabCampaignId(campaignId);
+  }, []);
+
   function rememberCalendarProposals(proposals: any[]) {
     try {
       const key = `picks_biz_calendar_${cleanUsername}`;
@@ -164,7 +189,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
    * 알고 싶은 것은 크리에이터 계정과 마찬가지로 "내 개인페이지가 얼마나 열렸고
    * 링크가 얼마나 눌렸나" 다. 그래서 일반 계정 대시보드와 똑같은 세 칸을 쓴다.
    */
-  const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
+  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [startDate, setStartDate] = useState(() => todayInSeoul());
@@ -494,7 +519,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
             <div className="bg-white p-4 md:p-6 rounded-2xl border border-slate-100 shadow-sm">
               <p className="text-slate-400 text-[9px] md:text-xs font-black uppercase tracking-widest mb-2 md:mb-3">방문자 수</p>
               <div className="flex items-end gap-2">
-                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.views.toLocaleString()}</span>
+                <span className="text-xl md:text-3xl font-black text-slate-900">{stats.visitors.toLocaleString()}</span>
                 {isRealtimeRange && <span className="text-[10px] md:text-sm font-black text-blue-600 mb-0.5">실시간</span>}
               </div>
             </div>

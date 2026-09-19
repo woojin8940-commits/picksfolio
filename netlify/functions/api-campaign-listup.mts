@@ -576,6 +576,10 @@ export default async (req: Request, context: Context) => {
         const next = await db.sql`SELECT * FROM campaign_listups WHERE id = ${id}`;
         return shapeListup((next as any[])[0], viewer);
       };
+      const reloadRaw = async () => {
+        const next = await db.sql`SELECT * FROM campaign_listups WHERE id = ${id}`;
+        return (next as any[])[0];
+      };
 
       // --- 브랜드 선택 -----------------------------------------------------
       if (action === "brand_decision") {
@@ -597,14 +601,22 @@ export default async (req: Request, context: Context) => {
             { status: 409 },
           );
         }
-        await db.sql`
+        const changed = (await db.sql`
           UPDATE campaign_listups
           SET brand_decision = ${decision},
               brand_decision_note = ${String(body.note || "")},
               brand_decided_at = NOW(),
               updated_at = NOW()
           WHERE id = ${id}
-        `;
+            AND (outreach_status <> 'accepted' OR ${decision} = 'pick')
+          RETURNING id
+        `) as any[];
+        if (!changed.length) {
+          return Response.json(
+            { error: "이미 수락된 후보입니다. 진행을 멈추려면 담당자에게 알려 주세요." },
+            { status: 409 },
+          );
+        }
         return Response.json({ success: true, listup: await reload(viewer) });
       }
 
@@ -655,7 +667,7 @@ export default async (req: Request, context: Context) => {
             await db.sql`
               UPDATE campaign_listups
               SET offer = ${JSON.stringify(nextOffer)}, updated_at = NOW()
-              WHERE id = ${id}
+              WHERE id = ${id} AND outreach_status = 'not_sent'
             `;
           } else {
             return Response.json(
@@ -707,7 +719,7 @@ export default async (req: Request, context: Context) => {
         if (!offer.uploadFrom && !offer.startDate) {
           return Response.json({ error: "일정(시작일 또는 희망 게시일)을 입력해 주세요." }, { status: 400 });
         }
-        await db.sql`
+        const sent = (await db.sql`
           UPDATE campaign_listups
           SET offer = ${JSON.stringify(offer)},
               outreach_status = 'sent',
@@ -717,7 +729,16 @@ export default async (req: Request, context: Context) => {
               response_note = '',
               updated_at = NOW()
           WHERE id = ${id}
-        `;
+            AND outreach_status <> 'accepted'
+            AND brand_decision = 'pick'
+          RETURNING id
+        `) as any[];
+        if (!sent.length) {
+          return Response.json(
+            { error: "후보 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요." },
+            { status: 409 },
+          );
+        }
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
@@ -732,7 +753,7 @@ export default async (req: Request, context: Context) => {
       // 여전히 브랜드의 몫이다.
       if (action === "start_collab") {
         if (!isManager) return managerRequired();
-        if (listup.outreach_status === "accepted") {
+        if (listup.outreach_status === "accepted" && listup.collab_id) {
           // 두 번 눌렀을 때. 이미 만들어진 협업을 그대로 알려준다.
           return Response.json({
             success: true,
@@ -741,7 +762,7 @@ export default async (req: Request, context: Context) => {
             listup: await reload("manager"),
           });
         }
-        if (listup.brand_decision !== "pick") {
+        if (listup.outreach_status !== "accepted" && listup.brand_decision !== "pick") {
           return Response.json(
             { error: "브랜드가 선택한 후보만 진행할 수 있습니다." },
             { status: 409 },
@@ -759,23 +780,73 @@ export default async (req: Request, context: Context) => {
           ),
         });
 
-        const result = await acceptListup({
-          db,
-          listup: { ...listup, offer: effective },
-          campaign,
-          actorRole: "manager",
-          actorUsername: managerUsername,
-        });
+        let acceptedListup = listup;
+        let claimedByThisRequest = false;
+        if (listup.outreach_status !== "accepted") {
+          const claimed = (await db.sql`
+            UPDATE campaign_listups
+            SET offer = ${JSON.stringify(effective)},
+                outreach_status = 'accepted',
+                offer_sent_at = COALESCE(offer_sent_at, NOW()),
+                offer_sent_by = CASE WHEN offer_sent_by = '' OR offer_sent_by IS NULL
+                                     THEN ${managerUsername} ELSE offer_sent_by END,
+                responded_at = NOW(),
+                response_note = ${String(body.note || "담당자 진행 처리")},
+                updated_at = NOW()
+            WHERE id = ${id}
+              AND outreach_status <> 'accepted'
+              AND brand_decision = 'pick'
+            RETURNING *
+          `) as any[];
+          claimedByThisRequest = Boolean(claimed[0]);
+          acceptedListup = claimed[0] || (await reloadRaw());
+          if (!acceptedListup || acceptedListup.outreach_status !== "accepted") {
+            return Response.json(
+              { error: "후보 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요." },
+              { status: 409 },
+            );
+          }
+          if (acceptedListup.collab_id) {
+            return Response.json({
+              success: true,
+              alreadyAccepted: true,
+              collabId: acceptedListup.collab_id,
+              listup: await reload("manager"),
+            });
+          }
+        }
+
+        let result;
+        try {
+          result = await acceptListup({
+            db,
+            listup: { ...acceptedListup, offer: effective },
+            campaign,
+            actorRole: "manager",
+            actorUsername: managerUsername,
+          });
+        } catch (error) {
+          if (claimedByThisRequest) {
+            await db.sql`
+              UPDATE campaign_listups
+              SET offer = ${JSON.stringify(listup.offer || {})},
+                  outreach_status = ${String(listup.outreach_status || "not_sent")},
+                  offer_sent_at = ${listup.offer_sent_at || null},
+                  offer_sent_by = ${String(listup.offer_sent_by || "")},
+                  responded_at = ${listup.responded_at || null},
+                  response_note = ${String(listup.response_note || "")},
+                  updated_at = NOW()
+              WHERE id = ${id}
+                AND outreach_status = 'accepted'
+                AND COALESCE(collab_id, '') = ''
+            `;
+          }
+          throw error;
+        }
 
         await db.sql`
           UPDATE campaign_listups
-          SET offer = ${JSON.stringify(effective)},
-              outreach_status = 'accepted',
-              offer_sent_at = COALESCE(offer_sent_at, NOW()),
-              offer_sent_by = CASE WHEN offer_sent_by = '' OR offer_sent_by IS NULL
-                                   THEN ${managerUsername} ELSE offer_sent_by END,
-              responded_at = NOW(),
-              response_note = ${String(body.note || "담당자 진행 처리")},
+          SET outreach_status = 'accepted',
               collab_id = ${result.collabId},
               updated_at = NOW()
           WHERE id = ${id}
@@ -799,15 +870,19 @@ export default async (req: Request, context: Context) => {
         if (listup.outreach_status === "accepted") {
           return Response.json({ error: "이미 수락된 제안은 회수할 수 없습니다." }, { status: 409 });
         }
-        await db.sql`
+        const withdrawn = (await db.sql`
           UPDATE campaign_listups
           SET outreach_status = 'not_sent',
               offer_sent_at = NULL,
               responded_at = NULL,
               response_note = ${String(body.note || "")},
               updated_at = NOW()
-          WHERE id = ${id}
-        `;
+          WHERE id = ${id} AND outreach_status <> 'accepted'
+          RETURNING id
+        `) as any[];
+        if (!withdrawn.length) {
+          return Response.json({ error: "이미 수락된 제안은 회수할 수 없습니다." }, { status: 409 });
+        }
         return Response.json({ success: true, listup: await reload("manager") });
       }
 
@@ -820,10 +895,13 @@ export default async (req: Request, context: Context) => {
           if (!auth.ok) return auth.response;
           viewer = "influencer";
         }
-        const accept = body.accept === true || String(body.decision || "") === "accept";
+        const accept =
+          listup.outreach_status === "accepted" ||
+          body.accept === true ||
+          String(body.decision || "") === "accept";
         const note = String(body.note || "");
 
-        if (listup.outreach_status === "accepted") {
+        if (listup.outreach_status === "accepted" && listup.collab_id) {
           // 두 번 눌렀거나 새로고침이 늦었을 때. 이미 만들어진 협업을 알려준다.
           return Response.json({
             success: true,
@@ -833,18 +911,38 @@ export default async (req: Request, context: Context) => {
           });
         }
         if (listup.outreach_status !== "sent") {
-          return Response.json({ error: "응답할 제안이 없습니다." }, { status: 409 });
+          if (listup.outreach_status !== "accepted") {
+            return Response.json({ error: "응답할 제안이 없습니다." }, { status: 409 });
+          }
         }
 
         if (!accept) {
-          await db.sql`
+          const declined = (await db.sql`
             UPDATE campaign_listups
             SET outreach_status = 'declined',
                 responded_at = NOW(),
                 response_note = ${note},
                 updated_at = NOW()
-            WHERE id = ${id}
-          `;
+            WHERE id = ${id} AND outreach_status = 'sent'
+            RETURNING id
+          `) as any[];
+          if (!declined.length) {
+            const latest = await reloadRaw();
+            if (latest?.outreach_status === "accepted") {
+              return Response.json({
+                success: true,
+                alreadyAccepted: true,
+                collabId: latest.collab_id || "",
+                listup: await reload(viewer),
+              });
+            }
+            if (latest?.outreach_status !== "declined") {
+              return Response.json(
+                { error: "제안 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요." },
+                { status: 409 },
+              );
+            }
+          }
           return Response.json({ success: true, listup: await reload(viewer) });
         }
 
@@ -855,19 +953,64 @@ export default async (req: Request, context: Context) => {
             ? signedIn.username
             : creator;
 
-        const result = await acceptListup({
-          db,
-          listup,
-          campaign,
-          actorRole: viewer === "influencer" ? "influencer" : "manager",
-          actorUsername,
-        });
+        let acceptedListup = listup;
+        let claimedByThisRequest = false;
+        if (listup.outreach_status !== "accepted") {
+          const claimed = (await db.sql`
+            UPDATE campaign_listups
+            SET outreach_status = 'accepted',
+                responded_at = NOW(),
+                response_note = ${note},
+                updated_at = NOW()
+            WHERE id = ${id} AND outreach_status = 'sent'
+            RETURNING *
+          `) as any[];
+          claimedByThisRequest = Boolean(claimed[0]);
+          acceptedListup = claimed[0] || (await reloadRaw());
+          if (!acceptedListup || acceptedListup.outreach_status !== "accepted") {
+            return Response.json(
+              { error: "제안 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요." },
+              { status: 409 },
+            );
+          }
+          if (acceptedListup.collab_id) {
+            return Response.json({
+              success: true,
+              alreadyAccepted: true,
+              collabId: acceptedListup.collab_id,
+              listup: await reload(viewer),
+            });
+          }
+        }
+
+        let result;
+        try {
+          result = await acceptListup({
+            db,
+            listup: acceptedListup,
+            campaign,
+            actorRole: viewer === "influencer" ? "influencer" : "manager",
+            actorUsername,
+          });
+        } catch (error) {
+          if (claimedByThisRequest) {
+            await db.sql`
+              UPDATE campaign_listups
+              SET outreach_status = ${String(listup.outreach_status || "sent")},
+                  responded_at = ${listup.responded_at || null},
+                  response_note = ${String(listup.response_note || "")},
+                  updated_at = NOW()
+              WHERE id = ${id}
+                AND outreach_status = 'accepted'
+                AND COALESCE(collab_id, '') = ''
+            `;
+          }
+          throw error;
+        }
 
         await db.sql`
           UPDATE campaign_listups
           SET outreach_status = 'accepted',
-              responded_at = NOW(),
-              response_note = ${note},
               collab_id = ${result.collabId},
               updated_at = NOW()
           WHERE id = ${id}

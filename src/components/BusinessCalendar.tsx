@@ -5,7 +5,9 @@ import { formatNumberWithCommas, stripCommas, formatKRW, todayInSeoul } from '..
 import UserSettlement from './UserSettlement';
 import {
   CampaignCollabStatus,
+  campaignProposalId,
   daysInWindow,
+  dropProposalsCoveredByCollabs,
   openCampaignCollab,
   toCampaignCollabStatuses,
   uploadWindow,
@@ -109,19 +111,6 @@ const ymd = (d: Date) =>
 
 const dayOnly = (value?: string) => (value || '').split('T')[0];
 
-/**
- * 'YYYY-MM-DD' 를 로컬 자정 Date 로 만든다.
- *
- * `new Date('2026-07-15')` 는 UTC 자정으로 해석되는데, 여기에 getDate()/setDate()
- * 로 하루씩 더하면 로컬 기준(한국은 +9)과 어긋나서 같은 날이 두 번 잡히거나
- * 마지막 날이 빠지는 일이 생긴다. 그래서 연·월·일을 직접 넘겨 로컬 날짜로 만든다.
- */
-const parseYmd = (value?: string): Date | null => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dayOnly(value));
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-};
-
 const normalizeText = (v?: string) => (v || '').trim().toLowerCase();
 
 /** 두 협업 기간이 겹치는지. 값이 비어 있으면 겹친다고 보지 않는다. */
@@ -149,7 +138,14 @@ function readCalendarCache(username: string): CalendarCache | null {
     const raw = localStorage.getItem(calendarCacheKey(username));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CalendarCache;
-    return parsed && Array.isArray(parsed.proposals) && Array.isArray(parsed.collabRecords) ? parsed : null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      proposals: Array.isArray(parsed.proposals) ? parsed.proposals.filter(item => item && typeof item === 'object') : [],
+      collabRecords: Array.isArray(parsed.collabRecords) ? parsed.collabRecords.filter(item => item && typeof item === 'object') : [],
+      campaignCollabs: Array.isArray(parsed.campaignCollabs) ? parsed.campaignCollabs.filter(item => item && typeof item === 'object') : [],
+      settlements: Array.isArray(parsed.settlements) ? parsed.settlements.filter(item => item && typeof item === 'object') : [],
+      savedAt: Number(parsed.savedAt || 0),
+    };
   } catch {
     return null;
   }
@@ -176,7 +172,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   useCloseOnBack(showAddForm, () => { setShowAddForm(false); resetForm(); });
   const [editingCollab, setEditingCollab] = useState<CollabRecord | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'proposals' | 'collabs' | 'settlements'>('all');
+  const [actionError, setActionError] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'collabs' | 'settlements'>('all');
   const [jumpYear, setJumpYear] = useState('');
   const [jumpMonth, setJumpMonth] = useState('');
   // Top-level section of the 협업 현황 page: the calendar, the list of collab
@@ -237,19 +234,16 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         nextProposals = data;
         if (!disposed) setProposals(data);
         persist();
-        ready();
       }),
       apiService.getCollabRecords(userName).then((data) => {
         nextCollabRecords = data;
         if (!disposed) setCollabRecords(data);
         persist();
-        ready();
       }),
       apiService.getSettlements(userName).then((data) => {
         nextSettlements = data;
         if (!disposed) setSettlements(data);
         persist();
-        ready();
       }),
       apiService.getCollabs('influencer').then((res) => {
         if (disposed || res.error) return;
@@ -257,7 +251,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         nextCampaignCollabs = data;
         if (!disposed) setCampaignCollabs(data);
         persist();
-        ready();
       }),
     ];
 
@@ -266,17 +259,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       disposed = true;
     };
   }, [userName]);
-
-  const handleComplete = async (proposalId: string) => {
-    setUpdatingId(proposalId);
-    const success = await apiService.updateProposalStatus(userName, proposalId, 'completed');
-    if (success) {
-      const next = proposals.map(p => p.id === proposalId ? { ...p, status: 'completed' as const, updated_at: new Date().toISOString() } : p);
-      setProposals(next);
-      writeCalendarCache(userName, { proposals: next, collabRecords, campaignCollabs, settlements });
-    }
-    setUpdatingId(null);
-  };
 
   const resetForm = () => {
     setFormData({
@@ -294,12 +276,14 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   const openAddForm = () => {
     resetForm();
+    setActionError('');
     setFormData(prev => ({ ...prev, date: selectedDate || todayInSeoul() }));
     setShowAddForm(true);
   };
 
   const openEditForm = (collab: CollabRecord) => {
     setEditingCollab(collab);
+    setActionError('');
     setFormData({
       title: collab.title,
       company_name: collab.company_name,
@@ -316,26 +300,40 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   const handleSaveCollab = async () => {
     if (!formData.title || !formData.date) return;
     setSaving(true);
+    setActionError('');
 
-    if (editingCollab) {
-      const success = await apiService.updateCollabRecord(userName, editingCollab.id, formData);
-      if (success) {
-        const next = collabRecords.map(c => c.id === editingCollab.id ? { ...c, ...formData, updated_at: new Date().toISOString() } : c);
-        setCollabRecords(next);
-        writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+    try {
+      let saved = false;
+      if (editingCollab) {
+        const success = await apiService.updateCollabRecord(userName, editingCollab.id, formData);
+        if (success) {
+          const next = collabRecords.map(c => c.id === editingCollab.id ? { ...c, ...formData, updated_at: new Date().toISOString() } : c);
+          setCollabRecords(next);
+          writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+          saved = true;
+        }
+      } else {
+        const record = await apiService.createCollabRecord(userName, formData);
+        if (record) {
+          const next = [...collabRecords, record];
+          setCollabRecords(next);
+          writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+          saved = true;
+        }
       }
-    } else {
-      const record = await apiService.createCollabRecord(userName, formData);
-      if (record) {
-        const next = [...collabRecords, record];
-        setCollabRecords(next);
-        writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+
+      if (!saved) {
+        setActionError('저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        return;
       }
+
+      setShowAddForm(false);
+      resetForm();
+    } catch {
+      setActionError('저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
-    setShowAddForm(false);
-    resetForm();
   };
 
   const handleDeleteCollab = async (collabId: string) => {
@@ -345,6 +343,8 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       const next = collabRecords.filter(c => c.id !== collabId);
       setCollabRecords(next);
       writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+    } else {
+      window.alert('삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     }
   };
 
@@ -355,13 +355,16 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       const next = collabRecords.map(c => c.id === collabId ? { ...c, status, updated_at: new Date().toISOString() } : c);
       setCollabRecords(next);
       writeCalendarCache(userName, { proposals, collabRecords: next, campaignCollabs, settlements });
+    } else {
+      window.alert('상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     }
     setUpdatingId(null);
   };
 
   const acceptedProposals = useMemo(
-    () => proposals.filter(p => p.status === 'accepted' || p.status === 'completed'),
-    [proposals]
+    () => dropProposalsCoveredByCollabs(proposals, campaignCollabs)
+      .filter(p => p.status === 'accepted' || p.status === 'completed'),
+    [proposals, campaignCollabs]
   );
 
   // Calendar helpers
@@ -393,27 +396,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   };
 
-  // Map proposal events per date
-  // 날짜 키는 로컬 기준으로 만든다. 예전에는 UTC 자정으로 파싱한 Date 에
-  // setDate() 로 하루씩 더하면서 toISOString() 으로 키를 뽑았는데, 한국 시간대에서는
-  // 첫날이 두 번 들어가고 마지막 날이 아예 빠져 캘린더 막대가 하루 짧게 그려졌다.
-  const proposalEventsMap = useMemo(() => {
-    const map: Record<string, BusinessProposal[]> = {};
-    acceptedProposals.forEach(p => {
-      const start = parseYmd(p.start_date);
-      const end = parseYmd(p.end_date);
-      if (!start || !end) return;
-      const cursor = new Date(start);
-      while (cursor <= end) {
-        const key = ymd(cursor);
-        if (!map[key]) map[key] = [];
-        map[key].push(p);
-        cursor.setDate(cursor.getDate() + 1);
-      }
-    });
-    return map;
-  }, [acceptedProposals]);
-
   // 기간이 지났으면 완료, 시작했으면 진행중. 정산이 완료 처리되면 그대로 완료.
   const derivedStatus = (settlementDone: boolean, start: string, end?: string): CollabRecord['status'] => {
     if (settlementDone) return 'completed';
@@ -431,12 +413,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
    * `collab_id` 가 붙는다). 그 줄이 이미 있으면 여기서 또 만들지 않는다 — 하나의
    * 협업이 두 줄이 되면 총 협업 수와 수익 합계가 두 번 세어진다.
    */
-  const campaignCollabItems = useMemo<CollabListItem[]>(() => {
-    const recorded = new Set(
-      collabRecords.map(c => String((c as any).collab_id || '')).filter(Boolean),
-    );
+  const allCampaignCollabItems = useMemo<CollabListItem[]>(() => {
     return campaignCollabs
-      .filter(c => c.state !== 'cancelled' && !recorded.has(c.id))
+      .filter(c => c.state !== 'cancelled')
       .map(c => {
         const date = dayOnly(c.startDate);
         const endDate = dayOnly(c.endDate) || undefined;
@@ -466,27 +445,51 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
         };
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignCollabs, collabRecords, today]);
+  }, [campaignCollabs, today]);
+
+  const campaignCollabItems = useMemo<CollabListItem[]>(() => {
+    const recorded = new Set(
+      collabRecords.map(c => String((c as any).collab_id || '')).filter(Boolean),
+    );
+    return allCampaignCollabItems.filter(c => !recorded.has(String(c._collabId || '')));
+  }, [allCampaignCollabItems, collabRecords]);
+
+  const campaignCollabsById = useMemo(
+    () => new Map(campaignCollabs.map(c => [c.id, c])),
+    [campaignCollabs],
+  );
+
+  const calendarCampaignItems = useMemo(
+    () => allCampaignCollabItems.filter(c => {
+      const linked = campaignCollabsById.get(String(c._collabId || ''));
+      return Boolean(linked?.listed) && Number(linked?.fee || c.fee || 0) > 0;
+    }),
+    [allCampaignCollabItems, campaignCollabsById],
+  );
 
   // Map collab records per date
   const collabEventsMap = useMemo(() => {
     const map: Record<string, CollabListItem[]> = {};
     // 직접 남긴 기록과 캠페인 협업을 같은 막대로 그린다. 캘린더에만 빠지면 "협업
     // 내역에는 있는데 그 날짜에는 아무것도 없는" 상태가 된다.
-    [...collabRecords.map(c => ({ ...c, _source: 'manual' as CollabSource })), ...campaignCollabItems].forEach(c => {
-      const start = parseYmd(c.date);
-      if (!start) return;
-      const end = parseYmd(c.end_date) || start;
-      const cursor = new Date(start);
-      while (cursor <= end) {
-        const key = ymd(cursor);
+    calendarCampaignItems.forEach(c => {
+      const linked = campaignCollabsById.get(String(c._collabId || ''));
+      const window = uploadWindow(
+        {
+          uploadedDay: c._uploadedDay || linked?.uploadedDay,
+          uploadFrom: c._uploadFrom || linked?.uploadFrom,
+          uploadTo: c._uploadTo || linked?.uploadTo,
+          uploadDue: c._uploadDue || linked?.uploadDue,
+        },
+        dayOnly(c.end_date || c.date),
+      );
+      daysInWindow(window.from, window.to).forEach(key => {
         if (!map[key]) map[key] = [];
         map[key].push(c);
-        cursor.setDate(cursor.getDate() + 1);
-      }
+      });
     });
     return map;
-  }, [collabRecords, campaignCollabItems]);
+  }, [calendarCampaignItems, campaignCollabsById]);
 
   /**
    * 정산 지급일.
@@ -500,16 +503,22 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
    */
   const settlementEventsMap = useMemo(() => {
     const map: Record<string, Settlement[]> = {};
+    const allowedPrefixes = calendarCampaignItems
+      .map(c => String(c._campaignId || ''))
+      .filter(Boolean)
+      .map(id => `campaign_${id}_`);
     settlements.forEach(s => {
       // 취소된 정산은 타입에는 없지만 서버 기록에는 남을 수 있다(옛 항목).
       if (String(s.status) === 'cancelled') return;
+      const proposalId = String((s as any).proposal_id || '');
+      if (!allowedPrefixes.some(prefix => proposalId.startsWith(prefix))) return;
       const key = dayOnly(s.status === 'completed' ? (s.completed_at || s.scheduled_date) : s.scheduled_date);
       if (!key) return;
       if (!map[key]) map[key] = [];
       map[key].push(s);
     });
     return map;
-  }, [settlements]);
+  }, [settlements, calendarCampaignItems]);
 
   /**
    * 날짜를 누르면 그날 상세로 데려간다.
@@ -534,7 +543,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  const selectedProposalEvents = selectedDate ? (proposalEventsMap[selectedDate] || []) : [];
   const selectedCollabEvents = selectedDate ? (collabEventsMap[selectedDate] || []) : [];
   const selectedSettlementEvents = selectedDate ? (settlementEventsMap[selectedDate] || []) : [];
 
@@ -545,14 +553,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
   };
 
   const formatFee = (fee: number) => formatKRW(fee);
-
-  const getProposalStatusColor = (status: string) => {
-    switch (status) {
-      case 'accepted': return 'bg-green-500';
-      case 'completed': return 'bg-blue-500';
-      default: return 'bg-blue-500';
-    }
-  };
 
   const getCollabStatusColor = (status: string) => {
     switch (status) {
@@ -607,14 +607,6 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     const end = c.end_date || c.date;
     if (end && end < today) return 'completed';
     return c.status;
-  };
-
-  // An accepted business proposal whose end date has passed is treated as
-  // 완료됨 in the calendar, mirroring the collab-record behaviour above.
-  const isProposalDone = (p: BusinessProposal): boolean => {
-    if (p.status === 'completed') return true;
-    const end = (p.end_date || '').split('T')[0];
-    return !!end && end < today;
   };
 
   /**
@@ -686,11 +678,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
      * 뺀 줄들이 사라지는 것은 아니다. 직접 기록과 제안은 아래 협업 내역 탭에 그대로
      * 있고, 날짜를 누르면 열리는 상세 칸에도 남는다 — 달력 칸만 비운다.
      */
-    const rows: CollabListItem[] = campaignCollabItems.filter(c => {
-      const linked = byCollabId.get(String(c._collabId || (c as any).collab_id || ''));
-      if (!linked?.listed) return false;
-      return Number(linked.fee || c.fee || 0) > 0;
-    });
+    const rows = calendarCampaignItems;
     /**
      * 정산 점도 같은 줄들만. 협업이 달력에서 빠졌는데 그 입금일만 남으면 어느 협업의
      * 돈인지 달력 안에서는 알 수 없다.
@@ -761,7 +749,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     );
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignCollabItems, campaignCollabs, settlementEventsMap, today]);
+  }, [calendarCampaignItems, campaignCollabs, settlementEventsMap, today]);
 
   /**
    * 점의 색 — 어느 캠페인인가.
@@ -862,9 +850,13 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
 
   const settlementCollabs = useMemo<CollabListItem[]>(() => {
     const seenProposalIds = new Set<string>();
+    const campaignProposalIds = new Set(
+      campaignCollabs.filter(c => c.state !== 'cancelled').map(campaignProposalId),
+    );
     const items: CollabListItem[] = [];
 
     settlements.forEach(s => {
+      if (s.proposal_id && campaignProposalIds.has(s.proposal_id)) return;
       // 같은 제안에서 나온 정산이 중복 저장돼 있으면 한 번만 센다.
       if (s.proposal_id) {
         if (seenProposalIds.has(s.proposal_id)) return;
@@ -901,7 +893,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     });
 
     return items;
-  }, [settlements, collabRecords, proposalById, today]);
+  }, [settlements, collabRecords, proposalById, campaignCollabs, today]);
 
   // 정산 항목이 만들어지기 전에 수락된 제안은 위 목록에 안 잡힌다. 협업 내역에서
   // 통째로 빠지지 않도록 읽기 전용 항목으로 채워 넣는다.
@@ -948,21 +940,21 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
     });
   }, [collabRecords, settlementCollabs, proposalCollabs, campaignCollabItems]);
 
-  // Stats — 캘린더 탭의 "일정 현황" 타일과 협업 내역 탭의 요약이 같은 목록
-  // (allCollabsSorted)에서 계산된다. 예전에는 캘린더 타일이 "직접 기록 + 수락된
-  // 제안"을, 협업 내역 타일이 "직접 기록"만 세서 같은 화면에서 숫자가 달랐다.
-  const totalCollabs = allCollabsSorted.length;
-  const completedCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'completed').length;
-  const inProgressCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'in_progress').length;
-  const scheduledCollabs = allCollabsSorted.filter(c => effectiveCollabStatus(c) === 'scheduled').length;
-  const totalRevenue = allCollabsSorted
+  const calendarCollabsSorted = useMemo(
+    () => [...calendarCampaignItems].sort((a, b) => dayOnly(b.date).localeCompare(dayOnly(a.date))),
+    [calendarCampaignItems],
+  );
+
+  const totalCollabs = calendarCollabsSorted.length;
+  const completedCollabs = calendarCollabsSorted.filter(c => effectiveCollabStatus(c) === 'completed').length;
+  const inProgressCollabs = calendarCollabsSorted.filter(c => effectiveCollabStatus(c) === 'in_progress').length;
+  const scheduledCollabs = calendarCollabsSorted.filter(c => effectiveCollabStatus(c) === 'scheduled').length;
+  const totalRevenue = calendarCollabsSorted
     .filter(c => effectiveCollabStatus(c) === 'completed')
     .reduce((sum, c) => sum + c.fee, 0);
 
-  // Upcoming deadlines — 협업 내역과 같은 목록을 쓰므로 제안과 정산이 각각
-  // 따로 잡혀 두 번 나오는 일이 없다.
   const upcomingDeadlines = useMemo(() => {
-    return allCollabsSorted
+    return calendarCollabsSorted
       .filter(c => {
         const status = effectiveCollabStatus(c);
         if (status !== 'scheduled' && status !== 'in_progress') return false;
@@ -978,7 +970,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
       }))
       .sort((a, b) => dayOnly(a.endDate).localeCompare(dayOnly(b.endDate)))
       .slice(0, 6);
-  }, [allCollabsSorted, today]);
+  }, [calendarCollabsSorted, today]);
 
   // --- Period (월별 / 기간 지정) filtering ---------------------------------
   const applyPreset = (preset: 'all' | 'thisMonth' | 'lastMonth' | 'thisYear') => {
@@ -1300,23 +1292,11 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 <h4 className="font-black text-slate-900 text-base">
                   {formatDate(selectedDate)} 일정
                 </h4>
-                <button
-                  onClick={() => {
-                    setFormData(prev => ({ ...prev, date: selectedDate }));
-                    openAddForm();
-                  }}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                  이 날짜에 추가
-                </button>
               </div>
 
               {/* Tab filter */}
               <div className="flex gap-2 mb-4">
-                {(['all', 'proposals', 'collabs', 'settlements'] as const).map(tab => (
+                {(['all', 'collabs', 'settlements'] as const).map(tab => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -1324,43 +1304,14 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                       activeTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                     }`}
                   >
-                    {tab === 'all' ? '전체' : tab === 'proposals' ? '제안' : tab === 'collabs' ? '협업 기록' : '정산'}
+                    {tab === 'all' ? '전체' : tab === 'collabs' ? '캠페인' : '정산'}
                   </button>
                 ))}
               </div>
 
-              {(activeTab === 'all' || activeTab === 'proposals') && selectedProposalEvents.length > 0 && (
-                <div className="space-y-3 mb-4">
-                  {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">비즈니스 제안</p>}
-                  {selectedProposalEvents.map(ev => (
-                    <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
-                      <div className={`w-2 h-12 rounded-full shrink-0 ${getProposalStatusColor(isProposalDone(ev) ? 'completed' : ev.status)}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-black text-slate-900 text-sm truncate">{ev.title}</p>
-                        <p className="text-xs font-bold text-slate-400">{ev.company_name} · {formatFee(ev.fee)}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className={`text-xs font-black ${isProposalDone(ev) ? 'text-blue-500' : 'text-green-500'}`}>
-                          {isProposalDone(ev) ? '완료' : '진행중'}
-                        </span>
-                      </div>
-                      {ev.status === 'accepted' && !isProposalDone(ev) && (
-                        <button
-                          onClick={() => handleComplete(ev.id)}
-                          disabled={updatingId === ev.id}
-                          className="px-4 py-2 bg-blue-500 text-white text-xs font-black rounded-lg hover:bg-blue-600 transition-all disabled:opacity-60 shrink-0"
-                        >
-                          완료 처리
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {(activeTab === 'all' || activeTab === 'collabs') && selectedCollabEvents.length > 0 && (
                 <div className="space-y-3">
-                  {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">협업 기록</p>}
+                  {activeTab === 'all' && <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">캠페인</p>}
                   {selectedCollabEvents.map(ev => (
                     <div key={ev.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
                       <div className={`w-2 h-12 rounded-full shrink-0 ${getCollabStatusColor(effectiveCollabStatus(ev))}`} />
@@ -1457,8 +1408,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                 </div>
               )}
 
-              {((activeTab === 'all' && selectedProposalEvents.length === 0 && selectedCollabEvents.length === 0 && selectedSettlementEvents.length === 0) ||
-                (activeTab === 'proposals' && selectedProposalEvents.length === 0) ||
+              {((activeTab === 'all' && selectedCollabEvents.length === 0 && selectedSettlementEvents.length === 0) ||
                 (activeTab === 'collabs' && selectedCollabEvents.length === 0) ||
                 (activeTab === 'settlements' && selectedSettlementEvents.length === 0)) && (
                 <p className="text-slate-400 text-sm font-bold text-center py-4">이 날짜에 해당하는 일정이 없습니다.</p>
@@ -1471,14 +1421,14 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">협업 히스토리</h4>
             {loading ? (
               <p className="text-slate-400 text-sm font-bold text-center py-8">로딩 중...</p>
-            ) : allCollabsSorted.length === 0 ? (
+            ) : calendarCollabsSorted.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-slate-400 text-sm font-bold">아직 기록된 협업이 없습니다.</p>
                 <p className="text-slate-300 text-xs mt-1">캠페인에 선정되거나 제안을 수락하면 자동으로 올라오고, 그 밖의 협업은 "협업 기록 추가"로 남길 수 있습니다.</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {allCollabsSorted.map(c => (
+                {calendarCollabsSorted.map(c => (
                   <div
                     key={c.id}
                     className={`flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer group ${
@@ -1522,7 +1472,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
                           handleUpdateCollabStatus(c.id, c.status === 'scheduled' ? 'in_progress' : 'completed');
                         }}
                         disabled={updatingId === c.id}
-                        className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all opacity-0 group-hover:opacity-100 disabled:opacity-40 shrink-0"
+                        className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 disabled:opacity-40 shrink-0"
                       >
                         {c.status === 'scheduled' ? '진행 시작' : '완료 처리'}
                       </button>
@@ -1848,6 +1798,9 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
               </p>
             </div>
             <div className="p-6 space-y-4">
+              {actionError && (
+                <p className="rounded-xl bg-red-50 px-4 py-3 text-xs font-bold text-red-600">{actionError}</p>
+              )}
               <div>
                 <label className="block text-xs font-black text-slate-600 mb-1.5">제목 *</label>
                 <input
@@ -1938,7 +1891,7 @@ const BusinessCalendar: React.FC<BusinessCalendarProps> = ({ userName }) => {
             </div>
             <div className="p-6 border-t border-slate-100 flex gap-3 justify-end">
               <button
-                onClick={() => { setShowAddForm(false); resetForm(); }}
+                onClick={() => { setShowAddForm(false); setActionError(''); resetForm(); }}
                 className="px-5 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-all"
               >
                 취소

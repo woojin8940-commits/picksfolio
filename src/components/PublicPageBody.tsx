@@ -791,7 +791,7 @@ const PublicPageBody: React.FC<PublicPageBodyProps> = ({
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-black truncate">{link.title}</p>
-                              <p className="text-[10px] opacity-40 font-bold truncate">{link.url.replace('https://', '').replace('http://', '')}</p>
+                              <p className="text-[10px] opacity-40 font-bold truncate">{(link.url || '').replace('https://', '').replace('http://', '')}</p>
                             </div>
                             <ExternalLink size={14} className={`opacity-100 ${w('md:opacity-20 md:group-hover:opacity-100')} transition-opacity`} />
                           </>

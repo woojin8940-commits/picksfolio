@@ -269,7 +269,7 @@ const ColorPickerPanel: React.FC<PanelProps> = ({ value, onChange, position, onR
             value={hexInput.replace(/^#/, '')}
             onChange={e => setHexInput('#' + e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6).toUpperCase())}
             onBlur={e => handleHexSubmit(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleHexSubmit((e.target as HTMLInputElement).value); }}
+            onKeyDown={e => { if (!e.nativeEvent.isComposing && e.key === 'Enter') handleHexSubmit((e.target as HTMLInputElement).value); }}
             spellCheck={false}
             maxLength={6}
             className="w-full bg-transparent text-sm font-semibold uppercase tracking-wide text-slate-700 outline-none"

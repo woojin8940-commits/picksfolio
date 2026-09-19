@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { apiService } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import { formatKoreanWon } from '../utils/formatters';
 import { rewardModeOf } from '../utils/campaignBrief';
 import { CollabStepTurn, nextCollabAction } from '../utils/collabNextAction';
@@ -10,6 +10,8 @@ import CampaignAiAssistant from './collab/CampaignAiAssistant';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { openExternalUrl } from '../utils/externalLink';
 
 /**
  * 협업 캠페인 — 인플루언서가 자기 캠페인을 진행하는 곳.
@@ -108,7 +110,14 @@ const readCreatorCollabCache = (username: string): CreatorCollabCache | null => 
   if (!username) return null;
   try {
     const raw = localStorage.getItem(creatorCollabCacheKey(username));
-    return raw ? JSON.parse(raw) as CreatorCollabCache : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return {
+      collabs: Array.isArray(parsed.collabs) ? parsed.collabs.filter((item: unknown) => item && typeof item === 'object') : [],
+      applications: Array.isArray(parsed.applications) ? parsed.applications.filter((item: unknown) => item && typeof item === 'object') : [],
+      metaLinked: typeof parsed.metaLinked === 'boolean' ? parsed.metaLinked : undefined,
+      savedAt: Number(parsed.savedAt || 0),
+    };
   } catch {
     return null;
   }
@@ -165,7 +174,7 @@ const collabBadge = (c: any): { label: string; cls: string } => {
  * 했다. 조건·일정 문의는 답이 빨라야 다음 단계가 움직이니 사람이 있는 창구로 곧장
  * 보낸다.
  */
-const MANAGER_CHAT_URL = 'http://pf.kakao.com/_ziZxhX/chat';
+const MANAGER_CHAT_URL = 'https://pf.kakao.com/_ziZxhX/chat';
 
 const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName, initialCollabId }) => {
   const { language } = useLanguage();
@@ -205,6 +214,10 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('progress');
+  useCloseOnBack(!!selectedId, () => {
+    setSelectedId('');
+    setDetail(null);
+  });
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => setToast({ message, type }), []);
@@ -223,8 +236,12 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
       // 연동을 끊어 둔 사람의 화면이 한 박자 뒤에 안내로 바뀐다.
       const [collabRes, applyRes, channelRes] = await Promise.all([
         apiService.getCollabs('influencer'),
-        fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`)
-          .then(r => r.json())
+        authHeaders({}, { account: userName })
+          .then(headers => fetch(`/api/campaign-applications?username=${encodeURIComponent(userName)}`, {
+            credentials: 'same-origin',
+            headers,
+          }))
+          .then(async r => r.ok ? r.json() : { applications: [] })
           .catch(() => ({ applications: [] })),
         apiService.getCreatorChannel(userName).catch(() => ({ error: 'network' })),
       ]);
@@ -376,7 +393,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
   };
 
   const openManagerThread = () => {
-    window.open(MANAGER_CHAT_URL, '_blank', 'noopener,noreferrer');
+    openExternalUrl(MANAGER_CHAT_URL);
   };
 
   // 협업이 열린 캠페인은 지원 목록에서 뺀다. 같은 캠페인이 "지원 검토 중"과

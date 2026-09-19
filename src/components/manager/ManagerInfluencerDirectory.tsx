@@ -122,7 +122,7 @@ const ManagerInfluencerDirectory: React.FC<ManagerInfluencerDirectoryProps> = ({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') setSubmitted(query.trim());
+                if (!e.nativeEvent.isComposing && e.key === 'Enter') setSubmitted(query.trim());
               }}
               placeholder="계정 · 이름 · 카테고리 · 소개 검색"
               className="text-[11px] font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-2 w-56 focus:outline-none focus:border-blue-400"

@@ -691,7 +691,7 @@ const ListupWorkspace: React.FC<ListupWorkspaceProps> = ({ campaignId, token, on
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') load(query);
+                  if (!e.nativeEvent.isComposing && e.key === 'Enter') load(query);
                 }}
                 placeholder="계정 · 이름 · 카테고리 검색"
                 className="flex-1 text-[11px] font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"

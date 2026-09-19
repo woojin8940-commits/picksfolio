@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatKoreanWon } from '../utils/formatters';
-import { apiService } from '../services/apiService';
+import { apiService, authHeaders } from '../services/apiService';
 import { daysUntilDeadline, isCampaignClosed, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { rewardModeOf, contentFormatLabel } from '../utils/campaignBrief';
 import CollabMatchRegister from './CollabMatchRegister';
 import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useDragScroll } from '../hooks/useDragScroll';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 interface Campaign {
   id: string;
@@ -37,6 +38,27 @@ interface UserCampaignBrowseProps {
   userName: string;
   onBack?: () => void;
 }
+
+const normalizeCampaignUrl = (raw: string, instagram = false) => {
+  const value = raw.trim();
+  if (!value) return '';
+  if (instagram) {
+    const handle = value.replace(/^@/, '');
+    if (/^[a-zA-Z0-9._]{1,30}$/.test(handle)) return `https://www.instagram.com/${handle}`;
+  }
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^\/\//.test(value)) return `https:${value}`;
+  return `https://${value}`;
+};
+
+const isWebUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
 
 const CATEGORIES_KO: Record<string, string> = {
   beauty: '뷰티', fashion: '패션', food: '식품', lifestyle: '라이프스타일',
@@ -92,6 +114,27 @@ const readJson = <T,>(key: string): T | null => {
 
 const writeJson = <T,>(key: string, value: T): void => {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
+
+const pruneCampaignListCache = (username: string, keep: number) => {
+  try {
+    const prefix = `picks_campaign_browse_${campaignCacheUser(username)}_`;
+    const entries: Array<{ key: string; savedAt: number }> = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix)) continue;
+      const value = readJson<CampaignBrowseListCache>(key);
+      entries.push({ key, savedAt: Number(value?.savedAt || 0) });
+    }
+    entries.sort((a, b) => b.savedAt - a.savedAt);
+    entries.slice(keep).forEach(entry => localStorage.removeItem(entry.key));
+  } catch {}
+};
+
+const writeCampaignListCache = (username: string, key: string, value: CampaignBrowseListCache) => {
+  pruneCampaignListCache(username, 23);
+  writeJson(key, value);
+  pruneCampaignListCache(username, 24);
 };
 
 const writeCampaignStatusCache = (username: string, patch: Partial<CampaignBrowseStatusCache>) => {
@@ -229,13 +272,22 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
   const [applying, setApplying] = useState(false);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  useCloseOnBack(!!selectedCampaign, () => {
+    setSelectedCampaign(null);
+    setShowApplyForm(false);
+  });
 
   const loadMyApplications = useCallback(async () => {
     if (!userName) return;
     try {
       // 조회 파라미터는 username 이다. 예전에는 applicant_username 으로 불러서
       // 서버가 400 을 돌려줬고, 이미 지원한 캠페인에도 "지원하기"가 그대로 떴다.
-      const res = await fetch(`/.netlify/functions/api-campaign-applications?username=${encodeURIComponent(userName)}`).then(r => r.json());
+      const response = await fetch(`/api/campaign-applications?username=${encodeURIComponent(userName)}`, {
+        credentials: 'same-origin',
+        headers: await authHeaders({}, { account: userName }),
+      });
+      const res = await response.json().catch(() => ({}));
+      if (!response.ok) return;
       if (res.applications) {
         const next = new Set<string>(res.applications.map((a: any) => a.campaign_id));
         setAppliedIds(next);
@@ -287,14 +339,14 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       params.append('page', String(page));
       params.append('limit', String(PAGE_SIZE));
 
-      const response = await fetch(`/.netlify/functions/api-campaigns?${params.toString()}`, { signal });
+      const response = await fetch(`/api/campaigns?${params.toString()}`, { signal });
       const res = await response.json();
       if (signal.aborted || !response.ok || res.error || !Array.isArray(res.campaigns)) return;
       const next = Array.isArray(res.campaigns) ? res.campaigns : [];
       const nextTotal = Number(res.total || 0);
       setCampaigns(next);
       setTotal(nextTotal);
-      writeJson<CampaignBrowseListCache>(key, { campaigns: next, total: nextTotal, savedAt: Date.now() });
+      writeCampaignListCache(userName, key, { campaigns: next, total: nextTotal, savedAt: Date.now() });
     } catch (e) {
       if (!signal.aborted) console.error(e);
     } finally {
@@ -343,22 +395,30 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       setToast({ message: isEn ? 'Please enter contact info and Instagram link.' : '연락처와 인스타그램 링크를 입력해 주세요.', type: 'error' });
       return;
     }
+    const instagramUrl = normalizeCampaignUrl(applyForm.instagram_url, true);
+    const optionalUrl = normalizeCampaignUrl(applyForm.youtube_naver_url);
+    if (!isWebUrl(instagramUrl) || (optionalUrl && !isWebUrl(optionalUrl))) {
+      setToast({ message: isEn ? 'Please check the link address.' : '링크 주소를 확인해 주세요.', type: 'error' });
+      return;
+    }
     setApplying(true);
     try {
-      const res = await fetch('/.netlify/functions/api-campaign-applications', {
+      const response = await fetch('/api/campaign-applications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: userName }),
         body: JSON.stringify({
           campaign_id: selectedCampaign.id,
           applicant_username: userName,
           contact: applyForm.contact.trim(),
-          instagram_url: applyForm.instagram_url.trim(),
-          youtube_naver_url: applyForm.youtube_naver_url.trim() || undefined,
+          instagram_url: instagramUrl,
+          youtube_naver_url: optionalUrl || undefined,
         }),
-      }).then(r => r.json());
+      });
+      const res = await response.json().catch(() => ({ error: isEn ? 'Failed to apply.' : '지원 처리에 실패했습니다.' }));
 
-      if (res.error) {
-        setToast({ message: res.error, type: 'error' });
+      if (!response.ok || res.error) {
+        setToast({ message: res.error || (isEn ? 'Failed to apply.' : '지원 처리에 실패했습니다.'), type: 'error' });
       } else {
         setToast({ message: isEn ? 'Application submitted successfully!' : '캠페인 지원이 완료되었습니다!', type: 'success' });
         setAppliedIds(prev => {
@@ -370,8 +430,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
           const next = prev.map(c =>
             c.id === selectedCampaign.id ? { ...c, application_count: c.application_count + 1 } : c
           );
-          writeJson<CampaignBrowseListCache>(
-            campaignListCacheKey(userName, activeFilter, activeCategory, searchQuery, page),
+          writeCampaignListCache(
+            userName,
+            campaignListCacheKey(userName, activeFilter, activeCategory, searchTerm, page),
             { campaigns: next, total, savedAt: Date.now() },
           );
           return next;
@@ -781,7 +842,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Instagram URL' : '인스타그램 링크'} <span className="text-rose-500">*</span></label>
                     <input
-                      type="url"
+                      type="text"
+                      inputMode="url"
+                      autoCapitalize="none"
                       value={applyForm.instagram_url}
                       onChange={e => setApplyForm(p => ({ ...p, instagram_url: e.target.value }))}
                       className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
@@ -791,7 +854,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'YouTube / Naver URL' : '유튜브 / 네이버 링크'} <span className="text-slate-400 font-medium">({isEn ? 'Optional' : '선택'})</span></label>
                     <input
-                      type="url"
+                      type="text"
+                      inputMode="url"
+                      autoCapitalize="none"
                       value={applyForm.youtube_naver_url}
                       onChange={e => setApplyForm(p => ({ ...p, youtube_naver_url: e.target.value }))}
                       className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
@@ -822,7 +887,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
         </div>
 
         {!isApplied && !isClosed && !showApplyForm && (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-slate-100 safe-area-bottom shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.35)]">
+          <div className="fixed bottom-[calc(68px+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-[110] bg-white/90 backdrop-blur-lg border-t border-slate-100 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.35)]">
             <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 {reward && (

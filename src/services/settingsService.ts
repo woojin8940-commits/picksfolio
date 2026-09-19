@@ -6,6 +6,7 @@ export interface SiteSettings {
   userName: string;
   templateType: TemplateType;
   blocks: Block[];
+  source?: 'primary' | 'legacy' | 'profile' | 'local' | 'default';
   portfolio?: any[];
   design?: DesignSettings;
   socials?: any;
@@ -23,6 +24,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
         userName,
         templateType: (apiData.design as any)?.templateType || TemplateType.SHOPPABLE_GRID,
         blocks: apiData.blocks || [],
+        source: 'primary',
         portfolio: apiData.portfolio,
         design: apiData.design,
         socials: apiData.socials,
@@ -52,6 +54,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
             userName,
             templateType: (legacy.design as any)?.templateType || TemplateType.SHOPPABLE_GRID,
             blocks: legacy.blocks || [],
+            source: 'legacy',
             portfolio: legacy.portfolio,
             design: legacy.design,
             socials: legacy.socials,
@@ -67,6 +70,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
           userName,
           templateType: TemplateType.SHOPPABLE_GRID,
           blocks: [],
+          source: 'profile',
           profile: {
             name: profileData.full_name || '',
             bio: profileData.bio || '',
@@ -94,6 +98,7 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
         userName,
         templateType: TemplateType.SHOPPABLE_GRID,
         blocks: localBlocks || [],
+        source: 'local',
         portfolio: localPortfolio || undefined,
         design: localDesign || undefined
       };
@@ -106,7 +111,8 @@ export const getSiteSettings = async (userName: string): Promise<SiteSettings | 
   return {
     userName,
     templateType: TemplateType.SHOPPABLE_GRID,
-    blocks: []
+    blocks: [],
+    source: 'default'
   };
 };
 
@@ -173,11 +179,12 @@ export const updateLinkGridItems = async (blocks: Block[]) => {
     const idsToDelete = existingIds.filter(id => !currentIds.includes(id));
     
     if (idsToDelete.length > 0) {
-      await supabase
+      const { error: deleteError } = await supabase
         .from('link_grid_items')
         .delete()
         .in('id', idsToDelete)
         .eq('user_id', user.id);
+      if (deleteError) throw deleteError;
     }
     
     // 3. Upsert current items
@@ -210,21 +217,23 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
   const normalizedUsername = userName.toLowerCase();
 
   // 1. Update LocalStorage (Immediate)
-  if (settings.blocks) {
-    localStorage.setItem(`picks_blocks_${normalizedUsername}`, JSON.stringify(settings.blocks));
-  }
+  try {
+    if (settings.blocks) {
+      localStorage.setItem(`picks_blocks_${normalizedUsername}`, JSON.stringify(settings.blocks));
+    }
 
-  if (settings.portfolio) {
-    localStorage.setItem(`picks_portfolio_${normalizedUsername}`, JSON.stringify(settings.portfolio));
-  }
+    if (settings.portfolio) {
+      localStorage.setItem(`picks_portfolio_${normalizedUsername}`, JSON.stringify(settings.portfolio));
+    }
 
-  if (settings.design) {
-    localStorage.setItem(`picks_design_${normalizedUsername}`, JSON.stringify(settings.design));
-  }
+    if (settings.design) {
+      localStorage.setItem(`picks_design_${normalizedUsername}`, JSON.stringify(settings.design));
+    }
 
-  if (settings.socials) {
-    localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(settings.socials));
-  }
+    if (settings.socials) {
+      localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(settings.socials));
+    }
+  } catch {}
 
   // 2. Sync to Netlify Database + Blobs API (Primary Cloud Storage)
   if (syncPrimary) {
@@ -281,19 +290,19 @@ export const updateSiteSettings = async (userName: string, settings: Partial<Sit
 
       // Sync top-level fields
       if (settings.profile) {
-        if (settings.profile.name) updateData.full_name = settings.profile.name;
-        if (settings.profile.bio) updateData.bio = settings.profile.bio;
-        if (settings.profile.avatar_url) updateData.avatar_url = settings.profile.avatar_url;
-        if (settings.profile.links?.phone) updateData.phone = settings.profile.links.phone;
+        if (settings.profile.bio !== undefined) updateData.bio = settings.profile.bio;
+        if (settings.profile.avatar_url !== undefined) updateData.avatar_url = settings.profile.avatar_url;
+        if (settings.profile.links?.phone !== undefined) updateData.phone = settings.profile.links.phone;
       }
 
-      await supabase
+      const { error: updateError } = await supabase
         .from('profiles')
         .upsert({
           id: user.id,
           ...updateData,
           updated_at: new Date().toISOString()
         }, { onConflict: 'id' });
+      if (updateError) throw updateError;
     } catch (e) {
       console.warn('Error syncing to Supabase:', e);
     }

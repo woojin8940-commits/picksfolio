@@ -1227,6 +1227,7 @@ const CollabMatchRegister: React.FC<Props> = ({ variant, applicantUsername, butt
                         value={customCategory}
                         onChange={e => setCustomCategory(e.target.value)}
                         onKeyDown={e => {
+                          if (e.nativeEvent.isComposing) return;
                           if (e.key === 'Enter') {
                             // 이 입력칸은 모달 안에 있다. 기본 동작을 막지 않으면
                             // 엔터가 접수 버튼까지 눌러 등록서가 바로 넘어간다.

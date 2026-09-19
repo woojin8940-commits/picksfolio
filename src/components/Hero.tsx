@@ -178,7 +178,7 @@ const Hero: React.FC<HeroProps> = ({ onSignup }) => {
                     value={handle}
                     onChange={(e) => setHandle(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') onSignup(handle);
+                      if (!e.nativeEvent.isComposing && e.key === 'Enter') onSignup(handle);
                     }}
                   />
                 </div>

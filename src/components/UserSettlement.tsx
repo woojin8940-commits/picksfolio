@@ -89,7 +89,8 @@ const settlementCacheKey = (username: string) => `picks_user_settlements_${(user
 const readSettlementCache = (username: string): Settlement[] => {
   try {
     const raw = localStorage.getItem(settlementCacheKey(username));
-    return raw ? JSON.parse(raw) as Settlement[] : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === 'object') as Settlement[] : [];
   } catch {
     return [];
   }

@@ -1,5 +1,5 @@
 import type { Config, Context } from '@netlify/functions'
-import { verifyPortOnePayment } from './_shared/portone-payment.mts'
+import { verifyPortOnePayment as verifyPortOnePaymentWithPortOne } from './_shared/portone-payment.mts'
 import {
   ACTIVATION_GRANT_CREDITS,
   ACTIVATION_PRICE_KRW,
@@ -34,13 +34,13 @@ import { requireAccountOwner } from './_shared/user-auth.mts'
 //
 // The Claude plan is independent of the membership tiers: activating it grants
 // Claude access on its own, regardless of which (if any) membership the account holds.
-const verifyPortOnePayment = async (
+const verifyClaudeCreditPayment = async (
   paymentId: string,
   expectedKrw: number,
   payMethod: string,
   expectedOwner: string,
 ): Promise<{ ok: boolean; error?: string }> => {
-  const verified = await verifyPortOnePayment({
+  const verified = await verifyPortOnePaymentWithPortOne({
     paymentId,
     expectedKrw,
     payMethod,
@@ -126,7 +126,7 @@ export default async (req: Request, context: Context) => {
         return respond(credits, { alreadyProcessed: true })
       }
 
-      const verified = await verifyPortOnePayment(paymentId, amountKrw, payMethod, username)
+      const verified = await verifyClaudeCreditPayment(paymentId, amountKrw, payMethod, username)
       if (!verified.ok) {
         return Response.json({ error: verified.error }, { status: 400 })
       }

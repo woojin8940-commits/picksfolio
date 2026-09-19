@@ -419,12 +419,18 @@ async function authedGet(
   /** 화면을 벗어나면 취소할 수 있게 — 주기적으로 부르는 조회가 쓴다. */
   opts: { signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const res = await fetch(url, { credentials: 'same-origin', headers: await build(), signal: opts.signal });
+  const res = await fetchWithTimeout(
+    url,
+    { credentials: 'same-origin', headers: await build(), signal: opts.signal },
+  );
   if (res.status !== 401) return res;
 
   const refreshed = await refreshSupabaseSession();
   if (!refreshed) return res;
-  return await fetch(url, { credentials: 'same-origin', headers: await build(), signal: opts.signal });
+  return await fetchWithTimeout(
+    url,
+    { credentials: 'same-origin', headers: await build(), signal: opts.signal },
+  );
 }
 
 /**
@@ -1277,7 +1283,7 @@ export const apiService = {
     siteDataVersions[key] = version;
     const request = (async () => {
       try {
-        const res = await fetch(`/api/site/${encodeURIComponent(key)}`);
+        const res = await fetchWithTimeout(`/api/site/${encodeURIComponent(key)}`);
         if (!res.ok) return null;
         const data = (await res.json()) as SiteData;
         if (siteDataVersions[key] !== version) return siteDataCache[key]?.data || null;
@@ -1303,10 +1309,11 @@ export const apiService = {
    * "재시도 중..." 을 띄우고 같은 요청을 한 번 더 보냈다. 사용자에게는 원인을 알
    * 수 없는 경고만 남았다.
    */
-  async saveSiteDataResult(username: string, data: Partial<SiteData>): Promise<SaveResult> {
+  async saveSiteDataResult(username: string, data: Partial<SiteData>, opts?: { force?: boolean }): Promise<SaveResult> {
     return serializeSiteDataSave(username, async () => {
       try {
-        const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}`, {
+        const query = opts?.force ? '?force=true' : '';
+        const res = await fetch(`/api/site/${encodeURIComponent(username.toLowerCase())}${query}`, {
           method: 'POST',
           headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(data)
@@ -1348,8 +1355,8 @@ export const apiService = {
     });
   },
 
-  async saveSiteData(username: string, data: Partial<SiteData>): Promise<boolean> {
-    return (await apiService.saveSiteDataResult(username, data)).ok;
+  async saveSiteData(username: string, data: Partial<SiteData>, opts?: { force?: boolean }): Promise<boolean> {
+    return (await apiService.saveSiteDataResult(username, data, opts)).ok;
   },
 
   async uploadImage(username: string, blob: Blob, filename: string): Promise<string | null> {
@@ -1363,6 +1370,7 @@ export const apiService = {
 
       const res = await fetch('/api/upload-image', {
         method: 'POST',
+        headers: await authHeaders({}, { account: username }),
         body: formData,
         signal: controller.signal
       });
@@ -1385,7 +1393,7 @@ export const apiService = {
         method: 'POST',
         headers: await authHeaders(
           { 'Content-Type': 'application/json' },
-          { account: proposal.business_username },
+          { account: `biz/${proposal.business_username}` },
         ),
         body: JSON.stringify(proposal)
       });
@@ -1427,7 +1435,7 @@ export const apiService = {
     const key = normalizeAccount(username);
     return (await readMemory<BusinessProposal[] | null>(`proposals:${key}`, 30_000, async () => {
       try {
-        const res = await fetch(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
+        const res = await fetchWithTimeout(`/api/proposals/${encodeURIComponent(username.toLowerCase())}`, {
           headers: await authHeaders(),
         });
         if (!res.ok) return null;
@@ -1572,7 +1580,7 @@ export const apiService = {
       //    거절될 파일을 몇 분 동안 올려보내고 나서 알게 되는 일이 없다.
       const signRes = await fetch('/api/upload-url', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }, { account: username }),
         body: JSON.stringify({
           username: owner,
           filename: file.name,
@@ -1696,7 +1704,7 @@ export const apiService = {
     const key = normalizeAccount(username);
     return (await readMemory<CollabRecord[] | null>(`collabRecords:${key}`, 30_000, async () => {
       try {
-        const res = await fetch(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
+        const res = await fetchWithTimeout(`/api/collabs/${encodeURIComponent(username.toLowerCase())}`, {
           headers: await authHeaders(),
         });
         if (!res.ok) return null;
@@ -1717,7 +1725,7 @@ export const apiService = {
     const key = normalizeAccount(username);
     return (await readMemory<Settlement[] | null>(`settlements:${key}:${role}`, 30_000, async () => {
       try {
-        const res = await fetch(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
+        const res = await fetchWithTimeout(`/api/settlements/${encodeURIComponent(username.toLowerCase())}?role=${role}`, {
           headers: await authHeaders(),
         });
         if (!res.ok) return null;
@@ -1906,7 +1914,7 @@ export const apiService = {
     try {
       const res = await fetch('/api/portone-complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ username: username.toLowerCase(), paymentId, payMethod }),
       });
       const json = await res.json();

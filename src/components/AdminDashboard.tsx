@@ -55,7 +55,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   children
 }) => {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ views: 0, clicks: 0, ctr: 0 });
+  const [stats, setStats] = useState({ views: 0, visitors: 0, clicks: 0, ctr: 0 });
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [topItemsData, setTopItemsData] = useState<{ id: string; count: number }[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -97,11 +97,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (!apiData || cancelled) return;
       if (Array.isArray(apiData.blocks)) {
         setPreviewBlocks(apiData.blocks);
-        localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks));
+        try { localStorage.setItem(`picks_blocks_${u}`, JSON.stringify(apiData.blocks)); } catch {}
       }
       if (apiData.openSchedule) {
         setPreviewSchedule(apiData.openSchedule);
-        localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule));
+        try { localStorage.setItem(`picks_schedule_${u}`, JSON.stringify(apiData.openSchedule)); } catch {}
       }
     }).catch(e => {
       console.warn('Error loading dashboard data from API:', e);
@@ -326,7 +326,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 w-full bg-[#0b1221] text-white z-[100] border-t border-white/10 fixed-bottom-nav">
-        <div className="grid grid-cols-4 px-1 py-2 gap-0.5">
+        <div className="grid grid-cols-5 px-1 py-2 gap-0.5">
           <MobileNavItem icon="🏠" label={t('nav.home', '홈', 'Home')} active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem
             icon="🔗"
@@ -335,11 +335,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
             onMouseEnter={() => prefetchLinkData(userName)}
           />
-          <MobileNavItem icon="📨" label={t('nav.inbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+          <MobileNavItem icon="📩" label={t('nav.dmAutomation', '자동DM', 'DM')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
+          <MobileNavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
           <MobileNavItem
             icon="⋯"
             label={t('nav.more', '더보기', 'More')}
-            active={['timeline','calendar','open-schedule','settlement','membership','campaigns','insights'].includes(currentSubView)}
+            active={['my-collabs','business','timeline','calendar','open-schedule','settlement','membership','insights'].includes(currentSubView)}
             onClick={() => setIsMobileMenuOpen(true)}
             /* 협업 타임라인과 캠페인 협업이 모두 이 서랍 안에 있다. 둘을 합쳐서
                보여 주지 않으면, 진행사항에 새 피드백이 왔을 때 아래 막대에는 아무
@@ -460,7 +461,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 mb-6 md:mb-8">
               <StatCard
                 label={t('dash.visitors', '방문자 수', 'Visitors')}
-                value={stats.views.toLocaleString()}
+                value={stats.visitors.toLocaleString()}
                 trend={startDate === endDate && startDate === todayInSeoul() ? t('dash.realtime', '실시간', 'Real-time') : undefined}
               />
               <StatCard

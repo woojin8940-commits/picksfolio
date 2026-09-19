@@ -14,12 +14,17 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
   const { language } = useLanguage();
   const isEn = language === 'en';
 
-  const initialSession = typeof window !== 'undefined'
-    ? localStorage.getItem('picks_business_session')
-    : null;
-  const cachedProfileRaw = typeof window !== 'undefined' && initialSession
-    ? localStorage.getItem(`picks_business_profile_${initialSession.toLowerCase()}`)
-    : null;
+  const initialSession = (() => {
+    try { return typeof window !== 'undefined' ? localStorage.getItem('picks_business_session') : null; }
+    catch { return null; }
+  })();
+  const cachedProfileRaw = (() => {
+    try {
+      return typeof window !== 'undefined' && initialSession
+        ? localStorage.getItem(`picks_business_profile_${initialSession.toLowerCase()}`)
+        : null;
+    } catch { return null; }
+  })();
   const cachedProfile = (() => {
     try { return cachedProfileRaw ? JSON.parse(cachedProfileRaw) : null; } catch { return null; }
   })();
@@ -122,19 +127,11 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
           continue;
         }
 
-        const formData = new FormData();
-        formData.append('image', file);
-
-        const res = await fetch('/.netlify/functions/api-upload-image', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const data = await res.json();
-        if (data.success && data.imageUrl) {
-          uploadedUrls.push(data.imageUrl);
+        const result = await apiService.uploadAttachment(businessUsername || username, file);
+        if (result.url) {
+          uploadedUrls.push(result.url);
         } else {
-          alert(isEn ? `Failed to upload file ${file.name}.` : `파일 ${file.name} 업로드에 실패했습니다.`);
+          alert(result.error || (isEn ? `Failed to upload file ${file.name}.` : `파일 ${file.name} 업로드에 실패했습니다.`));
         }
       }
 
@@ -171,7 +168,9 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
 
     if (!isBusinessLoggedIn) {
       alert(isEn ? 'Business login is required to send proposal. You will be directed to login.' : '제안서를 전송하려면 비즈니스 로그인이 필요합니다. 작성하신 내용은 저장되며 로그인 페이지로 이동합니다.');
-      window.location.href = `/business-login?redirect=${encodeURIComponent(window.location.pathname)}`;
+      const redirectPath = window.location.pathname + window.location.search + window.location.hash;
+      try { sessionStorage.setItem('picks_business_redirect', redirectPath); } catch {}
+      window.location.href = `/business-login?redirect=${encodeURIComponent(redirectPath)}`;
       return;
     }
 
@@ -230,7 +229,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
           </p>
             <div className="space-y-3">
             <button
-              onClick={() => window.location.href = '/business-dashboard'}
+              onClick={() => window.location.href = '/business-admin'}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-blue-500/30 transition-all"
             >
               {isEn ? 'Go to Business Dashboard' : '비즈니스 대시보드로 이동'}
@@ -399,7 +398,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
             <label className={`block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${uploadingFiles ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'}`}>
               <input
                 type="file"
-                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                accept="image/*,video/*,.pdf"
                 multiple
                 onChange={handleFileUpload}
                 disabled={uploadingFiles}
@@ -416,7 +415,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                   <p className="text-sm font-bold text-slate-500">{isEn ? 'Click to upload files' : '클릭하여 파일 업로드'}</p>
-                  <p className="text-[10px] text-slate-400">Image, PDF, Word, Excel, PPT, TXT, ZIP ({isEn ? 'Max 20MB' : '최대 20MB'})</p>
+                  <p className="text-[10px] text-slate-400">Image, Video, PDF ({isEn ? 'Max 20MB' : '최대 20MB'})</p>
                 </div>
               )}
             </label>
@@ -449,7 +448,7 @@ const BusinessProposalForm: React.FC<BusinessProposalFormProps> = ({ username, o
                       <button
                         type="button"
                         onClick={() => removeAttachment(idx)}
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-black shadow-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                       >
                         ✕
                       </button>

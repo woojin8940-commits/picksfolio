@@ -89,6 +89,17 @@ const contactName = (raw: unknown) => String(raw ?? "").trim().slice(0, 60);
 const contactPhone = (raw: unknown) => String(raw ?? "").replace(/[^\d]/g, "").slice(0, 11);
 const contactEmail = (raw: unknown) => String(raw ?? "").trim().slice(0, 200);
 
+const optionalHttpUrl = (raw: unknown): string | null => {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * 담당자 칸 검사. 자릿수는 9~11 로 본다 — 휴대폰(10~11)뿐 아니라 02 지역번호(9)로
  * 적는 브랜드가 있어서, 휴대폰만 허용하면 유효한 번호가 반려된다.
@@ -172,9 +183,9 @@ export default async (req: Request) => {
         const one = withRecruitState(result);
         const owner = String((result[0] as any).business_username || "");
         const forOwner = url.searchParams.get("business") === owner;
-        const shaped = forOwner ? one[0] : stripPrivateFields(one)[0];
         // 담당자 연락처는 파라미터가 아니라 토큰으로 확인된 주인에게만 남긴다.
         const verified = forOwner && (await viewerOwnsAccount(req, owner));
+        const shaped = verified ? one[0] : stripPrivateFields(one)[0];
         // 삭제한 캠페인은 이력으로만 남는다(DELETE 주석 참고). 브랜드 자신은 이력에서
         // 열어 볼 수 있어야 하지만, 남에게는 없는 캠페인이다 — 목록에서 내렸는데
         // 주소를 아는 사람에게 그대로 열리면 지원까지 들어온다.
@@ -193,6 +204,13 @@ export default async (req: Request) => {
       const statusParam = url.searchParams.get("status") || "";
       const status = business ? statusParam : statusParam || "active";
       const pattern = search ? `%${search}%` : "";
+
+      let verifiedBusiness = false;
+      if (business) {
+        const auth = await requireAccountOwner(req, business);
+        if (!auth.ok) return auth.response;
+        verifiedBusiness = true;
+      }
 
       // 조건별로 쿼리를 복사하지 않고, 넘어오지 않은 조건은 빈 문자열로 비활성화한다.
       // (조건 조합이 늘어날 때마다 분기를 추가하다 보면 category+type 처럼 빠지는
@@ -235,8 +253,7 @@ export default async (req: Request) => {
 
       // 브랜드 자신의 관리 화면. 로그인이 확인되면 담당자 연락처까지 내려보낸다 —
       // 수정 화면이 이미 적어 둔 담당자를 되읽어야 하기 때문이다.
-      const verified = await viewerOwnsAccount(req, business);
-      const paged = paginate(verified ? campaigns : stripContact(campaigns), pageParam, limitParam);
+      const paged = paginate(verifiedBusiness ? campaigns : stripContact(campaigns), pageParam, limitParam);
       return Response.json({
         campaigns: paged.rows,
         total: paged.total,
@@ -267,6 +284,10 @@ export default async (req: Request) => {
       const email = contactEmail(body.contact_email);
       const contactErr = contactError(person, phone, email);
       if (contactErr) return Response.json({ error: contactErr }, { status: 400 });
+      const productUrl = optionalHttpUrl(body.product_url);
+      if (productUrl === null) {
+        return Response.json({ error: "제품 URL을 확인해 주세요." }, { status: 400 });
+      }
 
       const id = `camp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -290,7 +311,7 @@ export default async (req: Request) => {
           ${body.brand_name || ""}, ${body.thumbnail_url || ""}, ${body.category || ""},
           ${body.reward_type || ""}, ${body.reward_amount || ""}, ${body.requirements || ""},
           ${body.max_applicants || 0}, ${body.start_date || null}, ${body.end_date || null}, 'pending_approval',
-          ${body.product_name || ""}, ${body.product_url || ""}, ${body.upload_channel || ""},
+          ${body.product_name || ""}, ${productUrl}, ${body.upload_channel || ""},
           ${body.content_format || ""}, ${body.video_concept || ""},
           ${body.guideline_url || ""}, ${body.guideline_note || ""},
           ${briefFee(body.second_use_fee)}, ${body.second_use_note || ""},
@@ -334,6 +355,12 @@ export default async (req: Request) => {
       // 수정할 수 있도록 확인한다.
       const auth = await requireAccountOwner(req, String(c.business_username || ""));
       if (!auth.ok) return auth.response;
+      const productUrl = updates.product_url === undefined
+        ? String(c.product_url || "")
+        : optionalHttpUrl(updates.product_url);
+      if (productUrl === null) {
+        return Response.json({ error: "제품 URL을 확인해 주세요." }, { status: 400 });
+      }
 
       /**
        * 담당자 칸의 수정 규칙.
@@ -372,7 +399,7 @@ export default async (req: Request) => {
             start_date = ${updates.start_date ?? c.start_date},
             end_date = ${updates.end_date ?? c.end_date},
             product_name = ${updates.product_name ?? c.product_name ?? ""},
-            product_url = ${updates.product_url ?? c.product_url ?? ""},
+            product_url = ${productUrl},
             upload_channel = ${updates.upload_channel ?? c.upload_channel ?? ""},
             content_format = ${updates.content_format ?? c.content_format ?? ""},
             video_concept = ${updates.video_concept ?? c.video_concept ?? ""},

@@ -92,6 +92,59 @@ async function resolveCaller(req: Request): Promise<CallerContext | { error: Res
 
 const jsonError = (message: string, status = 400) => Response.json({ error: message }, { status });
 
+const isHttpUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const objectValue = (value: unknown): Record<string, any> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
+
+const parsedObject = (value: unknown): Record<string, any> => {
+  if (typeof value !== "string") return objectValue(value);
+  try {
+    return objectValue(JSON.parse(value || "{}"));
+  } catch {
+    return {};
+  }
+};
+
+async function insertDeliverableVersion(
+  db: any,
+  input: {
+    collabId: string;
+    stageKey: string;
+    kind: string;
+    payload: Record<string, any>;
+    submittedBy: string;
+  },
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const deliverableId = newId("cd");
+    const rows = (await db.sql`
+      INSERT INTO collab_deliverables (
+        id, collab_id, stage_key, kind, version, status, payload, submitted_by
+      )
+      SELECT
+        ${deliverableId}, ${input.collabId}, ${input.stageKey}, ${input.kind},
+        COALESCE(MAX(version), 0)::int + 1, 'submitted', ${JSON.stringify(input.payload)},
+        ${input.submittedBy}
+      FROM collab_deliverables
+      WHERE collab_id = ${input.collabId} AND stage_key = ${input.stageKey}
+      ON CONFLICT (collab_id, stage_key, version) DO NOTHING
+      RETURNING id, version
+    `) as any[];
+    if (rows[0]) {
+      return { id: String(rows[0].id), version: Number(rows[0].version) };
+    }
+  }
+  throw new Error("산출물 버전을 저장하지 못했습니다.");
+}
+
 /**
  * 협업 한 건 + 그 캠페인의 가이드라인.
  *
@@ -140,25 +193,50 @@ async function loadStages(db: any, collabId: string) {
 
 /** 다음 단계를 열어 준다. 마지막 단계였다면 협업 자체를 완료로 넘긴다. */
 async function openNextStage(db: any, collabId: string, currentSeq: number) {
-  const next = (await db.sql`
-    SELECT * FROM collab_stages
-    WHERE collab_id = ${collabId} AND seq > ${currentSeq} AND status = 'pending'
-    ORDER BY seq ASC LIMIT 1
+  const activated = (await db.sql`
+    UPDATE collab_stages target
+    SET status = 'active', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+    WHERE target.id = (
+      SELECT candidate.id
+      FROM collab_stages candidate
+      WHERE candidate.collab_id = ${collabId}
+        AND candidate.seq > ${currentSeq}
+        AND candidate.status = 'pending'
+        AND NOT EXISTS (
+          SELECT 1 FROM collab_stages opened
+          WHERE opened.collab_id = ${collabId}
+            AND opened.status IN ('active', 'submitted', 'revision')
+        )
+      ORDER BY candidate.seq ASC
+      LIMIT 1
+    )
+      AND target.status = 'pending'
+    RETURNING target.*
   `) as any[];
-  const stage = next?.[0];
+  let stage = activated[0];
   if (!stage) {
-    await db.sql`
-      UPDATE campaign_collabs
-      SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), current_stage_key = '', updated_at = NOW()
-      WHERE id = ${collabId}
-    `;
+    const opened = (await db.sql`
+      SELECT * FROM collab_stages
+      WHERE collab_id = ${collabId} AND status IN ('active', 'submitted', 'revision')
+      ORDER BY seq ASC LIMIT 1
+    `) as any[];
+    stage = opened[0];
+  }
+  if (!stage) {
+    const remaining = (await db.sql`
+      SELECT id FROM collab_stages
+      WHERE collab_id = ${collabId} AND status NOT IN ('done', 'skipped')
+      LIMIT 1
+    `) as any[];
+    if (!remaining[0]) {
+      await db.sql`
+        UPDATE campaign_collabs
+        SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), current_stage_key = '', updated_at = NOW()
+        WHERE id = ${collabId} AND status <> 'cancelled'
+      `;
+    }
     return null;
   }
-  await db.sql`
-    UPDATE collab_stages
-    SET status = 'active', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
-    WHERE id = ${stage.id}
-  `;
   await db.sql`
     UPDATE campaign_collabs SET current_stage_key = ${stage.stage_key}, updated_at = NOW() WHERE id = ${collabId}
   `;
@@ -319,17 +397,28 @@ async function earlierUnfinishedStage(db: any, collabId: string, stage: any) {
  * 누른다고 다음 단계가 열리면 담당자가 하기로 한 일이 통째로 건너뛰어진다.
  */
 async function advanceProcessStage(db: any, collab: any, stage: any, actorUsername: string) {
-  if (!stage || !isProcessV1(collab.template_key)) return null;
-  if (stage.status === "done" || stage.status === "skipped") return null;
-  await db.sql`
-    UPDATE collab_stages SET status = 'done', completed_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
-  `;
+  if (!stage || !isProcessV1(collab.template_key)) return { advanced: false, next: null };
+  const completed = (await db.sql`
+    UPDATE collab_stages
+    SET status = 'done', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+    WHERE id = ${stage.id} AND status NOT IN ('done', 'skipped')
+    RETURNING id
+  `) as any[];
+  if (!completed[0]) return { advanced: false, next: null };
   await db.sql`
     UPDATE collab_deliverables
     SET status = 'approved', reviewed_by = ${actorUsername}, reviewed_at = NOW()
     WHERE collab_id = ${collab.id} AND stage_key = ${stage.stage_key} AND status = 'submitted'
   `;
-  return openNextStage(db, collab.id, stage.seq);
+  const earlier = (await db.sql`
+    SELECT id FROM collab_stages
+    WHERE collab_id = ${collab.id}
+      AND seq < ${stage.seq}
+      AND status NOT IN ('done', 'skipped')
+    LIMIT 1
+  `) as any[];
+  if (earlier[0]) return { advanced: true, next: null };
+  return { advanced: true, next: await openNextStage(db, collab.id, stage.seq) };
 }
 
 /**
@@ -1686,6 +1775,7 @@ export default async (req: Request, context: Context) => {
         }
 
         await logCollabEvent(db, {
+          id: `ce_settlement_completed_${collabId}`,
           collabId,
           type: "settlement_completed",
           ...actor,
@@ -1714,11 +1804,13 @@ export default async (req: Request, context: Context) => {
         `;
 
         const stage = await resolveStepStage(db, collabId, "shipping");
-        const next = await advanceProcessStage(db, collab, stage, caller.username);
+        const transition = await advanceProcessStage(db, collab, stage, caller.username);
+        const next = transition.next;
 
         // 택배사·송장번호·발송일은 payload 에 그대로 담는다. 인플루언서에게 나가는
         // 발송 완료 알림톡이 그 세 줄을 그대로 읽는다(scheduled-collab-events).
         await logCollabEvent(db, {
+          id: `ce_product_shipped_${collabId}`,
           collabId,
           type: "product_shipped",
           ...actor,
@@ -1739,6 +1831,7 @@ export default async (req: Request, context: Context) => {
 
         const text = String((body as any).body || "").trim().slice(0, 8000);
         const link = String((body as any).link || "").trim().slice(0, 1000);
+        if (link && !isHttpUrl(link)) return jsonError("올바른 링크를 입력해 주세요.");
         const fileUrl = String((body as any).fileUrl || "").trim();
         const fileName = String((body as any).fileName || "").trim().slice(0, 240);
         if (fileUrl && !isUploadedFileUrl(fileUrl)) {
@@ -1798,8 +1891,7 @@ export default async (req: Request, context: Context) => {
             WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
             ORDER BY version DESC LIMIT 1
           `) as any[];
-          const rawPrev = prevRows?.[0]?.payload;
-          const prev = (typeof rawPrev === "string" ? JSON.parse(rawPrev || "{}") : rawPrev) || {};
+          const prev = parsedObject(prevRows?.[0]?.payload);
           if (String(prev.fileUrl || "")) {
             carriedFileUrl = String(prev.fileUrl);
             carriedFileName = String(prev.fileName || "");
@@ -1828,16 +1920,15 @@ export default async (req: Request, context: Context) => {
 
         // 덮어쓰지 않고 버전을 쌓는다. 피드백이 "몇 번째 안"에 붙은 말인지가
         // 남지 않으면 수정 왕복이 기억 싸움이 된다.
-        const versionRows = (await db.sql`
-          SELECT COALESCE(MAX(version), 0)::int AS v FROM collab_deliverables
-          WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
-        `) as any[];
-        const version = Number(versionRows?.[0]?.v || 0) + 1;
-        const deliverableId = newId("cd");
-        await db.sql`
-          INSERT INTO collab_deliverables (id, collab_id, stage_key, kind, version, status, payload, submitted_by)
-          VALUES (${deliverableId}, ${collabId}, ${stageKey}, ${stepKey}, ${version}, 'submitted', ${JSON.stringify(payload)}, ${caller.username})
-        `;
+        const inserted = await insertDeliverableVersion(db, {
+          collabId,
+          stageKey,
+          kind: stepKey,
+          payload,
+          submittedBy: caller.username,
+        });
+        const deliverableId = inserted.id;
+        const version = inserted.version;
         if (stage && !["done", "skipped"].includes(stage.status) && !captionOnly) {
           await db.sql`
             UPDATE collab_stages SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ${stage.id}
@@ -2030,6 +2121,10 @@ export default async (req: Request, context: Context) => {
         }
 
         const stage = await resolveStepStage(db, collabId, stepKey);
+        if (!stage) return jsonError("단계를 찾을 수 없습니다.", 404);
+        if (["done", "skipped"].includes(stage.status)) {
+          return Response.json({ success: true, alreadyCompleted: true, nextStageKey: "", settlement: null });
+        }
         // 열리지도 않은 단계를 확인 처리하면 그 앞 단계가 통째로 건너뛰어진다
         // (advanceProcessStage 가 이 단계를 done 으로 닫고 다음 칸을 연다).
         const blockingConfirm = await earlierUnfinishedStage(db, collabId, stage);
@@ -2047,15 +2142,17 @@ export default async (req: Request, context: Context) => {
          * 검토가 닫히면 업로드 단계가 열리고, 브랜드가 한 번도 보지 못한 영상이 그대로
          * 게시된다.
          */
-        if (stepKey === "video") {
-          const videoRows = (await db.sql`
+        if (stepKey === "plan" || stepKey === "video") {
+          const workRows = (await db.sql`
             SELECT payload FROM collab_deliverables
-            WHERE collab_id = ${collabId} AND stage_key = ${stage?.stage_key || "video"}
+            WHERE collab_id = ${collabId} AND stage_key = ${stage.stage_key}
             ORDER BY version DESC LIMIT 1
           `) as any[];
-          const rawVideo = videoRows?.[0]?.payload;
-          const videoPayload = (typeof rawVideo === "string" ? JSON.parse(rawVideo || "{}") : rawVideo) || {};
-          if (!String(videoPayload.fileUrl || "").trim()) {
+          if (!workRows[0]) {
+            return jsonError(stepKey === "plan" ? "아직 기획안이 올라오지 않았습니다." : "아직 초안 영상이 올라오지 않았습니다.", 409);
+          }
+          const workPayload = parsedObject(workRows[0].payload);
+          if (stepKey === "video" && !String(workPayload.fileUrl || "").trim()) {
             return jsonError("아직 초안 영상이 올라오지 않았습니다.", 409);
           }
         }
@@ -2078,9 +2175,11 @@ export default async (req: Request, context: Context) => {
           if (confirmed?.[0]) settlement = await scheduleSettlementFor(db, collab);
         }
 
-        const next = await advanceProcessStage(db, collab, stage, caller.username);
+        const transition = await advanceProcessStage(db, collab, stage, caller.username);
+        const next = transition.next;
 
         await logCollabEvent(db, {
+          id: `ce_step_confirmed_${collabId}_${stage?.stage_key || stepKey}`,
           collabId,
           type: stepKey === "upload" ? "upload_confirmed" : "stage_completed",
           ...actor,
@@ -2115,11 +2214,19 @@ export default async (req: Request, context: Context) => {
         }
 
         const kind = String((body as any).kind || "content");
-        const payload = (body as any).payload || {};
+        if (!["script", "content", "upload"].includes(kind)) {
+          return jsonError("잘못된 제출물 종류입니다.");
+        }
+        const payload = objectValue((body as any).payload);
+        if (JSON.stringify(payload).length > 500_000) {
+          return jsonError("제출 내용이 너무 큽니다.", 413);
+        }
 
         // 업로드 단계는 링크가 반드시 있어야 한다 — 정산의 근거이기 때문이다.
-        if (kind === "upload" && !String(payload.uploadUrl || "").trim()) {
-          return jsonError("게시물 링크를 입력해 주세요.");
+        if (kind === "upload") {
+          const uploadUrl = String(payload.uploadUrl || "").trim();
+          if (!uploadUrl) return jsonError("게시물 링크를 입력해 주세요.");
+          if (!isHttpUrl(uploadUrl)) return jsonError("올바른 게시물 링크를 입력해 주세요.");
         }
         if (kind === "script" && !Array.isArray(payload.scenes)) {
           return jsonError("장면 구성을 하나 이상 작성해 주세요.");
@@ -2138,17 +2245,15 @@ export default async (req: Request, context: Context) => {
           }
         }
 
-        const versionRows = await db.sql`
-          SELECT COALESCE(MAX(version), 0)::int AS v FROM collab_deliverables
-          WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
-        `;
-        const version = Number((versionRows as any[])?.[0]?.v || 0) + 1;
-        const deliverableId = newId("cd");
-
-        await db.sql`
-          INSERT INTO collab_deliverables (id, collab_id, stage_key, kind, version, status, payload, submitted_by)
-          VALUES (${deliverableId}, ${collabId}, ${stageKey}, ${kind}, ${version}, 'submitted', ${JSON.stringify(payload)}, ${caller.username})
-        `;
+        const inserted = await insertDeliverableVersion(db, {
+          collabId,
+          stageKey,
+          kind,
+          payload,
+          submittedBy: caller.username,
+        });
+        const deliverableId = inserted.id;
+        const version = inserted.version;
         await db.sql`
           UPDATE collab_stages
           SET status = 'submitted', submitted_at = NOW(), updated_at = NOW()
@@ -2234,12 +2339,20 @@ export default async (req: Request, context: Context) => {
           return jsonError("이전 단계가 아직 끝나지 않았습니다.", 409);
         }
 
-        const note = String((body as any).note || "");
-        await db.sql`
+        const note = String((body as any).note || "").slice(0, 2000);
+        const completed = (await db.sql`
           UPDATE collab_stages
-          SET status = 'done', completed_at = NOW(), updated_at = NOW()
-          WHERE id = ${stage.id}
-        `;
+          SET status = 'done', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+          WHERE id = ${stage.id} AND status = ${stage.status}
+          RETURNING id
+        `) as any[];
+        if (!completed[0]) {
+          const latest = await stageByKey(stageKey);
+          if (latest && ["done", "skipped"].includes(latest.status)) {
+            return Response.json({ success: true, alreadyCompleted: true, nextStageKey: "", settlement: null });
+          }
+          return jsonError("단계 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요.", 409);
+        }
         await db.sql`
           UPDATE collab_deliverables
           SET status = 'approved', reviewed_by = ${caller.username}, reviewed_at = NOW(), review_note = ${note}
@@ -2262,6 +2375,7 @@ export default async (req: Request, context: Context) => {
         const next = await openNextStage(db, collabId, stage.seq);
 
         await logCollabEvent(db, {
+          id: `ce_stage_approved_${collabId}_${stageKey}`,
           collabId,
           type: next ? "stage_completed" : "collab_completed",
           ...actor,
@@ -2276,8 +2390,17 @@ export default async (req: Request, context: Context) => {
       // 브랜드·담당자: 피드백 등록 ---------------------------------------
       case "add_feedback": {
         if (role === "influencer") return jsonError("피드백은 브랜드와 담당자가 남깁니다.", 403);
-        const bodyText = String((body as any).body || "").trim();
+        const bodyText = String((body as any).body || "").trim().slice(0, 4000);
         if (!bodyText) return jsonError("피드백 내용을 입력해 주세요.");
+
+        const deliverableId = String((body as any).deliverableId || "");
+        if (deliverableId) {
+          const owned = (await db.sql`
+            SELECT id FROM collab_deliverables
+            WHERE id = ${deliverableId} AND collab_id = ${collabId}
+          `) as any[];
+          if (!owned[0]) return jsonError("제출물을 찾을 수 없습니다.", 404);
+        }
 
         // 브랜드 의견은 기본적으로 담당자만 본다. 담당자가 정리해서 다시 전달한다.
         const visible = role === "manager" ? (body as any).visibleToInfluencer !== false : false;
@@ -2288,9 +2411,9 @@ export default async (req: Request, context: Context) => {
             author_type, author_username, visible_to_influencer
           ) VALUES (
             ${id}, ${collabId},
-            ${String((body as any).deliverableId || "") || null},
-            ${String((body as any).stageKey || "")},
-            ${String((body as any).anchor || "")},
+            ${deliverableId || null},
+            ${String((body as any).stageKey || "").slice(0, 80)},
+            ${String((body as any).anchor || "").slice(0, 120)},
             ${bodyText},
             ${role}, ${caller.username}, ${visible}
           )
@@ -2300,9 +2423,9 @@ export default async (req: Request, context: Context) => {
           collabId,
           type: visible ? "feedback_sent" : "feedback_received",
           ...actor,
-          stageKey: String((body as any).stageKey || ""),
+          stageKey: String((body as any).stageKey || "").slice(0, 80),
           summary: visible ? "수정 요청 항목 전달" : "브랜드 의견 접수",
-          payload: { feedbackId: id, anchor: String((body as any).anchor || "") },
+          payload: { feedbackId: id, anchor: String((body as any).anchor || "").slice(0, 120) },
         });
 
         return Response.json({ success: true, feedbackId: id, visibleToInfluencer: visible });
@@ -2318,8 +2441,9 @@ export default async (req: Request, context: Context) => {
         const source = rows?.[0];
         if (!source) return jsonError("원본 피드백을 찾을 수 없습니다.", 404);
 
-        const text = String((body as any).body || source.body || "").trim();
-        const id = newId("cf");
+        const text = String((body as any).body || source.body || "").trim().slice(0, 4000);
+        if (!text) return jsonError("전달할 내용을 입력해 주세요.");
+        const id = `cf_relay_${sourceId}`;
         await db.sql`
           INSERT INTO collab_feedbacks (
             id, collab_id, deliverable_id, stage_key, anchor, body,
@@ -2329,6 +2453,7 @@ export default async (req: Request, context: Context) => {
             ${String((body as any).anchor || source.anchor || "")}, ${text},
             'manager', ${caller.username}, TRUE
           )
+          ON CONFLICT (id) DO NOTHING
         `;
         await db.sql`
           UPDATE collab_feedbacks
@@ -2338,6 +2463,7 @@ export default async (req: Request, context: Context) => {
         `;
 
         await logCollabEvent(db, {
+          id: `ce_feedback_relayed_${sourceId}`,
           collabId,
           type: "feedback_sent",
           ...actor,
@@ -2366,26 +2492,29 @@ export default async (req: Request, context: Context) => {
         }
         if (role === "brand") return jsonError("반영 여부는 인플루언서가 표시합니다.", 403);
 
-        const note = String((body as any).note || "");
+        const note = String((body as any).note || "").slice(0, 2000);
         if (status === "wont_apply" && !note.trim()) {
           // 미반영은 이유가 남아야 담당자가 브랜드에 설명할 수 있다.
           return jsonError("미반영 사유를 남겨 주세요.");
         }
 
-        await db.sql`
+        const resolved = (await db.sql`
           UPDATE collab_feedbacks
           SET status = ${status}, resolution_note = ${note}, resolved_by = ${caller.username}, resolved_at = NOW()
-          WHERE id = ${feedbackId}
-        `;
+          WHERE id = ${feedbackId} AND status IS DISTINCT FROM ${status}
+          RETURNING id
+        `) as any[];
 
-        await logCollabEvent(db, {
-          collabId,
-          type: "feedback_resolved",
-          ...actor,
-          stageKey: feedback.stage_key || "",
-          summary: status === "applied" ? "피드백 반영 완료" : "피드백 미반영",
-          payload: { feedbackId, status, note },
-        });
+        if (resolved[0]) {
+          await logCollabEvent(db, {
+            collabId,
+            type: "feedback_resolved",
+            ...actor,
+            stageKey: feedback.stage_key || "",
+            summary: status === "applied" ? "피드백 반영 완료" : "피드백 미반영",
+            payload: { feedbackId, status, note },
+          });
+        }
 
         return Response.json({ success: true });
       }
@@ -2401,6 +2530,22 @@ export default async (req: Request, context: Context) => {
 
         const patch = (body as any).terms || {};
         const fee = patch.fee === undefined ? Number(current?.fee || 0) : Math.max(0, Math.floor(Number(patch.fee) || 0));
+        const dateField = (value: unknown, fallback: unknown) => {
+          const raw = String(value === undefined ? fallback || "" : value).trim().split("T")[0];
+          return !raw || /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+        };
+        const scriptDue = dateField(patch.scriptDue, current?.script_due);
+        const contentDue = dateField(patch.contentDue, current?.content_due);
+        const uploadDue = dateField(patch.uploadDue, current?.upload_due);
+        if (scriptDue === null || contentDue === null || uploadDue === null) {
+          return jsonError("마감일 형식을 확인해 주세요.");
+        }
+        const deliverableSpec = objectValue(patch.deliverableSpec ?? current?.deliverable_spec ?? {});
+        if (JSON.stringify(deliverableSpec).length > 100_000) {
+          return jsonError("산출물 조건이 너무 큽니다.", 413);
+        }
+        const guideUrl = String(patch.guideUrl ?? current?.guide_url ?? "").trim().slice(0, 1000);
+        if (guideUrl && !isHttpUrl(guideUrl)) return jsonError("가이드 링크를 확인해 주세요.");
 
         await db.sql`
           INSERT INTO collab_terms (
@@ -2408,14 +2553,14 @@ export default async (req: Request, context: Context) => {
             deliverable_spec, guide_url, guide_note, updated_at
           ) VALUES (
             ${collabId}, ${fee},
-            ${String(patch.rewardType ?? current?.reward_type ?? "")},
-            ${String(patch.rewardNote ?? current?.reward_note ?? "")},
-            ${String(patch.scriptDue ?? current?.script_due ?? "")},
-            ${String(patch.contentDue ?? current?.content_due ?? "")},
-            ${String(patch.uploadDue ?? current?.upload_due ?? "")},
-            ${JSON.stringify(patch.deliverableSpec ?? current?.deliverable_spec ?? {})},
-            ${String(patch.guideUrl ?? current?.guide_url ?? "")},
-            ${String(patch.guideNote ?? current?.guide_note ?? "")},
+            ${String(patch.rewardType ?? current?.reward_type ?? "").slice(0, 80)},
+            ${String(patch.rewardNote ?? current?.reward_note ?? "").slice(0, 2000)},
+            ${scriptDue},
+            ${contentDue},
+            ${uploadDue},
+            ${JSON.stringify(deliverableSpec)},
+            ${guideUrl},
+            ${String(patch.guideNote ?? current?.guide_note ?? "").slice(0, 8000)},
             NOW()
           )
           ON CONFLICT (collab_id) DO UPDATE SET
@@ -2433,16 +2578,16 @@ export default async (req: Request, context: Context) => {
 
         // 확정한 마감일은 단계 마감일로도 내려보낸다 — 두 곳이 다르면 어느 쪽이
         // 약속인지 알 수 없게 된다.
-        const dueMap: [string, string][] = [
-          ["script", String(patch.scriptDue ?? current?.script_due ?? "")],
-          ["content", String(patch.contentDue ?? current?.content_due ?? "")],
-          ["upload", String(patch.uploadDue ?? current?.upload_due ?? "")],
+        const dueMap: [string[], string][] = [
+          [["script", "plan"], scriptDue],
+          [["content", "video"], contentDue],
+          [["upload"], uploadDue],
         ];
-        for (const [stageKey, due] of dueMap) {
+        for (const [stageKeys, due] of dueMap) {
           if (!due) continue;
           await db.sql`
             UPDATE collab_stages SET due_date = ${due}, updated_at = NOW()
-            WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
+            WHERE collab_id = ${collabId} AND stage_key = ANY(${stageKeys})
           `;
         }
 
@@ -2469,7 +2614,7 @@ export default async (req: Request, context: Context) => {
         if (role !== "manager") {
           return jsonError("일정 변경은 담당자가 확정합니다. 담당자 채널로 요청해 주세요.", 403);
         }
-        const stageKey = String((body as any).stageKey || "");
+        const stageKey = String((body as any).stageKey || "").slice(0, 80);
         const nextDue = String((body as any).nextDue || "");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDue)) return jsonError("변경할 마감일을 선택해 주세요.");
         const stage = await stageByKey(stageKey);
@@ -2488,13 +2633,20 @@ export default async (req: Request, context: Context) => {
             requested_by_role, requested_by, approved_by
           ) VALUES (
             ${newId("csc")}, ${collabId}, ${stageKey}, ${stage.due_date || ""}, ${nextDue},
-            ${String((body as any).reason || "")}, ${String((body as any).requestedByRole || "manager")},
-            ${String((body as any).requestedBy || caller.username)}, ${caller.username}
+            ${String((body as any).reason || "").slice(0, 1000)}, ${String((body as any).requestedByRole || "manager").slice(0, 40)},
+            ${String((body as any).requestedBy || caller.username).slice(0, 120)}, ${caller.username}
           )
         `;
         await db.sql`
           UPDATE collab_stages SET due_date = ${nextDue}, updated_at = NOW() WHERE id = ${stage.id}
         `;
+        if (["script", "plan"].includes(stage.stage_key)) {
+          await db.sql`UPDATE collab_terms SET script_due = ${nextDue}, updated_at = NOW() WHERE collab_id = ${collabId}`;
+        } else if (["content", "video"].includes(stage.stage_key)) {
+          await db.sql`UPDATE collab_terms SET content_due = ${nextDue}, updated_at = NOW() WHERE collab_id = ${collabId}`;
+        } else if (stage.stage_key === "upload") {
+          await db.sql`UPDATE collab_terms SET upload_due = ${nextDue}, updated_at = NOW() WHERE collab_id = ${collabId}`;
+        }
 
         await logCollabEvent(db, {
           collabId,
@@ -2502,7 +2654,7 @@ export default async (req: Request, context: Context) => {
           ...actor,
           stageKey,
           summary: `${stage.title} 마감 ${stage.due_date || "미정"} → ${nextDue}`,
-          payload: { reason: String((body as any).reason || "") },
+          payload: { reason: String((body as any).reason || "").slice(0, 1000) },
         });
 
         return Response.json({ success: true });
@@ -2628,7 +2780,7 @@ export default async (req: Request, context: Context) => {
       // 담당자: 배정 변경 ------------------------------------------------
       case "assign_manager": {
         if (role !== "manager") return jsonError("담당자만 배정할 수 있습니다.", 403);
-        const target = norm((body as any).managerUsername) || caller.username;
+        const target = (norm((body as any).managerUsername) || caller.username).slice(0, 120);
         await db.sql`
           UPDATE campaign_collabs SET manager_username = ${target}, updated_at = NOW() WHERE id = ${collabId}
         `;
@@ -2646,7 +2798,7 @@ export default async (req: Request, context: Context) => {
       // 담당자: 협업 취소 ------------------------------------------------
       case "cancel": {
         if (role !== "manager") return jsonError("취소는 담당자가 처리합니다.", 403);
-        const reason = String((body as any).reason || "").trim();
+        const reason = String((body as any).reason || "").trim().slice(0, 2000);
         if (!reason) return jsonError("취소 사유를 입력해 주세요.");
         await db.sql`
           UPDATE campaign_collabs
@@ -2655,6 +2807,7 @@ export default async (req: Request, context: Context) => {
           WHERE id = ${collabId}
         `;
         await logCollabEvent(db, {
+          id: `ce_collab_cancelled_${collabId}`,
           collabId,
           type: "collab_cancelled",
           ...actor,

@@ -91,7 +91,7 @@ export async function registerPushForUser(
     const token = await getPushToken();
     if (!token) return;
 
-    await fetch(`${config.webUrl}/api/push/register`, {
+    const response = await fetch(`${config.webUrl}/api/push/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -99,6 +99,7 @@ export async function registerPushForUser(
       },
       body: JSON.stringify({ token, username: uname, userType, platform: Platform.OS }),
     });
+    if (!response.ok) return;
     lastRegistered = key;
   } catch (e) {
     console.warn('[push] register failed', e);

@@ -75,21 +75,12 @@ class ErrorBoundary extends Component<Props, State> {
           <div className="text-4xl mb-4">⚠️</div>
           <h2 className="text-xl font-black text-slate-900 mb-2">화면을 불러오는 중 오류가 발생했습니다.</h2>
           <p className="text-slate-500 text-sm mb-6">데이터 형식이 올바르지 않거나 일시적인 오류일 수 있습니다.</p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="flex items-center justify-center">
             <button
               onClick={() => window.location.reload()}
               className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-blue-700 transition-all"
             >
               새로고침
-            </button>
-            <button
-              onClick={() => {
-                localStorage.clear();
-                window.location.reload();
-              }}
-              className="bg-white text-slate-600 border border-slate-200 px-6 py-3 rounded-xl font-black text-sm hover:bg-slate-100 transition-all"
-            >
-              데이터 초기화 후 새로고침
             </button>
           </div>
         </div>

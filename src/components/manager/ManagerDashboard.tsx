@@ -51,7 +51,14 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   onLogout,
   onNavigateCreator,
 }) => {
-  const [tab, setTab] = useState<ManagerTab>('picks');
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialProposalId = initialParams.get('proposal') || '';
+  const requestedTab = initialParams.get('tab');
+  const [tab, setTab] = useState<ManagerTab>(
+    requestedTab === 'influencers' || requestedTab === 'campaigns' || requestedTab === 'chat'
+      ? requestedTab
+      : 'picks',
+  );
   const [openCampaignId, setOpenCampaignId] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   /**
@@ -188,7 +195,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
             initialCampaignId={openCampaignId}
           />
         )}
-        {tab === 'chat' && <ManagerChatPanel managerUsername={username} onNotify={notify} />}
+        {tab === 'chat' && <ManagerChatPanel managerUsername={username} onNotify={notify} initialProposalId={initialProposalId} />}
       </div>
 
       {toast && (

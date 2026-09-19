@@ -135,12 +135,6 @@ export type PromoRedeemResult =
 
 /**
  * 코드를 등록한다.
- *
- * 한 문장으로 처리해 동시에 들어온 요청이 한도를 넘기지 못하게 한다: 코드의 사용 횟수를
- * 조건부로 늘리고(WHERE 로 활성·기한·한도를 함께 확인), 그 결과가 있을 때만 등록 기록을
- * 넣는다. 등록 기록의 기본키가 username 이므로 같은 계정이 두 번 등록되는 일은 없다.
- * (완전히 같은 순간에 같은 계정으로 두 번 들어오면 사용 횟수만 1 더 올라갈 수 있다 —
- * 공용 코드는 한도가 없어 집계용 숫자이고, 무료 기간이 두 번 붙지는 않는다.)
  */
 export async function redeemPromoCode(input: {
   code: string
@@ -158,29 +152,35 @@ export async function redeemPromoCode(input: {
 
   const db = getDatabase()
   const rows = await db.sql`
-    WITH claim AS (
-      UPDATE membership_promo_codes
-      SET redemptions = redemptions + 1, updated_at = NOW()
+    WITH eligible AS (
+      SELECT code, plan, free_months
+      FROM membership_promo_codes
       WHERE code = ${code}
         AND active
         AND (expires_at IS NULL OR expires_at > NOW())
         AND (max_redemptions IS NULL OR redemptions < max_redemptions)
-        AND NOT EXISTS (
-          SELECT 1 FROM membership_promo_redemptions WHERE username = ${username}
-        )
-      RETURNING code, plan, free_months
+      FOR UPDATE
+    ), inserted AS (
+      INSERT INTO membership_promo_redemptions (
+        username, code, auth_user_id, plan, free_months, free_until
+      )
+      SELECT
+        ${username}::text, eligible.code, ${authUserId}::text, eligible.plan, eligible.free_months,
+        NOW() + make_interval(months => eligible.free_months)
+      FROM eligible
+      ON CONFLICT (username) DO NOTHING
+      RETURNING username, code, plan, free_months, redeemed_at, free_until
+    ), counted AS (
+      UPDATE membership_promo_codes promo
+      SET redemptions = promo.redemptions + 1, updated_at = NOW()
+      FROM inserted
+      WHERE promo.code = inserted.code
+      RETURNING promo.code
     )
-    INSERT INTO membership_promo_redemptions (
-      username, code, auth_user_id, plan, free_months, free_until
-    )
-    SELECT
-      ${username}::text, claim.code, ${authUserId}::text, claim.plan, claim.free_months,
-      -- 무료 종료일 = 등록 시각 + free_months 개월. 달 길이가 짧으면 말일로 당겨진다
-      -- (8/31 등록 → 2/28). 이후 매월 청구도 같은 규칙으로 이어진다.
-      NOW() + make_interval(months => claim.free_months)
-    FROM claim
-    ON CONFLICT (username) DO NOTHING
-    RETURNING username, code, plan, free_months, redeemed_at, free_until
+    SELECT inserted.username, inserted.code, inserted.plan, inserted.free_months,
+           inserted.redeemed_at, inserted.free_until
+    FROM inserted
+    JOIN counted ON counted.code = inserted.code
   `
 
   if (rows.length > 0) return { ok: true, redemption: toRedemption(rows[0]) }

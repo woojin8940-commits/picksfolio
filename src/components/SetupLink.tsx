@@ -206,7 +206,7 @@ const SetupLink: React.FC<SetupLinkProps> = ({ onSetupComplete }) => {
                     화면 밖으로 넘기던 문제는 히어로의 같은 자리에 적어 두었다. */}
                 <input
                   type="text"
-                  placeholder={en ? 'yourname' : 'my-link'}
+                  placeholder={en ? 'yourname' : 'mylink'}
                   aria-label={en ? 'My page address' : '내 페이지 주소'}
                   value={username}
                   onChange={handleChange}

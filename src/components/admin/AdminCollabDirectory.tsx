@@ -164,6 +164,7 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
         credentials: 'same-origin',
         headers: authHeaders(),
       });
+      if (!res.ok) throw new Error('Request failed');
       const data = await res.json();
       setItems(data.applications || []);
     } catch {
@@ -178,14 +179,15 @@ const AdminCollabDirectory: React.FC<Props> = ({ token }) => {
   const saveFollowers = async (id: string) => {
     const fc = Math.max(0, parseInt(editValue, 10) || 0);
     try {
-      await fetch('/api/collab-directory', {
+      const res = await fetch('/api/collab-directory', {
         method: 'PATCH',
         credentials: 'same-origin',
         headers: authHeaders(),
         body: JSON.stringify({ id, follower_count: fc }),
       });
+      if (!res.ok) throw new Error('Save failed');
       setEditingId(null);
-      fetchItems();
+      await fetchItems();
     } catch {
       alert('저장에 실패했습니다.');
     }

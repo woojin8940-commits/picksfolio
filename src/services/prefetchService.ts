@@ -28,10 +28,10 @@ export const prefetchLinkData = async (userName: string) => {
   
   const request = Promise.resolve().then(async () => {
     try {
-      const [settings, gridItems] = await Promise.all([
-        getSiteSettings(normalizedUsername),
-        getLinkGridItems(normalizedUsername)
-      ]);
+      const settings = await getSiteSettings(normalizedUsername);
+      const gridItems = settings?.source === 'primary' || settings?.blocks?.length
+        ? null
+        : await getLinkGridItems(normalizedUsername);
 
       if (inFlight[normalizedUsername] !== request || (!settings && !gridItems)) return;
       cache[normalizedUsername] = {

@@ -5,7 +5,6 @@ const SUPABASE_URL = "https://rjksilpewohjvtbxrsvu.supabase.co";
 
 /** 수파베이스 조회 상한. 넘기면 "사용 불가" 가 아니라 "다시 시도" 로 답한다. */
 const PROFILE_LOOKUP_TIMEOUT_MS = 3500;
-/** site_data 조회 상한. 이 조회는 실패해도 가입을 막지 않으므로 더 짧게 끊는다. */
 const SITE_DATA_LOOKUP_TIMEOUT_MS = 2500;
 
 /**
@@ -166,15 +165,9 @@ export default async (req: Request) => {
 
     if (taken) return takenResponse(username);
 
-    // 여기까지 왔으면 두 조회가 모두 답한 상태다(위 카운트가 0이 됐다는 뜻).
-    // profiles 조회가 실패한 경우는 "사용 가능" 으로 답하지 않는다 — 비어 있다고
-    // 답한 뒤 가입에서 거절되는 것보다, 지금 다시 눌러 달라고 하는 편이 낫다.
-    //
-    // site_data 조회 실패는 반대로 그냥 넘긴다(auth-signup 도 site_data 쓰기를
-    // 선택적으로 다룬다). profiles 확인이 이미 끝났는데 여기서 막으면 쓸 수 있는
-    // 아이디를 못 쓰게 된다.
     const profile = await profileLookup;
-    if (profile.failed) {
+    const siteData = await siteDataLookup;
+    if (profile.failed || siteData.failed) {
       return Response.json(
         { success: false, error: "아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." },
         { status: 503 }

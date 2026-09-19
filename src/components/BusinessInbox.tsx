@@ -39,7 +39,8 @@ const BusinessInbox: React.FC<BusinessInboxProps> = ({ businessUsername, company
   const cachedProposals = useMemo(() => {
     try {
       const raw = localStorage.getItem(cacheKey);
-      return raw ? JSON.parse(raw) : [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === 'object') : [];
     } catch { return []; }
   }, [cacheKey]);
 

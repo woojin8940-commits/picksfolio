@@ -30,6 +30,7 @@ import {
   applyOperatorMembershipGrant,
   getOperatorMembershipGrant,
 } from "./_shared/operator-membership-grants.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 
 // Collaboration AI assistant.
 //
@@ -1197,6 +1198,40 @@ export default async (req: Request) => {
     }
   }
 
+  let claimedUsageCount = 0;
+  try {
+    let claimed = false;
+    const claimedState = await mutateBlobJSON<{ count?: number }>("ai-usage", usageKey, (current) => {
+      const count = Math.max(0, Math.floor(Number(current?.count) || 0));
+      if (count >= DAILY_LIMIT) return null;
+      claimed = true;
+      return { count: count + 1 };
+    });
+    if (!claimed) {
+      return Response.json(
+        {
+          error: "오늘 사용할 수 있는 AI 질문 횟수를 모두 사용했어요. 내일 다시 이용해 주세요.",
+          code: "RATE_LIMITED",
+        },
+        { status: 429 },
+      );
+    }
+    claimedUsageCount = Math.max(1, Math.floor(Number(claimedState?.count) || 1));
+  } catch (e) {
+    console.error("[collab-ai] usage reservation failed", e);
+    return Response.json(
+      { error: "AI 사용량을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
+  }
+
+  const releaseUsage = async () => {
+    await mutateBlobJSON<{ count?: number }>("ai-usage", usageKey, (current) => {
+      const count = Math.max(0, Math.floor(Number(current?.count) || 0));
+      return { count: Math.max(0, count - 1) };
+    }).catch(() => null);
+  };
+
   try {
     const res = await fetch(
       `${process.env.GOOGLE_GEMINI_BASE_URL}/v1beta/models/${MODEL}:generateContent`,
@@ -1218,6 +1253,7 @@ export default async (req: Request) => {
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       console.error("[collab-ai] Gemini error", res.status, detail);
+      await releaseUsage();
       return Response.json(
         { error: "AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요." },
         { status: 502 },
@@ -1232,18 +1268,16 @@ export default async (req: Request) => {
         .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
     const { reply, draft } = campaignDraftOf(rawReply);
 
-    // Record usage only after a successful response.
-    if (usageStore) await usageStore.setJSON(usageKey, { count: used + 1 });
-
     return Response.json({
       reply,
       draft,
       guide: guideStatus,
       model: "gemini",
-      remaining: Math.max(0, DAILY_LIMIT - used - 1),
+      remaining: Math.max(0, DAILY_LIMIT - claimedUsageCount),
     });
   } catch (e) {
     console.error("[collab-ai] request failed", e);
+    await releaseUsage();
     return Response.json(
       { error: "AI 응답 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." },
       { status: 500 },

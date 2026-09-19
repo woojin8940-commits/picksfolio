@@ -20,7 +20,8 @@ const proposalCacheKey = (username: string) => `picks_business_dashboard_${(user
 const readProposalCache = (username: string): BusinessProposal[] => {
   try {
     const raw = localStorage.getItem(proposalCacheKey(username));
-    return raw ? JSON.parse(raw) as BusinessProposal[] : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === 'object') as BusinessProposal[] : [];
   } catch {
     return [];
   }

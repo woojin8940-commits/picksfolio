@@ -201,7 +201,8 @@ const OperatorDashboard: React.FC<OperatorDashboardProps> = ({ onLogout }) => {
 
   const handleMarkAllRead = async () => {
     const token = await getToken();
-    await apiService.markNotificationsRead(token, undefined, true);
+    const saved = await apiService.markNotificationsRead(token, undefined, true);
+    if (!saved) return;
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     setUnreadCount(0);
   };

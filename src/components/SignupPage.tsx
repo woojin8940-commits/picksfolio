@@ -349,6 +349,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ initialId, onNavigateHome, onNa
                     value={id}
                     onChange={handleIdChange}
                     onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
                       // 이 칸에서 엔터는 "중복확인" 이다. 그대로 폼이 넘어가면
                       // 확인하지 않은 아이디로 가입을 시도하게 된다.
                       if (e.key === 'Enter') {

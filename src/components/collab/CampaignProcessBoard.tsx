@@ -552,7 +552,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const saveShipping = async () => {
     if (!ship.recipient.trim()) { onNotify('받는 분 이름을 입력해 주세요.', 'error'); return; }
     if (!ship.phone.trim()) { onNotify('연락처를 입력해 주세요.', 'error'); return; }
-    if (!ship.address1.trim()) { onNotify('주소 찾기로 주소를 선택해 주세요.', 'error'); return; }
+    if (!ship.address1.trim()) { onNotify('주소를 입력해 주세요.', 'error'); return; }
     const ok = await act('save_shipping', ship, '배송 정보를 저장했습니다. 브랜드가 바로 확인합니다.');
     // 저장이 끝나면 단계를 접는다. 다 적은 칸을 계속 펼쳐 두면 아직 할 일이 남은
     // 것처럼 보인다.
@@ -1360,7 +1360,15 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
             <div className="flex flex-wrap sm:flex-nowrap items-end gap-2">
               <div className="w-[100px] flex-none order-1">
                 <Field label="우편번호">
-                  <input value={ship.postcode} readOnly onClick={searchAddress} placeholder="검색" className={`${fieldCls(ship.postcode)} cursor-pointer`} />
+                  <input
+                    value={ship.postcode}
+                    readOnly={!postcodeFailed}
+                    onClick={postcodeFailed ? undefined : searchAddress}
+                    onChange={postcodeFailed ? e => setShip({ ...ship, postcode: e.target.value.replace(/\D/g, '').slice(0, 5) }) : undefined}
+                    inputMode="numeric"
+                    placeholder={postcodeFailed ? '우편번호' : '검색'}
+                    className={`${fieldCls(ship.postcode)} ${postcodeFailed ? '' : 'cursor-pointer'}`}
+                  />
                 </Field>
               </div>
               {/* 버튼 높이를 입력칸(38px)에 맞춰 고정한다. 글씨 크기가 기기마다
@@ -1377,19 +1385,28 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                   "내가 고른 주소가 이게 맞나"를 확인할 방법이 없었다. */}
               <div className="w-full sm:w-auto sm:flex-1 min-w-0 order-3 sm:order-2">
                 <Field label="주소">
-                  <button
-                    type="button"
-                    onClick={searchAddress}
-                    className={`${fieldCls(ship.address1)} text-left whitespace-normal break-words leading-snug min-h-[38px]`}
-                  >
-                    {ship.address1 || <span className="text-slate-400 font-medium">주소 찾기를 눌러 주세요</span>}
-                  </button>
+                  {postcodeFailed ? (
+                    <input
+                      value={ship.address1}
+                      onChange={e => setShip({ ...ship, address1: e.target.value })}
+                      placeholder="기본 주소"
+                      className={fieldCls(ship.address1)}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={searchAddress}
+                      className={`${fieldCls(ship.address1)} text-left whitespace-normal break-words leading-snug min-h-[38px]`}
+                    >
+                      {ship.address1 || <span className="text-slate-400 font-medium">주소 찾기를 눌러 주세요</span>}
+                    </button>
+                  )}
                 </Field>
               </div>
             </div>
             {postcodeFailed && (
               <p className="text-[10px] font-bold text-amber-600">
-                주소 검색을 열지 못했습니다. 아래 상세주소 칸에 전체 주소를 적어 주세요.
+                주소 검색을 열지 못했습니다. 우편번호와 주소를 직접 입력해 주세요.
               </p>
             )}
 

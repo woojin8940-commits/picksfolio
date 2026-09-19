@@ -16,6 +16,41 @@ async function getSupabaseAdmin() {
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_SNAPSHOTS_PER_USER = 20;
 
+function isRecord(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasUnsafeKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasUnsafeKey);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, child]) =>
+    key === "__proto__" || key === "prototype" || key === "constructor" || hasUnsafeKey(child)
+  );
+}
+
+function isValidSitePayload(body: Record<string, any>): boolean {
+  if (hasUnsafeKey(body)) return false;
+
+  for (const key of ["blocks", "portfolio", "productFolders", "openSchedule"]) {
+    const value = body[key];
+    if (value !== undefined && value !== null &&
+      (!Array.isArray(value) || value.some(item => !isRecord(item)))) return false;
+  }
+
+  for (const key of ["linkGridCategories", "tags"]) {
+    const value = body[key];
+    if (value !== undefined && value !== null &&
+      (!Array.isArray(value) || value.some(item => typeof item !== "string"))) return false;
+  }
+
+  for (const key of ["design", "profile", "socials"]) {
+    const value = body[key];
+    if (value !== undefined && value !== null && !isRecord(value)) return false;
+  }
+
+  return true;
+}
+
 function publicSiteResponse(data: Record<string, any>, username: string): Response {
   return new Response(JSON.stringify(data), {
     headers: {
@@ -99,24 +134,11 @@ export default async (req: Request, context: Context) => {
         SELECT data, cover_updated_at FROM site_data WHERE username = ${username}
       `;
 
-      if (result.length > 0 && result[0].data && Object.keys(result[0].data).length > 0) {
-        const dbData = result[0].data as Record<string, any>;
+      if (result.length > 0) {
+        const dbData = isRecord(result[0].data) ? result[0].data : {};
         if (result[0].cover_updated_at) {
           dbData.coverUpdatedAt = result[0].cover_updated_at;
         }
-        if (hasConnectedSiteContent(dbData)) {
-          return publicSiteResponse(dbData, username);
-        }
-
-        try {
-          const restored = await recoverSiteDataFromBlob(db, username);
-          if (restored && hasConnectedSiteContent(restored)) {
-            return publicSiteResponse(restored, username);
-          }
-        } catch (blobErr) {
-          console.warn("[api-site] Blob content recovery failed:", blobErr);
-        }
-
         return publicSiteResponse(dbData, username);
       }
 
@@ -204,7 +226,7 @@ export default async (req: Request, context: Context) => {
 
       const bodyText = await req.text();
 
-      if (bodyText.length > MAX_PAYLOAD_BYTES) {
+      if (new TextEncoder().encode(bodyText).byteLength > MAX_PAYLOAD_BYTES) {
         return Response.json({ error: "Payload too large" }, { status: 413 });
       }
 
@@ -216,6 +238,10 @@ export default async (req: Request, context: Context) => {
       }
 
       if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return Response.json({ error: "Invalid payload" }, { status: 400 });
+      }
+
+      if (!isValidSitePayload(body)) {
         return Response.json({ error: "Invalid payload" }, { status: 400 });
       }
 

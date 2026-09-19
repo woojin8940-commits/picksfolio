@@ -69,6 +69,17 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: usernameRules.error });
     }
 
+    const db = getDatabase();
+    const existingSiteData = await db.sql`
+      SELECT 1 FROM site_data WHERE username = ${cleanUsername} LIMIT 1
+    `;
+    if (existingSiteData.length > 0) {
+      return Response.json({
+        success: false,
+        error: "이미 사용 중인 아이디입니다.",
+      });
+    }
+
     // 휴대폰 인증은 서버에서 확인한다. 화면의 isVerified 만 믿으면 이 함수로 직접
     // 요청해 인증하지 않은 번호로 가입할 수 있고, 그러면 그 번호로 계정을 찾아 주는
     // 기능(find-account)이 남의 번호를 근거로 동작하게 된다.
@@ -84,11 +95,18 @@ export default async (req: Request) => {
     }
 
     // 아이디(링크 주소)는 변경할 수 없는 고유 식별자이므로 같은 아이디로는 재가입할 수 없다.
-    const { data: existingProfile } = await supabase
+    const { data: existingProfile, error: existingProfileError } = await supabase
       .from("profiles")
       .select("id")
       .eq("username", cleanUsername)
       .maybeSingle();
+
+    if (existingProfileError) {
+      return Response.json({
+        success: false,
+        error: "아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      });
+    }
 
     if (existingProfile) {
       return Response.json({
@@ -101,11 +119,18 @@ export default async (req: Request) => {
     // 단, 무제한 생성은 막기 위해 한 번호당 최대 10개까지만 만들 수 있도록 제한한다.
     const MAX_ACCOUNTS_PER_PERSON = 10;
     if (cleanPhone) {
-      const { data: sameOwner } = await supabase
+      const { data: sameOwner, error: sameOwnerError } = await supabase
         .from("profiles")
         .select("id")
         .eq("phone", cleanPhone)
         .eq("role", "user");
+
+      if (sameOwnerError) {
+        return Response.json({
+          success: false,
+          error: "회원정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+      }
 
       if ((sameOwner?.length || 0) >= MAX_ACCOUNTS_PER_PERSON) {
         return Response.json({
@@ -181,7 +206,6 @@ export default async (req: Request) => {
 
     let profileCode = generateProfileCode();
     try {
-      const db = getDatabase();
       let attempts = 0;
       while (attempts < 5) {
         const dup = await db.sql`SELECT 1 FROM site_data WHERE profile_code = ${profileCode}`;
@@ -208,9 +232,17 @@ export default async (req: Request) => {
       await db.sql`
         INSERT INTO site_data (username, data, profile_code)
         VALUES (${cleanUsername}, ${JSON.stringify(initialData)}, ${profileCode})
-        ON CONFLICT (username) DO NOTHING
       `;
-    } catch {}
+    } catch {
+      if (authData?.user) {
+        await supabase.from("profiles").delete().eq("id", authData.user.id);
+        await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+      }
+      return Response.json({
+        success: false,
+        error: "개인페이지를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      });
+    }
 
     // 가입이 끝난 뒤에 인증을 소진시킨다 — 중간에 실패한 시도가 인증을 태우면
     // 사용자는 이유도 모르고 문자를 다시 받아야 한다.

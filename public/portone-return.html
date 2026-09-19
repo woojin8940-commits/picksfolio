@@ -49,25 +49,63 @@
     const INTENT_KEY = "portone_pending_intent";
 
     let intent = null;
-    try { intent = JSON.parse(sessionStorage.getItem(INTENT_KEY) || "null"); } catch (e) {}
+    let intentSource = "";
+    try {
+      intent = JSON.parse(sessionStorage.getItem(INTENT_KEY) || "null");
+      if (intent) intentSource = "session";
+    } catch (e) {}
+    if (!intent) {
+      try {
+        intent = JSON.parse(localStorage.getItem(INTENT_KEY) || "null");
+        if (intent) intentSource = "local";
+      } catch (e) {}
+    }
+    if (intent && ((intent.savedAt && Date.now() - intent.savedAt > 7200000) || (!intent.savedAt && intentSource === "local"))) {
+      intent = null;
+    }
+
+    function clearIntent() {
+      try { sessionStorage.removeItem(INTENT_KEY); } catch (e) {}
+      try { localStorage.removeItem(INTENT_KEY); } catch (e) {}
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+      });
+    }
+
+    function safeReturnPath(value) {
+      const path = typeof value === "string" ? value.trim() : "";
+      if (!path || path.charAt(0) !== "/" || path.slice(0, 2) === "//") return "/";
+      try {
+        const target = new URL(path, location.origin);
+        if (target.origin !== location.origin) return "/";
+        return target.pathname + target.search + target.hash;
+      } catch (e) {
+        return "/";
+      }
+    }
 
     function fail(msg, errCode) {
-      const back = (intent && intent.returnPath) || "/";
+      const back = safeReturnPath(intent && intent.returnPath);
+      clearIntent();
       card.innerHTML =
         '<div class="icon">❌</div>' +
         '<h1>결제에 실패했어요</h1>' +
-        '<p>' + (msg || "결제가 정상적으로 처리되지 않았습니다.") + '</p>' +
-        (errCode ? '<p class="muted">오류 코드: ' + errCode + '</p>' : '') +
-        '<a class="btn" href="' + back + '">돌아가기</a>';
+        '<p>' + escapeHtml(msg || "결제가 정상적으로 처리되지 않았습니다.") + '</p>' +
+        (errCode ? '<p class="muted">오류 코드: ' + escapeHtml(errCode) + '</p>' : '') +
+        '<a class="btn" href="' + escapeHtml(back) + '">돌아가기</a>';
     }
 
     function done(returnPath) {
-      const back = returnPath || "/";
+      const back = safeReturnPath(returnPath);
+      clearIntent();
       card.innerHTML =
         '<div class="icon">✅</div>' +
         '<h1>결제가 완료되었어요</h1>' +
         '<p class="muted">잠시 후 자동으로 이동합니다…</p>' +
-        '<a class="btn" href="' + back + '">돌아가기</a>';
+        '<a class="btn" href="' + escapeHtml(back) + '">돌아가기</a>';
       setTimeout(function () { location.replace(back); }, 1400);
     }
 
@@ -112,9 +150,12 @@
     // 뒤에 `@@operator` 같은 접미사가 더해진다 — 형태로 훑어 찾는다.
     function supabaseToken() {
       try {
+        const scope = sessionStorage.getItem("picks_account_scope") === "operator" ? "operator" : "user";
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
-          if (!k || k.indexOf("sb-") !== 0 || k.indexOf("-auth-token") === -1) continue;
+          if (!k || k.indexOf("sb-") !== 0) continue;
+          if (scope === "operator" && !/-auth-token@@operator$/.test(k)) continue;
+          if (scope === "user" && !/-auth-token$/.test(k)) continue;
           let stored = null;
           try { stored = JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { continue; }
           const session = stored && stored.currentSession ? stored.currentSession : stored;
@@ -175,7 +216,6 @@
           billingKey: billingKey,
         });
         if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
-        sessionStorage.removeItem(INTENT_KEY);
         done(intent.returnPath);
         return;
       }
@@ -193,7 +233,6 @@
         if (!r.ok || r.data.error || r.data.success === false) {
           fail(r.data.error || "크레딧 적립에 실패했습니다."); return;
         }
-        sessionStorage.removeItem(INTENT_KEY);
         done(intent.returnPath);
         return;
       }

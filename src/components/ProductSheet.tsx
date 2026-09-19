@@ -54,7 +54,7 @@ const ProductSheet: React.FC<ProductSheetProps> = ({ block, design, onClose, onP
           <button onClick={onClose} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isDark ? 'bg-white/10 text-white/40 hover:text-white' : 'bg-slate-100 text-slate-400 hover:text-slate-900'}`}>✕</button>
         </div>
         <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-2 scrollbar-hide pb-4">
-          {block?.products.map((p) => (
+          {block?.products?.map((p) => (
             <a
               key={p.id}
               {...externalLinkProps(p.link)}
@@ -67,7 +67,7 @@ const ProductSheet: React.FC<ProductSheetProps> = ({ block, design, onClose, onP
               </div>
               <div className="flex-1 min-w-0">
                 <div className={`text-sm font-black truncate mb-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{p.name}</div>
-                <span className={`text-[9px] font-bold truncate opacity-60 block ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{p.link.replace('https://', '').replace('http://', '').split('/')[0]}</span>
+                <span className={`text-[9px] font-bold truncate opacity-60 block ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{(p.link || '').replace('https://', '').replace('http://', '').split('/')[0]}</span>
               </div>
             </a>
           ))}

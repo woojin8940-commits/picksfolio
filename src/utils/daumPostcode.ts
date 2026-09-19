@@ -42,18 +42,52 @@ const loadSdk = (): Promise<any> => {
  * 주세요" 한 줄만 띄우면 된다.
  */
 export const openPostcodeSearch = async (onSelect: (result: PostcodeResult) => void): Promise<boolean> => {
+  let overlay: HTMLDivElement | null = null;
   try {
     const daum = await loadSdk();
-    new daum.Postcode({
+    overlay = document.createElement('div');
+    const activeOverlay = overlay;
+    const panel = document.createElement('div');
+    const header = document.createElement('div');
+    const title = document.createElement('strong');
+    const close = document.createElement('button');
+    const frame = document.createElement('div');
+
+    activeOverlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.58);display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top,0px) + 12px) 12px calc(env(safe-area-inset-bottom,0px) + 12px)';
+    panel.style.cssText = 'width:min(520px,100%);height:min(640px,100%);max-height:100%;display:flex;flex-direction:column;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 24px 80px rgba(15,23,42,.35)';
+    header.style.cssText = 'height:52px;flex:0 0 52px;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 18px;border-bottom:1px solid #e2e8f0;color:#0f172a';
+    title.textContent = '주소 찾기';
+    close.type = 'button';
+    close.textContent = '닫기';
+    close.setAttribute('aria-label', '주소 검색 닫기');
+    close.style.cssText = 'min-width:44px;height:44px;border:0;background:transparent;color:#475569;font-size:14px;font-weight:700;cursor:pointer';
+    frame.style.cssText = 'flex:1;min-height:0;width:100%';
+
+    const cleanup = () => {
+      activeOverlay.remove();
+    };
+    close.addEventListener('click', cleanup);
+    activeOverlay.addEventListener('click', event => {
+      if (event.target === activeOverlay) cleanup();
+    });
+    header.append(title, close);
+    panel.append(header, frame);
+    activeOverlay.appendChild(panel);
+    document.body.appendChild(activeOverlay);
+
+    const postcode = new daum.Postcode({
       oncomplete: (data: any) => {
         onSelect({
           postcode: String(data?.zonecode || ''),
           address: String(data?.roadAddress || data?.jibunAddress || ''),
         });
+        cleanup();
       },
-    }).open();
+    });
+    postcode.embed(frame);
     return true;
   } catch {
+    overlay?.remove();
     return false;
   }
 };

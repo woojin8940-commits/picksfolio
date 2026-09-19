@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Block, DesignSettings, ProductFolder, OpenScheduleItem } from '../types';
 import { getPublicProfileByUsername, supabase, withTimeout } from '../services/supabase';
 import { trackView, trackClick } from '../services/analyticsService';
@@ -8,6 +8,7 @@ import PublicPageBody, { DEFAULT_PUBLIC_DESIGN } from './PublicPageBody';
 import PublicPageFooter from './PublicPageFooter';
 import ProductSheet from './ProductSheet';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useCloseOnBack } from '../hooks/useCloseOnBack';
 
 /**
  * socials 의 기본값.
@@ -17,6 +18,10 @@ import { useLanguage } from '../contexts/LanguageContext';
  * 기본값에는 그대로 둔다.
  */
 const DEFAULT_SOCIALS = { instagram: '', youtube: '', tiktok: '', phone: '', kakao: '', naver: '', businessProposal: false, liveNotify: false };
+
+const cacheLocalItem = (key: string, value: unknown): void => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
 
 interface UserPageProps {
   username: string;
@@ -44,6 +49,18 @@ interface LinkData {
   category?: string;
 }
 
+function objectArray<T>(value: unknown): T[] {
+  return Array.isArray(value)
+    ? value.filter(item => !!item && typeof item === 'object') as T[]
+    : [];
+}
+
+function objectValue(value: unknown): Record<string, any> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : null;
+}
+
 const ENABLE_SUPABASE_REALTIME = import.meta.env.VITE_ENABLE_SUPABASE_REALTIME === '1';
 
 const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
@@ -54,7 +71,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return [];
       const saved = localStorage.getItem(`picks_blocks_${normalizedUsername}`);
-      if (saved) return JSON.parse(saved);
+      if (saved) return objectArray<Block>(JSON.parse(saved));
     } catch (e) {
       console.error('Error parsing blocks:', e);
     }
@@ -68,7 +85,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return defaultDesign;
       const saved = localStorage.getItem(`picks_design_${normalizedUsername}`);
-      if (saved) return { ...defaultDesign, ...JSON.parse(saved) };
+      if (saved) {
+        const parsed = objectValue(JSON.parse(saved));
+        if (parsed) return { ...defaultDesign, ...parsed };
+      }
     } catch (e) {
       console.error('Error parsing design:', e);
     }
@@ -79,7 +99,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return DEFAULT_SOCIALS;
       const saved = localStorage.getItem(`picks_socials_${normalizedUsername}`);
-      if (saved) return { ...DEFAULT_SOCIALS, ...JSON.parse(saved) };
+      if (saved) {
+        const parsed = objectValue(JSON.parse(saved));
+        if (parsed) return { ...DEFAULT_SOCIALS, ...parsed };
+      }
     } catch (e) {
       console.error('Error parsing socials:', e);
     }
@@ -90,7 +113,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return [];
       const saved = localStorage.getItem(`picks_folders_${normalizedUsername}`);
-      return saved ? JSON.parse(saved) : [];
+      return saved ? objectArray<ProductFolder>(JSON.parse(saved)) : [];
     } catch (e) { return []; }
   });
 
@@ -98,7 +121,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return [];
       const saved = localStorage.getItem(`picks_schedule_${normalizedUsername}`);
-      return saved ? JSON.parse(saved) : [];
+      return saved ? objectArray<OpenScheduleItem>(JSON.parse(saved)) : [];
     } catch (e) { return []; }
   });
 
@@ -106,7 +129,8 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
     try {
       if (!normalizedUsername) return [];
       const saved = localStorage.getItem(`picks_categories_${normalizedUsername}`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : [];
     } catch (e) { return []; }
   });
 
@@ -115,13 +139,15 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
       if (!normalizedUsername) return null;
       const saved = localStorage.getItem(`picks_profile_${normalizedUsername}`);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          full_name: parsed.name,
-          bio: parsed.bio,
-          avatar_url: parsed.avatar_url,
-          aboutSections: Array.isArray(parsed.aboutSections) ? parsed.aboutSections : []
-        };
+        const parsed = objectValue(JSON.parse(saved));
+        if (parsed) {
+          return {
+            full_name: typeof parsed.name === 'string' ? parsed.name : '',
+            bio: typeof parsed.bio === 'string' ? parsed.bio : '',
+            avatar_url: typeof parsed.avatar_url === 'string' ? parsed.avatar_url : undefined,
+            aboutSections: objectArray<AboutSection>(parsed.aboutSections)
+          };
+        }
       }
     } catch (e) {
       console.error('Error parsing profile:', e);
@@ -132,6 +158,10 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isMissing, setIsMissing] = useState(false);
+  const [isResolving, setIsResolving] = useState(true);
+  const trackedUsernameRef = useRef('');
+  useCloseOnBack(!!selectedBlockId, () => setSelectedBlockId(null));
 
   /**
    * 개인페이지가 열려 있는 동안 body 를 흰 종이색으로 둔다.
@@ -147,6 +177,16 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const confirmExisting = () => {
+      if (cancelled) return;
+      setIsMissing(false);
+      setIsResolving(false);
+      if (!onBackToDashboard && trackedUsernameRef.current !== normalizedUsername) {
+        trackedUsernameRef.current = normalizedUsername;
+        trackView(username);
+      }
+    };
     const loadData = async () => {
       let apiDataResult: any = null;
       try {
@@ -162,48 +202,55 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
           const apiData = apiDataResult;
           if (apiData) {
             apiLoaded = true;
+            confirmExisting();
             // Cloud is source of truth: use cloud data even if empty (admin may have cleared it)
             if (Array.isArray(apiData.blocks)) {
-              setBlocks(apiData.blocks);
-              localStorage.setItem(`picks_blocks_${normalizedUsername}`, JSON.stringify(apiData.blocks));
+              const nextBlocks = objectArray<Block>(apiData.blocks);
+              setBlocks(nextBlocks);
+              cacheLocalItem(`picks_blocks_${normalizedUsername}`, nextBlocks);
             }
-            if (apiData.design) {
-              setDesign(prev => ({ ...prev, ...(apiData.design as any) }));
-              localStorage.setItem(`picks_design_${normalizedUsername}`, JSON.stringify(apiData.design));
+            const cloudDesign = objectValue(apiData.design);
+            if (cloudDesign) {
+              setDesign(prev => ({ ...prev, ...cloudDesign }));
+              cacheLocalItem(`picks_design_${normalizedUsername}`, cloudDesign);
             }
-            if (apiData.profile) {
+            const cloudProfile = objectValue(apiData.profile);
+            if (cloudProfile) {
               setProfile({
-                full_name: apiData.profile.name || '',
-                bio: apiData.profile.bio || '',
-                avatar_url: apiData.profile.avatar_url,
-                aboutSections: Array.isArray(apiData.profile.aboutSections)
-                  ? apiData.profile.aboutSections
-                  : []
+                full_name: typeof cloudProfile.name === 'string' ? cloudProfile.name : '',
+                bio: typeof cloudProfile.bio === 'string' ? cloudProfile.bio : '',
+                avatar_url: typeof cloudProfile.avatar_url === 'string' ? cloudProfile.avatar_url : undefined,
+                aboutSections: objectArray<AboutSection>(cloudProfile.aboutSections)
               });
+              let existingProfile: Record<string, any> = {};
               try {
-                const existingProfile = JSON.parse(localStorage.getItem(`picks_profile_${normalizedUsername}`) || '{}');
-                localStorage.setItem(`picks_profile_${normalizedUsername}`, JSON.stringify({ ...existingProfile, ...apiData.profile }));
-              } catch { localStorage.setItem(`picks_profile_${normalizedUsername}`, JSON.stringify(apiData.profile)); }
+                existingProfile = objectValue(JSON.parse(localStorage.getItem(`picks_profile_${normalizedUsername}`) || '{}')) || {};
+              } catch {}
+              cacheLocalItem(`picks_profile_${normalizedUsername}`, { ...existingProfile, ...cloudProfile });
             }
-            if (apiData.socials) {
+            const cloudSocials = objectValue(apiData.socials);
+            if (cloudSocials) {
               /* 서버 값으로 갈아 끼운다(먼저 그려 둔 localStorage 값 위에 덮지 않는다).
                  켜 둔 값만 저장되는 칸이 있어서 — 검색바는 껐을 때만 hideSearchBar 가
                  남는다 — 두 벌을 겹치면 서버에서 지워진 값이 예전 localStorage 에서
                  살아남는다. 검색바를 다시 켜도 이 기기에서만 계속 숨어 있던 이유다. */
-              setSocials({ ...DEFAULT_SOCIALS, ...(apiData.socials as any) });
-              localStorage.setItem(`picks_socials_${normalizedUsername}`, JSON.stringify(apiData.socials));
+              setSocials({ ...DEFAULT_SOCIALS, ...cloudSocials });
+              cacheLocalItem(`picks_socials_${normalizedUsername}`, cloudSocials);
             }
-            if (apiData.productFolders) {
-              setProductFolders(apiData.productFolders);
-              localStorage.setItem(`picks_folders_${normalizedUsername}`, JSON.stringify(apiData.productFolders));
+            if (Array.isArray(apiData.productFolders)) {
+              const nextFolders = objectArray<ProductFolder>(apiData.productFolders);
+              setProductFolders(nextFolders);
+              cacheLocalItem(`picks_folders_${normalizedUsername}`, nextFolders);
             }
-            if (apiData.openSchedule) {
-              setOpenSchedule(apiData.openSchedule);
-              localStorage.setItem(`picks_schedule_${normalizedUsername}`, JSON.stringify(apiData.openSchedule));
+            if (Array.isArray(apiData.openSchedule)) {
+              const nextSchedule = objectArray<OpenScheduleItem>(apiData.openSchedule);
+              setOpenSchedule(nextSchedule);
+              cacheLocalItem(`picks_schedule_${normalizedUsername}`, nextSchedule);
             }
             if (Array.isArray(apiData.linkGridCategories)) {
-              setLinkGridCategories(apiData.linkGridCategories);
-              localStorage.setItem(`picks_categories_${normalizedUsername}`, JSON.stringify(apiData.linkGridCategories));
+              const nextCategories = apiData.linkGridCategories.filter((item: unknown) => typeof item === 'string');
+              setLinkGridCategories(nextCategories);
+              cacheLocalItem(`picks_categories_${normalizedUsername}`, nextCategories);
             }
           }
         } catch (apiError) {
@@ -220,18 +267,26 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
             if (savedBlocks) {
               const parsed = JSON.parse(savedBlocks);
-              setBlocks(Array.isArray(parsed) ? parsed : []);
+              setBlocks(objectArray<Block>(parsed));
             }
-            if (savedDesign) setDesign(prev => ({ ...prev, ...JSON.parse(savedDesign) }));
-            if (savedSocials) setSocials({ ...DEFAULT_SOCIALS, ...JSON.parse(savedSocials) });
+            if (savedDesign) {
+              const parsed = objectValue(JSON.parse(savedDesign));
+              if (parsed) setDesign(prev => ({ ...prev, ...parsed }));
+            }
+            if (savedSocials) {
+              const parsed = objectValue(JSON.parse(savedSocials));
+              if (parsed) setSocials({ ...DEFAULT_SOCIALS, ...parsed });
+            }
             if (savedProfile) {
-              const parsed = JSON.parse(savedProfile);
-              setProfile({
-                full_name: parsed.name,
-                bio: parsed.bio,
-                avatar_url: parsed.avatar_url,
-                aboutSections: Array.isArray(parsed.aboutSections) ? parsed.aboutSections : []
-              });
+              const parsed = objectValue(JSON.parse(savedProfile));
+              if (parsed) {
+                setProfile({
+                  full_name: typeof parsed.name === 'string' ? parsed.name : '',
+                  bio: typeof parsed.bio === 'string' ? parsed.bio : '',
+                  avatar_url: typeof parsed.avatar_url === 'string' ? parsed.avatar_url : undefined,
+                  aboutSections: objectArray<AboutSection>(parsed.aboutSections)
+                });
+              }
             }
           } catch (e) {
             console.error('Error loading from localStorage:', e);
@@ -266,6 +321,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               }
 
               if (!profileError && profileData) {
+                confirmExisting();
                 // 이 화면의 profile.full_name 은 "표시 이름"이다(위의 API 경로는
                 // site_data 의 profile.name 을 여기에 넣는다). profiles.full_name
                 // 은 가입 폼의 실명이라 그대로 넣으면 site_data 를 못 읽은 방문에만
@@ -276,8 +332,9 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
                 // Fetch Link Grid Items (New Source of Truth for Blocks)
                 const cloudBlocks = await getLinkGridItems(username);
                 if (cloudBlocks && cloudBlocks.length > 0) {
-                  setBlocks(cloudBlocks);
-                  localStorage.setItem(`picks_blocks_${normalizedUsername}`, JSON.stringify(cloudBlocks));
+                  const nextBlocks = objectArray<Block>(cloudBlocks);
+                  setBlocks(nextBlocks);
+                  cacheLocalItem(`picks_blocks_${normalizedUsername}`, nextBlocks);
                 }
               }
 
@@ -302,6 +359,11 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
               } catch {
                 // Table may not exist yet — silently ignore
               }
+
+              if (!profileError && !profileData && !cancelled) {
+                setIsMissing(true);
+                setIsResolving(false);
+              }
             }
           } catch (supabaseError) {
             console.warn('[UserPage] Supabase 데이터 로드 실패 (API 데이터는 유지됨):', supabaseError);
@@ -309,11 +371,12 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
         }
       } catch (e) {
         console.error("Error loading user data:", e);
+      } finally {
+        if (!cancelled) setIsResolving(false);
       }
     };
 
     loadData();
-    trackView(username);
 
       // 4. Supabase Realtime Subscription
       // This ensures that when data changes on PC, the mobile browser updates immediately without cache issues.
@@ -374,6 +437,7 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
 
       window.addEventListener('storage', handleStorageChange);
       return () => {
+        cancelled = true;
         window.removeEventListener('storage', handleStorageChange);
         if (loadDataTimer) clearTimeout(loadDataTimer);
         if (profileChannel && supabase) supabase.removeChannel(profileChannel);
@@ -382,6 +446,24 @@ const UserPage: React.FC<UserPageProps> = ({ username, onBackToDashboard }) => {
   }, [normalizedUsername, username]);
 
   const selectedBlock = useMemo(() => blocks.find(b => b.id === selectedBlockId), [blocks, selectedBlockId]);
+
+  if (isResolving && !profile && blocks.length === 0) {
+    return <div className="min-h-screen bg-white flex items-center justify-center text-sm font-bold text-slate-400">페이지를 불러오는 중...</div>;
+  }
+
+  if (isMissing) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6 text-center">
+        <h1 className="text-xl font-black text-slate-900">페이지를 찾을 수 없습니다</h1>
+        <p className="mt-2 text-sm font-medium text-slate-500">주소를 다시 확인해 주세요.</p>
+        {onBackToDashboard && (
+          <button type="button" onClick={onBackToDashboard} className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white">
+            홈으로 돌아가기
+          </button>
+        )}
+      </div>
+    );
+  }
 
   /*
    * 화면을 그리는 일은 모두 떼어 놓았다 — 본문(커버 · 버튼 · 카테고리 · 카드)은

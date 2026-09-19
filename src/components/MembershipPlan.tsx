@@ -415,7 +415,7 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         payMethod: ppMethod,
         tier: selectedTier,
         orderName: `픽스폴리오 ${tierLabel} 정기결제`,
-        returnPath: window.location.pathname + window.location.search,
+        returnPath: '/admin?tab=membership',
       });
 
       const response = await window.PortOne.requestIssueBillingKey({
