@@ -321,9 +321,9 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     });
   }, [userName]);
 
-  const fetchCampaignsList = useCallback(async (signal: AbortSignal) => {
+  const fetchCampaignsList = useCallback(async (signal: AbortSignal, useCache = true) => {
     const key = campaignListCacheKey(userName, activeFilter, activeCategory, searchTerm, page);
-    const cached = readJson<CampaignBrowseListCache>(key);
+    const cached = useCache ? readJson<CampaignBrowseListCache>(key) : null;
     if (cached) {
       setCampaigns(cached.campaigns || []);
       setTotal(cached.total || 0);
@@ -339,7 +339,7 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
       params.append('page', String(page));
       params.append('limit', String(PAGE_SIZE));
 
-      const response = await fetch(`/api/campaigns?${params.toString()}`, { signal });
+      const response = await fetch(`/api/campaigns?${params.toString()}`, { signal, cache: 'no-store' });
       const res = await response.json();
       if (signal.aborted || !response.ok || res.error || !Array.isArray(res.campaigns)) return;
       const next = Array.isArray(res.campaigns) ? res.campaigns : [];
@@ -358,6 +358,23 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     const controller = new AbortController();
     void fetchCampaignsList(controller.signal);
     return () => controller.abort();
+  }, [fetchCampaignsList]);
+
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      controller?.abort();
+      controller = new AbortController();
+      void fetchCampaignsList(controller.signal, false);
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [fetchCampaignsList]);
 
   useEffect(() => {

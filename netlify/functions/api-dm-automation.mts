@@ -6,7 +6,7 @@ import {
   DM_AUTOMATION_TIER,
   dmAutomationAllowed,
 } from "./_shared/dm-automation-access.mts";
-import { normalizeLinkUrl } from "./_shared/instagram-dm.mts";
+import { normalizeImageUrl, normalizeLinkUrl } from "./_shared/instagram-dm.mts";
 import {
   adoptSharedInstagramLink,
   disconnectLinkFeature,
@@ -254,7 +254,7 @@ function requireLink(raw: string, where: string): string {
 function requireImage(raw: string, where: string): string {
   const value = String(raw || "").trim();
   if (!value) return "";
-  const normalized = normalizeLinkUrl(value);
+  const normalized = normalizeImageUrl(value);
   if (!normalized) {
     throw new InvalidLinkError(
       `${where}의 이미지 주소가 올바르지 않습니다: "${value.slice(0, 80)}" — 이미지를 올리거나 https:// 로 시작하는 주소를 입력해 주세요.`,

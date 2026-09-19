@@ -3,21 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <!--
-      interactive-widget=overlays-content: when the on-screen keyboard opens it
-      OVERLAYS the page without resizing either viewport. `resizes-content` (the
-      previous value) shrank the layout viewport, dragging fixed, full-screen
-      overlays (modals, bottom sheets) up and briefly revealing the page behind
-      them ("화면이 솟는" surge). Ordinary form inputs are still scrolled into
-      view by the browser within the unchanged layout viewport.
-    -->
-    <!--
       maximum-scale=1.0, user-scalable=no: lock the visual viewport so the page
       never zooms. Without this, focusing a text field or double-tapping on
       mobile magnifies the layout and leaves it stuck mid-zoom. Combined with the
       >=16px input font-size rule in index.css, this keeps the screen fixed at
       all times.
     -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#2563EB">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%232563EB%22/></svg>">
     <title>PICKSFOLIO | 크리에이터를 위한 올인원 서비스</title>
@@ -117,6 +109,5 @@
       방문자까지 그 대기를 물었다.
       지금은 필요한 화면이 utils/externalScripts.ts 로 그 자리에서 불러온다.
     -->
-    <script src="/campaign-inject.js" defer></script>
 </body>
 </html>

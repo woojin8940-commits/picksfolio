@@ -27,6 +27,21 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ mx: number; my: number; crop: CropRect } | null>(null);
+  const displayRectRef = useRef(displayRect);
+  const cropRef = useRef(crop);
+  const draggingRef = useRef(false);
+  const pendingCropRef = useRef<CropRect | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  const commitDisplayRect = useCallback((next: typeof displayRect) => {
+    displayRectRef.current = next;
+    setDisplayRect(next);
+  }, []);
+
+  const commitCrop = useCallback((next: CropRect) => {
+    cropRef.current = next;
+    setCrop(next);
+  }, []);
 
   const calcDisplayRect = useCallback(() => {
     // 화면 전체 높이에서 하단 버튼 높이를 100px 로 어림잡아 빼던 예전 방식은,
@@ -64,32 +79,39 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     if (!imgLoaded || !naturalSize.w) return;
     const dr = calcDisplayRect();
     if (!dr) return;
-    setDisplayRect(dr);
+    commitDisplayRect(dr);
     const { w: cw, h: ch } = computeFixedCropSize(dr);
-    setCrop({
+    commitCrop({
       x: dr.x + (dr.w - cw) / 2,
       y: dr.y + (dr.h - ch) / 2,
       w: cw,
       h: ch,
     });
-  }, [imgLoaded, naturalSize, calcDisplayRect, computeFixedCropSize]);
+  }, [imgLoaded, naturalSize, calcDisplayRect, computeFixedCropSize, commitDisplayRect, commitCrop]);
 
   useEffect(() => {
     const onResize = () => {
       if (!imgLoaded || !naturalSize.w) return;
       const dr = calcDisplayRect();
       if (!dr) return;
-      const oldDr = displayRect;
+      const oldDr = displayRectRef.current;
       if (oldDr.w === 0) return;
-      setDisplayRect(dr);
+      if (
+        Math.abs(oldDr.x - dr.x) < 0.5 &&
+        Math.abs(oldDr.y - dr.y) < 0.5 &&
+        Math.abs(oldDr.w - dr.w) < 0.5 &&
+        Math.abs(oldDr.h - dr.h) < 0.5
+      ) return;
+      commitDisplayRect(dr);
       const { w: cw, h: ch } = computeFixedCropSize(dr);
       const scaleX = dr.w / oldDr.w;
       const scaleY = dr.h / oldDr.h;
-      const newX = dr.x + (crop.x - oldDr.x) * scaleX;
-      const newY = dr.y + (crop.y - oldDr.y) * scaleY;
+      const currentCrop = cropRef.current;
+      const newX = dr.x + (currentCrop.x - oldDr.x) * scaleX;
+      const newY = dr.y + (currentCrop.y - oldDr.y) * scaleY;
       const clampedX = Math.max(dr.x, Math.min(newX, dr.x + dr.w - cw));
       const clampedY = Math.max(dr.y, Math.min(newY, dr.y + dr.h - ch));
-      setCrop({ x: clampedX, y: clampedY, w: cw, h: ch });
+      commitCrop({ x: clampedX, y: clampedY, w: cw, h: ch });
     };
     window.addEventListener('resize', onResize);
     // stage 자체가 줄어드는 경우(하단 버튼 줄바꿈 등)는 window resize 로 잡히지 않는다.
@@ -99,41 +121,61 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
     };
-  }, [imgLoaded, naturalSize, displayRect, calcDisplayRect, computeFixedCropSize, crop]);
+  }, [imgLoaded, naturalSize, calcDisplayRect, computeFixedCropSize, commitDisplayRect, commitCrop]);
 
   const clampPosition = useCallback((c: CropRect): CropRect => {
-    const x = Math.max(displayRect.x, Math.min(c.x, displayRect.x + displayRect.w - c.w));
-    const y = Math.max(displayRect.y, Math.min(c.y, displayRect.y + displayRect.h - c.h));
+    const dr = displayRectRef.current;
+    const x = Math.max(dr.x, Math.min(c.x, dr.x + dr.w - c.w));
+    const y = Math.max(dr.y, Math.min(c.y, dr.y + dr.h - c.h));
     return { x, y, w: c.w, h: c.h };
-  }, [displayRect]);
+  }, []);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    draggingRef.current = true;
     setDragging(true);
-    dragStart.current = { mx: e.clientX, my: e.clientY, crop: { ...crop } };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [crop]);
+    dragStart.current = { mx: e.clientX, my: e.clientY, crop: { ...cropRef.current } };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
 
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging || !dragStart.current) return;
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || !dragStart.current) return;
+    e.preventDefault();
     const dx = e.clientX - dragStart.current.mx;
     const dy = e.clientY - dragStart.current.my;
     const s = dragStart.current.crop;
-    setCrop(clampPosition({ x: s.x + dx, y: s.y + dy, w: s.w, h: s.h }));
-  }, [dragging, clampPosition]);
+    pendingCropRef.current = clampPosition({ x: s.x + dx, y: s.y + dy, w: s.w, h: s.h });
+    if (frameRef.current !== null) return;
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      const next = pendingCropRef.current;
+      pendingCropRef.current = null;
+      if (next) commitCrop(next);
+    });
+  }, [clampPosition, commitCrop]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    const next = pendingCropRef.current;
+    pendingCropRef.current = null;
+    if (next) commitCrop(next);
+    draggingRef.current = false;
     setDragging(false);
     dragStart.current = null;
-  }, []);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, [commitCrop]);
 
   useEffect(() => {
-    if (!dragging) return;
-    const up = () => { setDragging(false); dragStart.current = null; };
-    window.addEventListener('pointerup', up);
-    return () => window.removeEventListener('pointerup', up);
-  }, [dragging]);
+    return () => {
+      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+    };
+  }, []);
 
   const handleConfirm = useCallback(() => {
     if (!naturalSize.w || !displayRect.w) return;
@@ -143,7 +185,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     const sw = crop.w * scale;
     const sh = crop.h * scale;
 
-    const outputScale = Math.min(1, 1600 / Math.max(sw, sh));
+    const outputScale = Math.min(1, 1280 / Math.max(sw, sh));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(sw * outputScale));
     canvas.height = Math.max(1, Math.round(sh * outputScale));
@@ -156,7 +198,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
 
     canvas.toBlob(blob => {
       if (blob) onCrop(blob);
-    }, 'image/webp', 0.84);
+    }, 'image/webp', 0.82);
   }, [naturalSize, displayRect, crop, onCrop]);
 
   const handleImgLoad = () => {
@@ -173,8 +215,6 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
         display: 'flex', flexDirection: 'column',
         touchAction: 'none', userSelect: 'none',
       }}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
     >
       <button
         onClick={onCancel}
@@ -234,7 +274,9 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             <div
               style={{
                 position: 'absolute',
-                left: crop.x, top: crop.y, width: crop.w, height: crop.h,
+                left: 0, top: 0, width: crop.w, height: crop.h,
+                transform: `translate3d(${crop.x}px, ${crop.y}px, 0)`,
+                willChange: 'transform',
                 overflow: 'hidden', pointerEvents: 'none',
               }}
             >
@@ -244,8 +286,10 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
                 draggable={false}
                 style={{
                   position: 'absolute',
-                  left: displayRect.x - crop.x,
-                  top: displayRect.y - crop.y,
+                  left: 0,
+                  top: 0,
+                  transform: `translate3d(${displayRect.x - crop.x}px, ${displayRect.y - crop.y}px, 0)`,
+                  willChange: 'transform',
                   width: displayRect.w,
                   height: displayRect.h,
                   // 이 이미지의 부모는 크롭 창(원본 표시 너비보다 좁다)이다.
@@ -260,12 +304,17 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             <div
               style={{
                 position: 'absolute',
-                left: crop.x, top: crop.y, width: crop.w, height: crop.h,
+                left: 0, top: 0, width: crop.w, height: crop.h,
+                transform: `translate3d(${crop.x}px, ${crop.y}px, 0)`,
+                willChange: 'transform', touchAction: 'none',
                 border: '2px solid #3B82F6',
                 boxSizing: 'border-box',
                 cursor: dragging ? 'grabbing' : 'grab',
               }}
               onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
             />
           </>
         )}
@@ -298,7 +347,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
             onClick={() => {
               if (!displayRect.w) return;
               const { w: cw, h: ch } = computeFixedCropSize(displayRect);
-              setCrop({
+              commitCrop({
                 x: displayRect.x + (displayRect.w - cw) / 2,
                 y: displayRect.y + (displayRect.h - ch) / 2,
                 w: cw,
