@@ -4,17 +4,32 @@ import { isPastDeadline } from "./_shared/campaign-recruit.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { isOpenApplyMode } from "./_shared/reward-mode.mts";
 
+const cleanText = (value: unknown, max: number): string => String(value ?? "").trim().slice(0, max);
+const cleanUsername = (value: unknown): string => cleanText(value, 128).toLowerCase().replace(/^biz\//, "");
+const validOptionalUrl = (value: string): boolean => {
+  if (!value) return true;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
 export default async (req: Request) => {
   const db = getDatabase();
   const url = new URL(req.url);
 
   if (req.method === "GET") {
     try {
-      const username = url.searchParams.get("username");
-      const campaign_id = url.searchParams.get("campaign_id");
-      const applicant = url.searchParams.get("applicant");
+      const username = cleanUsername(url.searchParams.get("username"));
+      const campaign_id = cleanText(url.searchParams.get("campaign_id"), 200);
+      const applicant = cleanUsername(url.searchParams.get("applicant"));
 
       if (username) {
+        const auth = await requireAccountOwner(req, username);
+        if (!auth.ok) return auth.response;
+
         const result = await db.sql`
           SELECT ca.*, c.title as campaign_title, c.brand_name, c.type as campaign_type,
                  c.status as campaign_status, c.reward_type, c.reward_amount,
@@ -28,6 +43,9 @@ export default async (req: Request) => {
       }
 
       if (campaign_id && applicant) {
+        const auth = await requireAccountOwner(req, applicant);
+        if (!auth.ok) return auth.response;
+
         const result = await db.sql`
           SELECT * FROM campaign_applications
           WHERE campaign_id = ${campaign_id} AND applicant_username = ${applicant}
@@ -46,11 +64,25 @@ export default async (req: Request) => {
 
   if (req.method === "POST") {
     try {
-      const body = await req.json();
-      const { campaign_id, applicant_username, message, contact, portfolio_url, instagram_url, youtube_naver_url } = body;
+      const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+      if (!body) return Response.json({ error: "잘못된 요청입니다." }, { status: 400 });
+      const campaign_id = cleanText(body.campaign_id, 200);
+      const applicant_username = cleanUsername(body.applicant_username);
+      const message = cleanText(body.message, 3000);
+      const contact = cleanText(body.contact, 300);
+      const portfolio_url = cleanText(body.portfolio_url, 2000);
+      const instagram_url = cleanText(body.instagram_url, 2000);
+      const youtube_naver_url = cleanText(body.youtube_naver_url, 2000);
 
       if (!campaign_id || !applicant_username) {
         return Response.json({ error: "필수 항목을 입력해 주세요." }, { status: 400 });
+      }
+
+      const auth = await requireAccountOwner(req, applicant_username);
+      if (!auth.ok) return auth.response;
+
+      if (![portfolio_url, instagram_url, youtube_naver_url].every(validOptionalUrl)) {
+        return Response.json({ error: "링크 주소를 확인해 주세요." }, { status: 400 });
       }
 
       const campaign = await db.sql`SELECT * FROM campaigns WHERE id = ${campaign_id} AND status = 'active' AND deleted_at IS NULL`;
@@ -79,20 +111,17 @@ export default async (req: Request) => {
       // 모집 인원(max_applicants)이 다 차도 지원은 계속 받는다.
       // 지원자가 많을수록 브랜드가 더 나은 크리에이터를 고를 수 있기 때문이다.
 
-      const dup = await db.sql`
-        SELECT id FROM campaign_applications
-        WHERE campaign_id = ${campaign_id} AND applicant_username = ${applicant_username}
-      `;
-      if (dup.length > 0) {
-        return Response.json({ error: "이미 지원한 캠페인입니다." }, { status: 400 });
-      }
-
       const id = `app_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      await db.sql`
+      const inserted = await db.sql`
         INSERT INTO campaign_applications (id, campaign_id, applicant_username, message, contact, portfolio_url, instagram_url, youtube_naver_url)
         VALUES (${id}, ${campaign_id}, ${applicant_username}, ${message || ""}, ${contact || ""}, ${portfolio_url || ""}, ${instagram_url || ""}, ${youtube_naver_url || ""})
+        ON CONFLICT (campaign_id, applicant_username) DO NOTHING
+        RETURNING id
       `;
+      if (!inserted.length) {
+        return Response.json({ error: "이미 지원한 캠페인입니다." }, { status: 409 });
+      }
 
       return Response.json({ success: true, id });
     } catch (err: any) {
@@ -102,8 +131,8 @@ export default async (req: Request) => {
 
   if (req.method === "DELETE") {
     try {
-      const id = url.searchParams.get("id");
-      const username = url.searchParams.get("username");
+      const id = cleanText(url.searchParams.get("id"), 200);
+      const username = cleanUsername(url.searchParams.get("username"));
 
       if (!id || !username) {
         return Response.json({ error: "Missing parameters" }, { status: 400 });

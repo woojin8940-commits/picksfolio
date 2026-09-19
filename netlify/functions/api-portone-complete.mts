@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { verifyPortOnePayment } from "./_shared/portone-payment.mts";
+import { requireAccountOwner } from "./_shared/user-auth.mts";
 
 export default async (req: Request) => {
   if (req.method !== "POST") {
@@ -12,9 +13,13 @@ export default async (req: Request) => {
       return Response.json({ success: false, error: "Missing params" }, { status: 400 });
     }
 
+    const auth = await requireAccountOwner(req, String(username));
+    if (!auth.ok) return auth.response;
+
     const verified = await verifyPortOnePayment({
       paymentId: String(paymentId),
       payMethod: String(payMethod || ""),
+      expectedOwner: String(username),
     });
     if (!verified.ok) {
       return Response.json(

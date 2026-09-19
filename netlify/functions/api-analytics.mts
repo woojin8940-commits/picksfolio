@@ -20,6 +20,10 @@ function dayKey(username: string, date: string): string {
   return `analytics_${username}_${date}`;
 }
 
+function seoulDateKey(date = new Date()): string {
+  return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function dateRange(start: string, end: string): string[] | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startMs = Date.parse(`${start}T00:00:00Z`);
@@ -57,6 +61,8 @@ export default async (req: Request, context: Context) => {
       if (!dates) return Response.json({ error: "Invalid date range" }, { status: 400 });
       let totalViews = 0;
       let totalClicks = 0;
+      let legacyVisitors = 0;
+      const visitors = new Set<string>();
       const merged: Record<string, number> = {};
       const days = await mapConcurrent(dates, 8, date =>
         store.get(dayKey(username, date), { type: "json" }) as Promise<DayData | null>,
@@ -65,6 +71,11 @@ export default async (req: Request, context: Context) => {
         if (data) {
           totalViews += data.views || 0;
           totalClicks += data.clicks || 0;
+          if (Array.isArray(data.visitors) && data.visitors.length > 0) {
+            data.visitors.forEach(visitor => visitors.add(String(visitor)));
+          } else {
+            legacyVisitors += data.views || 0;
+          }
         }
         if (data?.blockClicks) {
           for (const [blockId, count] of Object.entries(data.blockClicks)) {
@@ -79,13 +90,13 @@ export default async (req: Request, context: Context) => {
         .slice(0, 10);
 
       const ctr = totalViews > 0 ? Math.round((totalClicks / totalViews) * 100) : 0;
-      const stats = { views: totalViews, clicks: totalClicks, ctr };
+      const stats = { views: totalViews, visitors: visitors.size + legacyVisitors, clicks: totalClicks, ctr };
       if (type === "stats") return Response.json(stats);
       if (type === "top-items") return Response.json({ topItems });
       return Response.json({ ...stats, topItems });
     }
 
-    const key = dayKey(username, new Date().toISOString().split("T")[0]);
+    const key = dayKey(username, seoulDateKey());
     const data = await store.get(key, { type: "json" });
     return Response.json(data || emptyDay());
   }
@@ -101,7 +112,7 @@ export default async (req: Request, context: Context) => {
       return Response.json({ error: "Invalid blockId" }, { status: 400 });
     }
     const visitorId = String(body.visitorId || "").slice(0, 100);
-    const date = new Date().toISOString().split("T")[0];
+    const date = seoulDateKey();
     const key = dayKey(username, date);
 
     await mutateBlobJSON<DayData>("analytics", key, (current) => {

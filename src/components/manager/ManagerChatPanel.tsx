@@ -21,6 +21,7 @@ import { useVisiblePolling } from '../../hooks/useVisiblePolling';
 interface ManagerChatPanelProps {
   managerUsername: string;
   onNotify: (message: string, type?: 'success' | 'error') => void;
+  initialProposalId?: string;
 }
 
 type Channel = 'influencer' | 'business';
@@ -30,14 +31,14 @@ const channelOf = (t: any): Channel =>
     ? 'business'
     : 'influencer';
 
-const ManagerChatPanel: React.FC<ManagerChatPanelProps> = ({ managerUsername, onNotify }) => {
+const ManagerChatPanel: React.FC<ManagerChatPanelProps> = ({ managerUsername, onNotify, initialProposalId = '' }) => {
   const [timelines, setTimelines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [mineOnly, setMineOnly] = useState(true);
   const [channel, setChannel] = useState<Channel>('influencer');
-  const [openId, setOpenId] = useState('');
+  const [openId, setOpenId] = useState(initialProposalId);
   const [thread, setThread] = useState<any>(null);
-  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadLoading, setThreadLoading] = useState(!!initialProposalId);
   const [detailRefresh, setDetailRefresh] = useState(0);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);

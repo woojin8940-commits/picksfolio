@@ -4,8 +4,9 @@ import {
   COLLABS_STORE,
   RecordWriteConflictError,
   collabsKey,
+  manualCollabChanges,
   mutateRecords,
-  parseAmount,
+  validManualCollabRecord,
 } from "./_shared/collab-records.mts";
 
 export default async (req: Request, context: Context) => {
@@ -22,9 +23,14 @@ export default async (req: Request, context: Context) => {
 
   try {
     if (req.method === "PATCH") {
-      const body = await req.json();
+      const body = await req.json().catch(() => null);
+      const patch = manualCollabChanges(body);
+      if (!patch || Object.keys(patch).length === 0) {
+        return Response.json({ error: "입력값을 확인해 주세요." }, { status: 400 });
+      }
       const now = new Date().toISOString();
       let notFound = false;
+      let invalid = false;
 
       await mutateRecords(COLLABS_STORE, key, (records) => {
         const idx = records.findIndex((r: any) => r.id === recordId);
@@ -33,15 +39,21 @@ export default async (req: Request, context: Context) => {
           return null;
         }
         notFound = false;
-        const patch: any = { ...body };
-        if (patch.fee !== undefined) patch.fee = parseAmount(patch.fee);
+        const updated = { ...records[idx], ...patch, updated_at: now };
+        if (!validManualCollabRecord(updated)) {
+          invalid = true;
+          return null;
+        }
         const next = [...records];
-        next[idx] = { ...records[idx], ...patch, updated_at: now };
+        next[idx] = updated;
         return next;
       });
 
       if (notFound) {
         return Response.json({ error: "Not found" }, { status: 404 });
+      }
+      if (invalid) {
+        return Response.json({ error: "필수 입력값과 날짜를 확인해 주세요." }, { status: 400 });
       }
       return Response.json({ success: true });
     }

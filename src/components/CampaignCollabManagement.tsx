@@ -5,6 +5,7 @@ import { useDragScroll } from '../hooks/useDragScroll';
 import { formatKoreanWon } from '../utils/formatters';
 import { daysUntilDeadline, isPastDeadline, isQuotaReached } from '../utils/campaignRecruit';
 import { authHeaders, apiService } from '../services/apiService';
+import { externalLinkProps } from '../utils/externalLink';
 import CampaignListupBoard from './collab/CampaignListupBoard';
 import CampaignGuidelineEditor, { parseGuidelineFiles } from './collab/CampaignGuidelineEditor';
 import InfluencerCandidateCard, { candidateSortValues } from './collab/InfluencerCandidateCard';
@@ -188,7 +189,14 @@ const applicantCacheKey = (businessUsername: string, campaignId: string) =>
 const readApplicantCache = (businessUsername: string, campaignId: string): ApplicantCache | null => {
   try {
     const raw = localStorage.getItem(applicantCacheKey(businessUsername, campaignId));
-    return raw ? JSON.parse(raw) as ApplicantCache : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.applicants)) return null;
+    return {
+      applicants: parsed.applicants.filter((item: unknown) => item && typeof item === 'object'),
+      managerUsername: typeof parsed.managerUsername === 'string' ? parsed.managerUsername : '',
+      selectionBy: parsed.selectionBy === 'brand' ? 'brand' : 'manager',
+      savedAt: Number(parsed.savedAt || 0),
+    } as ApplicantCache;
   } catch {
     return null;
   }
@@ -209,7 +217,8 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
   const cachedCampaigns = React.useMemo(() => {
     try {
       const raw = localStorage.getItem(cacheKey);
-      return raw ? JSON.parse(raw) : [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === 'object') : [];
     } catch { return []; }
   }, [cacheKey]);
 
@@ -1129,9 +1138,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
 
               {selectedCampaign.product_url && (
                 <a
-                  href={selectedCampaign.product_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  {...externalLinkProps(selectedCampaign.product_url)}
                   className="inline-block text-[11px] text-blue-600 font-black hover:underline"
                 >
                   제품 바로가기 →
@@ -1845,7 +1852,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       하는데, 모바일에서는 hover 가 없어 아예 닿지 않는다. */}
                   <div
                     className={`absolute top-2.5 right-2.5 flex gap-1 transition-opacity ${
-                      closed ? '' : 'opacity-0 group-hover:opacity-100'
+                      closed ? '' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
                     }`}
                     onClick={e => e.stopPropagation()}
                   >

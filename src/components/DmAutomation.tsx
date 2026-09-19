@@ -1013,7 +1013,7 @@ const AutomationEditor: React.FC<{
                       <input
                         value={keywordInput}
                         onChange={(e) => setKeywordInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
+                        onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
                         placeholder="키워드 입력 후 Enter (예: 가격)"
                         className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold focus:outline-none focus:border-pink-500"
                       />
@@ -2058,7 +2058,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                           setManualModalOpen(true);
                         }}
                         disabled={!entitled}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-pink-600 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-pink-700 disabled:opacity-40"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-pink-600 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-pink-700 disabled:opacity-40"
                       >
                         <Send size={11} /> 보내기
                       </button>
@@ -2066,7 +2066,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                         type="button"
                         onClick={() => setEditing({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
                         disabled={!entitled}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-50 disabled:opacity-40"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-50 disabled:opacity-40"
                       >
                         <Plus size={11} /> 자동화
                       </button>

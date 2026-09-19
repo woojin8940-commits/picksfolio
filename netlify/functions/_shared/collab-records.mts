@@ -29,6 +29,71 @@ export function parseAmount(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const manualCategories = new Set(["광고", "커머스", "기타"]);
+const manualStatuses = new Set(["scheduled", "in_progress", "completed", "cancelled"]);
+
+const exactDate = (value: unknown): string | null => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text ? text : null;
+};
+
+export function manualCollabChanges(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const changes: Record<string, unknown> = {};
+
+  if (Object.hasOwn(input, "title")) changes.title = String(input.title ?? "").trim().slice(0, 300);
+  if (Object.hasOwn(input, "company_name")) changes.company_name = String(input.company_name ?? "").trim().slice(0, 200);
+  if (Object.hasOwn(input, "memo")) changes.memo = String(input.memo ?? "").trim().slice(0, 5000);
+  if (Object.hasOwn(input, "category")) {
+    const category = String(input.category ?? "").trim();
+    if (!manualCategories.has(category)) return null;
+    changes.category = category;
+  }
+  if (Object.hasOwn(input, "status")) {
+    const status = String(input.status ?? "").trim();
+    if (!manualStatuses.has(status)) return null;
+    changes.status = status;
+  }
+  if (Object.hasOwn(input, "date")) {
+    const date = exactDate(input.date);
+    if (date === null) return null;
+    changes.date = date;
+  }
+  if (Object.hasOwn(input, "end_date")) {
+    const endDate = exactDate(input.end_date);
+    if (endDate === null) return null;
+    changes.end_date = endDate;
+  }
+  if (Object.hasOwn(input, "fee")) {
+    const fee = parseAmount(input.fee);
+    if (fee > 1_000_000_000_000) return null;
+    changes.fee = fee;
+  }
+
+  return changes;
+}
+
+export function validManualCollabRecord(value: Record<string, unknown>): boolean {
+  const title = String(value.title ?? "").trim();
+  const category = String(value.category ?? "").trim();
+  const status = String(value.status ?? "").trim();
+  const date = exactDate(value.date);
+  const endDate = exactDate(value.end_date);
+  return Boolean(
+    title &&
+    title.length <= 300 &&
+    manualCategories.has(category) &&
+    manualStatuses.has(status) &&
+    date &&
+    endDate !== null &&
+    (!endDate || endDate >= date)
+  );
+}
+
 /** 과거에 저장된 { records: [] } / { settlements: [] } 형태도 배열로 받아준다. */
 export function toRecordArray(data: unknown): any[] {
   if (Array.isArray(data)) return data;
@@ -280,4 +345,3 @@ export async function removeCollabScheduleRecord(
     return next.length === records.length ? null : next;
   });
 }
-

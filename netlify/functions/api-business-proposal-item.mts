@@ -4,6 +4,7 @@ import { getSupabaseServer } from "./_shared/supabase.mts";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { markProposalDeleted } from "./_shared/proposal-tombstones.mts";
 import { hideInboxItem } from "./_shared/business-inbox-hidden.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
   removeCollabScheduleRecord,
   removeSettlementsForProposal,
@@ -51,52 +52,67 @@ export default async (req: Request, context: Context) => {
     return Response.json({ success: true, hidden: true });
   }
 
-  // 묘비를 먼저 적는다. 뒤따르는 단계 중 하나가 실패해도 화면에는 다시 올라오지 않는다.
-  try {
-    await markProposalDeleted(itemId);
-  } catch (tombErr) {
-    console.error("[api-business-proposal-item] Failed to record delete tombstone:", tombErr);
-  }
-
-  // 업체 쪽 캐시.
-  const bizStore = getStore("business-proposals");
   const bizKey = `biz_proposals_${username}`;
-  let influencerUsername = "";
-  try {
-    const existing = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
-    const found = existing.find((p: any) => p?.id === itemId);
-    influencerUsername = String(found?.influencer_username || found?.username || "").toLowerCase();
-    await bizStore.setJSON(bizKey, existing.filter((p: any) => p?.id !== itemId));
-  } catch (err) {
-    console.error("[api-business-proposal-item] Failed to update business cache:", err);
-  }
-
-  // 인플루언서 쪽 캐시. 캐시에 인플루언서 아이디가 없으면 SQL 에서 찾는다 —
-  // 여기서 못 찾으면 수신함 캐시에 남아 조회 때 되살아난다(묘비가 막지만, 캐시를
-  // 비우는 것이 정상 경로다).
   let dbInstance: any = null;
   try {
     const { getDatabase } = await import("@picks/netlify-database");
     dbInstance = getDatabase();
   } catch {}
 
-  if (!influencerUsername && dbInstance) {
+  let proposal: any = null;
+  try {
+    const cached = await getStore("business-proposals").get(bizKey, { type: "json" });
+    if (Array.isArray(cached)) {
+      const candidate = cached.find((p: any) => p?.id === itemId);
+      const owner = String(candidate?.business_username || "").toLowerCase().replace(/^biz\//, "");
+      if (candidate && owner === username && !String(itemId).startsWith("campaign_")) proposal = candidate;
+    }
+  } catch {}
+
+  if (!proposal && dbInstance) {
     try {
       const rows = await dbInstance.sql`
-        SELECT influencer_username, username FROM proposals WHERE id = ${itemId} LIMIT 1
+        SELECT * FROM proposals
+        WHERE id = ${itemId}
+          AND LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
+        LIMIT 1
       ` as any[];
-      influencerUsername = String(rows?.[0]?.influencer_username || rows?.[0]?.username || "").toLowerCase();
+      proposal = rows?.[0] || null;
     } catch (err) {
-      console.error("[api-business-proposal-item] Failed to look up influencer:", err);
+      console.error("[api-business-proposal-item] Failed to look up proposal:", err);
     }
+  }
+
+  if (!proposal) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const influencerUsername = String(proposal.influencer_username || proposal.username || "").toLowerCase();
+
+  try {
+    await markProposalDeleted(itemId);
+  } catch (tombErr) {
+    console.error("[api-business-proposal-item] Failed to record delete tombstone:", tombErr);
+  }
+
+  try {
+    await mutateBlobJSON<any[]>("business-proposals", bizKey, (current) => {
+      const existing = Array.isArray(current) ? current : [];
+      if (!existing.some((p: any) => p?.id === itemId)) return null;
+      return existing.filter((p: any) => p?.id !== itemId);
+    });
+  } catch (err) {
+    console.error("[api-business-proposal-item] Failed to update business cache:", err);
   }
 
   if (influencerUsername) {
     try {
-      const infStore = getStore("proposals");
       const infKey = `proposals_${influencerUsername}`;
-      const existing = ((await infStore.get(infKey, { type: "json" })) as any[]) || [];
-      await infStore.setJSON(infKey, existing.filter((p: any) => p?.id !== itemId));
+      await mutateBlobJSON<any[]>("proposals", infKey, (current) => {
+        const existing = Array.isArray(current) ? current : [];
+        if (!existing.some((p: any) => p?.id === itemId)) return null;
+        return existing.filter((p: any) => p?.id !== itemId);
+      });
     } catch (err) {
       console.error("[api-business-proposal-item] Failed to update influencer cache:", err);
     }
@@ -120,7 +136,11 @@ export default async (req: Request, context: Context) => {
 
   if (dbInstance) {
     try {
-      await dbInstance.sql`DELETE FROM proposals WHERE id = ${itemId}`;
+      await dbInstance.sql`
+        DELETE FROM proposals
+        WHERE id = ${itemId}
+          AND LOWER(REGEXP_REPLACE(COALESCE(business_username, ''), '^biz/', '')) = ${username}
+      `;
     } catch (dbErr) {
       console.error("[api-business-proposal-item] Failed to delete from SQL:", dbErr);
     }

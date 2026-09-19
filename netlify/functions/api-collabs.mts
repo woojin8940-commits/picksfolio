@@ -4,9 +4,11 @@ import {
   COLLABS_STORE,
   RecordWriteConflictError,
   collabsKey,
+  manualCollabChanges,
   mutateRecords,
   parseAmount,
   readRecords,
+  validManualCollabRecord,
 } from "./_shared/collab-records.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 
@@ -43,17 +45,26 @@ export default async (req: Request, context: Context) => {
     }
 
     if (req.method === "POST") {
-      const body = await req.json();
+      const body = await req.json().catch(() => null);
+      const changes = manualCollabChanges(body);
+      if (!changes) {
+        return Response.json({ error: "입력값을 확인해 주세요." }, { status: 400 });
+      }
       const now = new Date().toISOString();
       const record = {
         id: `collab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ...body,
-        fee: parseAmount(body.fee),
+        category: "기타",
+        status: "scheduled",
+        ...changes,
+        fee: parseAmount(changes.fee),
         // 프런트엔드 타입(CollabRecord)은 created_at / updated_at 를 읽는다.
         // 예전에는 createdAt 만 저장해서 화면에서 항상 undefined 였다.
         created_at: now,
         updated_at: now,
       };
+      if (!validManualCollabRecord(record)) {
+        return Response.json({ error: "필수 입력값과 날짜를 확인해 주세요." }, { status: 400 });
+      }
       await mutateRecords(COLLABS_STORE, key, (records) => [...records, record]);
       return Response.json({ success: true, record });
     }

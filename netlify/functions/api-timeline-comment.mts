@@ -4,6 +4,7 @@ import { sendPushToUser } from "./_shared/push.mts";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import { participantList, resolveTimelineAccess } from "./_shared/timeline-access.mts";
 import { TIMELINE_ALIMTALK_COOLDOWN_MS, claimAlimtalkSlot } from "./_shared/alimtalk-throttle.mts";
+import { DIRECT_UPLOAD_MAX_BYTES, isUploadedFileUrl } from "./_shared/upload-media.mts";
 
 const STORE = "timelines";
 
@@ -81,7 +82,21 @@ export default async (req: Request, context: Context) => {
         ? stored.companyName || authorUsername
         : authorUsername;
     const content = typeof body.content === "string" ? body.content.trim().slice(0, 5000) : "";
-    const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 10) : [];
+    const attachments = Array.isArray(body.attachments)
+      ? body.attachments.slice(0, 10).flatMap((raw: unknown) => {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+          const item = raw as Record<string, unknown>;
+          const url = String(item.url || "").trim();
+          if (!isUploadedFileUrl(url)) return [];
+          const size = Number(item.fileSize || 0);
+          return [{
+            url,
+            fileName: String(item.fileName || "첨부 파일").slice(0, 255),
+            fileType: String(item.fileType || "application/octet-stream").slice(0, 120),
+            fileSize: Number.isFinite(size) ? Math.max(0, Math.min(size, DIRECT_UPLOAD_MAX_BYTES)) : 0,
+          }];
+        })
+      : [];
     if (!content && attachments.length === 0) {
       return Response.json({ error: "메시지 내용을 입력해 주세요." }, { status: 400 });
     }
@@ -190,7 +205,6 @@ export default async (req: Request, context: Context) => {
           if (recipients.length === 0) return;
 
           const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
-          const magicLink = `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`;
           const messagePreview = content.slice(0, 50);
           const projectName = existing.proposalTitle || "협업 프로젝트";
           const senderName = comment.authorName
@@ -204,6 +218,13 @@ export default async (req: Request, context: Context) => {
               : recipientUsername === businessUser
                 ? "business"
                 : "influencer";
+            const encodedProposalId = encodeURIComponent(proposalId);
+            const notificationPath = recipientType === "business"
+              ? `/business-admin?tab=timeline&proposal=${encodedProposalId}`
+              : recipientType === "manager"
+                ? `/manager?tab=chat&proposal=${encodedProposalId}`
+                : `/admin?tab=timeline&proposal=${encodedProposalId}`;
+            const magicLink = `${siteOrigin}${notificationPath}`;
 
             /**
              * 알림톡은 이 대화의 "첫 메시지"에만 나간다.
@@ -245,7 +266,7 @@ export default async (req: Request, context: Context) => {
               data: {
                 type: "timeline",
                 proposalId,
-                path: `/admin?tab=timeline&proposal=${proposalId}`,
+                path: notificationPath,
               },
             });
           }));

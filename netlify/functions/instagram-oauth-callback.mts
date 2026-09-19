@@ -1,10 +1,10 @@
-import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { subscribeInstagramWebhooks, WEBHOOK_FIELDS } from "./_shared/instagram-webhook-subscribe.mts";
 import { indexDmAccount } from "./_shared/dm-webhook-index.mts";
 import { consumeSignedState, sanitizeReturnPath } from "./_shared/oauth-state.mts";
 import { syncChannelFromMeta } from "./_shared/instagram-metrics.mts";
 import { warmFeedCache } from "./_shared/instagram-feed.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 
 /**
  * 인스타그램 계정 연동 콜백.
@@ -158,28 +158,27 @@ export default async (req: Request, _context: Context) => {
     // 그쪽 블롭에는 사람이 만들어 둔 자동 응답 규칙이 함께 들어 있다.
     const storeName = isCollab ? "collab-instagram" : "dm-automation";
     const key = isCollab ? `ig_${username}` : `dm_${username}`;
-    const store = getStore({ name: storeName, consistency: "strong" });
-    const existing = isCollab
-      ? ({} as DmSettings)
-      : ((await store.get(key, { type: "json" })) as DmSettings) || {};
-
-    const next: DmSettings = {
-      ...existing,
-      connected: true,
-      igUserId,
-      igAccountId: igUserId, // 하위호환: 기존 필드에도 채워둔다
-      igUsername: igUsername || existing.igUsername || "",
-      accessToken: longToken,
-      tokenSource: "instagram_login",
-      tokenExpiresAt: expiresIn
-        ? new Date(Date.now() + expiresIn * 1000).toISOString()
-        : existing.tokenExpiresAt,
-      updatedAt: new Date().toISOString(),
-    };
-    // 방금 새 토큰을 받았다. 지난 토큰이 죽어 남겨 둔 재연동 표시를 여기서 지우지
-    // 않으면, 재연동을 마치고 돌아온 화면이 계속 "다시 연동해 주세요"라고 말한다.
-    delete (next as any).needsReauth;
-    delete (next as any).tokenInvalidAt;
+    let next: DmSettings = {};
+    await mutateBlobJSON<DmSettings>(storeName, key, (current) => {
+      const existing = isCollab ? {} : current || {};
+      next = {
+        ...existing,
+        connected: true,
+        igUserId,
+        igAccountId: igUserId,
+        igUsername: igUsername || existing.igUsername || "",
+        accessToken: longToken,
+        tokenSource: "instagram_login",
+        tokenExpiresAt: expiresIn
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : existing.tokenExpiresAt,
+        updatedAt: new Date().toISOString(),
+      };
+      delete (next as any).needsReauth;
+      delete (next as any).tokenInvalidAt;
+      delete (next as any).featuresOff;
+      return next;
+    });
     // 끊어 뒀던 기능을 전부 되살린다. 어느 화면에서 시작한 연동인지는 보지 않는다.
     //
     // 연동 화면에서 사람이 하는 일은 "이 계정을 붙인다" 하나다. 그런데 예전에는
@@ -190,9 +189,6 @@ export default async (req: Request, _context: Context) => {
     // 자동 DM 이 저절로 나가기 시작하는 것은 아니다. 해제할 때 자동화 스위치를
     // 내려 뒀고(`enabled:false`) 그 값은 여기서 건드리지 않으므로, 발송은 본인이
     // 다시 켜는 순간부터다. 되살아나는 것은 "연동됨" 상태까지다.
-    delete (next as any).featuresOff;
-    await store.setJSON(key, next);
-
     // 웹훅 구독과 역추적 인덱스는 디엠 자동화(댓글·메시지 이벤트)를 위한 것이다.
     // 캠페인 연동은 지표를 읽기만 하므로 계정에 아무 것도 걸지 않는다.
     if (!isCollab) {
@@ -216,10 +212,13 @@ export default async (req: Request, _context: Context) => {
       });
       if (sub.ok) {
         try {
-          await store.setJSON(key, {
-            ...next,
-            webhookSubscribedAt: new Date().toISOString(),
-            webhookFields: WEBHOOK_FIELDS,
+          await mutateBlobJSON<DmSettings>(storeName, key, (current) => {
+            if (!current || current.accessToken !== longToken) return null;
+            return {
+              ...current,
+              webhookSubscribedAt: new Date().toISOString(),
+              webhookFields: WEBHOOK_FIELDS,
+            };
           });
         } catch (e) {
           console.warn("[ig-oauth] subscribe flag write failed:", e);

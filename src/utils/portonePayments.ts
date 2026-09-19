@@ -53,6 +53,7 @@ export interface PortOneIntent {
   kind?: 'activation' | 'recharge';
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
+  savedAt?: number;
 }
 
 export const channelKeyFor = (m: PortOnePayMethod) =>
@@ -96,12 +97,16 @@ const origin = () => window.location.origin;
 export const portoneRedirectUrl = () => `${origin()}/portone/return`;
 
 export const savePortOneIntent = (intent: PortOneIntent) => {
+  const saved = JSON.stringify({ ...intent, savedAt: Date.now() });
   try {
-    sessionStorage.setItem(INTENT_KEY, JSON.stringify(intent));
+    sessionStorage.setItem(INTENT_KEY, saved);
   } catch {
     // sessionStorage may be unavailable (private mode); the return page will then
     // surface a clear error instead of finalising the wrong action.
   }
+  try {
+    localStorage.setItem(INTENT_KEY, saved);
+  } catch {}
 };
 
 export const clearPortOneIntent = () => {
@@ -110,6 +115,9 @@ export const clearPortOneIntent = () => {
   } catch {
     /* ignore */
   }
+  try {
+    localStorage.removeItem(INTENT_KEY);
+  } catch {}
 };
 
 export const genPortOneId = (prefix: string, username: string) =>

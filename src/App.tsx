@@ -101,6 +101,22 @@ const clearAllLinkCacheLazy = () => {
 type View = 'home' | 'signup' | 'login' | 'admin' | 'user-page' | 'setup-link' | 'proposal' | 'operator' | 'operator-login' | 'terms' | 'privacy' | 'business-signup' | 'business-login' | 'business-admin' | 'manager';
 type SubView = 'dashboard' | 'links' | 'dm-automation' | 'insights' | 'business' | 'calendar' | 'membership' | 'open-schedule' | 'settlement' | 'timeline' | 'campaigns' | 'my-collabs';
 
+const QUERY_TAB_TO_SUBVIEW: Record<string, SubView> = {
+  dashboard: 'dashboard',
+  links: 'links',
+  dm: 'dm-automation',
+  insights: 'insights',
+  inbox: 'business',
+  proposals: 'business',
+  calendar: 'calendar',
+  membership: 'membership',
+  schedule: 'open-schedule',
+  settlement: 'settlement',
+  timeline: 'timeline',
+  campaigns: 'campaigns',
+  collab: 'my-collabs',
+};
+
 /** 주소 첫 칸이 그대로 화면 이름이 되는 경로. */
 const TOP_LEVEL_VIEWS: View[] = ['signup', 'login', 'admin', 'operator', 'operator-login', 'terms', 'privacy', 'business-signup', 'business-login', 'business-admin', 'manager'];
 
@@ -141,6 +157,7 @@ function initialPublicProfileUsername(): string {
 // WebView happened to keep sessionStorage around.
 const HOME_INTENT_KEY = 'picks_home_intent';
 const HOME_INTENT_TTL = 5 * 60 * 1000;
+const USER_IDENTITY_KEY = 'picks_user_id';
 
 /**
  * 비즈니스 로그인이 쓰는 키. 크리에이터 · 운영자 쪽 정리 로직은 이 키들을 절대
@@ -244,6 +261,10 @@ function hasStoredSupabaseSession(): boolean {
   return hasOwnSupabaseSession();
 }
 
+function localGet(key: string): string {
+  try { return localStorage.getItem(key) || ''; } catch { return ''; }
+}
+
 const App: React.FC = () => {
   // Native-app launch shortcut, resolved once per page load before the first
   // render so the dashboard can be the initial view (see launchDashboardView).
@@ -305,9 +326,9 @@ const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!sessionGet('picks_user_session'));
 
   // Business account state
-  const [businessUsername, setBusinessUsername] = useState(() => localStorage.getItem('picks_business_session') || '');
-  const [businessCompanyName, setBusinessCompanyName] = useState(() => localStorage.getItem('picks_business_company') || '');
-  const [isBusinessLoggedIn, setIsBusinessLoggedIn] = useState(() => !!localStorage.getItem('picks_business_session'));
+  const [businessUsername, setBusinessUsername] = useState(() => localGet('picks_business_session'));
+  const [businessCompanyName, setBusinessCompanyName] = useState(() => localGet('picks_business_company'));
+  const [isBusinessLoggedIn, setIsBusinessLoggedIn] = useState(() => !!localGet('picks_business_session'));
   const viewRef = useRef<View>(view);
   const userNameRef = useRef<string>(userName);
   const loginNavigationHandledRef = useRef<boolean>(false);
@@ -598,19 +619,23 @@ const App: React.FC = () => {
       }
 
       const uid = session.user.id;
+      const cachedUsername = sessionGet('picks_user_session') || '';
+      const cachedUserId = sessionGet(USER_IDENTITY_KEY) || '';
+      const cachedIdentityMatches = !!cachedUsername && cachedUserId === uid;
       // 새로고침할 때마다 "프로필 확인 중" 스피너가 몇 초씩 뜨던 원인.
       // 캐시된 사용자 이름이 이미 있으면 화면을 막지 않고 그대로 대시보드를
       // 보여주고, 프로필 검증은 아래에서 그대로 이어서 한다(끝나면 최신 값으로
       // 덮어쓴다). 캐시가 없는 첫 로그인에서는 예전처럼 확인이 끝날 때까지
       // 기다려야 하므로 그때만 게이트를 닫는다.
-      const hasCachedIdentity = !!(sessionGet('picks_user_session') || userNameRef.current);
+      const hasCachedIdentity = cachedIdentityMatches;
       if (!hasCachedIdentity) setProfileChecked(false);
 
       // NON-BLOCKING profile fetch: Use safeFetchProfile with 5s timeout.
       // If the fetch fails or times out, immediately proceed with a fallback
       // (localStorage username or 'Anonymous') so the dashboard is never
       // delayed. A background retry will update the profile later.
-      const fallbackUsername = sessionGet('picks_user_session') || '';
+      const fallbackUsername = cachedIdentityMatches ? cachedUsername : '';
+      const fallbackRefUsername = cachedIdentityMatches ? userNameRef.current : '';
       const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
         || sessionStorage.getItem('kakao_provider_token')
         || sessionStorage.getItem('kakao_client_phone')
@@ -628,6 +653,7 @@ const App: React.FC = () => {
             if (latestProfile?.username) {
               setUserName(latestProfile.username);
               sessionSet('picks_user_session', latestProfile.username);
+              sessionSet(USER_IDENTITY_KEY, uid);
             }
             if (latestProfile?.role === 'admin') {
               setProfileRole('admin');
@@ -670,11 +696,6 @@ const App: React.FC = () => {
         const effectiveProviderToken = session.provider_token || capturedProviderToken || sessionStorage.getItem('kakao_provider_token') || '';
         const clientKakaoPhone = sessionStorage.getItem('kakao_client_phone') || '';
         const clientKakaoName = sessionStorage.getItem('kakao_client_name') || '';
-        if (effectiveProviderToken) {
-          sessionStorage.removeItem('kakao_provider_token');
-        }
-        sessionStorage.removeItem('kakao_client_phone');
-        sessionStorage.removeItem('kakao_client_name');
         console.log('[Debug] Kakao user detected, calling server-side profile setup...');
 
         const runKakaoProfileSetup = async () => {
@@ -718,8 +739,12 @@ const App: React.FC = () => {
             profileData = nextProfile;
             if (setupResult.profile.username) {
               sessionSet('picks_user_session', setupResult.profile.username);
+              sessionSet(USER_IDENTITY_KEY, uid);
               console.log('[Auth] Kakao profile username persisted to localStorage:', setupResult.profile.username);
             }
+            sessionStorage.removeItem('kakao_provider_token');
+            sessionStorage.removeItem('kakao_client_phone');
+            sessionStorage.removeItem('kakao_client_name');
             return nextProfile;
           }
           return null;
@@ -727,7 +752,7 @@ const App: React.FC = () => {
 
         const handleKakaoSetupFailure = (setupResult: any) => {
           console.error('[Debug] Server-side profile setup failed:', setupResult?.error);
-          const savedUsername = sessionGet('picks_user_session') || '';
+          const savedUsername = fallbackUsername;
           if (savedUsername) {
             profileData = { username: savedUsername, role: 'user' };
             console.log('[Auth] Using saved username from localStorage as fallback:', savedUsername);
@@ -753,7 +778,7 @@ const App: React.FC = () => {
 
         const handleKakaoSetupError = async (serverErr: unknown) => {
           console.error('[Debug] Server-side profile setup call failed:', serverErr);
-          const savedUsernameOnErr = sessionGet('picks_user_session') || '';
+          const savedUsernameOnErr = fallbackUsername;
           if (savedUsernameOnErr && !profileData) {
             profileData = { username: savedUsernameOnErr, role: 'user' };
             console.log('[Auth] Using saved username from localStorage after server error:', savedUsernameOnErr);
@@ -772,7 +797,7 @@ const App: React.FC = () => {
                 setIsLoggedIn(true);
                 setProfileChecked(true);
                 setOauthProcessing(false);
-                const savedName = sessionGet('picks_user_session') || '';
+                const savedName = fallbackUsername;
                 if (savedName) {
                   setUserName(savedName);
                 }
@@ -900,7 +925,7 @@ const App: React.FC = () => {
       const emailUsername = session.user.email?.endsWith('@picks.me')
         ? session.user.email.replace('@picks.me', '')
         : '';
-      const existingUsername = profileUsername || sessionGet('picks_user_session') || userNameRef.current || emailUsername || '';
+      const existingUsername = profileUsername || fallbackUsername || fallbackRefUsername || emailUsername || '';
 
       console.log('[Debug] Username resolution:', { profileUsername, localStorage: sessionGet('picks_user_session'), ref: userNameRef.current, emailUsername, final: existingUsername });
 
@@ -923,6 +948,7 @@ const App: React.FC = () => {
         setIsLoggedIn(true);
         setProfileRole(userRole);
         sessionSet('picks_user_session', existingUsername);
+        sessionSet(USER_IDENTITY_KEY, uid);
         setProfileChecked(true);
         // Supabase confirmed a live session, so the optimistic launch was right.
         // From here on, losing the session means a real logout — which belongs on
@@ -973,7 +999,7 @@ const App: React.FC = () => {
             navigate('manager');
           } else {
             try {
-              const rawBlocks = localStorage.getItem(`picks_blocks_${existingUsername.toLowerCase()}`);
+              const rawBlocks = localGet(`picks_blocks_${existingUsername.toLowerCase()}`);
               const cachedBlocks = rawBlocks ? JSON.parse(rawBlocks) : null;
               if (Array.isArray(cachedBlocks) && cachedBlocks.length === 0) {
                 applySubView('links');
@@ -1023,8 +1049,6 @@ const App: React.FC = () => {
       // For INITIAL_SESSION: only redirect if this page load is from an OAuth callback,
       // to prevent stale sessions from auto-redirecting users who are just visiting /login.
       const isNewOAuthUser = (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && isOAuthCallbackRef.current))
-          && !localStorage.getItem('picks_live_kakao_redirect')
-          && !localStorage.getItem('picks_notify_kakao_redirect')
           && currentViewForSetup !== 'admin'
           && !loginNavigationHandledRef.current;
       if (isNewOAuthUser && (currentViewForSetup === 'login' || currentViewForSetup === 'home')) {
@@ -1331,7 +1355,7 @@ const App: React.FC = () => {
 
     const checkInactivity = () => {
       if (loggedOut) return;
-      const lastActivity = localStorage.getItem('picks_business_last_activity');
+      const lastActivity = localGet('picks_business_last_activity');
       if (!lastActivity) return;
       const elapsed = Date.now() - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_LIMIT) {
@@ -1347,7 +1371,7 @@ const App: React.FC = () => {
       }
     };
 
-    const stored = localStorage.getItem('picks_business_last_activity');
+    const stored = localGet('picks_business_last_activity');
     if (stored) {
       const elapsed = Date.now() - parseInt(stored, 10);
       if (elapsed > INACTIVITY_LIMIT) {
@@ -1400,7 +1424,7 @@ const App: React.FC = () => {
       const userType = isBusinessLoggedIn ? 'business' : 'influencer';
       if (!account || (!isBusinessLoggedIn && !isLoggedIn)) return;
       const accessToken = isBusinessLoggedIn
-        ? localStorage.getItem('picks_business_access_token') || ''
+        ? localGet('picks_business_access_token')
         : (await supabase?.auth.getSession())?.data.session?.access_token || '';
       if (!cancelled && accessToken) {
         native.registerPush!(account.replace(/^biz\//, ''), userType, accessToken);
@@ -1500,13 +1524,16 @@ const App: React.FC = () => {
       }, ms));
     };
 
-    later(400, () => {
-      import('./components/LinkManagement').catch(() => {});
-      import('./components/DmAutomation').catch(() => {});
-      import('./components/CreatorInsights').catch(() => {});
-      import('./components/BusinessCalendar').catch(() => {});
-    });
-    later(1100, () => {
+    later(400, () => import('./components/LinkManagement').catch(() => {}));
+    later(700, () => import('./components/DmAutomation').catch(() => {}));
+    later(1000, () => import('./components/CreatorInsights').catch(() => {}));
+    later(1300, () => import('./components/BusinessCalendar').catch(() => {}));
+    later(1600, () => import('./components/UserCampaignBrowse').catch(() => {}));
+    later(1900, () => import('./components/CreatorCampaignCollabs').catch(() => {}));
+    later(2200, () => import('./components/BusinessTimeline').catch(() => {}));
+    later(2500, () => import('./components/UserSettlement').catch(() => {}));
+    later(2800, () => import('./components/BusinessDashboard').catch(() => {}));
+    later(1200, () => {
       getApiService()
         .then((api) => {
           api.getDmAutomation(userName)
@@ -1517,32 +1544,25 @@ const App: React.FC = () => {
         })
         .catch(() => undefined);
     });
-    later(900, () => {
-      import('./components/BusinessDashboard').catch(() => {});
-      import('./components/BusinessTimeline').catch(() => {});
-      import('./components/UserCampaignBrowse').catch(() => {});
-      import('./components/CreatorCampaignCollabs').catch(() => {});
-      import('./components/UserSettlement').catch(() => {});
-    });
-    later(2400, () => {
+    later(3200, () => {
       getApiService()
-        .then((api) => {
-          api.getProposals(userName).catch(() => undefined);
-          api.getCollabRecords(userName).catch(() => undefined);
-          api.getSettlements(userName).catch(() => undefined);
-          api.getCollabs('influencer').catch(() => undefined);
-          api.getCreatorInsights(userName).catch(() => undefined);
-          api.getCreatorFollowerSeries(userName, 7).catch(() => undefined);
+        .then(async (api) => {
+          await api.getProposals(userName).catch(() => undefined);
+          await api.getCollabRecords(userName).catch(() => undefined);
+          await api.getSettlements(userName).catch(() => undefined);
+          await api.getCollabs('influencer').catch(() => undefined);
+          await api.getCreatorInsights(userName).catch(() => undefined);
+          await api.getCreatorFollowerSeries(userName, 7).catch(() => undefined);
         })
         .catch(() => undefined);
     });
-    later(1600, () => {
-      import('./components/MembershipPlan').catch(() => {});
-      import('./components/OpenScheduleManagement').catch(() => {});
+    later(3100, () => import('./components/MembershipPlan').catch(() => {}));
+    later(3400, () => import('./components/OpenScheduleManagement').catch(() => {}));
+    later(3600, () => {
       getApiService()
-        .then((api) => {
-          api.getSellerVerification(userName).catch(() => undefined);
-          api.getClaudeCredits(userName).catch(() => undefined);
+        .then(async (api) => {
+          await api.getSellerVerification(userName).catch(() => undefined);
+          await api.getClaudeCredits(userName).catch(() => undefined);
         })
         .catch(() => undefined);
     });
@@ -1568,8 +1588,19 @@ const App: React.FC = () => {
   // subView 는 URL 이 아니라 상태로만 관리되므로 연동 후 페이지가 새로 뜨면 기본
   // 대시보드로 돌아간다. 그러면 작성 중이던 등록서를 되살릴 화면 자체가 뜨지 않는다.
   // (등록서 복원과 안내 배너는 CollabMatchRegister 가 같은 파라미터를 읽어 처리한다.)
+  const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const requestedSubView = QUERY_TAB_TO_SUBVIEW[params.get('tab') || ''];
+    if (requestedSubView) {
+      const proposalId = params.get('proposal');
+      const collabId = params.get('collab');
+      if (requestedSubView === 'timeline' && proposalId) setTimelineProposalId(proposalId);
+      if (requestedSubView === 'my-collabs' && collabId) setCollabFocusId(collabId);
+      applySubView(requestedSubView);
+      return;
+    }
     if (params.get('collab_match')) {
       applySubView('campaigns');
       return;
@@ -1589,42 +1620,6 @@ const App: React.FC = () => {
     }
     if (params.get('ig_connected') || params.get('ig_error')) {
       applySubView('dm-automation');
-    }
-  }, []);
-
-  // Handle magic link timeline tokens — auto-login and navigate to timeline
-  const [timelineProposalId, setTimelineProposalId] = useState<string | null>(null);
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const timelineParam = params.get('timeline');
-    const tokenParam = params.get('token');
-
-    if (timelineParam && tokenParam) {
-      // Validate token and auto-login
-      fetch('/api/timeline/magic-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: tokenParam }),
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            // Set session based on user type
-            if (data.userType === 'influencer') {
-              sessionSet('picks_user_session', data.username);
-              setUserName(data.username);
-              setIsLoggedIn(true);
-            }
-            setTimelineProposalId(timelineParam);
-            applySubView('timeline');
-            setView('admin');
-          }
-          // Clean URL
-          window.history.replaceState(null, '', '/admin');
-        })
-        .catch(() => {
-          window.history.replaceState(null, '', '/');
-        });
     }
   }, []);
 
@@ -2050,6 +2045,7 @@ const App: React.FC = () => {
   if (view === 'user-page') return (
     <LazyRoute>
       <UserPage
+        key={targetUser.toLowerCase()}
         username={targetUser}
         // '대시보드로 돌아가기' 버튼은 앱에서만 띄운다. 웹에서는 내 페이지가 새 창으로
         // 열리므로(위 onViewMyPage) 돌아갈 곳이 없고, 방문자에게 보이는 페이지 위에
@@ -2176,7 +2172,7 @@ const App: React.FC = () => {
               clearCreatorIntent();
               navigate('manager');
             }}
-            className="fixed bottom-5 right-5 z-50 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl text-xs font-black hover:bg-slate-700"
+            className="fixed bottom-[calc(80px+env(safe-area-inset-bottom,0px))] md:bottom-5 right-5 z-[120] px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl text-xs font-black hover:bg-slate-700"
           >
             담당자 대시보드
           </button>

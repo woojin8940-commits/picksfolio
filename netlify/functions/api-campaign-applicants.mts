@@ -108,9 +108,10 @@ export default async (req: Request) => {
 
   if (req.method === "PATCH") {
     try {
-      const body = await req.json();
-      const { id } = body as any;
-      const status = (body as any).status ? String((body as any).status) : "";
+      const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+      if (!body) return Response.json({ error: "잘못된 요청입니다." }, { status: 400 });
+      const id = String(body.id || "").trim().slice(0, 200);
+      const status = body.status ? String(body.status).trim().toLowerCase() : "";
       const hasPreference = (body as any).brandPreference !== undefined;
       const preference = hasPreference ? String((body as any).brandPreference || "") : "";
       // 추천 이유만 고치는 요청. 지우는 것("")도 정상이므로 값이 비었는지가 아니라
@@ -148,7 +149,7 @@ export default async (req: Request) => {
         const auth = await requireAccountOwner(req, String(appRow.business_username || ""));
         if (!auth.ok) return auth.response;
 
-        const note = String((body as any).brandPreferenceNote ?? (body as any).note ?? "");
+        const note = String(body.brandPreferenceNote ?? body.note ?? "").slice(0, 2000);
         await db.sql`
           UPDATE campaign_applications
           SET brand_preference = ${preference},
@@ -217,6 +218,12 @@ export default async (req: Request) => {
         actorUsername = signedIn.username;
       }
 
+      const currentStatus = String(appRow.status || "pending");
+      const statusChanged = currentStatus !== status;
+      if (statusChanged && currentStatus !== "pending") {
+        return Response.json({ error: "이미 처리된 지원서는 상태를 변경할 수 없습니다." }, { status: 409 });
+      }
+
       // 캠페인에 배정된 담당자가 곧 이 협업의 담당자다. 브랜드가 수락한 경우에는
       // 누르는 사람이 담당자가 아니므로 캠페인 쪽 배정만 본다. 아직 배정 전이라면
       // 빈 값으로 두고, 담당자 콘솔의 "담당자 없는 협업"에 잡히게 한다 — 여기서
@@ -224,16 +231,21 @@ export default async (req: Request) => {
       const managerUsername =
         norm(appRow.manager_username) || (manager.ok ? manager.managerUsername : "");
 
-      await db.sql`
+      const updatedRows = await db.sql`
         UPDATE campaign_applications
         SET status = ${status},
-            manager_note = ${String((body as any).note || appRow.manager_note || "")},
+            manager_note = ${String(body.note || appRow.manager_note || "").slice(0, 2000)},
             decided_by = ${actorUsername},
             decided_by_role = ${actorRole},
             decided_at = NOW(),
             updated_at = NOW()
         WHERE id = ${id}
+          AND (status = ${status} OR status = 'pending')
+        RETURNING id
       `;
+      if (!updatedRows.length) {
+        return Response.json({ error: "이미 처리된 지원서는 상태를 변경할 수 없습니다." }, { status: 409 });
+      }
 
       if (status !== "accepted") {
         return Response.json({ success: true });
@@ -301,6 +313,7 @@ export default async (req: Request) => {
       //    업로드를 확인한 단계(confirm)에서, 게시물이 올라간 달의 익월 말일로
       //    예약한다.
       await logCollabEvent(db, {
+        id: `ce_applicant_selected_${collab.id}_${appRow.id}`,
         collabId: collab.id,
         type: "applicant_selected",
         actorRole,

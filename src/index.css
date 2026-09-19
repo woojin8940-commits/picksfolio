@@ -47,7 +47,7 @@ html {
   touch-action: manipulation;
 }
 
-@media (min-width: 769px) {
+@media (min-width: 769px) and (min-height: 600px) {
   html {
     zoom: 0.75;
   }

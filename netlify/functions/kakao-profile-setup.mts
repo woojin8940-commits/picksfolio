@@ -13,6 +13,18 @@ function getSupabaseAdmin() {
   });
 }
 
+function normalizePhone(value: unknown): string {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("0082")) return `0${digits.slice(4)}`;
+  if (digits.startsWith("82")) return `0${digits.slice(2)}`;
+  return digits;
+}
+
+function isCreatorProfile(profile: Record<string, any> | null | undefined): boolean {
+  const role = String(profile?.role || "user").toLowerCase();
+  return role === "user";
+}
+
 function extractKakaoPhone(
   userMetadata: Record<string, any>,
   identityData: Record<string, any>,
@@ -27,7 +39,7 @@ function extractKakaoPhone(
     identityData?.kakao_account?.phone_number ||
     "";
   if (!raw) return "";
-  return raw.replace(/[^0-9+]/g, "").replace(/^\+82/, "0");
+  return normalizePhone(raw);
 }
 
 function extractKakaoName(
@@ -188,7 +200,7 @@ export default async (req: Request) => {
             kakaoProfile.phone_number ||
             "";
           if (rawPhone) {
-            phone = rawPhone.replace(/[^0-9+]/g, "").replace(/^\+82/, "0");
+            phone = normalizePhone(rawPhone);
           }
         }
         if (!fullName && (account.name || account.profile?.nickname)) {
@@ -212,7 +224,7 @@ export default async (req: Request) => {
         .limit(10);
       if (recoveredProfile && recoveredProfile.length > 0) {
         const rp = recoveredProfile.find(
-          (p: any) => isRealUsername(p.username)
+          (p: any) => isCreatorProfile(p) && isRealUsername(p.username)
         );
         if (rp) {
           if (existing) {
@@ -268,7 +280,7 @@ export default async (req: Request) => {
         .not("username", "eq", "")
         .limit(1);
       if (data && data.length > 0) {
-        linkedProfile = data[0];
+        linkedProfile = data.find((p: any) => isCreatorProfile(p) && isRealUsername(p.username)) || null;
       } else {
         const { data: anyMatch } = await supabase
           .from("profiles")
@@ -277,7 +289,7 @@ export default async (req: Request) => {
           .neq("id", user_id)
           .limit(1);
         if (anyMatch && anyMatch.length > 0) {
-          linkedProfile = anyMatch[0];
+          linkedProfile = anyMatch.find((p: any) => isCreatorProfile(p) && isRealUsername(p.username)) || null;
         }
       }
     }
@@ -290,9 +302,11 @@ export default async (req: Request) => {
         .eq("email", email)
         .neq("id", user_id)
         .not("email", "eq", "")
-        .maybeSingle();
-      if (data && (!data.kakao_id || data.kakao_id === kakaoId)) {
-        linkedProfile = data;
+        .limit(20);
+      if (data && data.length > 0) {
+        linkedProfile = data.find(
+          (p: any) => isCreatorProfile(p) && isRealUsername(p.username) && (!p.kakao_id || p.kakao_id === kakaoId)
+        ) || null;
       }
     }
 
@@ -325,6 +339,7 @@ export default async (req: Request) => {
                 .maybeSingle();
               if (
                 profileById &&
+                isCreatorProfile(profileById) &&
                 isRealUsername(profileById.username) &&
                 (!profileById.kakao_id || profileById.kakao_id === kakaoId)
               ) {
@@ -341,16 +356,9 @@ export default async (req: Request) => {
       }
     }
 
-    // 3) Match by phone. The site signup stores phone digits-only (e.g. 01012345678)
-    //    while Kakao can return it in several shapes (+82, 8210…, formatted). A site
-    //    member who later opens a live stream and logs in with Kakao must be matched
-    //    to the SAME profile so they are never re-prompted for a link/username. We
-    //    therefore compare on the last 8 digits (the part that is stable across all
-    //    formats) and prefer a row that already has a real username. Using a list
-    //    query instead of .maybeSingle() also avoids silently failing when more than
-    //    one row happens to share the phone (e.g. a leftover Kakao stub profile).
     if (!linkedProfile && phone) {
-      const last8 = phone.replace(/\D/g, "").slice(-8);
+      const normalizedPhone = normalizePhone(phone);
+      const last8 = normalizedPhone.slice(-8);
       if (last8.length === 8) {
         const { data: phoneMatches } = await supabase
           .from("profiles")
@@ -361,13 +369,13 @@ export default async (req: Request) => {
           .limit(20);
         if (phoneMatches && phoneMatches.length > 0) {
           const eligible = phoneMatches.filter(
-            (p: any) => !p.kakao_id || p.kakao_id === kakaoId
-          );
-          const withRealName = eligible.find(
             (p: any) =>
-              isRealUsername(p.username)
+              isCreatorProfile(p) &&
+              isRealUsername(p.username) &&
+              normalizePhone(p.phone) === normalizedPhone &&
+              (!p.kakao_id || p.kakao_id === kakaoId)
           );
-          linkedProfile = withRealName || eligible[0] || null;
+          linkedProfile = eligible[0] || null;
         }
       }
     }
@@ -375,9 +383,8 @@ export default async (req: Request) => {
     // 5) Match by scanning auth users' phone metadata
     if (allowDeepAuthScan && !linkedProfile && phone) {
       try {
-        const phoneDigits = phone.replace(/\D/g, "");
-        const last10 = phoneDigits.slice(-10);
-        if (last10.length >= 8) {
+        const phoneDigits = normalizePhone(phone);
+        if (phoneDigits.length >= 10) {
           let page = 1;
           let found = false;
           while (!found && page <= 5) {
@@ -388,8 +395,8 @@ export default async (req: Request) => {
             if (!authData?.users?.length) break;
             for (const authUser of authData.users) {
               if (authUser.id === user_id) continue;
-              const metaPhone = (authUser.user_metadata?.phone || "").replace(/\D/g, "");
-              if (metaPhone && metaPhone.slice(-10) === last10) {
+              const metaPhone = normalizePhone(authUser.user_metadata?.phone || authUser.user_metadata?.phone_number);
+              if (metaPhone && metaPhone === phoneDigits) {
                 const { data: profileById } = await supabase
                   .from("profiles")
                   .select("*")
@@ -397,6 +404,7 @@ export default async (req: Request) => {
                   .maybeSingle();
                 if (
                   profileById &&
+                  isCreatorProfile(profileById) &&
                   isRealUsername(profileById.username) &&
                   (!profileById.kakao_id || profileById.kakao_id === kakaoId)
                 ) {

@@ -327,6 +327,7 @@ export const norm = (raw: unknown) =>
 // ---------------------------------------------------------------------------
 
 export type CollabEventInput = {
+  id?: string;
   collabId: string;
   type: string;
   actorRole?: string;
@@ -346,7 +347,7 @@ export function newId(prefix: string): string {
  * 누락을 나중에 찾을 수 있게 한다.
  */
 export async function logCollabEvent(db: any, input: CollabEventInput): Promise<string | null> {
-  const id = newId("ce");
+  const id = input.id || newId("ce");
   try {
     await db.sql`
       INSERT INTO collab_events (id, collab_id, type, actor_role, actor_username, stage_key, summary, payload)
@@ -360,6 +361,7 @@ export async function logCollabEvent(db: any, input: CollabEventInput): Promise<
         ${input.summary || ""},
         ${JSON.stringify(input.payload || {})}
       )
+      ON CONFLICT (id) DO NOTHING
     `;
     return id;
   } catch (err) {
@@ -472,7 +474,13 @@ export async function ensureSupportThread(input: EnsureThreadInput): Promise<str
     if (firstComment) {
       await db.sql`
         INSERT INTO timeline_messages (id, proposal_id, author_type, author_name, author_username, content, read_by, created_at)
-        VALUES (${firstComment.id}, ${proposalId}, ${firstComment.authorType}, ${firstComment.authorName}, ${firstComment.authorUsername}, ${firstComment.content}, ${firstComment.readBy}, ${nowISO})
+        SELECT ${firstComment.id}, ${proposalId}, ${firstComment.authorType}, ${firstComment.authorName}, ${firstComment.authorUsername}, ${firstComment.content}, ${firstComment.readBy}, ${nowISO}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM timeline_messages
+          WHERE proposal_id = ${proposalId}
+            AND author_type = ${firstComment.authorType}
+            AND content = ${firstComment.content}
+        )
         ON CONFLICT (id) DO NOTHING
       `;
     }
@@ -582,7 +590,7 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   const businessUsername = norm(input.businessUsername);
   const creatorUsername = norm(input.creatorUsername);
   const managerUsername = norm(input.managerUsername);
-  const template = templateForCampaignType(input.campaignType, input.packageTier, input.rewardMode);
+  let template = templateForCampaignType(input.campaignType, input.packageTier, input.rewardMode);
   const startKey = (input.startDate && /^\d{4}-\d{2}-\d{2}/.test(String(input.startDate)))
     ? String(input.startDate).slice(0, 10)
     : todayInSeoul();
@@ -593,39 +601,54 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   `;
   const existingRow = (existing as any[])?.[0];
 
-  const collabId = existingRow?.id || newId("clb");
+  let collabId = existingRow?.id || newId("clb");
+  let created = !existingRow;
+  let resultStageKey = existingRow?.current_stage_key || template.stages[0].key;
   const proposalId = `campaign_${input.campaignId}_${creatorUsername}`;
 
   if (existingRow) {
-    // 담당자만 갈아끼우고 나머지는 유지한다.
+    template = templateByKey(existingRow.template_key || template.key);
+    resultStageKey = existingRow.current_stage_key || template.stages[0].key;
     await db.sql`
       UPDATE campaign_collabs
       SET manager_username = ${managerUsername}, updated_at = NOW()
       WHERE id = ${collabId}
     `;
     await reassignSupportThreads(db, collabId, managerUsername);
-    return {
-      id: collabId,
-      templateKey: existingRow.template_key || template.key,
-      firstStageKey: existingRow.current_stage_key || template.stages[0].key,
-      influencerThreadId: supportThreadId("influencer_support", collabId),
-      brandThreadId: "",
-      created: false,
-    };
+  } else {
+    const inserted = await db.sql`
+      INSERT INTO campaign_collabs (
+        id, campaign_id, application_id, business_username, creator_username,
+        status, manager_username, campaign_title, company_name, campaign_type,
+        template_key, current_stage_key, proposal_id
+      ) VALUES (
+        ${collabId}, ${input.campaignId}, ${input.applicationId}, ${businessUsername}, ${creatorUsername},
+        'in_progress', ${managerUsername}, ${input.campaignTitle}, ${input.companyName}, ${String(input.campaignType || "")},
+        ${template.key}, ${template.stages[0].key}, ${proposalId}
+      )
+      ON CONFLICT (campaign_id, creator_username) DO NOTHING
+      RETURNING id, template_key, current_stage_key
+    `;
+    if (!inserted.length) {
+      const winner = await db.sql`
+        SELECT id, template_key, current_stage_key FROM campaign_collabs
+        WHERE campaign_id = ${input.campaignId} AND creator_username = ${creatorUsername}
+        LIMIT 1
+      `;
+      const winnerRow = (winner as any[])?.[0];
+      if (!winnerRow?.id) throw new Error("협업 생성 상태를 확인하지 못했습니다.");
+      collabId = winnerRow.id;
+      template = templateByKey(winnerRow.template_key || template.key);
+      resultStageKey = winnerRow.current_stage_key || template.stages[0].key;
+      created = false;
+      await db.sql`
+        UPDATE campaign_collabs
+        SET manager_username = ${managerUsername}, updated_at = NOW()
+        WHERE id = ${collabId}
+      `;
+      await reassignSupportThreads(db, collabId, managerUsername);
+    }
   }
-
-  await db.sql`
-    INSERT INTO campaign_collabs (
-      id, campaign_id, application_id, business_username, creator_username,
-      status, manager_username, campaign_title, company_name, campaign_type,
-      template_key, current_stage_key, proposal_id
-    ) VALUES (
-      ${collabId}, ${input.campaignId}, ${input.applicationId}, ${businessUsername}, ${creatorUsername},
-      'in_progress', ${managerUsername}, ${input.campaignTitle}, ${input.companyName}, ${String(input.campaignType || "")},
-      ${template.key}, ${template.stages[0].key}, ${proposalId}
-    )
-    ON CONFLICT (campaign_id, creator_username) DO NOTHING
-  `;
 
   // 단계 복사. 첫 단계만 active, 나머지는 pending 으로 둔다 — 앞 단계가 끝나기 전에
   // 뒷 단계가 열려 있으면 순서가 있다는 사실이 화면에서 사라진다.
@@ -733,6 +756,7 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   const brandThreadId = "";
 
   await logCollabEvent(db, {
+    id: `ce_collab_created_${collabId}`,
     collabId,
     type: "collab_created",
     actorRole: byBrand ? "brand" : "manager",
@@ -745,10 +769,10 @@ export async function createCollabForApplication(input: CreateCollabInput): Prom
   return {
     id: collabId,
     templateKey: template.key,
-    firstStageKey: template.stages[0].key,
+    firstStageKey: resultStageKey,
     influencerThreadId,
     brandThreadId,
-    created: true,
+    created,
   };
 }
 

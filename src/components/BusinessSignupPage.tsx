@@ -411,6 +411,7 @@ const BusinessSignupPage: React.FC<BusinessSignupPageProps> = ({ onNavigateHome,
                     value={username}
                     onChange={handleUsernameChange}
                     onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
                       // 이 칸에서 엔터는 "중복확인" 이다.
                       if (e.key === 'Enter') {
                         e.preventDefault();

@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 
 /**
  * 인스타그램 장기 액세스 토큰 자동 갱신.
@@ -47,14 +48,15 @@ interface DmSettings {
  * 영문 오류로 사실을 알게 된다. 밤사이에 미리 표시해 두면 다음에 화면을 여는
  * 순간부터 "다시 연동해 주세요"가 보인다.
  */
-async function markNeedsReauth(store: any, key: string): Promise<void> {
+async function markNeedsReauth(storeName: string, key: string, expectedToken: string): Promise<void> {
   try {
-    const latest = ((await store.get(key, { type: "json" })) as DmSettings) || null;
-    if (!latest || latest.needsReauth) return;
-    await store.setJSON(key, {
-      ...latest,
-      needsReauth: true,
-      tokenInvalidAt: new Date().toISOString(),
+    await mutateBlobJSON<DmSettings>(storeName, key, (latest) => {
+      if (!latest || latest.accessToken !== expectedToken || latest.needsReauth) return null;
+      return {
+        ...latest,
+        needsReauth: true,
+        tokenInvalidAt: new Date().toISOString(),
+      };
     });
   } catch (e) {
     console.warn(`[ig-token] ${key} 재연동 표시 실패:`, (e as Error)?.message);
@@ -100,7 +102,7 @@ async function refreshStore(storeName: string, prefix: string) {
           // 만료된 토큰은 갱신 자체가 불가능하다. 재연동만이 길이므로 표시를 남긴다.
           expired++;
           console.warn(`[ig-token] ${blob.key} token already expired — reconnect required`);
-          await markNeedsReauth(store, blob.key);
+          await markNeedsReauth(storeName, blob.key, token);
           continue;
         }
         if (expiresAt - now > REFRESH_WINDOW_DAYS * DAY_MS) {
@@ -131,25 +133,31 @@ async function refreshStore(storeName: string, prefix: string) {
           msg.includes("has not authorized application") ||
           msg.includes("error validating access token") ||
           msg.includes("session has expired");
-        if (tokenDead) await markNeedsReauth(store, blob.key);
+        if (tokenDead) await markNeedsReauth(storeName, blob.key, token);
         continue;
       }
 
       const expiresIn = Number(data.expires_in || 0);
-      // 갱신 중에 사용자가 설정을 바꿨을 수 있으므로 최신 레코드를 다시 읽어 토큰만 덮어쓴다.
-      const latest = ((await store.get(blob.key, { type: "json" })) as DmSettings) || settings;
-      // 새 토큰을 받았으니 지난번에 남긴 재연동 표시는 사실이 아니게 됐다.
-      const { needsReauth, tokenInvalidAt, ...rest } = latest;
-      await store.setJSON(blob.key, {
-        ...rest,
-        accessToken: data.access_token,
-        tokenExpiresAt: expiresIn
-          ? new Date(now + expiresIn * 1000).toISOString()
-          : latest.tokenExpiresAt,
-        updatedAt: new Date().toISOString(),
+      let updated = false;
+      await mutateBlobJSON<DmSettings>(storeName, blob.key, (latest) => {
+        if (!latest || latest.accessToken !== token) return null;
+        const { needsReauth, tokenInvalidAt, ...rest } = latest;
+        updated = true;
+        return {
+          ...rest,
+          accessToken: data.access_token,
+          tokenExpiresAt: expiresIn
+            ? new Date(Date.now() + expiresIn * 1000).toISOString()
+            : latest.tokenExpiresAt,
+          updatedAt: new Date().toISOString(),
+        };
       });
-      refreshed++;
-      console.log(`[ig-token] refreshed ${blob.key} (+${Math.round(expiresIn / 86400)}d)`);
+      if (updated) {
+        refreshed++;
+        console.log(`[ig-token] refreshed ${blob.key} (+${Math.round(expiresIn / 86400)}d)`);
+      } else {
+        skipped++;
+      }
     } catch (e) {
       failed++;
       console.error(`[ig-token] error processing ${blob.key}:`, e);

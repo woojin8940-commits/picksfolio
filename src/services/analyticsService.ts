@@ -3,7 +3,22 @@ import { authHeaders } from './apiService';
 
 const getDateKey = (date?: Date) => {
   const d = date || new Date();
-  return d.toISOString().split('T')[0]; // YYYY-MM-DD
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+};
+
+const getVisitorId = () => {
+  const key = 'picks_analytics_visitor';
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    const value = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(key, value);
+    return value;
+  } catch {
+    return '';
+  }
 };
 
 const analyticsApi = (username: string) =>
@@ -20,7 +35,7 @@ export const getAnalyticsForRange = async (
   if (!res.ok) throw new Error(`Analytics HTTP ${res.status}`);
   const data = await res.json();
   return {
-    stats: { views: data.views || 0, clicks: data.clicks || 0, ctr: data.ctr || 0 },
+    stats: { views: data.views || 0, visitors: data.visitors ?? data.views ?? 0, clicks: data.clicks || 0, ctr: data.ctr || 0 },
     topItems: (data.topItems || []).map((item: any) => ({
       id: item.blockId || item.id, count: item.clicks || item.count || 0,
     })),
@@ -32,7 +47,7 @@ export const trackView = (username: string) => {
   fetch(analyticsApi(username), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'track-view', date: dateKey })
+    body: JSON.stringify({ action: 'track-view', date: dateKey, visitorId: getVisitorId() })
   }).catch(e => console.error('Failed to track view:', e));
 };
 
@@ -48,11 +63,11 @@ export const trackClick = (username: string, blockId: string) => {
 export const getStatsForDate = async (username: string, dateString: string) => {
   try {
     const res = await getAnalytics(`${analyticsApi(username)}?start=${dateString}&end=${dateString}&type=stats`);
-    if (!res.ok) return { views: 0, clicks: 0, ctr: 0 };
+    if (!res.ok) return { views: 0, visitors: 0, clicks: 0, ctr: 0 };
     return await res.json();
   } catch (e) {
     console.error('Failed to get stats:', e);
-    return { views: 0, clicks: 0, ctr: 0 };
+    return { views: 0, visitors: 0, clicks: 0, ctr: 0 };
   }
 };
 
@@ -78,11 +93,11 @@ export const getTopClickedItemsForDate = async (username: string, dateString: st
 export const getStatsForRange = async (username: string, startDate: string, endDate: string) => {
   try {
     const res = await getAnalytics(`${analyticsApi(username)}?start=${startDate}&end=${endDate}&type=stats`);
-    if (!res.ok) return { views: 0, clicks: 0, ctr: 0 };
+    if (!res.ok) return { views: 0, visitors: 0, clicks: 0, ctr: 0 };
     return await res.json();
   } catch (e) {
     console.error('Failed to get stats for range:', e);
-    return { views: 0, clicks: 0, ctr: 0 };
+    return { views: 0, visitors: 0, clicks: 0, ctr: 0 };
   }
 };
 

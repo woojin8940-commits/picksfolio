@@ -4,6 +4,7 @@ import { OpenScheduleItem } from '../types';
 import { apiService } from '../services/apiService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { externalLinkProps } from '../utils/externalLink';
 
 interface OpenScheduleManagementProps {
   userName: string;
@@ -14,7 +15,10 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
   const [schedules, setSchedules] = useState<OpenScheduleItem[]>(() => {
     try {
       const saved = localStorage.getItem(`picks_schedule_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter(item => !!item && typeof item === 'object')
+        : [];
     } catch (e) {
       return [];
     }
@@ -27,14 +31,16 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
   const [form, setForm] = useState({ title: '', date: '', time: '', description: '', link: '' });
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     const loadFromCloud = async () => {
       try {
         const apiData = await apiService.getSiteData(userName);
-        if (apiData?.openSchedule) {
-          setSchedules(apiData.openSchedule);
-          localStorage.setItem(`picks_schedule_${userName.toLowerCase()}`, JSON.stringify(apiData.openSchedule));
+        if (Array.isArray(apiData?.openSchedule)) {
+          const next = apiData.openSchedule.filter(item => !!item && typeof item === 'object');
+          setSchedules(next);
+          try { localStorage.setItem(`picks_schedule_${userName.toLowerCase()}`, JSON.stringify(next)); } catch {}
         }
       } catch (e) {
         console.warn('[OpenSchedule] 클라우드 로드 실패:', e);
@@ -46,11 +52,19 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
   const saveToCloud = async (items: OpenScheduleItem[]) => {
-    localStorage.setItem(`picks_schedule_${userName.toLowerCase()}`, JSON.stringify(items));
     try {
-      await apiService.saveSiteData(userName, { openSchedule: items });
+      const result = await apiService.saveSiteDataResult(userName, { openSchedule: items });
+      if (!result.ok) {
+        setSaveError(result.error || (language === 'en' ? 'Failed to save.' : '저장에 실패했습니다.'));
+        return false;
+      }
+      try { localStorage.setItem(`picks_schedule_${userName.toLowerCase()}`, JSON.stringify(items)); } catch {}
+      setSaveError('');
+      return true;
     } catch (e) {
       console.warn('[OpenSchedule] 클라우드 동기화 실패:', e);
+      setSaveError(language === 'en' ? 'Failed to save.' : '저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      return false;
     }
   };
 
@@ -60,6 +74,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
   };
 
   const handleAdd = () => {
+    setSaveError('');
     setEditingId(null);
     setForm({ title: '', date: '', time: '', description: '', link: '' });
     setShowForm(true);
@@ -92,24 +107,25 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
       updated = [newItem, ...schedules];
     }
 
-    setSchedules(updated);
-    await saveToCloud(updated);
-    setShowForm(false);
-    showSuccessFeedback();
+    if (await saveToCloud(updated)) {
+      setSchedules(updated);
+      setShowForm(false);
+      showSuccessFeedback();
+    }
     setIsSaving(false);
   };
 
   const handleDelete = async (id: string) => {
     const updated = schedules.filter(s => s.id !== id);
-    setSchedules(updated);
-    await saveToCloud(updated);
-    showSuccessFeedback();
+    if (await saveToCloud(updated)) {
+      setSchedules(updated);
+      showSuccessFeedback();
+    }
   };
 
   const handleToggleActive = async (id: string) => {
     const updated = schedules.map(s => s.id === id ? { ...s, isActive: !s.isActive } : s);
-    setSchedules(updated);
-    await saveToCloud(updated);
+    if (await saveToCloud(updated)) setSchedules(updated);
   };
 
   const formatDate = (dateStr: string) => {
@@ -154,6 +170,12 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
           </div>
         )}
 
+        {saveError && (
+          <div className="fixed top-6 right-6 max-w-sm bg-red-500 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-2xl z-[300]">
+            {saveError}
+          </div>
+        )}
+
         {/* Schedule List */}
         <div className="space-y-4">
           {schedules.length === 0 ? (
@@ -186,7 +208,7 @@ const OpenScheduleManagement: React.FC<OpenScheduleManagementProps> = ({ userNam
                     <h3 className="text-base md:text-lg font-black text-[#1E1E2E] mb-1">{item.title}</h3>
                     {item.description && <p className="text-sm text-[#64748B] font-medium mb-2">{item.description}</p>}
                     {item.link && (
-                      <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 font-bold hover:underline break-all">
+                      <a {...externalLinkProps(item.link)} className="text-xs text-blue-600 font-bold hover:underline break-all">
                         {item.link}
                       </a>
                     )}

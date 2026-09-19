@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Trash2, Loader2, CheckCircle2, AlertTriangle, Plus, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon, Strikethrough as StrikethroughIcon, GripVertical, Move, Lock, Camera, Globe, Briefcase, User, Eye, Search } from 'lucide-react';
 import ImageCropper from './ImageCropper';
-import { supabase } from '../services/supabase';
 import { getSiteSettings, updateSiteSettings, getLinkGridItems, updateLinkGridItems, SiteSettings } from '../services/settingsService';
 import { getCachedLinkData, clearLinkCache } from '../services/prefetchService';
 import { apiService, type SaveResult } from '../services/apiService';
@@ -13,6 +12,7 @@ import ColorPicker from './ColorPicker';
 import { DEFAULT_BUTTONS, buttonLabelKey, buttonBgKey, buttonTextKey, type DefaultButtonKey } from '../utils/pageButtons';
 import PlatformLogo from './PlatformLogo';
 import { sanitizeLinkValue } from '../utils/externalLink';
+import { renderPortfolioHtml } from './richText';
 import {
   type ThemePreset,
   type CategoryChipColors,
@@ -26,6 +26,14 @@ import {
 } from '../utils/themeColor';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+
+const readLocalItem = (key: string): string | null => {
+  try { return localStorage.getItem(key); } catch { return null; }
+};
+
+const cacheLocalItem = (key: string, value: unknown): void => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
 
 // 텍스트 블록의 글씨색 · 배경색은 프리셋 색동그라미를 늘어놓지 않고 ColorPicker
 // 하나로만 고른다. 프리셋 여덟 개를 담으면 글씨 서식 줄이 두세 줄로 접히면서 편집
@@ -95,21 +103,16 @@ interface LinkManagementProps {
   onNavigateMembership?: () => void;
 }
 
-// [시각적 확인] 새 코드가 적용되었음을 알리는 알림창
-if (typeof window !== 'undefined') {
-  (window as any)._picks_code_applied = true;
-}
-
 const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMembership }) => {
   const { language, t } = useLanguage();
-  useEffect(() => {
-    // window.alert('픽스폴리오 새 코드가 적용되었습니다!');
-  }, []);
 
   const [blocks, setBlocks] = useState<Block[]>(() => {
     try {
       const saved = localStorage.getItem(`picks_blocks_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter(item => !!item && typeof item === 'object')
+        : [];
     } catch (e) {
       console.error('Error parsing blocks:', e);
       return [];
@@ -137,7 +140,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [productFolders, setProductFolders] = useState<ProductFolder[]>(() => {
     try {
       const saved = localStorage.getItem(`picks_folders_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter(item => !!item && typeof item === 'object')
+        : [];
     } catch (e) {
       return [];
     }
@@ -146,7 +152,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [linkGridCategories, setLinkGridCategories] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(`picks_categories_${(userName || '').toLowerCase()}`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : [];
     } catch (e) {
       return [];
     }
@@ -391,15 +398,6 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   });
 
   // 이미지를 Base64 데이터 URL로 변환하는 헬퍼
-  const blobToDataUrl = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
   // editForm에 이미지 URL 적용하는 헬퍼
   const applyImageToForm = (url: string, target: typeof uploadTarget) => {
     if (!target) return;
@@ -455,37 +453,9 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         const blobUrl = URL.createObjectURL(file);
         applyImageToForm(blobUrl, currentTarget);
 
-        let finalUrl = '';
-        const ext = file.name?.split('.').pop()?.toLowerCase() || 'mp4';
-        const fileName = `${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
-
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const apiUrl = await apiService.uploadImage(userName, file, fileName);
-            if (apiUrl) { finalUrl = apiUrl; break; }
-          } catch (apiError) {
-            console.warn(`[Upload] API 업로드 시도 ${attempt + 1}/3 실패:`, apiError);
-            if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-          }
-        }
-
-        if (!finalUrl && supabase) {
-          try {
-            const filePath = `${userName.toLowerCase()}/${fileName}`;
-            const { error: uploadError } = await supabase.storage
-              .from('images')
-              .upload(filePath, file, { contentType: file.type, cacheControl: '3600', upsert: true });
-            if (uploadError) throw uploadError;
-            const { data: publicData } = supabase.storage.from('images').getPublicUrl(filePath);
-            if (publicData?.publicUrl) finalUrl = publicData.publicUrl;
-          } catch (storageError) {
-            console.warn('[Upload] Supabase 업로드 실패, Base64로 전환:', storageError);
-          }
-        }
-
-        if (!finalUrl) {
-          finalUrl = await blobToDataUrl(file);
-        }
+        const upload = await apiService.uploadAttachment(userName, file, undefined, 'portfolio');
+        if (!upload.url) throw new Error(upload.error || 'Upload failed');
+        const finalUrl = upload.url;
 
         applyImageToForm(finalUrl, currentTarget);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
@@ -511,6 +481,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
   const handleCropConfirm = async (croppedBlob: Blob) => {
     const file = pendingFileRef.current;
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
     setCropperSrc(null);
     pendingFileRef.current = null;
     if (!file || !uploadTarget) return;
@@ -526,55 +497,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       const blobUrl = URL.createObjectURL(processedBlob);
       applyImageToForm(blobUrl, currentTarget);
 
-      // 3. Netlify Blobs API 업로드 시도 (메인 스토리지) - 재시도 로직
-      let finalUrl = '';
-      const ext = file.name?.split('.').pop()?.toLowerCase() || (processedBlob.type === 'image/png' ? 'png' : processedBlob.type === 'image/webp' ? 'webp' : 'jpg');
+      const ext = processedBlob.type === 'image/png' ? 'png' : processedBlob.type === 'image/webp' ? 'webp' : 'jpg';
       const fileName = `${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
-
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const apiUrl = await apiService.uploadImage(userName, processedBlob, fileName);
-          if (apiUrl) {
-            finalUrl = apiUrl;
-            break;
-          }
-        } catch (apiError) {
-          console.warn(`[Upload] API 업로드 시도 ${attempt + 1}/3 실패:`, apiError);
-          if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-        }
-      }
-
-      // 4. API 실패 시 Supabase Storage 업로드 시도
-      if (!finalUrl && supabase) {
-        try {
-          const filePath = `${userName.toLowerCase()}/${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('images')
-            .upload(filePath, processedBlob, {
-              contentType: processedBlob.type || file.type || 'image/jpeg',
-              cacheControl: '3600',
-              upsert: true
-            });
-
-          if (uploadError) throw uploadError;
-
-          const { data: publicData } = supabase.storage
-            .from('images')
-            .getPublicUrl(filePath);
-
-          if (publicData?.publicUrl) {
-            finalUrl = publicData.publicUrl;
-          }
-        } catch (storageError) {
-          console.warn('[Upload] Supabase 업로드 실패, Base64로 전환:', storageError);
-        }
-      }
-
-      // 5. Supabase도 실패 시 Base64 데이터 URL로 폴백
-      if (!finalUrl) {
-        finalUrl = await blobToDataUrl(processedBlob);
-      }
+      const uploadFile = new File([processedBlob], fileName, {
+        type: processedBlob.type || file.type || 'image/jpeg',
+      });
+      const upload = await apiService.uploadAttachment(userName, uploadFile, undefined, 'portfolio');
+      if (!upload.url) throw new Error(upload.error || 'Upload failed');
+      const finalUrl = upload.url;
 
       // 6. 최종 URL로 업데이트
       applyImageToForm(finalUrl, currentTarget);
@@ -653,14 +583,19 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     const loadData = async () => {
       const cached = getCachedLinkData(userName);
       if (cached) {
-        if (cached.gridItems && cached.gridItems.length > 0) setBlocks(cached.gridItems);
+        const cachedBlocks = cached.settings?.source === 'primary'
+          ? cached.settings.blocks
+          : cached.settings?.blocks?.length
+            ? cached.settings.blocks
+            : cached.gridItems;
+        if (Array.isArray(cachedBlocks)) setBlocks(cachedBlocks);
         if (cached.settings) applySettings(cached.settings);
         setIsLoading(false);
         return;
       }
 
-      const hasLocalDesign = localStorage.getItem(`picks_design_${userName.toLowerCase()}`);
-      const hasLocalBlocks = localStorage.getItem(`picks_blocks_${userName.toLowerCase()}`);
+      const hasLocalDesign = readLocalItem(`picks_design_${userName.toLowerCase()}`);
+      const hasLocalBlocks = readLocalItem(`picks_blocks_${userName.toLowerCase()}`);
 
       if (!hasLocalDesign && !hasLocalBlocks) {
         setIsLoading(true);
@@ -671,28 +606,36 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
         const apiData = await apiService.getSiteData(userName);
         if (disposed) return;
         if (apiData) {
+          const nextBlocks = Array.isArray(apiData.blocks)
+            ? apiData.blocks.filter((item): item is Block => !!item && typeof item === 'object')
+            : undefined;
           // API is the source of truth — always apply its data, even if empty
-          if (Array.isArray(apiData.blocks)) {
-            setBlocks(apiData.blocks);
-            localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(apiData.blocks));
+          if (nextBlocks) {
+            setBlocks(nextBlocks);
+            cacheLocalItem(`picks_blocks_${userName.toLowerCase()}`, nextBlocks);
           }
-          if (apiData.productFolders) {
-            setProductFolders(apiData.productFolders);
-            localStorage.setItem(`picks_folders_${userName.toLowerCase()}`, JSON.stringify(apiData.productFolders));
+          if (Array.isArray(apiData.productFolders)) {
+            const nextFolders = apiData.productFolders.filter(item => !!item && typeof item === 'object');
+            setProductFolders(nextFolders);
+            cacheLocalItem(`picks_folders_${userName.toLowerCase()}`, nextFolders);
           }
-          if (apiData.design) {
-            applySettings({ userName, templateType: TemplateType.SHOPPABLE_GRID, blocks: apiData.blocks || [], design: apiData.design as any, profile: apiData.profile });
+          if (apiData.design && typeof apiData.design === 'object' && !Array.isArray(apiData.design)) {
+            const nextProfile = apiData.profile && typeof apiData.profile === 'object' && !Array.isArray(apiData.profile)
+              ? apiData.profile
+              : undefined;
+            applySettings({ userName, templateType: TemplateType.SHOPPABLE_GRID, blocks: nextBlocks || [], design: apiData.design as any, profile: nextProfile });
           }
-          if (apiData.socials) {
+          if (apiData.socials && typeof apiData.socials === 'object' && !Array.isArray(apiData.socials)) {
             setSocials(apiData.socials);
-            localStorage.setItem(`picks_socials_${userName.toLowerCase()}`, JSON.stringify(apiData.socials));
+            cacheLocalItem(`picks_socials_${userName.toLowerCase()}`, apiData.socials);
           }
           if (Array.isArray(apiData.linkGridCategories)) {
-            setLinkGridCategories(apiData.linkGridCategories);
-            localStorage.setItem(`picks_categories_${userName.toLowerCase()}`, JSON.stringify(apiData.linkGridCategories));
+            const nextCategories = apiData.linkGridCategories.filter((item): item is string => typeof item === 'string');
+            setLinkGridCategories(nextCategories);
+            cacheLocalItem(`picks_categories_${userName.toLowerCase()}`, nextCategories);
           }
           // API에 블록 데이터가 없으면 Supabase 폴백
-          if ((!apiData.blocks || apiData.blocks.length === 0)) {
+          if (!Array.isArray(apiData.blocks)) {
             const [settings, gridItems] = await Promise.all([
               getSiteSettings(userName),
               getLinkGridItems(userName)
@@ -701,12 +644,12 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
             if (gridItems && gridItems.length > 0) {
               setBlocks(gridItems);
-              localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(gridItems));
+              cacheLocalItem(`picks_blocks_${userName.toLowerCase()}`, gridItems);
               // Netlify Blobs에도 동기화
               apiService.saveSiteData(userName, { blocks: gridItems }).catch(() => {});
             } else if (settings && Array.isArray(settings.blocks) && settings.blocks.length > 0) {
               setBlocks(settings.blocks);
-              localStorage.setItem(`picks_blocks_${userName.toLowerCase()}`, JSON.stringify(settings.blocks));
+              cacheLocalItem(`picks_blocks_${userName.toLowerCase()}`, settings.blocks);
               apiService.saveSiteData(userName, { blocks: settings.blocks }).catch(() => {});
             }
 
@@ -775,7 +718,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
   useEffect(() => {
     if (textEditorRef.current && isEditing && editForm.displayType === 'text') {
-      textEditorRef.current.innerHTML = editForm.textContent || '';
+      textEditorRef.current.innerHTML = renderPortfolioHtml(editForm.textContent || '');
     }
   }, [isEditing]);
 
@@ -1077,12 +1020,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       if (result.ok) {
         clearLinkCache(userName);
         showSuccessFeedback('저장되었습니다!');
+        updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials }, false)
+          .catch(err => console.warn('[SaveDesign] Supabase 동기화 실패:', err));
       } else {
         showFailureFeedback(saveFailureMessage(result), 'warning');
       }
-      // Supabase 동기화 (백그라운드)
-      updateSiteSettings(userName, { design: designUpdate as any, profile, socials: cleanedSocials }, false)
-        .catch(err => console.warn('[SaveDesign] Supabase 동기화 실패:', err));
     } catch (error) {
       console.error('[SaveDesign] 클라우드 동기화 실패:', error);
       showFailureFeedback('저장 실패 - 다시 시도해주세요');
@@ -1093,22 +1035,29 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  const saveBlocksToCloud = async (blocksToSave: Block[]): Promise<SaveResult> => {
+  const saveBlocksToCloud = async (blocksToSave: Block[], force = false): Promise<SaveResult> => {
     try {
-      const result = await apiService.saveSiteDataResult(userName, { blocks: blocksToSave });
+      const result = await apiService.saveSiteDataResult(userName, { blocks: blocksToSave }, { force });
       // 저장이 성공하면 프리페치 캐시를 비워, 편집 화면을 다시 열어도
       // 방금 저장한 내용이 즉시 반영되도록 한다(오래된 캐시가 덮어쓰지 않게).
-      if (result.ok) clearLinkCache(userName);
-      // Supabase 동기화도 시도 (백그라운드)
-      Promise.all([
-        updateLinkGridItems(blocksToSave),
-        updateSiteSettings(userName, { blocks: blocksToSave }, false)
-      ]).catch(err => console.warn('[SaveBlocks] Supabase 동기화 실패:', err));
+      if (result.ok) {
+        clearLinkCache(userName);
+        Promise.all([
+          updateLinkGridItems(blocksToSave),
+          updateSiteSettings(userName, { blocks: blocksToSave }, false)
+        ]).catch(err => console.warn('[SaveBlocks] Supabase 동기화 실패:', err));
+      }
       return result;
     } catch (error) {
       console.error('[SaveBlocks] 클라우드 동기화 실패:', error);
       return { ok: false, status: 0, error: '저장에 실패했습니다. 잠시 후 다시 시도해주세요.', retryable: true };
     }
+  };
+
+  const saveBlocksInBackground = (blocksToSave: Block[]) => {
+    void saveBlocksToCloud(blocksToSave).then(result => {
+      if (!result.ok) showFailureFeedback(saveFailureMessage(result), 'warning');
+    });
   };
 
   const handleSaveBlocks = async () => {
@@ -1126,7 +1075,15 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     writeLocal(`picks_blocks_${userName.toLowerCase()}`, sanitizedBlocks);
 
     // 클라우드 동기화 완료 후 결과 표시
-    const result = await saveBlocksToCloud(sanitizedBlocks);
+    let result = await saveBlocksToCloud(sanitizedBlocks);
+    if (!result.ok && result.status === 409 && sanitizedBlocks.length === 0) {
+      if (window.confirm('등록된 포스트와 링크를 모두 삭제할까요?')) {
+        result = await saveBlocksToCloud(sanitizedBlocks, true);
+      } else {
+        setIsSaving(false);
+        return;
+      }
+    }
     if (result.ok) {
       showSuccessFeedback('저장 완료!');
     } else if (!result.retryable) {
@@ -1174,7 +1131,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     [updated[idxA], updated[idxB]] = [updated[idxB], updated[idxA]];
     setBlocks(updated);
     writeLocal(`picks_blocks_${userName.toLowerCase()}`, updated);
-    saveBlocksToCloud(updated).catch(() => {});
+    saveBlocksInBackground(updated);
   };
 
   const handleDragStart = (e: React.DragEvent, blockId: string) => {
@@ -1223,7 +1180,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     updated.splice(toIdx, 0, moved);
     setBlocks(updated);
     writeLocal(`picks_blocks_${userName.toLowerCase()}`, updated);
-    saveBlocksToCloud(updated).catch(() => {});
+    saveBlocksInBackground(updated);
     setDraggedBlockId(null);
   };
 
@@ -1260,7 +1217,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
 
   // Product Folder Management Functions
   const saveFoldersToCloud = async (foldersToSave: ProductFolder[]) => {
-    localStorage.setItem(`picks_folders_${userName.toLowerCase()}`, JSON.stringify(foldersToSave));
+    cacheLocalItem(`picks_folders_${userName.toLowerCase()}`, foldersToSave);
     apiService.saveSiteData(userName, { productFolders: foldersToSave }).catch(err => console.warn('[SaveFolders] 클라우드 동기화 실패:', err));
   };
 
@@ -1339,12 +1296,37 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     ? ['전체', ...managedCategories]
     : ['전체', '패션', '아우터'];
 
-  const saveCategoriesToCloud = (cats: string[]) => {
-    localStorage.setItem(`picks_categories_${userName.toLowerCase()}`, JSON.stringify(cats));
-    apiService.saveSiteData(userName, { linkGridCategories: cats }).catch(err => console.warn('[SaveCategories] 클라우드 동기화 실패:', err));
+  const saveCategoriesToCloud = async (cats: string[]): Promise<SaveResult> => {
+    const result = await apiService.saveSiteDataResult(userName, { linkGridCategories: cats });
+    if (result.ok) {
+      cacheLocalItem(`picks_categories_${userName.toLowerCase()}`, cats);
+      clearLinkCache(userName);
+    }
+    return result;
   };
 
-  const handleAddCategory = () => {
+  const saveCategoryUpdate = async (nextBlocks: Block[], nextCategories: string[], force = false): Promise<boolean> => {
+    const result = await apiService.saveSiteDataResult(userName, {
+      blocks: nextBlocks,
+      linkGridCategories: nextCategories,
+    }, { force });
+    if (!result.ok) {
+      showFailureFeedback(saveFailureMessage(result), 'warning');
+      return false;
+    }
+    setBlocks(nextBlocks);
+    setLinkGridCategories(nextCategories);
+    writeLocal(`picks_blocks_${userName.toLowerCase()}`, nextBlocks);
+    cacheLocalItem(`picks_categories_${userName.toLowerCase()}`, nextCategories);
+    clearLinkCache(userName);
+    Promise.all([
+      updateLinkGridItems(nextBlocks),
+      updateSiteSettings(userName, { blocks: nextBlocks }, false),
+    ]).catch(() => undefined);
+    return true;
+  };
+
+  const handleAddCategory = async () => {
     const trimmed = newCategoryName.trim();
     if (!trimmed) return;
     if (managedCategories.includes(trimmed)) {
@@ -1352,14 +1334,18 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       return;
     }
     const updatedCats = [...linkGridCategories, trimmed];
+    const result = await saveCategoriesToCloud(updatedCats);
+    if (!result.ok) {
+      showFailureFeedback(saveFailureMessage(result), 'warning');
+      return;
+    }
     setLinkGridCategories(updatedCats);
-    saveCategoriesToCloud(updatedCats);
     setNewCategoryName('');
     setSelectedFolderId(trimmed);
     showSuccessFeedback(`'${trimmed}' 카테고리가 추가되었습니다!`);
   };
 
-  const handleRenameCategory = (oldName: string) => {
+  const handleRenameCategory = async (oldName: string) => {
     const trimmed = categoryEditValue.trim();
     if (!trimmed || trimmed === oldName) {
       setEditingCategoryName(null);
@@ -1370,12 +1356,8 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       return;
     }
     const updatedBlocks = blocks.map(b => b.category === oldName ? { ...b, category: trimmed } : b);
-    setBlocks(updatedBlocks);
-    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
-    saveBlocksToCloud(updatedBlocks).catch(() => {});
     const updatedCats = linkGridCategories.map(c => c === oldName ? trimmed : c);
-    setLinkGridCategories(updatedCats);
-    saveCategoriesToCloud(updatedCats);
+    if (!await saveCategoryUpdate(updatedBlocks, updatedCats)) return;
     if (selectedFolderId === oldName) setSelectedFolderId(trimmed);
     setEditingCategoryName(null);
     showSuccessFeedback(`카테고리가 '${trimmed}'(으)로 변경되었습니다!`);
@@ -1385,14 +1367,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   // 바로 지우지 않고 블록·상품 삭제와 같은 확인창을 한 번 띄운다.
   const handleDeleteCategory = (catName: string) => setConfirmDelete({ type: 'category', id: catName });
 
-  const executeDeleteCategory = (catName: string) => {
+  const executeDeleteCategory = async (catName: string) => {
     const updatedBlocks = blocks.filter(b => b.category !== catName);
-    setBlocks(updatedBlocks);
-    writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
-    saveBlocksToCloud(updatedBlocks).catch(() => {});
     const updatedCats = linkGridCategories.filter(c => c !== catName);
-    setLinkGridCategories(updatedCats);
-    saveCategoriesToCloud(updatedCats);
+    if (!await saveCategoryUpdate(updatedBlocks, updatedCats, true)) return;
     if (selectedFolderId === catName) setSelectedFolderId(null);
     showSuccessFeedback(`'${catName}' 카테고리가 삭제되었습니다!`);
   };
@@ -1437,7 +1415,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     }
     setBlocks(reordered);
     writeLocal(`picks_blocks_${userName.toLowerCase()}`, reordered);
-    saveBlocksToCloud(reordered).catch(() => {});
+    saveBlocksInBackground(reordered);
   };
 
   /**
@@ -1524,13 +1502,13 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
       setBlocks(updatedBlocks);
       writeLocal(`picks_blocks_${userName.toLowerCase()}`, updatedBlocks);
       // 클라우드 동기화 (백그라운드)
-      saveBlocksToCloud(updatedBlocks).catch(err => console.warn('[DeleteBlock] 클라우드 동기화 실패:', err));
+      saveBlocksInBackground(updatedBlocks);
       setIsEditing(null);
     } else if (confirmDelete.type === 'product') {
       const updatedProducts = (editForm.products || []).filter(p => p.id !== confirmDelete.id);
       setEditForm({ ...editForm, products: updatedProducts } as Block);
     } else if (confirmDelete.type === 'category') {
-      executeDeleteCategory(confirmDelete.id);
+      void executeDeleteCategory(confirmDelete.id);
     }
     setConfirmDelete(null);
   };
@@ -2170,7 +2148,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         value={bgHexDraft}
                         onChange={(e) => setBgHexDraft(e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6).toUpperCase())}
                         onBlur={commitBgHexDraft}
-                        onKeyDown={(e) => { if (e.key === 'Enter') commitBgHexDraft(); }}
+                        onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === 'Enter') commitBgHexDraft(); }}
                         maxLength={6}
                         spellCheck={false}
                         aria-label="배경색 16진수 코드"
@@ -2374,14 +2352,11 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                           style={{ objectPosition: `${(editForm.coverMediaPosition?.x ?? 50)}% ${(editForm.coverMediaPosition?.y ?? 50)}%` }}
                         />
                         <div
-                          className={`absolute inset-0 flex items-center justify-center transition-colors ${coverPosDragging ? 'bg-black/30 cursor-grabbing' : 'bg-black/10 hover:bg-black/20 cursor-grab'}`}
+                          className={`absolute inset-0 flex items-center justify-center touch-none transition-colors ${coverPosDragging ? 'bg-black/30 cursor-grabbing' : 'bg-black/10 hover:bg-black/20 cursor-grab'}`}
                           onPointerDown={handleCoverPosDown}
                           onPointerMove={handleCoverPosMove}
                           onPointerUp={handleCoverPosUp}
                         >
-                          {/* 손가락으로는 이 끌기가 듣지 않는다(휴대폰에서는 같은 동작이
-                              화면 넘기기로 먹힌다). 할 수 없는 일을 적어 두면 표지 위에
-                              덮인 글자만 남으므로 넓은 화면에서만 띄운다. */}
                           <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-[10px] font-bold pointer-events-none">
                             <Move size={12} />
                             <span>드래그하여 노출 영역 조정</span>
@@ -2896,7 +2871,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                   type="text"
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                  onKeyDown={e => !e.nativeEvent.isComposing && e.key === 'Enter' && handleAddCategory()}
                   className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-5 py-3 font-black text-sm focus:border-blue-600 transition-all"
                   placeholder="새 카테고리 이름"
                 />
@@ -2921,7 +2896,7 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                             type="text"
                             value={categoryEditValue}
                             onChange={e => setCategoryEditValue(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleRenameCategory(cat)}
+                            onKeyDown={e => !e.nativeEvent.isComposing && e.key === 'Enter' && handleRenameCategory(cat)}
                             className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-4 py-2 font-black text-sm focus:border-blue-600 transition-all"
                             autoFocus
                           />

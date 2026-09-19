@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { formatNumberWithCommas, formatKoreanWon, digitsOnly, todayInSeoul, formatPhoneInput } from '../../utils/formatters';
-import { authHeaders } from '../../services/apiService';
+import { apiService, authHeaders } from '../../services/apiService';
 import ImageCropper from '../ImageCropper';
 import DateRangeCalendar from './DateRangeCalendar';
 import {
@@ -179,6 +179,14 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const [savedAt, setSavedAt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingFileRef = useRef<File | null>(null);
+
+  useEffect(() => () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc);
+  }, [cropperSrc]);
+
+  useEffect(() => () => {
+    if (thumbnailPreview.startsWith('blob:')) URL.revokeObjectURL(thumbnailPreview);
+  }, [thumbnailPreview]);
 
   // 작성 중인 내용을 브라우저에 남겨 둔다. 캠페인 등록은 제품 이미지를 찾거나 예산을
   // 확인하러 자리를 뜨는 일이 흔하고, 그때 탭을 닫으면 처음부터 다시 적어야 했다.
@@ -363,18 +371,17 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     setUploadingImage(true);
     try {
       setThumbnailPreview(URL.createObjectURL(croppedBlob));
-      const fd = new FormData();
-      fd.append(
-        'image',
-        new File([croppedBlob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }),
+      const extension = croppedBlob.type === 'image/png' ? 'png' : croppedBlob.type === 'image/webp' ? 'webp' : 'jpg';
+      const thumbnail = new File(
+        [croppedBlob],
+        file.name.replace(/\.[^.]+$/, `.${extension}`),
+        { type: croppedBlob.type || 'image/jpeg' },
       );
-      fd.append('username', businessUsername);
-      const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (data.url) {
-        patch('thumbnail_url', data.url);
+      const uploaded = await apiService.uploadAttachment(businessUsername, thumbnail, undefined, 'campaigns');
+      if (uploaded.url) {
+        patch('thumbnail_url', uploaded.url);
       } else {
-        onNotify('이미지 업로드에 실패했습니다.', 'error');
+        onNotify(uploaded.error || '이미지 업로드에 실패했습니다.', 'error');
         setThumbnailPreview('');
       }
     } catch {

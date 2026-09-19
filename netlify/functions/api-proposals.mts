@@ -6,9 +6,31 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { isProposalAlive, loadDeletedProposalIds } from "./_shared/proposal-tombstones.mts";
 import { sendKakaoAlimtalk } from "./_shared/kakao-message.mts";
 import { businessProposalAlimtalk } from "./_shared/alimtalk-templates.mts";
+import { isUploadedFileUrl } from "./_shared/upload-media.mts";
 
 const STORE = "proposals";
 const BIZ_STORE = "business-proposals";
+
+const cleanText = (value: unknown, max: number): string =>
+  String(value ?? "").trim().slice(0, max);
+
+const cleanDate = (value: unknown): string => {
+  const date = cleanText(value, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? "" : date;
+};
+
+const recordTime = (value: any): number => {
+  const raw = value?.updated_at || value?.updatedAt || value?.created_at || value?.createdAt || 0;
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const mergeNewest = (primary: any, secondary: any): any =>
+  recordTime(secondary) > recordTime(primary)
+    ? { ...primary, ...secondary }
+    : { ...secondary, ...primary };
 
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
@@ -26,6 +48,7 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     const allProposals: any[] = [];
     const seenIds = new Set<string>();
+    const proposalIndex = new Map<string, number>();
 
     const [sqlResult, blobData, deletedIds] = await Promise.all([
       (async () => {
@@ -52,6 +75,7 @@ export default async (req: Request, context: Context) => {
         // 수신함에서 지운 제안. SQL 삭제가 실패해 행이 남아 있어도 화면에는 올리지 않는다.
         if (!isProposalAlive(deletedIds, row.id)) continue;
         seenIds.add(row.id);
+        proposalIndex.set(row.id, allProposals.length);
         allProposals.push({
           id: row.id,
           influencer_username: row.influencer_username || row.username || username,
@@ -78,8 +102,13 @@ export default async (req: Request, context: Context) => {
 
     if (Array.isArray(blobData)) {
       for (const bp of blobData as any[]) {
-        if (bp.id && !seenIds.has(bp.id) && isProposalAlive(deletedIds, bp.id)) {
+        if (!bp.id || !isProposalAlive(deletedIds, bp.id)) continue;
+        const existingIndex = proposalIndex.get(bp.id);
+        if (existingIndex !== undefined) {
+          allProposals[existingIndex] = mergeNewest(allProposals[existingIndex], bp);
+        } else if (!seenIds.has(bp.id)) {
           seenIds.add(bp.id);
+          proposalIndex.set(bp.id, allProposals.length);
           allProposals.push(bp);
         }
       }
@@ -102,14 +131,19 @@ export default async (req: Request, context: Context) => {
           // 겹친 바로 그 경우에 지운 제안이 캐시에 되살아난다.
           const fresh = await loadDeletedProposalIds();
           return mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
-            const latest = (Array.isArray(current) ? current : []).filter((p: any) =>
-              isProposalAlive(fresh, p?.id),
+          const latest = (Array.isArray(current) ? current : []).filter((p: any) =>
+            isProposalAlive(fresh, p?.id),
+          );
+          const mergedById = new Map(latest.map((p: any) => [p?.id, p]));
+          for (const proposal of allProposals) {
+            if (!proposal?.id || !isProposalAlive(fresh, proposal.id)) continue;
+            const currentProposal = mergedById.get(proposal.id);
+            mergedById.set(
+              proposal.id,
+              currentProposal ? mergeNewest(currentProposal, proposal) : proposal,
             );
-            const latestIds = new Set(latest.map((p: any) => p?.id));
-            const merged = [
-              ...latest,
-              ...allProposals.filter((p: any) => !latestIds.has(p?.id) && isProposalAlive(fresh, p?.id)),
-            ];
+          }
+          const merged = [...mergedById.values()];
             merged.sort(
               (a: any, b: any) =>
                 new Date(b.created_at || b.createdAt || 0).getTime() -
@@ -125,35 +159,117 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "POST") {
-    const body = await req.json();
-    const bizUsername = String(body.business_username || "").toLowerCase().replace(/^biz\//, "").trim();
-    if (!bizUsername) {
+    const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body) {
+      return Response.json({ error: "잘못된 요청입니다." }, { status: 400 });
+    }
+
+    const bizUsername = cleanText(body.business_username, 128)
+      .toLowerCase()
+      .replace(/^biz\//, "");
+    if (!bizUsername || /[\\/?#\s]/.test(bizUsername)) {
       return Response.json({ error: "Business account required" }, { status: 400 });
     }
     const auth = await requireAccountOwner(req, bizUsername);
     if (!auth.ok) return auth.response;
 
+    const category = body.category === "커머스" ? "커머스" : body.category === "광고" ? "광고" : "";
+    const companyName = cleanText(body.company_name, 200);
+    const contactPerson = cleanText(body.contact_person, 100);
+    const contactEmail = cleanText(body.contact_email, 254);
+    const contactPhone = cleanText(body.contact_phone, 50);
+    const title = cleanText(body.title, 300);
+    const content = cleanText(body.content, 20_000);
+    const startDate = cleanDate(body.start_date);
+    const endDate = cleanDate(body.end_date) || startDate;
+    const fee = Number(body.fee);
+    const revenueShare = body.revenue_share === undefined || body.revenue_share === ""
+      ? undefined
+      : Number(body.revenue_share);
+    const attachments = Array.isArray(body.attachments)
+      ? body.attachments.slice(0, 10).map((item) => cleanText(item, 2_000))
+      : [];
+    const referenceLinks = Array.isArray(body.reference_links)
+      ? body.reference_links.slice(0, 10).map((item) => cleanText(item, 2_000))
+      : [];
+    const linksValid = referenceLinks.every((link) => {
+      try {
+        const url = new URL(link);
+        return url.protocol === "https:" || url.protocol === "http:";
+      } catch {
+        return false;
+      }
+    });
+
+    if (!category || !companyName || !contactPerson || !contactEmail || !title || !content || !startDate) {
+      return Response.json({ error: "필수 입력값을 확인해 주세요." }, { status: 400 });
+    }
+    if (!/^\S+@\S+\.\S+$/.test(contactEmail)) {
+      return Response.json({ error: "이메일 형식을 확인해 주세요." }, { status: 400 });
+    }
+    if (!Number.isFinite(fee) || fee < 0 || fee > 1_000_000_000_000) {
+      return Response.json({ error: "제안 금액을 확인해 주세요." }, { status: 400 });
+    }
+    if (revenueShare !== undefined && (!Number.isFinite(revenueShare) || revenueShare < 0 || revenueShare > 100)) {
+      return Response.json({ error: "수익 배분율을 확인해 주세요." }, { status: 400 });
+    }
+    if (attachments.some((url) => !isUploadedFileUrl(url)) || !linksValid) {
+      return Response.json({ error: "첨부 파일 또는 링크를 확인해 주세요." }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
     const proposal = {
-      ...body,
-      // id·소유자·상태는 서버가 정한다(body 로 덮어쓰지 못하게 뒤에 둔다).
       id: `prop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       influencer_username: username,
+      business_username: bizUsername,
+      category,
+      company_name: companyName,
+      contact_person: contactPerson,
+      contact_email: contactEmail,
+      contact_phone: contactPhone,
+      title,
+      content,
+      description: content,
+      start_date: startDate,
+      end_date: endDate,
+      fee,
+      ...(revenueShare === undefined ? {} : { revenue_share: revenueShare }),
+      reference_links: referenceLinks,
+      attachments,
       status: "pending",
-      createdAt: new Date().toISOString(),
+      rejection_reason: "",
+      created_at: now,
+      createdAt: now,
+      updated_at: now,
+      updatedAt: now,
     };
 
     // 여러 업체가 같은 인플루언서에게 동시에 제안하면 통째로 덮어쓰기가 앞선
     // 제안을 지운다. 두 목록 모두 조건부 쓰기로 덧붙인다.
-    await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => [
-      ...(Array.isArray(current) ? current : []),
-      proposal,
-    ]);
-
-    if (bizUsername) {
+    let recipientSaved = false;
+    try {
+      await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => [
+        ...(Array.isArray(current) ? current : []),
+        proposal,
+      ]);
+      recipientSaved = true;
       await mutateBlobJSON<any[]>(BIZ_STORE, `biz_proposals_${bizUsername}`, (current) => [
         ...(Array.isArray(current) ? current : []),
         { ...proposal },
       ]);
+    } catch (writeErr) {
+      if (recipientSaved) {
+        await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
+          const list = Array.isArray(current) ? current : [];
+          return list.filter((item: any) => item?.id !== proposal.id);
+        }).catch(() => null);
+      }
+      await mutateBlobJSON<any[]>(BIZ_STORE, `biz_proposals_${bizUsername}`, (current) => {
+        const list = Array.isArray(current) ? current : [];
+        return list.filter((item: any) => item?.id !== proposal.id);
+      }).catch(() => null);
+      console.error("[api-proposals] Failed to store proposal:", writeErr);
+      return Response.json({ error: "제안서를 저장하지 못했습니다. 다시 시도해 주세요." }, { status: 503 });
     }
 
     // Persist to SQL database
@@ -167,18 +283,18 @@ export default async (req: Request, context: Context) => {
           ${username},
           ${username},
           ${bizUsername},
-          ${body.title || ""},
-          ${body.company_name || ""},
-          ${body.content || ""},
-          ${body.content || ""},
-          ${body.category || "광고"},
-          ${parseInt(body.fee) || 0},
-          ${body.start_date || null},
-          ${body.end_date || null},
+          ${proposal.title},
+          ${proposal.company_name},
+          ${proposal.content},
+          ${proposal.content},
+          ${proposal.category},
+          ${proposal.fee},
+          ${proposal.start_date || null},
+          ${proposal.end_date || null},
           ${"pending"},
-          ${body.contact_email || ""},
-          ${body.contact_person || ""},
-          ${body.contact_phone || ""},
+          ${proposal.contact_email},
+          ${proposal.contact_person},
+          ${proposal.contact_phone},
           NOW(),
           NOW()
         )
@@ -199,9 +315,9 @@ export default async (req: Request, context: Context) => {
           proposalId: proposal.id,
           influencerUsername: username,
           businessUsername: bizUsername,
-          companyName: body.company_name || "",
-          proposalTitle: body.title || "",
-          systemMessage: `"${body.title || "협업 제안"}" 협업 제안이 도착했습니다. 수락 전에도 여기에서 금액·일정·산출물 범위를 상의할 수 있어요.`,
+          companyName: proposal.company_name,
+          proposalTitle: proposal.title,
+          systemMessage: `"${proposal.title || "협업 제안"}" 협업 제안이 도착했습니다. 수락 전에도 여기에서 금액·일정·산출물 범위를 상의할 수 있어요.`,
         });
       } catch (roomErr) {
         // 방을 못 만들어도 제안 접수는 성공해야 한다. 수락 시점에 다시 시도된다.
@@ -220,8 +336,8 @@ export default async (req: Request, context: Context) => {
     try {
       const { sendPushToUser } = await import("./_shared/push.mts");
       await sendPushToUser(username, {
-        title: `새 협업 제안 · ${body.company_name || "브랜드"}`,
-        body: `"${body.title || "협업 제안"}" 제안이 도착했습니다. 조건을 확인해 주세요.`,
+        title: `새 협업 제안 · ${proposal.company_name || "브랜드"}`,
+        body: `"${proposal.title || "협업 제안"}" 제안이 도착했습니다. 조건을 확인해 주세요.`,
         // 알림톡이 쓰는 링크와 같은 자리로 보낸다(아래 magicLink). 두 채널이 서로
         // 다른 화면으로 데려가면 같은 알림이 두 번 온 것처럼 읽힌다.
         data: { type: "proposal", proposalId: proposal.id, path: "/admin?tab=proposals" },
@@ -241,8 +357,8 @@ export default async (req: Request, context: Context) => {
         username,
         ...businessProposalAlimtalk({
           influencer: username,
-          companyName: body.company_name || body.business_username,
-          proposalTitle: body.title,
+          companyName: proposal.company_name || proposal.business_username,
+          proposalTitle: proposal.title,
         }),
       });
     } catch (notifErr) {
@@ -254,9 +370,14 @@ export default async (req: Request, context: Context) => {
 
   // PUT - 상태 업데이트 (원래 5월 초 버전과 동일)
   if (req.method === "PUT") {
-    const body = await req.json();
-    if (!body.id) {
+    const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+    const id = cleanText(body?.id, 200);
+    const status = cleanText(body?.status, 20);
+    if (!id) {
       return Response.json({ error: "id is required" }, { status: 400 });
+    }
+    if (!['accepted', 'rejected', 'completed'].includes(status)) {
+      return Response.json({ error: "잘못된 상태값입니다." }, { status: 400 });
     }
 
     // Update in SQL
@@ -264,8 +385,8 @@ export default async (req: Request, context: Context) => {
       const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       await db.sql`
-        UPDATE proposals SET status = ${body.status}, updated_at = now()
-        WHERE id = ${body.id} AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
+        UPDATE proposals SET status = ${status}, updated_at = now()
+        WHERE id = ${id} AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
       `;
     } catch (dbErr) {
       console.error("[api-proposals] SQL update failed:", dbErr);
@@ -275,10 +396,10 @@ export default async (req: Request, context: Context) => {
     try {
       await mutateBlobJSON<any[]>(STORE, `proposals_${username}`, (current) => {
         const existing = Array.isArray(current) ? current : [];
-        const idx = existing.findIndex((p: any) => p.id === body.id);
+        const idx = existing.findIndex((p: any) => p.id === id);
         if (idx === -1) return null;
         const next = [...existing];
-        next[idx] = { ...next[idx], status: body.status, updatedAt: new Date().toISOString() };
+        next[idx] = { ...next[idx], status, updatedAt: new Date().toISOString() };
         return next;
       });
     } catch (blobErr) {

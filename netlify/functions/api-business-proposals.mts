@@ -7,6 +7,17 @@ import { loadHiddenInboxIds } from "./_shared/business-inbox-hidden.mts";
 
 const STORE = "business-proposals";
 
+const recordTime = (value: any): number => {
+  const raw = value?.updated_at || value?.updatedAt || value?.created_at || value?.createdAt || 0;
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const mergeNewest = (primary: any, secondary: any): any =>
+  recordTime(secondary) > recordTime(primary)
+    ? { ...primary, ...secondary }
+    : { ...secondary, ...primary };
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   if (!username) {
@@ -24,6 +35,7 @@ export default async (req: Request, context: Context) => {
   if (req.method === "GET") {
     const seenIds = new Set<string>();
     const allProposals: any[] = [];
+    const proposalIndex = new Map<string, number>();
 
     let dbInstance: any = null;
     try {
@@ -66,6 +78,7 @@ export default async (req: Request, context: Context) => {
       for (const row of sqlProposals) {
         if (seenIds.has(row.id) || !visible(row.id)) continue;
         seenIds.add(row.id);
+        proposalIndex.set(row.id, allProposals.length);
         allProposals.push({
           id: row.id,
           influencer_username: row.influencer_username || row.username || "",
@@ -94,6 +107,7 @@ export default async (req: Request, context: Context) => {
         const proposalId = `campaign_${row.campaign_id}_${(row.applicant_username || "").toLowerCase()}`;
         if (seenIds.has(proposalId) || !visible(proposalId)) continue;
         seenIds.add(proposalId);
+        proposalIndex.set(proposalId, allProposals.length);
         allProposals.push({
           id: proposalId,
           influencer_username: (row.applicant_username || "").toLowerCase(),
@@ -115,8 +129,13 @@ export default async (req: Request, context: Context) => {
 
     const cached = Array.isArray(cachedData) ? cachedData as any[] : [];
     for (const item of cached) {
-      if (item.id && !seenIds.has(item.id) && visible(item.id)) {
+      if (!item.id || !visible(item.id)) continue;
+      const existingIndex = proposalIndex.get(item.id);
+      if (existingIndex !== undefined) {
+        allProposals[existingIndex] = mergeNewest(allProposals[existingIndex], item);
+      } else if (!seenIds.has(item.id)) {
         seenIds.add(item.id);
+        proposalIndex.set(item.id, allProposals.length);
         allProposals.push(item);
       }
     }
@@ -135,11 +154,16 @@ export default async (req: Request, context: Context) => {
           const latest = (Array.isArray(current) ? current : []).filter((p: any) =>
             isProposalAlive(fresh, p?.id),
           );
-          const latestIds = new Set(latest.map((p: any) => p?.id));
-          const merged = [
-            ...latest,
-            ...allProposals.filter((p: any) => !latestIds.has(p?.id) && isProposalAlive(fresh, p?.id)),
-          ];
+          const mergedById = new Map(latest.map((p: any) => [p?.id, p]));
+          for (const proposal of allProposals) {
+            if (!proposal?.id || !isProposalAlive(fresh, proposal.id)) continue;
+            const currentProposal = mergedById.get(proposal.id);
+            mergedById.set(
+              proposal.id,
+              currentProposal ? mergeNewest(currentProposal, proposal) : proposal,
+            );
+          }
+          const merged = [...mergedById.values()];
           merged.sort(
             (a: any, b: any) =>
               new Date(b.createdAt || b.created_at || 0).getTime() -
@@ -153,19 +177,6 @@ export default async (req: Request, context: Context) => {
     // hiddenIds 는 캠페인 협업 줄에도 필요하다. 그 줄은 이 응답이 아니라 협업
     // 목록 API 에서 오므로, 화면이 직접 걸러야 한다.
     return Response.json({ proposals: allProposals, hiddenIds: [...hiddenIds] });
-  }
-
-  if (req.method === "POST") {
-    const body = await req.json();
-    await mutateBlobJSON<any[]>(STORE, key, (current) => [
-      ...(Array.isArray(current) ? current : []),
-      {
-        ...body,
-        id: `biz_${Date.now()}`,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    return Response.json({ success: true });
   }
 
   return Response.json({ error: "Method not allowed" }, { status: 405 });

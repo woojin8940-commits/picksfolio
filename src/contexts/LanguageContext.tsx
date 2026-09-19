@@ -315,8 +315,12 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<Language>(() => {
-    const saved = localStorage.getItem('picks_language');
-    return (saved === 'en' || saved === 'ko') ? saved : 'ko';
+    try {
+      const saved = localStorage.getItem('picks_language');
+      return (saved === 'en' || saved === 'ko') ? saved : 'ko';
+    } catch {
+      return 'ko';
+    }
   });
   const [platformTextBundle, setPlatformTextBundle] = useState<PlatformTextBundle | null>(null);
 
@@ -346,7 +350,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
-    localStorage.setItem('picks_language', lang);
+    try { localStorage.setItem('picks_language', lang); } catch {}
   }, []);
 
   const toggleLanguage = useCallback(() => {

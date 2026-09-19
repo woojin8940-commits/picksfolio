@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { requireAccountOwner } from "./_shared/user-auth.mts";
 import { requireManager } from "./_shared/manager-auth.mts";
+import { mutateBlobJSON } from "./_shared/blob-write.mts";
 
 /**
  * 대화방 목록. `?type=influencer|business|manager`
@@ -57,7 +58,9 @@ export default async (req: Request, context: Context) => {
     // 지금은 그 방을 새로 만들지 않는다 — 브랜드의 요청은 진행사항의 단계별
     // 피드백으로 받는다. 방과 대화 내용 자체는 남겨 두고 목록에서만 감춘다.
     const existing = (Array.isArray(data) ? data : []).filter(
-      (t: any) => !(userType === "business" && t?.kind === "brand_support"),
+      (t: any) => t && typeof t === "object" && typeof t.proposalId === "string"
+        && t.proposalId
+        && !(userType === "business" && t.kind === "brand_support"),
     );
 
     if (url.searchParams.get("unread") === "1") {
@@ -254,7 +257,9 @@ export default async (req: Request, context: Context) => {
                 }],
                 createdAt: row.updated_at || row.created_at || new Date().toISOString(),
               };
-              await store.setJSON(detailKey, timelineData);
+              await mutateBlobJSON<any>("timelines", detailKey, (current) =>
+                current ? null : timelineData,
+              );
             }
           } catch {}
         })());
@@ -330,7 +335,21 @@ export default async (req: Request, context: Context) => {
 
     if (added > 0) {
       existing.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      context.waitUntil(store.setJSON(indexKey, existing).catch(() => {}));
+      context.waitUntil(
+        mutateBlobJSON<any[]>("timelines", indexKey, (current) => {
+          const latest = Array.isArray(current)
+            ? current.filter((t: any) => t && typeof t === "object" && typeof t.proposalId === "string" && t.proposalId)
+            : [];
+          const byId = new Map(latest.map((t: any) => [t.proposalId, t]));
+          for (const item of existing) {
+            if (!byId.has(item.proposalId)) byId.set(item.proposalId, item);
+          }
+          return [...byId.values()].sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+          );
+        }).then(() => undefined).catch(() => {}),
+      );
     }
 
     const proposalIds = existing.map((t: any) => t.proposalId);
@@ -364,7 +383,7 @@ export default async (req: Request, context: Context) => {
           try {
             const unreadRows = await dbInstance.sql`
               SELECT proposal_id,
-                     COUNT(*) FILTER (WHERE NOT (${username} = ANY(read_by))) as unread_count,
+                     COUNT(*) FILTER (WHERE NOT (${username} = ANY(COALESCE(read_by, ARRAY[]::text[])))) as unread_count,
                      MAX(created_at) as last_message_at
               FROM timeline_messages
               WHERE proposal_id = ANY(${proposalIds})
@@ -383,7 +402,7 @@ export default async (req: Request, context: Context) => {
               batched.map(async (t: any) => {
                 try {
                   const detail = (await store.get(`detail_${t.proposalId}`, { type: "json" })) as any;
-                  const comments = detail?.comments || [];
+                  const comments = Array.isArray(detail?.comments) ? detail.comments : [];
                   const unreadCount = comments.filter((c: any) => !c.readBy?.includes(username)).length;
                   return { proposalId: t.proposalId, unreadCount };
                 } catch {

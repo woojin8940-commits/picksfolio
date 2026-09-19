@@ -1,4 +1,4 @@
-import { getStore } from "@netlify/blobs";
+import { mutateBlobJSON } from "./blob-write.mts";
 import {
   addDays,
   createCollabForApplication,
@@ -813,25 +813,23 @@ export async function mirrorCollabProposal(input: {
   };
 
   try {
-    const store = getStore("proposals");
     const key = `proposals_${creatorUsername}`;
-    const existing = ((await store.get(key, { type: "json" })) as any[]) || [];
-    if (!existing.some((p: any) => p.id === proposalId)) {
-      existing.push(entry);
-      await store.setJSON(key, existing);
-    }
+    await mutateBlobJSON<any[]>("proposals", key, (current) => {
+      const existing = Array.isArray(current) ? current : [];
+      if (existing.some((p: any) => p?.id === proposalId)) return null;
+      return [...existing, entry];
+    });
   } catch (e) {
     console.error("[listup] 인플루언서 제안 목록 반영 실패:", e);
   }
 
   try {
-    const store = getStore("business-proposals");
     const key = `biz_proposals_${businessUsername}`;
-    const existing = ((await store.get(key, { type: "json" })) as any[]) || [];
-    if (!existing.some((p: any) => p.id === proposalId)) {
-      existing.push(entry);
-      await store.setJSON(key, existing);
-    }
+    await mutateBlobJSON<any[]>("business-proposals", key, (current) => {
+      const existing = Array.isArray(current) ? current : [];
+      if (existing.some((p: any) => p?.id === proposalId)) return null;
+      return [...existing, entry];
+    });
   } catch (e) {
     console.error("[listup] 브랜드 수신함 반영 실패:", e);
   }
@@ -1033,6 +1031,7 @@ export async function acceptListup(input: {
   });
 
   await logCollabEvent(db, {
+    id: `ce_listup_accepted_${collab.id}_${listup.id}`,
     collabId: collab.id,
     type: "listup_accepted",
     actorRole: input.actorRole,

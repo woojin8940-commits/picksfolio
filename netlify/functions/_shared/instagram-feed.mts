@@ -251,11 +251,13 @@ export async function warmFeedCache(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!page.ok) return 0;
-    await writeFeedCache(username, {
-      items: page.items,
-      after: page.after,
-      igUserId: String(link.igUserId || link.igAccountId || ""),
-    });
+    if (page.items.length > 0) {
+      await writeFeedCache(username, {
+        items: page.items,
+        after: page.after,
+        igUserId: String(link.igUserId || link.igAccountId || ""),
+      });
+    }
     return page.items.length;
   } catch (e) {
     console.warn("[ig-feed] 연동 직후 목록 미리받기 실패:", (e as Error)?.message);

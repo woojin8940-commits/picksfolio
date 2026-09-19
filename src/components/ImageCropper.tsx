@@ -21,6 +21,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
   const [displayRect, setDisplayRect] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
@@ -142,17 +143,20 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
     const sw = crop.w * scale;
     const sh = crop.h * scale;
 
+    const outputScale = Math.min(1, 1600 / Math.max(sw, sh));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(sw);
-    canvas.height = Math.round(sh);
+    canvas.width = Math.max(1, Math.round(sw * outputScale));
+    canvas.height = Math.max(1, Math.round(sh * outputScale));
     const ctx = canvas.getContext('2d');
     if (!ctx || !imgRef.current) return;
 
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(imgRef.current, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh), 0, 0, canvas.width, canvas.height);
 
     canvas.toBlob(blob => {
       if (blob) onCrop(blob);
-    }, 'image/png', 1.0);
+    }, 'image/webp', 0.84);
   }, [naturalSize, displayRect, crop, onCrop]);
 
   const handleImgLoad = () => {
@@ -189,8 +193,15 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
           alt=""
           crossOrigin="anonymous"
           onLoad={handleImgLoad}
+          onError={() => setLoadError(true)}
           style={{ display: 'none' }}
         />
+
+        {loadError && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, color: '#fff', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>
+            이 이미지 형식은 브라우저에서 열 수 없습니다.<br />JPG, PNG 또는 WebP 파일로 다시 선택해 주세요.
+          </div>
+        )}
 
         {imgLoaded && displayRect.w > 0 && (
           <>
@@ -299,10 +310,12 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ src, onCrop, onCancel, aspe
           </button>
           <button
             onClick={handleConfirm}
+            disabled={!imgLoaded || loadError}
             style={{
               padding: '10px 32px', borderRadius: 8,
               background: '#3B82F6', color: '#fff',
-              border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+              border: 'none', fontSize: 15, fontWeight: 600, cursor: imgLoaded && !loadError ? 'pointer' : 'default',
+              opacity: imgLoaded && !loadError ? 1 : 0.45,
             }}
           >
             선택

@@ -30,8 +30,10 @@ type EventRow = {
   collab_id: string;
   type: string;
   stage_key: string;
+  actor_role: string;
   summary: string;
   payload: any;
+  campaign_id: string;
   creator_username: string;
   business_username: string;
   campaign_title: string;
@@ -84,7 +86,7 @@ const collabNames = (event: EventRow) => ({
  * 문자가 모든 이벤트마다 양쪽에게 쌓인다.
  */
 type NotifyRule = {
-  to: Audience[];
+  to: Audience[] | ((e: EventRow) => Audience[]);
   title: (e: EventRow) => string;
   body: (e: EventRow) => string;
   alimtalk?: (e: EventRow, audience: Audience) => AlimtalkTemplate | null;
@@ -105,6 +107,21 @@ const NOTIFY_MAP: Record<string, NotifyRule> = {
     to: ["influencer"],
     title: (e) => `${e.campaign_title} 수정 요청`,
     body: () => "담당자가 수정 요청을 보냈습니다. 항목을 확인하고 다시 제출해 주세요.",
+  },
+  asset_shared: {
+    to: (e) => payloadOf(e).kind === "guide" ? ["influencer"] : ["brand"],
+    title: (e) => `${e.campaign_title} 자료 공유`,
+    body: (e) => e.summary || "새 협업 자료가 공유되었습니다.",
+  },
+  shipping_saved: {
+    to: ["brand"],
+    title: (e) => `${e.campaign_title} 배송 정보 입력`,
+    body: () => "인플루언서가 제품을 받을 배송 정보를 입력했습니다.",
+  },
+  deliverable_submitted: {
+    to: ["brand"],
+    title: (e) => `${e.campaign_title} 제출물 도착`,
+    body: (e) => e.summary || "검토할 제출물이 도착했습니다.",
   },
   feedback_sent: {
     to: ["influencer"],
@@ -172,7 +189,7 @@ const NOTIFY_MAP: Record<string, NotifyRule> = {
   collab_cancelled: {
     to: ["influencer", "brand"],
     title: (e) => `${e.campaign_title} 협업 취소`,
-    body: (e) => `협업이 취소되었습니다. 사유: ${e.payload?.reason || "담당자 확인"}`,
+    body: (e) => `협업이 취소되었습니다. 사유: ${payloadOf(e).reason || "담당자 확인"}`,
   },
   stage_due_soon: {
     to: ["influencer"],
@@ -192,7 +209,8 @@ export default async () => {
   let rows: EventRow[] = [];
   try {
     rows = (await db.sql`
-      SELECT e.id, e.collab_id, e.type, e.stage_key, e.summary, e.payload,
+      SELECT e.id, e.collab_id, e.type, e.stage_key, e.actor_role, e.summary, e.payload,
+             c.campaign_id,
              c.creator_username, c.business_username, c.campaign_title, c.company_name,
              COALESCE(cp.product_name, '') AS product_name
       FROM collab_events e
@@ -219,7 +237,8 @@ export default async () => {
       continue;
     }
 
-    for (const audience of rule.to) {
+    const audiences = typeof rule.to === "function" ? rule.to(event) : rule.to;
+    for (const audience of audiences) {
       const username = audience === "influencer" ? event.creator_username : event.business_username;
       if (!username) continue;
 
@@ -227,10 +246,13 @@ export default async () => {
       const body = rule.body(event);
 
       try {
+        const path = audience === "brand"
+          ? `/business-admin?tab=campaigns&campaign=${encodeURIComponent(event.campaign_id || "")}`
+          : `/admin?tab=collab&collab=${encodeURIComponent(event.collab_id)}`;
         await sendPushToUser(username, {
           title,
           body,
-          data: { type: "collab", collabId: event.collab_id, path: `/admin?tab=collab&collab=${event.collab_id}` },
+          data: { type: "collab", collabId: event.collab_id, path },
         });
       } catch (pushErr) {
         console.error(`[collab-events] 푸시 실패 (${username}):`, pushErr);

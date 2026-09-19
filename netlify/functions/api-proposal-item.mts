@@ -28,6 +28,12 @@ const ymd = (value: unknown): string => {
 const todayInSeoul = (): string =>
   new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split("T")[0];
 
+const canChangeStatus = (current: string, next: string): boolean => {
+  if (current === next) return true;
+  if (current === "pending") return next === "accepted" || next === "rejected";
+  return current === "accepted" && next === "completed";
+};
+
 export default async (req: Request, context: Context) => {
   const username = context.params.username?.toLowerCase();
   const proposalId = context.params.id;
@@ -45,7 +51,18 @@ export default async (req: Request, context: Context) => {
   const key = `proposals_${username}`;
 
   if (req.method === "PATCH") {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const status = String(body.status || "").trim();
+    if (!["accepted", "rejected", "completed"].includes(status)) {
+      return Response.json({ error: "잘못된 상태값입니다." }, { status: 400 });
+    }
+    const rejectionReason = status === "rejected"
+      ? String(body.rejection_reason || "").trim().slice(0, 1000)
+      : "";
+    if (status === "rejected" && !rejectionReason) {
+      return Response.json({ error: "거절 사유를 입력해 주세요." }, { status: 400 });
+    }
+    const changes = { status, rejection_reason: rejectionReason };
     const updatedAt = new Date().toISOString();
 
     /**
@@ -62,14 +79,28 @@ export default async (req: Request, context: Context) => {
      * 도착한 새 제안이 캐시에서 지워진다.
      */
     let updatedProposal: any = null;
+    let proposalFoundInCache = false;
+    let invalidTransition = false;
+    let statusChanged = false;
     await mutateBlobJSON<any[]>(STORE, key, (current) => {
       const list = Array.isArray(current) ? [...current] : [];
       const idx = list.findIndex((p: any) => p?.id === proposalId);
       if (idx === -1) return null;
-      updatedProposal = { ...list[idx], ...body, updatedAt };
+      proposalFoundInCache = true;
+      const currentStatus = String(list[idx]?.status || "pending").trim().toLowerCase();
+      invalidTransition = !canChangeStatus(currentStatus, status);
+      if (invalidTransition) return null;
+      statusChanged = currentStatus !== status;
+      updatedProposal = { ...list[idx], ...changes, updatedAt };
+      const reasonChanged = String(list[idx]?.rejection_reason || "") !== rejectionReason;
+      if (!statusChanged && !reasonChanged) return null;
       list[idx] = updatedProposal;
       return list;
     });
+
+    if (proposalFoundInCache && invalidTransition) {
+      return Response.json({ error: "현재 상태에서는 해당 변경을 할 수 없습니다." }, { status: 409 });
+    }
 
     if (!updatedProposal) {
       const [rows, deletedIds] = await Promise.all([
@@ -99,6 +130,12 @@ export default async (req: Request, context: Context) => {
         return Response.json({ error: "Not found" }, { status: 404 });
       }
 
+      const currentStatus = String(row.status || "pending").trim().toLowerCase();
+      if (!canChangeStatus(currentStatus, status)) {
+        return Response.json({ error: "현재 상태에서는 해당 변경을 할 수 없습니다." }, { status: 409 });
+      }
+      statusChanged = currentStatus !== status;
+
       updatedProposal = {
         id: row.id,
         influencer_username: row.influencer_username || row.username || username,
@@ -113,11 +150,9 @@ export default async (req: Request, context: Context) => {
         end_date: row.end_date || "",
         fee: row.fee || 0,
         business_username: row.business_username || "",
-        status: row.status || "pending",
-        rejection_reason: row.rejection_reason || "",
         created_at: row.created_at || updatedAt,
         createdAt: row.created_at || updatedAt,
-        ...body,
+        ...changes,
         updatedAt,
       };
 
@@ -126,7 +161,16 @@ export default async (req: Request, context: Context) => {
         const list = Array.isArray(current) ? [...current] : [];
         const idx = list.findIndex((p: any) => p?.id === proposalId);
         if (idx === -1) list.push(updatedProposal);
-        else list[idx] = { ...list[idx], ...body, updatedAt };
+        else {
+          const latestStatus = String(list[idx]?.status || "pending").trim().toLowerCase();
+          if (!canChangeStatus(latestStatus, status)) {
+            invalidTransition = true;
+            return null;
+          }
+          statusChanged = latestStatus !== status;
+          updatedProposal = { ...list[idx], ...changes, updatedAt };
+          list[idx] = updatedProposal;
+        }
         return list;
       }).catch((cacheErr) => {
         // 캐시 쓰기가 실패해도 상태 변경은 계속한다. SQL 이 원본이고, 목록 조회가
@@ -134,20 +178,21 @@ export default async (req: Request, context: Context) => {
         console.error("[api-proposal-item] Failed to cache proposal for PATCH:", cacheErr);
         return null;
       });
+      if (invalidTransition) {
+        return Response.json({ error: "현재 상태에서는 해당 변경을 할 수 없습니다." }, { status: 409 });
+      }
     }
 
     const bizUsername = (updatedProposal.business_username || "").toLowerCase().replace(/^biz\//, "");
     if (bizUsername) {
-      const bizStore = getStore("business-proposals");
       const bizKey = `biz_proposals_${bizUsername}`;
-      const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
-      const bizIdx = bizExisting.findIndex((p: any) => p.id === proposalId);
-      if (bizIdx !== -1) {
-        bizExisting[bizIdx] = { ...bizExisting[bizIdx], ...body, updatedAt: updatedProposal.updatedAt };
-      } else {
-        bizExisting.push({ ...updatedProposal });
-      }
-      await bizStore.setJSON(bizKey, bizExisting);
+      await mutateBlobJSON<any[]>("business-proposals", bizKey, (current) => {
+        const list = Array.isArray(current) ? [...current] : [];
+        const index = list.findIndex((p: any) => p?.id === proposalId);
+        if (index === -1) list.push({ ...updatedProposal });
+        else list[index] = { ...list[index], ...changes, updatedAt: updatedProposal.updatedAt };
+        return list;
+      });
     }
 
     // Update SQL database
@@ -155,13 +200,13 @@ export default async (req: Request, context: Context) => {
       const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
       // Persist the rejection reason too — it feeds the admin "거절 사유 통계".
-      const rejectionReason = body.rejection_reason ?? updatedProposal.rejection_reason ?? null;
       await db.sql`
         UPDATE proposals SET
-          status = ${body.status || updatedProposal.status || 'pending'},
-          rejection_reason = ${rejectionReason},
+          status = ${status},
+          rejection_reason = ${rejectionReason || null},
           updated_at = NOW()
         WHERE id = ${proposalId}
+          AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
       `;
     } catch (dbErr) {
       console.error("[api-proposal-item] Failed to update SQL:", dbErr);
@@ -170,23 +215,49 @@ export default async (req: Request, context: Context) => {
     // Mirror the status + rejection reason into Supabase `business_proposals`,
     // which is the table the operator dashboard / 거절 사유 통계 read from. This
     // is best-effort: a different id space simply updates 0 rows and is ignored.
-    if (body.status) {
+    if (status) {
       try {
         const supabase = getSupabaseServer();
         const patch: Record<string, any> = {
-          status: body.status,
+          status,
           updated_at: new Date().toISOString(),
         };
-        if (body.status === "rejected") {
-          patch.rejection_reason = body.rejection_reason ?? updatedProposal.rejection_reason ?? null;
+        if (status === "rejected") {
+          patch.rejection_reason = rejectionReason || null;
+        } else {
+          patch.rejection_reason = null;
         }
-        await supabase.from("business_proposals").update(patch).eq("id", proposalId);
+        const writes: PromiseLike<any>[] = [
+          supabase.from("business_proposals").update(patch).eq("id", proposalId),
+        ];
+        if (statusChanged && (status === "accepted" || status === "rejected")) {
+          writes.push(
+            supabase.from("admin_notifications").upsert({
+              id: `proposal_${proposalId}_${status}`,
+              type: `proposal_${status}`,
+              influencer_username: username,
+              proposal_id: proposalId,
+              proposal_title: updatedProposal.title || "협업 제안",
+              company_name: updatedProposal.company_name || "",
+              category: updatedProposal.category || "",
+              fee: parseAmount(updatedProposal.fee),
+              rejection_reason: status === "rejected"
+                ? rejectionReason || null
+                : null,
+              created_at: updatedAt,
+              read: false,
+            }, { onConflict: "id" }),
+          );
+        }
+        const results = await Promise.all(writes);
+        const failed = results.find((result: any) => result?.error);
+        if (failed?.error) throw failed.error;
       } catch (sbErr) {
         console.error("[api-proposal-item] Failed to mirror status to Supabase:", sbErr);
       }
     }
 
-    if (body.status === "accepted") {
+    if (status === "accepted") {
       // 방은 제안이 도착할 때 이미 열려 있다(api-proposals POST). 여기서는 수락
       // 안내만 덧붙이고, 예전 제안이나 방 생성이 실패했던 건은 이 시점에 만든다.
       try {
@@ -197,7 +268,7 @@ export default async (req: Request, context: Context) => {
           companyName: updatedProposal.company_name || "",
           proposalTitle: updatedProposal.title || "",
           systemMessage: `"${updatedProposal.title || "협업 제안"}" 협업 제안이 수락되었습니다. 메시지를 보내 소통을 시작해보세요!`,
-          appendIfExists: true,
+          appendIfExists: statusChanged,
         });
       } catch (e) {
         console.error("Failed to create timeline on accept:", e);
@@ -279,15 +350,16 @@ export default async (req: Request, context: Context) => {
     }
 
     // Send alimtalk notification to business when proposal status changes
-    if (bizUsername && (body.status === "accepted" || body.status === "rejected")) {
+    if (statusChanged && bizUsername && (status === "accepted" || status === "rejected")) {
       try {
         const siteOrigin = Netlify.env.get("URL") || Netlify.env.get("DEPLOY_PRIME_URL") || "";
         const templateId = Netlify.env.get("SOLAPI_KAKAO_TIMELINE_TEMPLATE_ID") || "";
         const proposalTitle = updatedProposal.title || "협업 제안";
-        const statusText = body.status === "accepted" ? "수락" : "거절";
-        const magicLink = body.status === "accepted"
-          ? `${siteOrigin}/admin?tab=timeline&proposal=${proposalId}`
-          : `${siteOrigin}/admin?tab=inbox`;
+        const statusText = status === "accepted" ? "수락" : "거절";
+        const encodedProposalId = encodeURIComponent(proposalId);
+        const magicLink = status === "accepted"
+          ? `${siteOrigin}/business-admin?tab=timeline&proposal=${encodedProposalId}`
+          : `${siteOrigin}/business-admin?tab=inbox`;
 
         await sendKakaoAlimtalk({
           username: bizUsername,
@@ -310,51 +382,77 @@ export default async (req: Request, context: Context) => {
   }
 
   if (req.method === "DELETE") {
-    // 묘비를 먼저 적는다. 아래 삭제 중 어느 단계가 실패하더라도, 그리고 삭제 직전에
-    // 시작된 목록 조회의 지연 캐시 쓰기가 뒤늦게 도착하더라도, 읽는 쪽이 이 id 를
-    // 걸러 내므로 협업 현황·정산금에 다시 올라오지 않는다.
+    let proposal: any = null;
+    try {
+      const cached = await store.get(key, { type: "json" });
+      proposal = Array.isArray(cached)
+        ? cached.find((p: any) => p?.id === proposalId) || null
+        : null;
+    } catch {}
+
+    if (!proposal) {
+      try {
+        const { getDatabase } = await import("@picks/netlify-database");
+        const db = getDatabase();
+        const rows = await db.sql`
+          SELECT * FROM proposals
+          WHERE id = ${proposalId}
+            AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
+          LIMIT 1
+        `;
+        proposal = rows[0] || null;
+      } catch (dbErr) {
+        console.error("[api-proposal-item] Failed to look up proposal for delete:", dbErr);
+      }
+    }
+
+    if (!proposal) {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
     try {
       await markProposalDeleted(proposalId);
     } catch (tombErr) {
       console.error("[api-proposal-item] Failed to record delete tombstone:", tombErr);
     }
 
-    const existing = (await store.get(key, { type: "json" })) as any[] || [];
-    const proposal = existing.find((p: any) => p.id === proposalId);
-    const filtered = existing.filter((p: any) => p.id !== proposalId);
-    await store.setJSON(key, filtered);
+    await mutateBlobJSON<any[]>(STORE, key, (current) => {
+      const list = Array.isArray(current) ? current : [];
+      if (!list.some((p: any) => p?.id === proposalId)) return null;
+      return list.filter((p: any) => p?.id !== proposalId);
+    });
 
-    if (proposal) {
-      const bizUsername = (proposal.business_username || "").toLowerCase().replace(/^biz\//, "");
-      if (bizUsername) {
-        const bizStore = getStore("business-proposals");
-        const bizKey = `biz_proposals_${bizUsername}`;
-        const bizExisting = ((await bizStore.get(bizKey, { type: "json" })) as any[]) || [];
-        const bizFiltered = bizExisting.filter((p: any) => p.id !== proposalId);
-        await bizStore.setJSON(bizKey, bizFiltered);
-      }
+    const bizUsername = (proposal.business_username || "").toLowerCase().replace(/^biz\//, "");
+    if (bizUsername) {
+      const bizKey = `biz_proposals_${bizUsername}`;
+      await mutateBlobJSON<any[]>("business-proposals", bizKey, (current) => {
+        const list = Array.isArray(current) ? current : [];
+        if (!list.some((p: any) => p?.id === proposalId)) return null;
+        return list.filter((p: any) => p?.id !== proposalId);
+      });
+    }
 
-      // 제안에서 자동 생성된 정산 항목이 남아 있으면, 협업 내역에는 사라진
-      // 협업이 정산금 화면에만 계속 떠 있게 된다. 같이 지운다.
-      try {
-        await removeSettlementsForProposal(proposalId, bizUsername, username);
-      } catch (stlErr) {
-        console.error("[api-proposal-item] Failed to remove linked settlements:", stlErr);
-      }
+    try {
+      await removeSettlementsForProposal(proposalId, bizUsername, username);
+    } catch (stlErr) {
+      console.error("[api-proposal-item] Failed to remove linked settlements:", stlErr);
+    }
 
-      // 수락 시 자동 등록된 협업일정도 같이 지운다(사람이 직접 적은 줄은 남는다).
-      try {
-        await removeCollabScheduleRecord(`proposal_${proposalId}`, username);
-      } catch (schErr) {
-        console.error("[api-proposal-item] Failed to remove linked collab schedule:", schErr);
-      }
+    try {
+      await removeCollabScheduleRecord(`proposal_${proposalId}`, username);
+    } catch (schErr) {
+      console.error("[api-proposal-item] Failed to remove linked collab schedule:", schErr);
     }
 
     // Delete from SQL
     try {
       const { getDatabase } = await import("@picks/netlify-database");
       const db = getDatabase();
-      await db.sql`DELETE FROM proposals WHERE id = ${proposalId}`;
+      await db.sql`
+        DELETE FROM proposals
+        WHERE id = ${proposalId}
+          AND (LOWER(username) = ${username} OR LOWER(influencer_username) = ${username})
+      `;
     } catch (dbErr) {
       console.error("[api-proposal-item] Failed to delete from SQL:", dbErr);
     }

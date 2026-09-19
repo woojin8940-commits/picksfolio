@@ -40,6 +40,16 @@ interface TimelineAttachment {
   fileSize: number;
 }
 
+const PendingImagePreview: React.FC<{ file: File }> = ({ file }) => {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  return url ? <img src={url} alt="" className="w-8 h-8 rounded object-cover shrink-0" /> : null;
+};
+
 interface TimelineComment {
   id: string;
   clientId?: string;
@@ -201,7 +211,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
     if (typeof window === 'undefined' || !initialProposalId) return null;
     try {
       const raw = localStorage.getItem(detailCacheKey(initialProposalId));
-      return raw ? (JSON.parse(raw) as TimelineData) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as TimelineData : null;
     } catch {
       return null;
     }
@@ -414,14 +425,9 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       // 붙인 가이드 파일을 먼저 올린다. 서버는 주소만 받아 저장소에서 원본을 읽는다.
       const attachments: { url: string; fileName: string; fileType: string }[] = [];
       for (const file of attachedFiles) {
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('username', normalizedUserName.toLowerCase());
-        const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
-        const uploadData = await uploadRes.json().catch(() => null);
-        if (uploadData?.url) {
-          attachments.push({ url: uploadData.url, fileName: file.name, fileType: file.type });
-        }
+        const uploaded = await apiService.uploadAttachment(normalizedUserName, file, undefined, 'ai-guides');
+        if (!uploaded.url) throw new Error(uploaded.error || '파일 업로드에 실패했습니다.');
+        attachments.push({ url: uploaded.url, fileName: file.name, fileType: file.type });
       }
 
       const res = await fetch('/api/collab-ai', {
@@ -475,15 +481,27 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
         }
         setAiMessages(prev => [...prev, assistantMsg]);
       }
-    } catch {
-      setAiMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.' }]);
+    } catch (error) {
+      setAiInput(typed);
+      setAiFiles(attachedFiles);
+      setAiMessages(prev => [
+        ...prev.slice(0, -1),
+        {
+          role: 'assistant',
+          content:
+            error instanceof Error && error.message
+              ? error.message
+              : '네트워크 오류로 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.',
+        },
+      ]);
     } finally {
       setAiLoading(false);
     }
   };
 
   const handleAiKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault();
       sendAiMessage(aiInput);
     }
@@ -603,7 +621,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       const cached = (() => {
         try {
           const raw = localStorage.getItem(detailCacheKey(proposalId));
-          return raw ? JSON.parse(raw) as TimelineData : null;
+          const parsed = raw ? JSON.parse(raw) : null;
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as TimelineData : null;
         } catch { return null; }
       })();
       selectedIdRef.current = proposalId;
@@ -710,20 +729,14 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
       try {
         const uploadedAttachments: TimelineAttachment[] = [];
         for (const file of filesToUpload) {
-          const formData = new FormData();
-          formData.append('image', file);
-          formData.append('username', normalizedUserName.toLowerCase());
-          const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok || !uploadData.url) throw new Error('Upload failed');
-          if (uploadData.url) {
-            uploadedAttachments.push({
-              url: uploadData.url,
-              fileName: file.name,
-              fileType: file.type,
-              fileSize: file.size,
-            });
-          }
+          const uploaded = await apiService.uploadAttachment(normalizedUserName, file, undefined, 'timeline');
+          if (!uploaded.url) throw new Error(uploaded.error || 'Upload failed');
+          uploadedAttachments.push({
+            url: uploaded.url,
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: file.size,
+          });
         }
 
         if (uploadedAttachments.length > 0) {
@@ -783,7 +796,8 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -1587,7 +1601,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                 {pendingFiles.map((file, idx) => (
                   <div key={idx} className="relative group flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 max-w-[180px]">
                     {file.type.startsWith('image/') ? (
-                      <img src={URL.createObjectURL(file)} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                      <PendingImagePreview file={file} />
                     ) : (
                       renderDocPreview(file.type, file.name) || <span className="text-sm shrink-0">{getFileIcon(file.type)}</span>
                     )}
@@ -1597,7 +1611,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                     </div>
                     <button
                       onClick={() => removePendingFile(idx)}
-                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                     >
                       <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
@@ -1896,7 +1910,7 @@ const BusinessTimeline: React.FC<BusinessTimelineProps> = ({ userName, userType 
                         </div>
                         <button
                           onClick={() => setAiFiles(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                           title="첨부 취소"
                         >
                           <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

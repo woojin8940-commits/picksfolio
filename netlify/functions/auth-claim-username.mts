@@ -32,7 +32,6 @@ import { checkUsernameRules, normalizeUsername } from "./_shared/username-rules.
 
 /** 수파베이스 조회 상한. */
 const PROFILE_LOOKUP_TIMEOUT_MS = 4_000;
-/** site_data 조회 상한. 이 조회는 실패해도 링크 만들기를 막지 않으므로 짧게 끊는다. */
 const SITE_DATA_LOOKUP_TIMEOUT_MS = 2_500;
 
 /**
@@ -143,15 +142,13 @@ export default async (req: Request) => {
       );
     }
 
-    // 탈퇴한 계정의 페이지가 남아 있는 이름은 내주지 않는다. 이 조회가 실패하면
-    // 그냥 넘긴다(일반 가입의 중복확인과 같은 정책) — 확인 한 번 못 한 것 때문에
-    // 쓸 수 있는 이름을 못 쓰게 하는 편이 더 나쁘다.
     try {
       if (await withDeadline(siteDataExists(username), SITE_DATA_LOOKUP_TIMEOUT_MS)) {
         return fail("taken", TAKEN_MESSAGE);
       }
     } catch (err) {
-      console.warn("[auth-claim-username] site_data 확인을 건너뜁니다:", err);
+      console.error("[auth-claim-username] site_data 조회 실패:", err);
+      return fail("lookup", "링크를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
     }
 
     const payload = { username, updated_at: new Date().toISOString() };

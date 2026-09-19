@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { mutateBlobJSON } from "./blob-write.mts";
 
 /**
  * DM 을 보내온 사람들의 명단.
@@ -108,22 +109,25 @@ export async function noteDmContact(args: {
     const created = await s.set(key, JSON.stringify(fresh), { onlyIfNew: true });
     if (created?.modified !== false) return { first: !fromPostback, contact: fresh };
 
-    const prev = ((await s.get(key, { type: "json" })) as DmContact | null) || null;
-    // 버튼 클릭만 있던 상대가 드디어 메시지를 보냈다 — 이번이 "처음 대화"다.
-    const firstMessage = !fromPostback && prev?.awaitingFirstMessage === true;
-    const merged: DmContact = {
-      ...(prev || fresh),
-      igsid,
-      name: args.name || prev?.name,
-      username: args.igHandle || prev?.username,
-      firstAt: prev?.firstAt || now,
-      lastAt: now,
-      lastText: text || prev?.lastText,
-      count: (prev?.count || 0) + 1,
-      awaitingFirstMessage: fromPostback ? prev?.awaitingFirstMessage : undefined,
-    };
-    await s.setJSON(key, merged);
-    return { first: firstMessage, prevLastAt: prev?.lastAt, contact: merged };
+    let firstMessage = false;
+    let prevLastAt: string | undefined;
+    const merged = await mutateBlobJSON<DmContact>(STORE, key, (current) => {
+      const prev = current && typeof current === "object" ? current : fresh;
+      firstMessage = !fromPostback && prev.awaitingFirstMessage === true;
+      prevLastAt = prev.lastAt;
+      return {
+        ...prev,
+        igsid,
+        name: args.name || prev.name,
+        username: args.igHandle || prev.username,
+        firstAt: prev.firstAt || now,
+        lastAt: now,
+        lastText: text || prev.lastText,
+        count: (prev.count || 0) + 1,
+        awaitingFirstMessage: fromPostback ? prev.awaitingFirstMessage : undefined,
+      };
+    });
+    return { first: firstMessage, prevLastAt, contact: merged || null };
   } catch (e) {
     // 기록에 실패했다면 "처음"이라고 단정하지 않는다 — 인사말 중복 발송이
     // 아무 인사말도 안 보내는 것보다 나쁘다.
