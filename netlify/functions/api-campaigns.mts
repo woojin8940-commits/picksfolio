@@ -248,7 +248,7 @@ export default async (req: Request) => {
           page: paged.page,
           limit: paged.limit,
           total_pages: paged.total_pages,
-        });
+        }, { headers: { "Cache-Control": "no-store" } });
       }
 
       // 브랜드 자신의 관리 화면. 로그인이 확인되면 담당자 연락처까지 내려보낸다 —
@@ -260,7 +260,7 @@ export default async (req: Request) => {
         page: paged.page,
         limit: paged.limit,
         total_pages: paged.total_pages,
-      });
+      }, { headers: { "Cache-Control": "no-store" } });
     } catch (err: any) {
       return Response.json({ error: err?.message || "서버 오류" }, { status: 500 });
     }

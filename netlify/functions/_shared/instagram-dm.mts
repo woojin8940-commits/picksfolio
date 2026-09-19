@@ -66,6 +66,17 @@ const BUTTON_ONLY_CARD_TITLE = "👇 아래 버튼을 눌러주세요";
  */
 const CARD_TITLE_FALLBACK = "자세히 보기";
 
+function cleanLinkInput(raw: string): string {
+  return String(raw || "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/[：]/g, ":")
+    .replace(/[／]/g, "/")
+    .replace(/[．]/g, ".")
+    .trim()
+    .replace(/^[<>'\"“”‘’]+|[<>'\"“”‘’]+$/g, "")
+    .trim();
+}
+
 /**
  * Graph API 는 http/https 절대 URL 만 web_url 버튼·카드 이미지로 받는다.
  *
@@ -76,7 +87,7 @@ const CARD_TITLE_FALLBACK = "자세히 보기";
  */
 export function isValidLinkUrl(raw: string): boolean {
   try {
-    const u = new URL((raw || "").trim());
+    const u = new URL(cleanLinkInput(raw));
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;
     // 점으로 구분된 공개 호스트명(example.com)만 허용한다. localhost·내부 호스트는
     // 인스타그램 쪽에서 접근할 수 없으니 저장 단계에서 막는 게 낫다.
@@ -94,8 +105,12 @@ export function isValidLinkUrl(raw: string): boolean {
  *   안 보이는지 알 수 없다.
  */
 export function normalizeLinkUrl(raw: string): string {
-  const trimmed = (raw || "").trim();
+  const trimmed = cleanLinkInput(raw);
   if (!trimmed) return "";
+  if (trimmed.startsWith("//")) {
+    const withScheme = `https:${trimmed}`;
+    return isValidLinkUrl(withScheme) ? withScheme : "";
+  }
   if (isValidLinkUrl(trimmed)) return trimmed;
   // 스킴 없이 도메인만 적은 경우만 구제한다. (javascript:, mailto: 등은 걸러진다)
   if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
@@ -105,9 +120,19 @@ export function normalizeLinkUrl(raw: string): string {
   return "";
 }
 
+export function normalizeImageUrl(raw: string): string {
+  const value = cleanLinkInput(raw);
+  if (value.startsWith("/api/images/")) {
+    const origin = String(process.env.URL || "https://picks-folio.com").replace(/\/+$/, "");
+    return `${origin}${value}`;
+  }
+  return normalizeLinkUrl(value);
+}
+
 function toWebUrlButtons(buttons?: DmButton[]) {
   return (Array.isArray(buttons) ? buttons : [])
-    .filter((b) => b && b.label?.trim() && isValidLinkUrl(b.url))
+    .map((b) => ({ ...b, url: normalizeLinkUrl(b?.url || "") }))
+    .filter((b) => b && b.label?.trim() && b.url)
     .slice(0, BUTTON_MAX)
     .map((b) => ({
       type: "web_url",
@@ -130,8 +155,9 @@ export function toCardElements(cards?: DmCard[]): Record<string, unknown>[] {
     if (!c) continue;
     const title = (c.title || "").trim();
     const subtitle = (c.subtitle || "").trim();
-    const image = isValidLinkUrl(c.imageUrl) ? c.imageUrl.trim() : "";
-    const hasButton = Boolean((c.buttonLabel || "").trim() && isValidLinkUrl(c.buttonUrl));
+    const image = normalizeImageUrl(c.imageUrl);
+    const buttonUrl = normalizeLinkUrl(c.buttonUrl);
+    const hasButton = Boolean((c.buttonLabel || "").trim() && buttonUrl);
 
     // 제목 외에 아무 속성도 없는 요소는 Graph API 가 거부한다("At least one
     // property must be set in addition to title"). 그 한 장 때문에 캐러셀 전체가
@@ -144,7 +170,7 @@ export function toCardElements(cards?: DmCard[]): Record<string, unknown>[] {
     if (subtitle) el.subtitle = subtitle.slice(0, CARD_TEXT_MAX);
     if (image) el.image_url = image;
     if (hasButton) {
-      const url = c.buttonUrl.trim();
+      const url = buttonUrl;
       el.default_action = { type: "web_url", url };
       el.buttons = [
         { type: "web_url", url, title: c.buttonLabel.trim().slice(0, BUTTON_LABEL_MAX) },
@@ -170,7 +196,8 @@ function cardsFallbackText(cards?: DmCard[]): string {
   for (const c of (Array.isArray(cards) ? cards : []).slice(0, CARD_MAX)) {
     if (!c) continue;
     const lines = [(c.title || "").trim(), (c.subtitle || "").trim()].filter(Boolean);
-    if (isValidLinkUrl(c.buttonUrl)) lines.push(c.buttonUrl.trim());
+    const buttonUrl = normalizeLinkUrl(c.buttonUrl);
+    if (buttonUrl) lines.push(buttonUrl);
     if (lines.length > 0) blocks.push(lines.join("\n"));
   }
   return blocks.join("\n\n").slice(0, TEXT_MAX);

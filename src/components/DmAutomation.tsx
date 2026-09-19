@@ -126,6 +126,15 @@ const CARD_TEXT_MAX = 80;
 /** 한 캐러셀에 담을 수 있는 카드 수. 발송기·서버 저장 한도와 같은 값이다. */
 const CARD_MAX_COUNT = 10;
 
+const cleanLinkInput = (raw: string): string => (raw || '')
+  .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+  .replace(/[：]/g, ':')
+  .replace(/[／]/g, '/')
+  .replace(/[．]/g, '.')
+  .trim()
+  .replace(/^[<>'\"“”‘’]+|[<>'\"“”‘’]+$/g, '')
+  .trim();
+
 /**
  * Graph API 는 http/https 절대 URL 만 링크 버튼·카드 이미지로 받는다.
  *
@@ -136,7 +145,7 @@ const CARD_MAX_COUNT = 10;
  */
 const isValidLinkUrl = (raw: string): boolean => {
   try {
-    const u = new URL((raw || '').trim());
+    const u = new URL(cleanLinkInput(raw));
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
     return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname);
   } catch {
@@ -150,8 +159,12 @@ const isValidLinkUrl = (raw: string): boolean => {
  * 서버 `_shared/instagram-dm.mts` 의 normalizeLinkUrl 과 규칙을 맞춰 둔다.
  */
 const normalizeLinkUrl = (raw: string): string => {
-  const trimmed = (raw || '').trim();
+  const trimmed = cleanLinkInput(raw);
   if (!trimmed) return '';
+  if (trimmed.startsWith('//')) {
+    const withScheme = `https:${trimmed}`;
+    return isValidLinkUrl(withScheme) ? withScheme : '';
+  }
   if (isValidLinkUrl(trimmed)) return trimmed;
   if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
     const withScheme = `https://${trimmed}`;
@@ -160,8 +173,18 @@ const normalizeLinkUrl = (raw: string): string => {
   return '';
 };
 
+const normalizeImageUrl = (raw: string): string => {
+  const value = cleanLinkInput(raw);
+  if (value.startsWith('/api/images/')) {
+    const origin = typeof window === 'undefined' ? 'https://picks-folio.com' : window.location.origin;
+    return `${origin.replace(/\/$/, '')}${value}`;
+  }
+  return normalizeLinkUrl(value);
+};
+
 /** 입력값이 링크로 쓸 수 없는 상태인지(비어 있지 않은데 정규화도 안 되는 경우). */
 const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !normalizeLinkUrl(raw);
+const imageUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !normalizeImageUrl(raw);
 
 /**
  * 이 카드가 실제로 발송되는지.
@@ -174,7 +197,7 @@ const linkUrlBroken = (raw: string): boolean => Boolean((raw || '').trim()) && !
  * 실제로는 2장만 도착하는 일이 없다.
  */
 const cardSendable = (c: DmCarouselCard): boolean =>
-  isValidLinkUrl(c.imageUrl) || Boolean(c.subtitle.trim()) ||
+  Boolean(normalizeImageUrl(c.imageUrl)) || Boolean(c.subtitle.trim()) ||
   Boolean(c.buttonLabel.trim() && isValidLinkUrl(c.buttonUrl));
 
 /** 인스타그램 피드 게시물에서 카드 이미지로 쓸 수 있는 사진 주소. (영상은 썸네일) */
@@ -494,7 +517,7 @@ const CarouselBuilder: React.FC<{
         // 카드 버튼도 링크가 잘못되면 발송 시 통째로 빠진다.
         const cardUrlInvalid =
           linkUrlBroken(c.buttonUrl) || (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim());
-        const imageInvalid = linkUrlBroken(c.imageUrl);
+        const imageInvalid = imageUrlBroken(c.imageUrl);
         const working = busy[c.id];
         const error = imageError[c.id];
         // 제목도 이미지도 없는 카드는 발송에서 빠진다. 저장 전에 알려 준다.
@@ -716,7 +739,11 @@ const CarouselBuilder: React.FC<{
               />
               <input
                 value={c.buttonUrl}
-                onChange={(e) => setCard(c.id, { buttonUrl: e.target.value })}
+                onChange={(e) => setCard(c.id, { buttonUrl: cleanLinkInput(e.target.value) })}
+                onBlur={(e) => {
+                  const value = normalizeLinkUrl(e.currentTarget.value);
+                  if (value) setCard(c.id, { buttonUrl: value });
+                }}
                 placeholder="버튼 링크 (https://...)"
                 className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
                   cardUrlInvalid ? 'border-red-300' : 'border-slate-200'
@@ -811,7 +838,7 @@ const AutomationEditor: React.FC<{
         linkUrlBroken(c.buttonUrl) ||
         (Boolean(c.buttonLabel.trim()) && !c.buttonUrl.trim()) ||
         // 카드 이미지도 인스타그램이 직접 받아가는 주소다. 잘못돼 있으면 서버가 저장을 거절한다.
-        linkUrlBroken(c.imageUrl),
+        imageUrlBroken(c.imageUrl),
     );
 
   /**
@@ -860,7 +887,7 @@ const AutomationEditor: React.FC<{
       cards: draft.cards.map((c) => ({
         ...c,
         buttonUrl: normalizeLinkUrl(c.buttonUrl),
-        imageUrl: normalizeLinkUrl(c.imageUrl),
+        imageUrl: normalizeImageUrl(c.imageUrl),
       })),
     });
   };
@@ -1213,7 +1240,11 @@ const AutomationEditor: React.FC<{
                           />
                           <input
                             value={b.url}
-                            onChange={(e) => updateButton(b.id, { url: e.target.value })}
+                            onChange={(e) => updateButton(b.id, { url: cleanLinkInput(e.target.value) })}
+                            onBlur={(e) => {
+                              const value = normalizeLinkUrl(e.currentTarget.value);
+                              if (value) updateButton(b.id, { url: value });
+                            }}
                             placeholder="https://..."
                             className={`bg-white border rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-pink-500 ${
                               urlInvalid ? 'border-red-300' : 'border-slate-200'
