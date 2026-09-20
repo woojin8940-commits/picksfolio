@@ -11,7 +11,7 @@ import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
-import { openExternalUrl } from '../utils/externalLink';
+import { openManagerChat } from '../utils/managerChat';
 
 /**
  * 협업 캠페인 — 인플루언서가 자기 캠페인을 진행하는 곳.
@@ -165,16 +165,6 @@ const collabBadge = (c: any): { label: string; cls: string } => {
   if (c.status === 'cancelled') return { label: '취소', cls: 'bg-slate-400 text-white' };
   return { label: '진행중', cls: 'bg-blue-600 text-white' };
 };
-
-/**
- * 담당자와의 대화 창구. 픽스폴리오 카카오톡 채널이다.
- *
- * 앱 안의 대화방으로 보내던 자리다. 그런데 담당자가 실제로 답하는 곳은 이 채널이라,
- * 인플루언서가 앱에 남긴 말은 한참 뒤에 읽히거나 결국 카카오톡으로 다시 옮겨 적어야
- * 했다. 조건·일정 문의는 답이 빨라야 다음 단계가 움직이니 사람이 있는 창구로 곧장
- * 보낸다.
- */
-const MANAGER_CHAT_URL = 'https://pf.kakao.com/_ziZxhX/chat';
 
 const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userName, initialCollabId }) => {
   const { language } = useLanguage();
@@ -390,10 +380,6 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     void apiService.markCollabEventsSeen(collabId, 'influencer');
     await refreshDetail(collabId);
     setDetailLoading(false);
-  };
-
-  const openManagerThread = () => {
-    openExternalUrl(MANAGER_CHAT_URL);
   };
 
   // 협업이 열린 캠페인은 지원 목록에서 뺀다. 같은 캠페인이 "지원 검토 중"과
@@ -680,7 +666,7 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                     {isEn ? 'Questions on terms or schedule?' : '조건 · 일정 문의는 담당자에게 보내 주세요.'}
                   </p>
                   <button
-                    onClick={openManagerThread}
+                    onClick={openManagerChat}
                     className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 text-[11px] font-black hover:border-slate-900 hover:text-slate-900 transition-colors flex-shrink-0"
                   >
                     {isEn ? 'Chat with manager' : '담당자와 대화'}

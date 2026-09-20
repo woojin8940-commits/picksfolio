@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getAnalyticsForRange } from '../services/analyticsService';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { getSiteSettings } from '../services/settingsService';
@@ -71,6 +71,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
    * 협업 타임라인(메시지)뿐이었다. 진행사항도 같은 방식으로 표시한다.
    */
   const [collabUnread, setCollabUnread] = useState(0);
+  /**
+   * 아래 막대에서 지금 보고 있는 메뉴를 보이는 자리로 끌어온다.
+   *
+   * 막대는 한 화면에 다섯 칸쯤만 보이는 가로 줄이다. '오픈일정' 처럼 뒤쪽 메뉴를
+   * 열어 두고 화면을 새로 그리면(새로고침, 다른 화면에서 돌아오기) 막대는 맨
+   * 왼쪽에서 시작하므로, 켜져 있는 칸이 화면 밖에 있어 지금 어디인지 알 수 없다.
+   *
+   * scrollIntoView 대신 막대의 scrollLeft 만 직접 옮긴다 — scrollIntoView 는
+   * 조건에 따라 페이지까지 함께 움직여서, 메뉴를 누를 때마다 본문이 아래로
+   * 끌려가는 일이 생긴다.
+   */
+  const mobileNavRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = mobileNavRowRef.current;
+    if (!row) return;
+    const active = row.querySelector<HTMLElement>('[data-nav-active="true"]');
+    if (!active) return;
+    const centered = active.offsetLeft - (row.clientWidth - active.offsetWidth) / 2;
+    const max = Math.max(0, row.scrollWidth - row.clientWidth);
+    row.scrollTo({ left: Math.min(Math.max(0, centered), max), behavior: 'smooth' });
+  }, [currentSubView]);
+
   const [startDate, setStartDate] = useState(() => todayInSeoul());
   const [endDate, setEndDate] = useState(() => todayInSeoul());
 
@@ -324,29 +346,47 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </aside>
 
-      {/* Mobile Bottom Navigation */}
+      {/* Mobile Bottom Navigation
+
+          예전에는 네 칸 + '더보기' 였고, 나머지 일곱 메뉴는 '더보기'를 눌러 열리는
+          서랍 안에만 있었다. 그래서 협업 캠페인 · 타임라인처럼 매일 쓰는 자리도
+          두 번 눌러야 닿았고, 메뉴가 거기 있다는 것 자체를 모르는 사람이 있었다.
+          이제 메뉴를 전부 한 줄에 늘어놓고 옆으로 넘겨 보게 한다 — 브랜드
+          대시보드(BusinessEnterpriseDashboard)의 아래 막대와 같은 방식이다.
+          안 읽은 표시도 '더보기'에 합쳐 두지 않고 각자 자기 칸에 붙는다.
+
+          서랍은 그대로 남는다. 대시보드 머리말의 햄버거 버튼으로 열리고, 긴 이름과
+          로그아웃이 그 안에 있다. */}
       <nav className="md:hidden fixed bottom-0 left-0 w-full bg-[#0b1221] text-white z-[100] border-t border-white/10 fixed-bottom-nav">
-        <div className="grid grid-cols-5 px-1 py-2 gap-0.5">
-          <MobileNavItem icon="🏠" label={t('nav.home', '홈', 'Home')} active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
-          <MobileNavItem
-            icon="🔗"
-            label={t('nav.manage', '관리', 'Manage')}
-            active={currentSubView === 'links'}
-            onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
-            onMouseEnter={() => prefetchLinkData(userName)}
-          />
-          <MobileNavItem icon="📩" label={t('nav.dmAutomation', '자동DM', 'DM')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
-          <MobileNavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
-          <MobileNavItem
-            icon="⋯"
-            label={t('nav.more', '더보기', 'More')}
-            active={['my-collabs','business','timeline','calendar','open-schedule','settlement','membership','insights'].includes(currentSubView)}
-            onClick={() => setIsMobileMenuOpen(true)}
-            /* 협업 타임라인과 캠페인 협업이 모두 이 서랍 안에 있다. 둘을 합쳐서
-               보여 주지 않으면, 진행사항에 새 피드백이 왔을 때 아래 막대에는 아무
-               표시가 없어 서랍을 열어 볼 이유가 없다. */
-            badge={timelineUnread + collabUnread}
-          />
+        <div className="relative">
+          <div
+            ref={mobileNavRowRef}
+            className="flex overflow-x-auto scrollbar-hide overscroll-x-contain px-1 py-2 gap-0.5"
+          >
+            <MobileNavItem icon="🏠" label={t('nav.home', '홈', 'Home')} active={currentSubView === 'dashboard'} onClick={() => { onNavigateDashboard(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem
+              icon="🔗"
+              label={t('nav.manage', '관리', 'Manage')}
+              active={currentSubView === 'links'}
+              onClick={() => { onNavigateLinks(); setIsMobileMenuOpen(false); }}
+              onMouseEnter={() => prefetchLinkData(userName)}
+            />
+            <MobileNavItem icon="📩" label={t('nav.barDm', '자동DM', 'DM')} active={currentSubView === 'dm-automation'} onClick={() => { onNavigateDmAutomation(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem icon="📊" label={t('nav.insights', '인사이트', 'Insights')} active={currentSubView === 'insights'} onClick={() => { onNavigateInsights(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem icon="📢" label={t('nav.campaigns', '캠페인', 'Campaigns')} active={currentSubView === 'campaigns'} onClick={() => { onNavigateCampaigns(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem icon="🤝" label={t('nav.barCollabs', '협업', 'Collabs')} active={currentSubView === 'my-collabs'} onClick={() => { onNavigateMyCollabs(); setIsMobileMenuOpen(false); }} badge={collabUnread} />
+            <MobileNavItem icon="📨" label={t('nav.barInbox', '수신함', 'Inbox')} active={currentSubView === 'business'} onClick={() => { onNavigateBusiness(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem icon="💬" label={t('nav.barTimeline', '타임라인', 'Timeline')} active={currentSubView === 'timeline'} onClick={() => { onNavigateTimeline(); setIsMobileMenuOpen(false); }} badge={timelineUnread} />
+            <MobileNavItem icon="📅" label={t('nav.barCalendar', '협업현황', 'Calendar')} active={currentSubView === 'calendar'} onClick={() => { onNavigateCalendar(); setIsMobileMenuOpen(false); }} />
+            <MobileNavItem icon="🗓️" label={t('nav.barSchedule', '오픈일정', 'Schedule')} active={currentSubView === 'open-schedule'} onClick={() => { onNavigateOpenSchedule(); setIsMobileMenuOpen(false); }} />
+            {!isNativeApp() && (
+              <MobileNavItem icon="💎" label={t('nav.barMembership', '멤버십', 'Plan')} active={currentSubView === 'membership'} onClick={() => { onNavigateMembership(); setIsMobileMenuOpen(false); }} />
+            )}
+          </div>
+          {/* 오른쪽 끝을 흐리게 덮어 "여기서 끝이 아니다" 를 보여 준다. 잘린 칸이
+              배경색으로 사라지면 막대가 딱 맞게 찬 것처럼 보여서 넘겨 볼 생각을
+              하지 않는다. 손가락은 이 위를 그냥 지나가야 하므로 눌리지 않게 둔다. */}
+          <div className="pointer-events-none absolute top-0 right-0 h-full w-8 bg-gradient-to-l from-[#0b1221] to-transparent" />
         </div>
       </nav>
 
@@ -536,17 +576,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 };
 
-/* 아래 막대의 칸 하나. 네 칸이 화면을 넷으로 나누니 한 칸은 320px 폰에서 약
-   76px 뿐이고, 가장 긴 이름('비즈니스 수신함')이 재어 보면 74.8px 로 겨우
-   1.7px 만 남는다 — 지금은 넘치지 않지만 여유가 없다. whitespace-nowrap 을
-   떼어 두면 이름이 조금만 길어지거나 글꼴이 바뀌어도 옆 칸으로 번지는 대신
-   자기 칸 안에서 접힌다(body 의 word-break: keep-all 이 낱말은 안 쪼갠다).
-   지금 쓰는 이름들은 그대로 한 줄이라 보이는 모양은 달라지지 않는다. */
+/* 아래 막대의 칸 하나.
+
+   격자 한 칸이던 자리가 가로로 넘기는 줄의 한 칸이 됐다. 그래서 두 가지가 바뀐다.
+   칸은 내용만큼만 넓히고 줄어들지 않게 두고(flex-shrink-0), 이름은 한 줄로 못
+   박는다(whitespace-nowrap) — 접히면 칸 높이가 저마다 달라져 막대가 울퉁불퉁해진다.
+   min-w 는 '홈' 처럼 짧은 이름도 손가락이 닿을 만한 너비를 갖게 하는 바닥값이다.
+
+   data-nav-active 는 막대를 켜진 칸 쪽으로 끌어올 때 그 칸을 찾는 표식이다. */
 const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; onClick?: () => void; onMouseEnter?: () => void; badge?: number }> = ({ icon, label, active, onClick, onMouseEnter, badge }) => (
   <button
     onClick={onClick}
     onMouseEnter={onMouseEnter}
-    className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all min-h-[44px] relative min-w-0 ${active ? 'text-blue-400' : 'text-slate-500'}`}
+    data-nav-active={active ? 'true' : undefined}
+    className={`flex flex-col items-center justify-center flex-shrink-0 min-w-[56px] px-2 py-1.5 rounded-xl transition-all min-h-[44px] relative ${active ? 'text-blue-400 bg-white/5' : 'text-slate-500'}`}
   >
     <span className="text-lg leading-none mb-0.5 relative">
       {icon}
@@ -554,7 +597,7 @@ const MobileNavItem: React.FC<{ icon: string; label: string; active?: boolean; o
         <span className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[8px] font-bold min-w-[14px] h-[14px] flex items-center justify-center px-0.5 rounded-full">{badge > 99 ? '99+' : badge}</span>
       )}
     </span>
-    <span className="text-[11px] font-black tracking-tighter leading-tight text-center w-full">{label}</span>
+    <span className="text-[11px] font-black tracking-tighter leading-tight text-center whitespace-nowrap">{label}</span>
   </button>
 );
 
