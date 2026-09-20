@@ -343,6 +343,37 @@ h1, h2, h3, h4, h5, h6 {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* 아래에서 올라오는 시트(지원 정보 입력 등).
+
+   이 프로젝트에는 tailwindcss-animate 플러그인이 없어서 JSX 에 흔히 적혀 있는
+   `animate-in slide-in-from-bottom` 은 아무 일도 하지 않는다. 시트가 소리 없이
+   나타나면 화면 아래쪽에 원래 있던 막대가 바뀐 것처럼 보이므로, 올라오는 동작만
+   직접 그린다 — "아래에서 새 것이 올라왔다" 가 눈에 보여야 입력칸을 찾는다.
+   움직임을 줄여 달라고 설정해 둔 사용자에게는 움직이지 않고 그대로 놓는다. */
+@keyframes sheet-rise {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.sheet-rise {
+  animation: sheet-rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* 데스크톱에서는 같은 시트가 화면 한가운데에 놓인다. 거기서 아래에서 밀려 올라오면
+   어디서 왔는지 알 수 없는 움직임이라, 가만히 나타나게 둔다. */
+@media (min-width: 769px) {
+  .sheet-rise {
+    animation: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-rise {
+    animation: none;
+  }
+}
+
 /* When a collaboration conversation (or AI chat) is open, hide the app's
    mobile bottom nav so the message composer can rest flush at the very bottom
    of the screen. The conversation provides its own back button. */

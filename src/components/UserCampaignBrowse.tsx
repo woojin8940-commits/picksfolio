@@ -8,6 +8,7 @@ import Toast from './Toast';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useDragScroll } from '../hooks/useDragScroll';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { openManagerChat } from '../utils/managerChat';
 
 interface Campaign {
   id: string;
@@ -276,6 +277,10 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
     setSelectedCampaign(null);
     setShowApplyForm(false);
   });
+  /* 지원 시트는 상세 위에 겹쳐 열린다. 뒤로가기 한 번은 시트만 닫고 상세는 남긴다 —
+     입력칸을 잘못 열었을 때 캠페인 설명까지 같이 사라지면 처음부터 다시 찾아야 한다.
+     (useCloseOnBack 은 겹친 창을 위에서부터 하나씩 닫는다.) */
+  useCloseOnBack(showApplyForm, () => setShowApplyForm(false));
 
   const loadMyApplications = useCallback(async () => {
     if (!userName) return;
@@ -800,18 +805,16 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                           : (isEn ? 'Your manager will guide the process.' : '담당자가 진행을 안내드립니다.')}
                       </p>
                     </div>
+                    {/* 담당자는 픽스폴리오 카카오톡 채널에서 답한다. 여기만 앱 안
+                        타임라인으로 보내던 탓에, 협업 캠페인 화면에서 누른 같은 이름의
+                        버튼과 서로 다른 곳으로 갈렸다 — 이쪽에 남긴 문의는 담당자가
+                        늦게 보거나 아예 놓쳤다. 협업 캠페인 화면과 같은 창구로 보낸다. */}
                     <button
-                      onClick={() => {
-                        const collabId = collabByCampaign[selectedCampaign.id];
-                        const proposalId = collabId
-                          ? `support_inf_${collabId}`
-                          : `campaign_${selectedCampaign.id}_${userName.toLowerCase()}`;
-                        window.dispatchEvent(new CustomEvent('navigate-timeline', { detail: { proposalId } }));
-                      }}
+                      onClick={openManagerChat}
                       className="w-full bg-slate-900 hover:bg-slate-700 text-white py-4 rounded-2xl font-black text-sm transition-all shadow-[0_12px_28px_-10px_rgba(15,23,42,0.75)] hover:shadow-[0_16px_34px_-10px_rgba(15,23,42,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                      {collabByCampaign[selectedCampaign.id] ? (isEn ? 'Chat with Manager' : '담당자와 대화하기') : (isEn ? 'Chat' : '대화하기')}
+                      {isEn ? 'Chat with Manager' : '담당자와 대화하기'}
                     </button>
                   </div>
                 ) : (
@@ -834,69 +837,6 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                   </div>
                   <p className="text-base font-black text-slate-600">{isEn ? 'Campaign Closed' : '마감된 캠페인'}</p>
                   <p className="text-sm text-slate-400 font-medium mt-1">{closedReason}</p>
-                </div>
-              </div>
-            )}
-
-            {!isApplied && !isClosed && showApplyForm && (
-              <div className="py-5">
-                <div className="border border-blue-200 rounded-2xl p-5 md:p-6 bg-gradient-to-b from-blue-50/50 to-white space-y-4 shadow-[0_12px_30px_-14px_rgba(37,99,235,0.5)]">
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    {isEn ? 'Apply for Campaign' : '캠페인 지원하기'}
-                  </h3>
-                  <p className="text-xs text-slate-400 font-medium -mt-2">{isEn ? 'Enter information for brand review' : '브랜드가 검토할 정보를 입력해 주세요'}</p>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Contact Info' : '연락처'} <span className="text-rose-500">*</span></label>
-                    <input
-                      type="text"
-                      value={applyForm.contact}
-                      onChange={e => setApplyForm(p => ({ ...p, contact: e.target.value }))}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
-                      placeholder={isEn ? 'Email or phone number' : '이메일 또는 전화번호'}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Instagram URL' : '인스타그램 링크'} <span className="text-rose-500">*</span></label>
-                    <input
-                      type="text"
-                      inputMode="url"
-                      autoCapitalize="none"
-                      value={applyForm.instagram_url}
-                      onChange={e => setApplyForm(p => ({ ...p, instagram_url: e.target.value }))}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
-                      placeholder="https://instagram.com/username"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'YouTube / Naver URL' : '유튜브 / 네이버 링크'} <span className="text-slate-400 font-medium">({isEn ? 'Optional' : '선택'})</span></label>
-                    <input
-                      type="text"
-                      inputMode="url"
-                      autoCapitalize="none"
-                      value={applyForm.youtube_naver_url}
-                      onChange={e => setApplyForm(p => ({ ...p, youtube_naver_url: e.target.value }))}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
-                      placeholder={isEn ? 'https://youtube.com/... or blog link' : 'https://youtube.com/... 또는 https://blog.naver.com/...'}
-                    />
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      onClick={handleApply}
-                      disabled={applying || !applyForm.contact.trim() || !applyForm.instagram_url.trim()}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:shadow-none shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_14px_30px_-10px_rgba(37,99,235,0.85)] hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
-                    >
-                      {applying ? (
-                        <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {isEn ? 'Submitting...' : '지원 중...'}</>
-                      ) : (isEn ? 'Submit Application' : '지원하기')}
-                    </button>
-                    <button
-                      onClick={() => setShowApplyForm(false)}
-                      className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 transition-colors"
-                    >
-                      {isEn ? 'Cancel' : '취소'}
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
@@ -924,6 +864,108 @@ const UserCampaignBrowse: React.FC<UserCampaignBrowseProps> = ({ userName, onBac
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                 {isEn ? 'Apply Now' : '지원하기'}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* 지원 정보 입력 — 아래에서 올라오는 시트.
+
+            예전에는 이 입력칸이 상세 내용의 맨 끝, '캠페인 정보' 표 아래에 끼어
+            있었다. 그런데 '지원하기' 는 화면 아래에 고정된 막대의 버튼이라 사람은
+            상세 어디쯤에서든 누르는데, 누르면 그 막대만 사라지고 입력칸은 스크롤
+            한참 아래에 그려졌다 — 눈에 보이는 변화가 "버튼이 없어졌다" 뿐이어서
+            지원이 안 된다는 문의가 여기서 나왔다. 누른 자리 바로 위로 시트를
+            올려서, 누른 것과 입력할 것을 같은 자리에 둔다.
+
+            z-[190] 인 이유: 대시보드의 모바일 아래 막대가 z-[100], 이 화면의 고정
+            막대가 z-[110] 이라 그보다 위여야 시트 아래쪽(지원 버튼)이 가려지지
+            않는다. 서랍(z-[200])보다는 아래로 둔다. */}
+        {!isApplied && !isClosed && showApplyForm && (
+          <div className="fixed inset-0 z-[190] flex items-end md:items-center justify-center p-0 md:p-6">
+            <div
+              className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
+              onClick={() => setShowApplyForm(false)}
+            />
+            <div className="modal-card relative w-full md:max-w-lg bg-white rounded-t-3xl md:rounded-3xl shadow-[0_-18px_44px_-16px_rgba(15,23,42,0.55)] max-h-[85vh] modal-maxh-85 overflow-hidden sheet-rise">
+              <div className="shrink-0 px-5 pt-3 pb-4 border-b border-slate-100">
+                {/* 손잡이. 아래에서 올라온 시트라는 것을 말 없이 알려 준다. */}
+                <div className="md:hidden w-10 h-1.5 bg-slate-200 rounded-full mx-auto mb-3" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                      <svg className="w-5 h-5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      {isEn ? 'Apply for Campaign' : '캠페인 지원하기'}
+                    </h3>
+                    <p className="text-xs text-slate-400 font-medium mt-1 truncate">{selectedCampaign.title}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowApplyForm(false)}
+                    aria-label={isEn ? 'Close' : '닫기'}
+                    className="shrink-0 w-11 h-11 md:w-9 md:h-9 -mt-1.5 -mr-2 md:mt-0 md:mr-0 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 text-2xl md:text-xl"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <div className="modal-body px-5 py-4 space-y-4">
+                <p className="text-xs text-slate-400 font-medium">{isEn ? 'Enter information for brand review' : '브랜드가 검토할 정보를 입력해 주세요'}</p>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Contact Info' : '연락처'} <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    value={applyForm.contact}
+                    onChange={e => setApplyForm(p => ({ ...p, contact: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
+                    placeholder={isEn ? 'Email or phone number' : '이메일 또는 전화번호'}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'Instagram URL' : '인스타그램 링크'} <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    inputMode="url"
+                    autoCapitalize="none"
+                    value={applyForm.instagram_url}
+                    onChange={e => setApplyForm(p => ({ ...p, instagram_url: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
+                    placeholder="https://instagram.com/username"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5">{isEn ? 'YouTube / Naver URL' : '유튜브 / 네이버 링크'} <span className="text-slate-400 font-medium">({isEn ? 'Optional' : '선택'})</span></label>
+                  <input
+                    type="text"
+                    inputMode="url"
+                    autoCapitalize="none"
+                    value={applyForm.youtube_naver_url}
+                    onChange={e => setApplyForm(p => ({ ...p, youtube_naver_url: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white"
+                    placeholder={isEn ? 'https://youtube.com/... or blog link' : 'https://youtube.com/... 또는 https://blog.naver.com/...'}
+                  />
+                </div>
+              </div>
+
+              {/* 버튼 줄은 시트 안에 붙여 둔다(shrink-0). 입력칸이 길어지거나 자판이
+                  올라와도 '지원하기' 는 늘 화면 안에 남는다. */}
+              <div className="shrink-0 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] border-t border-slate-100 flex gap-2">
+                <button
+                  onClick={() => setShowApplyForm(false)}
+                  className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-black text-sm text-slate-600 transition-colors flex-shrink-0"
+                >
+                  {isEn ? 'Cancel' : '취소'}
+                </button>
+                <button
+                  onClick={handleApply}
+                  disabled={applying || !applyForm.contact.trim() || !applyForm.instagram_url.trim()}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-xl font-black text-sm transition-all disabled:opacity-50 disabled:shadow-none shadow-[0_10px_24px_-10px_rgba(37,99,235,0.75)] hover:shadow-[0_14px_30px_-10px_rgba(37,99,235,0.85)] flex items-center justify-center gap-2"
+                >
+                  {applying ? (
+                    <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {isEn ? 'Submitting...' : '지원 중...'}</>
+                  ) : (isEn ? 'Submit Application' : '지원하기')}
+                </button>
+              </div>
             </div>
           </div>
         )}

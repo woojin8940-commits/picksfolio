@@ -215,6 +215,17 @@ const translations: Record<string, { ko: string; en: string }> = {
   'nav.signup': { ko: '회원가입', en: 'Sign Up' },
   'nav.managerDashboard': { ko: '담당자 대시보드', en: 'Manager Dashboard' },
   'nav.more': { ko: '더보기', en: 'More' },
+  /* 모바일 아래 막대용 짧은 이름. 막대는 가로로 넘겨 보는 한 줄이라 칸 하나에
+     들어가는 글자 수가 얼마 안 된다 — 사이드바의 긴 이름('비즈니스 수신함',
+     '협업 타임라인')을 그대로 쓰면 칸 두세 개 너비를 혼자 차지해서, 한 화면에
+     보이는 메뉴가 두 개로 줄어든다. */
+  'nav.barDm': { ko: '자동DM', en: 'DM' },
+  'nav.barCollabs': { ko: '협업', en: 'Collabs' },
+  'nav.barInbox': { ko: '수신함', en: 'Inbox' },
+  'nav.barTimeline': { ko: '타임라인', en: 'Timeline' },
+  'nav.barCalendar': { ko: '협업현황', en: 'Calendar' },
+  'nav.barSchedule': { ko: '오픈일정', en: 'Schedule' },
+  'nav.barMembership': { ko: '멤버십', en: 'Plan' },
   'nav.myPage': { ko: '내 페이지 보기', en: 'View My Page' },
   'nav.myLink': { ko: '내 링크', en: 'My Link' },
 
