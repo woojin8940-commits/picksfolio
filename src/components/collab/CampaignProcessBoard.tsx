@@ -583,6 +583,14 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   const [caption, setCaption] = useState('');
   const [uploadLink, setUploadLink] = useState('');
   const [adCode, setAdCode] = useState('');
+  /**
+   * 클린본 영상 파일 — 자막·로고가 얹히지 않은 원본.
+   *
+   * 브랜드가 이 게시물을 자기 광고로 돌릴 때 파트너십 코드와 함께 필요한 파일이다.
+   * 예전에는 받을 칸이 없어서 카카오톡으로 오갔고, 캠페인이 끝난 뒤에는 대화방을
+   * 뒤지지 않으면 찾을 수 없었다. 게시물 링크·코드를 남기는 그 자리에서 같이 받는다.
+   */
+  const [cleanFile, setCleanFile] = useState<File | null>(null);
 
   // ── 6. 정산 ─────────────────────────────────────────────────────────
   /**
@@ -777,6 +785,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
     if (ok) {
       if (step === 'plan') setPlanFile(null);
       if (step === 'video') setVideoFile(null);
+      if (step === 'upload') setCleanFile(null);
       // 다 적은 칸은 접는다. 펼쳐진 채로 남으면 아직 할 일이 남은 것처럼 보이고,
       // 접힌 줄에 색이 들어오는 것으로 "올라갔다"가 한눈에 읽힌다.
       setOpen('');
@@ -1234,6 +1243,26 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
   /** 영상이면 재생 칸, 나머지(PDF·이미지)는 지금까지처럼 줄 하나. */
   const renderMediaFile = (url: string, name: string) =>
     isVideoFile(url, name) ? renderVideoFile(url, name) : renderFileLink(url, name);
+
+  /**
+   * 내려받기 전용 줄 하나. 클린본처럼 "보는 것"이 아니라 "받아서 쓰는" 파일에 쓴다.
+   *
+   * 초안 영상 칸처럼 재생기를 세우지 않는 이유는, 클린본은 검수 대상이 아니라 광고
+   * 소재로 넘길 원본이라서다 — 브랜드가 여기서 하려는 일은 파일을 자기 기기로 받는
+   * 것 하나고, 업로드 단계의 작은 칸에 재생기가 또 서면 코드·확인 버튼이 밀려난다.
+   */
+  const renderDownloadFile = (url: string, name: string) => (
+    <a
+      key={url}
+      href={downloadHref(url, name)}
+      download={name}
+      className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 hover:border-slate-900 transition-colors"
+    >
+      <span className="text-sm">🎬</span>
+      <span className="min-w-0 flex-1 text-xs font-bold text-slate-800 truncate">{name}</span>
+      <span className="text-[10px] font-black text-blue-600 flex-shrink-0">다운로드</span>
+    </a>
+  );
 
   /**
    * 잠긴 단계의 본문. 입력칸 자리에 "무엇이 끝나야 열리는지" 한 칸이 선다.
@@ -2050,7 +2079,7 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 </p>
                 <p className="text-[10px] font-bold text-emerald-700/80 mt-1 leading-relaxed">
                   검토를 마친 초안 영상과 본문 캡션을 그대로 올리시면 됩니다. 올리는 날짜는 담당자와
-                  맞춰 주세요. 올린 뒤 아래에 게시물 링크와 광고 파트너십 코드를 남겨 주세요.
+                  맞춰 주세요. 올린 뒤 아래에 게시물 링크와 광고 파트너십 코드, 클린본 영상을 남겨 주세요.
                 </p>
                 {videoWork?.payload?.caption && (
                   <div className="mt-2">
@@ -2068,26 +2097,71 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 <Field label="광고 파트너십 코드">
                   <input value={adCode} onChange={e => setAdCode(e.target.value)} placeholder="브랜디드 콘텐츠 파트너십 코드" className={inputCls} />
                 </Field>
+                {/*
+                  클린본. 코드 칸 바로 아래에 둔다 — 브랜드가 광고로 돌릴 때 코드와
+                  클린본을 함께 쓰므로, 한쪽만 받고 나머지를 나중에 요청하면 그 왕복이
+                  다시 카카오톡에서 일어난다.
+                */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-black text-slate-400">클린본 영상 (선택)</p>
+                  {collab.cleanFileUrl && !cleanFile && (
+                    <>
+                      {renderDownloadFile(collab.cleanFileUrl, collab.cleanFileName || '클린본 영상')}
+                      <p className="text-[10px] font-bold text-emerald-600">
+                        올려 둔 클린본이 있습니다. 새 파일을 고르면 이 파일을 대신합니다.
+                      </p>
+                    </>
+                  )}
+                  {renderFilePicker({
+                    id: `clean-file-${collabId}`,
+                    accept: VIDEO_ACCEPT,
+                    file: cleanFile,
+                    onPick: setCleanFile,
+                    label: collab.cleanFileUrl ? '클린본 다시 선택' : '클린본 파일 선택',
+                    hint: `자막·로고 없는 원본 영상 · mp4 · mov · webm · 최대 ${UPLOAD_MAX_MB}MB`,
+                  })}
+                </div>
                 <button
-                  onClick={() => saveWork('upload', { link: uploadLink, adCode }, null)}
+                  onClick={() => {
+                    // 링크는 서버도 막지만, 여기서 먼저 본다 — 클린본을 먼저 올리고
+                    // 나서 "게시물 링크를 입력해 주세요"로 거절되면 수백 MB 를 그냥
+                    // 올려보낸 것이 된다(모바일 데이터로는 더 아프다).
+                    if (!uploadLink.trim()) {
+                      onNotify('게시물 링크를 입력해 주세요.', 'error');
+                      return;
+                    }
+                    void saveWork('upload', { link: uploadLink.trim(), adCode }, cleanFile);
+                  }}
                   disabled={busy}
                   className="w-full px-4 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-black disabled:opacity-40 hover:bg-slate-700 transition-colors"
                 >
                   업로드 정보 등록
                 </button>
+                {renderUploadProgress()}
               </>
             ) : (
               <>
-                <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-                  <p className="text-[10px] font-black text-slate-400 mb-1">광고 파트너십 코드</p>
-                  {collab.adCode ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <code className="text-xs font-bold text-slate-800 break-all">{collab.adCode}</code>
-                      <button onClick={() => void copyToClipboard(collab.adCode, '광고 코드')} className="text-[10px] font-black text-blue-600 flex-shrink-0">복사</button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 font-medium">인플루언서가 코드를 공유하면 여기에 표시됩니다.</p>
-                  )}
+                <div className="rounded-lg bg-slate-50 px-3 py-2.5 space-y-2">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 mb-1">광고 파트너십 코드</p>
+                    {collab.adCode ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <code className="text-xs font-bold text-slate-800 break-all">{collab.adCode}</code>
+                        <button onClick={() => void copyToClipboard(collab.adCode, '광고 코드')} className="text-[10px] font-black text-blue-600 flex-shrink-0">복사</button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 font-medium">인플루언서가 코드를 공유하면 여기에 표시됩니다.</p>
+                    )}
+                  </div>
+                  {/* 클린본은 코드와 한 칸에 둔다. 광고로 돌릴 때 두 개를 같이 챙긴다. */}
+                  <div className="pt-2 border-t border-slate-200/70">
+                    <p className="text-[10px] font-black text-slate-400 mb-1">클린본 영상</p>
+                    {collab.cleanFileUrl ? (
+                      renderDownloadFile(collab.cleanFileUrl, collab.cleanFileName || '클린본 영상')
+                    ) : (
+                      <p className="text-xs text-slate-400 font-medium">인플루언서가 클린본을 올리면 여기에서 받을 수 있습니다.</p>
+                    )}
+                  </div>
                 </div>
                 {collab.uploadUrl && !collab.uploadConfirmedAt && (
                   <button
