@@ -8,7 +8,7 @@ import {
 import { requireManager, resolveIdentities } from "./_shared/manager-auth.mts";
 import { parseAmount } from "./_shared/collab-records.mts";
 import { createCollabForApplication, logCollabEvent, norm } from "./_shared/collab-workflow.mts";
-import { buildSnapshots, mirrorCollabProposal } from "./_shared/campaign-listup.mts";
+import { buildSnapshots, loadManagerContacts, mirrorCollabProposal } from "./_shared/campaign-listup.mts";
 import { isOpenApplyMode, normalizeRewardMode } from "./_shared/reward-mode.mts";
 
 /**
@@ -84,16 +84,29 @@ export default async (req: Request) => {
       // 없으면 등록서에 적어 둔 값이 온다 — 어느 쪽인지는 metricsSource 로 구분된다.
       // 화면이 사람마다 따로 조회하면 목록 하나에 요청이 수십 개 나가므로 한 번에 모은다.
       const rows = (result as any[]) || [];
-      const snapshots = await buildSnapshots(
-        db,
-        rows.map((r) => String(r.applicant_username || "")),
-      );
+      const usernames = rows.map((r) => String(r.applicant_username || ""));
+      /**
+       * 담당자 응답에만 연락처를 싣는다.
+       *
+       * 담당자가 수락된 지원자를 놓고 하는 다음 한 걸음은 전화나 카톡이다. 그 번호는
+       * 등록서 · 이 캠페인의 지원서 · 픽스폴리오 페이지에 흩어져 있어서, 예전에는
+       * 담당자가 명단 화면과 등록서 화면을 번갈아 열어 사람마다 찾아야 했다.
+       * 브랜드 응답에는 이 값이 아예 들어가지 않는다 — 브랜드가 보는 것은 지원서에
+       * 적힌 연락처뿐이고, 등록서에 적어 낸 번호는 픽스폴리오에 준 것이다.
+       */
+      const [snapshots, contacts] = await Promise.all([
+        buildSnapshots(db, usernames),
+        viewerRole === "manager"
+          ? loadManagerContacts(db, usernames, campaign_id)
+          : Promise.resolve(new Map()),
+      ]);
 
       const rewardMode = normalizeRewardMode(campaign.reward_mode);
       return Response.json({
         applicants: rows.map((r) => ({
           ...r,
           insights: snapshots.get(norm(r.applicant_username)) || null,
+          contact_card: contacts.get(norm(r.applicant_username)) || null,
         })),
         viewerRole,
         // 브랜드 화면이 "수락" 버튼과 "추천 의견" 중 무엇을 보여줄지 여기서 갈린다.

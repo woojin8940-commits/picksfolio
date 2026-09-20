@@ -2407,7 +2407,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                 <span className={`text-slate-300 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
               )}
             </button>
-            {isOpen && <div className="px-4 pb-4">{renderStep(s.key)}</div>}
+            {/* 펼친 내용은 머리줄에서 살짝 떼어 놓는다.
+                내 차례인 단계는 머리줄이 파란 칸이고(bg-blue-50), 그 아래 첫 줄도
+                파란 안내 칸인 경우가 많다("제품을 받을 주소를 입력해 주세요").
+                여백이 없으면 모바일에서 두 파란 칸이 한 덩어리로 붙어 보여, 안내문이
+                머리줄에 눌린 것처럼 읽힌다. */}
+            {isOpen && <div className="px-4 pt-2 pb-4">{renderStep(s.key)}</div>}
           </div>
         );
       })}

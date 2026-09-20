@@ -81,14 +81,28 @@ export type RewardModeDef = {
    */
   pickInfluencer: boolean;
   /**
-   * 정산이 붙는 방식인지.
+   * 화면 안에서 협업을 굴리는 방식인지 — 진행 단계 · 인사이트 · 정산.
    *
-   * 제품 협찬형은 지급할 돈이 없다 — 광고비도, 판매 수수료도 없다. 그런 캠페인에
-   * 정산 탭을 열어 두면 브랜드는 "언젠가 채워지는 칸"으로 읽고 지급 일정을 기다리게
-   * 된다. 진행 단계에도 정산 자리가 생기지 않는다 — 정산은 업로드를 확인하는 시점에
-   * 예약되는데, 지급액이 0원이면 그 예약을 만들지 않는다(api-collab-workflow.mts).
+   * 광고비 지급형만 켜져 있다. 제품 협찬형과 커머스형은 수락한 뒤의 일을 담당자가
+   * 전화·카톡으로 브랜드와 인플루언서 양쪽에 직접 연락해 진행한다. 그런 캠페인에
+   * 단계 보드와 인사이트·정산 탭을 열어 두면, 아무도 누르지 않는 단계가 첫 칸에
+   * 멈춰 있고 빈 인사이트·정산 칸은 "언젠가 채워지는 칸"으로 읽힌다. 브랜드는
+   * 이미 담당자와 통화로 끝낸 일을 화면에서 다시 기다리게 된다.
+   *
+   * 협업 본체와 단계는 수락 시점에 그대로 만들어진다(collab-workflow.mts). 기록은
+   * 남기고 화면만 감추는 쪽을 골랐다 — 진행 방식이 바뀌어도 지난 협업을 되살릴 수
+   * 있어야 하고, 담당자 콘솔의 협업 목록이 이 데이터를 읽는다.
    */
-  hasSettlement: boolean;
+  hasWorkroom: boolean;
+  /**
+   * 콘텐츠 형식(숏폼 · 피드)을 브랜드가 못 박는지.
+   *
+   * 커머스형은 끈다. 판매가 목적이라 인플루언서가 자기 계정에서 가장 잘 팔리는
+   * 형태로 자유롭게 만드는 것이 낫고, 실제로도 릴스와 피드를 함께 올린다. 형식을
+   * 하나 고르게 하면 지키지 못할 약속이 캠페인에 박히고, 담당자가 명단을 올릴 때
+   * 그 형식의 단가로 제안이 나간다 — 커머스형의 보수는 단가가 아니라 수수료다.
+   */
+  hasContentFormat: boolean;
   /** 지원/모집 인원 칸에 붙는 이름. 진행 방식마다 세는 대상이 다르다. */
   headcountLabel: string;
   /** 캠페인 유형(type) 컬럼에 저장할 값. 협업 단계 묶음이 이 값으로 갈린다. */
@@ -105,7 +119,8 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: false,
     managerListup: true,
     pickInfluencer: true,
-    hasSettlement: true,
+    hasWorkroom: true,
+    hasContentFormat: true,
     headcountLabel: '모집 인원',
     campaignType: 'ad_collab',
   },
@@ -118,7 +133,8 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: true,
     managerListup: false,
     pickInfluencer: false,
-    hasSettlement: false,
+    hasWorkroom: false,
+    hasContentFormat: true,
     headcountLabel: '협찬 인원',
     campaignType: 'ad_collab',
   },
@@ -131,7 +147,8 @@ export const REWARD_MODES: RewardModeDef[] = [
     openApply: true,
     managerListup: true,
     pickInfluencer: false,
-    hasSettlement: true,
+    hasWorkroom: false,
+    hasContentFormat: false,
     headcountLabel: '모집 인원',
     campaignType: 'group_buy',
   },
@@ -328,6 +345,9 @@ export type StageMark = { label: string; included: boolean };
  * 협업에 실제로 생기는 단계와 짝을 맞춰야 한다. "콘텐츠 검수 포함"이라고 보여 주고
  * 협업에 그 단계가 없으면 그 표시는 거짓말이 된다. 공동구매는 단계 이름 자체가 다르므로
  * (가이드 전달 → 상품 정보 전달, 업로드 → 판매 시작) 목록을 따로 둔다.
+ *
+ * 화면에 그리는 곳은 hasWorkroom 이 켜진 진행 방식뿐이다. 협찬형·커머스형은 담당자가
+ * 화면 밖에서 진행하므로 단계를 약속으로 내걸지 않는다 — 데이터로는 그대로 생긴다.
  *
  * 공동구매가 아닌 캠페인은 전부 다섯 단계로 진행한다
  * (collab-workflow.mts 의 CAMPAIGN_PROCESS). 정산은 단계로 두지 않는다 — 업로드를

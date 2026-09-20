@@ -642,16 +642,26 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
    * 이 버튼 한 번으로 협업 본체와 단계가 생기고 인플루언서에게 선정 알림이 간다.
    * 되돌릴 수 없는 통보가 나가므로 누르기 전에 한 번 확인한다.
    *
-   * 수락 뒤에는 목록을 다시 읽는다 — 협업 ID 가 생겨야 진행사항에 이 인플루언서가
-   * 나타나고, 그 값은 서버가 만든다.
+   * 수락 뒤에 무슨 일이 일어나는지는 진행 방식에 따라 다르고, 그 한 줄이 브랜드가
+   * 다음에 할 일을 정한다.
+   *
+   *   커머스형 — 담당자가 배정되어 브랜드와 인플루언서 양쪽에 연락한다. 브랜드는
+   *     기다리면 된다. 예전 문구는 "담당자가 중간에서 조건과 일정을 정리해
+   *     진행합니다"처럼 절차를 길게 적어 두었는데, 정작 필요한 두 가지(수락됐다 ·
+   *     담당자가 연락한다)가 문장 안에 묻혔다.
+   *
+   *   제품 협찬형 — 광고비가 없어 담당자가 중간에 서지 않는다. 브랜드가 지원서의
+   *     연락처로 직접 연락해 제품을 보내고 진행한다. 이 캠페인에서 "담당자가 곧
+   *     연락드립니다"라고 안내하면 브랜드도 인플루언서도 오지 않는 연락을 기다린다.
    */
   const handleAcceptApplicant = async (app: Applicant) => {
-    if (
-      !window.confirm(
-        `@${app.applicant_username} 님을 수락하시겠습니까?\n\n` +
-          '수락하면 인플루언서에게 선정 안내가 가고, 픽스폴리오 담당자가 중간에서 조건과 일정을 정리해 진행합니다.',
-      )
-    ) {
+    // 진행 방식은 지금 열어 둔 캠페인이 정한다. 상세 화면 안쪽의 mode 는 이 핸들러
+    // 바깥이라 여기서 다시 읽는다.
+    const isBarter = rewardModeOf(selectedCampaign?.reward_mode).value === 'barter';
+    const acceptNote = isBarter
+      ? '수락하면 인플루언서에게 선정 안내가 갑니다. 이후 진행은 지원서에 적힌 연락처로 브랜드에서 직접 연락해 주세요.'
+      : '수락하면 인플루언서에게 선정 안내가 가고, 픽스폴리오 담당자가 배정되어 연락드립니다.';
+    if (!window.confirm(`@${app.applicant_username} 님을 수락하시겠습니까?\n\n${acceptNote}`)) {
       return;
     }
     setAccepting(app.id);
@@ -662,9 +672,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
         return;
       }
       notify(
-        res.managerUsername
-          ? `수락했습니다. 담당자 (@${res.managerUsername})가 이어서 진행합니다.`
-          : '수락했습니다. 픽스폴리오 담당자가 곧 연락드립니다.',
+        isBarter
+          ? '수락했습니다. 지원서에 적힌 연락처로 인플루언서에게 연락해 주세요.'
+          : res.managerUsername
+            ? `수락했습니다. 담당자 (@${res.managerUsername})가 연락드립니다.`
+            : '수락했습니다. 담당자가 배정되어 연락드립니다.',
       );
       if (selectedCampaign) {
         await fetchApplicants(selectedCampaign.id);
@@ -883,17 +895,25 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
             : { label: '진행중', cls: 'bg-blue-50 text-blue-600' };
 
     /**
-     * 상세 탭. 정산은 지급할 돈이 있는 방식에만 붙는다 — 제품 협찬형은 광고비도
-     * 판매 수수료도 없어 정산할 것이 없고, 협업 단계에도 정산 단계가 생기지 않는다.
-     * 빈 정산 탭을 남겨 두면 브랜드는 지급을 기다리게 된다.
+     * 상세 탭.
+     *
+     * 진행사항 · 인사이트 · 정산은 광고비 지급형에만 붙는다(mode.hasWorkroom).
+     * 제품 협찬형과 커머스형은 수락한 뒤의 일을 담당자가 브랜드와 인플루언서 양쪽에
+     * 직접 연락해 진행한다 — 단계 보드는 아무도 누르지 않은 첫 칸에 멈춰 있고,
+     * 인사이트·정산 칸은 비어 있는데, 브랜드는 그 빈 칸을 "곧 채워질 것"으로 읽고
+     * 이미 통화로 끝낸 일을 화면에서 다시 기다렸다.
      */
     const TABS = [
       { key: 'influencer' as const, label: '인플루언서' },
-      { key: 'progress' as const, label: '진행사항' },
-      { key: 'insight' as const, label: '인사이트' },
-      ...(mode.hasSettlement ? [{ key: 'settlement' as const, label: '정산' }] : []),
+      ...(mode.hasWorkroom
+        ? [
+            { key: 'progress' as const, label: '진행사항' },
+            { key: 'insight' as const, label: '인사이트' },
+            { key: 'settlement' as const, label: '정산' },
+          ]
+        : []),
     ];
-    // 캠페인을 옮겨 다니면 탭 상태가 남는다. 정산 탭이 없는 캠페인에서 그 상태가
+    // 캠페인을 옮겨 다니면 탭 상태가 남는다. 그 탭이 없는 캠페인에서 상태가
     // 그대로면 아무것도 그려지지 않는 화면이 된다.
     const activeTab = TABS.some(t => t.key === detailTab) ? detailTab : 'influencer';
 
@@ -1044,6 +1064,17 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                     <p className="text-sm font-black text-slate-900">{selectedCampaign.upload_channel}</p>
                   </div>
                 )}
+                {/* 모집기간. 브랜드가 등록 때 정한 값이고, 마감일이 지나면 캠페인이
+                    협업 목록에서 내려간다 — 지원자가 늘지 않는 이유가 여기 있다. */}
+                {openApply && (selectedCampaign.start_date || selectedCampaign.end_date) && (
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-[11px] text-slate-400 font-black uppercase">모집기간</p>
+                    <p className="text-sm font-black text-slate-900">
+                      {String(selectedCampaign.start_date || '').slice(0, 10) || '미정'}
+                      {selectedCampaign.end_date ? ` ~ ${String(selectedCampaign.end_date).slice(0, 10)}` : ''}
+                    </p>
+                  </div>
+                )}
                 {(selectedCampaign.upload_from || selectedCampaign.upload_to) && (
                   <div className="bg-slate-50 rounded-xl p-3">
                     <p className="text-[11px] text-slate-400 font-black uppercase">희망 업로드</p>
@@ -1094,7 +1125,20 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 </div>
               )}
 
-              {/* 진행 방식이 정한 진행 단계. 등록 화면에서 본 것과 같은 표시여야 한다. */}
+              {/* 진행 방식이 정한 진행 단계. 등록 화면에서 본 것과 같은 표시여야 한다.
+                  제품 협찬형·커머스형은 단계를 화면에서 굴리지 않으므로(hasWorkroom)
+                  대신 누가 어떻게 진행하는지를 적는다. */}
+              {!mode.hasWorkroom ? (
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1.5">진행 방법 · {mode.label}</p>
+                  <p className="text-sm text-slate-700 font-medium leading-relaxed break-keep">
+                    {isBarter
+                      ? '지원자를 수락하면 지원서에 적힌 연락처로 브랜드에서 직접 연락해 제품 발송과 일정을 진행합니다.'
+                      : `지원자를 수락하면 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 배정되어 브랜드와 인플루언서 양쪽에 연락해 조건과 일정을 정리합니다.`}
+                  </p>
+                  <p className="text-xs text-slate-400 font-medium mt-2">{mode.secondUseNote}</p>
+                </div>
+              ) : (
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-[11px] text-slate-400 font-black uppercase mb-3">진행 단계 · {mode.label}</p>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
@@ -1114,6 +1158,7 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                 </div>
                 <p className="text-xs text-slate-400 font-medium mt-2">{mode.secondUseNote}</p>
               </div>
+              )}
 
               {selectedCampaign.video_concept && (
                 <div className="bg-slate-50 rounded-xl p-4">
@@ -1235,7 +1280,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   key={selectedCampaign.id}
                   campaignId={selectedCampaign.id}
                   onNotify={notify}
-                  onConfirmed={() => setDetailTab('progress')}
+                  // 확정한 뒤 갈 곳은 진행사항 탭인데, 그 탭이 없는 방식
+                  // (커머스형)에서는 그대로 명단 자리에 머문다.
+                  onConfirmed={() => { if (mode.hasWorkroom) setDetailTab('progress'); }}
                 />
               )}
 
@@ -1251,9 +1298,11 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                       "고르기"와 "진행"을 한 문장 안에서 나눠 적는다. */}
                   <div className="mb-5 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
                     <p className="text-sm text-slate-700 font-bold">
-                      {brandSelects
-                        ? `함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 중간에서 맡습니다.`
-                        : `지원자 선정은 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.`}
+                      {!brandSelects
+                        ? `지원자 선정은 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 진행합니다.`
+                        : isBarter
+                          ? '함께할 인플루언서를 브랜드가 직접 수락하고, 이후 진행도 브랜드에서 인플루언서에게 직접 연락해 진행합니다.'
+                          : `함께할 인플루언서는 브랜드가 직접 수락하고, 그 뒤는 픽스폴리오 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 배정되어 연락드립니다.`}
                     </p>
                     <p className="text-xs text-slate-500 font-medium mt-1">
                       {brandSelects ? (
@@ -1263,13 +1312,15 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                           {selectedCampaign.max_applicants > 0
                             ? ` ${mode.headcountLabel} ${selectedCampaign.max_applicants}명만큼 수락하시면 됩니다. `
                             : ' '}
-                          수락하는 순간 담당자가 조건과 일정을 정리해 진행을 맡고, 상황은 <span className="font-black">진행사항</span> 탭에서 확인하실 수 있습니다.
+                          {isBarter
+                            ? '수락하면 지원서에 적힌 연락처가 이 카드에 그대로 보입니다 — 그 연락처로 직접 연락해 제품 발송과 일정을 진행해 주세요.'
+                            : '수락하는 순간 픽스폴리오 담당자가 배정되어 브랜드와 인플루언서 양쪽에 연락해 진행합니다.'}{' '}
                           함께하기 어려운 분은 <span className="font-black">보류</span>로 표시해 두시면 담당자가 정리해 안내합니다.
                         </>
                       ) : (
                         <>
                           함께하고 싶은 지원자를 <span className="font-black text-blue-600">추천</span>으로 표시해 주세요.
-                          담당자가 조건과 일정을 정리해 협업을 시작하고, 진행 상황은 <span className="font-black">진행사항</span> 탭에서 확인하실 수 있습니다.
+                          담당자가 조건과 일정을 정리해 협업을 시작하고 진행 상황을 안내드립니다.
                         </>
                       )}
                     </p>
@@ -1495,7 +1546,10 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                                 )}
                               </div>
                             )}
-                            {app.status === 'accepted' && (
+                            {/* 진행사항 보기는 단계 보드가 있는 방식에만 둔다. 제품
+                                협찬형·커머스형은 담당자가 화면 밖에서 진행하므로
+                                누를 곳이 없는 버튼을 남기지 않는다. */}
+                            {app.status === 'accepted' && mode.hasWorkroom && (
                               <button
                                 onClick={openProgress}
                                 disabled={!app.collab_id}
@@ -1507,7 +1561,9 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                             )}
                             {app.status === 'accepted' && (
                               <p className="text-xs text-emerald-600 font-bold">
-                                수락 완료. 조건과 일정은 담당자{campaignManager ? ` (@${campaignManager})` : ''}가 정리해 진행합니다.
+                                {isBarter
+                                  ? '수락 완료. 지원서에 적힌 연락처로 직접 연락해 진행해 주세요.'
+                                  : `수락 완료. 담당자${campaignManager ? ` (@${campaignManager})` : ''}가 배정되어 연락드립니다.`}
                               </p>
                             )}
                             {app.status === 'pending' && !brandSelects && app.brand_preference === 'shortlist' && (
@@ -1625,13 +1681,26 @@ const CampaignCollabManagement: React.FC<CampaignCollabManagementProps> = ({ bus
                   </p>
                 )}
               </div>
-              <button
-                onClick={openProgress}
-                disabled={!hasCollab}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-40 flex-shrink-0 transition-colors"
-              >
-                {hasCollab ? '진행사항 보기' : '진행 대기'}
-              </button>
+              {/* 단계 보드가 있는 방식만 갈 곳이 있다. 제품 협찬형·커머스형은
+                  진행이 화면 밖에서 일어나므로, 버튼 대신 지금 어디까지 왔는지만
+                  적는다 — 눌러도 아무 데도 가지 않는 버튼을 남기지 않는다. */}
+              {mode.hasWorkroom ? (
+                <button
+                  onClick={openProgress}
+                  disabled={!hasCollab}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-40 flex-shrink-0 transition-colors"
+                >
+                  {hasCollab ? '진행사항 보기' : '진행 대기'}
+                </button>
+              ) : (
+                <p className="text-[11px] font-bold text-slate-400 text-right flex-shrink-0 max-w-[13rem] leading-snug break-keep">
+                  {hasCollab
+                    ? isBarter
+                      ? '수락한 인플루언서에게 직접 연락해 진행해 주세요.'
+                      : `담당자${campaignManager ? ` (@${campaignManager})` : ''}가 연락해 진행합니다.`
+                    : '지원자를 수락하면 진행이 시작됩니다.'}
+                </p>
+              )}
             </div>
           </div>
         )}

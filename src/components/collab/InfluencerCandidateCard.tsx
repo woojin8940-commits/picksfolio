@@ -254,8 +254,11 @@ const Stat: React.FC<{ label: string; value: string; title?: string; hint?: stri
  *
  * 서버가 담당자 응답에만 contact 를 싣는다(campaign-listup.mts 의 loadManagerContacts).
  * 브랜드·인플루언서 응답에는 이 값이 아예 없으므로 이 자리도 그려지지 않는다.
+ *
+ * 담당자 캠페인 화면의 '선정된 인플루언서' 목록도 같은 칸을 쓴다(export 한 이유다) —
+ * 연락처를 보여 주는 자리가 두 벌이 되면 한쪽만 고쳐져 전화·복사 동작이 갈라진다.
  */
-const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
+export const ContactPanel: React.FC<{ contact: any; fallbackName?: string }> = ({
   contact,
   fallbackName,
 }) => {

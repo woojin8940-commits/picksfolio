@@ -1015,12 +1015,35 @@ export default async (req: Request) => {
       "- 가이드 파일을 읽지 못했다면 본문을 지어내지 말고 그 사실을 먼저 알리세요(표식도 붙이지 않습니다)."
     : "";
 
+  // 기획안을 달라는 요청에도 같은 못을 박는다.
+  //
+  // 표식 규칙은 CAMPAIGN_AI_SYSTEM_INSTRUCTION 맨 위에 이미 적혀 있지만, 캠페인 사실과
+  // 가이드 본문이 그 뒤로 길게 붙으면 모델이 앞쪽 규칙을 흘리고 글만 예쁘게 써 놓는 일이
+  // 있었다(실제로 기획안이 글로만 나오고 반영 버튼이 안 떴다). 지시문 맨 끝, 사용자
+  // 요청 바로 앞에 한 번 더 놓아 두면 잊힐 자리가 없다. 표식이 그래도 빠지면
+  // extractCampaignDraft 가 글에서 건져 내지만, 건져 낸 값은 글을 다시 쪼갠 것이라
+  // 모델이 직접 준 JSON 보다 부정확하다 — 이쪽을 먼저 지킨다.
+  const planRequest = scope === "campaign" && PLAN_ALSO_INTENT_RE.test(String(lastUserText));
+  const planDirective = planRequest
+    ? "\n\n[이번 요청은 기획안(장면 구성)을 써 달라는 요청입니다]\n" +
+      "- 답의 맨 끝에 {\"kind\":\"plan\"} 표식을 반드시 딱 한 번 붙이세요. 표식이 없으면 화면에 " +
+      "수정·반영 카드가 뜨지 않아 사용자가 장면을 손으로 옮겨 적어야 합니다.\n" +
+      "- 표식 안 scenes 에는 사람에게 보여 준 장면을 **하나도 빼지 말고 같은 순서로** 넣고, 각 장면의 " +
+      "visual·subtitle·narration 에 보여 준 문장과 똑같은 글을 넣으세요.\n" +
+      "- 장면 하나만 고쳐 달라는 요청이었어도 표식에는 **고친 기획안 전체(모든 장면)**를 넣으세요. " +
+      "반영 버튼은 기획안을 통째로 바꿉니다.\n" +
+      "- 나레이션 없이 써 달라고 했다면 narration 은 빈 문자열로 두세요(\"음원만 사용\" 같은 말을 " +
+      "넣지 마세요).\n" +
+      "- 가이드 파일을 읽지 못했다면 기획안을 지어내지 말고 그 사실을 먼저 알리세요(표식도 붙이지 않습니다)."
+    : "";
+
   const systemInstruction = campaignContext
     ? CAMPAIGN_AI_SYSTEM_INSTRUCTION +
       `\n\n아래는 지금 열어 둔 캠페인의 사실입니다. 캠페인에 관한 것은 모두 이 데이터와 ` +
       `첨부 파일을 근거로만 답하고, 없는 값은 지어내지 마세요.\n${campaignContext.text}` +
       campaignGuideStatus +
-      captionOnlyDirective
+      captionOnlyDirective +
+      planDirective
     : baseSystemInstruction;
 
   // 캠페인 화면은 기획안 전체를 다시 내놓는다(장면 5개에 설명·자막·나레이션, 거기에
@@ -1040,8 +1063,14 @@ export default async (req: Request) => {
 
   // 초안 떼어내기. 타임라인 화면의 답은 손대지 않는다 — 그쪽 모델은 표식을 붙이라는
   // 지시를 받지 않았으므로 검사할 것도 없다.
+  //
+  // 표식이 빠진 답에서는 사람이 읽는 글에서 초안을 건져 낸다(extractCampaignDraft
+  // 안쪽). 그때 본문인지 기획안인지 가리는 기준이 이번 요청의 뜻이라, 위에서 이미
+  // 판정해 둔 captionOnlyRequest 를 그대로 넘긴다.
   const campaignDraftOf = (raw: string): { reply: string; draft: CampaignDraft | null } =>
-    scope === "campaign" ? extractCampaignDraft(raw) : { reply: raw, draft: null };
+    scope === "campaign"
+      ? extractCampaignDraft(raw, captionOnlyRequest)
+      : { reply: raw, draft: null };
 
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {

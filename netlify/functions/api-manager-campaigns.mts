@@ -48,6 +48,30 @@ const shape = (row: any) => ({
   uploadTo: row.upload_to || "",
   startDate: row.start_date || "",
   endDate: row.end_date || "",
+  /**
+   * 브랜드가 등록서에 적어 낸 내용 그대로.
+   *
+   * 예전에는 제목 · 제품명 · 단가 · 일정만 내려보냈다. 그래서 담당자는 브랜드가 무엇을
+   * 어떻게 알리고 싶은지 — 제품 소개, 원하는 컨셉, 제품을 어떻게 주는지, 필수 표기 —
+   * 를 화면에서 볼 수 없었고, 그걸 알아야 하는 자리(후보를 고르고, 인플루언서에게
+   * 설명하는 자리)에서 브랜드에게 다시 전화해 물었다. 등록서에 이미 있는 내용이다.
+   */
+  requirements: row.requirements || "",
+  videoConcept: row.video_concept || "",
+  productUrl: row.product_url || "",
+  productProvide: row.product_provide || "",
+  adObjective: row.ad_objective || "",
+  secondUseNote: row.second_use_note || "",
+  maxApplicants: Number(row.max_applicants || 0),
+  seedingCount: Number(row.seeding_count || 0),
+  groupbuyCommissionRate: Number(row.groupbuy_commission_rate || 0),
+  targetAudience: row.target_audience || "",
+  influencerGender: row.influencer_gender || "",
+  influencerAges: row.influencer_ages || "",
+  snsCategory: row.sns_category || "",
+  influencerStyles: row.influencer_styles || "",
+  excludeKeywords: row.exclude_keywords || "",
+  tierCounts: row.tier_counts || "",
   status: row.status || "",
   managerUsername: norm(row.manager_username),
   // 진행 방식과, 여기에 담당자 리스트업이 붙는지. 제품 협찬형은 지원자만 받으므로
