@@ -237,6 +237,38 @@ export function uploadWindow(
   return { from, to: spanDays(from, to) > UPLOAD_WINDOW_MAX_DAYS ? from : to };
 }
 
+/** 한국 날짜 기준으로 그 날까지 남은 일수. 오늘이면 0, 지났으면 음수. */
+const daysUntilSeoul = (day: string): number | null => {
+  const key = asDate(day);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  return Math.round((Date.parse(`${key}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+};
+
+/**
+ * 화면이 적을 업로드 일정 한 칸.
+ *
+ * 브랜드·인플루언서 화면은 오랫동안 "지금 진행 단계의 마감"(collab_stages.due_date)을
+ * 날짜로 적었다. 그 값은 담당자가 단계를 열 때 하나씩 잡는 것이라, 당사자는 어디서 나온
+ * 날짜인지 모르는 채로 'N일 남음'을 읽었고 단계가 넘어갈 때마다 숫자가 튀었다. 단계
+ * 일정은 담당자가 굴리는 일이고, 브랜드와 인플루언서가 함께 지켜야 하는 날은 하나다 —
+ * 콘텐츠가 올라가는 날.
+ *
+ * 날짜의 출처는 달력과 같다(uploadWindow). 같은 협업이 카드에서는 23일, 달력에서는
+ * 26일로 보이면 어느 쪽이 약속인지 되묻게 된다.
+ *
+ * `deadline` 은 기간의 끝이다 — "23일~26일 사이에 올려 주세요"에서 남은 날을 세는
+ * 기준은 26일이다. 시작일로 세면 24일에 이미 '1일 지났어요'가 된다.
+ */
+export function uploadSchedule(
+  input: { uploadFrom?: string; uploadTo?: string; uploadDue?: string },
+  fallbackDay = '',
+): { from: string; to: string; deadline: string; daysLeft: number | null } {
+  const { from, to } = uploadWindow({ ...input, uploadedDay: '' }, fallbackDay);
+  const deadline = to || from;
+  return { from, to, deadline, daysLeft: deadline ? daysUntilSeoul(deadline) : null };
+}
+
 /** 기간에 걸친 날짜 전부('YYYY-MM-DD'). 달력이 칸마다 같은 일정을 찍는 데 쓴다. */
 export function daysInWindow(from: string, to: string): string[] {
   if (!from) return [];

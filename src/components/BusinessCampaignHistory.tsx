@@ -476,15 +476,19 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                               p.cancelled ? 'border-slate-100 opacity-60' : 'border-slate-100'
                             }`}
                           >
+                            {/* 썸네일은 릴스 비율(9:16) 그대로. self-start 가 빠지면 그 비율이
+                                무시된다 — 카드가 flex 줄이라 이미지 높이가 카드 높이까지 늘어나고
+                                (align-items: stretch), 옆 칸의 글이 길어질수록 세로로 더 길게
+                                늘어진 띠가 됐다. */}
                             {p.metrics?.thumbnailUrl ? (
                               <img
                                 src={p.metrics.thumbnailUrl}
                                 alt=""
                                 loading="lazy"
-                                className="w-16 aspect-[9/16] object-cover rounded-lg bg-slate-100 flex-shrink-0"
+                                className="w-16 aspect-[9/16] self-start object-cover rounded-lg bg-slate-100 flex-shrink-0"
                               />
                             ) : (
-                              <div className="w-16 aspect-[9/16] rounded-lg bg-slate-100 flex-shrink-0 flex items-center justify-center">
+                              <div className="w-16 aspect-[9/16] self-start rounded-lg bg-slate-100 flex-shrink-0 flex items-center justify-center">
                                 <span className="text-[9px] text-slate-400 font-black text-center px-1">
                                   {REASON_LABEL[p.reason] || '집계 전'}
                                 </span>

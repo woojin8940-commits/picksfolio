@@ -12,6 +12,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useVisiblePolling } from '../hooks/useVisiblePolling';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
 import { openManagerChat } from '../utils/managerChat';
+import { uploadSchedule } from '../utils/campaignCollabStatus';
 
 /**
  * 협업 캠페인 — 인플루언서가 자기 캠페인을 진행하는 곳.
@@ -128,13 +129,31 @@ const writeCreatorCollabCache = (username: string, data: CreatorCollabCache): vo
   try { localStorage.setItem(creatorCollabCacheKey(username), JSON.stringify(data)); } catch {}
 };
 
-const dueText = (dueDate: string, daysLeft: number | null, isEn: boolean) => {
-  if (!dueDate) return isEn ? 'No deadline' : '마감일 미정';
-  if (daysLeft === null || daysLeft === undefined) return dueDate;
+/**
+ * 업로드 일정 한 줄.
+ *
+ * 예전에는 "지금 진행 단계의 마감"(dueDate)을 적었다. 그 날짜는 담당자가 단계를 열 때
+ * 하나씩 잡는 값이라, 인플루언서는 어디서 나온 날짜인지 모르는 채로 남은 날을 셌고
+ * 단계가 넘어갈 때마다 숫자가 튀었다. 단계 일정은 담당자가 굴리는 일이고, 인플루언서가
+ * 지켜야 하는 날은 하나다 — 콘텐츠를 올리는 날.
+ */
+const uploadDueText = (deadline: string, daysLeft: number | null, isEn: boolean) => {
+  if (!deadline) return isEn ? 'Upload date TBD' : '업로드 일정 미정';
+  if (daysLeft === null || daysLeft === undefined) return deadline;
   if (daysLeft < 0) return isEn ? `${-daysLeft} days overdue` : `${-daysLeft}일 지났어요`;
-  if (daysLeft === 0) return isEn ? 'Due today' : '오늘까지';
+  if (daysLeft === 0) return isEn ? 'Upload today' : '오늘까지';
   return isEn ? `${daysLeft} days left` : `${daysLeft}일 남음`;
 };
+
+/** 'MM월 DD일' 꼴. 기간으로 등록된 캠페인은 '9월 23일 ~ 9월 26일'로 적는다. */
+const monthDay = (day: string) => {
+  const key = String(day || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  return `${Number(key.slice(5, 7))}월 ${Number(key.slice(8, 10))}일`;
+};
+
+/** 업로드가 이미 올라간 협업인지. 남은 날 대신 '업로드 완료'를 적는 기준이다. */
+const uploadedAlready = (c: any) => Boolean(c?.uploadConfirmedAt || c?.uploadUrl);
 
 /**
  * 이 협업에서 인플루언서가 지금 해야 하는 일.
@@ -492,6 +511,28 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     const fee = Number(terms?.fee || 0);
     const mode = rewardModeOf(selected.campaignRewardMode);
     const badge = collabBadge(selected);
+    /**
+     * 이 협업의 업로드 일정.
+     *
+     * 방금 읽어 온 상세의 조건표를 먼저 본다 — 담당자가 일정을 확정한 직후에는 목록이
+     * 아직 갱신되지 않아, 목록 값만 보면 머리말이 낡은 날짜를 적는다. 캠페인 종료일이
+     * 마지막 폴백인 이유는 조건이 정리되기 전에 화면에 놓을 수 있는 날짜가 그것뿐이기
+     * 때문이다.
+     */
+    const selectedUpload = uploadSchedule(
+      terms
+        ? {
+            uploadDue: terms.uploadDue,
+            uploadFrom: terms.deliverableSpec?.uploadFrom,
+            uploadTo: terms.deliverableSpec?.uploadTo,
+          }
+        : selected,
+      selected.campaignEndDate,
+    );
+    const selectedUploaded = uploadedAlready({
+      uploadUrl: detail?.collab?.uploadUrl ?? selected.uploadUrl,
+      uploadConfirmedAt: detail?.collab?.uploadConfirmedAt ?? selected.uploadConfirmedAt,
+    });
     // 상세에서는 목록 요약이 아니라 방금 읽어 온 상세로 판정한다. 저장 직후 목록이
     // 아직 갱신되지 않았을 때 머리말과 보드가 다른 말을 하지 않도록.
     const action = actionOf({
@@ -579,11 +620,32 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                     (selected.status === 'completed' ? (isEn ? 'All done' : '모든 단계 완료') : isEn ? 'Preparing' : '준비 중')}
               </p>
             </div>
+            {/* 업로드 일정 한 칸. 단계마다의 마감은 담당자가 잡는 값이라 여기 적지 않는다 —
+                인플루언서가 이 화면에서 세는 날은 콘텐츠가 올라가야 하는 날 하나다. */}
             <div className="bg-slate-50 rounded-xl px-4 py-3">
-              <p className="text-[10px] font-black text-slate-400">{isEn ? 'Due' : '마감'}</p>
-              <p className={`text-sm font-black mt-0.5 ${(selected.daysLeft ?? 1) < 0 ? 'text-red-500' : 'text-slate-900'}`}>
-                {dueText(selected.dueDate, selected.daysLeft, isEn)}
+              <p className="text-[10px] font-black text-slate-400">{isEn ? 'Upload by' : '업로드 일정'}</p>
+              <p
+                className={`text-sm font-black mt-0.5 ${
+                  selectedUploaded
+                    ? 'text-emerald-600'
+                    : (selectedUpload.daysLeft ?? 1) < 0
+                      ? 'text-red-500'
+                      : 'text-slate-900'
+                }`}
+              >
+                {selectedUploaded
+                  ? isEn ? 'Uploaded' : '업로드 완료'
+                  : uploadDueText(selectedUpload.deadline, selectedUpload.daysLeft, isEn)}
               </p>
+              {/* 브랜드가 기간으로 등록했으면 그 기간을 그대로 적는다. 남은 날만 있으면
+                  "며칠 사이에 올려도 되는 일정"인지 그날 하루인지 구별되지 않는다. */}
+              {selectedUpload.deadline && !selectedUploaded && (
+                <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+                  {selectedUpload.to && selectedUpload.to !== selectedUpload.from
+                    ? `${monthDay(selectedUpload.from)} ~ ${monthDay(selectedUpload.to)}`
+                    : `${monthDay(selectedUpload.deadline)}${isEn ? '' : '까지'}`}
+                </p>
+              )}
             </div>
             <div className="bg-slate-50 rounded-xl px-4 py-3 col-span-2 md:col-span-1">
               <p className="text-[10px] font-black text-slate-400">{isEn ? 'Payout' : '보수'}</p>
@@ -807,7 +869,11 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
               {shownCollabs.map(c => {
                 const badge = collabBadge(c);
                 const cardAction = actionOf(c);
-                const overdue = (c.daysLeft ?? 1) < 0 && c.status !== 'completed';
+                // 카드에 적는 날짜도 업로드 일정 하나다. 단계 마감은 담당자가 잡는 값이라,
+                // 카드마다 다른 단계의 마감이 섞여 있으면 목록이 서로 다른 기준의 날짜를
+                // 나란히 세운 것이 된다.
+                const cardUpload = uploadSchedule(c, c.campaignEndDate);
+                const overdue = (cardUpload.daysLeft ?? 1) < 0 && c.status !== 'completed';
                 return (
                   <button
                     key={c.id}
@@ -836,13 +902,15 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
                           </span>
                         )}
                       </div>
-                      {c.status !== 'completed' && c.status !== 'cancelled' && c.dueDate && (
+                      {c.status !== 'completed' && c.status !== 'cancelled' && cardUpload.deadline && (
                         <span
                           className={`absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-lg text-[10px] font-black shadow-sm text-white ${
-                            overdue ? 'bg-rose-500' : 'bg-slate-900/85'
+                            uploadedAlready(c) ? 'bg-emerald-500' : overdue ? 'bg-rose-500' : 'bg-slate-900/85'
                           }`}
                         >
-                          {dueText(c.dueDate, c.daysLeft, isEn)}
+                          {uploadedAlready(c)
+                            ? isEn ? 'Uploaded' : '업로드 완료'
+                            : uploadDueText(cardUpload.deadline, cardUpload.daysLeft, isEn)}
                         </span>
                       )}
                       {/* 브랜드가 남긴 새 소식(피드백, 단계 처리) 개수. 협업 타임라인
