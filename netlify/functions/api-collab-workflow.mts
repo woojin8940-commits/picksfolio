@@ -1229,6 +1229,14 @@ export default async (req: Request, context: Context) => {
           proposalId: collab.proposal_id,
           uploadUrl: collab.upload_url || "",
           adCode: collab.ad_code || "",
+          /**
+           * 업로드 단계에 함께 올라온 클린본(자막·로고 없는 원본 영상).
+           *
+           * 파트너십 코드와 한 쌍으로 쓰인다 — 코드만으로는 게시물을 광고 소재로
+           * 지정할 수 있을 뿐이고, 새 소재로 편집해 돌리려면 이 파일이 필요하다.
+           */
+          cleanFileUrl: collab.clean_file_url || "",
+          cleanFileName: collab.clean_file_name || "",
           uploadConfirmedAt: collab.upload_confirmed_at || null,
           uploadConfirmedBy: role === "influencer" ? "" : collab.upload_confirmed_by || "",
           confirmedAt: collab.confirmed_at,
@@ -1883,9 +1891,17 @@ export default async (req: Request, context: Context) => {
          * 수백 MB 영상을 다시 올리게 하면 한 줄 고치는 데 몇 분이 들고 모바일
          * 데이터로는 아예 포기하게 된다.
          */
+        /**
+         * 업로드 단계의 파일칸도 같은 이유로 이어받는다.
+         *
+         * 그 칸에 오는 파일은 클린본(자막·로고 없는 원본 영상)이다. 링크를 잘못 붙였거나
+         * 파트너십 코드만 뒤늦게 받아 다시 등록하는 일이 잦은데, 그때 파일을 다시 고르지
+         * 않으면 이미 올라간 클린본이 빈 값으로 덮인다 — 한 줄을 고치는 저장이 수백 MB
+         * 파일을 지우는 셈이다.
+         */
         let carriedFileUrl = fileUrl;
         let carriedFileName = fileName;
-        if (stepKey === "video" && !carriedFileUrl) {
+        if ((stepKey === "video" || stepKey === "upload") && !carriedFileUrl) {
           const prevRows = (await db.sql`
             SELECT payload FROM collab_deliverables
             WHERE collab_id = ${collabId} AND stage_key = ${stageKey}
@@ -1976,6 +1992,8 @@ export default async (req: Request, context: Context) => {
             SET upload_url = ${link},
                 deliverable_url = ${link},
                 ad_code = ${adCode || collab.ad_code || ""},
+                clean_file_url = ${carriedFileUrl || collab.clean_file_url || ""},
+                clean_file_name = ${carriedFileUrl ? carriedFileName : collab.clean_file_name || ""},
                 updated_at = NOW()
             WHERE id = ${collabId}
           `;

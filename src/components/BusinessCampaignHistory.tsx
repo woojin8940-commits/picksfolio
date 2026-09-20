@@ -58,6 +58,12 @@ type HistoryPost = {
    * 막히는 대신 목록에서 미리 '코드 없음'으로 보여 준다.
    */
   partnershipCode: string;
+  /**
+   * 업로드 단계에 함께 올라온 클린본 영상. 코드와 한 쌍으로 쓰인다 — 코드로 게시물을
+   * 광고 소재로 지정하고, 새 소재로 편집해 돌릴 때 이 원본 파일이 필요하다.
+   */
+  cleanFileUrl: string;
+  cleanFileName: string;
   metrics: PostMetric | null;
   reason: string;
 };
@@ -112,6 +118,19 @@ const REASON_LABEL: Record<string, string> = {
   not_linked: '채널 연동 전',
   out_of_window: '집계 전',
   cancelled: '취소된 협업',
+};
+
+/**
+ * 저장소 파일을 "내려받기"로 여는 주소.
+ *
+ * 스토리지는 download 값이 붙은 요청만 첨부파일로 내려보낸다. 링크에 download 속성만
+ * 달아도 다른 도메인의 파일에는 듣지 않고, 그러면 클린본 영상이 새 탭에서 재생되기만
+ * 한다 — 브랜드가 하려던 일은 그 파일을 광고 소재로 쓰기 위해 받는 것이다.
+ */
+const downloadHref = (url: string, name: string) => {
+  if (!/^https?:\/\//i.test(url)) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}download=${encodeURIComponent(name || 'file')}`;
 };
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
@@ -523,14 +542,35 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                   버튼만 두면 브랜드는 눌러 본 뒤에야 막힌 이유를 알게 되고,
                                   그 이유는 브랜드가 아니라 인플루언서가 풀 수 있는 일이다. */}
                               <div className="mt-2 pt-2 border-t border-slate-100">
-                                {p.partnershipCode ? (
-                                  <p className="text-[10px] font-black text-slate-500 break-all">
-                                    파트너십 코드{' '}
-                                    <span className="text-slate-800">{p.partnershipCode}</span>
-                                  </p>
-                                ) : (
-                                  <p className="text-[10px] font-black text-amber-600">코드 없음</p>
-                                )}
+                                <div className="flex items-start justify-between gap-2">
+                                  {p.partnershipCode ? (
+                                    <p className="min-w-0 text-[10px] font-black text-slate-500 break-all">
+                                      파트너십 코드{' '}
+                                      <span className="text-slate-800">{p.partnershipCode}</span>
+                                    </p>
+                                  ) : (
+                                    <p className="text-[10px] font-black text-amber-600">코드 없음</p>
+                                  )}
+
+                                  {/* 클린본은 코드 옆에 파일 한 줄로. 광고로 돌릴 때
+                                      브랜드가 챙기는 것은 이 두 개이고, 지금까지 이
+                                      파일은 카카오톡 대화방에만 있었다. */}
+                                  {p.cleanFileUrl ? (
+                                    <a
+                                      href={downloadHref(p.cleanFileUrl, p.cleanFileName || '클린본 영상')}
+                                      download={p.cleanFileName || '클린본 영상'}
+                                      title={p.cleanFileName || '클린본 영상'}
+                                      className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-600 hover:border-slate-900 hover:text-slate-900 transition-colors"
+                                    >
+                                      <span>🎬</span>
+                                      <span>클린본 받기</span>
+                                    </a>
+                                  ) : (
+                                    <span className="flex-shrink-0 text-[10px] font-bold text-slate-300">
+                                      클린본 없음
+                                    </span>
+                                  )}
+                                </div>
 
                                 <button
                                   type="button"
@@ -548,6 +588,15 @@ const BusinessCampaignHistory: React.FC<BusinessCampaignHistoryProps> = ({ busin
                                 {!p.partnershipCode && !p.cancelled && (
                                   <p className="text-[9px] text-slate-400 font-medium mt-1 leading-tight">
                                     인플루언서가 업로드 단계에 파트너십 코드를 남기면 광고로 돌릴 수 있습니다.
+                                  </p>
+                                )}
+
+                                {/* 코드는 있는데 클린본이 없는 경우. 부스팅 자체는 되므로
+                                    버튼을 잠그지 않고, 무엇이 없어서 무엇을 못 하는지만 적는다. */}
+                                {p.partnershipCode && !p.cleanFileUrl && !p.cancelled && (
+                                  <p className="text-[9px] text-slate-400 font-medium mt-1 leading-tight">
+                                    게시물 그대로 부스팅은 가능합니다. 새 광고 소재로 편집하려면 인플루언서에게
+                                    클린본을 요청해 주세요.
                                   </p>
                                 )}
                               </div>
