@@ -316,8 +316,10 @@ export const collabStepTurns = (
 /**
  * 지금 내가 해야 하는 단계 하나. 없으면 null.
  *
- * 순서상 앞의 단계가 상대를 기다리는 중이라도 건너뛴다 — 가이드를 기다리는 동안 배송지를
- * 미리 적어 두는 것을 막을 이유가 없고, 실제로 그 사이가 가장 길다.
+ * 앞질러 갈 수 있는 것은 가이드·배송 두 칸뿐이다. 가이드를 기다리는 동안 배송지를 미리
+ * 적어 두는 것을 막을 이유가 없고, 실제로 그 사이가 가장 길다. 반면 기획안부터는 앞의
+ * 단계가 상대를 기다리는 중이면 뒤 단계를 당겨 오지 않는다 — 기획안 승인을 기다리는
+ * 사람에게 '영상 올리기'가 할 일로 뜨면, 승인 전 영상을 만들게 되고 되돌림이 늘어난다.
  */
 export const nextCollabAction = (
   input: CollabActionInput,
@@ -326,8 +328,17 @@ export const nextCollabAction = (
   const turns = collabStepTurns(input, role);
   // 되돌림(피드백 반영)이 있으면 그것이 먼저다. 브랜드가 고쳐 달라고 한 것을 놔두고
   // 다음 단계를 채우면, 같은 단계를 두 번 왕복하게 된다.
-  const mine = COLLAB_STEP_ORDER.map(k => turns[k]).filter((t): t is CollabStepTurn => Boolean(t?.mine));
-  return mine.find(t => t.revision) || mine[0] || null;
+  const opening = [turns.guide, turns.shipping].filter((t): t is CollabStepTurn => Boolean(t));
+  const openingMine = opening.filter(t => t.mine);
+  if (openingMine.length) return openingMine.find(t => t.revision) || openingMine[0];
+  // 가이드나 배송이 아직 열려 있는데 둘 다 상대 차례면, 여기서 멈춘다.
+  if (opening.length) return null;
+
+  for (const key of COLLAB_STEP_ORDER.slice(2)) {
+    const turn = turns[key];
+    if (turn) return turn.mine ? turn : null;
+  }
+  return null;
 };
 
 /** 내 차례는 아니고 상대를 기다리는 중인 첫 단계. 할 일이 없을 때 무엇을 기다리는지 적는다. */

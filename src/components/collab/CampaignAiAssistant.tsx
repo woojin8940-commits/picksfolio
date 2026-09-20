@@ -185,6 +185,32 @@ const chatStorageKey = (userName: string, collabId: string) =>
 /** 남겨 두는 최대 대화 수. 답 하나가 길어서, 넘치면 오래된 것부터 버린다. */
 const MAX_STORED_MESSAGES = 30;
 
+/**
+ * 이 대화에서 마지막으로 카드가 떴던 초안의 종류.
+ *
+ * "좀 더 짧게 해 줘" 처럼 대상을 적지 않은 수정 요청이 무엇을 고치라는 말인지는 화면만
+ * 안다 — 방금 카드가 뜬 그 초안이다. 서버는 이 값을 받아 같은 대상의 초안을 다시 내놓게
+ * 하고, 표식이 빠지면 모델에게 한 번 더 물어 카드를 띄운다.
+ *
+ * 닫은 카드(draft: null)도 종류는 기억한다. 카드를 닫은 것은 "이 초안 말고"라는 뜻이지
+ * "본문 작업을 그만두겠다"는 뜻이 아니다.
+ */
+const lastDraftKindOf = (msgs: AiMessage[], before?: number): 'plan' | 'caption' | null => {
+  const from = Math.min(before ?? msgs.length, msgs.length);
+  for (let i = from - 1; i >= 0; i -= 1) {
+    const kind = msgs[i]?.draft?.kind || msgs[i]?.draftOriginal?.kind;
+    if (kind === 'plan' || kind === 'caption') return kind;
+  }
+  return null;
+};
+
+/** 카드 없이 글로만 온 초안을 카드로 다시 받아 오는 부탁. 대상(본문·기획안)을 말에 적는다. */
+const RESCUE_PROMPT = {
+  caption:
+    '방금 답변에 쓴 본문을 그대로 초안 카드로 정리해 주세요. 문장은 바꾸지 말고 본문 전체를 다시 보여 주세요.',
+  plan: '방금 답변에 쓴 기획안을 그대로 초안 카드로 정리해 주세요. 장면을 하나도 빼지 말고 그대로 다시 보여 주세요.',
+} as const;
+
 const readStoredChat = (key: string): AiMessage[] => {
   if (!key || typeof window === 'undefined') return [];
   try {
@@ -418,6 +444,8 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
             campaignFocusId: collabId || '',
             // 초안(draft)은 대화 기록에 싣지 않는다. 서버가 쓰는 것은 역할과 글뿐이다.
             messages: next.map(m => ({ role: m.role, content: m.content })),
+            // 대상을 적지 않은 수정 요청("좀 더 짧게 해 줘")이 무엇을 가리키는지 알려 준다.
+            lastDraftKind: lastDraftKindOf(messages),
             attachments,
           }),
         });
@@ -880,6 +908,48 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
     );
   };
 
+  /**
+   * 카드가 뜨지 않은 답을 카드로 다시 받아 오는 버튼.
+   *
+   * 서버는 표식이 빠진 답에서 초안을 건져 내고, 그래도 없으면 모델에게 한 번 더 묻는다.
+   * 그 두 겹을 다 지나도 카드가 없는 답이 남을 수 있다 — 답이 토큰 한도에서 잘렸거나,
+   * 모델이 기획안 대신 설명만 써 놓은 경우다. 그때 사용자에게 남는 길이 "글을 손으로
+   * 옮겨 적기"뿐이면 안 된다. 이 버튼은 대상(본문·기획안)을 말에 적어 다시 부탁하므로,
+   * 서버가 표식을 붙이라고 못 박는 경로로 들어간다.
+   *
+   * 마지막 답에만 붙인다. 위로 올라간 옛 답에 붙여 두면 "방금 답변"이 어느 답인지
+   * 어긋나고, 지금 화면의 기획안과 상관없는 초안이 카드로 뜬다.
+   */
+  const renderDraftRescue = (index: number, message: AiMessage) => {
+    if (message.draft || message.draftOriginal || message.applied) return null;
+    if (index !== messages.length - 1 || loading) return null;
+    // 한두 줄 답(되묻기·안내)에는 옮겨 적을 초안이 없다.
+    if ((message.content || '').trim().length < 120) return null;
+    const kind = lastDraftKindOf(messages, index);
+    if (!kind) return null;
+
+    const label = kind === 'plan' ? '기획안' : '본문';
+    const labelEn = kind === 'plan' ? 'content plan' : 'caption';
+    return (
+      <div className="mt-2 ml-9 md:ml-10 max-w-3xl">
+        <button
+          type="button"
+          onClick={() => send(RESCUE_PROMPT[kind])}
+          className="px-3 py-2 rounded-lg bg-white border border-violet-200 text-[11px] font-black text-violet-700 hover:bg-violet-50 transition-colors"
+        >
+          {isEn
+            ? `Load this answer as an editable ${labelEn} draft`
+            : `이 답변을 ${label} 초안 카드로 불러오기`}
+        </button>
+        <p className="mt-1 text-[10px] font-bold text-slate-400">
+          {isEn
+            ? 'The card lets you edit it and apply it with one button.'
+            : `카드로 불러오면 내용을 고친 뒤 버튼 한 번으로 ${label}에 반영할 수 있어요.`}
+        </p>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       {/* 머리말 — 이 AI 가 무엇을 보고 있는지 한 줄로 밝힌다. 가이드 파일과 브랜드
@@ -1038,6 +1108,7 @@ const CampaignAiAssistant: React.FC<CampaignAiAssistantProps> = ({
                       쓴다. 장면 설명은 두세 줄이 아니라 여섯 줄인 일이 많은데, 말풍선
                       안에 두면 그 글이 화면의 절반 폭에 담기고 나머지는 여백으로 남았다. */}
                   {m.role === 'assistant' && renderDraftCard(idx, m)}
+                  {m.role === 'assistant' && renderDraftRescue(idx, m)}
                 </div>
               ))}
 

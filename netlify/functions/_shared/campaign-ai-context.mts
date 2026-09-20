@@ -101,6 +101,13 @@ export interface CampaignFocusContext {
   /** 지금 제출돼 있는 인스타 본문 캡션. */
   caption: string;
   campaignTitle: string;
+  /**
+   * 이 협업이 딸린 캠페인(모집 공고) 아이디.
+   *
+   * 같은 캠페인에 붙은 인플루언서들이 서로 다른 창작 방향을 받게 하는 데 쓴다
+   * (campaign-ai-variation). 캠페인이 지워졌으면 빈 문자열이다.
+   */
+  campaignId: string;
 }
 
 const parseJsonish = (raw: unknown): any => {
@@ -423,5 +430,6 @@ export async function buildCampaignFocusContext(
       : null,
     caption,
     campaignTitle,
+    campaignId: String(collab.campaign_id || ""),
   };
 }
