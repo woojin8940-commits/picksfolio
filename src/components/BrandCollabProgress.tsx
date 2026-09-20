@@ -5,6 +5,7 @@ import BrandContactCard from './collab/BrandContactCard';
 import CampaignProcessBoard from './collab/CampaignProcessBoard';
 import type { GuidelineFile } from './collab/CampaignGuidelineEditor';
 import { useCloseOnBack } from '../hooks/useCloseOnBack';
+import { uploadSchedule } from '../utils/campaignCollabStatus';
 
 /**
  * 협업 진행 현황 — 단계를 가로로 늘어놓은 보드.
@@ -139,6 +140,17 @@ type CollabRow = {
   adCode?: string;
   uploadConfirmedAt: string | null;
   confirmedAt: string | null;
+  /** 캠페인 종료일. 조건표가 아직 없는 협업의 업로드 일정을 대신한다. */
+  campaignEndDate?: string;
+  /**
+   * 담당자가 확정한 업로드 마감과, 브랜드가 등록 때 고른 희망 게시 기간.
+   *
+   * 카드에 적는 날짜가 이 값이다 — 단계마다의 마감(dueDate)은 담당자가 단계를 열 때
+   * 잡는 값이라, 브랜드 화면에 그리면 사람마다 다른 단계의 마감이 한 보드에 섞인다.
+   */
+  uploadDue?: string;
+  uploadFrom?: string;
+  uploadTo?: string;
   /**
    * 확정된 보수(원)와 조건 잠금 여부. 브랜드·담당자에게만 실려 온다 — 총 진행 예산의
    * 재료다. 담당자가 조건을 아직 정리하지 않은 협업은 0원으로 온다.
@@ -297,6 +309,20 @@ const korDate = (raw: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
   return `${Number(key.slice(5, 7))}월 ${Number(key.slice(8, 10))}일`;
 };
+
+/**
+ * 카드에 적을 날짜.
+ *
+ * 브랜드가 보는 날짜는 업로드 일정 하나다. 예전에는 그 자리에 "이 사람의 지금 단계
+ * 마감"(collab_stages.due_date)이 들어갔는데, 그 값은 담당자가 단계를 열 때 하나씩
+ * 잡는 것이라 보드에 사람마다 다른 기준의 날짜가 섞여 섰다 — 브랜드는 어디서 나온
+ * 날짜인지 모르는 채로 '임박'을 읽었다. 단계 일정을 굴리는 것은 담당자의 일이므로
+ * 담당자 화면에서는 단계 마감을 그대로 둔다.
+ */
+const cardDueOf = (collab: CollabRow, stageDue: string, isManager: boolean): string =>
+  isManager
+    ? stageDue || collab.dueDate
+    : uploadSchedule(collab, collab.campaignEndDate).deadline;
 
 /** 오늘까지 남은 날. 마감이 지난 카드에 붉은 테를 두르기 위한 값이다. */
 const daysUntil = (raw: string): number | null => {
@@ -1198,7 +1224,7 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                     ) : (
                       cards.map(({ collab, state: cardState, due }) => {
                         const who = identityOf(collab);
-                        const cardDue = due || collab.dueDate;
+                        const cardDue = cardDueOf(collab, due, isManager);
                         const left = daysUntil(cardDue);
                         /* 마감이 지났거나 이틀 안이면 붉은 테, 닷새 안이면 노란 테.
                            카드가 수십 장 늘어서 있어도 손이 급한 것이 먼저 눈에 들어와야
@@ -1276,7 +1302,9 @@ const BrandCollabProgress: React.FC<BrandCollabProgressProps> = ({
                                 ) : (
                                   <>
                                     <p className={`text-[11px] font-bold ${urgency === 'over' || urgency === 'soon' ? 'text-red-500' : 'text-slate-400'}`}>
-                                      {cardDue ? `마감 ${korDate(cardDue)}` : '마감일 미정'}
+                                      {cardDue
+                                        ? `${isManager ? '마감' : '업로드'} ${korDate(cardDue)}`
+                                        : isManager ? '마감일 미정' : '업로드 일정 미정'}
                                     </p>
                                     {urgency && (
                                       <span

@@ -2399,7 +2399,12 @@ const CampaignProcessBoard: React.FC<Props> = ({ collabId, role, detail, onRefre
                     : statusText(s.key, s.done, s.current)}
                 </span>
               </span>
-              {stage?.dueDate && !s.done && !s.submitted && (!isOpen || solo) && (
+              {/* 단계마다의 마감은 담당자 화면에만 남긴다.
+                  이 날짜는 담당자가 단계를 열 때 하나씩 잡는 값이라, 브랜드와 인플루언서
+                  화면에서는 줄마다 다른 기준의 날짜가 서고 단계가 넘어갈 때마다 숫자가
+                  바뀌었다 — 어디서 나온 날짜인지 화면이 말해 주지 않는다. 당사자가 지켜야
+                  하는 날은 업로드 일정 하나이고, 그것은 목록 카드와 머리줄에 적혀 있다. */}
+              {role === 'manager' && stage?.dueDate && !s.done && !s.submitted && (!isOpen || solo) && (
                 <span className="text-[10px] font-black text-slate-400 flex-shrink-0">{fmtDate(stage.dueDate)}까지</span>
               )}
               {/* 한 단계만 보고 있을 때는 접을 것이 없다 — 접으면 화면에 아무것도 안 남는다. */}
