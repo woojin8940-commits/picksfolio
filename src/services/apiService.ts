@@ -2446,14 +2446,21 @@ export const apiService = {
   },
 
   /** 지원자 목록. 브랜드(본인 캠페인)와 담당자 모두 같은 경로를 쓴다. */
-  async getCampaignApplicants(campaignId: string, token?: string): Promise<any> {
+  async getCampaignApplicants(
+    campaignId: string,
+    token?: string,
+    // 담당자 화면인지. 운영 콘솔 토큰을 가진 사람이 자기 브랜드 캠페인을 열면
+    // 기본은 브랜드 화면이므로(서버 주석 참고), 담당자 화면은 그 뜻을 밝혀야 한다.
+    // 이 값이 있어야 응답에 연락처(contact_card)가 실린다.
+    viewer?: 'manager',
+  ): Promise<any> {
     const headers = await collabHeaders(token);
-    return readMemory(`campaignApplicants:${JSON.stringify(headers)}:${campaignId}`, token ? 0 : 10_000, async () => {
+    return readMemory(`campaignApplicants:${JSON.stringify(headers)}:${campaignId}:${viewer || ''}`, token ? 0 : 10_000, async () => {
     try {
-      const res = await fetch(`/api/campaign-applicants?campaign_id=${encodeURIComponent(campaignId)}`, {
-        credentials: 'same-origin',
-        headers,
-      });
+      const res = await fetch(
+        `/api/campaign-applicants?campaign_id=${encodeURIComponent(campaignId)}${viewer ? `&viewer=${viewer}` : ''}`,
+        { credentials: 'same-origin', headers },
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { applicants: [], error: json?.error || '지원자를 불러오지 못했습니다.' };
       return json;

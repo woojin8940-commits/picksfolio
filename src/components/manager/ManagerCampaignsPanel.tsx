@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../../services/apiService';
 import { formatKoreanWon } from '../../utils/formatters';
-import { contentFormatLabel } from '../../utils/campaignBrief';
+import {
+  AD_OBJECTIVES,
+  PRODUCT_PROVIDE,
+  chosenTiers,
+  contentFormatLabel,
+  parseTierCounts,
+  rewardModeOf,
+} from '../../utils/campaignBrief';
 import BrandCollabProgress from '../BrandCollabProgress';
 import BrandContactCard from '../collab/BrandContactCard';
 import { parseGuidelineFiles } from '../collab/CampaignGuidelineEditor';
@@ -10,6 +17,7 @@ import CampaignInsightPanel from '../collab/CampaignInsightPanel';
 import CollabReviewRoom from '../collab/CollabReviewRoom';
 import CollabSharedWorkspace from '../collab/CollabSharedWorkspace';
 import ManagerCampaignSettlementPanel from './ManagerCampaignSettlementPanel';
+import ManagerCampaignInfluencers from './ManagerCampaignInfluencers';
 
 /**
  * 브랜드 캠페인 — 목록에서 캠페인을 눌러 들어가 인플루언서를 배정한다.
@@ -65,6 +73,42 @@ const STAGE_STATUS: Record<string, { label: string; cls: string }> = {
  * 많아지고, 세 줄이면 아래 묶음이 화면 밖으로 밀린다.
  */
 const PAGE = 10;
+
+/**
+ * 진행 방식(캠페인 카테고리)별 거르기 — 제품 협찬 · 커머스 · 유가시딩.
+ *
+ * 담당자가 하는 일이 방식마다 다르다. 유가시딩(광고비 지급형)은 후보를 찾아 명단을
+ * 올리고 단계를 굴리는 일이고, 제품 협찬과 커머스는 수락된 사람에게 연락해 조건을
+ * 맞추는 일이다. 손과 머리를 쓰는 방식이 다르니 한 번에 한 종류만 보고 싶다는 요청이
+ * 있었고, 실제로 목록을 섞어 두면 카드를 열기 전까지 어느 쪽 일인지 알 수 없다.
+ *
+ * 이름은 브랜드 등록 화면의 이름(REWARD_MODES 의 label)이 아니라 담당자와 브랜드가
+ * 전화에서 쓰는 말로 적는다 — '커머스형'은 등록 화면의 이름이고, 통화에서는 '공동구매'
+ * 라고 부른다.
+ */
+const MODE_FILTERS = [
+  { key: 'barter', label: '제품 협찬' },
+  { key: 'groupbuy', label: '커머스 (공동구매)' },
+  { key: 'paid', label: '유가시딩' },
+];
+
+/** 카드·머리말에 적는 진행 방식 이름. 목록의 거르기 칩과 같은 말을 쓴다. */
+const modeLabelOf = (rewardMode: unknown): string =>
+  MODE_FILTERS.find((m) => m.key === rewardModeOf(String(rewardMode || '')).value)?.label ||
+  rewardModeOf(String(rewardMode || '')).label;
+
+/**
+ * 규모별 인원 배분을 한 줄로 — "나노 3 · 마이크로 2".
+ *
+ * 브랜드는 등록서에서 규모별로 인원을 나눠 적는다(tier_counts). 담당자가 후보를 찾을
+ * 때 "몇 명"보다 먼저 알아야 하는 것이 "어느 규모로 몇 명"이다.
+ */
+const tierCountsLabel = (raw: unknown): string => {
+  const counts = parseTierCounts(raw);
+  return chosenTiers(counts)
+    .map((t) => `${t.label} ${counts[t.key]}`)
+    .join(' · ');
+};
 
 const SCOPES = [
   { key: 'mine' as const, label: '내 담당' },
@@ -227,6 +271,8 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
   const [query, setQuery] = useState('');
   /** 고른 할 일 묶음(bucket). 비어 있으면 전부 보여 준다. */
   const [bucketFilter, setBucketFilter] = useState('');
+  /** 고른 진행 방식. 비어 있으면 전부 보여 준다. */
+  const [modeFilter, setModeFilter] = useState('');
   /** 묶음별로 지금 펼쳐 둔 줄 수. 캠페인이 수백 건이어도 첫 화면은 짧아야 한다. */
   const [shown, setShown] = useState<Record<string, number>>({});
   const [openId, setOpenId] = useState('');
@@ -237,10 +283,16 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
     'listup' | 'progress' | 'insight' | 'review' | 'settlement'
   >('listup');
   /**
-   * 브리프를 펼쳤는지. 접어 두는 이유는 담당자가 캠페인을 열 때 찾는 것이 조건이
-   * 아니라 할 일이기 때문이다 — 조건은 처음 한 번 읽고, 그 뒤로는 명단과 검수만 본다.
+   * 브리프를 펼쳤는지. 캠페인을 열면 펼친 상태로 시작한다.
+   *
+   * 예전에는 접어 두었다 — 담당자가 캠페인을 열 때 찾는 것은 조건이 아니라 할 일이고,
+   * 조건은 처음 한 번 읽으면 된다고 봤다. 그런데 접혀 있던 시절의 브리프에는 단가와
+   * 일정밖에 없었다. 지금은 브랜드가 등록서에 적어 낸 제품 소개 · 원하는 컨셉 ·
+   * 필수 표기가 그대로 들어 있고, 이것들은 담당자가 인플루언서에게 캠페인을 설명할
+   * 때마다 다시 읽는 글이다. 있는 줄 모르면 아무도 펼치지 않으므로 기본을 뒤집었다.
+   * 다 읽은 담당자는 접어 두면 된다.
    */
-  const [showBrief, setShowBrief] = useState(false);
+  const [showBrief, setShowBrief] = useState(true);
 
   const [collabs, setCollabs] = useState<any[]>([]);
   const [reviewTarget, setReviewTarget] = useState<{ collabId: string; target: 'script' | 'content' } | null>(
@@ -285,7 +337,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
     // 캠페인을 옮기면 탭도 처음으로 돌린다. 앞 캠페인에서 검수 탭에 있었다고 다음
     // 캠페인도 검수부터 볼 이유는 없다(대개 명단이 먼저다).
     setDetailTab('listup');
-    setShowBrief(false);
+    setShowBrief(true);
     setConfirmDue(c.listupConfirmDue ? String(c.listupConfirmDue).slice(0, 10) : '');
     setAssetsFor('');
     setAssetDetail(null);
@@ -372,11 +424,25 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
     const q = query.trim().toLowerCase();
     return campaigns.filter((c: any) => {
       if (scope === 'unassigned' && c.managerUsername) return false;
+      // 진행 방식은 범위와 같은 층에서 좁힌다 — 묶음 숫자가 고른 방식의 숫자여야
+      // "제품 협찬 중에 검수 대기가 몇 건"이 읽힌다.
+      if (modeFilter && rewardModeOf(c.rewardMode).value !== modeFilter) return false;
       if (!q) return true;
       return [c.title, c.brandName, c.businessUsername, c.category, c.managerUsername]
         .some((v) => String(v || '').toLowerCase().includes(q));
     });
-  }, [campaigns, scope, query]);
+  }, [campaigns, scope, query, modeFilter]);
+
+  /** 방식별 건수. 거르기 칩에 적는다(고른 방식과 무관하게 전체에서 센다). */
+  const modeCounts = useMemo(() => {
+    const acc: Record<string, number> = {};
+    campaigns.forEach((c: any) => {
+      if (scope === 'unassigned' && c.managerUsername) return;
+      const key = rewardModeOf(c.rewardMode).value;
+      acc[key] = (acc[key] || 0) + 1;
+    });
+    return acc;
+  }, [campaigns, scope]);
 
   const bucketCounts = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -431,12 +497,21 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
      * 정산이 맨 끝인 이유는 순서가 곧 일의 순서이기 때문이다 — 명단을 넘기고,
      * 진행을 보고, 성과를 확인하고, 검수를 마친 다음에야 지급이 열린다.
      */
+    const mode = rewardModeOf(open.rewardMode);
     const TABS = [
-      { key: 'listup' as const, label: '인플루언서', count: open.counts?.listed || 0 },
-      { key: 'progress' as const, label: '진행사항', count: 0 },
-      { key: 'insight' as const, label: '인사이트', count: 0 },
-      { key: 'review' as const, label: '검수', count: reviewCount },
-      { key: 'settlement' as const, label: '정산', count: unpaidCount },
+      {
+        key: 'listup' as const,
+        label: '인플루언서',
+        count: mode.openApply ? 0 : open.counts?.listed || 0,
+      },
+      ...(mode.hasWorkroom
+        ? [
+            { key: 'progress' as const, label: '진행사항', count: 0 },
+            { key: 'insight' as const, label: '인사이트', count: 0 },
+            { key: 'review' as const, label: '검수', count: reviewCount },
+            { key: 'settlement' as const, label: '정산', count: unpaidCount },
+          ]
+        : []),
     ];
     const activeTab = TABS.some((t) => t.key === detailTab) ? detailTab : 'listup';
 
@@ -546,26 +621,112 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                 className="border-slate-200"
               />
 
+              {/* 제품 소개. 브랜드가 등록서 첫 칸에 적은 글이고, 담당자가
+                  인플루언서에게 캠페인을 설명할 때 그대로 읽는 문장이다. */}
               {open.description && (
-                <p className="text-sm text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
-                  {open.description}
-                </p>
+                <div className="bg-slate-50 rounded-xl p-4">
+                  <p className="text-[11px] text-slate-400 font-black mb-1.5">제품 소개</p>
+                  <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                    {open.description}
+                  </p>
+                </div>
               )}
+
+              {/* 원하는 컨셉 · 필수 표기 · 2차 활용 안내 — 등록서의 긴 글 칸들.
+                  칸 하나에 한 줄로 접어 넣으면 문장이 잘려 쓸 수 없으므로 폭을
+                  다 쓰는 블록으로 그린다. */}
+              {[
+                { label: mode.hasContentFormat ? '원하는 컨셉' : '콘텐츠 컨셉', value: open.videoConcept },
+                { label: '필수 표기 · 가이드', value: open.requirements },
+                { label: '2차 활용 안내', value: open.secondUseNote },
+                { label: '타겟 · 원하는 인플루언서', value: open.targetAudience },
+              ]
+                .filter((b) => String(b.value || '').trim())
+                .map((b) => (
+                  <div key={b.label} className="bg-slate-50 rounded-xl p-4">
+                    <p className="text-[11px] text-slate-400 font-black mb-1.5">{b.label}</p>
+                    <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap leading-relaxed">
+                      {b.value}
+                    </p>
+                  </div>
+                ))}
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {briefTile('1인 단가', open.rewardAmount ? formatKoreanWon(open.rewardAmount) : '미정')}
+                {briefTile('진행 방식', modeLabelOf(open.rewardMode), mode.tagline)}
+                {briefTile(
+                  mode.value === 'paid' ? '1인 단가' : '단가',
+                  open.rewardAmount ? formatKoreanWon(open.rewardAmount) : mode.value === 'paid' ? '미정' : '',
+                )}
+                {/* 커머스형은 단가 대신 판매 수수료로 정산한다. */}
+                {briefTile(
+                  '판매 수수료',
+                  open.groupbuyCommissionRate > 0 ? `${open.groupbuyCommissionRate}%` : '',
+                )}
                 {briefTile('2차 활용', open.secondUseFee > 0 ? formatKoreanWon(open.secondUseFee) : '')}
+                {/* 모집기간. 지원을 받는 방식에서는 이 기간이 지나면 지원이 닫히므로
+                    담당자가 브랜드에 "연장할까요"를 물어야 하는 값이다. */}
+                {mode.openApply &&
+                  briefTile(
+                    '모집기간',
+                    open.startDate
+                      ? `${String(open.startDate).slice(0, 10)}${open.endDate ? ` ~ ${String(open.endDate).slice(0, 10)}` : ''}`
+                      : '',
+                    '마감일까지 지원할 수 있습니다',
+                  )}
+                {briefTile(
+                  mode.headcountLabel,
+                  open.maxApplicants > 0
+                    ? `${open.maxApplicants}명`
+                    : open.seedingCount > 0
+                      ? `${open.seedingCount}명`
+                      : '',
+                )}
                 {briefTile('업로드 채널', open.uploadChannel || '')}
-                {briefTile('콘텐츠 형식', open.contentFormat ? contentFormatLabel(open.contentFormat) : '')}
+                {briefTile(
+                  '콘텐츠 형식',
+                  mode.hasContentFormat
+                    ? open.contentFormat
+                      ? contentFormatLabel(open.contentFormat)
+                      : ''
+                    : '자유 (인플루언서 선택)',
+                )}
                 {briefTile(
                   '희망 게시일',
                   open.uploadFrom ? `${open.uploadFrom}${open.uploadTo ? ` ~ ${open.uploadTo}` : ''}` : '',
                 )}
                 {briefTile('제품', open.productName || '')}
                 {briefTile(
+                  '제품 제공',
+                  PRODUCT_PROVIDE.find((x) => x.value === open.productProvide)?.label || '',
+                )}
+                {briefTile(
+                  '광고 목적',
+                  AD_OBJECTIVES.find((x) => x.value === open.adObjective)?.label || '',
+                )}
+                {briefTile('SNS 카테고리', open.snsCategory || '')}
+                {briefTile('희망 성별', open.influencerGender || '')}
+                {briefTile('희망 연령', open.influencerAges || '')}
+                {briefTile('희망 스타일', open.influencerStyles || '')}
+                {briefTile('제외 키워드', open.excludeKeywords || '')}
+                {/* 규모별 인원 배분. 브랜드가 직접 정하는 방식(광고비 지급형)에만 있고,
+                    담당자가 후보를 몇 명씩 찾아야 하는지가 여기서 나온다. */}
+                {briefTile('희망 인플루언서', tierCountsLabel(open.tierCounts))}
+                {briefTile(
                   '브랜드 확정 기한',
                   open.listupConfirmDue ? String(open.listupConfirmDue).slice(0, 10) : '',
                 )}
               </div>
+              {/* 제품 페이지. 담당자가 인플루언서에게 보낼 링크라 눌러 열 수 있어야 한다. */}
+              {open.productUrl && (
+                <a
+                  href={open.productUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block text-xs font-black text-blue-600 hover:underline break-all"
+                >
+                  제품 페이지 열기 ↗
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -636,7 +797,18 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                 </span>
               </div>
             )}
-            <ListupWorkspace campaignId={open.id} onNotify={onNotify} />
+            {/* 지원자 · 수락한 명단. 지원을 받는 방식(제품 협찬 · 커머스)에만 있다.
+                담당자가 수락된 사람에게 먼저 연락해야 진행이 시작되는 방식이라,
+                연락처는 이 목록 안에서 바로 열린다. */}
+            {mode.openApply && (
+              <ManagerCampaignInfluencers
+                campaignId={open.id}
+                isBarter={mode.value === 'barter'}
+                onNotify={onNotify}
+              />
+            )}
+            {/* 담당자가 후보를 찾아 올리는 명단. 제품 협찬형에는 없다. */}
+            {open.managerListup !== false && <ListupWorkspace campaignId={open.id} onNotify={onNotify} />}
           </div>
         )}
 
@@ -814,7 +986,7 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
           <div className="min-w-0">
             <h3 className="text-base font-black text-slate-900">브랜드 캠페인</h3>
             <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-              지금 내 손이 필요한 캠페인이 맨 위에 옵니다. 카드를 누르면 명단·진행사항·인사이트·검수로 들어갑니다.
+              지금 내 손이 필요한 캠페인이 맨 위에 옵니다. 카드를 누르면 브랜드가 적어 낸 조건과 인플루언서 명단으로 들어갑니다.
             </p>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -830,6 +1002,32 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
               </button>
             ))}
           </div>
+        </div>
+
+        {/* 캠페인 카테고리(진행 방식). 할 일 묶음보다 위에 둔다 — 방식을 먼저
+            좁히면 아래 묶음 숫자가 그 방식 안에서의 숫자가 된다. */}
+        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={() => setModeFilter('')}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-black ${
+              modeFilter ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'bg-blue-600 text-white'
+            }`}
+          >
+            전체
+          </button>
+          {MODE_FILTERS.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setModeFilter(modeFilter === m.key ? '' : m.key)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black ${
+                modeFilter === m.key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {m.label} {modeCounts[m.key] || 0}
+            </button>
+          ))}
         </div>
 
         {/* 검색. 캠페인이 쌓이면 목록을 눈으로 훑는 것이 가장 느린 방법이 된다. */}
@@ -873,11 +1071,13 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
       ) : totalShown === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
           <p className="text-sm text-slate-500 font-black">
-            {query || bucketFilter ? '조건에 맞는 캠페인이 없습니다.' : '진행할 캠페인이 없습니다.'}
+            {query || bucketFilter || modeFilter
+              ? '조건에 맞는 캠페인이 없습니다.'
+              : '진행할 캠페인이 없습니다.'}
           </p>
           <p className="mt-1 text-[11px] font-medium text-slate-400">
-            {query || bucketFilter
-              ? '검색어를 지우거나 다른 묶음을 골라 보세요.'
+            {query || bucketFilter || modeFilter
+              ? '검색어를 지우거나 다른 카테고리 · 묶음을 골라 보세요.'
               : scope === 'mine'
                 ? '아직 맡은 캠페인이 없습니다. "담당자 없음"에서 하나 맡아 보세요.'
                 : '운영자가 캠페인을 승인하면 이 자리에 올라옵니다.'}
@@ -969,6 +1169,11 @@ const ManagerCampaignsPanel: React.FC<ManagerCampaignsPanelProps> = ({
                               </>
                             )}
                           </div>
+                          {/* 진행 방식. 카테고리를 전체로 놓고 볼 때도 카드만 보고
+                              어느 쪽 일인지 알 수 있어야 한다. */}
+                          <span className="inline-block px-1.5 py-0.5 rounded-md bg-slate-100 text-[10px] font-black text-slate-500 mb-1">
+                            {modeLabelOf(c.rewardMode)}
+                          </span>
                           <h3 className="font-black text-sm md:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mb-1.5">
                             {c.title}
                           </h3>

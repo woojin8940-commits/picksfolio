@@ -175,13 +175,26 @@ ${SENTINEL_OPEN} {"kind":"caption","text":"본문 전체","changes":["첫 줄에
  */
 const PLACEHOLDER_FIELD = /^(없음|없습니다|해당\s*없음|무|-{1,3}|—|n\/?a|none|null)$/i;
 
+/**
+ * "나레이션 없이" 를 말로 적어 놓은 경우.
+ *
+ * 나레이션 없는 기획안을 달라고 하면 모델이 칸을 비우는 대신 "(음원만 사용)",
+ * "BGM만", "무음" 처럼 상태를 적어 넣는다. 그대로 저장하면 브랜드 화면의 나레이션
+ * 칸에 그 말이 대사처럼 찍혀 나가므로, 칸 전체가 이 말뿐일 때는 빈 칸으로 본다.
+ * 문장 안에 섞여 있으면(예: "음원만 사용하고 자막으로 …") 건드리지 않는다.
+ */
+const NO_NARRATION_FIELD =
+  /^(?:음원|bgm|배경\s*음악|음악|사운드|소리)\s*(?:만)?\s*(?:사용|삽입|재생)?$|^무음$|^(?:나레이션|내레이션|대사|멘트)\s*(?:없이|생략|제외)$/i;
+
 const emptyish = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return "";
   const bare = trimmed.replace(/^[([{]\s*/, "").replace(/\s*[)\]}]$/, "");
   // "(나레이션 없음)" 처럼 칸 이름을 함께 적은 경우까지 같은 것으로 본다.
   const withoutLabel = bare.replace(/^(나레이션|자막|대사|내레이션)\s*[:·]?\s*/, "").trim();
-  return PLACEHOLDER_FIELD.test(bare) || PLACEHOLDER_FIELD.test(withoutLabel) ? "" : trimmed;
+  if (PLACEHOLDER_FIELD.test(bare) || PLACEHOLDER_FIELD.test(withoutLabel)) return "";
+  if (NO_NARRATION_FIELD.test(bare) || NO_NARRATION_FIELD.test(withoutLabel)) return "";
+  return trimmed;
 };
 
 /**
@@ -266,14 +279,24 @@ const parseDraftJson = (raw: string): CampaignDraft | null => {
 /**
  * 모델 답에서 초안 덩어리를 떼어낸다.
  *
+ * 표식을 못 찾거나 JSON 이 깨져 있으면 사람이 읽는 글에서 같은 값을 건져 낸다
+ * (아래 '표식이 없을 때' 단락). 표식이 있으면 항상 그쪽이 이긴다.
+ *
+ * @param captionRequested 이번 요청이 본문(캡션) 하나만 가리켰는지. 글에서 본문을
+ *   건져 낼 때 경계를 어디까지 넓혀도 되는지가 이 값으로 갈린다.
  * @returns `reply` 는 표식을 지운 사람이 읽을 답, `draft` 는 반영 가능한 초안(없으면 null).
  */
-export function extractCampaignDraft(reply: string): { reply: string; draft: CampaignDraft | null } {
+export function extractCampaignDraft(
+  reply: string,
+  captionRequested = false,
+): { reply: string; draft: CampaignDraft | null } {
   const raw = String(reply || "");
   if (!raw.includes(SENTINEL_OPEN)) {
-    // 여는 표식이 없으면 초안도 없다. 닫는 표식만 흘러나온 경우가 있으므로 그것만
-    // 지운다 — 사용자 화면에 표식 문자열이 그대로 보이면 안 된다.
-    return { reply: raw.split(SENTINEL_CLOSE).join("").trim(), draft: null };
+    // 여는 표식이 없다. 닫는 표식만 흘러나온 경우가 있으므로 그것만 지운다 —
+    // 사용자 화면에 표식 문자열이 그대로 보이면 안 된다. 그리고 글에서 초안을
+    // 건져 낸다: 표식을 잊었을 뿐 기획안은 답 안에 다 쓰여 있는 경우다.
+    const text = raw.split(SENTINEL_CLOSE).join("").trim();
+    return { reply: text, draft: salvageDraft(text, captionRequested) };
   }
 
   // 표식을 여러 번 붙였다면 마지막 것이 최종안이다.
@@ -297,6 +320,225 @@ export function extractCampaignDraft(reply: string): { reply: string; draft: Cam
     text = text.slice(0, dangling);
   }
   text = text.split(SENTINEL_CLOSE).join("");
+  const readable = text.trim();
 
-  return { reply: text.trim(), draft };
+  // 표식은 있었지만 JSON 이 깨졌거나(설명이 섞임, 답이 잘림) 저장 규칙에 걸려 버려진
+  // 경우. 글에는 기획안이 그대로 있으므로 거기서 건져 낸다.
+  return { reply: readable, draft: draft || salvageDraft(readable, captionRequested) };
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 표식이 없을 때 — 글에서 초안을 건져 낸다
+ *
+ * 위 규약은 모델이 답 끝에 JSON 표식을 붙여 준다는 전제에 서 있다. 그런데 표식은
+ * 실제로 빠진다. 답이 길어져 마지막 토큰에서 잘리거나, 모델이 장면을 사람이 읽는
+ * 글로만 예쁘게 써 놓고 표식을 잊거나, 표식 안에 설명을 섞어 JSON 이 깨진다.
+ *
+ * 표식이 없으면 초안 카드가 안 뜨고, 그러면 사용자는 완성된 기획안을 눈으로 읽고
+ * 손으로 옮겨 적어야 한다 — 버튼 한 번이면 끝나는 일이다. "가끔 안 뜬다"는 것이
+ * 실제로는 "믿을 수 없다"와 같아서, 사용자는 AI 가 쓴 기획안을 매번 복사할 준비를
+ * 하고 읽게 된다.
+ *
+ * 그래서 표식이 없거나 못 읽었으면 사람이 읽는 글에서 같은 값을 건져 낸다. 모델이
+ * 장면을 쓰는 모양은 지시문이 정해 두었으므로(장면 번호 → 설명 · 자막 · 나레이션)
+ * 그 모양을 그대로 읽는다. 건져 낸 초안도 카드에서 고칠 수 있으니, 조금 어긋나게
+ * 읽어도 사용자가 그 자리에서 바로잡을 수 있다 — 카드가 아예 안 뜨는 것보다 낫다.
+ *
+ * 건져 내기는 표식을 대신하지 않는다. 표식이 있으면 그것이 항상 이긴다(모델이 직접
+ * 고른 값이고 `changes` 까지 들어 있다). 이 길은 마지막 그물이다.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** 마크다운 장식과 목록 기호를 벗긴다. 저장되는 것은 글이지 마크다운이 아니다. */
+const plainLine = (line: string): string =>
+  String(line || "")
+    // 인용·목록 기호. 중첩 목록이라 여러 겹으로 붙어 온다("  - * 자막: …").
+    .replace(/^\s*(?:[>\s]*)(?:[-*+•◦·]\s+)*/, "")
+    // **굵게** · __굵게__ · *기울임* · `코드`
+    .replace(/\*\*|__|`/g, "")
+    .trim();
+
+/**
+ * 장면 머리줄인지 — "장면 3", "**장면 3: 마무리**", "컷 2)", "Scene 4".
+ *
+ * 번호를 요구하는 것이 핵심이다. 지시문은 답 맨 앞에 "필수 장면: …" 같은 가이드
+ * 확인 목록을 쓰게 하는데, 번호 없이 '장면'이라는 낱말만 보면 그 줄까지 머리줄로
+ * 읽어 가이드 요약이 1번 장면이 되어 버린다.
+ */
+const SCENE_HEAD_RE = /^(?:#{1,6}\s*)?(?:장면|씬|컷|scene|cut)\s*#?\s*(\d{1,2})\s*(?:[.):\-–~]|$)/i;
+
+/**
+ * 장면 나열이 끝나는 자리. 지시문이 장면 뒤에 쓰게 하는 꼬리 단락들이다
+ * ("담당자 확인 필요:", 수평선, 본문 섹션). 여기서 끊지 않으면 마지막 장면의
+ * 설명 칸에 이 단락이 통째로 들어간다.
+ */
+const SCENE_STOP_RE =
+  /^(?:-{3,}|_{3,}|\*{3,}|(?:#{1,6}\s*)?(?:담당자\s*확인\s*필요|확인\s*필요|확인이?\s*필요한?\s*것|참고\s*사항|비고|다음\s*단계|추가\s*제안|본문|캡션|인스타그램\s*본문|해시태그)\s*[::]?\s*$)/i;
+
+/** 장면 안의 칸 이름. 앞의 것이 먼저 걸린다("장면 설명"이 "장면"보다 앞). */
+const SCENE_FIELD_LABELS: { key: keyof DraftScene; re: RegExp }[] = [
+  { key: "visual", re: /^(?:장면\s*설명|영상\s*설명|화면\s*설명|설명|영상|화면|비주얼|촬영|visual)\s*[::]\s*/i },
+  { key: "subtitle", re: /^(?:화면\s*자막|자막|텍스트|subtitle|caption)\s*[::]\s*/i },
+  { key: "narration", re: /^(?:나레이션|내레이션|대사|멘트|보이스|음성|narration|voice\s*over|vo)\s*[::]\s*/i },
+];
+
+/**
+ * 사람이 읽는 글에서 장면을 읽어 낸다.
+ *
+ * 칸 이름을 붙이지 않고 장면을 한 문단으로 쓴 답도 있다. 그때는 문단 전체를 설명으로
+ * 둔다 — 설명은 기획안에서 유일한 필수 칸이고, 자막·나레이션을 비워 둔 초안은
+ * 저장할 수 있다. 사용자가 카드에서 채우면 된다.
+ */
+const salvagePlan = (text: string): CampaignDraft | null => {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks: string[][] = [];
+  let current: string[] | null = null;
+
+  for (const rawLine of lines) {
+    const line = plainLine(rawLine);
+    if (SCENE_HEAD_RE.test(line)) {
+      current = [];
+      blocks.push(current);
+      // 머리줄에 제목을 같이 적는 경우("장면 1: 첫 3초")가 있는데, 그 제목은 촬영
+      // 지시가 아니라 이름표다. 설명으로 옮기지 않는다.
+      continue;
+    }
+    if (!current) continue;
+    if (SCENE_STOP_RE.test(line)) {
+      current = null;
+      continue;
+    }
+    current.push(line);
+  }
+
+  const scenes: DraftScene[] = [];
+  for (const block of blocks) {
+    const found: DraftScene = { visual: "", subtitle: "", narration: "" };
+    /** 지금 이어 붙이는 칸. 한 칸이 여러 줄로 이어지는 일이 흔하다. */
+    let cursor: keyof DraftScene | null = null;
+    const loose: string[] = [];
+
+    for (const line of block) {
+      if (!line) {
+        cursor = null;
+        continue;
+      }
+      const label = SCENE_FIELD_LABELS.find((f) => f.re.test(line));
+      if (label) {
+        cursor = label.key;
+        const value = line.replace(label.re, "").trim();
+        found[cursor] = found[cursor] ? `${found[cursor]}\n${value}` : value;
+        continue;
+      }
+      if (cursor) {
+        found[cursor] = found[cursor] ? `${found[cursor]}\n${line}` : line;
+        continue;
+      }
+      loose.push(line);
+    }
+
+    // 칸 이름 없이 쓴 줄은 설명으로 본다. 이름 붙은 설명이 이미 있으면 그 뒤에 붙인다.
+    if (loose.length > 0) {
+      const extra = loose.join("\n").trim();
+      found.visual = found.visual ? `${found.visual}\n${extra}` : extra;
+    }
+
+    const scene = clampScene(found);
+    if (scene.visual.trim()) scenes.push(scene);
+  }
+
+  /*
+   * 장면이 하나뿐이면 기획안으로 보지 않는다.
+   *
+   * "1번 장면은 이렇게 바꾸면 좋겠어요" 처럼 한 장면만 이야기하는 답이 실제로 있고,
+   * 그것을 기획안으로 읽으면 반영 버튼이 나머지 장면을 지운다(초안 JSON 이 기획안을
+   * 통째로 대체한다). 한 장면만 고치는 답에 표식이 빠졌다면, 카드가 안 뜨는 쪽이
+   * 기획안을 잃는 쪽보다 낫다.
+   */
+  if (scenes.length < 2) return null;
+  return { kind: "plan", scenes: scenes.slice(0, MAX_SCENES) };
+};
+
+/** 본문 섹션 머리줄 — "**본문:**", "## 인스타그램 본문", "캡션 초안". */
+const CAPTION_HEAD_RE =
+  /^(?:#{1,6}\s*)?(?:인스타그램\s*)?(?:본문|캡션|caption)\s*(?:초안|\(캡션\)|안)?\s*[::]?\s*$/i;
+
+/** 본문 뒤에 붙는 꼬리 단락. 여기서부터는 본문이 아니다. */
+const CAPTION_STOP_RE =
+  /^(?:-{3,}|_{3,}|\*{3,}|(?:#{1,6}\s*)?(?:담당자\s*확인\s*필요|확인\s*필요|확인이?\s*필요한?\s*것|참고\s*사항|비고|다음\s*단계|추가\s*제안|가이드에서\s*확인한\s*것)\s*[::]?\s*$)/i;
+
+/**
+ * 사람이 읽는 글에서 본문(캡션)을 건져 낸다.
+ *
+ * 본문은 장면처럼 생긴 모양이 없어서 경계를 잡는 것이 전부다. 순서대로 본다.
+ *   1. ``` 로 감싼 덩어리 — 모델이 "그대로 복사하세요"의 뜻으로 가장 자주 쓰는 모양.
+ *   2. "본문:" 머리줄 뒤부터 꼬리 단락 전까지.
+ *   3. (본문만 써 달라는 요청이었을 때) 인사말 한 줄을 떼어낸 나머지 전체.
+ *
+ * 3번은 요청이 본문 하나만 가리켰을 때만 쓴다. 질문에 답한 글을 본문으로 읽으면
+ * 엉뚱한 글이 카드에 올라오는데, 무엇을 물어도 카드가 뜨는 화면은 카드를 믿을 수
+ * 없게 만든다.
+ */
+const salvageCaption = (text: string, captionRequested: boolean): CampaignDraft | null => {
+  const raw = String(text || "");
+
+  // 1. 코드 블록. 가장 긴 것을 고른다 — 해시태그만 따로 감싸는 경우가 있다.
+  const fenced = [...raw.matchAll(/```[a-z]*\s*\n([\s\S]*?)```/gi)]
+    .map((m) => m[1].trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)[0];
+  if (fenced) return { kind: "caption", text: fenced.slice(0, MAX_CAPTION) };
+
+  const lines = raw.split(/\r?\n/);
+  const headAt = lines.findIndex((line) => CAPTION_HEAD_RE.test(plainLine(line)));
+
+  let body: string[];
+  if (headAt >= 0) {
+    body = [];
+    for (const rawLine of lines.slice(headAt + 1)) {
+      if (CAPTION_STOP_RE.test(plainLine(rawLine))) break;
+      body.push(rawLine);
+    }
+  } else if (captionRequested) {
+    // 첫 줄이 "아래와 같이 작성했습니다" 같은 인사말이면 떼어낸다. 본문에 들어가면
+    // 인스타에 그 말이 그대로 올라간다. 짧고 다음 줄이 비어 있을 때만 인사말로 본다.
+    const start =
+      lines.length > 2 && plainLine(lines[0]).length > 0 && plainLine(lines[0]).length <= 80 &&
+      !plainLine(lines[1]).trim()
+        ? 2
+        : 0;
+    body = [];
+    for (const rawLine of lines.slice(start)) {
+      if (CAPTION_STOP_RE.test(plainLine(rawLine))) break;
+      body.push(rawLine);
+    }
+  } else {
+    return null;
+  }
+
+  // 마크다운 장식만 걷어낸다. 줄바꿈과 해시태그는 본문의 일부이므로 그대로 둔다.
+  const cleaned = body
+    .map((line) => line.replace(/\*\*|__|`/g, "").replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (cleaned.length < 20) return null;
+  return { kind: "caption", text: cleaned.slice(0, MAX_CAPTION) };
+};
+
+/**
+ * 글에서 초안을 건져 낸다. 기획안을 먼저 본다.
+ *
+ * 순서가 중요하다. 기획안 답에도 마지막 장면 자막이나 꼬리에 본문·해시태그가 함께
+ * 실려 오는 일이 흔한데, 본문을 먼저 보면 장면이 다섯 개 쓰여 있는 답에서 본문
+ * 카드가 떠 버린다. 장면이 읽히면 그 답의 결과물은 기획안이다.
+ *
+ * 다만 요청이 본문 하나만 가리켰다면(captionRequested) 본문을 먼저 본다 — 그때
+ * 글에 장면처럼 보이는 줄이 있어도 사용자가 받으려던 것은 본문이다.
+ */
+const salvageDraft = (text: string, captionRequested: boolean): CampaignDraft | null => {
+  if (!text.trim()) return null;
+  if (captionRequested) {
+    return salvageCaption(text, true) || salvagePlan(text);
+  }
+  return salvagePlan(text) || salvageCaption(text, false);
+};

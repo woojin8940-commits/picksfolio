@@ -211,7 +211,18 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     reward_mode: normalizeRewardMode(editing?.reward_mode),
     upload_channel: editing?.upload_channel || CHANNELS[0],
     // 숏폼(릴스)인가 피드 게시물인가. 인플루언서의 지급 단가가 이 값으로 갈린다.
+    // 커머스형은 형식을 묻지 않으므로(hasContentFormat) 저장할 때 빈 값이 된다.
     content_format: editing?.content_format || CONTENT_FORMATS[0].value,
+    // 지원을 받는 방식(제품 협찬형 · 커머스형)의 모집기간.
+    //
+    // 예전에는 등록 즉시 모집을 시작해 희망 업로드 시작일에 닫았다. 그래서 두 달
+    // 뒤에 올릴 캠페인은 두 달 내내 목록에 걸려 있었고, 당장 진행할 캠페인은
+    // 모집이 며칠밖에 열리지 않았다 — 브랜드가 정할 수 있어야 하는 값이다.
+    // 저장되는 곳은 campaigns 의 start_date · end_date 이고, end_date 가 지나면
+    // 서버가 지원을 막는다(api-campaign-applications).
+    // 예전 캠페인에는 ISO 시각이 들어 있어 달력이 못 읽는다 — 날짜 부분만 쓴다.
+    recruit_from: String(editing?.start_date || '').slice(0, 10),
+    recruit_to: String(editing?.end_date || '').slice(0, 10),
     budget_krw: formatNumberWithCommas(digitsOnly(editing?.budget_krw || '')),
     // 지원을 받아 고르는 방식의 인원. 제품 협찬형은 협찬 인원, 공동구매는 모집 인원이고
     // 세는 대상은 둘 다 사람이다 — 예전에는 제품 수(개)를 받았는데, 한 사람에게 제품
@@ -287,6 +298,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
   const mode = rewardModeOf(form.reward_mode);
   const isBarter = form.reward_mode === 'barter';
   const isGroupBuy = form.reward_mode === 'groupbuy';
+  // 모집기간을 브랜드가 정하는 방식인지. 지원을 받는 방식에만 모집 시작·마감이 있다.
+  const hasRecruitPeriod = mode.openApply;
   // 규모별 배분을 브랜드가 직접 정하는 방식인지. 단계 구성과 필수 항목이 여기서 갈린다.
   const picksInfluencer = mode.pickInfluencer;
   const budgetKrw = Number(digitsOnly(form.budget_krw) || 0);
@@ -409,7 +422,12 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
    * 담길 장면과 본문의 결이다. 저장하는 칸(video_concept)은 하나로 둔다.
    */
   const isShortformFormat = form.content_format !== 'feed';
-  const conceptLabel = isShortformFormat ? '영상 컨셉' : '게시물 컨셉';
+  // 커머스형은 형식을 고르지 않는다. 숏폼으로 단정하지 않도록 이름도 중립으로 둔다.
+  const conceptLabel = !mode.hasContentFormat
+    ? '콘텐츠 컨셉'
+    : isShortformFormat
+      ? '영상 컨셉'
+      : '게시물 컨셉';
 
   /**
    * 사이드바가 보여 주는 항목별 상태.
@@ -434,12 +452,17 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
     campaign: [
       { label: '진행 방식', done: !!form.reward_mode, required: true },
       { label: '업로드 채널', done: !!form.upload_channel, required: true },
-      { label: '콘텐츠 형식', done: !!form.content_format, required: true },
+      ...(mode.hasContentFormat
+        ? [{ label: '콘텐츠 형식', done: !!form.content_format, required: true }]
+        : []),
       ...(picksInfluencer
         ? [{ label: '광고 집행 예산', done: budgetKrw >= cheapestFee, required: true }]
         : [{ label: mode.headcountLabel, done: applyHeadcount > 0, required: true }]),
       ...(isGroupBuy
         ? [{ label: '판매 수수료', done: commissionRate > 0 && !badCommission, required: true }]
+        : []),
+      ...(hasRecruitPeriod
+        ? [{ label: '모집기간', done: !!form.recruit_from && !!form.recruit_to, required: true }]
         : []),
       { label: '희망 업로드 일정', done: !!form.upload_from, required: true },
       { label: conceptLabel, done: !!form.video_concept.trim(), required: true },
@@ -455,7 +478,8 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       { label: '제외 조건', done: form.exclude_keywords.length > 0, required: false },
     ],
   }), [
-    form, mode, picksInfluencer, isGroupBuy, applyHeadcount, commissionRate,
+    form, mode, picksInfluencer, isGroupBuy, hasRecruitPeriod, conceptLabel,
+    applyHeadcount, commissionRate,
     badCommission, budgetKrw, cheapestFee, headcount, overBudget,
   ]);
 
@@ -488,11 +512,15 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
       if (isGroupBuy && badCommission) {
         return `판매 수수료는 ${COMMISSION_RANGE.min}% ~ ${COMMISSION_RANGE.max}% 사이로 입력해 주세요.`;
       }
+      if (hasRecruitPeriod) {
+        if (!form.recruit_from || !form.recruit_to) return '모집기간을 선택해 주세요.';
+        if (form.recruit_from > form.recruit_to) return '모집기간의 시작일이 마감일보다 늦습니다.';
+      }
       if (!form.upload_from) return '희망 업로드 시작일을 선택해 주세요.';
       if (form.upload_from && form.upload_to && form.upload_from > form.upload_to) {
         return '희망 업로드 일정의 시작일이 마감일보다 늦습니다.';
       }
-      if (!form.content_format) return '콘텐츠 형식을 골라 주세요.';
+      if (mode.hasContentFormat && !form.content_format) return '콘텐츠 형식을 골라 주세요.';
       if (!form.video_concept.trim()) return `원하는 ${conceptLabel}을 적어 주세요.`;
       return '';
     }
@@ -560,10 +588,14 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
         reward_amount: picksInfluencer ? String(derivedUnitFee(form.reward_mode, counts)) : '',
         requirements,
         max_applicants: headcount,
-        // 모집은 등록 즉시 시작하고, 희망 업로드 시작일까지 받는다.
-        start_date: todayInSeoul(),
-        end_date: form.upload_from || '',
-        content_format: form.content_format,
+        // 모집기간. 지원을 받는 방식은 브랜드가 고른 기간을 그대로 쓰고, 담당자가
+        // 후보를 찾아 오는 방식(광고비 지급형)은 목록에 걸리지 않으므로 예전처럼
+        // 등록 즉시 ~ 희망 업로드 시작일로 둔다.
+        start_date: hasRecruitPeriod ? (form.recruit_from || todayInSeoul()) : todayInSeoul(),
+        end_date: hasRecruitPeriod ? (form.recruit_to || '') : (form.upload_from || ''),
+        // 커머스형은 형식을 못 박지 않는다. 빈 값으로 저장하면 상세·명단 화면이
+        // 형식 줄 자체를 그리지 않고, 담당자 단가도 형식에 묶이지 않는다.
+        content_format: mode.hasContentFormat ? form.content_format : '',
         second_use_fee: 0,
         second_use_note: mode.secondUseNote,
 
@@ -1027,7 +1059,20 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 </div>
               </div>
 
-              {/* 진행 방식이 정하는 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다. */}
+              {/* 진행 방식이 정하는 단계. 협업 화면에 실제로 생기는 단계와 짝을 맞춰 둔다.
+                  제품 협찬형·커머스형은 담당자가 화면 밖에서 진행하므로 단계를 약속으로
+                  내걸지 않고, 무엇이 대신 일어나는지만 적는다. */}
+              {!mode.hasWorkroom ? (
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                  <p className="text-[11px] font-black text-slate-700">{mode.label} 진행 방법</p>
+                  <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-relaxed break-keep">
+                    지원자를 수락하면 픽스폴리오 담당자가 배정되어 브랜드와 인플루언서 양쪽에
+                    직접 연락해 조건과 일정을 정리합니다. 화면에서 단계를 하나씩 눌러 진행하지
+                    않아도 됩니다.
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5">{mode.secondUseNote}</p>
+                </div>
+              ) : (
               <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
                 <p className="text-[11px] font-black text-slate-700 mb-3">{mode.label} 진행 단계</p>
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
@@ -1053,6 +1098,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   {mode.secondUseNote} · 제외된 단계는 협업에도 생기지 않습니다.
                 </p>
               </div>
+              )}
 
               <div>
                 <label className={LABEL}>업로드 채널 *</label>
@@ -1070,7 +1116,10 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
               </div>
 
               {/* 콘텐츠 형식. 인플루언서의 지급 단가(릴스 단가 · 피드 단가)가 이
-                  선택으로 갈리므로, 예산을 적기 전에 고르는 자리에 둔다. */}
+                  선택으로 갈리므로, 예산을 적기 전에 고르는 자리에 둔다.
+                  커머스형은 묻지 않는다 — 판매가 목적이라 인플루언서가 자기 계정에서
+                  가장 잘 팔리는 형태로 자유롭게 만드는 쪽이 낫다. */}
+              {mode.hasContentFormat && (
               <div>
                 <label className={LABEL}>콘텐츠 형식 *</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1098,6 +1147,7 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                   })}
                 </div>
               </div>
+              )}
 
               {picksInfluencer ? (
                 <div>
@@ -1161,6 +1211,26 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                     판매 금액에서 인플루언서에게 지급할 비율입니다. {COMMISSION_RANGE.min}% ~ {COMMISSION_RANGE.max}% 사이로 적어 주세요.
                     <br />
                     이 비율은 담당자에게만 전달되고 캠페인 화면에는 노출되지 않습니다. 최종 수수료는 담당자가 인플루언서와 협의해 정합니다.
+                  </p>
+                </div>
+              )}
+
+              {/* 모집기간. 지원을 받는 방식만 있다 — 담당자가 후보를 찾아 오는
+                  캠페인은 목록에 걸리지 않으므로 모집이라는 개념이 없다.
+                  마감일이 지나면 목록에서 내려가고 서버가 지원을 막는다. */}
+              {hasRecruitPeriod && (
+                <div>
+                  <label className={LABEL}>모집기간 *</label>
+                  <DateRangeCalendar
+                    from={form.recruit_from}
+                    to={form.recruit_to}
+                    onChange={(nextFrom, nextTo) =>
+                      setForm(p => ({ ...p, recruit_from: nextFrom, recruit_to: nextTo }))
+                    }
+                  />
+                  <p className="text-[11px] text-slate-400 font-medium mt-1.5 leading-relaxed break-keep">
+                    마감일까지 캠페인 협업 목록에 노출되고 인플루언서가 지원할 수 있습니다.
+                    마감일이 지나면 목록에서 자동으로 내려가고 지원도 닫힙니다.
                   </p>
                 </div>
               )}
@@ -1495,10 +1565,23 @@ const CampaignRegisterWizard: React.FC<CampaignRegisterWizardProps> = ({
                 <span className="text-white/50">채널</span>
                 <span>{form.upload_channel}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/50">형식</span>
-                <span>{contentFormatLabel(form.content_format)}</span>
-              </div>
+              {mode.hasContentFormat ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/50">형식</span>
+                  <span>{contentFormatLabel(form.content_format)}</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/50">형식</span>
+                  <span>자유 (인플루언서 선택)</span>
+                </div>
+              )}
+              {hasRecruitPeriod && form.recruit_from && (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/50">모집</span>
+                  <span>{form.recruit_from}{form.recruit_to ? ` ~ ${form.recruit_to}` : ''}</span>
+                </div>
+              )}
               {form.upload_from && (
                 <div className="flex items-center justify-between">
                   <span className="text-white/50">업로드</span>

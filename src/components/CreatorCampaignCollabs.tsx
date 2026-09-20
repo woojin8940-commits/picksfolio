@@ -523,15 +523,16 @@ const CreatorCampaignCollabs: React.FC<CreatorCampaignCollabsProps> = ({ userNam
     });
 
     /**
-     * 상세 탭. 정산은 지급할 돈이 있는 협업에만 붙인다 — 제품 협찬형은 광고비도
-     * 판매 수수료도 없어 정산 자체가 만들어지지 않는다. 빈 정산 탭을 남겨 두면
-     * 오지 않을 입금을 기다리게 된다. 조건에 보수가 잡혀 있으면 진행 방식과
-     * 무관하게 열어 둔다(예전 방식으로 시작된 협업).
+     * 상세 탭. 정산은 화면에서 정산까지 굴리는 방식(mode.hasWorkroom)에만 붙인다 —
+     * 제품 협찬형은 광고비도 판매 수수료도 없어 정산 자체가 만들어지지 않고,
+     * 커머스형의 판매 수수료는 담당자가 브랜드·인플루언서와 직접 정리한다. 빈 정산
+     * 탭을 남겨 두면 오지 않을 입금을 기다리게 된다. 조건에 보수가 잡혀 있으면
+     * 진행 방식과 무관하게 열어 둔다(예전 방식으로 시작된 협업).
      */
     const TABS: { key: DetailTab; label: string }[] = [
       { key: 'progress', label: isEn ? 'Progress' : '진행사항' },
       { key: 'insight', label: isEn ? 'Insights' : '인사이트' },
-      ...(mode.hasSettlement || fee > 0 ? [{ key: 'settlement' as const, label: isEn ? 'Settlement' : '정산' }] : []),
+      ...(mode.hasWorkroom || fee > 0 ? [{ key: 'settlement' as const, label: isEn ? 'Settlement' : '정산' }] : []),
       // AI 는 정산 옆에 항상 둔다. 정산 탭처럼 조건을 걸지 않는 이유: 이 어시스턴트가
       // 하는 일(기획안, 마감 정리, 담당자 문의 초안)은 보수가 없는 제품 협찬형에서도
       // 그대로 필요하다.
