@@ -636,6 +636,12 @@ const App: React.FC = () => {
       // delayed. A background retry will update the profile later.
       const fallbackUsername = cachedIdentityMatches ? cachedUsername : '';
       const fallbackRefUsername = cachedIdentityMatches ? userNameRef.current : '';
+      // 프로필 조회가 실패하거나 행이 아직 없을 때 기댈 마지막 줄. 세션에는 가입 때 넣어 둔
+      // user_metadata.username 이 남아 있고, 없으면 picks.me 메일의 앞부분이 곧 아이디다.
+      const emailUsername = session.user.email?.endsWith('@picks.me')
+        ? session.user.email.replace('@picks.me', '')
+        : '';
+      const sessionUsername = String(session.user.user_metadata?.username || emailUsername).trim();
       const hasKakaoHandoff = !!(session.provider_token || capturedProviderToken
         || sessionStorage.getItem('kakao_provider_token')
         || sessionStorage.getItem('kakao_client_phone')
@@ -668,6 +674,9 @@ const App: React.FC = () => {
       if (!profileData && fallbackUsername) {
         console.log('[Auth] Profile fetch returned null, using localStorage fallback immediately:', fallbackUsername);
         profileData = { username: fallbackUsername, _fallback: true };
+      }
+      if (!profileData && sessionUsername) {
+        profileData = { username: sessionUsername, role: 'user', _fallback: true };
       }
 
       console.log('[Debug] Profile fetch result (non-blocking):', { profileData, fallback: !!profileData?._fallback });
@@ -922,10 +931,7 @@ const App: React.FC = () => {
 
       // Determine username: check profile first, then fallback sources
       const profileUsername = (profileData?.username || '').trim();
-      const emailUsername = session.user.email?.endsWith('@picks.me')
-        ? session.user.email.replace('@picks.me', '')
-        : '';
-      const existingUsername = profileUsername || fallbackUsername || fallbackRefUsername || emailUsername || '';
+      const existingUsername = profileUsername || fallbackUsername || fallbackRefUsername || sessionUsername || '';
 
       console.log('[Debug] Username resolution:', { profileUsername, localStorage: sessionGet('picks_user_session'), ref: userNameRef.current, emailUsername, final: existingUsername });
 

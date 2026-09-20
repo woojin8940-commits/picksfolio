@@ -1040,7 +1040,7 @@ const ViewsChart: React.FC<{
 
   return (
     <div className="h-[200px] md:h-[260px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           {monthAxis}
@@ -1107,7 +1107,7 @@ const ReactionChart: React.FC<{ rows: MonthlyRow[]; thisMonth?: string }> = ({ r
   };
   return (
     <div className="h-[170px] md:h-[200px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }} barGap={2}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           {monthAxis}
@@ -1143,7 +1143,7 @@ const CountChart: React.FC<{ rows: MonthlyRow[]; thisMonth?: string }> = ({ rows
   };
   return (
     <div className="h-[170px] md:h-[200px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           {monthAxis}

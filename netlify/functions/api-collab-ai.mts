@@ -16,9 +16,15 @@ import {
 } from "./_shared/campaign-ai-context.mts";
 import {
   CAMPAIGN_AI_SYSTEM_INSTRUCTION,
+  DRAFT_REPAIR_INSTRUCTION,
   extractCampaignDraft,
+  parseDraftReply,
   type CampaignDraft,
 } from "./_shared/campaign-ai-prompt.mts";
+import {
+  buildVariationDirective,
+  resolveCampaignVariation,
+} from "./_shared/campaign-ai-variation.mts";
 import { getSupabaseServer } from "./_shared/supabase.mts";
 import {
   DIRECT_UPLOAD_BUCKET,
@@ -161,6 +167,68 @@ const GUIDE_INTENT_RE =
  */
 const CAPTION_ONLY_INTENT_RE = /(본문|캡션|caption)/i;
 const PLAN_ALSO_INTENT_RE = /(기획안|기획서|장면|씬|콘티|대본|스토리보드|자막|나레이션|릴스|숏폼|쇼츠)/i;
+
+/**
+ * "방금 준 그거, 이렇게 고쳐 줘" 를 알아보는 자리.
+ *
+ * 위 두 규칙은 요청에 대상이 적혀 있을 때만 맞는다. 그런데 실제 대화는 이렇게 흐른다 —
+ * "본문 써 줘" → (본문 카드) → "좀 더 짧게 해 줘". 뒤엣말에는 '본문'도 '기획안'도 없다.
+ * 그래서 두 규칙이 모두 안 걸리고, 표식을 붙이라는 못도 안 박히고, 글에서 건져 내는
+ * 쪽도 "본문:" 머리글이 없으니 빈손이 된다. 결과는 사용자가 본 그 화면이다: 짧아진
+ * 본문은 글로만 오고 반영 버튼이 없어서, 방금 고친 본문을 손으로 옮겨 적어야 한다.
+ *
+ * 고쳐 달라는 말투가 보이면 직전 초안의 종류를 이어받아 같은 대상으로 본다. 대상을
+ * 억지로 이어받으면 엉뚱한 답에 표식이 붙을 수 있으므로, "고쳐 달라"는 뜻이 실제로
+ * 읽히는 말일 때만 이어받는다 — "가이드 필수사항 정리해 줘" 같은 질문은 그대로 질문이다.
+ */
+const REVISION_FOLLOWUP_RE =
+  /(짧게|짧은|줄여|줄이|간결|길게|늘려|늘리|추가|넣어|빼고|빼 ?줘|빼줘|삭제|지워|바꿔|바꾸|고쳐|고쳐 ?줘|수정|다시\s*(써|작성|만들|해)|말투|톤|느낌|해시\s*태그|해시태그|이모지|첫\s*줄|강조|부드럽|자연스럽|친근|전문적|캐주얼|반영|그대로|이걸로|이대로)/;
+
+/** 이번 요청이 무엇을 만들어 내는 요청인지. null 이면 초안을 만드는 요청이 아니다. */
+type DraftTarget = "plan" | "caption" | null;
+
+const asDraftTarget = (raw: unknown): DraftTarget =>
+  raw === "plan" || raw === "caption" ? raw : null;
+
+/**
+ * 대화를 거꾸로 훑어 마지막으로 가리킨 대상을 찾는다.
+ *
+ * 화면이 보내 준 `lastDraftKind`(마지막으로 카드가 떴던 초안의 종류)가 가장 정확하지만,
+ * 대화를 이어받은 다른 기기나 옛 화면에서는 그 값이 없다. 그때는 사용자가 앞서 적은
+ * 말에서 대상을 찾는다. 모델 답은 보지 않는다 — 답에서 표식은 이미 지워져 있다.
+ */
+const inferDraftTargetFromHistory = (
+  messages: { role: string; content: string }[],
+): DraftTarget => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "assistant") continue;
+    const text = String(messages[i]?.content || "");
+    if (PLAN_ALSO_INTENT_RE.test(text)) return "plan";
+    if (CAPTION_ONLY_INTENT_RE.test(text)) return "caption";
+  }
+  return null;
+};
+
+/**
+ * 이번 요청의 초안 대상을 정한다.
+ *
+ * @returns `target` 이 대상, `followUp` 은 그 대상을 직전 대화에서 이어받았는지
+ *   (이어받았으면 "고친 초안 전체를 다시 내놓아라"는 지시를 더 붙인다).
+ */
+const resolveDraftTarget = (
+  lastUserText: string,
+  clientLastDraftKind: unknown,
+  messages: { role: string; content: string }[],
+): { target: DraftTarget; followUp: boolean } => {
+  const text = String(lastUserText || "");
+  // 말에 대상이 적혀 있으면 그것이 이긴다.
+  if (PLAN_ALSO_INTENT_RE.test(text)) return { target: "plan", followUp: false };
+  if (CAPTION_ONLY_INTENT_RE.test(text)) return { target: "caption", followUp: false };
+  if (!REVISION_FOLLOWUP_RE.test(text)) return { target: null, followUp: false };
+
+  const carried = asDraftTarget(clientLastDraftKind) || inferDraftTargetFromHistory(messages);
+  return carried ? { target: carried, followUp: true } : { target: null, followUp: false };
+};
 
 interface GuideRef {
   url?: string;
@@ -532,6 +600,99 @@ async function buildWorkspaceContext(
   return { text: overview + body + activeBlock, guideRefs };
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * 초안 되묻기(repair)
+ *
+ * 초안을 만들어 내는 요청인데 표식이 없고 글에서도 건져 내지 못한 경우, 모델에게 그
+ * 답변을 다시 보여 주며 JSON 만 달라고 한 번 더 묻는다. 한 번만 묻고, 실패하면 조용히
+ * 넘어간다 — 초안 카드가 안 뜨는 것은 불편이지만 답 대신 오류가 뜨는 것은 고장이다.
+ *
+ * 모델 호출이 한 번 더 붙는 값이지만, 이 호출이 붙는 경우는 "초안을 만들었는데 표식이
+ * 빠진 답"뿐이다. 그 답의 대안은 사용자가 완성된 본문을 손으로 옮겨 적는 것이다.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** 되묻기에 싣는 답변 길이. 초안은 답의 뒤쪽에 있으므로 넘치면 앞쪽을 자른다. */
+const REPAIR_MAX_CHARS = 12000;
+
+const repairPrompt = (target: DraftTarget, reply: string): string => {
+  const what = target === "plan" ? "기획안(장면 구성)" : "인스타그램 본문(캡션)";
+  const body = reply.length > REPAIR_MAX_CHARS ? reply.slice(-REPAIR_MAX_CHARS) : reply;
+  return (
+    `이 답변에서 뽑아야 하는 것: ${what}\n\n` +
+    `[AI 답변 시작]\n${body}\n[AI 답변 끝]\n\n` +
+    "위 답변에 담긴 내용을 JSON 한 덩어리로만 옮겨 적으세요."
+  );
+};
+
+/** Gemini 로 되묻기. 하루 사용량은 더 차감하지 않는다(같은 질문의 뒤처리이므로). */
+const repairDraftWithGemini = async (
+  target: DraftTarget,
+  reply: string,
+  maxOutputTokens: number,
+): Promise<CampaignDraft | null> => {
+  try {
+    const res = await fetch(
+      `${process.env.GOOGLE_GEMINI_BASE_URL}/v1beta/models/${MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": process.env.GEMINI_API_KEY as string,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: DRAFT_REPAIR_INSTRUCTION }] },
+          contents: [{ role: "user", parts: [{ text: repairPrompt(target, reply) }] }],
+          // 옮겨 적는 일이므로 창작 여지를 두지 않는다.
+          generationConfig: { temperature: 0, maxOutputTokens },
+        }),
+      },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = (data?.candidates?.[0]?.content?.parts || [])
+      .map((part: any) => part?.text || "")
+      .join("");
+    return parseDraftReply(text);
+  } catch (e) {
+    console.error("[collab-ai] draft repair (gemini) failed", e);
+    return null;
+  }
+};
+
+/** Claude 로 되묻기. 쓴 토큰은 이번 요청의 차감에 합쳐야 하므로 usage 를 함께 돌려준다. */
+const repairDraftWithClaude = async (
+  target: DraftTarget,
+  reply: string,
+  maxOutputTokens: number,
+): Promise<{ draft: CampaignDraft | null; usage: any }> => {
+  try {
+    const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxOutputTokens,
+        temperature: 0,
+        system: DRAFT_REPAIR_INSTRUCTION,
+        messages: [{ role: "user", content: repairPrompt(target, reply) }],
+      }),
+    });
+    if (!res.ok) return { draft: null, usage: null };
+    const data = await res.json();
+    const text = (data?.content || [])
+      .map((part: any) => (part?.type === "text" ? part.text || "" : ""))
+      .join("");
+    return { draft: parseDraftReply(text), usage: data?.usage || null };
+  } catch (e) {
+    console.error("[collab-ai] draft repair (claude) failed", e);
+    return { draft: null, usage: null };
+  }
+};
+
 export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -566,6 +727,12 @@ export default async (req: Request) => {
   const scope = body?.scope === "campaign" ? "campaign" : "timeline";
   // 캠페인 진행 화면에서 지금 열어 둔 협업. 캠페인 화면에서는 필수다.
   const campaignFocusId = String(body?.campaignFocusId || "");
+  // 이 대화에서 마지막으로 초안 카드가 떴던 초안의 종류('plan' | 'caption').
+  //
+  // "좀 더 짧게 해 줘" 처럼 대상을 적지 않은 수정 요청이 무엇을 고치라는 말인지는 화면이
+  // 알고 있다 — 방금 카드가 뜬 그 초안이다. 대화 기록만으로 되짚으면 사용자가 앞서
+  // '본문'이라는 말을 쓴 적이 있는지에 기대게 되므로, 화면이 아는 값을 그대로 받는다.
+  const clientLastDraftKind = body?.lastDraftKind;
   // 사용자가 AI 대화창에서 직접 올린 파일(브랜드 가이드 등). 실제 파일은 업로드 시
   // Blobs 에 저장되므로 여기서는 주소만 받는다.
   // 한 번에 읽을 파일 수. 캠페인 화면만 더 넉넉하다(가이드가 기획의 유일한 근거라서).
@@ -738,6 +905,15 @@ export default async (req: Request) => {
     }
     discoveredGuideRefs = campaignContext.guideRefs;
   }
+
+  // 이 인플루언서에게 배정된 창작 방향.
+  //
+  // 같은 캠페인의 인플루언서들이 같은 가이드 파일 하나를 근거로 기획안을 받으므로,
+  // 방향을 나눠 주지 않으면 결과가 서로 닮는다(campaign-ai-variation 참고). 저장소를
+  // 못 읽어도 답은 만들어야 하므로 그 안에서 해시로 떨어진다.
+  const campaignVariation = campaignContext
+    ? await resolveCampaignVariation(campaignContext.campaignId, campaignFocusId, username)
+    : null;
 
   // 브랜드 기본 가이드 읽기. 사용자가 직접 올린 파일이 있으면 그것을 쓰고, 없으면
   // 지금 보고 있는 협업에 올라온 이미지·PDF 를 가져온다(가이드를 봐야 하는 요청일 때만).
@@ -996,11 +1172,14 @@ export default async (req: Request) => {
     return "";
   })();
 
-  // 이번 요청이 본문 하나만 가리키는지 — 위 CAPTION_ONLY_INTENT_RE 주석에 이유가 있다.
-  const captionOnlyRequest =
-    scope === "campaign" &&
-    CAPTION_ONLY_INTENT_RE.test(String(lastUserText)) &&
-    !PLAN_ALSO_INTENT_RE.test(String(lastUserText));
+  // 이번 요청이 무엇을 만들어 내는 요청인지 — 위 resolveDraftTarget 주석에 이유가 있다.
+  // 말에 대상이 없어도 "좀 더 짧게 해 줘" 같은 수정 요청이면 직전 초안의 종류를 이어받는다.
+  const { target: draftTarget, followUp: draftFollowUp } =
+    scope === "campaign"
+      ? resolveDraftTarget(String(lastUserText), clientLastDraftKind, messages)
+      : { target: null as DraftTarget, followUp: false };
+
+  const captionOnlyRequest = draftTarget === "caption";
   const captionOnlyDirective = captionOnlyRequest
     ? "\n\n[이번 요청은 인스타그램 본문(캡션)만 써 달라는 요청입니다]\n" +
       "- 답에는 본문 하나만 쓰세요. 장면 설명·자막·나레이션 같은 기획안 내용을 쓰지 마세요.\n" +
@@ -1023,7 +1202,7 @@ export default async (req: Request) => {
   // 요청 바로 앞에 한 번 더 놓아 두면 잊힐 자리가 없다. 표식이 그래도 빠지면
   // extractCampaignDraft 가 글에서 건져 내지만, 건져 낸 값은 글을 다시 쪼갠 것이라
   // 모델이 직접 준 JSON 보다 부정확하다 — 이쪽을 먼저 지킨다.
-  const planRequest = scope === "campaign" && PLAN_ALSO_INTENT_RE.test(String(lastUserText));
+  const planRequest = draftTarget === "plan";
   const planDirective = planRequest
     ? "\n\n[이번 요청은 기획안(장면 구성)을 써 달라는 요청입니다]\n" +
       "- 답의 맨 끝에 {\"kind\":\"plan\"} 표식을 반드시 딱 한 번 붙이세요. 표식이 없으면 화면에 " +
@@ -1037,13 +1216,38 @@ export default async (req: Request) => {
       "- 가이드 파일을 읽지 못했다면 기획안을 지어내지 말고 그 사실을 먼저 알리세요(표식도 붙이지 않습니다)."
     : "";
 
+  // 대상을 적지 않은 수정 요청("좀 더 짧게", "말투 바꿔 줘")에 못을 박는다.
+  //
+  // 이런 요청에서 모델은 고친 결과를 글로만 써 놓고 표식을 잊는다 — 앞 차례에서 이미
+  // 붙였으니 됐다고 보는 것처럼. 그런데 반영 버튼은 표식이 있을 때만 뜨고, 저장은
+  // 초안을 통째로 덮어쓰므로 고친 부분만 적어 보내도 쓸 수 없다.
+  const followUpDirective =
+    draftFollowUp && draftTarget
+      ? "\n\n[이번 요청은 방금 준 " +
+        (draftTarget === "plan" ? "기획안" : "본문") +
+        "을 고쳐 달라는 요청입니다]\n" +
+        "- 무엇을 어떻게 고쳤는지 한 줄로 알리고, **고친 " +
+        (draftTarget === "plan" ? "기획안 전체(모든 장면)" : "본문 전체") +
+        "를 다시 내놓으세요.** 고친 조각만 알려 주면 안 됩니다.\n" +
+        "- 답의 맨 끝에 " +
+        (draftTarget === "plan" ? '{"kind":"plan"}' : '{"kind":"caption"}') +
+        " 표식을 반드시 딱 한 번 붙이고, 그 안에 사람에게 보여 준 것과 **똑같은 글**을 넣으세요. " +
+        "앞 차례에 표식을 붙였더라도 이번 답에 다시 붙여야 합니다 — 표식이 없으면 반영 버튼이 " +
+        "뜨지 않아 사용자가 고친 글을 손으로 옮겨 적어야 합니다.\n" +
+        "- 사용자가 고치라고 한 것만 고치고, 나머지는 방금 준 것을 그대로 유지하세요. " +
+        "가이드의 필수 표기·해시태그·멘션은 짧게 줄일 때에도 빼지 마세요.\n" +
+        "- 요청이 무엇을 가리키는지 모호하면 되묻되, 그때는 표식을 붙이지 마세요."
+      : "";
+
   const systemInstruction = campaignContext
     ? CAMPAIGN_AI_SYSTEM_INSTRUCTION +
       `\n\n아래는 지금 열어 둔 캠페인의 사실입니다. 캠페인에 관한 것은 모두 이 데이터와 ` +
       `첨부 파일을 근거로만 답하고, 없는 값은 지어내지 마세요.\n${campaignContext.text}` +
       campaignGuideStatus +
+      (campaignVariation ? buildVariationDirective(campaignVariation) : "") +
       captionOnlyDirective +
-      planDirective
+      planDirective +
+      followUpDirective
     : baseSystemInstruction;
 
   // 캠페인 화면은 기획안 전체를 다시 내놓는다(장면 5개에 설명·자막·나레이션, 거기에
@@ -1066,11 +1270,30 @@ export default async (req: Request) => {
   //
   // 표식이 빠진 답에서는 사람이 읽는 글에서 초안을 건져 낸다(extractCampaignDraft
   // 안쪽). 그때 본문인지 기획안인지 가리는 기준이 이번 요청의 뜻이라, 위에서 이미
-  // 판정해 둔 captionOnlyRequest 를 그대로 넘긴다.
+  // 판정해 둔 대상을 그대로 넘긴다.
+  //
+  // 다만 대상을 이어받은 수정 요청("좀 더 짧게 해 줘")에는 넘기지 않는다. 그 층의
+  // 마지막 수단은 "답 전체를 본문으로 본다"인데, 이런 답은 인사말("네, 짧게 줄여
+  // 봤습니다")과 무엇을 고쳤는지 설명이 본문 앞에 붙어 있다. 그것까지 본문으로 저장하면
+  // 사용자는 인사말이 들어간 캡션을 인스타에 올리게 된다 — 카드가 안 뜨는 것보다 나쁘다.
+  // 이 경우는 아래 되묻기(repair)가 모델에게 본문만 다시 받아 온다.
+  const captionSalvageAllowed = draftTarget === "caption" && !draftFollowUp;
   const campaignDraftOf = (raw: string): { reply: string; draft: CampaignDraft | null } =>
     scope === "campaign"
-      ? extractCampaignDraft(raw, captionOnlyRequest)
+      ? extractCampaignDraft(raw, captionSalvageAllowed)
       : { reply: raw, draft: null };
+
+  // 초안을 만들어 내는 요청이었는데 표식도 없고 글에서도 못 건진 경우에만 되묻는다.
+  //
+  // 가이드 파일 이름만 있고 내용을 못 읽어서 모델이 "가이드를 다시 올려 달라"고 답한
+  // 경우는 제외한다 — 그 답에는 옮겨 적을 초안이 없고, 되묻기는 호출만 한 번 늘린다.
+  const guideUnreadable = campaignGuideCandidates.length > 0 && guideFiles.length === 0;
+  const needsDraftRepair = (draft: CampaignDraft | null, reply: string): boolean =>
+    scope === "campaign" &&
+    !draft &&
+    draftTarget !== null &&
+    !guideUnreadable &&
+    reply.trim().length >= 60;
 
   // ── Claude (premium, credit-metered) ───────────────────────────────────────
   if (useClaude) {
@@ -1155,24 +1378,38 @@ export default async (req: Request) => {
           .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
       // 캠페인 화면이면 답 끝에 붙은 초안 덩어리를 떼어낸다. 사용자에게는 글만 보이고,
       // 떼어낸 초안은 '수정하기' 버튼이 기획안에 반영할 값이 된다.
-      const { reply, draft } = campaignDraftOf(rawReply);
+      const extracted = campaignDraftOf(rawReply);
+      const reply = extracted.reply;
+      let draft = extracted.draft;
+      // 표식이 빠졌으면 같은 답을 다시 보여 주며 JSON 만 달라고 한 번 더 묻는다.
+      // 이 호출의 토큰도 이번 요청의 차감에 합친다 — 사용자에게는 한 번의 질문이다.
+      let repairUsage: any = null;
+      if (needsDraftRepair(draft, reply)) {
+        const repaired = await repairDraftWithClaude(draftTarget, reply, maxOutputTokens);
+        draft = repaired.draft;
+        repairUsage = repaired.usage;
+      }
 
       // Deduct credits based on the tokens actually consumed, then (if opted in
       // and the balance is now low) auto-recharge for the next request.
       // 차감은 최신 지갑에 대고 조건부로 쓴다. 요청을 보내는 동안 크레딧 충전이
       // 들어왔을 수 있는데, 통째로 덮어쓰면 그 충전분이 사라진다.
       const usage = data?.usage || {};
-      const charged = deductionCredits(usage);
+      const inputOf = (u: any) =>
+        (Number(u?.input_tokens) || 0) +
+        (Number(u?.cache_creation_input_tokens) || 0) +
+        (Number(u?.cache_read_input_tokens) || 0);
+      const charged = deductionCredits(usage) + (repairUsage ? deductionCredits(repairUsage) : 0);
       const usageEntry = {
         at: new Date().toISOString(),
         model: CLAUDE_MODEL,
-        inputTokens:
-          (Number(usage.input_tokens) || 0) +
-          (Number(usage.cache_creation_input_tokens) || 0) +
-          (Number(usage.cache_read_input_tokens) || 0),
-        outputTokens: Number(usage.output_tokens) || 0,
-        cachedTokens: Number(usage.cache_read_input_tokens) || 0,
-        costKrw: Math.round(rawCostKrw(usage)),
+        inputTokens: inputOf(usage) + inputOf(repairUsage),
+        outputTokens:
+          (Number(usage.output_tokens) || 0) + (Number(repairUsage?.output_tokens) || 0),
+        cachedTokens:
+          (Number(usage.cache_read_input_tokens) || 0) +
+          (Number(repairUsage?.cache_read_input_tokens) || 0),
+        costKrw: Math.round(rawCostKrw(usage) + (repairUsage ? rawCostKrw(repairUsage) : 0)),
         chargedCredits: charged,
       };
 
@@ -1295,7 +1532,13 @@ export default async (req: Request) => {
         .map((p: any) => p?.text || "")
         .join("")
         .trim() || "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 적어 주세요.";
-    const { reply, draft } = campaignDraftOf(rawReply);
+    const extracted = campaignDraftOf(rawReply);
+    const reply = extracted.reply;
+    let draft = extracted.draft;
+    // 표식이 빠졌으면 한 번 더 묻는다(하루 사용량은 더 차감하지 않는다 — 같은 질문의 뒤처리다).
+    if (needsDraftRepair(draft, reply)) {
+      draft = await repairDraftWithGemini(draftTarget, reply, maxOutputTokens);
+    }
 
     return Response.json({
       reply,

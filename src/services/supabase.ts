@@ -63,15 +63,17 @@ async function inProcessLock<R>(name: string, _acquireTimeout: number, fn: () =>
   const next = new Promise<void>((resolve) => {
     release = resolve;
   });
-  inProcessLockQueues.set(name, previous.then(() => next));
+  // 꼬리를 Map 에 넣을 때 쓴 프라미스를 그대로 들고 있어야 한다. previous.then(...) 을
+  // 다시 부르면 매번 새 프라미스가 나와서 비교가 언제나 어긋나고, 큐가 지워지지 않는다.
+  const queued = previous.then(() => next);
+  inProcessLockQueues.set(name, queued);
   try {
     await previous;
     return await fn();
   } finally {
     release();
-    if (inProcessLockQueues.get(name) === previous.then(() => next)) {
-      // best-effort cleanup; Map retains most-recent pointer
-    }
+    // 내가 마지막 대기자였을 때만 지운다. 뒤에 붙은 사람이 있으면 그 꼬리를 남겨 둔다.
+    if (inProcessLockQueues.get(name) === queued) inProcessLockQueues.delete(name);
   }
 }
 
@@ -128,8 +130,21 @@ const resilientLock = async <R,>(
 
     try {
       (navigator as any).locks
-        .request(name, { mode: 'exclusive' }, async () => {
+        // ifAvailable 로 물어본다. 다른 탭이 들고 있으면 브라우저 큐에서 기다리는 대신
+        // lock 이 null 로 바로 돌아오고, 그때는 같은 탭 안의 큐로 넘긴다. 기다리다
+        // acquireTimeout 이 먼저 끝나 fallback 과 이중 실행되는 길을 막는다.
+        .request(name, { mode: 'exclusive', ifAvailable: true }, async (lock: unknown) => {
           if (settled) return; // fallback already took over
+          if (!lock) {
+            settled = true;
+            clearTimeout(timer);
+            try {
+              resolve(await inProcessLock(name, acquireTimeout, fn));
+            } catch (e) {
+              reject(e);
+            }
+            return;
+          }
           try {
             const out = await fn();
             if (!settled) {

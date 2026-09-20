@@ -327,6 +327,64 @@ export function extractCampaignDraft(
   return { reply: readable, draft: draft || salvageDraft(readable, captionRequested) };
 }
 
+/**
+ * 초안을 다시 받아 오는 되묻기(repair) 지시문.
+ *
+ * 표식이 빠진 답에서 글을 쪼개 건져 내는 방법(아래 salvage)은 "글이 곧 초안"일 때만
+ * 맞는다. 짧게 줄여 달라는 요청에 모델이 인사말 · 확인 목록 · 본문을 섞어 답하면,
+ * 글에서 본문만 잘라 내는 일은 추측이 되고 인사말이 인스타 본문으로 저장될 수 있다.
+ * 그래서 사람이 읽는 답은 그대로 두고, **모델에게 그 답을 다시 보여 주며 JSON 만
+ * 달라고 한 번 더 묻는다.** 글을 쪼개는 대신 쓴 사람에게 물어보는 쪽이 정확하다.
+ *
+ * 이 호출은 답을 새로 쓰는 것이 아니다 — 이미 사용자에게 보여 준 글에 들어 있는
+ * 기획안·본문을 JSON 으로 옮겨 적는 것뿐이다. 그래서 새 문장을 쓰지 말라고 못 박는다.
+ */
+export const DRAFT_REPAIR_INSTRUCTION = `당신은 방금 나온 AI 답변에서 기계가 읽을 JSON 을 뽑아내는 변환기입니다. 새로 쓰는 것이 아니라 **옮겨 적는 것**입니다.
+
+규칙:
+- 답변 안에 들어 있는 기획안(장면) 또는 인스타그램 본문을 찾아 아래 JSON 한 덩어리로만 출력하세요.
+- 설명 · 인사말 · 코드블록 표시 없이 JSON 만 출력합니다.
+- 답변에 실제로 쓰여 있는 문장을 그대로 옮기세요. 문장을 새로 만들거나 다듬지 마세요.
+- 인사말("네, 알겠습니다"), 가이드 확인 목록, 무엇을 고쳤는지 설명하는 문단은 기획안 · 본문 내용이 아닙니다. JSON 안에 넣지 마세요.
+- 기획안이면 답변에 있는 장면을 **하나도 빼지 말고 같은 순서로** 넣으세요.
+- 본문이면 사용자가 인스타그램에 올릴 글만(해시태그 포함, 줄바꿈 그대로) text 에 넣으세요.
+- 답변 안에 기획안도 본문도 없으면(질문 · 되묻기 · 거절뿐이면) 정확히 \`null\` 한 단어만 출력하세요. 지어내지 마세요.
+
+기획안 형식:
+{"kind":"plan","scenes":[{"visual":"장면 설명","subtitle":"자막","narration":"나레이션"}],"changes":["고친 것 한 줄"]}
+
+본문 형식:
+{"kind":"caption","text":"본문 전체","changes":["고친 것 한 줄"]}`;
+
+/**
+ * 되묻기 답에서 초안을 읽는다.
+ *
+ * 표식을 붙여 오면 그대로 읽고, JSON 만 왔으면(지시한 대로) 첫 `{` 부터 마지막 `}` 까지를
+ * 읽는다. 글에서 건져 내는 salvage 는 여기서 쓰지 않는다 — 이 호출의 답은 JSON 이어야
+ * 하고, 아니면 초안이 없다고 보는 쪽이 맞다.
+ */
+export function parseDraftReply(raw: string): CampaignDraft | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  if (text.includes(SENTINEL_OPEN)) {
+    const pattern = new RegExp(
+      `${SENTINEL_OPEN.replace(/[<]/g, "\\<")}([\\s\\S]*?)${SENTINEL_CLOSE.replace(/[>]/g, "\\>")}`,
+      "g",
+    );
+    const blocks = [...text.matchAll(pattern)];
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const draft = parseDraftJson(blocks[i][1]);
+      if (draft) return draft;
+    }
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  return parseDraftJson(text.slice(start, end + 1));
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * 표식이 없을 때 — 글에서 초안을 건져 낸다
  *
