@@ -346,6 +346,10 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  // 포스트 수정 창 안에서 바로 만드는 카테고리. 카테고리 관리 창의 입력칸과 따로
+  // 두는 이유는, 둘이 같은 칸을 쓰면 한쪽에서 쓰던 이름이 다른 쪽에 남기 때문이다.
+  const [showInlineCategoryInput, setShowInlineCategoryInput] = useState(false);
+  const [inlineCategoryName, setInlineCategoryName] = useState('');
   const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
   const [categoryEditValue, setCategoryEditValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -380,6 +384,14 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
   useCloseOnBack(showMobilePreview, () => setShowMobilePreview(false));
   useCloseOnBack(showBlockTypeModal, () => setShowBlockTypeModal(false));
   useCloseOnBack(showCategoryModal, () => { setShowCategoryModal(false); setEditingCategoryName(null); });
+
+  /* 수정 창을 닫거나 다른 포스트를 열면 새 카테고리 입력칸은 접어 둔다. 창을 여는
+     길이 여러 갈래(목록에서 누르기 · 콘텐츠 추가 · 저장 후 닫기)라, 각 갈래마다
+     정리하는 대신 열려 있는 포스트가 바뀌는 순간을 한 곳에서 본다. */
+  useEffect(() => {
+    setShowInlineCategoryInput(false);
+    setInlineCategoryName('');
+  }, [isEditing]);
 
   /**
    * 미리보기에 함께 그릴 오픈 일정.
@@ -1343,6 +1355,43 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
     setNewCategoryName('');
     setSelectedFolderId(trimmed);
     showSuccessFeedback(`'${trimmed}' 카테고리가 추가되었습니다!`);
+  };
+
+  /**
+   * 포스트 수정 창에서 카테고리를 새로 만든다.
+   *
+   * 카테고리 관리 창의 handleAddCategory 와 두 가지가 다르다. 하나는 만든 뒤에
+   * 목록을 그 카테고리로 걸러 두지 않는다는 것 — 수정 중인 포스트가 화면에서
+   * 사라지면 안 되기 때문이다. 다른 하나는 만든 이름을 지금 고치고 있는 포스트의
+   * 카테고리로 바로 넣어 준다는 것이다. 새로 만들고 다시 골라야 하면 두 번 일이 된다.
+   */
+  const handleCreateInlineCategory = async () => {
+    const trimmed = inlineCategoryName.trim();
+    if (!trimmed) return;
+    // 이미 있는 이름이면 새로 만들지 않고 그 카테고리를 고른 것으로 둔다.
+    if (managedCategories.includes(trimmed)) {
+      setEditForm(prev => ({ ...prev, category: trimmed }));
+      setInlineCategoryName('');
+      setShowInlineCategoryInput(false);
+      showSuccessFeedback('이미 존재하는 카테고리입니다!');
+      return;
+    }
+    const updatedCats = [...linkGridCategories, trimmed];
+    const result = await saveCategoriesToCloud(updatedCats);
+    if (!result.ok) {
+      showFailureFeedback(saveFailureMessage(result), 'warning');
+      return;
+    }
+    setLinkGridCategories(updatedCats);
+    setEditForm(prev => ({ ...prev, category: trimmed }));
+    setInlineCategoryName('');
+    setShowInlineCategoryInput(false);
+    showSuccessFeedback(`'${trimmed}' 카테고리가 추가되었습니다!`);
+  };
+
+  const closeInlineCategoryInput = () => {
+    setShowInlineCategoryInput(false);
+    setInlineCategoryName('');
   };
 
   const handleRenameCategory = async (oldName: string) => {
@@ -2417,8 +2466,20 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                     <input type="text" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-6 py-4 font-black focus:border-blue-600 transition-all" placeholder="제목" />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">카테고리</label>
-                    {/* 카테고리는 직접 입력하지 않고 이미 만들어 둔 목록에서 고른다.
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">카테고리</label>
+                      {/* 고를 것이 없어서 창을 닫고 카테고리 관리로 갔다가 다시 돌아오는
+                          걸음을 없앤다. 여기서 만든 이름은 바로 이 포스트에 붙는다. */}
+                      <button
+                        type="button"
+                        onClick={() => (showInlineCategoryInput ? closeInlineCategoryInput() : setShowInlineCategoryInput(true))}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-xl font-black text-[10px] hover:bg-blue-100 transition-all"
+                      >
+                        {showInlineCategoryInput ? <X size={12} /> : <Plus size={12} />}
+                        <span>{showInlineCategoryInput ? '취소' : '새 카테고리'}</span>
+                      </button>
+                    </div>
+                    {/* 카테고리는 아무렇게나 적어 넣지 않고 만들어 둔 목록에서 고른다.
                         오타로 비슷한 카테고리가 여러 개 생기는 일을 막는다. */}
                     <select
                       value={editForm.category || ''}
@@ -2430,10 +2491,37 @@ const LinkManagement: React.FC<LinkManagementProps> = ({ userName, onNavigateMem
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
+                    {showInlineCategoryInput && (
+                      <div className="flex gap-2 mt-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={inlineCategoryName}
+                          onChange={e => setInlineCategoryName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.nativeEvent.isComposing) return;
+                            if (e.key === 'Enter') handleCreateInlineCategory();
+                            if (e.key === 'Escape') closeInlineCategoryInput();
+                          }}
+                          className="flex-1 min-w-0 bg-white border border-blue-200 rounded-2xl px-5 py-3 font-black text-sm focus:border-blue-600 transition-all"
+                          placeholder="새 카테고리 이름"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCreateInlineCategory}
+                          disabled={!inlineCategoryName.trim()}
+                          className="px-5 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm hover:bg-blue-700 transition-all disabled:opacity-50 shrink-0"
+                        >
+                          추가
+                        </button>
+                      </div>
+                    )}
                     <p className="text-[10px] text-slate-400 font-bold mt-1">
-                      {managedCategories.length === 0
-                        ? '아직 카테고리가 없습니다. 포스트 목록 위의 카테고리 관리에서 먼저 추가해 주세요.'
-                        : '카테고리 관리에서 추가한 목록에서 선택합니다.'}
+                      {showInlineCategoryInput
+                        ? '만들면 이 포스트의 카테고리로 바로 지정됩니다.'
+                        : managedCategories.length === 0
+                          ? '아직 카테고리가 없습니다. 위의 새 카테고리 버튼으로 바로 만들 수 있어요.'
+                          : '목록에서 고르거나, 새 카테고리 버튼으로 바로 만들 수 있어요.'}
                     </p>
                   </div>
                   </>
