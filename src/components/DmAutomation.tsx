@@ -1469,6 +1469,8 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
       for (let page = 0; page < MAX_FEED_PAGES && cursor; page += 1) {
         const more = await apiService.getInstagramMedia(userName, { after: cursor });
         if (request !== requests.current.media) return;
+        if (more.error) setMediaError(more.error);
+        if (more.needsReauth) setMediaNeedsReauth(true);
         if (more.media.length === 0) break;
         const seen = new Set(all.map((m) => m.id));
         all = [...all, ...more.media.filter((m) => m.id && !seen.has(m.id))];
@@ -1507,7 +1509,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
         if (s.direct) setDirect(s.direct);
         writeJson(dmSettingsCacheKey(userName), { ...s, automations: nextAutomations });
         setLoaded(true);
-        if (s.connected) void loadMedia();
+        if (s.connected) void loadMedia({ refresh: true });
       })
       // getDmAutomation 은 스스로 오류를 삼키지만, 앞으로 구현이 바뀌어도 스피너가
       // 남지 않도록 여기서도 반드시 끝을 만든다.
@@ -2019,9 +2021,21 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
             <h3 className="text-base md:text-lg font-black text-slate-900 flex items-center gap-2">
               <LayoutGrid size={17} className="text-slate-400" /> 내 피드 게시물
             </h3>
-            <span className="text-xs font-black text-slate-400">{media.length}개</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-slate-400">{media.length}개</span>
+              <button
+                type="button"
+                onClick={() => void loadMedia({ refresh: true })}
+                disabled={mediaLoading}
+                aria-label="피드 새로고침"
+                title="피드 새로고침"
+                className="w-8 h-8 inline-flex items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={mediaLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
-          {mediaLoading ? (
+          {mediaLoading && media.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
               <Loader2 size={18} className="animate-spin" /> <span className="text-sm font-bold">게시물을 불러오는 중…</span>
             </div>

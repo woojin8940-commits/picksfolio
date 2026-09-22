@@ -251,6 +251,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
       // DM 과 댓글 답글은 함께 나간다. 둘 중 하나라도 나갔으면 발송된 것이다.
       const sentCount = (res.count || 0) + (res.replyCount || 0);
       const failedCount = (res.failCount || 0) + (res.replyFailCount || 0);
+      const alreadyHandledCount = (res.alreadyCount || 0) + (res.replyAlreadyCount || 0);
       // 서버는 건수·건너뜀·실패 이유를 사람이 읽을 문장으로 만들어 보내 준다.
       // 잘 나간 발송에서는 이 문장을 쓰지 않는다 — "몇 명 중 몇 명에게 보냈다",
       //  "중복이라 건너뛰었다" 같은 집계 안내는 보내는 사람이 조치할 것이 없는데도
@@ -280,6 +281,16 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           ),
           done: false,
         };
+      } else if (res.incomplete) {
+        outcome = {
+          tone: sentCount > 0 ? 'warn' : 'error',
+          message: detail || t(
+            'dm.commentLoadIncomplete',
+            '일부 댓글을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            'Some comments could not be checked. Please try again in a moment.',
+          ),
+          done: false,
+        };
       } else if (failedCount > 0) {
         // 일부가 실패했다. 이유는 사용자가 고칠 수 있는 것(문구·대상·연동)이므로 남긴다.
         outcome = {
@@ -288,6 +299,26 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             'dm.sendPartialFailed',
             '일부 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.',
             'Some messages failed to send. Please try again in a moment.',
+          ),
+          done: false,
+        };
+      } else if ((res.remaining || 0) > 0) {
+        outcome = {
+          tone: 'warn',
+          message: detail || t(
+            'dm.sendRemaining',
+            '아직 보내지 못한 대상이 있습니다. 발송 버튼을 다시 눌러 이어서 보내주세요.',
+            'Some recipients are still pending. Press Send again to continue.',
+          ),
+          done: false,
+        };
+      } else if (sentCount === 0 && alreadyHandledCount > 0) {
+        outcome = {
+          tone: 'warn',
+          message: detail || t(
+            'dm.sendAlreadyHandled',
+            '선택한 댓글에는 이미 DM이 발송되어 중복 발송하지 않았습니다.',
+            'A DM was already sent for the selected comments, so no duplicate was sent.',
           ),
           done: false,
         };
@@ -301,8 +332,8 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
           tone: 'error',
           message: detail || t(
             'dm.sendNothingSent',
-            '발송된 DM이 없습니다. 인스타그램 정책상 최근 24시간 안에 댓글을 남긴 사람에게만 보낼 수 있어요.',
-            'No DMs were sent. Instagram only allows messaging people who commented within the last 24 hours.',
+            '발송된 DM이 없습니다. 인스타그램 정책상 최근 7일 안에 댓글을 남긴 사람에게만 비공개 답장을 보낼 수 있어요.',
+            'No DMs were sent. Instagram only allows private replies to people who commented within the last 7 days.',
           ),
           done: false,
         };

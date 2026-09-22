@@ -3633,8 +3633,8 @@ export const apiService = {
     try {
       // 이어보기는 커서마다 다른 응답이라 기억해 둘 이유가 없다. 첫 페이지만
       // 잠깐 기억해 화면 두 곳이 동시에 물어볼 때의 중복 왕복을 막는다.
-      if (after || opts.refresh) return await load();
-      return await readMemory(`instagramMedia:${key}`, 120_000, load);
+      if (after) return await load();
+      return await readMemory(`instagramMedia:${key}`, 120_000, load, Boolean(opts.refresh));
     } catch (e) {
       console.error('[API] Failed to get Instagram media:', e);
       clearMemory(`instagramMedia:${key}`);
@@ -4103,12 +4103,14 @@ export const apiService = {
     replyCount?: number;
     /** 답글을 남기지 못한 댓글 수. */
     replyFailCount?: number;
+    replyAlreadyCount?: number;
     remaining?: number;
     total?: number;
     message?: string;
     /** 요청이 거절된 이유(플랜 미충족 등). `message` 가 없을 때 화면에 쓴다. */
     error?: string;
     indeterminate?: boolean;
+    incomplete?: boolean;
   }> {
     try {
       const res = await fetchWithTimeout(
