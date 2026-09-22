@@ -146,8 +146,12 @@ export default async (req: Request) => {
   }
 
   const url = new URL(req.url);
-  // 브랜드 사용자명은 `biz/<이름>` 형태다. 블롭 키가 그 접두사까지 포함하므로
-  // 여기서 떼지 않고 그대로 들고 간다(권한 검사 쪽에서만 정규화된다).
+  // 브랜드 사용자명은 접두사 없는 평문으로 온다(business-auth 가 그렇게 내려주고
+  // 화면도 그대로 보낸다). 소문자로만 맞춰 블롭 키(`dm_<사용자명>`)에 그대로 쓴다 —
+  // 예전 주석은 `biz/` 를 붙여 보내야 한다고 적혀 있었지만 그런 호출자는 없다.
+  //
+  // 이 경로에는 멤버십 게이트가 없다. 자동 디엠을 해제했거나 프로 플랜이 없는
+  // 브랜드도 캠페인 성과는 볼 수 있어야 한다(_shared/tagged-media 의 loadBrandLink).
   const rawUsername = norm(url.searchParams.get("username") || "");
   if (!rawUsername) {
     return Response.json({ error: "사용자명이 필요합니다.", items: [] }, { status: 400 });

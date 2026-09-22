@@ -18,15 +18,6 @@ import { applyOperatorMembershipGrant, getOperatorMembershipGrant } from './oper
 import { tierAtLeast, type MembershipTier } from './membership-billing.mts'
 
 /**
- * 기업(비즈니스) 계정인지 — 이 계정들은 멤버십 게이트를 적용하지 않는다.
- *
- * 협업 워크스페이스에 포함된 기능으로 제공하며, 인플루언서 멤버십 티어로 값을
- * 매기지 않는다. 기업 계정은 사용자명이 `biz/` 로 시작한다.
- */
-export const isBusinessAccountName = (username: string | null | undefined): boolean =>
-  !!username && username.toLowerCase().startsWith('biz/')
-
-/**
  * 이 사용자의 멤버십이 지금 살아 있고, `required` 이상 티어인지.
  *
  * 구독이 멈춘 계정(`membership_active === false`)은 티어가 남아 있어도 통과시키지
@@ -34,6 +25,14 @@ export const isBusinessAccountName = (username: string | null | undefined): bool
  *
  * 조회가 실패하면 막는다(fail-closed). 블롭이 한 번 흔들린 것으로 전용 기능이 열리는
  * 쪽보다, 구독자가 잠시 안내 화면을 보고 다시 열어 보는 쪽이 낫다.
+ *
+ * 기업(비즈니스) 계정도 예외가 아니다. 한동안 사용자명이 `biz/` 로 시작하면 무조건
+ * 통과시키는 분기가 있었는데, 브랜드 사용자명은 로그인 응답(business-auth)부터
+ * 화면·API 요청까지 접두사 없는 평문으로 흐르므로 그 분기는 한 번도 타지 않았다.
+ * 실제로 적용되던 규칙(브랜드도 같은 티어를 구독해야 한다)만 남기고 지웠다 —
+ * 도달하지 않는 면제가 남아 있으면 "브랜드는 무료"라는 잘못된 전제로 다른 기능이
+ * 얹힌다. 접두사 제거는 그대로 둔다. 블롭·화면 쪽에는 `biz/` 를 붙여 쓰는 자리가
+ * 남아 있어, 그런 이름이 들어와도 같은 멤버십 기록을 읽어야 한다.
  */
 export const hasMembershipTier = async (
   username: string | null | undefined,
@@ -41,7 +40,6 @@ export const hasMembershipTier = async (
   required: MembershipTier,
 ): Promise<boolean> => {
   if (!username) return false
-  if (isBusinessAccountName(username)) return true
 
   const clean = username.toLowerCase().replace(/^biz\//, '')
   try {

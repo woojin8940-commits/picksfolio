@@ -208,7 +208,20 @@ const TAG_FIELDS_MINIMAL = "id,media_type,media_url,thumbnail_url,permalink,time
  *
  * 브랜드는 디엠 자동화 화면에서 계정을 붙인다(블롭 dm-automation, 키 dm_<사용자명>).
  * 캠페인용 collab 보관함은 캠페인에 지원하는 인플루언서 전용이라 여기서 보지 않는다.
- * 사용자명에 `biz/` 접두사가 붙은 그대로 넘겨야 키가 맞는다.
+ * 사용자명은 로그인 응답부터 API 요청까지 접두사 없는 평문으로 흐르고, 블롭 키도 그
+ * 이름으로 잡힌다 — `biz/` 를 붙여 보내면 오히려 키가 어긋난다.
+ *
+ * ## 기능 스위치(featuresOff)와 멤버십을 일부러 보지 않는다
+ *
+ * `resolveSharedLink(_, "dm")` 이 아니라 보관함(`loadMetaLink(_, "dm")`)을 곧장 읽는다.
+ * 브랜드가 자동 디엠을 해제하면 `featuresOff` 에 `dm`·`insights` 가 적히지만, 그것은
+ * "DM 을 더 보내지 않겠다"는 뜻이고 "우리 브랜드를 태그한 게시물을 더 보지 않겠다"는
+ * 뜻이 아니다. 유가시딩 캠페인은 브랜드가 성과를 확인해야 정산·재계약이 돌아가므로,
+ * 디엠 구독을 끊거나 프로 플랜이 없어도 콘텐츠 성과는 계속 열려 있어야 한다.
+ * 같은 이유로 이 경로에는 멤버십 게이트(dmAutomationAllowed)가 없다.
+ *
+ * 그래서 여기를 `resolveSharedLink` 로 "정리"하면 연동을 해제한 브랜드의 성과 화면이
+ * 통째로 "연동 안 됨"으로 바뀐다. 토큰이 죽었는지만(`brandLinkUsable`) 본다.
  */
 export async function loadBrandLink(rawUsername: string): Promise<MetaLink | null> {
   return await loadMetaLink(rawUsername, "dm");
@@ -759,5 +772,11 @@ export async function getTaggedMedia(
   return { ok: true, payload, cached: false };
 }
 
-/** 연동이 쓸 수 있는 상태인지. 화면에 연동 안내를 띄울지 판단한다. */
+/**
+ * 연동이 쓸 수 있는 상태인지. 화면에 연동 안내를 띄울지 판단한다.
+ *
+ * 토큰이 살아 있는지만 본다. 해제 표시(`featuresOff`)는 보지 않는다 —
+ * `loadBrandLink` 주석에 적은 대로 콘텐츠 성과는 디엠 해제·미구독과 무관하게
+ * 열려 있어야 한다.
+ */
 export const brandLinkUsable = (link: MetaLink | null): boolean => linkIsUsable(link);

@@ -403,7 +403,7 @@ const BusinessEnterpriseDashboard: React.FC<BusinessEnterpriseDashboardProps> = 
       subComponent = <LazyRoute><AITrendAnalysis userName={businessUsername} /></LazyRoute>;
       break;
     case 'dm-automation':
-      subComponent = <LazyRoute><DmAutomation userName={businessUsername} /></LazyRoute>;
+      subComponent = <LazyRoute><DmAutomation userName={businessUsername} isBusiness /></LazyRoute>;
       break;
     case 'open-schedule':
       subComponent = <LazyRoute><OpenScheduleManagement userName={businessUsername} /></LazyRoute>;
