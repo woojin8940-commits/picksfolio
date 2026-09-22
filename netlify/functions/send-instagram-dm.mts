@@ -43,9 +43,9 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
  *    버튼을 다시 눌러도 이미 같은 내용을 받은 사람에게는 다시 보내지 않는다.
  *    공개 답글도 댓글 1건당 1회만 달아, 버튼을 두 번 눌러도 답글이 두 개 붙지 않는다.
  *
- * 3) 실패 구분 — 인스타그램은 댓글 1건당 비공개 답장 1회, 그리고 마지막 상호작용
- *    이후 24시간까지만 DM 을 허용한다. 이 제한에 걸린 대상은 "이미 발송됨"으로
- *    세고 실패로 표시하지 않는다.
+ * 3) 실패 구분 — 인스타그램은 댓글 1건당 비공개 답장 1회만 허용하고, 직접 발송은
+ *    마지막 상호작용 이후 24시간까지만 허용한다. 이 제한에 걸린 대상은
+ *    "이미 발송됨"으로 세고 실패로 표시하지 않는다.
  */
 
 const GRAPH_VERSION = "v21.0";
@@ -59,14 +59,17 @@ const SEND_BUDGET_MS = 38_000;
 const COLLECT_BUDGET_MS = 12_000;
 /** 한 번에 댓글을 훑을 게시물 최대 개수. */
 const MAX_MEDIA = 20;
+const COMMENT_PAGE_SIZE = 100;
+const MAX_COMMENT_PAGES_PER_MEDIA = 5;
+const MAX_COMMENT_PAGES_PER_REQUEST = 40;
+const COMMENT_REQUEST_TIMEOUT_MS = 5_000;
 /**
  * 발송 대상으로 삼을 댓글의 나이 한도.
  *
- * 인스타그램은 마지막 상호작용 이후 24시간까지만 DM 을 허용한다. 그보다 오래된
- * 댓글은 어차피 거부되므로, 시도해서 실패로 세는 대신 대상에서 아예 제외한다.
- * 그러면 시간 예산이 실제로 보낼 수 있는 사람에게만 쓰인다.
+ * 댓글 비공개 답장은 댓글 작성 후 7일까지 허용된다. 그보다 오래된 댓글은
+ * 대상에서 제외해 시간 예산을 실제로 보낼 수 있는 사람에게만 쓴다.
  */
-const COMMENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const COMMENT_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** 동시 발송 수. 인스타그램 발송 한도를 자극하지 않는 선에서 시간을 벌어준다. */
 const SEND_CONCURRENCY = 4;
 
@@ -110,8 +113,7 @@ interface CommenterItem {
  * 인스타그램 댓글 타임스탬프를 ms 로 바꾼다.
  *
  * 인스타그램은 "2026-08-10T12:00:00+0000" 처럼 콜론 없는 오프셋을 주므로 표준
- * 형태로 고쳐서 넘긴다. 해석할 수 없으면 null — 나이를 확인할 수 없는 댓글은
- * 24시간 창 안이라고 단정하지 않는다.
+ * 형태로 고쳐서 넘긴다. 해석할 수 없으면 null 을 돌려준다.
  */
 function parseCommentTime(raw: unknown): number | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
@@ -391,29 +393,84 @@ export default async (req: Request, context: Context) => {
     });
   }
 
-  // 댓글 수집은 게시물마다 독립적이므로 병렬로 훑는다. 순차로 훑으면 게시물 수가
-  // 늘어날 때마다 그만큼 발송에 쓸 시간이 사라진다.
   const collectDeadline = Date.now() + COLLECT_BUDGET_MS;
-  const commentLists = await Promise.all(
+  let commentPageSlots = Math.max(targetMediaIds.length, MAX_COMMENT_PAGES_PER_REQUEST);
+  const commentResults = await Promise.all(
     targetMediaIds.map(async (mId) => {
-      if (Date.now() > collectDeadline) return [] as any[];
-      try {
-        const commentsUrl = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(mId)}/comments?fields=id,text,from,username,timestamp&limit=100`;
-        const cRes = await fetch(commentsUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const cData = (await cRes.json().catch(() => ({}))) as any;
-        return Array.isArray(cData?.data) ? cData.data : [];
-      } catch (e: any) {
-        console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, e?.message);
-        return [] as any[];
+      const items: any[] = [];
+      let after = "";
+      let pageCount = 0;
+
+      while (pageCount < MAX_COMMENT_PAGES_PER_MEDIA) {
+        if (Date.now() >= collectDeadline || commentPageSlots <= 0) {
+          return { items, error: "", incomplete: true };
+        }
+
+        commentPageSlots -= 1;
+        try {
+          const params = new URLSearchParams({
+            fields: "id,text,from,username,timestamp",
+            limit: String(COMMENT_PAGE_SIZE),
+          });
+          if (after) params.set("after", after);
+          const commentsUrl = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(mId)}/comments?${params}`;
+          const timeoutMs = Math.max(
+            250,
+            Math.min(COMMENT_REQUEST_TIMEOUT_MS, collectDeadline - Date.now()),
+          );
+          const cRes = await fetch(commentsUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+          const cData = (await cRes.json().catch(() => ({}))) as any;
+          if (!cRes.ok || !Array.isArray(cData?.data)) {
+            const error = String(cData?.error?.message || `HTTP ${cRes.status}`);
+            console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
+            return { items, error, incomplete: true };
+          }
+
+          items.push(...cData.data);
+          pageCount += 1;
+          after = cData?.paging?.next
+            ? String(cData?.paging?.cursors?.after || "")
+            : "";
+          if (!after) return { items, error: "", incomplete: false };
+        } catch (e: any) {
+          const timedOut = e?.name === "AbortError" || e?.name === "TimeoutError";
+          const error = timedOut ? "댓글 조회 시간 초과" : e?.message || "댓글 조회 실패";
+          console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
+          return { items, error, incomplete: true };
+        }
       }
+
+      return { items, error: "", incomplete: Boolean(after) };
     }),
   );
 
+  const commentLists = commentResults.map((result) => result.items);
+  const commentFetchFailCount = commentResults.filter((result) => result.error).length;
+  const commentCollectionIncomplete = commentResults.some(
+    (result) => result.incomplete || Boolean(result.error),
+  );
+  if (commentResults.every((result) => result.error && result.items.length === 0)) {
+    await appendLog(username, {
+      status: "failed",
+      reason: "comment_fetch_failed",
+      targetMediaIds,
+      ruleId: body.ruleId,
+    });
+    return Response.json({
+      success: false,
+      connected: true,
+      count: 0,
+      total: 0,
+      message: "인스타그램 댓글을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    });
+  }
+
   const commentersMap = new Map<string, CommenterItem>();
-  const windowStart = Date.now() - COMMENT_WINDOW_MS;
-  /** 24시간 창을 벗어나 대상에서 빠진 댓글 수. */
+  const windowStart = Date.now() - COMMENT_REPLY_WINDOW_MS;
+  /** 7일 창을 벗어나 대상에서 빠진 댓글 수. */
   let staleCount = 0;
 
   for (const commentsList of commentLists) {
@@ -431,12 +488,13 @@ export default async (req: Request, context: Context) => {
         continue;
       }
 
-      // 24시간 이내에 달린 댓글만 발송 대상이다.
-      const commentedAt = parseCommentTime(c?.timestamp);
-      if (commentedAt === null || commentedAt < windowStart) {
+      // 7일 이내에 달린 댓글만 발송 대상이다.
+      const parsedCommentedAt = parseCommentTime(c?.timestamp);
+      if (parsedCommentedAt !== null && parsedCommentedAt < windowStart) {
         staleCount += 1;
         continue;
       }
+      const commentedAt = parsedCommentedAt ?? 0;
 
       const key = fromId || commenterUsername || commentId;
       const prev = commentersMap.get(key);
@@ -464,11 +522,14 @@ export default async (req: Request, context: Context) => {
       ruleId: body.ruleId,
     });
     return Response.json({
-      success: true,
+      success: false,
       connected: true,
       count: 0,
       total: 0,
-      message: "최근 24시간 안에 댓글을 남긴 사용자가 없습니다.",
+      incomplete: commentCollectionIncomplete,
+      message: commentCollectionIncomplete
+        ? "일부 게시물의 댓글을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+        : "최근 7일 안에 발송 가능한 댓글 작성자가 없습니다.",
     });
   }
 
@@ -698,6 +759,8 @@ export default async (req: Request, context: Context) => {
     remaining,
     totalCommenters: targetCommenters.length,
     staleCount,
+    commentFetchFailCount,
+    commentCollectionIncomplete,
     error: failureReason,
     timedOut: stoppedForTime,
     test: Boolean(body.test),
@@ -736,6 +799,9 @@ export default async (req: Request, context: Context) => {
       `남은 ${remaining}명은 시간 제한으로 아직 보내지 못했습니다. 발송 버튼을 다시 누르면 이어서 발송합니다.`,
     );
   }
+  if (commentCollectionIncomplete) {
+    parts.push("일부 댓글은 아직 확인하지 못했습니다. 잠시 후 발송 버튼을 다시 눌러 주세요.");
+  }
   if (parts.length === 0) {
     parts.push("발송할 새로운 대상이 없습니다.");
   }
@@ -749,8 +815,10 @@ export default async (req: Request, context: Context) => {
     failCount,
     replyCount,
     replyFailCount,
+    replyAlreadyCount,
     remaining,
     total: targetCommenters.length,
+    incomplete: commentCollectionIncomplete,
     message: parts.join(" "),
   });
 };
