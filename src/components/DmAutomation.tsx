@@ -19,6 +19,16 @@ import { DmFaqSection, DmTriggerSection, fmtDateTime, toLocalInput } from './DmA
 
 interface DmAutomationProps {
   userName: string;
+  /**
+   * 브랜드(기업) 워크스페이스에서 열린 화면인가.
+   *
+   * 문구만 갈린다. 브랜드에게는 "브랜드 매칭받기"가 없고(인플루언서 쪽 기능이다)
+   * 대신 연동 하나로 콘텐츠 성과(태그된 콘텐츠)를 본다. 해제 안내에 남의 기능을
+   * 적어 두면 브랜드는 무엇이 멈추는지 알 수 없고, 반대로 성과 화면이 계속
+   * 열려 있다는 사실을 적어 두지 않으면 끊기를 망설이거나 끊은 뒤에 "왜 아직
+   * 내 인스타 데이터를 읽나"를 묻게 된다.
+   */
+  isBusiness?: boolean;
 }
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1341,7 +1351,7 @@ const AutomationEditor: React.FC<{
 
 /* ────────────────────────── 토글 ────────────────────────── */
 /* ────────────────────────── 메인 컴포넌트 ────────────────────────── */
-const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
+const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = false }) => {
   const { t } = useLanguage();
   const cachedSettings = useMemo(() => readJson<DmAutomationSettings>(dmSettingsCacheKey(userName)), [userName]);
   const cachedMedia = useMemo(() => readJson<InstagramMedia[]>(dmMediaCacheKey(userName)), [userName]);
@@ -1594,14 +1604,17 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
   };
 
   const disconnect = async () => {
-    if (
-      !window.confirm(
-        '인스타그램 계정 연동을 해제할까요?\n\n' +
-          '자동화는 보관되지만 DM 발송이 중단되고, 인사이트도 함께 해제됩니다.\n' +
-          '브랜드 매칭받기는 그대로 유지됩니다.',
-      )
-    )
-      return;
+    // 해제는 토큰을 지우지 않고 기능 표시만 끈다. 그래서 무엇이 멈추고 무엇이
+    // 남는지가 화면마다 다르다 — 브랜드의 콘텐츠 성과는 해제 뒤에도 같은 연동으로
+    // 계속 조회된다(서버 _shared/tagged-media 의 loadBrandLink).
+    const notice = isBusiness
+      ? '인스타그램 계정 연동을 해제할까요?\n\n' +
+        '자동화는 보관되지만 자동 DM 발송이 중단됩니다.\n' +
+        '콘텐츠 성과(태그된 콘텐츠)는 그대로 볼 수 있습니다.'
+      : '인스타그램 계정 연동을 해제할까요?\n\n' +
+        '자동화는 보관되지만 DM 발송이 중단되고, 인사이트도 함께 해제됩니다.\n' +
+        '브랜드 매칭받기는 그대로 유지됩니다.';
+    if (!window.confirm(notice)) return;
     setDisconnecting(true);
     const ok = await apiService.disconnectInstagram(userName);
     setDisconnecting(false);
@@ -1860,6 +1873,14 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName }) => {
                     프로 플랜(월 18,700원 · 부가세 포함)을 구독하면 모든 멤버십 플랜 혜택과 함께 인스타그램 디엠 자동화를
                     사용할 수 있어요. 구독 전에는 자동화를 저장하거나 자동 DM 을 발송할 수 없습니다.
                   </p>
+                  {/* 구독 전에도 막히지 않는 것을 함께 적는다. 브랜드는 이 카드만 보고
+                      "연동도 성과 조회도 프로 전용"이라고 읽어 캠페인 성과 확인을
+                      미루게 되는데, 실제로 잠기는 것은 저장과 발송뿐이다. */}
+                  {isBusiness && (
+                    <p className="text-slate-500 text-xs md:text-sm font-medium mt-2 leading-relaxed">
+                      인스타그램 계정 연동과 콘텐츠 성과(태그된 콘텐츠) 조회는 프로 플랜 없이도 그대로 사용할 수 있어요.
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-membership'))}
