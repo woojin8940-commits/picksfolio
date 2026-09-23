@@ -53,6 +53,7 @@ interface StoredSettings {
   accessToken?: string;
   automations?: { enabled?: boolean }[];
   updatedAt?: string;
+  featuresOff?: string[];
 }
 
 const idKey = (igAccountId: string) => `ig_${igAccountId}`;
@@ -174,7 +175,24 @@ export async function unindexDmAccount(
   // 같은 인스타그램 계정을 연동해 둔 다른 사용자가 남아 있는지. 계정별 웹훅 구독
   // (`subscribed_apps`)은 계정 하나에 하나뿐이라 우리 쪽 사용자들이 나눠 쓴다 —
   // 한 사람이 자동 디엠을 끊었다고 구독을 내리면 남은 사람의 자동 DM 도 함께 멈춘다.
-  return Array.from(remaining);
+  if (remaining.size === 0) return [];
+  const settings = getStore({ name: SETTINGS_STORE, consistency: "strong" });
+  const checked = await Promise.all(
+    Array.from(remaining).map(async (who) => {
+      let data: StoredSettings | null;
+      try {
+        data = (await settings.get(`dm_${who}`, { type: "json" })) as StoredSettings | null;
+      } catch {
+        return who;
+      }
+      if (!data) return null;
+      const linkedIds = [data.igUserId, data.igAccountId].filter(Boolean) as string[];
+      if (!linkedIds.some((id) => ids.includes(id))) return null;
+      if (Array.isArray(data.featuresOff) && data.featuresOff.includes("dm")) return null;
+      return who;
+    }),
+  );
+  return checked.filter((who): who is string => Boolean(who));
 }
 
 /** 저장된 설정에서 이 IG ID 를 쓰는 사용자명을 모두 찾는다. */

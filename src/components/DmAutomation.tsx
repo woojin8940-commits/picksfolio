@@ -1726,32 +1726,6 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
 
   const activeCount = useMemo(() => automations.filter((a) => a.enabled).length, [automations]);
 
-  /**
-   * 게시물에서 "수동발송"을 누를 때 어떤 문구를 채워 넣을지 고른다.
-   *
-   * 예전에는 언제나 기본 예시 문구로 시작했다. 그래서 그 게시물에 이미 자동화를
-   * 걸어 둔 사람이 수동발송을 누르면, 방금 저장한 자기 문구가 아니라 기본 예시
-   * 문구가 채워진 채 발송돼 "설정한 메시지가 아닌 엉뚱한 메시지가 나갔다"가 됐다.
-   * 그 게시물에 걸린 자동화가 있으면 가장 최근에 설정한 것을 그대로 쓴다.
-   */
-  const configuredAt = (a: DmAutomationItem) => {
-    const ms = Date.parse(a.updatedAt || a.createdAt || '');
-    return Number.isNaN(ms) ? 0 : ms;
-  };
-
-  const manualRuleForMedia = (mediaId: string, caption: string): DmAutomationItem => {
-    const targeting = automations
-      .filter((a) => a.mediaScope === 'selected' && (a.mediaIds || []).includes(mediaId))
-      .sort((x, y) => Number(y.enabled) - Number(x.enabled) || configuredAt(y) - configuredAt(x));
-    if (targeting.length > 0) return targeting[0];
-    return {
-      ...blankAutomation(t),
-      name: caption ? caption.slice(0, 20) : '선택한 게시물',
-      mediaScope: 'selected',
-      mediaIds: [mediaId],
-    };
-  };
-
   // 만료됐거나 임박한 토큰만 알린다. 평소에는 배지를 띄우지 않는다(하루 한 번 도는
   // scheduled-instagram-token-refresh 가 미리 갱신한다).
   const tokenStatus = useMemo(() => {
@@ -2110,33 +2084,11 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                 {media.map((m) => (
                   <div
                     key={m.id}
-                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 group border border-slate-100"
-                    title={entitled ? '이 게시물의 댓글 단 사람에게 DM·답글 보내기 또는 자동화 설정' : '디엠 자동화는 프로 플랜 전용 기능이에요.'}
+                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-100"
                   >
                     {m.mediaUrl
                       ? <img src={m.mediaUrl} alt={m.caption.slice(0, 40)} className="w-full h-full object-cover" loading="lazy" />
                       : <div className="w-full h-full flex items-center justify-center"><ImageIcon size={20} className="text-slate-300" /></div>}
-                    <span className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/60 transition-colors flex flex-col items-center justify-center gap-1.5 p-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setManualModalRule(manualRuleForMedia(m.id, m.caption));
-                          setManualModalOpen(true);
-                        }}
-                        disabled={!entitled}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-pink-600 text-white rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-pink-700 disabled:opacity-40"
-                      >
-                        <Send size={11} /> 보내기
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditing({ ...blankAutomation(t), mediaScope: 'selected', mediaIds: [m.id] })}
-                        disabled={!entitled}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white text-pink-600 rounded-full px-2.5 py-1 text-[11px] font-black shadow hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        <Plus size={11} /> 자동화
-                      </button>
-                    </span>
                   </div>
                 ))}
               </div>
@@ -2221,12 +2173,20 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                     <Users size={11} /> {FOLLOW_LABEL[a.followFilter]}
                   </span>
                   {/* 즉시 발송은 기본값이라 굳이 표시하지 않고, 예약만 눈에 띄게 알린다. */}
-                  {a.sendMode === 'scheduled' && (
+                  {a.sendMode === 'scheduled' && (Date.parse(a.scheduledAt || '') <= Date.now() ? (
+                    <span
+                      className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 rounded-lg px-2 py-1 text-[11px] font-bold"
+                      title="예약 시각이 지나 댓글이 달리면 즉시 DM이 나가요."
+                    >
+                      <AlertCircle size={11} />
+                      {fmtDateTime(a.scheduledAt)} 지남 · 즉시 발송 중
+                    </span>
+                  ) : (
                     <span className="inline-flex items-center gap-1 bg-indigo-100 text-indigo-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <CalendarClock size={11} />
                       {fmtDateTime(a.scheduledAt) || '예약'} 예약
                     </span>
-                  )}
+                  ))}
                   {a.messageType === 'carousel' && (
                     <span className="inline-flex items-center gap-1 bg-pink-100 text-pink-600 rounded-lg px-2 py-1 text-[11px] font-bold">
                       <GalleryHorizontalEnd size={11} /> 캐러셀 {(a.cards || []).filter(cardSendable).length}장

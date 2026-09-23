@@ -395,57 +395,82 @@ export default async (req: Request, context: Context) => {
 
   const collectDeadline = Date.now() + COLLECT_BUDGET_MS;
   let commentPageSlots = Math.max(targetMediaIds.length, MAX_COMMENT_PAGES_PER_REQUEST);
-  const commentResults = await Promise.all(
-    targetMediaIds.map(async (mId) => {
-      const items: any[] = [];
-      let after = "";
-      let pageCount = 0;
+  const commentResults = targetMediaIds.map(() => ({
+    items: [] as any[],
+    error: "",
+    incomplete: false,
+    after: "",
+    pageCount: 0,
+    done: false,
+  }));
 
-      while (pageCount < MAX_COMMENT_PAGES_PER_MEDIA) {
-        if (Date.now() >= collectDeadline || commentPageSlots <= 0) {
-          return { items, error: "", incomplete: true };
-        }
-
-        commentPageSlots -= 1;
-        try {
-          const params = new URLSearchParams({
-            fields: "id,text,from,username,timestamp",
-            limit: String(COMMENT_PAGE_SIZE),
-          });
-          if (after) params.set("after", after);
-          const commentsUrl = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(mId)}/comments?${params}`;
-          const timeoutMs = Math.max(
-            250,
-            Math.min(COMMENT_REQUEST_TIMEOUT_MS, collectDeadline - Date.now()),
-          );
-          const cRes = await fetch(commentsUrl, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            signal: AbortSignal.timeout(timeoutMs),
-          });
-          const cData = (await cRes.json().catch(() => ({}))) as any;
-          if (!cRes.ok || !Array.isArray(cData?.data)) {
-            const error = String(cData?.error?.message || `HTTP ${cRes.status}`);
-            console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
-            return { items, error, incomplete: true };
-          }
-
-          items.push(...cData.data);
-          pageCount += 1;
-          after = cData?.paging?.next
-            ? String(cData?.paging?.cursors?.after || "")
-            : "";
-          if (!after) return { items, error: "", incomplete: false };
-        } catch (e: any) {
-          const timedOut = e?.name === "AbortError" || e?.name === "TimeoutError";
-          const error = timedOut ? "댓글 조회 시간 초과" : e?.message || "댓글 조회 실패";
-          console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
-          return { items, error, incomplete: true };
-        }
+  const fetchCommentPage = async (index: number) => {
+    const state = commentResults[index];
+    const mId = targetMediaIds[index];
+    try {
+      const params = new URLSearchParams({
+        fields: "id,text,from,username,timestamp",
+        limit: String(COMMENT_PAGE_SIZE),
+      });
+      if (state.after) params.set("after", state.after);
+      const commentsUrl = `https://${graphHost}/${GRAPH_VERSION}/${encodeURIComponent(mId)}/comments?${params}`;
+      const timeoutMs = Math.max(
+        250,
+        Math.min(COMMENT_REQUEST_TIMEOUT_MS, collectDeadline - Date.now()),
+      );
+      const cRes = await fetch(commentsUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const cData = (await cRes.json().catch(() => ({}))) as any;
+      if (!cRes.ok || !Array.isArray(cData?.data)) {
+        const error = String(cData?.error?.message || `HTTP ${cRes.status}`);
+        console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
+        state.error = error;
+        state.incomplete = true;
+        state.done = true;
+        return;
       }
 
-      return { items, error: "", incomplete: Boolean(after) };
-    }),
-  );
+      state.items.push(...cData.data);
+      state.pageCount += 1;
+      const hasNext = Boolean(cData?.paging?.next);
+      state.after = hasNext ? String(cData?.paging?.cursors?.after || "") : "";
+      if (!hasNext) {
+        state.done = true;
+      } else if (!state.after) {
+        state.incomplete = true;
+        state.done = true;
+      } else if (state.pageCount >= MAX_COMMENT_PAGES_PER_MEDIA) {
+        state.incomplete = true;
+        state.done = true;
+      }
+    } catch (e: any) {
+      const timedOut = e?.name === "AbortError" || e?.name === "TimeoutError";
+      const error = timedOut ? "댓글 조회 시간 초과" : e?.message || "댓글 조회 실패";
+      console.warn(`[send-instagram-dm] 게시물(${mId}) 댓글 조회 실패:`, error);
+      state.error = error;
+      state.incomplete = true;
+      state.done = true;
+    }
+  };
+
+  while (true) {
+    const pending = commentResults
+      .map((state, index) => (state.done ? -1 : index))
+      .filter((index) => index >= 0);
+    if (pending.length === 0) break;
+    if (Date.now() >= collectDeadline || commentPageSlots <= 0) {
+      for (const index of pending) {
+        commentResults[index].incomplete = true;
+        commentResults[index].done = true;
+      }
+      break;
+    }
+    const round = pending.slice(0, commentPageSlots);
+    commentPageSlots -= round.length;
+    await Promise.all(round.map((index) => fetchCommentPage(index)));
+  }
 
   const commentLists = commentResults.map((result) => result.items);
   const commentFetchFailCount = commentResults.filter((result) => result.error).length;

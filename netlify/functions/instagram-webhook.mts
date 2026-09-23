@@ -667,8 +667,7 @@ function conversationWentQuiet(prevLastAt?: string): boolean {
  * Meta 웹훅 서명(`x-hub-signature-256`) 검증.
  *
  * 이 엔드포인트는 공개 URL 이라 서명을 확인하지 않으면 누구나 가짜 댓글 이벤트를
- * 흘려 넣어 고객 계정으로 DM 을 보내게 만들 수 있다. 앱 시크릿이 설정돼 있으면
- * 반드시 검증하고, 없으면(로컬/미설정 환경) 경고만 남기고 통과시킨다.
+ * 흘려 넣어 고객 계정으로 DM 을 보내게 만들 수 있다.
  */
 function verifySignature(rawBody: string, header: string | null, appSecret: string): boolean {
   if (!header) return false;
@@ -704,13 +703,13 @@ export default async (req: Request, _context: Context) => {
   // Meta 는 빠른 200 응답을 기대한다. 처리 중 오류가 나도 200 을 돌려준다.
   const rawBody = await req.text().catch(() => "");
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
-  if (appSecret) {
-    if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret)) {
-      console.warn("[ig-webhook] rejected: invalid x-hub-signature-256");
-      return new Response("Forbidden", { status: 403 });
-    }
-  } else {
-    console.warn("[ig-webhook] INSTAGRAM_APP_SECRET not set — skipping signature check");
+  if (!appSecret) {
+    console.error("[ig-webhook] rejected: INSTAGRAM_APP_SECRET not set");
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret)) {
+    console.warn("[ig-webhook] rejected: invalid x-hub-signature-256");
+    return new Response("Forbidden", { status: 403 });
   }
 
   let payload: any;
