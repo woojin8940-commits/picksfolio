@@ -241,9 +241,8 @@ export async function claimJob(key: string, staleAfterMs = STALE_CLAIM_MS): Prom
     console.warn(`[dm-schedule] stale claim re-taken: ${key}`);
     return true;
   } catch (e) {
-    // 선점 기록에 실패했다면 발송을 막지 않는다 — 예약이 아예 안 나가는 쪽이 더 나쁘다.
     console.warn("[dm-schedule] claim failed:", (e as Error)?.message);
-    return true;
+    return false;
   }
 }
 

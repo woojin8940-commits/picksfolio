@@ -3804,6 +3804,8 @@ export const platformTextTranslations: Readonly<Record<string, string>> = {
   "확인했어요": "Got it",
   "인스타그램 다시 연동하기": "Reconnect Instagram",
   "예약": "Scheduled",
+  "지남 · 즉시 발송 중": "passed · sending immediately",
+  "예약 시각이 지나 댓글이 달리면 즉시 DM이 나가요.": "The scheduled time has passed, so DMs go out as soon as a comment comes in.",
   "자주 묻는 질문을 인스타그램에 등록했어요. DM 창(앱)에서 확인해 보세요.": "Your frequently asked questions have been registered with Instagram. Check the DM window (app).",
   "저장했어요.": "Saved.",
   "자주 묻는 질문 버튼": "Frequently asked question buttons",
