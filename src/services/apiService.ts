@@ -3674,7 +3674,7 @@ export const apiService = {
     },
   ): Promise<{
     ok: boolean; error?: string; automations?: DmAutomationItem[]; enabled?: boolean;
-    faq?: DmFaqSettings; direct?: DmDirectSettings;
+    faq?: DmFaqSettings; direct?: DmDirectSettings; backfillWarning?: string;
   }> {
     try {
       const res = await fetchWithTimeout(`/api/dm-automation/${encodeURIComponent(username.toLowerCase())}`, {
@@ -3699,6 +3699,7 @@ export const apiService = {
           // 실패 이유가 그 응답에 실려 오므로 화면이 그대로 따라가야 한다.
           faq: data?.faq && typeof data.faq === 'object' ? data.faq : undefined,
           direct: data?.direct && typeof data.direct === 'object' ? data.direct : undefined,
+          backfillWarning: typeof data?.backfillWarning === 'string' ? data.backfillWarning : undefined,
         };
       }
       // 잘못된 버튼 링크처럼 사용자가 고칠 수 있는 오류는 서버 메시지를 그대로 보여준다.
@@ -3713,6 +3714,24 @@ export const apiService = {
     } catch (e) {
       console.error('[API] Failed to save DM automation:', e);
       return { ok: false, error: '네트워크 오류로 저장에 실패했습니다.' };
+    }
+  },
+
+  async backfillDmComments(username: string, ruleId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetchWithTimeout(`/api/dm-comment-backfill/${encodeURIComponent(username.toLowerCase())}`, {
+        method: 'POST',
+        headers: await authHeadersWithTimeout(
+          { 'Content-Type': 'application/json' },
+          { account: username },
+        ),
+        body: JSON.stringify({ ruleId }),
+      });
+      return res.ok
+        ? { ok: true }
+        : { ok: false, error: '이전 댓글 확인을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+    } catch {
+      return { ok: false, error: '네트워크 오류로 이전 댓글 확인을 시작하지 못했습니다.' };
     }
   },
 

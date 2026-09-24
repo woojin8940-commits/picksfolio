@@ -125,6 +125,7 @@ export async function listScheduledJobs(username: string): Promise<DmScheduledJo
     const stored = await listStoredScheduledJobs(username);
     storedJobs = stored.map((row) => ({
       ...(row.payload as DmScheduledJob),
+      sendAt: row.due_at,
       status: row.status === "processing" ? "pending" : row.status,
       error: row.last_error || undefined,
       errorKind: row.error_kind || undefined,
