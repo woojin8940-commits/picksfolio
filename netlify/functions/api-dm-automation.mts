@@ -19,6 +19,7 @@ import {
   syncIceBreakers,
 } from "./_shared/instagram-ice-breakers.mts";
 import { clearForeignDm, readForeignDm } from "./_shared/dm-foreign-dm.mts";
+import { reschedulePendingCommentJobs } from "./_shared/dm-jobs.mts";
 import {
   subscribeInstagramWebhooks,
   webhookFieldsSufficient,
@@ -1128,6 +1129,40 @@ export default async (req: Request, context: Context) => {
       }
     }
 
+    const backfillRules = !dmOff && next.enabled && next.accessToken
+      ? (op.kind === "upsert"
+          ? next.automations.filter((item) => item.id === op.incoming.item.id)
+          : ((op.kind === "settings" && body.enabled === true) || op.kind === "replace")
+            ? next.automations
+            : [])
+          .filter((item) => item.enabled && item.sendMode === "scheduled" && !Number.isNaN(Date.parse(item.scheduledAt)))
+      : [];
+    let backfillWarning = "";
+    let scheduleWarning = "";
+    for (const item of backfillRules) {
+      try {
+        await reschedulePendingCommentJobs(username, item.id, item.scheduledAt);
+      } catch (e) {
+        console.warn("[dm-automation] scheduled comment update failed:", (e as Error)?.message);
+        scheduleWarning = "대기 중인 댓글의 예약 시각을 바꾸지 못했습니다. 잠시 후 다시 저장해 주세요.";
+      }
+      try {
+        const url = new URL(`/api/dm-comment-backfill/${encodeURIComponent(username)}`, req.url);
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: req.headers.get("Authorization") || "",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ruleId: item.id }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!response.ok) backfillWarning = "예약 전 댓글 확인을 시작하지 못했습니다. 잠시 후 자동화를 다시 저장해 주세요.";
+      } catch {
+        backfillWarning = "예약 전 댓글 확인을 시작하지 못했습니다. 잠시 후 자동화를 다시 저장해 주세요.";
+      }
+    }
+
     // 저장된 목록을 그대로 돌려준다. 화면이 이 응답으로 상태를 맞추면, 실제로
     // 발송에 쓰일 내용과 화면에 보이는 내용이 어긋나지 않는다.
     return Response.json({
@@ -1138,6 +1173,7 @@ export default async (req: Request, context: Context) => {
       faq: next.faq,
       direct: next.direct,
       updatedAt: next.updatedAt,
+      backfillWarning: [scheduleWarning, backfillWarning].filter(Boolean).join(" ") || undefined,
     });
   }
 

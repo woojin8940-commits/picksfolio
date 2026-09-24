@@ -1585,7 +1585,7 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
     if (result.ok) {
       setSavedAt(Date.now());
       setTimeout(() => setSavedAt(null), 2200);
-      setBanner(null);
+      setBanner(result.backfillWarning ? { type: 'err', text: result.backfillWarning } : null);
     } else {
       setBanner({ type: 'err', text: result.error || '저장에 실패했습니다. 다시 시도해주세요.' });
     }
@@ -1704,6 +1704,12 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
   const saveAutomation = (a: DmAutomationItem) => {
     setEditing(null);
     void commitAutomation(a);
+  };
+  const backfillPastComments = async (a: DmAutomationItem) => {
+    const result = await apiService.backfillDmComments(userName, a.id);
+    setBanner(result.ok
+      ? { type: 'ok', text: '예약 전 댓글 확인을 시작했습니다. 대상 댓글은 순차적으로 처리됩니다.' }
+      : { type: 'err', text: result.error || '이전 댓글 확인을 시작하지 못했습니다.' });
   };
   const toggleAutomation = (id: string) => {
     const target = automations.find((x) => x.id === id);
@@ -2251,6 +2257,17 @@ const DmAutomation: React.FC<DmAutomationProps> = ({ userName, isBusiness = fals
                   >
                     <Send size={13} /> {t('dm.manualSend', '보내기', 'Send')}
                   </button>
+                  {a.sendMode === 'scheduled' && (
+                    <button
+                      onClick={() => void backfillPastComments(a)}
+                      disabled={!entitled || !enabled || !a.enabled}
+                      title="예약 전 댓글 다시 확인"
+                      aria-label="예약 전 댓글 다시 확인"
+                      className="w-10 rounded-xl text-slate-500 hover:bg-slate-100 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <RefreshCw size={15} />
+                    </button>
+                  )}
                   <button onClick={() => deleteAutomation(a.id)} disabled={saving} className="w-10 rounded-xl text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                     <Trash2 size={15} />
                   </button>

@@ -64,6 +64,26 @@ export async function enqueueScheduledJob(
   if (error) throw error;
 }
 
+export async function reschedulePendingCommentJobs(
+  username: string,
+  ruleId: string,
+  scheduledAt: string,
+): Promise<void> {
+  const target = Date.parse(scheduledAt);
+  if (!username || !ruleId || Number.isNaN(target)) throw new Error("Invalid scheduled comment time");
+  const dueAt = new Date(Math.max(target, Date.now())).toISOString();
+  const { error } = await getSupabaseServer()
+    .from("dm_jobs")
+    .update({ due_at: dueAt, updated_at: new Date().toISOString() })
+    .eq("job_type", "scheduled")
+    .eq("username", username.toLowerCase())
+    .eq("status", "pending")
+    .eq("attempts", 0)
+    .is("error_kind", null)
+    .contains("payload", { source: "comment", ruleId });
+  if (error) throw error;
+}
+
 export async function claimDueJobs(limit = 1): Promise<DmJob[]> {
   const { data, error } = await getSupabaseServer().rpc("dm_claim_due_jobs", { p_limit: limit });
   if (error) throw error;

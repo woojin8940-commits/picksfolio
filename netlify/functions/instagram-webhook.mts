@@ -763,6 +763,7 @@ export interface WebhookProcessResult {
 export async function processWebhookPayload(
   payload: any,
   skipComments = false,
+  onlyAutomationId = "",
 ): Promise<WebhookProcessResult> {
   const outcome: WebhookProcessResult = { retryable: false };
 
@@ -932,7 +933,8 @@ export async function processWebhookPayload(
         // 걸어둔 경우에도 각각 의도대로 동작한다. 후보가 여럿이면 좁게 지정한 것 →
         // 최근에 설정한 것 순으로 본다(byPriority).
         const candidates = byPriority(
-          (settings.automations || []).filter((a) => matchAutomation(a, commentText, mediaId)),
+          (settings.automations || []).filter((a) =>
+            (!onlyAutomationId || a.id === onlyAutomationId) && matchAutomation(a, commentText, mediaId)),
         );
         if (candidates.length === 0) continue;
 
@@ -951,7 +953,12 @@ export async function processWebhookPayload(
         const automation = candidates.find((a) => passesFollowFilter(a, follows));
         if (!automation) continue;
 
-        const scheduledMs = scheduledSendAt(automation);
+        if (onlyAutomationId && automation.sendMode !== "scheduled") continue;
+        const configuredSchedule = Date.parse(automation.scheduledAt || "");
+        if (onlyAutomationId && Number.isNaN(configuredSchedule)) continue;
+        const scheduledMs = onlyAutomationId
+          ? Math.max(configuredSchedule, Date.now())
+          : scheduledSendAt(automation);
         if (scheduledMs !== null) {
           const pool = automation.replyEnabled
             ? (automation.replies || []).filter((r) => r && r.trim())
@@ -970,7 +977,10 @@ export async function processWebhookPayload(
             console.warn("[ig-webhook] comment already handled — scheduling skipped", commentId);
             continue;
           }
-          const entryMs = Number(entry?.time) > 0 ? Number(entry.time) * 1000 : Date.now();
+          const commentMs = Date.parse(String(value?.timestamp || ""));
+          const entryMs = !Number.isNaN(commentMs)
+            ? commentMs
+            : Number(entry?.time) > 0 ? Number(entry.time) * 1000 : Date.now();
           const sendAt = new Date(scheduledMs).toISOString();
           const carousel = automation.messageType === "carousel";
           let sendDm = hasContent(automation);

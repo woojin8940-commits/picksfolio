@@ -20,21 +20,10 @@ function normalizePhone(value: unknown): string {
   return digits;
 }
 
-function isCreatorProfile(profile: Record<string, any> | null | undefined): boolean {
-  const role = String(profile?.role || "user").toLowerCase();
-  return role === "user";
-}
-
 function extractKakaoPhone(
-  userMetadata: Record<string, any>,
   identityData: Record<string, any>,
-  clientPhone: string
 ): string {
   const raw =
-    clientPhone ||
-    userMetadata?.phone_number ||
-    userMetadata?.phone ||
-    userMetadata?.kakao_account?.phone_number ||
     identityData?.phone_number ||
     identityData?.kakao_account?.phone_number ||
     "";
@@ -116,36 +105,35 @@ export default async (req: Request) => {
     const user_metadata = verifiedUser.user_metadata || {};
     const identities = verifiedUser.identities || [];
     const email = verifiedUser.email || "";
-    const client_kakao_phone = "";
     const client_kakao_name = "";
 
     const kakaoIdentity = identities.find(
       (i: any) => i.provider === "kakao"
     );
+    if (!kakaoIdentity) {
+      return Response.json({ success: false, error: "Kakao identity not found" }, { status: 403 });
+    }
     const identityData = kakaoIdentity?.identity_data || {};
 
-    let phone = extractKakaoPhone(
-      user_metadata,
-      identityData,
-      client_kakao_phone
-    );
+    let phone = extractKakaoPhone(identityData);
     let fullName = extractKakaoName(
       user_metadata,
       identityData,
       client_kakao_name
     );
     let avatarUrl =
+      identityData?.avatar_url ||
       user_metadata?.avatar_url ||
       user_metadata?.picture ||
-      identityData?.avatar_url ||
       "";
     let kakaoId = String(
-      user_metadata?.provider_id ||
-      user_metadata?.sub ||
       identityData?.sub ||
-      kakaoIdentity?.id ||
+      kakaoIdentity?.provider_id ||
       ""
     );
+    if (!kakaoId) {
+      return Response.json({ success: false, error: "Kakao account ID not found" }, { status: 403 });
+    }
 
     const { data: existing } = await supabase
       .from("profiles")
@@ -183,14 +171,11 @@ export default async (req: Request) => {
       });
     }
 
-    if (provider_token && (!kakaoId || !phone || !fullName)) {
+    if (provider_token && (!phone || !fullName)) {
       const kakaoProfile = await fetchKakaoProfile(provider_token);
       if (kakaoProfile) {
-        if (kakaoId && String(kakaoProfile.id || "") !== kakaoId) {
+        if (String(kakaoProfile.id || "") !== kakaoId) {
           return Response.json({ success: false, error: "Kakao account mismatch" }, { status: 403 });
-        }
-        if (!kakaoId && kakaoProfile.id) {
-          kakaoId = String(kakaoProfile.id);
         }
         const account = kakaoProfile.kakao_account || {};
         if (!phone) {
@@ -212,281 +197,6 @@ export default async (req: Request) => {
       }
     }
 
-    // Try to recover via kakao_id — works whether or not a profile row exists yet
-    const recoveryKakaoId = existing?.kakao_id || kakaoId;
-    if (recoveryKakaoId) {
-      const { data: recoveredProfile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("kakao_id", recoveryKakaoId)
-        .neq("id", user_id)
-        .not("username", "eq", "")
-        .limit(10);
-      if (recoveredProfile && recoveredProfile.length > 0) {
-        const rp = recoveredProfile.find(
-          (p: any) => isCreatorProfile(p) && isRealUsername(p.username)
-        );
-        if (rp) {
-          if (existing) {
-            await supabase
-              .from("profiles")
-              .update({
-                username: rp.username,
-                kakao_id: recoveryKakaoId,
-                role: rp.role || "user",
-                full_name: rp.full_name || existing.full_name || fullName || "",
-                phone: rp.phone || existing.phone || phone || "",
-                avatar_url: rp.avatar_url || existing.avatar_url || avatarUrl || "",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", user_id);
-          } else {
-            await supabase
-              .from("profiles")
-              .upsert({
-                id: user_id,
-                username: rp.username,
-                email: email || "",
-                kakao_id: recoveryKakaoId,
-                role: rp.role || "user",
-                full_name: rp.full_name || fullName || "",
-                phone: rp.phone || phone || "",
-                avatar_url: rp.avatar_url || avatarUrl || "",
-                updated_at: new Date().toISOString(),
-              }, { onConflict: "id" })
-              .then(({ error }) => {
-                if (error) console.error("Recovery upsert failed:", error.message);
-              });
-          }
-          return Response.json({
-            success: true,
-            profile: { ...rp, id: user_id, kakao_id: recoveryKakaoId },
-            isNewUser: false,
-          });
-        }
-      }
-    }
-
-    let linkedProfile: Record<string, any> | null = null;
-    const allowDeepAuthScan = Netlify.env.get("KAKAO_PROFILE_DEEP_SCAN") === "1";
-
-    // 1) Match by kakao_id (strongest signal)
-    if (!linkedProfile && kakaoId) {
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("kakao_id", kakaoId)
-        .neq("id", user_id)
-        .not("username", "eq", "")
-        .limit(1);
-      if (data && data.length > 0) {
-        linkedProfile = data.find((p: any) => isCreatorProfile(p) && isRealUsername(p.username)) || null;
-      } else {
-        const { data: anyMatch } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("kakao_id", kakaoId)
-          .neq("id", user_id)
-          .limit(1);
-        if (anyMatch && anyMatch.length > 0) {
-          linkedProfile = anyMatch.find((p: any) => isCreatorProfile(p) && isRealUsername(p.username)) || null;
-        }
-      }
-    }
-
-    // 2) Match by email (more specific than phone)
-    if (!linkedProfile && email) {
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("email", email)
-        .neq("id", user_id)
-        .not("email", "eq", "")
-        .limit(20);
-      if (data && data.length > 0) {
-        linkedProfile = data.find(
-          (p: any) => isCreatorProfile(p) && isRealUsername(p.username) && (!p.kakao_id || p.kakao_id === kakaoId)
-        ) || null;
-      }
-    }
-
-    // 2.5) Match by email across auth users — find if any other auth user
-    // shares this email in their profile or identity data
-    if (allowDeepAuthScan && !linkedProfile && email) {
-      try {
-        let page = 1;
-        while (!linkedProfile && page <= 3) {
-          const { data: authData } = await supabase.auth.admin.listUsers({
-            page,
-            perPage: 200,
-          });
-          if (!authData?.users?.length) break;
-          for (const authUser of authData.users) {
-            if (authUser.id === user_id) continue;
-            const authEmail = authUser.email || "";
-            const metaEmail = authUser.user_metadata?.email || "";
-            const identityEmails = (authUser.identities || [])
-              .map((ident: any) => ident.identity_data?.email || "")
-              .filter(Boolean);
-            const allEmails = [authEmail, metaEmail, ...identityEmails]
-              .map((e: string) => e.toLowerCase().trim())
-              .filter(Boolean);
-            if (allEmails.includes(email.toLowerCase().trim())) {
-              const { data: profileById } = await supabase
-                .from("profiles")
-                .select("*")
-                .eq("id", authUser.id)
-                .maybeSingle();
-              if (
-                profileById &&
-                isCreatorProfile(profileById) &&
-                isRealUsername(profileById.username) &&
-                (!profileById.kakao_id || profileById.kakao_id === kakaoId)
-              ) {
-                linkedProfile = profileById;
-                break;
-              }
-            }
-          }
-          if (authData.users.length < 200) break;
-          page++;
-        }
-      } catch (e) {
-        console.error("Auth user email search failed:", e);
-      }
-    }
-
-    if (!linkedProfile && phone) {
-      const normalizedPhone = normalizePhone(phone);
-      const last8 = normalizedPhone.slice(-8);
-      if (last8.length === 8) {
-        const { data: phoneMatches } = await supabase
-          .from("profiles")
-          .select("*")
-          .neq("id", user_id)
-          .not("phone", "eq", "")
-          .ilike("phone", `%${last8}`)
-          .limit(20);
-        if (phoneMatches && phoneMatches.length > 0) {
-          const eligible = phoneMatches.filter(
-            (p: any) =>
-              isCreatorProfile(p) &&
-              isRealUsername(p.username) &&
-              normalizePhone(p.phone) === normalizedPhone &&
-              (!p.kakao_id || p.kakao_id === kakaoId)
-          );
-          linkedProfile = eligible[0] || null;
-        }
-      }
-    }
-
-    // 5) Match by scanning auth users' phone metadata
-    if (allowDeepAuthScan && !linkedProfile && phone) {
-      try {
-        const phoneDigits = normalizePhone(phone);
-        if (phoneDigits.length >= 10) {
-          let page = 1;
-          let found = false;
-          while (!found && page <= 5) {
-            const { data: authData } = await supabase.auth.admin.listUsers({
-              page,
-              perPage: 200,
-            });
-            if (!authData?.users?.length) break;
-            for (const authUser of authData.users) {
-              if (authUser.id === user_id) continue;
-              const metaPhone = normalizePhone(authUser.user_metadata?.phone || authUser.user_metadata?.phone_number);
-              if (metaPhone && metaPhone === phoneDigits) {
-                const { data: profileById } = await supabase
-                  .from("profiles")
-                  .select("*")
-                  .eq("id", authUser.id)
-                  .maybeSingle();
-                if (
-                  profileById &&
-                  isCreatorProfile(profileById) &&
-                  isRealUsername(profileById.username) &&
-                  (!profileById.kakao_id || profileById.kakao_id === kakaoId)
-                ) {
-                  linkedProfile = profileById;
-                  found = true;
-                  break;
-                }
-              }
-            }
-            if (authData.users.length < 200) break;
-            page++;
-          }
-        }
-      } catch (e) {
-        console.error("Auth user phone search failed:", e);
-      }
-    }
-
-    if (linkedProfile) {
-      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (kakaoId && (!linkedProfile.kakao_id || linkedProfile.kakao_id === kakaoId)) {
-        updates.kakao_id = kakaoId;
-      }
-      if (email && !email.endsWith("@picks.me") && linkedProfile.email !== email) {
-        updates.email = email;
-      }
-      if (phone && !linkedProfile.phone) updates.phone = phone;
-      if (fullName && !linkedProfile.full_name) updates.full_name = fullName;
-      if (avatarUrl && !linkedProfile.avatar_url) updates.avatar_url = avatarUrl;
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update(updates)
-        .eq("id", linkedProfile.id);
-
-      if (updateError) {
-        console.error("Failed to update linked profile:", updateError.message);
-      }
-
-      const merged = { ...linkedProfile, ...updates };
-
-      if (linkedProfile.id !== user_id) {
-        const kakaoUserProfile = {
-          id: user_id,
-          username: merged.username || "",
-          email: email || "",
-          full_name: merged.full_name || "",
-          phone: merged.phone || "",
-          avatar_url: merged.avatar_url || "",
-          kakao_id: kakaoId || merged.kakao_id || "",
-          role: merged.role || "user",
-          updated_at: new Date().toISOString(),
-        };
-
-        const { error: upsertError } = await supabase
-          .from("profiles")
-          .upsert(kakaoUserProfile, { onConflict: "id" });
-
-        if (upsertError) {
-          console.error("Kakao profile sync failed:", upsertError.message);
-          if (existing) {
-            await supabase
-              .from("profiles")
-              .update({
-                kakao_id: kakaoId || merged.kakao_id || "",
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", user_id);
-          }
-        }
-      }
-
-      return Response.json({
-        success: true,
-        profile: {
-          ...merged,
-          username: merged.username || "",
-        },
-        isNewUser: false,
-      });
-    }
-
     const newProfile = {
       id: user_id,
       username: "",
@@ -497,6 +207,25 @@ export default async (req: Request) => {
       kakao_id: kakaoId,
       role: "user",
     };
+
+    if (existing) {
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          full_name: fullName || existing.full_name || "",
+          phone: phone || existing.phone || "",
+          avatar_url: avatarUrl || existing.avatar_url || "",
+          kakao_id: kakaoId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user_id)
+        .select("*")
+        .single();
+      if (updateError) {
+        return Response.json({ success: false, error: updateError.message });
+      }
+      return Response.json({ success: true, profile: updated, isNewUser: true });
+    }
 
     const { error: insertError } = await supabase
       .from("profiles")
