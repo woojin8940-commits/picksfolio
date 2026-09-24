@@ -1056,7 +1056,7 @@ export interface DmScheduledJob {
   message: string;
   buttons: { label: string; url: string }[];
   createdAt: string;
-  status: 'pending' | 'sent' | 'failed' | 'canceled';
+  status: 'pending' | 'sent' | 'failed' | 'canceled' | 'uncertain';
   sentAt?: string;
   error?: string;
   errorKind?: string;
@@ -1933,19 +1933,25 @@ export const apiService = {
     username: string,
     billingKey: string,
     tier: MembershipTier,
-  ): Promise<{ success: boolean; error?: string; data?: SellerVerification }> {
+    promoCode?: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    data?: SellerVerification;
+    promo?: { code: string; freeMonths: number; freeUntil: string; plan: MembershipTier };
+  }> {
     try {
       const res = await fetch('/api/billing-issue', {
         method: 'POST',
         headers: await authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ username: username.toLowerCase(), billingKey, tier }),
+        body: JSON.stringify({ username: username.toLowerCase(), billingKey, tier, promoCode }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
         return { success: false, error: json?.error || '빌링 결제 실패' };
       }
       if (json.data) writeVerificationCache(username, json.data);
-      return { success: true, data: json.data };
+      return { success: true, data: json.data, promo: json.promo };
     } catch (e) {
       console.error('[API] Failed to process billing key payment:', e);
       return { success: false, error: '네트워크 오류' };

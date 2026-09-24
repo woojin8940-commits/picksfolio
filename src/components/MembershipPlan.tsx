@@ -388,6 +388,19 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
     }
 
     // ── 간편결제(카카오페이): PortOne 빌링키로 정기결제 등록 ──
+    const typedPromo = promoInput.replace(/[^0-9]/g, '');
+    let promoCodeToUse = '';
+    if (typedPromo) {
+      const verified = promo ? { ok: true as const, code: typedPromo } : await verifyPromoCode();
+      if (!verified.ok) {
+        setError(verified.error);
+        return;
+      }
+      promoCodeToUse = verified.code;
+    }
+    const billingTier = promoCodeToUse && promo ? promo.plan : selectedTier;
+    const billingLabel = TIER_LABEL[billingTier];
+
     // SDK 는 여기서 받는다. 모든 페이지가 미리 받으면 결제를 열지 않는
     // 방문자까지 77KB 를 기다린다.
     try {
@@ -413,8 +426,9 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         type: 'membership',
         username: normalizedUserName,
         payMethod: ppMethod,
-        tier: selectedTier,
-        orderName: `픽스폴리오 ${tierLabel} 정기결제`,
+        tier: billingTier,
+        promoCode: promoCodeToUse || undefined,
+        orderName: `픽스폴리오 ${billingLabel} 정기결제`,
         returnPath: '/admin?tab=membership',
       });
 
@@ -423,8 +437,8 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         channelKey: channelKeyFor(ppMethod),
         billingKeyMethod: portoneBillingKeyMethod(ppMethod),
         issueId,
-        issueName: `픽스폴리오 ${tierLabel} 정기결제`,
-        displayAmount: tierAmount,
+        issueName: `픽스폴리오 ${billingLabel} 정기결제`,
+        displayAmount: TIER_PRICE[billingTier],
         currency: 'KRW',
         redirectUrl: portoneRedirectUrl(),
         ...easyPayParam(ppMethod),
@@ -454,7 +468,12 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
         return;
       }
 
-      const verifyRes = await apiService.issueBillingKeyPayment(normalizedUserName, billingKey, selectedTier);
+      const verifyRes = await apiService.issueBillingKeyPayment(
+        normalizedUserName,
+        billingKey,
+        billingTier,
+        promoCodeToUse || undefined,
+      );
       clearPortOneIntent();
       if (!verifyRes.success) {
         setError(verifyRes.error || '빌링 결제에 실패했습니다. 고객센터로 문의해 주세요.');
@@ -463,15 +482,26 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
       }
 
       if (verifyRes.data) setVerification(verifyRes.data);
+      const grantedPromo = verifyRes.promo;
       closeConfirm();
       const methodLabel = payMethod === 'KAKAOPAY' ? '카카오페이로' : '카드로';
       const nextDate = nextBillingOf(verifyRes.data)
         ? new Date(nextBillingOf(verifyRes.data) as string).toLocaleDateString('ko-KR')
         : null;
-      flashSuccess(
-        `${methodLabel} ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`
-          + (nextDate ? ` 다음 결제일은 ${nextDate}이며, 가입일 기준 매월 자동결제됩니다.` : ' 가입일 기준 매월 자동결제됩니다.'),
-      );
+      if (grantedPromo) {
+        const promoLabel = TIER_LABEL[grantedPromo.plan] || tierLabel;
+        flashSuccess(
+          `출시 혜택 코드가 등록되어 ${promoLabel}을(를) ${grantedPromo.freeMonths}개월간 무료로 이용합니다. 지금 결제된 금액은 없습니다.`
+            + (nextDate
+              ? ` ${nextDate}부터 등록한 카카오페이로 월 ${TIER_PRICE[grantedPromo.plan].toLocaleString()}원이 자동결제됩니다.`
+              : ''),
+        );
+      } else {
+        flashSuccess(
+          `${methodLabel} ${tierAmount.toLocaleString()}원이 결제되어 ${tierLabel}이(가) 활성화되었습니다.`
+            + (nextDate ? ` 다음 결제일은 ${nextDate}이며, 가입일 기준 매월 자동결제됩니다.` : ' 가입일 기준 매월 자동결제됩니다.'),
+        );
+      }
     } catch (e) {
       console.error('[Membership] PortOne billing key error:', e);
       setError('결제 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
@@ -1176,80 +1206,80 @@ const MembershipPlan: React.FC<MembershipPlanProps> = ({ userName }) => {
                       {' '}카드 정보는 결제사로만 전달되어 자동결제용 결제키로 바뀌며 픽스폴리오에는 저장되지 않습니다.
                       법인카드는 생년월일 대신 사업자등록번호 10자리를 입력하세요.
                     </p>
-
-                    {/* 코드 입력칸만 남긴다. 무슨 혜택이 있는 코드인지는 직접 연락받은
-                        사람만 알아야 하므로 화면에 설명을 쓰지 않는다. */}
-                    <div className="pt-3 mt-1 border-t border-dashed border-slate-200">
-                      <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">
-                        코드 <span className="text-slate-400 normal-case tracking-normal font-bold">(선택)</span>
-                      </p>
-                      <div className="flex gap-2">
-                        {/* maxLength 에 여유를 둔 이유: 구분자가 섞인 붙여넣기(323-039-109)가
-                            잘려 들어오면 앞자리만 남는다. 넉넉히 받고 숫자만 남긴다.
-
-                            min-w-0 이 꼭 있어야 한다. flex 자식은 기본값이
-                            min-width:auto 라 자기 내용 너비 밑으로는 줄어들지
-                            않는다. 이 칸의 내용 너비는 placeholder('9자리 코드
-                            입력') 가 정하는데, index.css 가 휴대폰 입력칸을
-                            16px 로 못 박고 여기에 tracking-[0.2em] 까지 붙어서
-                            332px 이 나온다 — 폭 390px 폰의 이 줄(326px)보다
-                            넓다. 그래서 flex-1 만 있던 동안에는 줄이 89~159px
-                            넘쳐서(320·360·390px 폰 모두) 옆의 '코드 확인'
-                            버튼이 오른쪽으로 잘려 나갔고, 그 가로 넘침이 화면을
-                            옆으로 밀어 아래 막대까지 잘려 보이게 했다.
-                            min-w-0 으로 풀면 칸이 남는 폭까지 줄어 넘침이 0 이 된다. */}
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          name="membershipPromoCode"
-                          autoComplete="off"
-                          data-lpignore="true"
-                          data-1p-ignore="true"
-                          data-form-type="other"
-                          maxLength={PROMO_CODE_LENGTH + 2}
-                          value={promoInput}
-                          onChange={(e) => {
-                            setPromoInput(e.target.value.replace(/[^0-9]/g, '').slice(0, PROMO_CODE_LENGTH));
-                            // 코드를 고치면 앞서 확인한 결과는 더 이상 이 값이 아니다.
-                            setPromo(null);
-                            setPromoError(null);
-                          }}
-                          placeholder={`${PROMO_CODE_LENGTH}자리 코드 입력`}
-                          className={`flex-1 min-w-0 px-3 py-2.5 rounded-xl border text-sm font-bold tracking-[0.2em] focus:outline-none ${
-                            promo
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                              : promoError
-                                ? 'border-red-300 focus:border-red-400'
-                                : 'border-slate-200 focus:border-blue-400'
-                          }`}
-                        />
-                        <button
-                          type="button"
-                          onClick={verifyPromoCode}
-                          disabled={promoChecking || promoInput.replace(/[^0-9]/g, '').length !== PROMO_CODE_LENGTH}
-                          className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 whitespace-nowrap"
-                        >
-                          {promoChecking ? '확인 중…' : promo ? '확인됨' : '코드 확인'}
-                        </button>
-                      </div>
-                      {promo && (
-                        <p className="text-[11px] font-bold text-emerald-600 mt-2 leading-relaxed">
-                          ✓ 코드가 적용되었습니다. 오늘 결제 금액 0원.
-                        </p>
-                      )}
-                      {promoError && (
-                        <p className="text-[11px] font-bold text-red-600 mt-2">{promoError}</p>
-                      )}
-                    </div>
                   </div>
                 )}
                 {payMethod === 'KAKAOPAY' && (
                   <p className="text-[11px] text-slate-400 font-medium mt-2 leading-relaxed">
                     카카오톡 앱에서 카카오페이로 간편하게 결제됩니다.
-                    <br />
-                    코드는 신용카드로 등록할 때 입력할 수 있습니다.
+                    {promo
+                      ? ' 등록한 카카오페이는 무료 기간이 끝난 뒤 자동결제에 사용됩니다(오늘은 결제되지 않습니다).'
+                      : ' 등록하면 가입일 기준 매월 자동결제됩니다(첫 달은 지금 결제).'}
                   </p>
                 )}
+                {/* 코드 입력칸만 남긴다. 무슨 혜택이 있는 코드인지는 직접 연락받은
+                    사람만 알아야 하므로 화면에 설명을 쓰지 않는다. */}
+                <div className="pt-3 mt-1 border-t border-dashed border-slate-200">
+                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                    코드 <span className="text-slate-400 normal-case tracking-normal font-bold">(선택)</span>
+                  </p>
+                  <div className="flex gap-2">
+                    {/* maxLength 에 여유를 둔 이유: 구분자가 섞인 붙여넣기(323-039-109)가
+                        잘려 들어오면 앞자리만 남는다. 넉넉히 받고 숫자만 남긴다.
+
+                        min-w-0 이 꼭 있어야 한다. flex 자식은 기본값이
+                        min-width:auto 라 자기 내용 너비 밑으로는 줄어들지
+                        않는다. 이 칸의 내용 너비는 placeholder('9자리 코드
+                        입력') 가 정하는데, index.css 가 휴대폰 입력칸을
+                        16px 로 못 박고 여기에 tracking-[0.2em] 까지 붙어서
+                        332px 이 나온다 — 폭 390px 폰의 이 줄(326px)보다
+                        넓다. 그래서 flex-1 만 있던 동안에는 줄이 89~159px
+                        넘쳐서(320·360·390px 폰 모두) 옆의 '코드 확인'
+                        버튼이 오른쪽으로 잘려 나갔고, 그 가로 넘침이 화면을
+                        옆으로 밀어 아래 막대까지 잘려 보이게 했다.
+                        min-w-0 으로 풀면 칸이 남는 폭까지 줄어 넘침이 0 이 된다. */}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      name="membershipPromoCode"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-form-type="other"
+                      maxLength={PROMO_CODE_LENGTH + 2}
+                      value={promoInput}
+                      onChange={(e) => {
+                        setPromoInput(e.target.value.replace(/[^0-9]/g, '').slice(0, PROMO_CODE_LENGTH));
+                        // 코드를 고치면 앞서 확인한 결과는 더 이상 이 값이 아니다.
+                        setPromo(null);
+                        setPromoError(null);
+                      }}
+                      placeholder={`${PROMO_CODE_LENGTH}자리 코드 입력`}
+                      className={`flex-1 min-w-0 px-3 py-2.5 rounded-xl border text-sm font-bold tracking-[0.2em] focus:outline-none ${
+                        promo
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                          : promoError
+                            ? 'border-red-300 focus:border-red-400'
+                            : 'border-slate-200 focus:border-blue-400'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={verifyPromoCode}
+                      disabled={promoChecking || promoInput.replace(/[^0-9]/g, '').length !== PROMO_CODE_LENGTH}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 whitespace-nowrap"
+                    >
+                      {promoChecking ? '확인 중…' : promo ? '확인됨' : '코드 확인'}
+                    </button>
+                  </div>
+                  {promo && (
+                    <p className="text-[11px] font-bold text-emerald-600 mt-2 leading-relaxed">
+                      ✓ 코드가 적용되었습니다. 오늘 결제 금액 0원.
+                    </p>
+                  )}
+                  {promoError && (
+                    <p className="text-[11px] font-bold text-red-600 mt-2">{promoError}</p>
+                  )}
+                </div>
               </div>
               <div className="text-xs text-slate-500 space-y-1">
                 <p>✓ 구독 즉시 멤버십 기능을 이용할 수 있습니다.</p>

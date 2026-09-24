@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
-import type { Config, Context } from "@netlify/functions";
+import type { Config } from "@netlify/functions";
+import { createHash } from "node:crypto";
 import {
   buildCommentDmPlan,
   buildDirectDmPlan,
@@ -14,6 +15,12 @@ import {
 } from "./_shared/dm-automation-access.mts";
 import { appendDmLog } from "./_shared/dm-automation-log.mts";
 import {
+  clearManualCursor,
+  loadManualCursor,
+  saveManualCursor,
+} from "./_shared/dm-manual-cursor.mts";
+import {
+  alreadyRecorded,
   claimIfNew,
   contentHashOf,
   dmContentKey,
@@ -51,12 +58,12 @@ import { requireAccountOwner } from "./_shared/user-auth.mts";
 const GRAPH_VERSION = "v21.0";
 
 /**
- * 발송에 쓸 시간 예산. 동기 함수 한도(60초)보다 넉넉히 앞서 끝내야 응답·로그를
+ * 발송에 쓸 시간 예산. 동기 함수 한도(10초)보다 넉넉히 앞서 끝내야 응답·로그를
  * 남길 여유가 있다.
  */
-const SEND_BUDGET_MS = 38_000;
+const SEND_BUDGET_MS = 4_500;
 /** 댓글 수집 단계에 쓸 시간 예산. */
-const COLLECT_BUDGET_MS = 12_000;
+const COLLECT_BUDGET_MS = 2_500;
 /** 한 번에 댓글을 훑을 게시물 최대 개수. */
 const MAX_MEDIA = 20;
 const COMMENT_PAGE_SIZE = 100;
@@ -71,7 +78,12 @@ const COMMENT_REQUEST_TIMEOUT_MS = 5_000;
  */
 const COMMENT_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** 동시 발송 수. 인스타그램 발송 한도를 자극하지 않는 선에서 시간을 벌어준다. */
-const SEND_CONCURRENCY = 4;
+const SEND_CONCURRENCY = 1;
+const SEND_SPACING_MS = 400;
+const PREFILTER_BATCH = 20;
+const PREFILTER_BUDGET_MS = 1_500;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface DmSettings {
   enabled: boolean;
@@ -138,7 +150,7 @@ async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "send-instagram-dm");
 }
 
-export default async (req: Request, context: Context) => {
+export default async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -393,15 +405,28 @@ export default async (req: Request, context: Context) => {
     });
   }
 
+  const batchKey = createHash("sha256")
+    .update(JSON.stringify({ mediaIds: [...targetMediaIds].sort(), messages, replies }))
+    .digest("hex");
+  let savedMediaCursor: Record<string, string | null>;
+  try {
+    savedMediaCursor = await loadManualCursor(username, batchKey);
+  } catch (e: any) {
+    return Response.json(
+      { success: false, connected: true, message: "발송 진행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
+  }
+
   const collectDeadline = Date.now() + COLLECT_BUDGET_MS;
   let commentPageSlots = Math.max(targetMediaIds.length, MAX_COMMENT_PAGES_PER_REQUEST);
-  const commentResults = targetMediaIds.map(() => ({
+  const commentResults = targetMediaIds.map((mediaId) => ({
     items: [] as any[],
     error: "",
     incomplete: false,
-    after: "",
+    after: typeof savedMediaCursor[mediaId] === "string" ? savedMediaCursor[mediaId] : "",
     pageCount: 0,
-    done: false,
+    done: savedMediaCursor[mediaId] === null,
   }));
 
   const fetchCommentPage = async (index: number) => {
@@ -477,6 +502,26 @@ export default async (req: Request, context: Context) => {
   const commentCollectionIncomplete = commentResults.some(
     (result) => result.incomplete || Boolean(result.error),
   );
+  const persistScanPosition = async (): Promise<boolean> => {
+    if (commentFetchFailCount > 0) return true;
+    const nextMediaCursor: Record<string, string | null> = {};
+    for (let index = 0; index < targetMediaIds.length; index += 1) {
+      const mediaId = targetMediaIds[index];
+      const result = commentResults[index];
+      nextMediaCursor[mediaId] = result.incomplete ? result.after : null;
+    }
+    try {
+      if (Object.values(nextMediaCursor).every((value) => value === null)) {
+        await clearManualCursor(username, batchKey);
+      } else {
+        await saveManualCursor(username, batchKey, nextMediaCursor);
+      }
+      return true;
+    } catch (e: any) {
+      console.warn("[send-instagram-dm] cursor write failed:", e?.message);
+      return false;
+    }
+  };
   if (commentResults.every((result) => result.error && result.items.length === 0)) {
     await appendLog(username, {
       status: "failed",
@@ -537,8 +582,10 @@ export default async (req: Request, context: Context) => {
   }
 
   const targetCommenters = Array.from(commentersMap.values());
+  let rateLimited = false;
 
   if (targetCommenters.length === 0) {
+    const cursorPersisted = await persistScanPosition();
     await appendLog(username, {
       status: "skipped",
       reason: "no_recent_commenters",
@@ -551,11 +598,38 @@ export default async (req: Request, context: Context) => {
       connected: true,
       count: 0,
       total: 0,
-      incomplete: commentCollectionIncomplete,
-      message: commentCollectionIncomplete
+      incomplete: commentCollectionIncomplete || !cursorPersisted,
+      message: !cursorPersisted
+        ? "댓글 조회 위치를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+        : commentCollectionIncomplete
         ? "일부 게시물의 댓글을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
         : "최근 7일 안에 발송 가능한 댓글 작성자가 없습니다.",
     });
+  }
+
+  const preSkipped: CommenterItem[] = [];
+  const pendingTargets: CommenterItem[] = [];
+  const prefilterDeadline = Date.now() + PREFILTER_BUDGET_MS;
+  for (let offset = 0; offset < targetCommenters.length; offset += PREFILTER_BATCH) {
+    const slice = targetCommenters.slice(offset, offset + PREFILTER_BATCH);
+    if (Date.now() >= prefilterDeadline) {
+      pendingTargets.push(...targetCommenters.slice(offset));
+      break;
+    }
+    const handled = await Promise.all(
+      slice.map(async (c) => {
+        const checks: Promise<boolean>[] = [];
+        if (messages.length > 0) {
+          checks.push(alreadyRecorded(username, dmContentKey(c.commentId, contentHash)));
+        }
+        if (replies.length > 0) {
+          checks.push(alreadyRecorded(username, publicReplyKey(c.commentId)));
+        }
+        if (checks.length === 0) return false;
+        return (await Promise.all(checks)).every(Boolean);
+      }),
+    );
+    slice.forEach((c, index) => (handled[index] ? preSkipped : pendingTargets).push(c));
   }
 
   /**
@@ -567,7 +641,7 @@ export default async (req: Request, context: Context) => {
    */
   async function replyToComment(c: CommenterItem): Promise<ReplyOutcome> {
     if (replies.length === 0) return "skipped";
-    if (!(await claimIfNew(username, publicReplyKey(c.commentId)))) return "duplicate";
+    if (!(await claimIfNew(username, publicReplyKey(c.commentId), true))) return "duplicate";
 
     const text = replies[Math.floor(Math.random() * replies.length)];
     const result = await postCommentReply({
@@ -590,7 +664,8 @@ export default async (req: Request, context: Context) => {
       return "sent";
     }
 
-    await release(username, publicReplyKey(c.commentId));
+    if (result.errorKind === "rate_limit") rateLimited = true;
+    if (!result.uncertain) await release(username, publicReplyKey(c.commentId), true);
     await appendLog(username, {
       kind: "reply",
       status: "failed",
@@ -612,15 +687,18 @@ export default async (req: Request, context: Context) => {
   async function sendToCommenter(c: CommenterItem): Promise<Outcome> {
     const contentKey = dmContentKey(c.commentId, contentHash);
     const replyKey = privateReplyKey(c.commentId);
+    let contentClaimed = false;
+    let sendAttempted = false;
 
     try {
       // 같은 내용을 이미 보낸 대상은 건너뛴다.
-      if (!(await claimIfNew(username, contentKey))) {
+      if (!(await claimIfNew(username, contentKey, true))) {
         return { kind: "already", reason: "이미 같은 내용의 DM을 받은 대상입니다." };
       }
+      contentClaimed = true;
 
       // 비공개 답장은 댓글 1건당 1회. 우리가 이미 썼다면 시도 자체를 하지 않는다.
-      const replyAvailable = await claimIfNew(username, replyKey);
+      const replyAvailable = await claimIfNew(username, replyKey, true);
       let lastError = "";
       let lastKind: DmErrorKind = "other";
       /**
@@ -633,6 +711,7 @@ export default async (req: Request, context: Context) => {
       let mayRetryViaIgsid = !replyAvailable;
 
       if (replyAvailable) {
+        sendAttempted = true;
         const result = await sendDmMessages({
           graphHost,
           graphVersion: GRAPH_VERSION,
@@ -662,11 +741,12 @@ export default async (req: Request, context: Context) => {
         lastKind = result.errorKind || "other";
         mayRetryViaIgsid = lastKind === "already_sent";
         // 인스타그램이 "이미 답장했다"고 하면 기록은 유지한다(사실이므로).
-        if (lastKind !== "already_sent") await release(username, replyKey);
+        if (lastKind !== "already_sent" && lastKind !== "uncertain") await release(username, replyKey, true);
       }
 
       // IGSID 기반 직접 발송. 비공개 답장을 못 쓰는 경우의 유일한 경로다.
       if (mayRetryViaIgsid && c.fromId) {
+        sendAttempted = true;
         const direct = await sendDmMessages({
           graphHost,
           graphVersion: GRAPH_VERSION,
@@ -686,7 +766,8 @@ export default async (req: Request, context: Context) => {
       }
 
       // 아무것도 못 보냈으므로 내용 기록을 지운다 — 나중에 다시 시도할 수 있어야 한다.
-      await release(username, contentKey);
+      if (lastKind !== "uncertain") await release(username, contentKey, true);
+      if (lastKind === "rate_limit") rateLimited = true;
 
       // 우리가 이미 DM 을 보낸 댓글이고, 지금 막힌 이유가 인스타그램의 1회
       // 제한·24시간 창이라면 이건 새로운 실패가 아니다.
@@ -700,12 +781,14 @@ export default async (req: Request, context: Context) => {
         errorKind: lastKind,
       };
     } catch (e: any) {
+      if (contentClaimed && !sendAttempted) {
+        await release(username, contentKey, true).catch(() => {});
+      }
       // 한 명에게서 난 예외로 나머지 발송이 통째로 중단되면 안 된다.
-      await release(username, contentKey).catch(() => {});
       return {
         kind: "failed",
         error: e?.message || "발송 중 알 수 없는 오류가 발생했습니다.",
-        errorKind: "other",
+        errorKind: "uncertain",
       };
     }
   }
@@ -719,26 +802,47 @@ export default async (req: Request, context: Context) => {
   let stoppedForTime = false;
 
   async function worker() {
+    let lastActed = false;
     while (true) {
+      if (rateLimited) return;
       if (Date.now() >= sendDeadline) {
         stoppedForTime = true;
         return;
       }
       const index = cursor;
-      if (index >= targetCommenters.length) return;
+      if (index >= pendingTargets.length) return;
       cursor += 1;
-      const target = targetCommenters[index];
+      const target = pendingTargets[index];
+      if (lastActed) await wait(SEND_SPACING_MS);
+      lastActed = false;
       // 답글을 먼저 남기고 DM 을 보낸다. 받는 사람 입장에서 "댓글에 답이 달리고
       // DM 이 온다"가 자연스러운 순서이고, 자동 발송도 같은 순서로 처리한다.
-      replyOutcomes.push(await replyToComment(target));
+      let replied: ReplyOutcome = "skipped";
+      try {
+        replied = await replyToComment(target);
+      } catch (e: any) {
+        console.warn("[send-instagram-dm] reply failed:", e?.message);
+        replied = "failed";
+      }
+      replyOutcomes.push(replied);
+      if (replied === "sent" || replied === "failed") lastActed = true;
+      if (rateLimited) {
+        processed += 1;
+        return;
+      }
       // DM 본문 없이 답글만 보내는 설정이면 DM 단계는 건너뛴다.
-      if (messages.length > 0) outcomes.push(await sendToCommenter(target));
+      if (messages.length > 0) {
+        if (replied === "sent") await wait(SEND_SPACING_MS);
+        const sendOutcome = await sendToCommenter(target);
+        outcomes.push(sendOutcome);
+        if (sendOutcome.kind !== "already") lastActed = true;
+      }
       processed += 1;
     }
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(SEND_CONCURRENCY, targetCommenters.length) }, worker),
+    Array.from({ length: Math.min(SEND_CONCURRENCY, pendingTargets.length) }, worker),
   );
 
   const successCount = outcomes.filter((o) => o.kind === "sent").length;
@@ -750,15 +854,22 @@ export default async (req: Request, context: Context) => {
   const followUpSkippedCount = outcomes.filter(
     (o) => o.kind === "sent" && o.followUpSkipped,
   ).length;
-  const alreadyCount = outcomes.filter((o) => o.kind === "already").length;
+  const alreadyCount =
+    outcomes.filter((o) => o.kind === "already").length +
+    (messages.length > 0 ? preSkipped.length : 0);
   const failures = outcomes.filter((o) => o.kind === "failed") as Extract<Outcome, { kind: "failed" }>[];
   const failCount = failures.length;
   const replyCount = replyOutcomes.filter((r) => r === "sent").length;
   const replyFailCount = replyOutcomes.filter((r) => r === "failed").length;
   /** 이미 답글이 달려 있어 건너뛴 댓글 수. 실패가 아니다. */
-  const replyAlreadyCount = replyOutcomes.filter((r) => r === "duplicate").length;
-  const remaining = Math.max(0, targetCommenters.length - processed);
+  const replyAlreadyCount =
+    replyOutcomes.filter((r) => r === "duplicate").length +
+    (messages.length === 0 && replies.length > 0 ? preSkipped.length : 0);
+  const remaining = Math.max(0, pendingTargets.length - processed);
   const failureReason = failCount > 0 ? describeDmError(failures[0].errorKind, failures[0].error) : undefined;
+  const cursorPersisted = remaining === 0 && failCount === 0 && replyFailCount === 0
+    ? await persistScanPosition()
+    : true;
 
   // 보낸 게 하나라도 있거나, 못 보낸 이유가 "이미 받은 사람들"·"다음 차례"뿐이면
   // 실패가 아니다. 이걸 실패로 표시하면 도착한 DM 을 보면서 실패 안내를 읽는다.
@@ -821,11 +932,16 @@ export default async (req: Request, context: Context) => {
   }
   if (remaining > 0) {
     parts.push(
-      `남은 ${remaining}명은 시간 제한으로 아직 보내지 못했습니다. 발송 버튼을 다시 누르면 이어서 발송합니다.`,
+      rateLimited
+        ? `남은 ${remaining}명은 인스타그램 발송 한도 때문에 보내지 못했습니다. 한도가 풀린 뒤 발송 버튼을 다시 눌러 주세요.`
+        : `남은 ${remaining}명은 시간 제한으로 아직 보내지 못했습니다. 발송 버튼을 다시 누르면 이어서 발송합니다.`,
     );
   }
   if (commentCollectionIncomplete) {
     parts.push("일부 댓글은 아직 확인하지 못했습니다. 잠시 후 발송 버튼을 다시 눌러 주세요.");
+  }
+  if (!cursorPersisted) {
+    parts.push("댓글 조회 위치를 저장하지 못했습니다. 잠시 후 발송 버튼을 다시 눌러 주세요.");
   }
   if (parts.length === 0) {
     parts.push("발송할 새로운 대상이 없습니다.");
@@ -843,7 +959,7 @@ export default async (req: Request, context: Context) => {
     replyAlreadyCount,
     remaining,
     total: targetCommenters.length,
-    incomplete: commentCollectionIncomplete,
+    incomplete: commentCollectionIncomplete || !cursorPersisted,
     message: parts.join(" "),
   });
 };

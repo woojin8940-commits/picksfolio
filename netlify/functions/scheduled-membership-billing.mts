@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import type { Config } from "@netlify/functions";
+import { randomUUID } from "node:crypto";
 import { mutateBlobJSON } from "./_shared/blob-write.mts";
 import {
   chargeMembershipBillingKey,
@@ -7,8 +8,10 @@ import {
   normalizeTier,
   isDue,
   MAX_BILLING_FAILURES,
+  verifyMembershipBillingKey,
   type MembershipTier,
   type MembershipBillingEntry,
+  type MembershipChargePending,
 } from "./_shared/membership-billing.mts";
 
 const STORE = "seller-verification";
@@ -44,6 +47,7 @@ interface SellerRecord {
   next_billing_date?: string | null;
   billing_failures?: number;
   billing_history?: MembershipBillingEntry[];
+  membership_charge_pending?: MembershipChargePending | null;
   [k: string]: unknown;
 }
 
@@ -88,7 +92,8 @@ export default async () => {
       const due: DueSubscription[] = [];
 
       const tier = normalizeTier(record.membership_plan);
-      if (record.membership_active && tier && isDue(record.next_billing_date, now)) {
+      if (record.membership_active && tier &&
+        (isDue(record.next_billing_date, now) || record.membership_charge_pending?.kind === "recurring")) {
         due.push({
           plan: tier,
           activeField: "membership_active",
@@ -145,6 +150,46 @@ export default async () => {
           skipped++;
           continue;
         }
+        const keyOwned = await verifyMembershipBillingKey(username, billingKey);
+        if (keyOwned === null) {
+          skipped++;
+          console.error(`[membership-billing] Billing key check unavailable for ${username}`);
+          continue;
+        }
+        if (!keyOwned) {
+          const at = new Date().toISOString();
+          const mismatch: { failures: number; exhausted: boolean } = { failures: 0, exhausted: false };
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            if (!latest) return null;
+            const history = Array.isArray(latest.billing_history) ? latest.billing_history : [];
+            const failures = ((latest[sub.failuresField] as number | undefined) || 0) + 1;
+            const exhausted = failures >= MAX_BILLING_FAILURES;
+            mismatch.failures = failures;
+            mismatch.exhausted = exhausted;
+            const entry: MembershipBillingEntry = {
+              at,
+              tier: sub.plan,
+              amountKrw: 0,
+              kind: "recurring",
+              success: false,
+              error: "등록된 결제 수단의 계정 정보가 일치하지 않아 청구하지 않았습니다.",
+            };
+            return {
+              ...latest,
+              [sub.activeField]: exhausted ? false : latest[sub.activeField],
+              [sub.failuresField]: failures,
+              billing_history: [entry, ...history].slice(0, 50),
+              updated_at: at,
+            };
+          }).catch((e) => console.error(`[membership-billing] Could not record mismatch for ${username}:`, e));
+          failed++;
+          console.error(
+            `[membership-billing] Billing key owner mismatch for ${username} ` +
+              `attempt ${mismatch.failures}/${MAX_BILLING_FAILURES}` +
+              `${mismatch.exhausted ? " — subscription paused" : ""}`,
+          );
+          continue;
+        }
 
         // ── 1) 결제일 선점 ────────────────────────────────────────────────
         // 카드를 긁기 전에 다음 결제일을 먼저 한 달 밀어 둔다. 순서를 이렇게
@@ -153,18 +198,37 @@ export default async () => {
         // 이중 청구다. 반대로 선점을 먼저 하면 최악의 경우 이번 달 청구를
         // 건너뛰는 것으로 끝나고, 돈이 두 번 빠지지는 않는다.
         // 최신 레코드로 다시 확인하므로 실행이 겹쳐도 한 번만 청구된다.
-        const claim: { base: string | null } = { base: null };
+        const claim: { base: string | null; pending: MembershipChargePending | null } = { base: null, pending: null };
         try {
           await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
             claim.base = null;
+            claim.pending = null;
             if (!latest || !latest.billing_key || !latest[sub.activeField]) return null;
             const scheduled = latest[sub.nextField] as string | null | undefined;
-            if (!isDue(scheduled, now)) return null; // 이미 다른 실행이 처리했다
             const at = new Date().toISOString();
-            claim.base = scheduled || at;
+            const existing = latest.membership_charge_pending;
+            if (existing) {
+              if (existing.kind !== "recurring" || !existing.scheduledDate || existing.tier !== sub.plan ||
+                existing.billingKey !== latest.billing_key ||
+                Date.now() - Date.parse(existing.startedAt) < 5 * 60_000) return null;
+              claim.base = existing.scheduledDate;
+              claim.pending = { ...existing, startedAt: at };
+            } else {
+              if (!isDue(scheduled, now)) return null;
+              claim.base = scheduled || at;
+              claim.pending = {
+                paymentId: `membership-${randomUUID()}`,
+                billingKey: latest.billing_key,
+                tier: sub.plan,
+                kind: "recurring",
+                scheduledDate: claim.base,
+                startedAt: at,
+              };
+            }
             return {
               ...latest,
               [sub.nextField]: addOneMonth(claim.base),
+              membership_charge_pending: claim.pending,
               updated_at: at,
             };
           });
@@ -172,20 +236,21 @@ export default async () => {
           console.error(`[membership-billing] Could not claim ${username} (${sub.plan}):`, claimErr);
         }
 
-        if (!claim.base) {
+        if (!claim.base || !claim.pending) {
           skipped++;
           continue;
         }
         const scheduledDate = claim.base;
 
         // ── 2) 청구 ──────────────────────────────────────────────────────
-        const charge = await chargeMembershipBillingKey(username, billingKey, sub.plan);
+        const charge = await chargeMembershipBillingKey(username, claim.pending.billingKey, claim.pending.tier, claim.pending.paymentId);
         const at = new Date().toISOString();
 
         // ── 3) 결과 기록 ─────────────────────────────────────────────────
         // 같은 레코드를 사용자 저장(계좌·사업자 정보)과 빌링키 발급도 고치므로,
         // 통째로 덮어쓰지 않고 최신 레코드에 결과만 얹는다.
         if (charge.success) {
+          let recorded = false;
           const entry: MembershipBillingEntry = {
             at,
             tier: sub.plan,
@@ -195,26 +260,45 @@ export default async () => {
             paymentId: charge.paymentId,
           };
           await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            recorded = false;
+            if (latest?.membership_charge_pending?.paymentId !== charge.paymentId) return null;
             const base: SellerRecord = latest ?? {};
             const history = Array.isArray(base.billing_history) ? base.billing_history : [];
+            recorded = true;
             return {
               ...base,
               [sub.lastField]: at,
+              [sub.nextField]: addOneMonth(scheduledDate),
               [sub.failuresField]: 0,
               billing_history: [entry, ...history].slice(0, 50),
+              membership_charge_pending: null,
               updated_at: at,
             };
           });
+          if (!recorded) {
+            failed++;
+            console.error(`[membership-billing] Paid payment ${charge.paymentId} needs subscription review for ${username}`);
+            continue;
+          }
           charged++;
           console.log(
             `[membership-billing] Charged ${username} (${sub.plan}) ₩${charge.amountKrw}`,
           );
+        } else if (charge.uncertain) {
+          await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) =>
+            latest?.membership_charge_pending?.paymentId === charge.paymentId
+              ? { ...latest, [sub.nextField]: scheduledDate, updated_at: at }
+              : null,
+          );
+          failed++;
+          console.error(`[membership-billing] Payment result pending for ${username} (${sub.plan}), payment ${charge.paymentId}`);
         } else {
           // Dunning: 선점해 둔 결제일을 원래 날짜로 돌려 다음 날 다시 시도한다.
           // MAX_BILLING_FAILURES 번 연속 실패하면 그 구독만 정지시켜, 죽은 카드를
           // 무한히 재시도하지 않는다.
           const outcome: { failures: number; exhausted: boolean } = { failures: 0, exhausted: false };
           await mutateBlobJSON<SellerRecord>(STORE, blob.key, (latest) => {
+            if (latest?.membership_charge_pending?.paymentId !== charge.paymentId) return null;
             const base: SellerRecord = latest ?? {};
             const history = Array.isArray(base.billing_history) ? base.billing_history : [];
             const failures = ((base[sub.failuresField] as number | undefined) || 0) + 1;
@@ -235,6 +319,7 @@ export default async () => {
               [sub.activeField]: exhausted ? false : base[sub.activeField],
               [sub.failuresField]: failures,
               billing_history: [entry, ...history].slice(0, 50),
+              membership_charge_pending: null,
               updated_at: at,
             };
           });

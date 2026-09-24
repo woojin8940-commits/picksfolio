@@ -140,6 +140,90 @@ const PORTONE_API_BASE = 'https://api.portone.io'
 const PORTONE_STORE_ID = 'store-1e85edf9-8f37-490c-9419-5a1f15db9ab5'
 
 const asciiSafe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'user'
+const sdkCustomerId = (s: string) => s.replace(/[^\x00-\x7F]/g, (ch) => `_${(ch.codePointAt(0) ?? 0).toString(36)}`)
+
+const ownerName = (username: string) =>
+  String(username || '').trim().toLowerCase().replace(/^biz\//, '')
+
+const ownedByAccount = (customerId: unknown, username: string): boolean => {
+  const base = ownerName(username)
+  if (!base) return false
+  const actual = String(customerId || '').trim().toLowerCase()
+  if (!actual) return false
+  return actual === asciiSafe(base) || actual === sdkCustomerId(base)
+}
+
+export type MembershipChargePending = {
+  paymentId: string
+  billingKey: string
+  tier: MembershipTier
+  kind: 'initial' | 'recurring'
+  startedAt: string
+  scheduledDate?: string
+  method?: 'card' | 'easypay'
+}
+
+export const verifyMembershipBillingKey = async (username: string, billingKey: string): Promise<boolean | null> => {
+  const apiSecret = process.env.PORTONE_V2_API_SECRET
+  if (!apiSecret) return null
+  try {
+    const res = await fetch(`${PORTONE_API_BASE}/billing-keys/${encodeURIComponent(billingKey)}?storeId=${encodeURIComponent(PORTONE_STORE_ID)}`, {
+      headers: { Authorization: `PortOne ${apiSecret}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (res.status === 404) return false
+    if (!res.ok) return null
+    const info = await res.json() as any
+    return info?.status === 'ISSUED' && info?.billingKey === billingKey &&
+      info?.storeId === PORTONE_STORE_ID && ownedByAccount(info?.customer?.id, username)
+  } catch {
+    return null
+  }
+}
+
+type ChargeResult = { success: boolean; uncertain?: boolean; paymentId: string; amountKrw: number; error?: string }
+
+const readCharge = async (
+  apiSecret: string,
+  paymentId: string,
+  username: string,
+  billingKey: string,
+  amountKrw: number,
+): Promise<'paid' | 'failed' | 'missing' | 'unknown'> => {
+  try {
+    const res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`, {
+      headers: { Authorization: `PortOne ${apiSecret}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (res.status === 404) return 'missing'
+    if (!res.ok) return 'unknown'
+    const payment = await res.json() as any
+    if (payment?.id !== paymentId || payment?.storeId !== PORTONE_STORE_ID ||
+      payment?.currency !== 'KRW' || payment?.amount?.total !== amountKrw ||
+      !ownedByAccount(payment?.customer?.id, username) ||
+      (payment?.billingKey && payment.billingKey !== billingKey)) return 'unknown'
+    if (payment.status === 'PAID') return 'paid'
+    if (payment.status === 'FAILED' || payment.status === 'CANCELLED') return 'failed'
+    return 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export const readMembershipCharge = async (
+  pending: MembershipChargePending,
+  username: string,
+): Promise<'paid' | 'failed' | 'missing' | 'unknown'> => {
+  const apiSecret = process.env.PORTONE_V2_API_SECRET
+  if (!apiSecret) return 'unknown'
+  return readCharge(
+    apiSecret,
+    pending.paymentId,
+    username,
+    pending.billingKey,
+    TIER_PRICE_KRW[pending.tier],
+  )
+}
 
 /**
  * Charge one month of a membership against its stored PortOne billing key. Used
@@ -151,16 +235,16 @@ export const chargeMembershipBillingKey = async (
   username: string,
   billingKey: string,
   tier: MembershipTier,
-): Promise<{ success: boolean; paymentId?: string; amountKrw?: number; error?: string }> => {
+  paymentId: string,
+): Promise<ChargeResult> => {
   const apiSecret = process.env.PORTONE_V2_API_SECRET
-  if (!apiSecret) return { success: false, error: 'PORTONE_V2_API_SECRET 미설정' }
-
   const amountKrw = TIER_PRICE_KRW[tier]
-  const paymentId = `membership-${asciiSafe(username)}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`
+  if (!apiSecret) return { success: false, paymentId, amountKrw, error: '결제 설정이 완료되지 않았습니다.' }
+  const before = await readCharge(apiSecret, paymentId, username, billingKey, amountKrw)
+  if (before === 'paid') return { success: true, paymentId, amountKrw }
+  if (before === 'failed') return { success: false, paymentId, amountKrw, error: '결제에 실패했습니다.' }
   try {
-    const res = await fetch(
+    await fetch(
       `${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}/billing-key`,
       {
         method: 'POST',
@@ -168,23 +252,28 @@ export const chargeMembershipBillingKey = async (
           'Content-Type': 'application/json',
           Authorization: `PortOne ${apiSecret}`,
         },
+        signal: AbortSignal.timeout(15_000),
         body: JSON.stringify({
           billingKey,
           storeId: PORTONE_STORE_ID,
           orderName: `픽스폴리오 ${TIER_LABEL[tier]} 월 구독료`,
-          customer: { customerId: asciiSafe(username) },
+          customer: { id: asciiSafe(username) },
           amount: { total: amountKrw },
           currency: 'KRW',
         }),
       },
     )
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      return { success: false, amountKrw, error: `PortOne ${res.status}: ${detail.slice(0, 200)}` }
+    const after = await readCharge(apiSecret, paymentId, username, billingKey, amountKrw)
+    if (after === 'paid') return { success: true, paymentId, amountKrw }
+    if (after === 'failed') {
+      return { success: false, paymentId, amountKrw, error: '결제에 실패했습니다. 결제 수단을 확인해 주세요.' }
     }
-    return { success: true, paymentId, amountKrw }
-  } catch (e: any) {
-    return { success: false, amountKrw, error: e?.message || 'PortOne 정기결제 요청 실패' }
+    return { success: false, uncertain: true, paymentId, amountKrw, error: '결제 결과를 확인할 수 없습니다.' }
+  } catch {
+    const after = await readCharge(apiSecret, paymentId, username, billingKey, amountKrw)
+    if (after === 'paid') return { success: true, paymentId, amountKrw }
+    if (after === 'failed') return { success: false, paymentId, amountKrw, error: '결제에 실패했습니다.' }
+    return { success: false, uncertain: true, paymentId, amountKrw, error: '결제 결과를 확인할 수 없습니다.' }
   }
 }
 

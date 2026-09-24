@@ -214,6 +214,7 @@ export default async (req: Request, context: Context) => {
   const job: DmScheduledJob = {
     id: genId(),
     username,
+    igAccountId: settings.igUserId || settings.igAccountId || "",
     recipientId,
     recipientName: contact.username || contact.name || undefined,
     sendAt: new Date(sendAtMs).toISOString(),

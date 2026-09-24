@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { SolapiMessageService } from "solapi";
 import { getDatabase } from "@picks/netlify-database";
 import { randomInt } from "node:crypto";
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 
 const PURPOSES = new Set(["signup", "business_signup", "find-id", "reset-password"]);
 
@@ -45,29 +46,58 @@ export default async (req: Request) => {
       return Response.json({ error: "잘못된 인증 요청입니다." }, { status: 400 });
     }
 
+    for (const limit of [
+      { bucket: "sms-phone-minute", key: cleanPhone, limit: 1, windowSeconds: 60 },
+      { bucket: "sms-phone-day", key: cleanPhone, limit: 10, windowSeconds: 86400 },
+      { bucket: "sms-ip-day", key: clientIp(req), limit: 30, windowSeconds: 86400 },
+    ]) {
+      const checked = await checkRateLimit(limit);
+      if (!checked.ok) return checked.response;
+    }
+
     const db = getDatabase();
 
     const recentCodes = await db.sql`
-      SELECT COUNT(*) as cnt FROM sms_verifications
+      SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 minute') AS recent,
+             COUNT(*) AS daily
+      FROM sms_verifications
       WHERE phone = ${cleanPhone}
-        AND created_at > NOW() - INTERVAL '1 minute'
+        AND created_at > NOW() - INTERVAL '1 day'
     `;
-    if (recentCodes[0]?.cnt > 0) {
+    if (Number(recentCodes[0]?.recent || 0) > 0 || Number(recentCodes[0]?.daily || 0) >= 10) {
       return Response.json({
         success: false,
-        error: "1분 후에 다시 시도해 주세요.",
+        error: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
       }, { status: 429 });
     }
 
     const code = randomInt(100000, 1000000).toString();
 
+    const reserved = await db.sql`
+      INSERT INTO sms_verifications (phone, code, purpose, expires_at)
+      VALUES (${cleanPhone}, ${code}, ${smsPurpose}, NOW() + INTERVAL '5 minutes')
+      RETURNING id
+    `;
+    const reservationId = reserved[0]?.id;
+    if (!reservationId) throw new Error("SMS reservation failed");
+
     const messageService = new SolapiMessageService(apiKey, apiSecret);
 
-    await messageService.sendOne({
-      to: receiver,
-      from: fromNumber,
-      text: `[픽스폴리오] 인증번호는 [${code}] 입니다.`,
-    });
+    try {
+      await messageService.sendOne({
+        to: cleanPhone,
+        from: fromNumber,
+        text: `[픽스폴리오] 인증번호는 [${code}] 입니다.`,
+      });
+    } catch (sendError) {
+      try {
+        await db.sql`
+          UPDATE sms_verifications SET expires_at = NOW()
+          WHERE id = ${reservationId}
+        `;
+      } catch {}
+      throw sendError;
+    }
 
     // 아직 인증되지 않은 이전 코드를 무효화한다.
     //
@@ -81,13 +111,9 @@ export default async (req: Request) => {
       SET expires_at = NOW()
       WHERE phone = ${cleanPhone}
         AND purpose = ${smsPurpose}
+        AND id < ${reservationId}
         AND verified = FALSE
         AND expires_at > NOW()
-    `;
-
-    await db.sql`
-      INSERT INTO sms_verifications (phone, code, purpose, expires_at)
-      VALUES (${cleanPhone}, ${code}, ${smsPurpose}, NOW() + INTERVAL '5 minutes')
     `;
 
     return Response.json({
@@ -98,7 +124,7 @@ export default async (req: Request) => {
     console.error("SMS Sending Error:", error);
     return Response.json({
       error: "서버 에러",
-      message: error.message || "알 수 없는 에러가 발생했습니다.",
+      message: "인증번호를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
     }, { status: 500 });
   }
 };

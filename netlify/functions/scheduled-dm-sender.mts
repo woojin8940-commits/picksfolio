@@ -9,10 +9,14 @@ import {
   buildCommentDmPlan,
   buildDirectDmPlan,
   describeDmError,
+  postCommentReply,
   sendDmMessages,
 } from "./_shared/instagram-dm.mts";
 import type { DmContent } from "./_shared/instagram-dm.mts";
-import { noteSentText } from "./_shared/dm-send-registry.mts";
+import { claimIfNew, contentHashOf, dmContentKey, noteSentText, privateReplyKey, publicReplyKey, release } from "./_shared/dm-send-registry.mts";
+import { claimDueJobs, completeDmJob, enqueueScheduledJob, pauseDmAccount, retryDmJob } from "./_shared/dm-jobs.mts";
+import type { DmJob } from "./_shared/dm-jobs.mts";
+import { processWebhookPayload } from "./instagram-webhook.mts";
 
 /**
  * 예약 DM 발송기(1분 주기).
@@ -52,13 +56,8 @@ interface DmSettings {
 }
 
 async function readSettings(username: string): Promise<DmSettings | null> {
-  try {
-    const store = getStore({ name: "dm-automation", consistency: "strong" });
-    return ((await store.get(`dm_${username}`, { type: "json" })) as DmSettings) || null;
-  } catch (e) {
-    console.warn("[scheduled-dm] settings read failed:", (e as Error)?.message);
-    return null;
-  }
+  const store = getStore({ name: "dm-automation", consistency: "strong" });
+  return ((await store.get(`dm_${username}`, { type: "json" })) as DmSettings) || null;
 }
 
 /** 발송을 막는 이유를 사람이 읽을 문장으로 돌려준다. 보낼 수 있으면 null. */
@@ -74,7 +73,7 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
   }
   if (job.commentId) {
     // 비공개 답장 — 24시간 창이 아니라 댓글 기준 7일 창을 본다.
-    const commentMs = Date.parse(job.commentAt || "");
+    const commentMs = Date.parse(job.commentAt || job.createdAt || "");
     if (!Number.isNaN(commentMs) && Date.now() - commentMs > PRIVATE_REPLY_WINDOW_MS) {
       return (
         "댓글이 달린 뒤 7일이 지나 발송하지 못했습니다. " +
@@ -93,22 +92,50 @@ async function blockReason(job: DmScheduledJob, settings: DmSettings | null): Pr
   return null;
 }
 
-export default async () => {
-  const now = new Date();
-  const due = await listDueJobs(now);
-  if (due.length === 0) return;
+const WORK_BUDGET_MS = 22_000;
+const MAX_JOBS_PER_RUN = 20;
+const SEND_SPACING_MS = 400;
 
-  console.log(`[scheduled-dm] ${due.length} scheduled DM(s) due`);
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-  for (const { key, job } of due) {
+function retryDelay(attempts: number): number {
+  return Math.min(60 * 60_000, 60_000 * 2 ** Math.min(Math.max(attempts - 1, 0), 6));
+}
+
+async function finishScheduled(key: string, queued: DmJob | undefined, completed: DmScheduledJob) {
+  if (queued) {
+    await completeDmJob(queued, completed.status as "sent" | "failed" | "uncertain", completed.error, completed.errorKind);
+  } else {
+    await finishJob(key, completed);
+  }
+}
+
+async function deferRateLimited(
+  key: string,
+  job: DmScheduledJob,
+  queued: DmJob | undefined,
+  delay: number,
+  error: string,
+) {
+  if (queued) {
+    await retryDmJob(queued, delay, error, "rate_limit");
+  } else {
+    const sendAt = new Date(Date.now() + delay).toISOString();
+    await enqueueScheduledJob(job.username, job.id, job.igAccountId || "", sendAt, { ...job, sendAt, attempts: (job.attempts || 0) + 1 });
+    await finishJob(key, { ...job, status: "canceled", sentAt: sendAt, error, errorKind: "rate_limit" });
+  }
+  await pauseDmAccount(job.igAccountId || "", delay);
+}
+
+async function processScheduled(key: string, job: DmScheduledJob, queued?: DmJob) {
     try {
       // 실행이 1분을 넘겨 다음 실행과 겹쳐도 같은 예약을 두 번 보내지 않는다.
-      if (!(await claimJob(key))) continue;
+      if (!queued && !(await claimJob(key))) return;
 
       const settings = await readSettings(job.username);
       const blocked = await blockReason(job, settings);
       if (blocked) {
-        await finishJob(key, {
+        await finishScheduled(key, queued, {
           ...job,
           status: "failed",
           sentAt: new Date().toISOString(),
@@ -117,7 +144,7 @@ export default async () => {
         await appendDmLog(
           job.username,
           {
-            kind: "dm",
+            kind: job.sendDm === false ? "reply" : "dm",
             status: "failed",
             trigger: "scheduled",
             recipientId: job.recipientId,
@@ -127,8 +154,85 @@ export default async () => {
           },
           "scheduled-dm",
         );
-        continue;
+        return;
       }
+
+      let replyFailure: { error: string; kind: string } | null = null;
+      let repliedNow = false;
+      if (job.publicReply?.message) {
+        const replyKey = publicReplyKey(job.commentId || job.publicReply.commentId);
+        if (await claimIfNew(job.username, replyKey, true)) {
+          const replyResult = await postCommentReply({
+            host: settings!.tokenSource === "instagram_login" ? "graph.instagram.com" : "graph.facebook.com",
+            graphVersion: GRAPH_VERSION,
+            commentId: job.publicReply.commentId,
+            accessToken: settings!.accessToken!,
+            message: job.publicReply.message,
+          });
+          repliedNow = true;
+          if (replyResult.ok) {
+            await appendDmLog(job.username, {
+              kind: "reply",
+              status: "sent",
+              trigger: "scheduled",
+              recipientId: job.recipientId,
+              ruleId: job.ruleId || job.id,
+              messageId: replyResult.replyId,
+            }, "scheduled-dm");
+          } else {
+            const kind = replyResult.errorKind || "other";
+            const error = describeDmError(kind, replyResult.error);
+            await appendDmLog(job.username, {
+              kind: "reply",
+              status: "failed",
+              trigger: "scheduled",
+              recipientId: job.recipientId,
+              ruleId: job.ruleId || job.id,
+              error,
+              errorKind: kind,
+            }, "scheduled-dm");
+            if (kind === "rate_limit" && (job.commentId || (queued?.attempts ?? job.attempts ?? 0) < 12)) {
+              await release(job.username, replyKey, true);
+              await deferRateLimited(key, job, queued, retryDelay(queued?.attempts || 1), error);
+              return;
+            }
+            if (kind === "rate_limit") {
+              await release(job.username, replyKey, true);
+              await finishScheduled(key, queued, {
+                ...job,
+                status: "failed",
+                sentAt: new Date().toISOString(),
+                error,
+                errorKind: kind,
+              });
+              return;
+            }
+            if (replyResult.uncertain) {
+              await finishScheduled(key, queued, {
+                ...job,
+                status: "uncertain",
+                sentAt: new Date().toISOString(),
+                error,
+                errorKind: kind,
+              });
+              return;
+            }
+            replyFailure = { error, kind };
+          }
+        }
+      }
+
+      if (job.sendDm === false) {
+        await finishScheduled(key, queued, {
+          ...job,
+          status: replyFailure ? "failed" : "sent",
+          sentAt: new Date().toISOString(),
+          error: replyFailure?.error,
+          errorKind: replyFailure?.kind,
+        });
+        return;
+      }
+      if (repliedNow) await wait(SEND_SPACING_MS);
 
       /**
        * 댓글에서 걸린 예약은 비공개 답장이라 "가장 중요한 내용이 첫 통"이어야
@@ -143,13 +247,13 @@ export default async () => {
       };
       const plan = isPrivateReply ? buildCommentDmPlan(content) : buildDirectDmPlan(content);
       if (plan.messages.length === 0) {
-        await finishJob(key, {
+        await finishScheduled(key, queued, {
           ...job,
           status: "failed",
           sentAt: new Date().toISOString(),
           error: "보낼 내용이 비어 있습니다.",
         });
-        continue;
+        return;
       }
 
       // 우리가 보낸 문구로 남긴다 — 발신 에코를 "외부 서비스가 보낸 DM"으로 잘못
@@ -167,6 +271,39 @@ export default async () => {
         igId: settings!.igUserId || settings!.igAccountId || "",
         accessToken: settings!.accessToken!,
       };
+
+      const sendKey = isPrivateReply
+        ? dmContentKey(job.commentId!, contentHashOf(plan.messages))
+        : `schedule_${job.id}`;
+      if (!(await claimIfNew(job.username, sendKey, true))) {
+        await finishScheduled(key, queued, {
+          ...job,
+          status: "uncertain",
+          sentAt: new Date().toISOString(),
+          error: "이 예약의 이전 발송 결과를 확인해야 합니다.",
+          errorKind: "uncertain",
+        });
+        return;
+      }
+      let privateClaimed = false;
+      if (isPrivateReply) {
+        try {
+          privateClaimed = await claimIfNew(job.username, privateReplyKey(job.commentId!), true);
+        } catch (e) {
+          await release(job.username, sendKey, true);
+          throw e;
+        }
+        if (!privateClaimed) {
+          await finishScheduled(key, queued, {
+            ...job,
+            status: "uncertain",
+            sentAt: new Date().toISOString(),
+            error: "이 댓글에 대한 이전 발송 결과를 확인해야 합니다.",
+            errorKind: "uncertain",
+          });
+          return;
+        }
+      }
 
       let result = await sendDmMessages({
         ...sendArgs,
@@ -206,7 +343,13 @@ export default async () => {
 
       const sentAt = new Date().toISOString();
       if (result.ok || result.partial) {
-        await finishJob(key, { ...job, status: "sent", sentAt });
+        await finishScheduled(key, queued, {
+          ...job,
+          status: "sent",
+          sentAt,
+          error: replyFailure?.error,
+          errorKind: replyFailure?.kind,
+        });
         await appendDmLog(
           job.username,
           {
@@ -224,7 +367,25 @@ export default async () => {
       } else {
         const kind = result.errorKind || "other";
         const error = describeDmError(kind, result.error);
-        await finishJob(key, { ...job, status: "failed", sentAt, error, errorKind: kind });
+        if (kind === "rate_limit" && (job.commentId || (queued?.attempts ?? job.attempts ?? 0) < 12) &&
+          (!job.commentId || Date.now() - Date.parse(job.commentAt || job.createdAt || "") < PRIVATE_REPLY_WINDOW_MS)) {
+          const delay = retryDelay(queued?.attempts || 1);
+          await release(job.username, sendKey, true);
+          if (privateClaimed) await release(job.username, privateReplyKey(job.commentId!), true);
+          await deferRateLimited(key, job, queued, delay, error);
+          return;
+        }
+        if (kind !== "already_sent" && kind !== "uncertain") {
+          await release(job.username, sendKey, true);
+          if (privateClaimed) await release(job.username, privateReplyKey(job.commentId!), true);
+        }
+        await finishScheduled(key, queued, {
+          ...job,
+          status: kind === "uncertain" ? "uncertain" : "failed",
+          sentAt,
+          error,
+          errorKind: kind,
+        });
         await appendDmLog(
           job.username,
           {
@@ -243,9 +404,82 @@ export default async () => {
     } catch (e) {
       // 처리 중 예외가 나면 예약은 대기열에 그대로 남는다. 선점만 풀어 다음 주기에
       // 다시 시도되게 한다 — 풀지 않으면 그 예약은 영영 나가지 않는다.
-      await releaseJobClaim(key);
+      if (queued) {
+        await retryDmJob(queued, retryDelay(queued.attempts), (e as Error)?.message || "발송 오류", "other")
+          .catch((retryError) => console.error("[scheduled-dm] retry failed:", retryError));
+      } else {
+        await releaseJobClaim(key);
+      }
       console.error(`[scheduled-dm] error on ${key}:`, e);
     }
+}
+
+async function processQueuedComment(job: DmJob): Promise<boolean> {
+  const payload = job.payload || {};
+  const igAccountId = String(payload.igAccountId || job.ig_account_id || "");
+  const change = payload.change;
+  if (!igAccountId || !change?.value?.id) {
+    await completeDmJob(job, "failed", "댓글 이벤트 정보가 비어 있습니다.", "invalid_payload");
+    return false;
+  }
+  try {
+    const result = await processWebhookPayload({
+      entry: [{ id: igAccountId, time: payload.entryTime, changes: [change] }],
+    });
+    if (result.uncertain) {
+      await completeDmJob(job, "uncertain", result.error, result.errorKind);
+    } else if (result.retryable) {
+      const commentAt = Number(payload.entryTime) > 0
+        ? Number(payload.entryTime) * 1000
+        : Date.parse(job.created_at || job.due_at);
+      const expired = Date.now() - commentAt >= PRIVATE_REPLY_WINDOW_MS;
+      if (expired || (result.errorKind !== "rate_limit" && job.attempts >= 12)) {
+        await completeDmJob(job, "failed", result.error || "재시도 횟수를 초과했습니다.", result.errorKind);
+        return Boolean(result.sideEffectAttempted);
+      }
+      const delay = retryDelay(job.attempts);
+      await retryDmJob(job, delay, result.error || "일시적인 발송 오류", result.errorKind || "other");
+      if (result.errorKind === "rate_limit") {
+        await pauseDmAccount(igAccountId, delay).catch((e) =>
+          console.error("[scheduled-dm] account pause failed:", e),
+        );
+      }
+    } else {
+      await completeDmJob(job, "sent");
+    }
+    return Boolean(result.sideEffectAttempted);
+  } catch (e) {
+    const error = (e as Error)?.message || "처리 오류";
+    if (job.attempts >= 12) await completeDmJob(job, "failed", error, "other");
+    else await retryDmJob(job, retryDelay(job.attempts), error, "other");
+    return false;
+  }
+}
+
+export default async () => {
+  const started = Date.now();
+  let processed = 0;
+  try {
+    while (processed < MAX_JOBS_PER_RUN && Date.now() - started < WORK_BUDGET_MS) {
+      const [queued] = await claimDueJobs(1);
+      if (!queued) break;
+      processed += 1;
+      const attemptedSend = queued.job_type === "comment_event"
+        ? await processQueuedComment(queued)
+        : (await processScheduled(queued.id, queued.payload as DmScheduledJob, queued), true);
+      if (attemptedSend && processed < MAX_JOBS_PER_RUN && Date.now() - started < WORK_BUDGET_MS) {
+        await wait(SEND_SPACING_MS);
+      }
+    }
+  } catch (e) {
+    console.error("[scheduled-dm] queue processing failed:", (e as Error)?.message);
+  }
+  if (Date.now() - started >= WORK_BUDGET_MS) return;
+  const due = await listDueJobs(new Date(), 10);
+  for (const { key, job } of due) {
+    if (Date.now() - started >= WORK_BUDGET_MS) break;
+    await processScheduled(key, job);
+    if (Date.now() - started < WORK_BUDGET_MS) await wait(SEND_SPACING_MS);
   }
 };
 

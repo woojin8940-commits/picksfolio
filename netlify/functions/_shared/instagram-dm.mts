@@ -345,6 +345,7 @@ export type DmErrorKind =
   | "outside_window"
   | "permission"
   | "rate_limit"
+  | "uncertain"
   | "other";
 
 export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
@@ -368,6 +369,8 @@ export function classifyGraphError(err: any, httpStatus?: number): DmErrorKind {
   if (httpStatus === 429 || code === 4 || code === 17 || code === 32 || code === 613 || /rate limit|too many/.test(message)) {
     return "rate_limit";
   }
+  if (httpStatus && httpStatus >= 500) return "uncertain";
+  if (/unknown error|temporarily unavailable/.test(message)) return "uncertain";
   if (code === 190 || code === 200 || code === 102 || /permission|access token|expired/.test(message)) {
     return "permission";
   }
@@ -385,6 +388,8 @@ export function describeDmError(kind: DmErrorKind, raw?: string): string {
       return "인스타그램 연동 권한이 만료됐거나 부족합니다. DM 자동화 화면에서 계정을 다시 연동해 주세요.";
     case "rate_limit":
       return "인스타그램 발송 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.";
+    case "uncertain":
+      return "발송 결과를 확인하지 못했습니다. 인스타그램 DM 함을 확인해 주세요.";
     default:
       return raw || "인스타그램에서 발송을 거부했습니다.";
   }
@@ -438,6 +443,7 @@ async function postOneMessage(args: {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ recipient, message }),
+      signal: AbortSignal.timeout(8_000),
     });
     result = (await res.json().catch(() => ({}))) as any;
   } catch (e: any) {
@@ -446,7 +452,7 @@ async function postOneMessage(args: {
     return {
       ok: false,
       error: e?.message || "인스타그램 서버 연결에 실패했습니다.",
-      errorKind: "other",
+      errorKind: "uncertain",
     };
   }
 
@@ -562,7 +568,7 @@ export async function postCommentReply(args: {
   commentId: string;
   accessToken: string;
   message: string;
-}): Promise<{ ok: boolean; replyId?: string; error?: string }> {
+}): Promise<{ ok: boolean; replyId?: string; error?: string; uncertain?: boolean; errorKind?: DmErrorKind }> {
   const { host, graphVersion, commentId, accessToken, message } = args;
   try {
     const res = await fetch(
@@ -574,17 +580,21 @@ export async function postCommentReply(args: {
           Authorization: `Bearer ${accessToken}`,
         },
         body: new URLSearchParams({ message }),
+        signal: AbortSignal.timeout(8_000),
       },
     );
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error) {
+      const errorKind = classifyGraphError(data?.error, res.status);
       return {
         ok: false,
         error: data?.error?.message || `Graph API 오류 (HTTP ${res.status})`,
+        uncertain: errorKind === "uncertain",
+        errorKind,
       };
     }
     return { ok: true, replyId: data?.id };
   } catch (e: any) {
-    return { ok: false, error: e?.message || "답글 전송 중 오류" };
+    return { ok: false, error: e?.message || "답글 전송 중 오류", uncertain: true, errorKind: "uncertain" };
   }
 }

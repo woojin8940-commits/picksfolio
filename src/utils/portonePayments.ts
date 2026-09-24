@@ -53,6 +53,7 @@ export interface PortOneIntent {
   kind?: 'activation' | 'recharge';
   // membership subscription tier
   tier?: 'standard' | 'standard_ai' | 'commerce' | 'pro';
+  promoCode?: string;
   savedAt?: number;
 }
 

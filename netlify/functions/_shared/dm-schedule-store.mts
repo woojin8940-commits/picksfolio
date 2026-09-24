@@ -1,4 +1,9 @@
 import { getStore } from "@netlify/blobs";
+import {
+  cancelStoredScheduledJob,
+  enqueueScheduledJob,
+  listStoredScheduledJobs,
+} from "./dm-jobs.mts";
 import type { DmButton, DmCard } from "./instagram-dm.mts";
 
 /**
@@ -45,10 +50,11 @@ export interface DmScheduledJob {
   message: string;
   buttons: DmButton[];
   createdAt: string;
-  status: "pending" | "sent" | "failed" | "canceled";
+  status: "pending" | "sent" | "failed" | "canceled" | "uncertain";
   sentAt?: string;
   error?: string;
   errorKind?: string;
+  attempts?: number;
   /** 예약을 만든 시점에 알고 있던 "상대의 마지막 메시지 시각". 창 안내에 쓴다. */
   contactLastAt?: string;
   /**
@@ -74,11 +80,14 @@ export interface DmScheduledJob {
    * 그대로 적용하면 정상 발송할 수 있는 예약을 전부 실패로 만든다.
    */
   commentId?: string;
+  publicReply?: { commentId: string; message: string };
+  sendDm?: boolean;
   /** 댓글이 달린 시각(ISO). 7일 창 판정에 쓴다. */
   commentAt?: string;
   /** 이 예약을 만든 자동화(기록·화면 표시용). */
   ruleId?: string;
   ruleName?: string;
+  igAccountId?: string;
 }
 
 const pendingPrefix = (username: string) => `job/${username.toLowerCase()}/`;
@@ -99,12 +108,31 @@ function parseKey(key: string): { username: string; sendAt: string; id: string }
 }
 
 export async function createScheduledJob(job: DmScheduledJob): Promise<void> {
+  try {
+    await enqueueScheduledJob(job.username, job.id, job.igAccountId || "", job.sendAt, job);
+    return;
+  } catch (e) {
+    console.warn("[dm-schedule] queue insert failed:", (e as Error)?.message);
+  }
   await store().setJSON(`${pendingPrefix(job.username)}${suffixOf(job)}`, job);
 }
 
 /** 한 사용자의 예약 목록(대기 + 완료 기록)을 발송 시각 순으로 돌려준다. */
 export async function listScheduledJobs(username: string): Promise<DmScheduledJob[]> {
   if (!username) return [];
+  let storedJobs: DmScheduledJob[] = [];
+  try {
+    const stored = await listStoredScheduledJobs(username);
+    storedJobs = stored.map((row) => ({
+      ...(row.payload as DmScheduledJob),
+      status: row.status === "processing" ? "pending" : row.status,
+      error: row.last_error || undefined,
+      errorKind: row.error_kind || undefined,
+      sentAt: row.completed_at || undefined,
+    })) as DmScheduledJob[];
+  } catch (e) {
+    console.warn("[dm-schedule] queue list failed:", (e as Error)?.message);
+  }
   const s = store();
   try {
     const [pending, done] = await Promise.all([
@@ -121,17 +149,23 @@ export async function listScheduledJobs(username: string): Promise<DmScheduledJo
         }
       }),
     );
-    return (jobs.filter(Boolean) as DmScheduledJob[]).sort(
+    const storedIds = new Set(storedJobs.map((job) => job.id));
+    return [...storedJobs, ...(jobs.filter((job) => job && !storedIds.has(job.id)) as DmScheduledJob[])].sort(
       (a, b) => Date.parse(a.sendAt) - Date.parse(b.sendAt),
     );
   } catch (e) {
     console.warn("[dm-schedule] list failed:", (e as Error)?.message);
-    return [];
+    return storedJobs;
   }
 }
 
 /** 아직 보내지 않은 예약 하나를 취소(삭제)한다. 이미 나간 건은 취소할 수 없다. */
 export async function cancelScheduledJob(username: string, id: string): Promise<boolean> {
+  try {
+    if (await cancelStoredScheduledJob(username, id)) return true;
+  } catch (e) {
+    console.warn("[dm-schedule] queue cancel failed:", (e as Error)?.message);
+  }
   const s = store();
   const { blobs } = await s.list({ prefix: pendingPrefix(username) });
   const target = blobs.find((b) => parseKey(b.key)?.id === id);
@@ -184,6 +218,7 @@ export async function listDueJobs(
  */
 export async function finishJob(key: string, job: DmScheduledJob): Promise<void> {
   const s = store();
+  await s.setJSON(`${donePrefix(job.username)}${suffixOf(job)}`, job);
   try {
     await s.delete(key);
     // 선점 표시도 함께 정리한다. 대기열에서 이미 빠졌으니 다시 집어 들 일이 없고,
@@ -191,13 +226,11 @@ export async function finishJob(key: string, job: DmScheduledJob): Promise<void>
     await s.delete(`claim/${key}`).catch(() => {});
   } catch (e) {
     console.warn("[dm-schedule] pending delete failed:", (e as Error)?.message);
+    throw e;
   }
-  try {
-    await s.setJSON(`${donePrefix(job.username)}${suffixOf(job)}`, job);
-    await pruneHistory(job.username);
-  } catch (e) {
-    console.warn("[dm-schedule] history write failed:", (e as Error)?.message);
-  }
+  await pruneHistory(job.username).catch((e) =>
+    console.warn("[dm-schedule] history prune failed:", (e as Error)?.message),
+  );
 }
 
 /**
@@ -212,6 +245,15 @@ export async function claimJob(key: string, staleAfterMs = STALE_CLAIM_MS): Prom
   const s = store();
   const claimKey = `claim/${key}`;
   try {
+    const parsed = parseKey(key);
+    if (parsed) {
+      const doneKey = `${donePrefix(parsed.username)}${parsed.sendAt}_${parsed.id}`;
+      if (await s.get(doneKey)) {
+        await s.delete(key);
+        await s.delete(claimKey).catch(() => {});
+        return false;
+      }
+    }
     // 같은 키에 "선점됨" 표시를 조건부로 남길 수는 없으므로(값이 이미 있다),
     // 별도의 선점 키를 하나 만든다. 이 키는 발송이 끝나면 남겨 두더라도
     // `job/` 목록을 훑는 데 영향이 없다.
