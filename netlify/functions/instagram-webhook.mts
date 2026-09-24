@@ -27,6 +27,8 @@ import {
 } from "./_shared/dm-send-registry.mts";
 import { commentSeenRecently, noteCommentSeen, recordForeignDm } from "./_shared/dm-foreign-dm.mts";
 import { createScheduledJob } from "./_shared/dm-schedule-store.mts";
+import { enqueueCommentEvents } from "./_shared/dm-jobs.mts";
+import type { QueuedComment } from "./_shared/dm-jobs.mts";
 import { fetchContactProfile, noteDmContact } from "./_shared/dm-contacts.mts";
 import { faqIdFromPayload } from "./_shared/instagram-ice-breakers.mts";
 
@@ -170,21 +172,14 @@ async function appendLog(username: string, entry: Record<string, unknown>) {
   await appendDmLog(username, entry, "ig-webhook");
 }
 
-/** 예약으로 넘길지 판단할 때 필요한 최소 여유. 이보다 가까우면 그냥 지금 보낸다. */
-const SCHEDULE_MIN_LEAD_MS = 30_000;
+const SEND_SPACING_MS = 400;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/**
- * 이 자동화가 "예약 발송"이면 보낼 시각(ms)을, 즉시 발송이면 null 을 돌려준다.
- *
- * 예약 시각이 이미 지났거나 눈앞이면 즉시 발송으로 본다. 지난 시각을 대기열에
- * 넣어도 결국 다음 주기에 나가지만, 그 사이 발송기가 한 번 더 조건을 검사하는
- * 동안 댓글 비공개 답장 기회를 미룰 이유가 없다.
- */
 function scheduledSendAt(a: DmAutomationItem): number | null {
   if (a.sendMode !== "scheduled") return null;
   const at = Date.parse(a.scheduledAt || "");
   if (Number.isNaN(at)) return null;
-  return at - Date.now() > SCHEDULE_MIN_LEAD_MS ? at : null;
+  return at > Date.now() ? at : null;
 }
 
 /**
@@ -303,7 +298,7 @@ async function fetchFollowsBusiness(args: {
     const res = await fetch(
       `https://${host}/${GRAPH_VERSION}/${encodeURIComponent(igsid)}` +
         `?fields=is_user_follow_business`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(3_000) },
     );
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || data?.error || typeof data?.is_user_follow_business !== "boolean") {
@@ -719,6 +714,58 @@ export default async (req: Request, _context: Context) => {
     return new Response("EVENT_RECEIVED", { status: 200 });
   }
 
+  const commentEvents = (payload?.entry || []).flatMap((entry: any) =>
+    (entry?.changes || [])
+      .filter((change: any) => change?.field === "comments" && change?.value?.id && entry?.id)
+      .map((change: any) => ({
+        igAccountId: String(entry.id),
+        entryTime: Number(entry.time) || undefined,
+        change,
+      })),
+  );
+  if (commentEvents.length > 0) {
+    try {
+      await enqueueCommentEvents(commentEvents);
+    } catch (e) {
+      console.error("[ig-webhook] comment queue failed, processing inline:", e);
+      await processWebhookPayload({
+        entry: (commentEvents as QueuedComment[]).map((event) => ({
+          id: event.igAccountId,
+          time: event.entryTime,
+          changes: [event.change],
+        })),
+      }).catch((err) => console.error("[ig-webhook] inline comment processing failed:", err));
+    }
+  }
+
+  const messagingEntries = (payload?.entry || []).filter((entry: any) =>
+    (Array.isArray(entry?.messaging) && entry.messaging.length > 0) ||
+    (entry?.changes || []).some((change: any) =>
+      ["messages", "message_echoes", "messaging_postbacks"].includes(change?.field),
+    ),
+  );
+  if (messagingEntries.length > 0) {
+    await processWebhookPayload({ entry: messagingEntries }, true).catch((e) =>
+      console.error("[ig-webhook] messaging processing error:", e),
+    );
+  }
+  return new Response("EVENT_RECEIVED", { status: 200 });
+};
+
+export interface WebhookProcessResult {
+  retryable: boolean;
+  uncertain?: boolean;
+  sideEffectAttempted?: boolean;
+  error?: string;
+  errorKind?: string;
+}
+
+export async function processWebhookPayload(
+  payload: any,
+  skipComments = false,
+): Promise<WebhookProcessResult> {
+  const outcome: WebhookProcessResult = { retryable: false };
+
   try {
     // 설정 저장 직후 들어온 댓글에도 방금 편집한 메시지를 사용해야 한다. 기본 eventual
     // consistency 는 이전 설정을 최대 60초간 반환할 수 있어 자동 DM 내용이 어긋난다.
@@ -739,11 +786,19 @@ export default async (req: Request, _context: Context) => {
       await noteWebhookReceived(igAccountId, username);
       if (!username) {
         console.warn("[ig-webhook] no account for IG id", igAccountId);
+        outcome.retryable = true;
+        outcome.errorKind = "account_lookup";
+        outcome.error = "인스타그램 계정 연결 정보를 찾지 못했습니다.";
         continue;
       }
 
       const settings = (await store.get(`dm_${username}`, { type: "json" })) as DmSettings | null;
-      if (!settings) continue;
+      if (!settings) {
+        outcome.retryable = true;
+        outcome.errorKind = "settings_lookup";
+        outcome.error = "자동 DM 설정을 찾지 못했습니다.";
+        continue;
+      }
       const accessToken = settings.accessToken || "";
       const igId = settings.igUserId || settings.igAccountId || igAccountId;
       // 자기 자신의 댓글을 걸러낼 때 쓰는 ID 모음. 계정 연동 방식에 따라 웹훅의
@@ -835,6 +890,7 @@ export default async (req: Request, _context: Context) => {
       }
 
       for (const change of entry?.changes || []) {
+        if (skipComments) break;
         if (change?.field !== "comments") continue;
         const value = change.value || {};
         const commentId = String(value?.id || "");
@@ -895,6 +951,108 @@ export default async (req: Request, _context: Context) => {
         const automation = candidates.find((a) => passesFollowFilter(a, follows));
         if (!automation) continue;
 
+        const scheduledMs = scheduledSendAt(automation);
+        if (scheduledMs !== null) {
+          const pool = automation.replyEnabled
+            ? (automation.replies || []).filter((r) => r && r.trim())
+            : [];
+          const reply = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined;
+          if (automation.replyEnabled && !reply) {
+            await appendLog(username, {
+              kind: "reply",
+              status: "skipped",
+              reason: "답글 문구가 비어 있습니다.",
+              recipientId: fromId,
+              ruleId: automation.id,
+            });
+          }
+          if (!(await claimIfNew(username, commentDmKey(commentId), true))) {
+            console.warn("[ig-webhook] comment already handled — scheduling skipped", commentId);
+            continue;
+          }
+          const entryMs = Number(entry?.time) > 0 ? Number(entry.time) * 1000 : Date.now();
+          const sendAt = new Date(scheduledMs).toISOString();
+          const carousel = automation.messageType === "carousel";
+          let sendDm = hasContent(automation);
+          if (sendDm && buildCommentPlan(automation).messages.length === 0) {
+            sendDm = false;
+            await appendLog(username, {
+              kind: "dm",
+              status: "failed",
+              recipientId: fromId,
+              ruleId: automation.id,
+              ruleName: automation.name,
+              error:
+                "보낼 수 있는 카드가 없습니다. 카드마다 이미지를 올리거나 설명·버튼을 채워 주세요(제목만 있는 카드는 인스타그램이 거부합니다).",
+              errorKind: "other",
+            });
+          }
+          if (!sendDm && !reply) continue;
+          try {
+            await createScheduledJob({
+              id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+              username,
+              igAccountId,
+              recipientId: fromId,
+              recipientName: String(value?.from?.username || "") || undefined,
+              sendAt,
+              message: carousel ? "" : automation.message || "",
+              buttons: automation.buttons || [],
+              messageType: carousel ? "carousel" : "text",
+              cards: carousel ? automation.cards : undefined,
+              commentId,
+              commentAt: new Date(entryMs).toISOString(),
+              publicReply: reply ? { commentId: parentId || commentId, message: reply } : undefined,
+              sendDm,
+              source: "comment",
+              ruleId: automation.id,
+              ruleName: automation.name,
+              createdAt: new Date().toISOString(),
+              status: "pending",
+            });
+            if (reply) {
+              await appendLog(username, {
+                kind: "reply",
+                status: "scheduled",
+                recipientId: fromId,
+                commentId,
+                ruleId: automation.id,
+                sendAt,
+              });
+            }
+            if (sendDm) {
+              await appendLog(username, {
+                kind: "dm",
+                status: "scheduled",
+                recipientId: fromId,
+                commentId,
+                ruleId: automation.id,
+                ruleName: automation.name,
+                sendAt,
+              });
+            }
+            console.log(`[ig-webhook] comment automation scheduled for ${sendAt}`);
+          } catch (e: any) {
+            await release(username, commentDmKey(commentId), true);
+            console.error("[ig-webhook] scheduling failed:", e?.message);
+            await appendLog(username, {
+              kind: "dm",
+              status: "failed",
+              recipientId: fromId,
+              commentId,
+              ruleId: automation.id,
+              ruleName: automation.name,
+              error: "예약 대기열에 넣지 못했습니다. 잠시 후 다시 시도해 주세요.",
+              errorKind: "queue",
+            });
+            outcome.retryable = true;
+            outcome.error = e?.message || "예약 대기열 저장 실패";
+            outcome.errorKind = "queue";
+          }
+          continue;
+        }
+
+        let repliedNow = false;
         // 1) 선택 시 공개 답글 (랜덤). 성공·실패 모두 로그에 남겨 화면의 활동
         //    기록에서 답글이 실제로 달렸는지 확인할 수 있게 한다.
         if (automation.replyEnabled) {
@@ -907,11 +1065,13 @@ export default async (req: Request, _context: Context) => {
               recipientId: fromId,
               ruleId: automation.id,
             });
-          } else if (!(await claimIfNew(username, publicReplyKey(commentId)))) {
+          } else if (!(await claimIfNew(username, publicReplyKey(commentId), true))) {
             // 같은 댓글 이벤트가 재전송된 경우다. 다시 달면 답글이 두 개 붙는다.
             console.warn("[ig-webhook] duplicate comment event — public reply skipped");
           } else {
             const reply = pool[Math.floor(Math.random() * pool.length)];
+            outcome.sideEffectAttempted = true;
+            repliedNow = true;
             const replyResult = await postCommentReply({
               host: graphHost(settings),
               graphVersion: GRAPH_VERSION,
@@ -930,7 +1090,16 @@ export default async (req: Request, _context: Context) => {
             } else {
               // 실패한 답글은 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
               // 그때 한 번 더 시도할 수 있어야 한다.
-              await release(username, publicReplyKey(commentId));
+              if (!replyResult.uncertain) await release(username, publicReplyKey(commentId), true);
+              if (replyResult.errorKind === "rate_limit") {
+                outcome.retryable = true;
+                outcome.error = replyResult.error;
+                outcome.errorKind = "rate_limit";
+              } else if (replyResult.uncertain) {
+                outcome.uncertain = true;
+                outcome.error = replyResult.error;
+                outcome.errorKind = "uncertain";
+              }
               console.warn("[ig-webhook] public reply failed:", replyResult.error);
               await appendLog(username, {
                 kind: "reply",
@@ -946,6 +1115,7 @@ export default async (req: Request, _context: Context) => {
         // 2) 비공개 답장(DM) — recipient.comment_id 사용. 답글만 설정한 자동화는
         //    보낼 DM 본문이 없으므로 발송을 건너뛴다(실패로 기록하지 않는다).
         if (!hasContent(automation)) continue;
+        if (repliedNow) await wait(SEND_SPACING_MS);
 
         const plan = buildCommentPlan(automation);
         /**
@@ -967,79 +1137,6 @@ export default async (req: Request, _context: Context) => {
               "보낼 수 있는 카드가 없습니다. 카드마다 이미지를 올리거나 설명·버튼을 채워 주세요(제목만 있는 카드는 인스타그램이 거부합니다).",
             errorKind: "other",
           });
-          continue;
-        }
-
-        /**
-         * "예약 발송"으로 설정된 자동화 — 지금 보내지 않고 대기열에 넣는다.
-         *
-         * 발송은 1분마다 도는 scheduled-dm-sender 가 맡는다. 댓글에서 만든 예약은
-         * `comment_id` 비공개 답장으로 나가므로 상대가 우리에게 DM 을 보낸 적이
-         * 없어도 되지만, 그 기회는 **댓글 작성 후 7일**까지다. 그래서 댓글 시각을
-         * 함께 넣어 발송기가 창을 판정할 수 있게 한다.
-         *
-         * 여기서 내용을 그대로 복사해 두는 이유: 예약이 나가는 시점에 설정이 바뀌어
-         * 있을 수 있는데, 사용자가 예약을 걸 때 화면에서 본 문구가 나가야 한다.
-         */
-        const scheduledMs = scheduledSendAt(automation);
-        if (scheduledMs !== null) {
-          /**
-           * 댓글 단위 선점을 예약을 넣기 전에 해 둔다. Meta 가 같은 댓글 이벤트를
-           * 다시 보내도 같은 댓글에 예약이 두 건 쌓이지 않는다.
-           */
-          if (!(await claimIfNew(username, commentDmKey(commentId)))) {
-            console.warn("[ig-webhook] comment already handled — scheduling skipped", commentId);
-            continue;
-          }
-          // 웹훅 entry.time 은 초 단위다. 없으면 지금(이벤트를 받은 시각)으로 본다.
-          const entryMs = Number(entry?.time) > 0 ? Number(entry.time) * 1000 : Date.now();
-          const sendAt = new Date(scheduledMs).toISOString();
-          const carousel = automation.messageType === "carousel";
-          try {
-            await createScheduledJob({
-              id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
-              username,
-              recipientId: fromId,
-              recipientName: String(value?.from?.username || "") || undefined,
-              sendAt,
-              message: carousel ? "" : automation.message || "",
-              buttons: automation.buttons || [],
-              messageType: carousel ? "carousel" : "text",
-              cards: carousel ? automation.cards : undefined,
-              commentId,
-              commentAt: new Date(entryMs).toISOString(),
-              source: "comment",
-              ruleId: automation.id,
-              ruleName: automation.name,
-              createdAt: new Date().toISOString(),
-              status: "pending",
-            });
-            await appendLog(username, {
-              kind: "dm",
-              status: "scheduled",
-              recipientId: fromId,
-              commentId,
-              ruleId: automation.id,
-              ruleName: automation.name,
-              sendAt,
-            });
-            console.log(`[ig-webhook] comment DM scheduled for ${sendAt}`);
-          } catch (e: any) {
-            // 대기열에 넣지 못했다면 선점을 되돌린다. Meta 가 이벤트를 다시 보내면
-            // 그때 한 번 더 시도할 수 있어야 한다.
-            await release(username, commentDmKey(commentId));
-            console.error("[ig-webhook] scheduling failed:", e?.message);
-            await appendLog(username, {
-              kind: "dm",
-              status: "failed",
-              recipientId: fromId,
-              commentId,
-              ruleId: automation.id,
-              ruleName: automation.name,
-              error: "예약 대기열에 넣지 못했습니다. 잠시 후 다시 시도해 주세요.",
-              errorKind: "other",
-            });
-          }
           continue;
         }
 
@@ -1066,7 +1163,7 @@ export default async (req: Request, _context: Context) => {
          * 그러면 이 댓글 작성자에게 예전 문구에 이어 새 문구까지 도착한다
          * ("hello 만 가야 하는데 예전 메시지도 왔다"가 정확히 이 상황이다).
          */
-        if (!(await claimIfNew(username, commentKey))) {
+        if (!(await claimIfNew(username, commentKey, true))) {
           console.warn("[ig-webhook] comment already auto-DMed — skipped", commentId);
           continue;
         }
@@ -1074,15 +1171,26 @@ export default async (req: Request, _context: Context) => {
         // 같은 댓글에 같은 내용을 이미 보냈다면(웹훅 재전송·수동 발송과 겹침) 끝.
         // 댓글 단위 선점은 되돌리지 않는다 — 이 댓글에는 이미 DM 이 나갔으므로,
         // 나중에 문구가 바뀐 재전송이 들어와도 다시 보내면 안 된다.
-        if (!(await claimIfNew(username, contentKey))) {
+        let contentClaimed: boolean;
+        try {
+          contentClaimed = await claimIfNew(username, contentKey, true);
+        } catch (e) {
+          await release(username, commentKey, true);
+          throw e;
+        }
+        if (!contentClaimed) {
           console.warn("[ig-webhook] duplicate DM suppressed for comment", commentId);
           continue;
         }
 
+        let sendAttempted = false;
         try {
-          const replyAvailable = await claimIfNew(username, replyKey);
-          let result = replyAvailable
-            ? await sendDmMessages({
+          const replyAvailable = await claimIfNew(username, replyKey, true);
+          let result = null;
+          if (replyAvailable) {
+            sendAttempted = true;
+            outcome.sideEffectAttempted = true;
+            result = await sendDmMessages({
                 graphHost: graphHost(settings),
                 graphVersion: GRAPH_VERSION,
                 igId,
@@ -1092,11 +1200,12 @@ export default async (req: Request, _context: Context) => {
                 messages,
                 bestEffortFrom: plan.bestEffortFrom,
                 fallback: plan.fallback,
-              })
-            : null;
+              });
+          }
 
-          if (result && !result.ok && !result.partial && result.errorKind !== "already_sent") {
-            await release(username, replyKey);
+          if (result && !result.ok && !result.partial &&
+            result.errorKind !== "already_sent" && result.errorKind !== "uncertain") {
+            await release(username, replyKey, true);
           }
 
           /**
@@ -1119,6 +1228,8 @@ export default async (req: Request, _context: Context) => {
             // 이 경로는 대화창이 열려 있어야 성공한다. 열려 있다면 여러 통을 보낼 수
             // 있으므로, 설정한 순서(인사말 → 카드)를 그대로 살린다.
             const direct = buildDirectPlan(automation);
+            sendAttempted = true;
+            outcome.sideEffectAttempted = true;
             result = await sendDmMessages({
               graphHost: graphHost(settings),
               graphVersion: GRAPH_VERSION,
@@ -1153,9 +1264,20 @@ export default async (req: Request, _context: Context) => {
             });
           } else {
             // 못 보냈으니 기록을 지운다 — 재전송 때 다시 시도할 수 있어야 한다.
-            await release(username, contentKey);
-            await release(username, commentKey);
             const kind = result?.errorKind || "other";
+            if (kind !== "uncertain") {
+              await release(username, contentKey, true);
+              await release(username, commentKey, true);
+            } else {
+              outcome.uncertain = true;
+              outcome.error = result?.error || "발송 결과를 확인하지 못했습니다.";
+              outcome.errorKind = kind;
+            }
+            if (kind === "rate_limit") {
+              outcome.retryable = true;
+              outcome.error = result?.error || "인스타그램 발송 한도";
+              outcome.errorKind = kind;
+            }
             await appendLog(username, {
               kind: "dm",
               status: "failed",
@@ -1169,18 +1291,33 @@ export default async (req: Request, _context: Context) => {
             });
           }
         } catch (e: any) {
-          await release(username, contentKey);
-          await release(username, commentKey);
+          if (!sendAttempted) {
+            await release(username, contentKey, true);
+            await release(username, commentKey, true);
+            outcome.retryable = true;
+            outcome.errorKind = "registry";
+          } else {
+            outcome.uncertain = true;
+            outcome.errorKind = "other";
+          }
           await appendLog(username, { kind: "dm", status: "failed", recipientId: fromId, ruleId: automation.id, error: e?.message || "send error" });
+          outcome.error = e?.message || "발송 결과를 확인하지 못했습니다.";
         }
       }
     }
   } catch (e) {
     console.error("[ig-webhook] processing error:", e);
+    if (outcome.sideEffectAttempted) {
+      outcome.uncertain = true;
+      outcome.error = (e as Error)?.message || "댓글 처리 결과를 확인하지 못했습니다.";
+      outcome.errorKind = "uncertain";
+      return outcome;
+    }
+    throw e;
   }
 
-  return new Response("EVENT_RECEIVED", { status: 200 });
-};
+  return outcome;
+}
 
 export const config: Config = {
   path: "/api/instagram/webhook",

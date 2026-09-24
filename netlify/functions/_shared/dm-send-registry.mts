@@ -31,8 +31,6 @@ import { createHash } from "node:crypto";
 const STORE = "dm-automation-sent";
 /** 사용자당 보관할 최대 기록 수. */
 const KEEP = 3000;
-/** 정리를 시도할 확률. 매 발송마다 목록을 훑지 않기 위한 장치. */
-const PRUNE_CHANCE = 0.05;
 
 const prefixFor = (username: string) => `sent_${username.toLowerCase()}/`;
 
@@ -133,7 +131,7 @@ export async function wasSentByUs(username: string, text: string): Promise<boole
  * 쓰기가 무시된다). `set` 은 조건을 제대로 전달하므로 여기서는 값을 직접
  * 문자열로 만들어 넘긴다. 기록의 값은 아무도 읽지 않으므로 형식은 무관하다.
  */
-export async function claimIfNew(username: string, key: string): Promise<boolean> {
+export async function claimIfNew(username: string, key: string, strict = false): Promise<boolean> {
   if (!username || !key) return true;
   try {
     const res = await store().set(
@@ -142,21 +140,32 @@ export async function claimIfNew(username: string, key: string): Promise<boolean
       { onlyIfNew: true },
     );
     if (res?.modified === false) return false;
-    if (Math.random() < PRUNE_CHANCE) await pruneSentRegistry(username);
     return true;
   } catch (e) {
     console.warn("[dm-registry] claim failed:", (e as Error)?.message);
+    if (strict) throw e;
     return true;
   }
 }
 
+export async function alreadyRecorded(username: string, key: string): Promise<boolean> {
+  if (!username || !key) return false;
+  try {
+    const found = await store().get(`${prefixFor(username)}${key}`);
+    return found !== null && found !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** 선점을 되돌린다. 결국 아무것도 못 보낸 경우에 호출해 다음 시도를 막지 않는다. */
-export async function release(username: string, key: string): Promise<void> {
+export async function release(username: string, key: string, strict = false): Promise<void> {
   if (!username || !key) return;
   try {
     await store().delete(`${prefixFor(username)}${key}`);
   } catch (e) {
     console.warn("[dm-registry] release failed:", (e as Error)?.message);
+    if (strict) throw e;
   }
 }
 

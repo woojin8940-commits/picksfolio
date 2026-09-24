@@ -1,10 +1,15 @@
 import type { Config } from "@netlify/functions";
+import { randomUUID } from "node:crypto";
 import {
   chargeMembershipBillingKey,
   addOneMonth,
   normalizeTier,
   issueNiceCardBillingKey,
   TIER_PRICE_KRW,
+  TIER_RANK,
+  readMembershipCharge,
+  verifyMembershipBillingKey,
+  type MembershipChargePending,
   type MembershipBillingEntry,
 } from "./_shared/membership-billing.mts";
 import {
@@ -116,7 +121,84 @@ export default async (req: Request) => {
       );
     }
 
+    const keyVerified = await verifyMembershipBillingKey(String(username), billingKey);
+    if (keyVerified !== true) {
+      return Response.json(
+        { success: false, error: keyVerified === null
+          ? "결제 수단 확인이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+          : "결제 수단의 계정 정보가 일치하지 않습니다." },
+        { status: keyVerified === null ? 503 : 403 },
+      );
+    }
+
     const now = new Date().toISOString();
+    const paymentMethod: "card" | "easypay" = cardCredential ? "card" : "easypay";
+
+    const activateInitialCharge = async (pending: MembershipChargePending, amountKrw: number) => {
+      const at = new Date().toISOString();
+      const entry: MembershipBillingEntry = {
+        at,
+        tier: pending.tier,
+        amountKrw,
+        kind: "initial",
+        success: true,
+        paymentId: pending.paymentId,
+      };
+      let recorded = false;
+      // 같은 레코드를 정기결제 스케줄러도 고친다. 통째로 덮어쓰면 그 사이 기록된
+      // 다음 결제일·결제 이력이 사라질 수 있어 조건부 쓰기로 반영한다.
+      const saved = (await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
+        recorded = false;
+        if (current?.membership_charge_pending?.paymentId !== pending.paymentId) return null;
+        const history = Array.isArray(current?.billing_history) ? current!.billing_history : [];
+        recorded = true;
+
+        return {
+          ...(current || {}),
+          membership_active: true,
+          membership_plan: pending.tier,
+          membership_started_at: current?.membership_started_at || at,
+          membership_amount_krw: amountKrw,
+          // 어떤 수단으로 등록한 정기결제인지(화면 안내용).
+          // card = 카드 수기(키인) 빌링키, easypay = 간편결제(카카오페이) 빌링키.
+          membership_payment_method: pending.method || paymentMethod,
+          // 해지 예약이 걸린 상태에서 다시 구독(또는 업그레이드)하면 예약을 풀어
+          // 정기결제를 되살린다 — 아니면 다음 결제일에 방금 산 구독이 종료된다.
+          membership_cancel_at_period_end: false,
+          membership_canceled_at: null,
+          membership_ends_at: null,
+          membership_ended_at: null,
+          last_billing_at: at,
+          next_billing_date: addOneMonth(at),
+          billing_failures: 0,
+          billing_key: pending.billingKey,
+          // 빌링키를 발급한 PG — 결제는 모두 포트원을 거친다(카드 = 나이스정보통신, 간편결제 =
+          // 카카오페이). 정기결제 스케줄러가 이 값을 보고 청구한다.
+          billing_provider: "portone",
+          billing_key_issued_at: at,
+          billing_history: [entry, ...history].slice(0, 50),
+          membership_charge_pending: null,
+          updated_at: at,
+        };
+      })) as Record<string, any>;
+      return { recorded, saved };
+    };
+
+    const snapshot = await mutateBlobJSON<Record<string, any>>(STORE, key, () => null);
+    const stale = snapshot?.membership_charge_pending as MembershipChargePending | null | undefined;
+    if (stale && stale.kind === "initial" && Date.now() - Date.parse(stale.startedAt) >= 60_000) {
+      const settled = await readMembershipCharge(stale, String(username));
+      if (settled === "paid") {
+        const { recorded, saved } = await activateInitialCharge(stale, TIER_PRICE_KRW[stale.tier]);
+        if (recorded) return Response.json({ success: true, data: redactSellerRecord(saved) });
+      } else if (settled === "failed" || settled === "missing") {
+        await mutateBlobJSON<Record<string, any>>(STORE, key, (current) =>
+          current?.membership_charge_pending?.paymentId === stale.paymentId
+            ? { ...current, membership_charge_pending: null }
+            : null,
+        );
+      }
+    }
 
     // ── 출시 혜택으로 시작하는 구독 ──
     // 코드를 소진시키는 것은 빌링키를 확보한 뒤다. 순서를 반대로 두면 카드 등록이
@@ -141,8 +223,11 @@ export default async (req: Request) => {
         success: true,
       };
 
+      let promoBusy = false;
       try {
         const updated = (await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
+          promoBusy = Boolean(current?.membership_charge_pending);
+          if (promoBusy) return null;
           const history = Array.isArray(current?.billing_history) ? current!.billing_history : [];
 
           return {
@@ -175,6 +260,14 @@ export default async (req: Request) => {
           };
         })) as Record<string, any>;
 
+        if (promoBusy) {
+          await releasePromoRedemption(String(username)).catch(() => {});
+          return Response.json(
+            { success: false, error: "결제 처리 중입니다. 잠시 후 다시 시도해 주세요." },
+            { status: 409 },
+          );
+        }
+
         return Response.json({
           success: true,
           promo: { code: promoCode, freeMonths, freeUntil, plan },
@@ -191,57 +284,76 @@ export default async (req: Request) => {
     // This anchors the anniversary billing day — every subsequent monthly charge
     // is scheduled relative to this first successful payment. If the first charge
     // fails the subscription is NOT activated; the member is asked to retry.
-    const charge = await chargeMembershipBillingKey(username, billingKey, normalizedTier);
-    if (!charge.success) {
+    const claim: { state: "claimed" | "busy" | "active"; pending: MembershipChargePending | null } = {
+      state: "busy",
+      pending: null,
+    };
+    const claimed = await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
+      claim.state = "busy";
+      claim.pending = null;
+      const previous = normalizeTier(current?.membership_plan);
+      if (current?.membership_active && previous && TIER_RANK[previous] >= TIER_RANK[normalizedTier]) {
+        claim.state = "active";
+        return null;
+      }
+      const existing = current?.membership_charge_pending as MembershipChargePending | null;
+      if (existing) {
+        if (existing.kind !== "initial" || existing.billingKey !== billingKey ||
+          existing.tier !== normalizedTier || Date.now() - Date.parse(existing.startedAt) < 60_000) return null;
+        claim.state = "claimed";
+        claim.pending = { ...existing, startedAt: new Date().toISOString() };
+        return { ...current, membership_charge_pending: claim.pending };
+      }
+      const next: MembershipChargePending = {
+        paymentId: `membership-${randomUUID()}`,
+        billingKey,
+        tier: normalizedTier,
+        kind: "initial",
+        startedAt: new Date().toISOString(),
+        method: paymentMethod,
+      };
+      claim.state = "claimed";
+      claim.pending = next;
+      return { ...(current || {}), membership_charge_pending: next };
+    });
+    if (claim.state === "active") {
+      if (claimed?.billing_key === billingKey && normalizeTier(claimed.membership_plan) === normalizedTier) {
+        return Response.json({ success: true, data: redactSellerRecord(claimed) });
+      }
+      return Response.json({ success: false, error: "이미 이용 중인 멤버십입니다." }, { status: 409 });
+    }
+    if (claim.state !== "claimed" || !claim.pending) {
       return Response.json(
-        { success: false, error: charge.error || "첫 결제에 실패했습니다. 카드 정보를 확인해 주세요." },
-        { status: 402 },
+        {
+          success: false,
+          error: "결제 처리 중입니다. 잠시 후 다시 시도해 주세요. 같은 안내가 계속 보이면 고객센터에 문의해 주세요.",
+        },
+        { status: 409 },
+      );
+    }
+    const charge = await chargeMembershipBillingKey(String(username), billingKey, normalizedTier, claim.pending.paymentId);
+    if (!charge.success) {
+      if (!charge.uncertain) {
+        await mutateBlobJSON<Record<string, any>>(STORE, key, (current) =>
+          current?.membership_charge_pending?.paymentId === charge.paymentId
+            ? { ...current, membership_charge_pending: null }
+            : null,
+        );
+      }
+      return Response.json(
+        { success: false, error: charge.uncertain
+          ? "결제 결과를 확인 중입니다. 다시 결제하지 마시고 고객센터에 문의해 주세요."
+          : charge.error || "첫 결제에 실패했습니다. 카드 정보를 확인해 주세요." },
+        { status: charge.uncertain ? 503 : 402 },
       );
     }
 
-    const billingEntry: MembershipBillingEntry = {
-      at: now,
-      tier: normalizedTier,
-      amountKrw: charge.amountKrw || 0,
-      kind: "initial",
-      success: true,
-      paymentId: charge.paymentId,
-    };
+    const { recorded, saved } = await activateInitialCharge(claim.pending, charge.amountKrw || 0);
+    if (!recorded) {
+      return Response.json({ success: false, error: "결제는 완료됐지만 구독 반영을 확인해야 합니다. 다시 결제하지 말고 고객센터에 문의해 주세요." }, { status: 503 });
+    }
 
-    // 같은 레코드를 정기결제 스케줄러도 고친다. 통째로 덮어쓰면 그 사이 기록된
-    // 다음 결제일·결제 이력이 사라질 수 있어 조건부 쓰기로 반영한다.
-    const updated = (await mutateBlobJSON<Record<string, any>>(STORE, key, (current) => {
-      const history = Array.isArray(current?.billing_history) ? current!.billing_history : [];
-
-      return {
-        ...(current || {}),
-        membership_active: true,
-        membership_plan: normalizedTier,
-        membership_started_at: current?.membership_started_at || now,
-        membership_amount_krw: charge.amountKrw,
-        // 어떤 수단으로 등록한 정기결제인지(화면 안내용).
-        // card = 카드 수기(키인) 빌링키, easypay = 간편결제(카카오페이) 빌링키.
-        membership_payment_method: cardCredential ? "card" : "easypay",
-        // 해지 예약이 걸린 상태에서 다시 구독(또는 업그레이드)하면 예약을 풀어
-        // 정기결제를 되살린다 — 아니면 다음 결제일에 방금 산 구독이 종료된다.
-        membership_cancel_at_period_end: false,
-        membership_canceled_at: null,
-        membership_ends_at: null,
-        membership_ended_at: null,
-        last_billing_at: now,
-        next_billing_date: addOneMonth(now),
-        billing_failures: 0,
-        billing_key: billingKey,
-        // 빌링키를 발급한 PG — 결제는 모두 포트원을 거친다(카드 = 나이스정보통신, 간편결제 =
-        // 카카오페이). 정기결제 스케줄러가 이 값을 보고 청구한다.
-        billing_provider: "portone",
-        billing_key_issued_at: now,
-        billing_history: [billingEntry, ...history].slice(0, 50),
-        updated_at: now,
-      };
-    })) as Record<string, any>;
-
-    return Response.json({ success: true, data: redactSellerRecord(updated) });
+    return Response.json({ success: true, data: redactSellerRecord(saved) });
   } catch (err: any) {
     return Response.json(
       { success: false, error: err?.message || "빌링 발급 실패" },

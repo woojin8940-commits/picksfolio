@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { verifyBusinessStatus, cleanBizNo } from "./_shared/nts-business.mts";
+import { checkRateLimit, clientIp } from "./_shared/rate-limit.mts";
 
 // 국세청 사업자등록정보 진위확인 및 상태조회 서비스 (data.go.kr / odcloud.kr)
 // 사업자등록번호가 국세청에 실제 등록된 계속사업자인지 검증한다.
@@ -9,6 +10,15 @@ export default async (req: Request) => {
   if (req.method !== "POST") {
     return Response.json({ success: false, error: "Method not allowed" }, { status: 405 });
   }
+
+  const limited = await checkRateLimit({
+    bucket: "nts-verify-day",
+    key: clientIp(req),
+    limit: 100,
+    windowSeconds: 86400,
+    message: "사업자 조회 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+  });
+  if (!limited.ok) return limited.response;
 
   let body: any;
   try {
@@ -72,4 +82,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/.netlify/functions/business-verify-nts",
+  rateLimit: { windowSize: 60, windowLimit: 10, aggregateBy: "ip" },
 };

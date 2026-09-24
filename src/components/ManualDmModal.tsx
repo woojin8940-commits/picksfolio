@@ -92,6 +92,7 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
    */
   const [replies, setReplies] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [sentSoFar, setSentSoFar] = useState(0);
   const [result, setResult] = useState<{ tone: ResultTone; message: string } | null>(null);
 
   /** 자동화에 설정된 답글 문구(꺼져 있으면 없는 것으로 본다). */
@@ -228,13 +229,14 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
     }
 
     setSending(true);
+    setSentSoFar(0);
     setResult(null);
 
     const validButtons = buttons.filter((b) => b.label.trim());
 
     let outcome: { tone: ResultTone; message: string; done: boolean };
     try {
-      const res = await apiService.sendInstagramDm({
+      const payload = {
         username: userName,
         mediaId: effectiveMediaId,
         mediaIds: effectiveMediaIds,
@@ -246,7 +248,28 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
         replies: validReplies,
         ruleId: selectedRuleId !== 'custom' ? selectedRuleId : undefined,
         test: true,
-      });
+      };
+
+      let res = await apiService.sendInstagramDm(payload);
+      for (let round = 0; round < 60; round += 1) {
+        const shouldStop =
+          res.connected === false ||
+          res.indeterminate ||
+          (res.failCount || 0) > 0 ||
+          (res.replyFailCount || 0) > 0 ||
+          (res.remaining || 0) <= 0;
+        if (shouldStop) break;
+        setSentSoFar((res.count || 0) + (res.replyCount || 0));
+        const next = await apiService.sendInstagramDm(payload);
+        const movedOn = (next.count || 0) + (next.replyCount || 0) > 0;
+        res = {
+          ...next,
+          count: (res.count || 0) + (next.count || 0),
+          replyCount: (res.replyCount || 0) + (next.replyCount || 0),
+          partialCount: (res.partialCount || 0) + (next.partialCount || 0),
+        };
+        if (!movedOn) break;
+      }
 
       // DM 과 댓글 답글은 함께 나간다. 둘 중 하나라도 나갔으면 발송된 것이다.
       const sentCount = (res.count || 0) + (res.replyCount || 0);
@@ -673,7 +696,10 @@ export const ManualDmModal: React.FC<ManualDmModalProps> = ({
             {sending ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
-                <span>{t('dm.sending', '발송 중...', 'Sending...')}</span>
+                <span>
+                  {t('dm.sending', '발송 중...', 'Sending...')}
+                  {sentSoFar > 0 ? ` ${sentSoFar}` : ''}
+                </span>
               </>
             ) : (
               <>

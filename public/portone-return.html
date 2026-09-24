@@ -214,6 +214,7 @@
           username: intent.username,
           tier: intent.tier,
           billingKey: billingKey,
+          promoCode: intent.promoCode || undefined,
         });
         if (!r.ok || !r.data.success) { fail(r.data.error || "멤버십 결제에 실패했습니다."); return; }
         done(intent.returnPath);
