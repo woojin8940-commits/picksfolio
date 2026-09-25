@@ -23,6 +23,16 @@ function parseFollowerText(raw: string): number | null {
 // 플랫폼이 차단하거나 형식이 바뀌면 null 을 반환하고, 호출측은 수기 입력값으로 대체한다.
 async function crawlFollowers(url: string): Promise<number | null> {
   if (!url || !/^https?:\/\//i.test(url)) return null;
+  // 사용자가 넣은 주소를 서버가 대신 여는 것이므로 인스타·틱톡 주소만 연다
+  // (내부망 주소 등 임의 주소를 서버에서 호출하지 못하게 한다).
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  const allowed = ["tiktok.com", "instagram.com"];
+  if (!allowed.some((d) => host === d || host.endsWith(`.${d}`))) return null;
   try {
     const res = await fetch(url, {
       headers: {
