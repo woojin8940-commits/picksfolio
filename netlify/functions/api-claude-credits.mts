@@ -40,6 +40,11 @@ const verifyClaudeCreditPayment = async (
   payMethod: string,
   expectedOwner: string,
 ): Promise<{ ok: boolean; error?: string }> => {
+  // 클로드 결제창에서 만든 결제번호만 받는다. 멤버십 결제(membership-*)는 금액이 충전 팩과
+  // 같을 수 있어, 이미 낸 멤버십 결제번호로 크레딧을 받아가는 재사용을 막는다.
+  if (!paymentId.startsWith('claude-')) {
+    return { ok: false, error: '결제 정보가 주문과 일치하지 않습니다.' }
+  }
   const verified = await verifyPortOnePaymentWithPortOne({
     paymentId,
     expectedKrw,
