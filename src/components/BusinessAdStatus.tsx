@@ -1,21 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Settings2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Pause, Play, Plus, RefreshCw, RotateCcw, Settings2, Trash2 } from 'lucide-react';
 import { formatKoreanWon, formatNumberWithCommas } from '../utils/formatters';
 import { ctaLabel, findObjective, placementSummary, targetSummary } from '../utils/adBoosts';
 import {
   MetaAdWithLive,
   STEP_LABELS,
   adsManagerUrl,
+  deleteMetaAd,
   fetchMetaAds,
   needsReconnect,
   notifyMetaAdsChanged,
-  runRemainingSteps,
   setMetaAdStatus,
   subscribeMetaAds,
 } from '../utils/metaAdsApi';
 import { useMetaAdConnection } from '../hooks/useMetaAdConnection';
 import MetaAdConnectCard from './MetaAdConnectCard';
 import AdCreateModal from './AdCreateModal';
+import AdBoostModal from './AdBoostModal';
+import MetaAdDeleteDialog from './MetaAdDeleteDialog';
 import MetaPageEngagementPanel from './MetaPageEngagement';
 
 /**
@@ -232,9 +234,10 @@ interface AdCardProps {
   busy: boolean;
   onToggle: (ad: AdItem, next: 'ACTIVE' | 'PAUSED') => void;
   onContinue: (ad: AdItem) => void;
+  onDelete: (ad: AdItem) => void;
 }
 
-const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue }) => {
+const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue, onDelete }) => {
   // 카드마다 따로 접는다 — 한 광고를 자세히 보는 중에 다른 카드가 같이 펴질 이유가 없다.
   const [open, setOpen] = useState(false);
   const badge = STATUS_LABEL[ad.status];
@@ -429,8 +432,8 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue }) => {
             onClick={() => onContinue(ad)}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[11px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-            멈춘 단계부터 이어서 만들기
+            <RotateCcw className="w-3.5 h-3.5" />
+            설정 확인하고 이어서 만들기
           </button>
         )}
         {canPause && (
@@ -466,6 +469,15 @@ const AdCard: React.FC<AdCardProps> = ({ ad, busy, onToggle, onContinue }) => {
             <ExternalLink className="w-3 h-3" />
           </a>
         )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onDelete(ad)}
+          className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-black text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-60 transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          삭제
+        </button>
       </div>
     </div>
   );
@@ -587,6 +599,10 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
   const [actionError, setActionError] = useState('');
   // 직접 올린 소재로 광고를 만드는 창.
   const [createOpen, setCreateOpen] = useState(false);
+  /** '이어서 만들기' 로 연 멈춘 광고. 소재 출처에 따라 만들 때 쓴 창을 다시 연다. */
+  const [resumeTarget, setResumeTarget] = useState<MetaAdWithLive | null>(null);
+  /** 삭제를 확인 중인 광고. */
+  const [deleteTarget, setDeleteTarget] = useState<MetaAdWithLive | null>(null);
 
   const {
     connection,
@@ -683,13 +699,26 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
     await loadAds();
   };
 
-  const continueAd = async (ad: AdItem) => {
-    setBusyId(ad.id);
+  /**
+   * 멈춘 광고는 같은 값으로 다시 부르면 같은 자리에서 또 멈춘다. 그래서 바로 다시 시도하지
+   * 않고, 저장된 설정을 채운 집행 창을 열어 브랜드가 확인·수정한 뒤 다시 만들게 한다.
+   */
+  const continueAd = (ad: AdItem) => {
     setActionError('');
-    const result = await runRemainingSteps(cleanUsername, ad.source, () => {});
-    if (result.error) setActionError(result.error);
+    setResumeTarget(ad.source);
+  };
+
+  /** 지운 뒤 목록을 다시 읽는다. 실패하면 창이 메타 문장을 그대로 보여 준다. */
+  const removeAd = async (removeFromMeta: boolean): Promise<string> => {
+    if (!deleteTarget) return '';
+    setBusyId(deleteTarget.id);
+    const res = await deleteMetaAd(cleanUsername, deleteTarget.id, removeFromMeta);
     setBusyId('');
+    if (!res.ok) return res.error;
+    setMetaAds((prev) => prev.filter((a) => a.id !== deleteTarget.id));
+    setDeleteTarget(null);
     notifyMetaAdsChanged();
+    return '';
   };
 
   const accountAds = useMemo(() => metaAds.map(recordToAd), [metaAds]);
@@ -1014,7 +1043,8 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
                   ad={ad}
                   busy={busyId === ad.id}
                   onToggle={(target, next) => void toggleAd(target, next)}
-                  onContinue={(target) => void continueAd(target)}
+                  onContinue={continueAd}
+                  onDelete={(target) => setDeleteTarget(target.source)}
                 />
               ))}
             </div>
@@ -1037,6 +1067,40 @@ const BusinessAdStatus: React.FC<BusinessAdStatusProps> = ({ businessUsername })
           onClose={() => setCreateOpen(false)}
           account={account}
           username={cleanUsername}
+        />
+      )}
+
+      {/* 멈춘 광고 이어서 만들기 — 만들 때 쓴 창을 저장된 설정으로 채워 다시 연다. */}
+      {resumeTarget?.source === 'own' && (
+        <AdCreateModal
+          open
+          onClose={() => setResumeTarget(null)}
+          account={accounts.find((a) => a.id === resumeTarget.adAccountId) || account}
+          username={cleanUsername}
+          resume={resumeTarget}
+        />
+      )}
+      {resumeTarget?.source === 'partnership' && (
+        <AdBoostModal
+          open
+          onClose={() => setResumeTarget(null)}
+          businessUsername={cleanUsername}
+          campaignId={resumeTarget.campaignRef || ''}
+          campaignTitle={resumeTarget.campaignTitle || ''}
+          collabId={resumeTarget.collabId || ''}
+          creatorHandle={resumeTarget.creatorHandle || ''}
+          partnershipCode={resumeTarget.partnershipCode || ''}
+          thumbnailUrl={resumeTarget.thumbnailUrl || ''}
+          resume={resumeTarget}
+        />
+      )}
+
+      {deleteTarget && (
+        <MetaAdDeleteDialog
+          record={deleteTarget}
+          busy={busyId === deleteTarget.id}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={removeAd}
         />
       )}
     </div>

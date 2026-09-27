@@ -17,6 +17,7 @@ import {
   MetaAdRecord,
   createMetaAd,
   notifyMetaAdsChanged,
+  resumeMetaAd,
   runRemainingSteps,
   uploadAdImage,
   uploadAdVideo,
@@ -26,6 +27,7 @@ import { AdDeliveryFields, inputCls, labelCls, selectCls, useAdDelivery } from '
 import MetaAdProgress from './MetaAdProgress';
 import MetaPagePicker from './MetaPagePicker';
 import StartPausedToggle from './StartPausedToggle';
+import ResumeNotice from './MetaAdResumeNotice';
 
 /**
  * 직접 소재 업로드 창 — 브랜드가 만든 소재로 광고를 만드는 설정.
@@ -63,6 +65,13 @@ interface AdCreateModalProps {
   username: string;
   /** 메타에 광고 기록이 만들어졌을 때(중간 실패 포함). 부모가 목록을 다시 읽는다. */
   onSubmitted?: (record: MetaAdRecord) => void;
+  /**
+   * 중간 단계에서 멈춘 광고. 넘기면 그 광고의 설정을 채운 채로 창이 열리고, 브랜드가
+   * 확인·수정한 뒤 누르면 고친 설정으로 다시 만든다(광고 현황의 '이어서 만들기').
+   * 멈춘 이유는 대개 설정(예산·기간·타겟·링크)이라, 같은 값으로 다시 시도만 하면 같은
+   * 자리에서 또 멈춘다.
+   */
+  resume?: MetaAdRecord | null;
 }
 
 type UploadState = { state: 'idle' | 'running' | 'done' | 'error'; label: string; detail?: string };
@@ -70,29 +79,38 @@ type UploadState = { state: 'idle' | 'running' | 'done' | 'error'; label: string
 /** 소재로 받는 파일. 메타가 광고 소재로 받는 형식만 둔다. */
 const ACCEPT = 'image/*,video/*';
 
-const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, username, onSubmitted }) => {
-  const [objective, setObjective] = useState<AdObjective>(DEFAULT_AD_OBJECTIVE);
+const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, username, onSubmitted, resume: resumeProp }) => {
+  const [objective, setObjective] = useState<AdObjective>(resumeProp?.objective || DEFAULT_AD_OBJECTIVE);
   const [file, setFile] = useState<File | null>(null);
   /** 창이 열려 있는 동안의 미리보기(blob URL). 저장하는 값과는 다르다. */
   const [previewUrl, setPreviewUrl] = useState('');
   /** 목록에 남기는 작은 미리보기(data URL). 파일을 고른 뒤 만들어 둔다. */
   const [thumbnailUrl, setThumbnailUrl] = useState('');
-  const [headline, setHeadline] = useState('');
-  const [bodyText, setBodyText] = useState('');
-  const [cta, setCta] = useState<AdCta>(ctasForObjective(DEFAULT_AD_OBJECTIVE)[0].value);
+  const [headline, setHeadline] = useState(resumeProp?.headline || '');
+  const [bodyText, setBodyText] = useState(resumeProp?.bodyText || '');
+  const [cta, setCta] = useState<AdCta>(
+    resumeProp?.cta || ctasForObjective(resumeProp?.objective || DEFAULT_AD_OBJECTIVE)[0].value,
+  );
   /** 브랜드가 CTA 를 직접 골랐는지. 고른 뒤에는 목적을 바꿔도 그 문구를 지킨다. */
-  const [ctaPicked, setCtaPicked] = useState(false);
-  const [linkUrl, setLinkUrl] = useState('');
+  const [ctaPicked, setCtaPicked] = useState(!!resumeProp?.cta);
+  const [linkUrl, setLinkUrl] = useState(resumeProp?.linkUrl || '');
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
   /** PAUSED 로 만들면 광고가 만들어져도 노출·과금이 시작되지 않는다(검증용). */
-  const [startPaused, setStartPaused] = useState(false);
+  const [startPaused, setStartPaused] = useState(resumeProp?.initialStatus === 'PAUSED');
   /** 집행 진행 화면. 한 번 누르면 폼 대신 단계 목록을 보여 준다. */
   const [phase, setPhase] = useState<'form' | 'running' | 'finished'>('form');
   const [upload, setUpload] = useState<UploadState>({ state: 'idle', label: 'Meta 광고 계정에 소재 올리기' });
   const [record, setRecord] = useState<MetaAdRecord | null>(null);
+  /**
+   * 이어서 만드는 광고. 광고 현황에서 넘긴 멈춘 광고이거나, 이 창에서 만들다 멈춘 뒤
+   * '설정 고치기' 를 누른 기록이다. 어느 쪽이든 고친 설정으로 다시 만든다(같은 값으로
+   * 다시 시도만 하면 같은 자리에서 또 멈춘다).
+   */
+  const [fixing, setFixing] = useState(false);
+  const resume = resumeProp || (fixing && record && record.step !== 'done' ? record : null);
   const [runError, setRunError] = useState('');
   const [runNote, setRunNote] = useState('');
   /** 이미 올린 소재. 다시 시도할 때 같은 파일을 또 올리지 않는다. */
@@ -101,7 +119,19 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
   const fileInputRef = useRef<HTMLInputElement>(null);
   const delivery = useAdDelivery();
   const pagesState = useMetaPages(username, open && !!account);
-  const page = pagesState.page;
+  /**
+   * 이어서 만들 때는 그 광고가 쓰던 페이지를 기본으로 둔다. 여기서 고른 값은 이 창에만
+   * 둔다 — 광고 현황·이력이 같이 보는 '고른 페이지' 를 멈춘 광고 하나 때문에 바꾸지 않는다.
+   */
+  const [resumePageId, setResumePageId] = useState(resumeProp?.pageId || '');
+  const page = (resume && pagesState.pages.find((p) => p.id === resumePageId)) || pagesState.page;
+  const selectPage = resume ? setResumePageId : pagesState.selectPage;
+
+  // 멈춘 광고의 예산·기간·타겟·노출 위치를 한 번 채운다.
+  useEffect(() => {
+    if (resume) delivery.fill(resume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume?.id]);
 
   useCloseOnBack(open, onClose);
 
@@ -219,7 +249,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       setError('광고를 내보낼 페이스북 페이지를 골라 주세요.');
       return;
     }
-    if (!file) {
+    if (!file && !resume) {
       setError('광고로 쓸 영상 또는 이미지를 올려 주세요.');
       return;
     }
@@ -242,9 +272,11 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
     setSubmitting(true);
     setPhase('running');
 
-    let media: { imageHash: string; videoId?: string };
+    // 이어서 만들 때 파일을 바꾸지 않았으면 이미 광고 계정에 올라간 소재를 그대로 쓴다.
+    let media: { imageHash: string; videoId?: string } | null = null;
     try {
-      media = await uploadCreative(account, file);
+      if (file) media = await uploadCreative(account, file);
+      else setUpload({ state: 'done', label: 'Meta 광고 계정에 소재 올리기', detail: '이전에 올린 소재 사용' });
     } catch (e) {
       setUpload({ state: 'error', label: 'Meta 광고 계정에 소재 올리기', detail: (e as Error)?.message });
       setRunError((e as Error)?.message || '소재를 올리지 못했습니다.');
@@ -252,22 +284,22 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       return;
     }
 
-    const created = await createMetaAd(username, {
-      source: 'own',
-      adAccountId: account.id,
+    const settings = {
       pageId: page.id,
-      initialStatus: startPaused ? 'PAUSED' : 'ACTIVE',
+      initialStatus: (startPaused ? 'PAUSED' : 'ACTIVE') as 'PAUSED' | 'ACTIVE',
       objective,
       headline: headline.trim(),
       bodyText: bodyText.trim(),
       cta,
       linkUrl: link,
-      imageHash: media.imageHash,
-      videoId: media.videoId,
-      creativeKind: isVideo ? 'video' : 'image',
-      thumbnailUrl,
+      ...(media
+        ? { imageHash: media.imageHash, videoId: media.videoId, creativeKind: isVideo ? 'video' as const : 'image' as const, thumbnailUrl }
+        : {}),
       ...delivery.payload(),
-    });
+    };
+    const created = resume
+      ? await resumeMetaAd(username, resume.id, settings)
+      : await createMetaAd(username, { source: 'own', adAccountId: account.id, ...settings });
     if (!created.ok) {
       if (created.record) {
         setRecord(created.record);
@@ -295,9 +327,9 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
       <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] modal-maxh-90 flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div>
-            <p className="text-sm font-black text-slate-900">직접 소재 업로드</p>
+            <p className="text-sm font-black text-slate-900">{resume ? '멈춘 광고 이어서 만들기' : '직접 소재 업로드'}</p>
             <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-              브랜드가 가진 영상·이미지로 광고를 만듭니다
+              {resume ? '설정을 확인하고 고친 뒤 다시 만듭니다' : '브랜드가 가진 영상·이미지로 광고를 만듭니다'}
             </p>
           </div>
           <button
@@ -374,10 +406,10 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                   {record ? '멈춘 단계부터 다시 시도' : '다시 시도'}
                 </button>
               )}
-              {runError && !submitting && !record && (
+              {runError && !submitting && (
                 <button
                   type="button"
-                  onClick={() => { setPhase('form'); setRunError(''); }}
+                  onClick={() => { setPhase('form'); setRunError(''); if (record) setFixing(true); }}
                   className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 text-[12px] font-black hover:bg-slate-50 transition-colors"
                 >
                   설정 고치기
@@ -396,6 +428,8 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
         ) : (
           <>
             <div className="overflow-y-auto px-5 py-4 space-y-5">
+              {resume && <ResumeNotice record={resume} />}
+
               {/* 목적이 먼저다 — CTA 문구 순서와 아래 안내가 이 값에 따라 바뀐다. */}
               <div>
                 <p className={labelCls}>광고 목적</p>
@@ -473,6 +507,34 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                           삭제
                         </button>
                       </div>
+                    </div>
+                  </div>
+                ) : resume ? (
+                  // 이어서 만들 때는 이미 광고 계정에 올라간 소재가 있다. 바꿀 때만 새로 올린다.
+                  <div className="mt-1.5 flex items-start gap-3 bg-slate-50 rounded-2xl p-3">
+                    {resume.thumbnailUrl ? (
+                      <img
+                        src={resume.thumbnailUrl}
+                        alt=""
+                        className="w-20 aspect-[9/16] rounded-xl object-cover bg-slate-200 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-20 aspect-[9/16] rounded-xl bg-slate-200 flex-shrink-0 flex items-center justify-center">
+                        <span className="text-[9px] text-slate-400 font-black">소재</span>
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-black text-slate-900 leading-snug">이전에 올린 소재를 그대로 씁니다</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                        {resume.creativeKind === 'video' ? '영상' : '이미지'} · Meta 광고 계정에 올라가 있음
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="mt-2 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-500 hover:bg-slate-50 transition-colors"
+                      >
+                        파일 바꾸기
+                      </button>
                     </div>
                   </div>
                 ) : (
@@ -583,7 +645,7 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                   <MetaPagePicker
                     pages={pagesState.pages}
                     selectedId={page?.id}
-                    onSelect={pagesState.selectPage}
+                    onSelect={selectPage}
                     loading={pagesState.loading}
                     error={pagesState.error}
                     onRetry={pagesState.refresh}
@@ -621,10 +683,12 @@ const AdCreateModal: React.FC<AdCreateModalProps> = ({ open, onClose, account, u
                 className="w-full py-3 rounded-xl bg-blue-600 text-white text-[13px] font-black hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {submitting ? '집행 중' : '집행하기'}
+                {submitting ? '집행 중' : resume ? '이 설정으로 이어서 만들기' : '집행하기'}
               </button>
               <p className="text-[10px] text-slate-400 font-medium mt-2 text-center leading-relaxed">
-                {startPaused
+                {resume
+                  ? '멈출 때까지 만들어 둔 캠페인은 지우고, 이 설정으로 캠페인부터 다시 만듭니다.'
+                  : startPaused
                   ? 'Meta에 캠페인·광고 세트·소재·광고를 일시중지 상태로 만듭니다(과금 없음).'
                   : 'Meta에 캠페인·광고 세트·소재·광고가 바로 만들어지고, Meta 검토 후 노출·과금이 시작됩니다.'}
               </p>
